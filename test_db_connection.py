@@ -55,6 +55,14 @@ try:
         print(f"\nDatabase: {result.get('db_name')}")
         print(f"Version: {result.get('version')[:80]}...")
     
+    
+
+    #test query
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT id, email , password_hash FROM users")
+        result = cur.fetchall()
+        print(f"\nUsers table query result: {result}")
+
     conn.close()
     print("\n✅ Database is working properly!")
     

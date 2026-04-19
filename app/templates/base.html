@@ -3,12 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ApexEstateHub - Estate Management Platform</title>
-    <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
-    {% block styles %}{% endblock %}
+    <title>ApexEstateHub</title>
 </head>
 <body>
-    {% block content %}{% endblock %}
-    {% block scripts %}{% endblock %}
+    <div id="root">
+        <div style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column;">
+            <h1>ApexEstateHub</h1>
+            <p>Loading...</p>
+        </div>
+    </div>
+    <script>
+        window.location.href = '/dashboard/';
+    </script>
 </body>
 </html>

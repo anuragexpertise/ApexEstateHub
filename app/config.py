@@ -3,40 +3,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def get_database_url():
+    """Build PostgreSQL connection URL from individual parameters"""
+    # Check for direct DATABASE_URL first
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        return database_url
+    
+    # Otherwise use individual parameters
+    host = os.getenv('PGHOST', '').strip("'\"")
+    name = os.getenv('PGDATABASE', '').strip("'\"")
+    user = os.getenv('PGUSER', '').strip("'\"")
+    password = os.getenv('PGPASSWORD', '').strip("'\"")
+    sslmode = os.getenv('PGSSLMODE', 'require').strip("'\"")
+    
+    if not all([host, name, user, password]):
+        # For local development without NeonDB, use SQLite
+        return 'sqlite:///apexestatehub.db'
+    
+    return f"postgresql://{user}:{password}@{host}/{name}?sslmode={sslmode}"
+
 class Config:
     """Base configuration"""
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     
-    # Database - Individual NeonDB Parameters
-    DB_HOST = os.getenv('PGHOST')
-    DB_NAME = os.getenv('PGDATABASE')
-    DB_USER = os.getenv('PGUSER')
-    DB_PASSWORD = os.getenv('PGPASSWORD')
-    DB_SSLMODE = os.getenv('PGSSLMODE', 'require')
-    DB_CHANNEL_BINDING = os.getenv('PGCHANNELBINDING', 'require')
-    
-    # Build connection URL from individual parameters
-    @staticmethod
-    def get_database_url():
-        """Build PostgreSQL connection URL from individual parameters"""
-        host = Config.DB_HOST
-        name = Config.DB_NAME
-        user = Config.DB_USER
-        password = Config.DB_PASSWORD
-        sslmode = Config.DB_SSLMODE
-        
-        if not all([host, name, user, password]):
-            raise ValueError("Missing required database environment variables: PGHOST, PGDATABASE, PGUSER, PGPASSWORD")
-        
-        # Remove quotes if present
-        host = host.strip("'\"")
-        name = name.strip("'\"")
-        user = user.strip("'\"")
-        password = password.strip("'\"")
-        
-        # Build connection URL
-        return f"postgresql://{user}:{password}@{host}/{name}?sslmode={sslmode}"
-    
+    # Database
     SQLALCHEMY_DATABASE_URI = get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
@@ -69,17 +60,21 @@ class Config:
     VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY')
     VAPID_CLAIM_EMAIL = os.getenv('VAPID_CLAIM_EMAIL', 'admin@apexestatehub.com')
 
+
 class DevelopmentConfig(Config):
     DEBUG = True
     TESTING = False
 
+
 class ProductionConfig(Config):
     DEBUG = False
     TESTING = False
-    
+
+
 class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+
 
 config = {
     'development': DevelopmentConfig,
