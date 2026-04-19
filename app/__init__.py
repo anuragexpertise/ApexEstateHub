@@ -21,6 +21,16 @@ def create_app(config_name=None):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
     
+    # Log database connection info (without password)
+    print("=" * 60)
+    print("DATABASE CONFIGURATION")
+    print("=" * 60)
+    print(f"Host: {app.config.get('DB_HOST')}")
+    print(f"Database: {app.config.get('DB_NAME')}")
+    print(f"User: {app.config.get('DB_USER')}")
+    print(f"SSL Mode: {app.config.get('DB_SSLMODE')}")
+    print("=" * 60)
+    
     # Initialize extensions
     db.init_app(app)
     login_manager.init_app(app)
