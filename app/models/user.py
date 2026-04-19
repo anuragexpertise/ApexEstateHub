@@ -1,6 +1,7 @@
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db, login_manager
+import json
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -14,10 +15,10 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(20), nullable=False, index=True)
     linked_id = db.Column(db.Integer, nullable=True)
     login_method = db.Column(db.String(20), default='password')
+    push_subscription = db.Column(db.Text, nullable=True)  # JSON string for push subscription
+    credential_id = db.Column(db.Text, nullable=True)  # For WebAuthn
+    public_key = db.Column(db.Text, nullable=True)  # For WebAuthn
     created_at = db.Column(db.DateTime, server_default=db.func.now())
-    
-    # Relationships
-    society = db.relationship('Society', backref='users', foreign_keys=[society_id])
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password, method='scrypt')
@@ -39,6 +40,12 @@ class User(UserMixin, db.Model):
     
     def is_master_admin(self):
         return self.role == 'admin' and self.society_id is None
+    
+    def set_push_subscription(self, subscription):
+        self.push_subscription = json.dumps(subscription)
+    
+    def get_push_subscription(self):
+        return json.loads(self.push_subscription) if self.push_subscription else None
     
     def get_id(self):
         return str(self.id)

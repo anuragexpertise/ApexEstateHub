@@ -1,51 +1,70 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from app import db
+from app.auth.jwt_handler import token_required, role_required
 from app.models.user import User
 from app.models.payment import Payment
 from app.models.apartment import Apartment
 from app.services.qr_service import generate_qr_code, validate_qr_code
 from app.services.payment_service import process_payment, calculate_dues
+from app.services.push_service import send_push_notification
 import csv
 import io
-import base64
 
 api_bp = Blueprint('api', __name__)
 
-@api_bp.route('/user/qr-code')
-@login_required
-def get_qr_code():
-    """Generate QR code for current user"""
+# JWT Protected Routes (for API clients)
+@api_bp.route('/user/qr-code', methods=['GET'])
+@token_required
+def get_qr_code_api():
+    """Generate QR code for user (JWT protected)"""
+    user_id = request.user_payload.get('user_id')
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
     qr_data = {
-        'user_id': current_user.id,
-        'email': current_user.email,
-        'role': current_user.role,
-        'society_id': current_user.society_id
+        'user_id': user.id,
+        'email': user.email,
+        'role': user.role,
+        'society_id': user.society_id
     }
     qr_base64 = generate_qr_code(str(qr_data))
     return jsonify({'qr_code': qr_base64})
 
 @api_bp.route('/validate-qr', methods=['POST'])
-@login_required
-def validate_qr():
-    """Validate QR code for gate access"""
+@token_required
+def validate_qr_api():
+    """Validate QR code for gate access (JWT protected)"""
     data = request.get_json()
     qr_data = data.get('qr_data')
+    society_id = request.user_payload.get('society_id')
     
     if not qr_data:
         return jsonify({'error': 'No QR data provided'}), 400
     
-    result = validate_qr_code(qr_data, current_user.society_id)
+    result = validate_qr_code(qr_data, society_id)
+    
+    # Send push notification on gate access
+    if result.get('user'):
+        user = User.query.filter_by(email=result['user']['name']).first()
+        if user:
+            send_push_notification(user.id, "Gate Access", f"Access {result['status']} at gate")
+    
     return jsonify(result)
 
 @api_bp.route('/payments/calculate', methods=['GET'])
-@login_required
-def calculate_payments():
-    """Calculate pending payments for user"""
-    if current_user.role == 'apartment':
+@role_required(['apartment', 'admin'])
+def calculate_payments_api():
+    """Calculate pending payments (JWT protected with role check)"""
+    user_id = request.user_payload.get('user_id')
+    user = User.query.get(user_id)
+    
+    if user.role == 'apartment':
         apartment = Apartment.query.filter_by(
-            society_id=current_user.society_id,
-            owner_name=current_user.email.split('@')[0]
+            society_id=user.society_id,
+            owner_name=user.email.split('@')[0]
         ).first()
         
         if apartment:
@@ -55,24 +74,44 @@ def calculate_payments():
     return jsonify({'error': 'No apartment found'}), 404
 
 @api_bp.route('/payments/process', methods=['POST'])
-@login_required
+@role_required(['apartment', 'admin'])
 def process_payment_api():
-    """Process a payment"""
+    """Process a payment (JWT protected with role check)"""
     data = request.get_json()
     amount = data.get('amount')
     payment_method = data.get('payment_method')
+    user_id = request.user_payload.get('user_id')
+    society_id = request.user_payload.get('society_id')
     
     if not amount:
         return jsonify({'error': 'Amount required'}), 400
     
     result = process_payment(
-        user_id=current_user.id,
-        society_id=current_user.society_id,
+        user_id=user_id,
+        society_id=society_id,
         amount=amount,
         payment_method=payment_method
     )
     
+    if result.get('success'):
+        # Send push notification on successful payment
+        send_push_notification(user_id, "Payment Received", f"Payment of ₹{amount} processed successfully")
+    
     return jsonify(result)
+
+# Session-based routes (for Dash app)
+@api_bp.route('/user/qr-code-session', methods=['GET'])
+@login_required
+def get_qr_code_session():
+    """Generate QR code for current user (session-based)"""
+    qr_data = {
+        'user_id': current_user.id,
+        'email': current_user.email,
+        'role': current_user.role,
+        'society_id': current_user.society_id
+    }
+    qr_base64 = generate_qr_code(str(qr_data))
+    return jsonify({'qr_code': qr_base64})
 
 @api_bp.route('/attendance/clock-in', methods=['POST'])
 @login_required
@@ -87,6 +126,8 @@ def clock_in():
     )
     db.session.add(gate_entry)
     db.session.commit()
+    
+    send_push_notification(current_user.id, "Attendance", "Clocked in successfully")
     
     return jsonify({'success': True, 'message': 'Clocked in successfully'})
 
@@ -105,6 +146,7 @@ def clock_out():
     if gate_entry:
         gate_entry.check_out()
         db.session.commit()
+        send_push_notification(current_user.id, "Attendance", "Clocked out successfully")
         return jsonify({'success': True, 'message': 'Clocked out successfully'})
     
     return jsonify({'error': 'No active clock-in found'}), 404
@@ -129,8 +171,9 @@ def upload_csv():
         
         results = []
         for row in csv_input:
-            # Process each row
             results.append(row)
+        
+        send_push_notification(current_user.id, "Upload Complete", f"CSV uploaded with {len(results)} rows")
         
         return jsonify({
             'success': True,
