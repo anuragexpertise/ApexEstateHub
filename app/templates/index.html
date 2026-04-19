@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block styles %}
+<link rel="stylesheet" href="/static/css/style.css">
+{% endblock %}
+
+{% block content %}
+<div id="root">
+    <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <p>Loading ApexEstateHub...</p>
+    </div>
+</div>
+
+<script>
+    // Redirect to Dash app
+    window.location.href = "{{ dash_url }}";
+</script>
+{% endblock %}

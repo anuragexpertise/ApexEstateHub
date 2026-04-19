@@ -1,3 +1,4 @@
+import os
 from app import create_app, create_dash_app
 
 # Create Flask application
