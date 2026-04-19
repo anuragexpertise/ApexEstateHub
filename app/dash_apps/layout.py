@@ -2,7 +2,7 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 def serve_layout():
-    """Main application layout"""
+    """Full application layout"""
     
     layout = html.Div(
         [
@@ -11,26 +11,39 @@ def serve_layout():
             dcc.Store(id='toast-store'),
             
             # Toast container
-            html.Div(id='toast-container', className='toast-container'),
+            html.Div(id='toast-container', 
+                    style={'position': 'fixed', 'top': '20px', 'right': '20px', 'zIndex': '9999'}),
             
             # Main container
             html.Div(
                 [
+                    # Dynamic sidebar (shown when authenticated)
                     html.Div(id='sidebar-container'),
+                    
+                    # Main content area
                     html.Div(
                         [
+                            # Navbar
                             html.Div(id='navbar-container'),
-                            html.Div(id='breadcrumb-container', className='container-fluid mt-2'),
-                            html.Div(id='page-content', className='container-fluid', 
-                                    style={'padding': '20px', 'marginTop': '70px', 'minHeight': 'calc(100vh - 130px)'}),
+                            
+                            # Page content
+                            html.Div(
+                                id='page-content',
+                                style={
+                                    'padding': '20px',
+                                    'minHeight': 'calc(100vh - 100px)'
+                                }
+                            ),
+                            
+                            # Footer
                             html.Div(id='footer-container'),
                         ],
-                        className='content-wrapper',
-                        style={'marginLeft': '250px', 'transition': 'all 0.3s ease'}
+                        style={'marginLeft': '0px', 'transition': 'all 0.3s ease'}
                     ),
+                    
+                    # Society login container (shown when not authenticated)
                     html.Div(id='society-login-container'),
-                ],
-                className='main-container'
+                ]
             ),
         ],
         style={'minHeight': '100vh', 'backgroundColor': '#f5f7fb'}

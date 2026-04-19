@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_cors import CORS
-from dash import Dash
+from dash import Dash, html, dcc, dependencies
 import dash_bootstrap_components as dbc
 import os
 
@@ -21,16 +21,6 @@ def create_app(config_name=None):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
     
-    # Log database connection info (without password)
-    print("=" * 60)
-    print("DATABASE CONFIGURATION")
-    print("=" * 60)
-    print(f"Host: {app.config.get('DB_HOST')}")
-    print(f"Database: {app.config.get('DB_NAME')}")
-    print(f"User: {app.config.get('DB_USER')}")
-    print(f"SSL Mode: {app.config.get('DB_SSLMODE')}")
-    print("=" * 60)
-    
     # Initialize extensions
     db.init_app(app)
     login_manager.init_app(app)
@@ -39,25 +29,26 @@ def create_app(config_name=None):
     
     # Configure login
     login_manager.login_view = 'auth.login'
-    login_manager.login_message = 'Please log in to access this page.'
-    login_manager.login_message_category = 'info'
     
     # Register blueprints
-    from app.routes.auth import auth_bp
-    from app.routes.api import api_bp
-    from app.routes.web import web_bp
-    
-    app.register_blueprint(auth_bp, url_prefix='/auth')
-    app.register_blueprint(api_bp, url_prefix='/api')
-    app.register_blueprint(web_bp)
-    
-    # Create upload folder
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    try:
+        from app.routes.auth import auth_bp
+        from app.routes.api import api_bp
+        from app.routes.web import web_bp
+        
+        app.register_blueprint(auth_bp, url_prefix='/auth')
+        app.register_blueprint(api_bp, url_prefix='/api')
+        app.register_blueprint(web_bp)
+        print("✓ Blueprints registered")
+    except Exception as e:
+        print(f"⚠️ Blueprint error: {e}")
     
     return app
 
+
 def create_dash_app(flask_app):
     """Create and configure Dash app"""
+    
     dash_app = Dash(
         __name__,
         server=flask_app,
@@ -67,16 +58,30 @@ def create_dash_app(flask_app):
             'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
         ],
         suppress_callback_exceptions=True,
-        assets_folder='app/static/assets',
-        assets_url_path='/static/assets'
     )
     
-    # Import and set layout
-    from app.dash_apps.layout import serve_layout
-    dash_app.layout = serve_layout()
+    # ============ USE FULL LAYOUT ============
+    # Import the full layout from dash_apps/layout.py
+    try:
+        from app.dash_apps.layout import serve_layout
+        dash_app.layout = serve_layout()
+        print("✓ Full layout loaded from app/dash_apps/layout.py")
+    except ImportError as e:
+        print(f"⚠️ Could not load full layout: {e}")
+        # Fallback layout
+        dash_app.layout = html.Div([
+            html.H1("ApexEstateHub", style={"textAlign": "center", "marginTop": "50px"}),
+            html.P("Layout file not found. Please create app/dash_apps/layout.py", 
+                   style={"textAlign": "center", "color": "red"})
+        ])
+    # =========================================
     
     # Register callbacks
-    from app.dash_apps.callbacks import register_callbacks
-    register_callbacks(dash_app)
+    try:
+        from app.dash_apps.callbacks import register_callbacks
+        register_callbacks(dash_app)
+        print("✓ Callbacks registered")
+    except ImportError as e:
+        print(f"⚠️ Could not register callbacks: {e}")
     
     return dash_app

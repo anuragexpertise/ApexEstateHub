@@ -1,14 +1,26 @@
+#!/usr/bin/env python
+"""ApexEstateHub - Main Application Entry Point"""
+
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from app import create_app, create_dash_app
+from dash import html
 
 # Create Flask application
-flask_app = create_app(os.getenv('FLASK_CONFIG', 'production'))
+flask_app = create_app('development')
 
-# Create and mount Dash application
+# Create Dash application
 dash_app = create_dash_app(flask_app)
 
-# Expose for Gunicorn
-server = flask_app
-
 if __name__ == '__main__':
-    flask_app.run(host='0.0.0.0', port=8050, debug=False)
+    print("=" * 60)
+    print("APEXESTATEHUB - STARTING APPLICATION")
+    print("=" * 60)
+    print("Server: http://127.0.0.1:8050")
+    print("Dashboard: http://127.0.0.1:8050/dashboard/")
+    print("=" * 60)
+    
+    dash_app.run(debug=True, host='127.0.0.1', port=8050)
