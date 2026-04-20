@@ -18,16 +18,27 @@ def serve_layout():
             # Main container
             html.Div(
                 [
+<<<<<<< HEAD
                     # Sidebar (shown when authenticated)
+=======
+                    # Sidebar container
+>>>>>>> dashboard
                     html.Div(id='sidebar-container'),
                     
                     # Main content wrapper
                     html.Div(
                         [
+<<<<<<< HEAD
                             # Header/Navbar
                             html.Div(id='navbar-container'),
                             
                             # Breadcrumb
+=======
+                            # Header/Navbar container
+                            html.Div(id='navbar-container'),
+                            
+                            # Breadcrumb container
+>>>>>>> dashboard
                             html.Div(id='breadcrumb-container', 
                                     style={'padding': '10px 20px', 'marginTop': '70px'}),
                             
@@ -40,7 +51,7 @@ def serve_layout():
                                 }
                             ),
                             
-                            # Footer
+                            # Footer container
                             html.Div(id='footer-container'),
                         ],
                         id='main-content',

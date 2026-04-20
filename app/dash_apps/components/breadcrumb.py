@@ -44,6 +44,7 @@ def create_breadcrumb(pathname):
     if path_parts and path_parts[0] == 'dashboard':
         path_parts = path_parts[1:]
     
+<<<<<<< HEAD
     # Build breadcrumb items as a list of links
     breadcrumb_items = []
     
@@ -62,10 +63,30 @@ def create_breadcrumb(pathname):
             ], className="breadcrumb-item")
         )
     
+=======
+>>>>>>> dashboard
     # Build breadcrumb items
+    breadcrumb_items = []
+    
+    # Add Home
+    if len(path_parts) == 0 or (len(path_parts) == 1 and path_parts[0] == ''):
+        breadcrumb_items.append(
+            html.Li([
+                html.I(className="fas fa-home me-1"),
+                html.Span("Home", className="active")
+            ], className="breadcrumb-item active")
+        )
+    else:
+        breadcrumb_items.append(
+            html.Li([
+                html.A([html.I(className="fas fa-home me-1"), "Home"], href="/dashboard")
+            ], className="breadcrumb-item")
+        )
+    
+    # Build remaining breadcrumb items
     current_path = ""
     for i, part in enumerate(path_parts):
-        if part:
+        if part and part != '':
             current_path += f"/{part}"
             display_name = path_map.get(part, part.replace('-', ' ').title())
             is_active = i == len(path_parts) - 1

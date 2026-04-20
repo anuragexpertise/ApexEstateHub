@@ -4,6 +4,7 @@ from flask_login import logout_user
 from app.services.auth_service import authenticate_user, authenticate_pin, authenticate_pattern
 from app.services.society_service import get_societies, get_society_details
 from app.dash_apps.pages.login import society_login_layout
+from app.dash_apps.pages.login import society_login_layout
 from app.dash_apps.pages.society_select import society_select_layout
 from app.dash_apps.pages.admin_portal import admin_portal_layout
 from app.dash_apps.pages.owner_portal import owner_portal_layout
@@ -14,7 +15,7 @@ from app.dash_apps.pages.master_admin import layout as master_layout
 def register_auth_callbacks(app):
     
     # ============================================
-    # MAIN ROUTER
+    # MAIN ROUTER - Handles all page navigation
     # ============================================
     @app.callback(
         Output("page-content", "children"),
@@ -125,15 +126,15 @@ def register_auth_callbacks(app):
         if role == 'apartment':
             if pathname in ["/owner-portal", "/dashboard/owner-portal"]:
                 active_tab = "dashboard"
-            elif "/cashbook" in pathname:
+            elif "/owner-cashbook" in pathname or "/cashbook" in pathname:
                 active_tab = "cashbook"
             elif "/payments" in pathname:
                 active_tab = "payments"
             elif "/charges" in pathname:
                 active_tab = "charges"
-            elif "/events" in pathname:
+            elif "/owner-events" in pathname or "/events" in pathname:
                 active_tab = "events"
-            elif "/settings" in pathname:
+            elif "/owner-settings" in pathname or "/settings" in pathname:
                 active_tab = "settings"
             else:
                 active_tab = "dashboard"
@@ -146,15 +147,15 @@ def register_auth_callbacks(app):
         if role == 'vendor':
             if pathname in ["/vendor-portal", "/dashboard/vendor-portal"]:
                 active_tab = "dashboard"
-            elif "/cashbook" in pathname:
+            elif "/vendor-cashbook" in pathname:
                 active_tab = "vendor_cashbook"
-            elif "/payments" in pathname:
+            elif "/vendor-payments" in pathname:
                 active_tab = "vendor_payments"
-            elif "/charges" in pathname:
+            elif "/vendor-charges" in pathname:
                 active_tab = "vendor_charges"
-            elif "/events" in pathname:
+            elif "/vendor-events" in pathname:
                 active_tab = "vendor_events"
-            elif "/settings" in pathname:
+            elif "/vendor-settings" in pathname:
                 active_tab = "vendor_settings"
             else:
                 active_tab = "dashboard"
@@ -169,13 +170,13 @@ def register_auth_callbacks(app):
                 active_tab = "pass_evaluation"
             elif "/attendance" in pathname:
                 active_tab = "attendance"
-            elif "/events" in pathname:
+            elif "/security-events" in pathname:
                 active_tab = "security_events"
-            elif "/receipt" in pathname:
+            elif "/security-receipt" in pathname:
                 active_tab = "security_receipt"
-            elif "/users" in pathname:
+            elif "/security-users" in pathname:
                 active_tab = "security_users"
-            elif "/settings" in pathname:
+            elif "/security-settings" in pathname:
                 active_tab = "security_settings"
             else:
                 active_tab = "pass_evaluation"
