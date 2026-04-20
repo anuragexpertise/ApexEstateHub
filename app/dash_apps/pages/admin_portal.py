@@ -432,6 +432,17 @@ def admin_portal_layout(active_tab="dashboard"):
             ])
         ])
     
+    elif active_tab == "customize":
+        content = html.Div([
+            html.H2("Customize Society", className="mb-4"),
+            dbc.Card([
+                dbc.CardBody([
+                    html.P("Drag and drop layout customization coming soon...", 
+                        className="text-muted text-center p-5")
+                ])
+            ], className="shadow-sm", style={"borderRadius": "15px"})
+        ])
+
     else:
         content = html.Div([
             html.H2(active_tab.replace('_', ' ').title(), className="mb-4"),
