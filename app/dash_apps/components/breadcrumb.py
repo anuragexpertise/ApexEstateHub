@@ -9,6 +9,7 @@ def create_breadcrumb(pathname):
         'admin-portal': 'Dashboard',
         'owner-portal': 'Dashboard',
         'vendor-portal': 'Dashboard',
+        'master': 'Master Admin',
         'pass-evaluation': 'Pass Evaluation',
         'cashbook': 'Cashbook',
         'owner-cashbook': 'Cashbook',
@@ -43,39 +44,52 @@ def create_breadcrumb(pathname):
     if path_parts and path_parts[0] == 'dashboard':
         path_parts = path_parts[1:]
     
-    breadcrumb_items = [
-        dbc.BreadcrumbItem(
-            [html.I(className="fas fa-home me-1"), "Home"],
-            href="/dashboard",
-            active=len(path_parts) == 0
-        )
-    ]
-    
     # Build breadcrumb items
+    breadcrumb_items = []
+    
+    # Add Home
+    if len(path_parts) == 0 or (len(path_parts) == 1 and path_parts[0] == ''):
+        breadcrumb_items.append(
+            html.Li([
+                html.I(className="fas fa-home me-1"),
+                html.Span("Home", className="active")
+            ], className="breadcrumb-item active")
+        )
+    else:
+        breadcrumb_items.append(
+            html.Li([
+                html.A([html.I(className="fas fa-home me-1"), "Home"], href="/dashboard")
+            ], className="breadcrumb-item")
+        )
+    
+    # Build remaining breadcrumb items
     current_path = ""
     for i, part in enumerate(path_parts):
-        if part:
+        if part and part != '':
             current_path += f"/{part}"
             display_name = path_map.get(part, part.replace('-', ' ').title())
             is_active = i == len(path_parts) - 1
             
-            breadcrumb_items.append(
-                dbc.BreadcrumbItem(
-                    display_name,
-                    href=f"/dashboard{current_path}" if not is_active else None,
-                    active=is_active
+            if is_active:
+                breadcrumb_items.append(
+                    html.Li(display_name, className="breadcrumb-item active")
                 )
-            )
+            else:
+                breadcrumb_items.append(
+                    html.Li(
+                        html.A(display_name, href=f"/dashboard{current_path}"),
+                        className="breadcrumb-item"
+                    )
+                )
     
-    return dbc.Breadcrumb(
-        breadcrumb_items,
+    return html.Nav(
+        html.Ol(breadcrumb_items, className="breadcrumb"),
         className="glass-breadcrumb",
         style={
             "background": "rgba(255, 255, 255, 0.7)",
             "backdropFilter": "blur(5px)",
             "padding": "8px 15px",
             "borderRadius": "8px",
-            "margin": "0",
-            "fontSize": "14px"
+            "margin": "0"
         }
     )

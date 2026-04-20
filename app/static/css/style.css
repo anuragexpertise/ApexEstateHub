@@ -127,3 +127,269 @@
 .toast-container {
     animation: slideInRight 0.3s ease;
 }
+
+/* ========================================
+   MOBILE RESPONSIVE STYLES
+   ======================================== */
+
+/* Mobile Menu Button */
+.mobile-menu-btn {
+    display: none;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1002;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    width: 45px;
+    height: 45px;
+    border-radius: 10px;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+/* Sidebar Mobile Styles */
+@media (max-width: 768px) {
+    .mobile-menu-btn {
+        display: block;
+    }
+    
+    .glass-sidebar {
+        transform: translateX(-100%);
+        width: 280px;
+        z-index: 1003;
+        transition: transform 0.3s ease;
+    }
+    
+    .glass-sidebar.sidebar-open {
+        transform: translateX(0);
+    }
+    
+    /* Overlay when sidebar is open */
+    .sidebar-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 1002;
+        display: none;
+    }
+    
+    .sidebar-overlay.active {
+        display: block;
+    }
+    
+    /* Header mobile styles */
+    .glass-header {
+        left: 0 !important;
+        padding: 8px 0 !important;
+    }
+    
+    .glass-header .container-fluid {
+        padding: 0 15px !important;
+    }
+    
+    /* Hide society name on mobile */
+    .glass-header .d-none.d-md-flex {
+        display: none !important;
+    }
+    
+    /* Adjust portal name size */
+    .glass-header .mx-auto span {
+        font-size: 14px !important;
+    }
+    
+    /* Main content wrapper */
+    #main-content {
+        margin-left: 0 !important;
+        padding-top: 60px;
+    }
+    
+    /* Footer mobile styles */
+    .glass-footer {
+        left: 0 !important;
+        padding: 8px 0 !important;
+    }
+    
+    .glass-footer .row {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .glass-footer .ms-auto {
+        margin-left: 0 !important;
+        margin-top: 10px;
+    }
+    
+    /* Card adjustments for mobile */
+    .row > [class*="col-"] {
+        margin-bottom: 15px;
+    }
+    
+    /* KPI cards on mobile */
+    .dashboard-card {
+        margin-bottom: 15px;
+    }
+    
+    /* Table responsive */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Form adjustments */
+    .form-control, .Select-control {
+        font-size: 16px !important; /* Prevents zoom on iOS */
+    }
+    
+    /* Modal adjustments */
+    .modal-dialog {
+        margin: 10px;
+        max-width: calc(100% - 20px);
+    }
+    
+    .modal-body {
+        padding: 15px;
+    }
+    
+    /* Breadcrumb adjustments */
+    .glass-breadcrumb {
+        margin: 0 10px !important;
+        font-size: 12px;
+    }
+    
+    /* Button adjustments */
+    .btn {
+        padding: 10px 15px;
+        font-size: 14px;
+    }
+    
+    /* Toast notifications */
+    .toast-container {
+        top: 70px !important;
+        right: 10px !important;
+        left: auto !important;
+        max-width: calc(100% - 20px);
+    }
+}
+
+/* Tablet Styles */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .glass-sidebar {
+        width: 220px;
+    }
+    
+    #main-content {
+        margin-left: 220px;
+    }
+    
+    .glass-header {
+        left: 220px;
+    }
+    
+    .glass-footer {
+        left: 220px;
+    }
+    
+    .row > [class*="col-"] {
+        margin-bottom: 15px;
+    }
+}
+
+/* Small Desktop Adjustments */
+@media (min-width: 1025px) and (max-width: 1366px) {
+    .glass-sidebar {
+        width: 240px;
+    }
+    
+    #main-content {
+        margin-left: 240px;
+    }
+}
+
+/* Landscape Mode on Mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    .glass-sidebar {
+        width: 250px;
+    }
+    
+    .sidebar-nav .nav-link {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+/* Touch Device Optimizations */
+@media (hover: none) and (pointer: coarse) {
+    .btn, .nav-link, .dropdown-item {
+        min-height: 44px;
+    }
+    
+    input, select, textarea {
+        font-size: 16px !important;
+    }
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.9);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Login Page Mobile Responsive */
+@media (max-width: 768px) {
+    .society-select-card,
+    .login-card {
+        margin: 20px !important;
+        width: calc(100% - 40px) !important;
+        max-width: none !important;
+    }
+    
+    .society-select-card div[style*="maxWidth"],
+    .login-card div[style*="maxWidth"] {
+        margin: 10px !important;
+        padding: 20px !important;
+    }
+    
+    .society-select-card h1,
+    .login-card h2 {
+        font-size: 24px !important;
+    }
+    
+    .society-select-card h3 {
+        font-size: 18px !important;
+    }
+    
+    /* Tab adjustments */
+    .nav-tabs .nav-link {
+        padding: 8px 12px !important;
+        font-size: 12px !important;
+    }
+}

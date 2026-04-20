@@ -19,7 +19,8 @@ def create_footer():
                                         html.I(className="fas fa-copyright me-1"),
                                         f" {current_year} ApexEstateHub. All rights reserved."
                                     ],
-                                    className="mb-0"
+                                    className="mb-0",
+                                    style={"fontSize": "12px"}
                                 )
                             ],
                             width="auto",
@@ -33,18 +34,28 @@ def create_footer():
                                             html.I(className="fab fa-github me-2"),
                                             href="#",
                                             target="_blank",
-                                            className="text-muted me-3"
+                                            className="text-muted me-3",
+                                            style={"textDecoration": "none"}
                                         ),
                                         html.A(
                                             html.I(className="fab fa-twitter me-2"),
                                             href="#",
                                             target="_blank",
-                                            className="text-muted me-3"
+                                            className="text-muted me-3",
+                                            style={"textDecoration": "none"}
+                                        ),
+                                        html.A(
+                                            html.I(className="fab fa-linkedin me-2"),
+                                            href="#",
+                                            target="_blank",
+                                            className="text-muted me-3",
+                                            style={"textDecoration": "none"}
                                         ),
                                         html.A(
                                             html.I(className="fas fa-envelope"),
                                             href="mailto:support@apexestatehub.com",
-                                            className="text-muted"
+                                            className="text-muted",
+                                            style={"textDecoration": "none"}
                                         ),
                                     ],
                                     className="text-center text-md-end"
@@ -62,7 +73,8 @@ def create_footer():
                     dbc.Col(
                         html.Small(
                             "Version 1.0.0 | Built with Flask, Dash, and NeonDB",
-                            className="text-muted"
+                            className="text-muted",
+                            style={"fontSize": "10px"}
                         ),
                         width=12,
                         className="text-center mt-2"
@@ -82,7 +94,7 @@ def create_footer():
             "background": "rgba(255, 255, 255, 0.95)",
             "backdropFilter": "blur(10px)",
             "boxShadow": "0 -2px 15px rgba(0,0,0,0.05)",
-            "padding": "12px 0",
+            "padding": "10px 0",
             "transition": "all 0.3s ease"
         }
     )
