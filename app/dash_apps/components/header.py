@@ -227,11 +227,7 @@ def create_header(society_name="ApexEstateHub", role="admin", user_email=None, u
                 fluid=True,
                 style={"padding": "0 20px"}
             ),
-<<<<<<< HEAD
-            qr_modal,  # Add the QR modal here
-=======
             qr_modal,
->>>>>>> dashboard
         ],
         className="glass-header",
         style={
