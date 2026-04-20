@@ -29,7 +29,6 @@ def get_navbar_components(session_data, pathname):
     # Determine role for display
     display_role = 'master' if is_master else role
     
-<<<<<<< HEAD
     # Create components with error handling
     try:
         header = create_header(society_name, display_role, email)
@@ -54,12 +53,5 @@ def get_navbar_components(session_data, pathname):
     except Exception as e:
         print(f"Error creating footer: {e}")
         footer = html.Div("Footer Error")
-=======
-    # Create components
-    header = create_header(society_name, display_role, email)
-    sidebar = create_sidebar(role, society_id)
-    breadcrumb = create_breadcrumb(pathname)
-    footer = create_footer()
->>>>>>> dashboard
     
     return header, sidebar, breadcrumb, footer

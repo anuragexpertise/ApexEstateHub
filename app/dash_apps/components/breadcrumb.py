@@ -44,27 +44,7 @@ def create_breadcrumb(pathname):
     if path_parts and path_parts[0] == 'dashboard':
         path_parts = path_parts[1:]
     
-<<<<<<< HEAD
-    # Build breadcrumb items as a list of links
-    breadcrumb_items = []
-    
-    # Add Home
-    if len(path_parts) == 0:
-        breadcrumb_items.append(
-            html.Li([
-                html.I(className="fas fa-home me-1"),
-                html.Span("Home", className="active")
-            ], className="breadcrumb-item active")
-        )
-    else:
-        breadcrumb_items.append(
-            html.Li([
-                html.A([html.I(className="fas fa-home me-1"), "Home"], href="/dashboard")
-            ], className="breadcrumb-item")
-        )
-    
-=======
->>>>>>> dashboard
+   
     # Build breadcrumb items
     breadcrumb_items = []
     

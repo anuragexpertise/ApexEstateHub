@@ -139,10 +139,7 @@ def create_sidebar(role, society_id=None):
             )
         ],
         className="glass-sidebar",
-<<<<<<< HEAD
-=======
         id="main-sidebar",
->>>>>>> dashboard
         style={
             "position": "fixed",
             "top": "0",
@@ -153,11 +150,7 @@ def create_sidebar(role, society_id=None):
             "backdropFilter": "blur(10px)",
             "color": "white",
             "overflowY": "auto",
-<<<<<<< HEAD
-            "zIndex": "1000",
-=======
             "zIndex": "1003",
->>>>>>> dashboard
             "boxShadow": "2px 0 10px rgba(0,0,0,0.1)",
             "transition": "all 0.3s ease"
         }
