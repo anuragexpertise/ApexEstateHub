@@ -7,61 +7,61 @@ ROLE_CONFIG = {
         'color': '#ADD8E6', 
         'label': 'Admin Portal', 
         'tabs': [
-            {'label': 'Dashboard', 'href': '/dashboard/admin-portal', 'icon': 'fa-th-large'},
-            {'label': 'Cashbook', 'href': '/dashboard/cashbook', 'icon': 'fa-book'},
-            {'label': 'Receipts', 'href': '/dashboard/receipts', 'icon': 'fa-file-invoice-dollar'},
-            {'label': 'Expenses', 'href': '/dashboard/expenses', 'icon': 'fa-wallet'},
-            {'label': 'Enroll', 'href': '/dashboard/enroll', 'icon': 'fa-user-plus'},
-            {'label': 'Users', 'href': '/dashboard/users', 'icon': 'fa-users'},
-            {'label': 'Events', 'href': '/dashboard/events', 'icon': 'fa-calendar-alt'},
-            {'label': 'Evaluate Pass', 'href': '/dashboard/evaluate-pass', 'icon': 'fa-qrcode'},
-            {'label': 'Customize', 'href': '/dashboard/customize', 'icon': 'fa-edit'},
-            {'label': 'Settings', 'href': '/dashboard/settings', 'icon': 'fa-cog'},
+            {'label': 'Dashboard', 'href': '/dashboard/admin-portal', 'icon': 'fa-th-large', 'id': 'sidebar-link-dashboard'},
+            {'label': 'Cashbook', 'href': '/dashboard/cashbook', 'icon': 'fa-book', 'id': 'sidebar-link-cashbook'},
+            {'label': 'Receipts', 'href': '/dashboard/receipts', 'icon': 'fa-file-invoice-dollar', 'id': 'sidebar-link-receipts'},
+            {'label': 'Expenses', 'href': '/dashboard/expenses', 'icon': 'fa-wallet', 'id': 'sidebar-link-expenses'},
+            {'label': 'Enroll', 'href': '/dashboard/enroll', 'icon': 'fa-user-plus', 'id': 'sidebar-link-enroll'},
+            {'label': 'Users', 'href': '/dashboard/users', 'icon': 'fa-users', 'id': 'sidebar-link-users'},
+            {'label': 'Events', 'href': '/dashboard/events', 'icon': 'fa-calendar-alt', 'id': 'sidebar-link-events'},
+            {'label': 'Evaluate Pass', 'href': '/dashboard/evaluate-pass', 'icon': 'fa-qrcode', 'id': 'sidebar-link-evaluate-pass'},
+            {'label': 'Customize', 'href': '/dashboard/customize', 'icon': 'fa-edit', 'id': 'sidebar-link-customize'},
+            {'label': 'Settings', 'href': '/dashboard/settings', 'icon': 'fa-cog', 'id': 'sidebar-link-settings'},
         ]
     },
     'apartment': {
         'color': '#90EE90', 
         'label': 'Owner Portal', 
         'tabs': [
-            {'label': 'Dashboard', 'href': '/dashboard/owner-portal', 'icon': 'fa-th-large'},
-            {'label': 'Cashbook', 'href': '/dashboard/owner-cashbook', 'icon': 'fa-book'},
-            {'label': 'Payments', 'href': '/dashboard/payments', 'icon': 'fa-credit-card'},
-            {'label': 'Charges', 'href': '/dashboard/charges', 'icon': 'fa-file-invoice'},
-            {'label': 'Events', 'href': '/dashboard/owner-events', 'icon': 'fa-calendar-alt'},
-            {'label': 'Settings', 'href': '/dashboard/owner-settings', 'icon': 'fa-cog'},
+            {'label': 'Dashboard', 'href': '/dashboard/owner-portal', 'icon': 'fa-th-large', 'id': 'sidebar-link-owner-portal'},
+            {'label': 'Cashbook', 'href': '/dashboard/owner-cashbook', 'icon': 'fa-book', 'id': 'sidebar-link-owner-cashbook'},
+            {'label': 'Payments', 'href': '/dashboard/payments', 'icon': 'fa-credit-card', 'id': 'sidebar-link-payments'},
+            {'label': 'Charges', 'href': '/dashboard/charges', 'icon': 'fa-file-invoice', 'id': 'sidebar-link-charges'},
+            {'label': 'Events', 'href': '/dashboard/owner-events', 'icon': 'fa-calendar-alt', 'id': 'sidebar-link-owner-events'},
+            {'label': 'Settings', 'href': '/dashboard/owner-settings', 'icon': 'fa-cog', 'id': 'sidebar-link-owner-settings'},
         ]
     },
     'vendor': {
         'color': '#FFFF00', 
         'label': 'Vendor Portal', 
         'tabs': [
-            {'label': 'Dashboard', 'href': '/dashboard/vendor-portal', 'icon': 'fa-th-large'},
-            {'label': 'Cashbook', 'href': '/dashboard/vendor-cashbook', 'icon': 'fa-book'},
-            {'label': 'Payments', 'href': '/dashboard/vendor-payments', 'icon': 'fa-credit-card'},
-            {'label': 'Charges', 'href': '/dashboard/vendor-charges', 'icon': 'fa-file-invoice'},
-            {'label': 'Events', 'href': '/dashboard/vendor-events', 'icon': 'fa-calendar-alt'},
-            {'label': 'Settings', 'href': '/dashboard/vendor-settings', 'icon': 'fa-cog'},
+            {'label': 'Dashboard', 'href': '/dashboard/vendor-portal', 'icon': 'fa-th-large', 'id': 'sidebar-link-vendor-portal'},
+            {'label': 'Cashbook', 'href': '/dashboard/vendor-cashbook', 'icon': 'fa-book', 'id': 'sidebar-link-vendor-cashbook'},
+            {'label': 'Payments', 'href': '/dashboard/vendor-payments', 'icon': 'fa-credit-card', 'id': 'sidebar-link-vendor-payments'},
+            {'label': 'Charges', 'href': '/dashboard/vendor-charges', 'icon': 'fa-file-invoice', 'id': 'sidebar-link-vendor-charges'},
+            {'label': 'Events', 'href': '/dashboard/vendor-events', 'icon': 'fa-calendar-alt', 'id': 'sidebar-link-vendor-events'},
+            {'label': 'Settings', 'href': '/dashboard/vendor-settings', 'icon': 'fa-cog', 'id': 'sidebar-link-vendor-settings'},
         ]
     },
     'security': {
         'color': '#F08080', 
         'label': 'Security Portal', 
         'tabs': [
-            {'label': 'Pass Evaluation', 'href': '/dashboard/pass-evaluation', 'icon': 'fa-qrcode'},
-            {'label': 'Attendance', 'href': '/dashboard/attendance', 'icon': 'fa-clock'},
-            {'label': 'Events', 'href': '/dashboard/security-events', 'icon': 'fa-calendar-alt'},
-            {'label': 'New Receipt', 'href': '/dashboard/security-receipt', 'icon': 'fa-plus-circle'},
-            {'label': 'Users', 'href': '/dashboard/security-users', 'icon': 'fa-users'},
-            {'label': 'Settings', 'href': '/dashboard/security-settings', 'icon': 'fa-cog'},
+            {'label': 'Pass Evaluation', 'href': '/dashboard/pass-evaluation', 'icon': 'fa-qrcode', 'id': 'sidebar-link-pass-evaluation'},
+            {'label': 'Attendance', 'href': '/dashboard/attendance', 'icon': 'fa-clock', 'id': 'sidebar-link-attendance'},
+            {'label': 'Events', 'href': '/dashboard/security-events', 'icon': 'fa-calendar-alt', 'id': 'sidebar-link-security-events'},
+            {'label': 'New Receipt', 'href': '/dashboard/security-receipt', 'icon': 'fa-plus-circle', 'id': 'sidebar-link-security-receipt'},
+            {'label': 'Users', 'href': '/dashboard/security-users', 'icon': 'fa-users', 'id': 'sidebar-link-security-users'},
+            {'label': 'Settings', 'href': '/dashboard/security-settings', 'icon': 'fa-cog', 'id': 'sidebar-link-security-settings'},
         ]
     },
     'master': {
         'color': '#FF6B6B', 
         'label': 'Master Admin', 
         'tabs': [
-            {'label': 'Dashboard', 'href': '/dashboard/master', 'icon': 'fa-th-large'},
-            {'label': 'Create Society', 'href': '/dashboard/master', 'icon': 'fa-building'},
-            {'label': 'Settings', 'href': '/dashboard/master-settings', 'icon': 'fa-cog'},
+            {'label': 'Dashboard', 'href': '/dashboard/master', 'icon': 'fa-th-large', 'id': 'sidebar-link-dashboard'},
+            {'label': 'Create Society', 'href': '/dashboard/master', 'icon': 'fa-building', 'id': 'sidebar-link-create-society'},
+            {'label': 'Settings', 'href': '/dashboard/master-settings', 'icon': 'fa-cog', 'id': 'sidebar-link-settings'},
         ]
     }
 }
@@ -85,7 +85,8 @@ def create_sidebar(role, society_id=None):
                 ],
                 href=tab['href'],
                 active="exact",
-                className="nav-link"
+                className="nav-link",
+                id=tab.get('id', f"sidebar-link-{tab['label'].replace(' ', '-').lower()}")
             )
         )
     

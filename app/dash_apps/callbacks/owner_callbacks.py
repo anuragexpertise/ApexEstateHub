@@ -8,7 +8,7 @@ from io import BytesIO
 def register_owner_callbacks(app):
     
     @app.callback(
-        Output("owner-qr-code", "src"),
+        Output("owner-qr-display", "src"),
         Input("show-qr-btn", "n_clicks"),
         prevent_initial_call=True
     )
