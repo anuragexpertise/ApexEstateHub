@@ -7,7 +7,7 @@ import json
 from dash import Input, Output, State, html, no_update, clientside_callback
 import dash_bootstrap_components as dbc
 
-from app.dash_apps.pages.customize import (
+from app.dash_apps.pages.customize_layout import (
     CARD_DEFINITIONS,
     DEFAULT_ACTIVE,
     make_card,
