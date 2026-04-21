@@ -1,7 +1,7 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 from datetime import datetime
-from app.dash_apps.pages.customize_layout import customize_layout   
+from .customize_layout import customize_layout   
 def admin_portal_layout(active_tab="dashboard"):
     """Complete Admin Portal Layout with all features"""
     
@@ -442,7 +442,7 @@ def admin_portal_layout(active_tab="dashboard"):
         #         ])
         #     ], className="shadow-sm", style={"borderRadius": "15px"})
         # ])
-        return customize_layout()
+        content = customize_layout()
     else:
         content = html.Div([
             html.H2(active_tab.replace('_', ' ').title(), className="mb-4"),

@@ -4,7 +4,6 @@ import qrcode
 import base64
 from io import BytesIO
 from datetime import datetime, timedelta
-from database.db_manager import db
 
 def register_qr_callbacks(app):
     
@@ -45,16 +44,8 @@ def register_qr_callbacks(app):
             role = auth_data.get('role')
             society_id = auth_data.get('society_id')
             
-            # Get user name from database if available
+            # Get user name
             user_name = email.split('@')[0].title()
-            try:
-                if role == 'apartment':
-                    query = "SELECT owner_name FROM apartments WHERE society_id = %s AND owner_name LIKE %s LIMIT 1"
-                    result = db.execute_query(query, (society_id, f'%{user_name}%'), fetch_one=True)
-                    if result:
-                        user_name = result.get('owner_name', user_name)
-            except Exception as e:
-                print(f"Error getting user name: {e}")
             
             # Create QR data
             qr_data = {
@@ -88,18 +79,3 @@ def register_qr_callbacks(app):
             return True, qr_src, user_name, email, role, valid_until
         
         return no_update, no_update, no_update, no_update, no_update, no_update
-    
-    @app.callback(
-        Output("toast-store", "data", allow_duplicate=True),
-        Input("download-qr-btn", "n_clicks"),
-        State("qr-code-img", "src"),
-        prevent_initial_call=True
-    )
-    def download_qr_code(n_clicks, qr_src):
-        """Download QR code as PNG"""
-        if not n_clicks or not qr_src:
-            return no_update
-        
-        # Create a download link using JavaScript
-        # This will be handled by a clientside callback
-        return {"type": "info", "message": "Right-click on QR code to save image"}

@@ -28,7 +28,7 @@ CARD_DEFINITIONS = {
         "subtitle": "Awaiting payment",
         "format": "currency",
         "query": (
-            "SELECT COALESCE(SUM(amount),0) AS v FROM payments "
+            "SELECT COALESCE(SUM(amount),0) AS v FROM transactions "
             "WHERE society_id = %s AND status = 'pending'"
         ),
     },
@@ -61,8 +61,8 @@ CARD_DEFINITIONS = {
         "subtitle": "Service providers",
         "format": "count",
         "query": (
-            "SELECT COUNT(*) AS v FROM users "
-            "WHERE society_id = %s AND role = 'vendor'"
+            "SELECT COUNT(*) AS v FROM vendors "
+            "WHERE society_id = %s AND active = TRUE"
         ),
     },
     "security_staff": {
@@ -73,8 +73,8 @@ CARD_DEFINITIONS = {
         "subtitle": "On roster",
         "format": "count",
         "query": (
-            "SELECT COUNT(*) AS v FROM users "
-            "WHERE society_id = %s AND role = 'security'"
+            "SELECT COUNT(*) AS v FROM security_staff "
+            "WHERE society_id = %s AND active = TRUE"
         ),
     },
     "gate_entries": {
@@ -114,7 +114,7 @@ def make_card(card_id: str, value: str = "—") -> html.Div:
     cfg = CARD_DEFINITIONS[card_id]
     return html.Div(
         [
-            # ── drag handle ──────────────────────────────────────
+            # drag handle
             html.Div(
                 "⠿",
                 className="dnd-handle",
@@ -130,7 +130,7 @@ def make_card(card_id: str, value: str = "—") -> html.Div:
                     "userSelect": "none",
                 },
             ),
-            # ── card body ────────────────────────────────────────
+            # card body
             html.Div(
                 [
                     html.I(
@@ -191,23 +191,21 @@ def customize_layout() -> html.Div:
 
     return html.Div(
         [
-            # ── Stores / hidden inputs ────────────────────────────
+            # Stores / hidden inputs
             dcc.Store(
                 id="dnd-layout-store",
                 storage_type="session",
                 data={"active": DEFAULT_ACTIVE[:], "available": available_ids},
             ),
-            # JS → server bridge: SortableJS writes here via React setter trick
             dcc.Input(
                 id="dnd-order-capture",
                 value="",
                 debounce=False,
                 style={"display": "none"},
             ),
-            # Dummy target for clientside init callback
             html.Div(id="dnd-init-dummy", style={"display": "none"}),
 
-            # ── Toolbar ───────────────────────────────────────────
+            # Toolbar
             dbc.Row(
                 [
                     dbc.Col(
@@ -248,7 +246,7 @@ def customize_layout() -> html.Div:
             # Status alert area
             html.Div(id="layout-status-msg", className="mb-3"),
 
-            # ── Dashboard (active) zone ───────────────────────────
+            # Dashboard (active) zone
             dbc.Card(
                 [
                     dbc.CardHeader(
@@ -299,7 +297,7 @@ def customize_layout() -> html.Div:
                 style={"borderRadius": "15px"},
             ),
 
-            # ── Palette (available) zone ──────────────────────────
+            # Palette (available) zone
             dbc.Card(
                 [
                     dbc.CardHeader(
@@ -337,21 +335,6 @@ def customize_layout() -> html.Div:
                 className="shadow-sm",
                 style={"borderRadius": "15px"},
             ),
-
-            # ── Scoped CSS ────────────────────────────────────────
-            html.Style(
-                """
-                .dnd-card{transition:box-shadow .15s,transform .15s}
-                .dnd-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.13)!important}
-                .dnd-ghost{opacity:.3;border:2px dashed #667eea!important}
-                .dnd-chosen{box-shadow:0 8px 28px rgba(0,0,0,.18)!important;transform:scale(1.03)!important;z-index:999}
-                .dnd-drag{opacity:0}
-                #dnd-active-zone.dnd-over{border-color:#667eea!important;background:#f0f3ff!important}
-                #dnd-available-zone.dnd-over{border-color:#999!important;background:#f0f0f0!important}
-                .dnd-handle:active{cursor:grabbing}
-                .dnd-handle:hover{color:#667eea!important}
-                """
-            ),
         ],
-        style={"padding": "20px"},
+        style={"padding": "20px"}
     )
