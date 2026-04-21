@@ -4,7 +4,6 @@ from .owner_callbacks import register_owner_callbacks
 # from .vendor_callbacks import register_vendor_callbacks
 from .security_callbacks import register_security_callbacks
 from .mobile_callbacks import register_mobile_callbacks
-
 from .security_callbacks import register_security_callbacks
 from .qr_callbacks import register_qr_callbacks
 from .customize_callbacks import register_customize_callbacks
