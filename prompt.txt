@@ -76,12 +76,16 @@ Use Dash Bootstrap Components.
 5. ROLE-BASED DASH PORTALS
 header, sidebar, navbar crumbs, content, footer. Layout can be changed by Admin-Settings
 
-Role bsed entities: 'admin', 'apartment', 'vendor', 'security'
+Role based entities: 'master','admin', 'apartment', 'vendor', 'security'
 
 Role based content:
 # --- Layout Constants for sidebar tabs and their path_name
 ROLE_CONFIG = {
-    'admin': {'color': '#ADD8E6', 'label': 'Admin Portal', 'tabs': [
+    'master':{'color:'#f08843','label':'Master Portal','tabs':[
+        ('Dashboard','/master-portal','fa-th-large'),
+        ('Society','/societies', 'fa-home'),
+    ]}
+    'admin': {'color': '#58c1e4', 'label': 'Admin Portal', 'tabs': [
         ('Dashboard', '/admin-portal', 'fa-th-large'),
         ('Cashbook', '/cashbook', 'fa-book'),
         ('Receipts', '/receipts', 'fa-file-invoice-dollar'),
@@ -120,6 +124,7 @@ ROLE_CONFIG = {
 }
 
 KPI cards - fillterd to specific entity:
+      {'Societies':[('/societies-free-plan', 'fa-home'), ('/societies-paid-plan', 'fa-home'), ('/societies-total', 'fa-home')]},
       {'Apartments': [('/apartments-with-dues','fa-home'), ('/apartments-with-no-dues','fa-home'), ('/apartments-total','fa-home')]},
       {'Vendors': [('/vendors-with-dues','fa-person-digging'), ('/vendors-with-no-dues','fa-person-digging'), ('/apartments-total','fa-person-digging')]},
       {'Security': [('/security-on-duty','fa-user-shield'), ('/security-off-duty','fa-user-shield'), ('/security-total','fa-user-shield')]},

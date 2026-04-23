@@ -1,4 +1,15 @@
 .env
 __pycache__/
-.venv
+*.pyc
+*.pyo
+.venv/
+venv/
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+app/static/uploads/
 generate_vapid_keys.py
+*.db
+migrations/
