@@ -13,4 +13,4 @@ server     = flask_app          # gunicorn targets `server`
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
     debug = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
-    server.run(host='0.0.0.0', port=port, debug=debug)
+    server.run(host='0.0.0.0', port=port, debug=False)
