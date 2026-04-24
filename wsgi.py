@@ -1,25 +1,15 @@
- 
-#!/usr/bin/env python
-"""
-wsgi.py — Gunicorn / ApexWeave entry point
-Usage:  gunicorn wsgi:server --workers 2 --threads 4 --timeout 120
-"""
-import os
+# wsgi.py
 import sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+if not hasattr(sys, 'warnoptions'):
+    sys.warnoptions = []
 
 from app import create_app, create_dash_app
 
-flask_app = create_app(os.getenv('FLASK_CONFIG', 'production'))
-dash_app  = create_dash_app(flask_app)
-
-# Gunicorn expects `server`
+flask_app = create_app()
+dash_app = create_dash_app(flask_app)
 server = flask_app
 
 if __name__ == '__main__':
-    print('=' * 60)
-    print('SocietyOS — ApexEstateHub')
-    print('http://127.0.0.1:8050/dashboard/')
-    print('=' * 60)
-    dash_app.run(debug=True, host='0.0.0.0', port=8050)
+    import os
+    port = int(os.environ.get('PORT', 8050))
+    server.run(host='0.0.0.0', port=port, debug=True)
