@@ -4,6 +4,10 @@ from flask_login import LoginManager
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
+# In your app/__init__.py or main app file
+from flask import send_from_directory
+import os
+
 
 load_dotenv()
 
@@ -35,6 +39,12 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(api_bp, url_prefix='/api')
 
+    # Ensure static files are served
+    @app.route('/static/<path:filename>')
+    def serve_static(filename):
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static')
+        return send_from_directory(static_dir, filename)
+    
     @app.route('/')
     def index():
         return redirect('/dashboard/')

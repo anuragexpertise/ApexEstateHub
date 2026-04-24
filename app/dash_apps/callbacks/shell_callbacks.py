@@ -478,14 +478,6 @@ def register_shell_callbacks(app):
         pw_cls = 'page-wrapper page-wrapper--expanded' if new_col else 'page-wrapper'
         return sb_cls, pw_cls, {'collapsed': new_col}
 
-    # 10. Footer clock ────────────────────────────────────────────────────────
-    @app.callback(
-        Output('footer-clock', 'children'),
-        Input('clock-tick', 'n_intervals'),
-    )
-    def tick(_):
-        return datetime.now().strftime('%H:%M:%S')
-
     # 11. Toast renderer ──────────────────────────────────────────────────────
     @app.callback(
         Output('toast-container', 'children'),

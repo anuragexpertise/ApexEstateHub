@@ -83,7 +83,6 @@ def shell_layout():
             dcc.Store(id='sidebar-open-store', storage_type='memory', data={'collapsed': False}),
 
             # ── Timers ───────────────────────────────────────────
-            dcc.Interval(id='clock-tick',       interval=1_000,  n_intervals=0),
             dcc.Interval(id='kpi-auto-refresh', interval=60_000, n_intervals=0),
 
             # ── Sidebar ──────────────────────────────────────────
@@ -217,8 +216,6 @@ def shell_layout():
                                           className='footer-copy'),
                                 html.Span('All systems operational',
                                           className='footer-status'),
-                                html.Span(id='footer-clock',
-                                          className='footer-clock'),
                             ]),
                         ],
                     ),
