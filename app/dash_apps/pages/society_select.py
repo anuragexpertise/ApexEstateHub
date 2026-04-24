@@ -19,9 +19,11 @@ def society_select_layout(societies_list=None, error_message=None, show_master_l
                     "position": "fixed",
                     "top": "0",
                     "left": "0",
-                    "width": "100%",
+                    "width": "100vw",
                     "height": "100%",
-                    "background": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                    "background-image": "url('/static/assets/EH_bk.jpg')",
+                    "background-size": "cover",
+                    "background-attachment": "fixed",
                     "zIndex": "-1"
                 }
             ),
