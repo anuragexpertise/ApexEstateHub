@@ -7,12 +7,15 @@ import json
 from dash import Input, Output, State, html, no_update, clientside_callback
 import dash_bootstrap_components as dbc
 
-from app.dash_apps.pages.customize_layout import (
-    CARD_DEFINITIONS,
-    DEFAULT_ACTIVE,
+from app.dash_apps.pages.card_catalogue import (
+    CARD_CATALOGUE,
+    KPI_CARDS,
+    DEFAULT_LAYOUTS,
     make_card,
 )
-
+# Alias used inside this file for brevity
+CARD_DEFINITIONS = CARD_CATALOGUE          # ← was the missing name
+DEFAULT_ACTIVE   = DEFAULT_LAYOUTS.get('admin', list(CARD_CATALOGUE.keys())[:4])
 
 # ================================================================
 # SortableJS clientside callback
