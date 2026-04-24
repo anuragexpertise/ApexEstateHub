@@ -1,19 +1,21 @@
 {% extends "base.html" %}
 
-{% block styles %}
-<link rel="stylesheet" href="/static/css/style.css">
-{% endblock %}
-
 {% block content %}
-<div id="root">
-    <div class="loading-container">
-        <div class="loading-spinner"></div>
-        <p>Loading ApexEstateHub...</p>
+<div class="portal-content">
+    <div class="glass-card" style="padding: 40px; text-align: center;">
+        <h1>Welcome to ApexEstateHub</h1>
+        <p>Your complete society management solution</p>
     </div>
 </div>
-
-<script>
-    // Redirect to Dash app
-    window.location.href = "{{ dash_url }}";
-</script>
 {% endblock %}
+<!-- /home/at/Documents/ApexEstateHub/app/templates/index.html
+{% extends "base.html" %}
+
+{% block content %}
+<div class="portal-content">
+    <div class="glass-card" style="padding: 40px; text-align: center;">
+        <h1>Welcome to ApexEstateHub</h1>
+        <p>Your complete society management solution</p>
+    </div>
+</div>
+{% endblock %} -->

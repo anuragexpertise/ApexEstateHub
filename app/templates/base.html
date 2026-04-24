@@ -1,19 +1,197 @@
+<!-- /home/at/Documents/ApexEstateHub/app/templates/base.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ApexEstateHub</title>
+    <title>ApexEstateHub - Society Management System</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Your Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <!-- If static files aren't working, try this alternative -->
+    <!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"> -->
 </head>
 <body>
-    <div id="root">
-        <div style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column;">
-            <h1>ApexEstateHub</h1>
-            <p>Loading...</p>
+    <div id="app-root">
+        <!-- Sidebar -->
+        <aside class="app-sidebar">
+            <div class="sb-brand">
+                <div class="sb-brand-inner">
+                    <div class="sb-logo">AE</div>
+                    <div>
+                        <div class="sb-name">ApexEstateHub</div>
+                        <div class="sb-tagline">Society Management</div>
+                    </div>
+                </div>
+                <button class="sb-collapse-btn" id="collapseBtn">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+            </div>
+            
+            <nav class="sb-nav">
+                <ul class="sb-nav-list">
+                    <li class="snav-item">
+                        <a href="/dashboard/" class="snav-link">
+                            <i class="fas fa-tachometer-alt" style="margin-right: 12px;"></i>
+                            Dashboard
+                        </a>
+                    </li>
+                    <li class="snav-item">
+                        <a href="/residents/" class="snav-link">
+                            <i class="fas fa-users" style="margin-right: 12px;"></i>
+                            Residents
+                        </a>
+                    </li>
+                    <li class="snav-item">
+                        <a href="/vendors/" class="snav-link">
+                            <i class="fas fa-truck" style="margin-right: 12px;"></i>
+                            Vendors
+                        </a>
+                    </li>
+                    <li class="snav-item">
+                        <a href="/complaints/" class="snav-link">
+                            <i class="fas fa-clipboard-list" style="margin-right: 12px;"></i>
+                            Complaints
+                        </a>
+                    </li>
+                    <li class="snav-item">
+                        <a href="/payments/" class="snav-link">
+                            <i class="fas fa-credit-card" style="margin-right: 12px;"></i>
+                            Payments
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="sb-user-panel">
+                <div class="sb-user-info">
+                    <div class="sb-avatar">U</div>
+                    <div>
+                        <div class="sb-uname" id="userName">User</div>
+                        <div class="sb-urole" id="userRole">Loading...</div>
+                    </div>
+                </div>
+                <button class="sb-logout-btn" id="logoutBtn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </aside>
+        
+        <div class="sb-overlay" id="sidebarOverlay"></div>
+        
+        <div class="page-wrapper">
+            <header class="app-header">
+                <button class="hdr-hamburger" id="hamburgerBtn">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <nav class="breadcrumb-nav">
+                    <ul class="bc-list" id="breadcrumb">
+                        <li class="bc-item bc-item--active">Dashboard</li>
+                    </ul>
+                </nav>
+                <div class="hdr-right">
+                    <button class="icon-btn" id="notificationsBtn">
+                        <i class="far fa-bell"></i>
+                    </button>
+                    <div class="hdr-avatar" id="userAvatar">U</div>
+                </div>
+            </header>
+            
+            <main class="main-content">
+                <div id="content">
+                    <!-- Dash app will be injected here -->
+                    {{ content | safe if content else '<div class="portal-content">Loading...</div>' }}
+                </div>
+            </main>
+            
+            <footer class="app-footer">
+                <div class="footer-inner">
+                    <div class="footer-copy">© 2024 ApexEstateHub</div>
+                    <div class="footer-status" id="systemStatus">System Online</div>
+                </div>
+            </footer>
         </div>
     </div>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        window.location.href = '/dashboard/';
+        // Clock update
+        function updateClock() {
+            const now = new Date();
+            const clock = document.getElementById('clock');
+            if (clock) {
+                clock.textContent = now.toLocaleTimeString();
+            }
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+        
+        // Mobile sidebar toggle
+        const hamburger = document.getElementById('hamburgerBtn');
+        const sidebar = document.querySelector('.app-sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        
+        if (hamburger && sidebar) {
+            hamburger.addEventListener('click', () => {
+                sidebar.classList.toggle('sidebar-mobile-open');
+                overlay.classList.toggle('active');
+            });
+            
+            overlay.addEventListener('click', () => {
+                sidebar.classList.remove('sidebar-mobile-open');
+                overlay.classList.remove('active');
+            });
+        }
+        
+        // Collapse sidebar on desktop
+        const collapseBtn = document.getElementById('collapseBtn');
+        const pageWrapper = document.querySelector('.page-wrapper');
+        
+        if (collapseBtn && pageWrapper) {
+            collapseBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('app-sidebar--collapsed');
+                pageWrapper.classList.toggle('page-wrapper--expanded');
+            });
+        }
+        
+        // Check authentication
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/user-info');
+                const data = await response.json();
+                if (data.success && data.user) {
+                    const userName = document.getElementById('userName');
+                    const userRole = document.getElementById('userRole');
+                    const userAvatar = document.getElementById('userAvatar');
+                    
+                    if (userName) userName.textContent = data.user.name || 'User';
+                    if (userRole) userRole.textContent = data.user.role || 'Resident';
+                    if (userAvatar) userAvatar.textContent = (data.user.name || 'U')[0].toUpperCase();
+                }
+            } catch (error) {
+                console.log('Auth check failed:', error);
+            }
+        }
+        checkAuth();
+        
+        // Logout
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', async () => {
+                await fetch('/auth/logout', { method: 'POST' });
+                window.location.href = '/login';
+            });
+        }
+        
+        console.log('✓ CSS should be loaded from: /static/css/style.css');
     </script>
 </body>
 </html>
