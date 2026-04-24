@@ -119,7 +119,7 @@ def _security_tab(p):
 
 def _redirect_for_role(role, society_id):
     if role == 'admin' and society_id is None:
-        return '/dashboard/master-portal'
+        return '/dashboard/master'  # ← Change from master-portal
     if role == 'admin':
         return '/dashboard/admin-portal'
     if role == 'apartment':

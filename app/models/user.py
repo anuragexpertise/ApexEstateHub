@@ -1,58 +1,105 @@
+# app/models/user.py
 from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
-from app import db, login_manager
-import json
+from database.db_manager import db
 
-class User(UserMixin, db.Model):
-    __tablename__ = 'users'
+class User(UserMixin):
+    def __init__(self, user_id, email, role, society_id=None, name=None, phone=None):
+        self.id = user_id
+        self.email = email
+        self.role = role
+        self.society_id = society_id
+        self.name = name or email.split('@')[0].title()
+        self.phone = phone
     
-    id = db.Column(db.Integer, primary_key=True)
-    society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=True)
-    email = db.Column(db.String(100), unique=True, nullable=False, index=True)
-    password_hash = db.Column(db.String(255), nullable=False)
-    pin_hash = db.Column(db.String(255), nullable=True)
-    pattern_hash = db.Column(db.String(255), nullable=True)
-    role = db.Column(db.String(20), nullable=False, index=True)
-    linked_id = db.Column(db.Integer, nullable=True)
-    login_method = db.Column(db.String(20), default='password')
-    push_subscription = db.Column(db.Text, nullable=True)  # JSON string for push subscription
-    credential_id = db.Column(db.Text, nullable=True)  # For WebAuthn
-    public_key = db.Column(db.Text, nullable=True)  # For WebAuthn
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    @staticmethod
+    def get(user_id):
+        """Get user by ID from database"""
+        try:
+            result = db.execute_query(
+                """SELECT u.id, u.email, u.role, u.society_id, u.name, u.phone 
+                   FROM users u WHERE u.id = %s""",
+                (user_id,), fetch_one=True
+            )
+            if result:
+                return User(
+                    user_id=result['id'],
+                    email=result['email'],
+                    role=result['role'],
+                    society_id=result.get('society_id'),
+                    name=result.get('name'),
+                    phone=result.get('phone')
+                )
+        except Exception as e:
+            print(f"Error loading user {user_id}: {e}")
+        return None
     
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password, method='scrypt')
+    @staticmethod
+    def find_by_email(email, society_id=None):
+        """Find user by email and optional society"""
+        try:
+            query = """SELECT u.id, u.email, u.role, u.society_id, u.name, u.phone 
+                       FROM users u WHERE u.email = %s"""
+            params = [email]
+            
+            if society_id:
+                query += " AND u.society_id = %s"
+                params.append(society_id)
+            
+            result = db.execute_query(query, tuple(params), fetch_one=True)
+            if result:
+                return User(
+                    user_id=result['id'],
+                    email=result['email'],
+                    role=result['role'],
+                    society_id=result.get('society_id'),
+                    name=result.get('name'),
+                    phone=result.get('phone')
+                )
+        except Exception as e:
+            print(f"Error finding user: {e}")
+        return None
     
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-    
-    def set_pin(self, pin):
-        self.pin_hash = generate_password_hash(pin, method='scrypt')
-    
-    def check_pin(self, pin):
-        return check_password_hash(self.pin_hash, pin) if self.pin_hash else False
-    
-    def set_pattern(self, pattern):
-        self.pattern_hash = generate_password_hash(pattern, method='scrypt')
-    
-    def check_pattern(self, pattern):
-        return check_password_hash(self.pattern_hash, pattern) if self.pattern_hash else False
-    
-    def is_master_admin(self):
-        return self.role == 'admin' and self.society_id is None
-    
-    def set_push_subscription(self, subscription):
-        self.push_subscription = json.dumps(subscription)
-    
-    def get_push_subscription(self):
-        return json.loads(self.push_subscription) if self.push_subscription else None
+    @staticmethod
+    def create(email, password_hash, role, society_id=None, name=None, phone=None):
+        """Create a new user"""
+        try:
+            result = db.execute_query(
+                """INSERT INTO users (email, password_hash, role, society_id, name, phone, login_method)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'password')
+                   RETURNING id""",
+                (email, password_hash, role, society_id, name, phone), fetch_one=True
+            )
+            if result:
+                return User.get(result['id'])
+        except Exception as e:
+            print(f"Error creating user: {e}")
+        return None
     
     def get_id(self):
         return str(self.id)
     
-    def __repr__(self):
-        return f'<User {self.email}>'
-
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
+    def is_master_admin(self):
+        return self.role == 'admin' and self.society_id is None
+    
+    def is_admin(self):
+        return self.role == 'admin' and self.society_id is not None
+    
+    def is_apartment_owner(self):
+        return self.role == 'apartment'
+    
+    def is_vendor(self):
+        return self.role == 'vendor'
+    
+    def is_security(self):
+        return self.role == 'security'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'role': self.role,
+            'society_id': self.society_id,
+            'name': self.name,
+            'phone': self.phone,
+            'is_master_admin': self.is_master_admin()
+        }

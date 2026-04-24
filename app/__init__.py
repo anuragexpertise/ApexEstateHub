@@ -1,54 +1,74 @@
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+# app/__init__.py
+from flask import Flask, jsonify, redirect
 from flask_login import LoginManager
-from flask_migrate import Migrate
 from flask_cors import CORS
-from dash import Dash, html, dcc, dependencies
-import dash_bootstrap_components as dbc
 import os
+from dotenv import load_dotenv
 
-# Initialize extensions
-db = SQLAlchemy()
+load_dotenv()
+
+# Create login manager
 login_manager = LoginManager()
-migrate = Migrate()
 
-def create_app(config_name=None):
-    """Application factory"""
-    if config_name is None:
-        config_name = os.getenv('FLASK_CONFIG', 'development')
-    
-    from app.config import config
+def create_app():
+    """Create and configure Flask application"""
     app = Flask(__name__)
-    app.config.from_object(config[config_name])
-    
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
+    app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_CONFIG') == 'production'
+    app.config['REMEMBER_COOKIE_SECURE'] = os.environ.get('FLASK_CONFIG') == 'production'
+
     # Initialize extensions
-    db.init_app(app)
+    CORS(app, supports_credentials=True)
     login_manager.init_app(app)
-    migrate.init_app(app, db)
-    CORS(app)
-    
-    # Configure login
     login_manager.login_view = 'auth.login'
-    
+    login_manager.login_message = 'Please log in to access this page'
+
+    # Initialize database connection pool
+    from database.db_manager import db
+    db.init_app(app)
+
+    # Add test route for debugging
+    @app.route('/test')
+    def test():
+        return jsonify({
+            "status": "ok",
+            "message": "Flask server is running",
+            "routes": [str(rule) for rule in app.url_map.iter_rules()][:10]
+        })
+
+    # Home route
+    @app.route('/')
+    def index():
+        return redirect('/dashboard/')
+
     # Register blueprints
-    try:
-        from app.routes.auth import auth_bp
-        from app.routes.api import api_bp
-        from app.routes.web import web_bp
-        
-        app.register_blueprint(auth_bp, url_prefix='/auth')
-        app.register_blueprint(api_bp, url_prefix='/api')
-        app.register_blueprint(web_bp)
-        print("✓ Blueprints registered")
-    except Exception as e:
-        print(f"⚠️ Blueprint error: {e}")
-    
+    from app.routes.auth import auth_bp
+    from app.routes.api import api_bp
+
+    app.register_blueprint(auth_bp, url_prefix='/auth')
+    app.register_blueprint(api_bp, url_prefix='/api')
+
+    print("✓ Blueprints and routes registered")
+
     return app
 
 
 def create_dash_app(flask_app):
-    """Create and configure Dash app"""
-    
+    """Create and configure the Dash application"""
+    from dash import Dash, html
+    import dash_bootstrap_components as dbc
+
+    # Setup user loader for this app
+    from app.models.user import User
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        if user_id:
+            return User.get(int(user_id))
+        return None
+
+    print("✓ User loader registered")
+
     dash_app = Dash(
         __name__,
         server=flask_app,
@@ -58,30 +78,25 @@ def create_dash_app(flask_app):
             'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
         ],
         suppress_callback_exceptions=True,
+        assets_folder='app/static/assets',
+        assets_url_path='/static'
     )
-    
-    # ============ USE FULL LAYOUT ============
-    # Import the full layout from dash_apps/layout.py
-    try:
-        from app.dash_apps.layout import serve_layout
-        dash_app.layout = serve_layout()
-        print("✓ Full layout loaded from app/dash_apps/layout.py")
-    except ImportError as e:
-        print(f"⚠️ Could not load full layout: {e}")
-        # Fallback layout
-        dash_app.layout = html.Div([
-            html.H1("ApexEstateHub", style={"textAlign": "center", "marginTop": "50px"}),
-            html.P("Layout file not found. Please create app/dash_apps/layout.py", 
-                   style={"textAlign": "center", "color": "red"})
-        ])
-    # =========================================
-    
-    # Register callbacks
-    try:
-        from app.dash_apps.callbacks import register_callbacks
-        register_callbacks(dash_app)
-        print("✓ Callbacks registered")
-    except ImportError as e:
-        print(f"⚠️ Could not register callbacks: {e}")
-    
+
+    # Simple test layout
+    dash_app.layout = html.Div(
+        [
+            html.H1("ApexEstateHub - Dashboard",
+                   style={"textAlign": "center", "color": "#2c3e50", "paddingTop": "50px"}),
+            html.P("If you see this, Dash is working!",
+                   style={"textAlign": "center", "fontSize": "18px", "color": "#666"}),
+            html.Div(
+                dbc.Button("Test Button", color="primary", size="lg"),
+                style={"textAlign": "center", "marginTop": "30px"}
+            ),
+        ],
+        style={"minHeight": "100vh", "background": "#f5f7fb"}
+    )
+
+    print("✓ Dash app created with test layout")
+
     return dash_app
