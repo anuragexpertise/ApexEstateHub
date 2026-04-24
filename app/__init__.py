@@ -17,6 +17,9 @@ def create_app():
     is_prod = os.environ.get('FLASK_CONFIG') == 'production'
     app.config['SESSION_COOKIE_SECURE'] = is_prod
     app.config['REMEMBER_COOKIE_SECURE'] = is_prod
+    app.static_folder = os.path.join(os.path.dirname(__file__), 'static')
+    app.static_url_path = '/static'
+
 
     CORS(app, supports_credentials=True)
     login_manager.init_app(app)
