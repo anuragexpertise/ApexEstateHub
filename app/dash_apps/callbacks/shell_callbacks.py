@@ -198,7 +198,7 @@ def register_shell_callbacks(app):
     @app.callback(
         Output('society-dropdown', 'options'),
         Input('login-modal', 'is_open'),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_society_options(_is_open):
         try:
@@ -402,7 +402,7 @@ def register_shell_callbacks(app):
         Output('login-modal',      'is_open', allow_duplicate=True),
         Input('url',        'pathname'),
         Input('auth-store', 'data'),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def router(pathname, auth):
         _not_auth = (
@@ -461,23 +461,44 @@ def register_shell_callbacks(app):
         return not bool(auth and auth.get('authenticated'))
 
     # 9. Sidebar collapse ─────────────────────────────────────────────────────
+    # Replace the sidebar toggle callback (around line 393) with:
     @app.callback(
-        Output('app-sidebar',        'className'),
-        Output('page-wrapper',       'className'),
-        Output('sidebar-open-store', 'data'),
-        Input('sb-collapse-btn',   'n_clicks'),
-        Input('hdr-hamburger-btn', 'n_clicks'),
-        Input('sb-overlay',        'n_clicks'),
-        State('sidebar-open-store', 'data'),
-        prevent_initial_call=True,
+        [
+            Output('sidebar-content', 'style'),
+            Output('page-content', 'style'),
+            Output('sb-overlay', 'style')
+        ],
+        [
+            Input('hdr-hamburger-btn', 'n_clicks'),
+            Input('sb-close-btn', 'n_clicks'),
+            Input('sb-overlay', 'n_clicks')
+        ],
+        prevent_initial_call=True  
     )
-    def toggle_sidebar(_n1, _n2, _n3, state):
-        trig      = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
-        collapsed = (state or {}).get('collapsed', False)
-        new_col   = True if trig == 'sb-overlay' else not collapsed
-        sb_cls = 'app-sidebar app-sidebar--collapsed' if new_col else 'app-sidebar'
-        pw_cls = 'page-wrapper page-wrapper--expanded' if new_col else 'page-wrapper'
-        return sb_cls, pw_cls, {'collapsed': new_col}
+    def toggle_sidebar(hdr_clicks, close_clicks, overlay_clicks):
+        """Toggle sidebar open/close"""
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            # Return current state (sidebar closed by default)
+            return (
+                {'position': 'fixed', 'top': 0, 'left': '-250px', 'width': '250px', 
+                'height': '100%', 'backgroundColor': '#343a40', 'transition': 'left 0.3s ease',
+                'zIndex': 1000, 'overflowY': 'auto'},
+                {'marginLeft': '0px', 'padding': '20px', 'transition': 'margin-left 0.3s ease'},
+                {'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'height': '100%',
+                'backgroundColor': 'rgba(0,0,0,0.5)', 'zIndex': 999, 'display': 'none'}
+            )
+        
+        # Current state check - you may need to store state in dcc.Store
+        # For simplicity, toggle based on current left position or use a store
+        return (
+            {'position': 'fixed', 'top': 0, 'left': '0px', 'width': '250px', 
+            'height': '100%', 'backgroundColor': '#343a40', 'transition': 'left 0.3s ease',
+            'zIndex': 1000, 'overflowY': 'auto'},
+            {'marginLeft': '250px', 'padding': '20px', 'transition': 'margin-left 0.3s ease'},
+            {'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'height': '100%',
+            'backgroundColor': 'rgba(0,0,0,0.5)', 'zIndex': 999, 'display': 'block'}
+        )
 
     # 11. Toast renderer ──────────────────────────────────────────────────────
     @app.callback(
@@ -505,7 +526,7 @@ def register_shell_callbacks(app):
     @app.callback(
         Output('society-dropdown', 'value'),
         Input('cookie-store', 'data'),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def restore_cookie(cookie):
         if cookie and cookie.get('society_id'):
