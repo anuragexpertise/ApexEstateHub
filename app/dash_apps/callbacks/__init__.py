@@ -1,14 +1,10 @@
 # app/dash_apps/callbacks/__init__.py
 """
 Master callback registrar.
-
-BUG in original: app/__init__.py calls register_callbacks(dash_app)
-                 but this module only exports register_all_callbacks().
-FIX: export both names so both callers work.
 """
 
 
-def register_all_callbacks(app):
+def register_callbacks(app):
     """Register every callback module in safe dependency order."""
 
     # Shell must be first — it owns auth-store / url / login-modal
@@ -48,5 +44,4 @@ def register_all_callbacks(app):
     print("✓ ALL callbacks registered")
 
 
-# Alias so app/__init__.py import works unchanged
-register_callbacks = register_all_callbacks
+
