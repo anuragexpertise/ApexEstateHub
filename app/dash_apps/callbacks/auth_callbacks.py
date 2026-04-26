@@ -4,7 +4,6 @@ from flask_login import logout_user
 from app.services.auth_service import authenticate_user, authenticate_pin, authenticate_pattern
 from app.services.society_service import get_societies, get_society_details
 from app.dash_apps.pages.login import society_login_layout
-from app.dash_apps.pages.login import society_login_layout
 from app.dash_apps.pages.society_select import society_select_layout
 from app.dash_apps.pages.admin_portal import admin_portal_layout
 from app.dash_apps.pages.owner_portal import owner_portal_layout

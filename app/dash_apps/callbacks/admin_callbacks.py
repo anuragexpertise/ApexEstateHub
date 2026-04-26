@@ -148,7 +148,7 @@ def register_admin_callbacks(app):
         
         try:
             from database.db_manager import db
-            from services.qr_service import validate_qr_code
+            from app.services.qr_service import validate_qr_code
             
             # Validate the QR code
             result = validate_qr_code(qr_data, None)  # society_id will be determined from session

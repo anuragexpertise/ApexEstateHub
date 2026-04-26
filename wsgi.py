@@ -7,7 +7,7 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
 # Debug: Check if static folder exists
-static_path = os.path.join(project_root, 'static')
+static_path = os.path.join(project_root, 'app', 'assets')
 css_path = os.path.join(static_path, 'css', 'style.css')
 
 print(f"Project root: {project_root}")
@@ -24,7 +24,7 @@ from app import create_app, create_dash_app
 
 flask_app = create_app()
 dash_app = create_dash_app(flask_app)
-server = flask_app
+server = dash_app.server  # Gunicorn target
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
