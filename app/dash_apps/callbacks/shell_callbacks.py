@@ -7,7 +7,6 @@ Shell-level callbacks:
   • Logout
   • Main router: content + sidebar nav + header meta
   • Sidebar collapse / hamburger
-  • Footer clock
   • Toast renderer
   • Login modal guard
 """
