@@ -461,44 +461,31 @@ def register_shell_callbacks(app):
         return not bool(auth and auth.get('authenticated'))
 
     # 9. Sidebar collapse ─────────────────────────────────────────────────────
-    # Replace the sidebar toggle callback (around line 393) with:
+    # shell_callbacks.py — replace toggle_sidebar callback entirely
+
     @app.callback(
-        [
-            Output('sidebar-content', 'style'),
-            Output('page-content', 'style'),
-            Output('sb-overlay', 'style')
-        ],
-        [
-            Input('hdr-hamburger-btn', 'n_clicks'),
-            Input('sb-close-btn', 'n_clicks'),
-            Input('sb-overlay', 'n_clicks')
-        ],
-        prevent_initial_call=True  
+        Output('app-sidebar',  'className'),
+        Output('sb-overlay',   'style'),
+        Input('hdr-hamburger-btn', 'n_clicks'),
+        Input('sb-collapse-btn',   'n_clicks'),
+        Input('sb-overlay',        'n_clicks'),
+        State('app-sidebar',  'className'),
+        prevent_initial_call=True,
     )
-    def toggle_sidebar(hdr_clicks, close_clicks, overlay_clicks):
-        """Toggle sidebar open/close"""
+    def toggle_sidebar(hdr_n, collapse_n, overlay_n, current_class):
+        current_class = current_class or 'app-sidebar'
+        is_open = 'sidebar-open' in current_class
         ctx = dash.callback_context
         if not ctx.triggered:
-            # Return current state (sidebar closed by default)
-            return (
-                {'position': 'fixed', 'top': 0, 'left': '-250px', 'width': '250px', 
-                'height': '100%', 'backgroundColor': '#343a40', 'transition': 'left 0.3s ease',
-                'zIndex': 1000, 'overflowY': 'auto'},
-                {'marginLeft': '0px', 'padding': '20px', 'transition': 'margin-left 0.3s ease'},
-                {'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'height': '100%',
-                'backgroundColor': 'rgba(0,0,0,0.5)', 'zIndex': 999, 'display': 'none'}
-            )
-        
-        # Current state check - you may need to store state in dcc.Store
-        # For simplicity, toggle based on current left position or use a store
-        return (
-            {'position': 'fixed', 'top': 0, 'left': '0px', 'width': '250px', 
-            'height': '100%', 'backgroundColor': '#343a40', 'transition': 'left 0.3s ease',
-            'zIndex': 1000, 'overflowY': 'auto'},
-            {'marginLeft': '250px', 'padding': '20px', 'transition': 'margin-left 0.3s ease'},
-            {'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'height': '100%',
-            'backgroundColor': 'rgba(0,0,0,0.5)', 'zIndex': 999, 'display': 'block'}
-        )
+            return current_class, {'display': 'none'}
+        trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger in ('hdr-hamburger-btn', 'sb-collapse-btn'):
+            if is_open:
+                return 'app-sidebar', {'display': 'none'}
+            else:
+                return 'app-sidebar sidebar-open', {'display': 'block', 'zIndex': 1002}
+        # overlay click → close
+        return 'app-sidebar', {'display': 'none'}
 
     # 11. Toast renderer ──────────────────────────────────────────────────────
     @app.callback(
