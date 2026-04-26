@@ -26,29 +26,32 @@ def get_push_subscription(user_id):
     return None
 
 def send_push_notification(user_id, title, body, icon=None, url=None):
-    """Send push notification to user"""
+    """Send push notification to user."""
+    # ── GUARD ──────────────────────────────────────────────────
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        print("⚠  Push notifications disabled: VAPID keys not set in environment.")
+        return False, "VAPID keys not configured"
+    # ───────────────────────────────────────────────────────────
+ 
     subscription = get_push_subscription(user_id)
     if not subscription:
         return False, "No subscription found"
-    
+ 
     try:
         webpush(
             subscription_info=subscription,
-            data=json.dumps({
+            data=__import__('json').dumps({
                 'title': title,
-                'body': body,
-                'icon': icon or '/static/assets/logo.png',
-                'url': url or '/dashboard'
+                'body':  body,
+                'icon':  icon or '/static/assets/logo.png',
+                'url':   url  or '/dashboard/',
             }),
             vapid_private_key=VAPID_PRIVATE_KEY,
-            vapid_claims={
-                'sub': f'mailto:{VAPID_CLAIM_EMAIL}'
-            }
+            vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
         )
         return True, "Notification sent"
-    except WebPushException as e:
+    except Exception as e:
         return False, str(e)
-
 def send_payment_reminder(user_id, amount, due_date):
     """Send payment reminder notification"""
     title = "Payment Reminder"

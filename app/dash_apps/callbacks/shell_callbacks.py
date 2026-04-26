@@ -53,10 +53,13 @@ def _redirect_for_role(role, society_id):
 def _make_nav_items(role, society_id, pathname):
     is_master = (role == 'admin' and society_id is None)
     key = 'master' if is_master else (role or 'admin')
-    cfg = ROLE_CONFIG.get(key, ROLE_CONFIG['admin'])
+    cfg   = ROLE_CONFIG.get(key, ROLE_CONFIG['admin'])
     color = cfg['color']
     items = []
-    for label, href, icon in cfg['tabs']:
+    for tab in cfg['tabs']:
+        label = tab['label']
+        href  = tab['href']
+        icon  = tab['icon']
         is_active = bool(pathname and href.rstrip('/') in pathname)
         items.append(html.Li(
             html.A(
@@ -72,7 +75,6 @@ def _make_nav_items(role, society_id, pathname):
             className='snav-item',
         ))
     return items
-
 
 def _breadcrumb(pathname):
     path_map = {
