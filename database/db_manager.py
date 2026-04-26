@@ -1,98 +1,143 @@
 # database/db_manager.py
+"""
+Singleton PostgreSQL connection manager.
+Uses psycopg2 with a simple connection pool pattern safe for
+multi-threaded gunicorn (--threads flag).
+"""
+
 import os
 import psycopg2
-import psycopg2.extras          # must be explicit
-import psycopg2.pool
-from contextlib import contextmanager
+import psycopg2.extras
+from threading import Lock
 
 
 class DatabaseManager:
-    """Singleton psycopg2 connection-pool manager."""
-    _instance = None
-    _pool     = None
+    """Thread-safe PostgreSQL manager with auto-reconnect."""
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    def init_app(self, app=None):
-        try:
-            database_url = os.environ.get('DATABASE_URL')
-            
-            if not database_url:
-                # Build from individual params
-                host = os.environ.get('PGHOST', 'localhost')
-                database = os.environ.get('PGDATABASE', 'societyos')
-                user = os.environ.get('PGUSER', 'postgres')
-                password = os.environ.get('PGPASSWORD', '')
-                port = os.environ.get('PGPORT', '5432')
-                database_url = f"postgresql://{user}:{password}@{host}:{port}/{database}"
-            
-            # For Neon, explicitly add hostaddr to bypass DNS issues
-            if 'neon.tech' in database_url:
-                # Resolve and add hostaddr
-                import socket
-                from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
-                
-                parsed = urlparse(database_url)
-                host = parsed.hostname
-                try:
-                    ip = socket.gethostbyname(host)
-                    print(f"✓ Resolved {host} to {ip}")
-                    
-                    # Add hostaddr parameter
-                    query_params = parse_qs(parsed.query)
-                    query_params['hostaddr'] = [ip]
-                    new_query = urlencode(query_params, doseq=True)
-                    
-                    # Rebuild URL with hostaddr
-                    new_parsed = parsed._replace(query=new_query)
-                    database_url = urlunparse(new_parsed)
-                    print(f"Using URL with hostaddr: {database_url[:80]}...")
-                except Exception as e:
-                    print(f"Warning: Could not resolve host: {e}")
-            
-            self._pool = psycopg2.pool.SimpleConnectionPool(
-                1, 20, 
-                dsn=database_url,
-                connect_timeout=10  # Add timeout
+    def __init__(self):
+        self._conn   = None
+        self._lock   = Lock()
+        self._dsn    = self._build_dsn()
+
+    # ── DSN builder ───────────────────────────────────────────────
+    @staticmethod
+    def _build_dsn() -> str:
+        direct = os.getenv('DATABASE_URL')
+        if direct:
+            # Neon returns postgres:// — psycopg2 needs postgresql://
+            return direct.replace('postgres://', 'postgresql://', 1)
+
+        host     = os.getenv('PGHOST',     '').strip("'\"")
+        dbname   = os.getenv('PGDATABASE', '').strip("'\"")
+        user     = os.getenv('PGUSER',     '').strip("'\"")
+        password = os.getenv('PGPASSWORD', '').strip("'\"")
+        sslmode  = os.getenv('PGSSLMODE',  'require').strip("'\"")
+
+        if not all([host, dbname, user, password]):
+            raise EnvironmentError(
+                "Database env vars missing. Set DATABASE_URL or "
+                "PGHOST / PGDATABASE / PGUSER / PGPASSWORD."
             )
-            print("✓ Database connection pool initialized")
-            return True
-            
-        except Exception as e:
-            print(f"⚠️ Database initialization error: {e}")
-            import traceback
-            traceback.print_exc()
-            self._pool = None
-            return False
-    @contextmanager
-    def get_connection(self):
-        """Get a connection from the pool"""
-        if not self._pool:
-            self.init_app()
+        return (
+            f"postgresql://{user}:{password}@{host}/{dbname}"
+            f"?sslmode={sslmode}"
+        )
 
-        conn = self._pool.getconn()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._pool.putconn(conn)
+    # ── Connection management ─────────────────────────────────────
+    def _get_conn(self):
+        """Return an open connection, reconnecting if needed."""
+        if self._conn is None or self._conn.closed:
+            self._conn = psycopg2.connect(
+                self._dsn,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+            )
+            self._conn.autocommit = False
+        return self._conn
 
-    def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
-        """Execute a query and return results"""
-        with self.get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query, params or ())
+    # ── Public query interface ────────────────────────────────────
+    def execute_query(
+        self,
+        query: str,
+        params=None,
+        fetch_one: bool = False,
+        fetch_all: bool = False,
+    ):
+        """
+        Execute a SQL statement and optionally fetch results.
+
+        Returns:
+            dict          — when fetch_one=True
+            list[dict]    — when fetch_all=True
+            None          — for INSERT / UPDATE / DELETE
+        """
+        with self._lock:
+            try:
+                conn   = self._get_conn()
+                cursor = conn.cursor()
+                cursor.execute(query, params or ())
+
                 if fetch_one:
-                    return cur.fetchone()
-                elif fetch_all:
-                    return cur.fetchall()
-                else:
-                    return cur.rowcount
+                    row = cursor.fetchone()
+                    conn.commit()
+                    return dict(row) if row else None
 
-# Global instance
+                if fetch_all:
+                    rows = cursor.fetchall()
+                    conn.commit()
+                    return [dict(r) for r in rows] if rows else []
+
+                conn.commit()
+                return None
+
+            except psycopg2.OperationalError:
+                # Connection lost — reset and retry once
+                try:
+                    self._conn = None
+                    conn   = self._get_conn()
+                    cursor = conn.cursor()
+                    cursor.execute(query, params or ())
+                    if fetch_one:
+                        row = cursor.fetchone()
+                        conn.commit()
+                        return dict(row) if row else None
+                    if fetch_all:
+                        rows = cursor.fetchall()
+                        conn.commit()
+                        return [dict(r) for r in rows] if rows else []
+                    conn.commit()
+                    return None
+                except Exception as retry_err:
+                    if self._conn:
+                        self._conn.rollback()
+                    raise retry_err
+
+            except Exception as e:
+                if self._conn and not self._conn.closed:
+                    self._conn.rollback()
+                raise e
+
+            finally:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+    def test_connection(self) -> bool:
+        """Return True if the database is reachable."""
+        try:
+            result = self.execute_query("SELECT 1 AS ok", fetch_one=True)
+            return bool(result and result.get('ok') == 1)
+        except Exception as e:
+            print(f"DB connection test failed: {e}")
+            return False
+
+    def close(self):
+        """Close the underlying connection."""
+        if self._conn and not self._conn.closed:
+            self._conn.close()
+            self._conn = None
+
+
+# ── Singleton ─────────────────────────────────────────────────────────────────
 db = DatabaseManager()

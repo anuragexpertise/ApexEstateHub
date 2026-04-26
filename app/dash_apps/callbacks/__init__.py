@@ -1,13 +1,17 @@
 # app/dash_apps/callbacks/__init__.py
 """
 Master callback registrar.
-Import order matters: shell_callbacks last so it can see all other outputs.
+
+BUG in original: app/__init__.py calls register_callbacks(dash_app)
+                 but this module only exports register_all_callbacks().
+FIX: export both names so both callers work.
 """
 
 
 def register_all_callbacks(app):
-    """Register every callback module."""
+    """Register every callback module in safe dependency order."""
 
+    # Shell must be first — it owns auth-store / url / login-modal
     from .shell_callbacks import register_shell_callbacks
     register_shell_callbacks(app)
 
@@ -33,12 +37,16 @@ def register_all_callbacks(app):
         from .customize_callbacks import register_customize_callbacks
         register_customize_callbacks(app)
     except Exception as e:
-        print(f"⚠ customize_callbacks skipped: {e}")
+        print(f"⚠  customize_callbacks skipped: {e}")
 
     try:
         from .card_catalogue_callbacks import register_card_catalogue_callbacks
         register_card_catalogue_callbacks(app)
     except Exception as e:
-        print(f"⚠ card_catalogue_callbacks skipped: {e}")
+        print(f"⚠  card_catalogue_callbacks skipped: {e}")
 
     print("✓ ALL callbacks registered")
+
+
+# Alias so app/__init__.py import works unchanged
+register_callbacks = register_all_callbacks
