@@ -1,113 +1,143 @@
-# app/__init__.py
-from flask import Flask, jsonify, redirect
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from flask_migrate import Migrate
 from flask_cors import CORS
-import os
-from dotenv import load_dotenv
-# In your app/__init__.py or main app file
-from flask import send_from_directory
+from dash import Dash, html
+import dash_bootstrap_components as dbc
 import os
 
-
-load_dotenv()
-
+# ── Extensions (initialised without app, bound in create_app) ──────────────
+db           = SQLAlchemy()
 login_manager = LoginManager()
+migrate      = Migrate()
 
 
-def create_app():
-    """Create and configure Flask application."""
-    app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
-    is_prod = os.environ.get('FLASK_CONFIG') == 'production'
-    app.config['SESSION_COOKIE_SECURE'] = is_prod
-    app.config['REMEMBER_COOKIE_SECURE'] = is_prod
-    app.static_folder = os.path.join(os.path.dirname(__file__), 'static')
-    app.static_url_path = '/static'
+# ══════════════════════════════════════════════════════════════════════════════
+# Flask application factory
+# ══════════════════════════════════════════════════════════════════════════════
+def create_app(config_name=None):
+    """Create and configure the Flask application."""
 
+    if config_name is None:
+        config_name = os.getenv('FLASK_CONFIG', 'development')
 
-    CORS(app, supports_credentials=True)
-    login_manager.init_app(app)
-    login_manager.login_view = 'auth.login'
+    from app.config import config
 
-    # Database pool
-    from database.db_manager import db
+    app = Flask(
+        __name__,
+        # Flask static files (login.html, sw.js, push.js, logo.png …)
+        static_folder=os.path.join(os.path.dirname(__file__), 'static'),
+        static_url_path='/static',
+    )
+    app.config.from_object(config[config_name])
+
+    # ── Bind extensions ────────────────────────────────────────────
     db.init_app(app)
+    login_manager.init_app(app)
+    migrate.init_app(app, db)
+    CORS(app)
 
-    # Blueprints
-    from app.routes.auth import auth_bp
-    from app.routes.api import api_bp
-    app.register_blueprint(auth_bp, url_prefix='/auth')
-    app.register_blueprint(api_bp, url_prefix='/api')
+    # ── Flask-Login config ─────────────────────────────────────────
+    login_manager.login_view       = 'auth.login'
+    login_manager.login_message    = 'Please log in to access this page.'
+    login_manager.session_protection = 'strong'
 
-    # Ensure static files are served
-    @app.route('/static/<path:filename>')
-    def serve_static(filename):
-        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static')
-        return send_from_directory(static_dir, filename)
-    
-    @app.route('/')
-    def index():
-        return redirect('/dashboard/')
+    # ── Blueprints ─────────────────────────────────────────────────
+    try:
+        from app.routes.auth import auth_bp
+        from app.routes.api  import api_bp
+        from app.routes.web  import web_bp
 
-    @app.route('/health')
-    def health():
-        return jsonify({'status': 'ok'})
+        app.register_blueprint(auth_bp, url_prefix='/auth')
+        app.register_blueprint(api_bp,  url_prefix='/api')
+        app.register_blueprint(web_bp)
+        print("✓ Blueprints registered")
+    except Exception as e:
+        print(f"⚠️  Blueprint error: {e}")
 
-    print("✓ Flask app created")
     return app
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Dash application factory
+# ══════════════════════════════════════════════════════════════════════════════
 def create_dash_app(flask_app):
-    """Mount Dash onto Flask and load full shell layout + callbacks."""
-    from dash import Dash, html
-    import dash_bootstrap_components as dbc
-    from app.models.user import User
+    """Mount the Dash SPA onto the Flask server.
 
-    @login_manager.user_loader
-    def load_user(user_id):
-        try:
-            return User.get(int(user_id))
-        except Exception:
-            return None
+    CSS / JS loading
+    ----------------
+    Dash automatically injects every file inside `assets_folder` into its
+    pages (no manual <link> or <script> tags required).
+
+    Correct folder  →  app/assets/          (resolved below via __file__)
+    Wrong folder    →  app/static/css/      (Flask serves it, Dash ignores it)
+
+    Keep app/static/ for Flask-only files:
+        • templates/login.html  (references /static/css/style.css)
+        • static/js/sw.js       (service-worker, registered at root scope)
+        • static/js/push.js
+        • static/assets/logo.png
+    """
+
+    # Absolute path → app/assets/  (sibling of this __init__.py)
+    _here         = os.path.dirname(os.path.abspath(__file__))
+    assets_folder = os.path.join(_here, 'assets')
+    os.makedirs(assets_folder, exist_ok=True)   # create on first run
 
     dash_app = Dash(
         __name__,
-        server=flask_app,
-        url_base_pathname='/dashboard/',
-        external_stylesheets=[
+        server               = flask_app,
+        url_base_pathname    = '/dashboard/',
+        # ↓ KEY: Dash loads style.css (and any .js) from here automatically
+        assets_folder        = assets_folder,
+        assets_url_path      = '/dashboard/assets',
+        external_stylesheets = [
             dbc.themes.BOOTSTRAP,
-            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
         ],
-        suppress_callback_exceptions=True,
-        prevent_initial_callbacks='initial_duplicate',   # ← fixes allow_duplicate errors
-        assets_folder=os.path.join(os.path.dirname(__file__), 'static', 'assets'),
-        assets_url_path='/static/assets',
-        meta_tags=[{'name': 'viewport',
-                    'content': 'width=device-width, initial-scale=1.0'}],
+        suppress_callback_exceptions = True,
+        # Show a loading indicator while callbacks run
+        update_title         = 'Loading… | ApexEstateHub',
     )
 
+    # Expose the server for gunicorn / ApexWeave
+    # (entry point:  from app import create_dash_app; server = dash_app.server)
     dash_app.title = 'ApexEstateHub'
 
-    # ── Layout ──────────────────────────────────────────────────
+    # ── Layout ────────────────────────────────────────────────────
     try:
-        from app.dash_apps.app_shell import shell_layout
-        dash_app.layout = shell_layout
-        print("✓ Shell layout loaded")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        dash_app.layout = html.Div([
-            html.H2("Layout Error", style={'color': 'red', 'textAlign': 'center', 'marginTop': '80px'}),
-            html.Pre(str(e), style={'textAlign': 'center', 'color': '#666'}),
-        ])
+        from app.dash_apps.layout import serve_layout
+        dash_app.layout = serve_layout()
+        print("✓ Dash layout loaded")
+    except ImportError as e:
+        print(f"⚠️  Layout import error: {e}")
+        dash_app.layout = _fallback_layout(str(e))
 
-    # ── Callbacks ────────────────────────────────────────────────
+    # ── Callbacks ─────────────────────────────────────────────────
     try:
-        from app.dash_apps.callbacks import register_all_callbacks
-        register_all_callbacks(dash_app)
-        print("✓ All callbacks registered")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        print(f"⚠ Callback registration failed: {e}")
+        from app.dash_apps.callbacks import register_callbacks
+        register_callbacks(dash_app)
+        print("✓ Callbacks registered")
+    except ImportError as e:
+        print(f"⚠️  Callback import error: {e}")
 
-    print("✓ Dash app ready at /dashboard/")
     return dash_app
+
+
+# ── Private helpers ────────────────────────────────────────────────────────
+def _fallback_layout(error_msg: str):
+    """Minimal layout shown when the real layout cannot be imported."""
+    return html.Div(
+        [
+            html.H1("ApexEstateHub",
+                    style={"textAlign": "center", "marginTop": "60px", "color": "#2c3e50"}),
+            html.P("⚠️  Could not load dashboard layout.",
+                   style={"textAlign": "center", "color": "#e74c3c", "marginTop": "10px"}),
+            html.Pre(error_msg,
+                     style={"maxWidth": "700px", "margin": "20px auto",
+                            "background": "#f8f9fa", "padding": "15px",
+                            "borderRadius": "8px", "fontSize": "13px"}),
+        ],
+        style={"fontFamily": "sans-serif"}
+    )
