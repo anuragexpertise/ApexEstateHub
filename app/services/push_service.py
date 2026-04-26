@@ -5,24 +5,32 @@ from app.models.user import User
 
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY')
-VAPID_CLAIM_EMAIL = os.getenv('VAPID_CLAIM_EMAIL', 'admin@apexestatehub.com')
+VAPID_CLAIM_EMAIL = os.getenv('VAPID_CLAIM_EMAIL', 'admin@estatehub.com')
+
 
 def save_push_subscription(user_id, subscription_info):
-    """Save push subscription for user"""
-    from app import db
-    user = User.query.get(user_id)
-    if user:
-        user.push_subscription = json.dumps(subscription_info)
-        db.session.commit()
+    try:
+        from database.db_manager import db
+        db.execute_query(
+            """UPDATE users SET push_subscription = %s WHERE id = %s""",
+            (json.dumps(subscription_info), user_id)
+        )
         return True
-    return False
+    except Exception as e:
+        print(f"Push save error: {e}")
+        return False
 
 def get_push_subscription(user_id):
-    """Get push subscription for user"""
-    from app.models.user import User
-    user = User.query.get(user_id)
-    if user and user.push_subscription:
-        return json.loads(user.push_subscription)
+    try:
+        from database.db_manager import db
+        row = db.execute_query(
+            "SELECT push_subscription FROM users WHERE id = %s",
+            (user_id,), fetch_one=True
+        )
+        if row and row.get('push_subscription'):
+            return json.loads(row['push_subscription'])
+    except Exception as e:
+        print(f"Push get error: {e}")
     return None
 
 def send_push_notification(user_id, title, body, icon=None, url=None):

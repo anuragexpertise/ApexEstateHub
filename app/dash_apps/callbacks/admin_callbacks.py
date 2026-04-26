@@ -175,3 +175,38 @@ def register_admin_callbacks(app):
                 html.H4("Error", style={"color": "#f39c12", "marginTop": "10px"}),
                 html.P(str(e))
             ], className="text-center p-3", style={"backgroundColor": "#fff3cd", "borderRadius": "10px"})
+        
+    @app.callback(
+        Output("total-users",    "children"),
+        Output("total-revenue",  "children"),
+        Output("pending-dues",   "children"),
+        Input("url", "pathname"),
+        State("auth-store", "data"),
+        prevent_initial_call=False,
+    )
+    def update_admin_kpis(pathname, auth_data):
+        sid = (auth_data or {}).get('society_id')
+        try:
+            from database.db_manager import db
+            users = db.execute_query(
+                "SELECT COUNT(*) AS c FROM users WHERE society_id=%s", (sid,), fetch_one=True
+            ) or {'c': 0}
+            revenue = db.execute_query(
+                "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
+                "WHERE society_id=%s AND status='paid' "
+                "AND trx_date >= date_trunc('month', CURRENT_DATE)",
+                (sid,), fetch_one=True
+            ) or {'s': 0}
+            dues = db.execute_query(
+                "SELECT COALESCE(SUM(amount),0) AS s FROM payments "
+                "WHERE society_id=%s AND status='pending'",
+                (sid,), fetch_one=True
+            ) or {'s': 0}
+            return (
+                str(users.get('c', 0)),
+                f"₹{int(float(revenue.get('s', 0))):,}",
+                f"₹{int(float(dues.get('s', 0))):,}",
+            )
+        except Exception as e:
+            print(f"Admin KPI error: {e}")
+            return "0", "₹0", "₹0"
