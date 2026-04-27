@@ -463,29 +463,26 @@ def register_shell_callbacks(app):
     # 9. Sidebar collapse ─────────────────────────────────────────────────────
     # shell_callbacks.py — replace toggle_sidebar callback entirely
 
+    # shell_callbacks.py — replace toggle_sidebar only
+
     @app.callback(
-        Output('app-sidebar',  'className'),
-        Output('sb-overlay',   'style'),
+        Output('app-sidebar', 'className'),
+        Output('sb-overlay',  'style'),
         Input('hdr-hamburger-btn', 'n_clicks'),
         Input('sb-collapse-btn',   'n_clicks'),
         Input('sb-overlay',        'n_clicks'),
-        State('app-sidebar',  'className'),
+        State('app-sidebar',       'className'),
         prevent_initial_call=True,
     )
-    def toggle_sidebar(hdr_n, collapse_n, overlay_n, current_class):
-        current_class = current_class or 'app-sidebar'
-        is_open = 'sidebar-open' in current_class
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return current_class, {'display': 'none'}
-        trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger in ('hdr-hamburger-btn', 'sb-collapse-btn'):
+    def toggle_sidebar(h_n, c_n, o_n, cur_class):
+        cur_class = cur_class or 'app-sidebar'
+        is_open   = 'sidebar-open' in cur_class
+        trig      = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
+        if trig in ('hdr-hamburger-btn', 'sb-collapse-btn'):
             if is_open:
                 return 'app-sidebar', {'display': 'none'}
-            else:
-                return 'app-sidebar sidebar-open', {'display': 'block', 'zIndex': 1002}
-        # overlay click → close
-        return 'app-sidebar', {'display': 'none'}
+            return 'app-sidebar sidebar-open', {'display': 'block', 'zIndex': 1002}
+        return 'app-sidebar', {'display': 'none'}   # overlay click → close
 
     # 11. Toast renderer ──────────────────────────────────────────────────────
     @app.callback(
