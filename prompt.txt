@@ -4,7 +4,7 @@ Your task is to generate a production-ready web application using:
 
 - Backend: Flask (modular, scalable)
 - Frontend: Dash (Plotly Dash with Bootstrap + glassmorphism UI)
-- Database: PostgreSQL (NeonDB cloud)
+- Database: PostgreSQL (Aiven Database)
 - ORM: SQLAlchemy
 - Authentication: Flask-Login + role-based access control
 - Deployment target: ApexWeave (Linux hosting)
@@ -18,14 +18,24 @@ CORE REQUIREMENTS
 1. ARCHITECTURE
 - Use clean modular architecture:
   /app
+    /assets
+    /auth
+    /dash_apps
     /models
     /routes
     /services
-    /dash_apps
-    /templates
     /static
-    config.py
-    __init__.py
+    /templates
+  /database
+  .env
+  .gitignore
+  dashestatehub.sql
+  Procfile
+  README.md
+  requirements.txt
+  run.py
+  wsgi.py
+  
 
 - Separate Flask server and Dash app properly (server = Flask, UI = Dash mounted)
 
