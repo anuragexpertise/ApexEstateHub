@@ -32,6 +32,7 @@ CREATE TABLE users (
     ) NOT NULL,
     linked_id INT, -- apartment_id / vendor_id / etc
     login_method VARCHAR(20) DEFAULT 'pin',
+    push_subscription TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -169,6 +170,42 @@ CREATE TABLE IF NOT EXISTS society_settings (
     key        VARCHAR(60) NOT NULL,
     value      TEXT,
     UNIQUE(society_id, key)
+);
+-- Extra tables not in dashestatehub.sql
+CREATE TABLE IF NOT EXISTS events (
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    event_date DATE NOT NULL,
+    event_time VARCHAR(20),
+    venue VARCHAR(200),
+    open_to VARCHAR(20) DEFAULT 'all',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS concerns (
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    flat_no VARCHAR(20),
+    concern_type VARCHAR(50),
+    description TEXT,
+    preferred_time VARCHAR(20),
+    status VARCHAR(20) DEFAULT 'open',
+    assigned_to VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS charges (
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    charge_type VARCHAR(30),
+    amount NUMERIC(10,2),
+    applies_to VARCHAR(20) DEFAULT 'all',
+    frequency VARCHAR(20) DEFAULT 'monthly',
+    due_day INTEGER DEFAULT 15,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_email ON users (email);
