@@ -38,6 +38,11 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     CORS(app)
 
+    @login_manager.user_loader
+    def load_user(user_id):
+        from app.models.user import User
+        return User.get(int(user_id))
+    
     # ── Flask-Login config ─────────────────────────────────────────
     login_manager.login_view       = 'auth.login'
     login_manager.login_message    = 'Please log in to access this page.'

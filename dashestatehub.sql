@@ -45,6 +45,9 @@ CREATE TABLE apartments (
     apartment_size INT NOT NULL,
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ADD CONSTRAINT IF NOT EXISTS uq_apartment_society_flat
+    UNIQUE (society_id, flat_number);
+
 );
 
 CREATE TABLE vendors (
@@ -69,6 +72,23 @@ CREATE TABLE security_staff (
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS payments (
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users (id),
+    apartment_id INTEGER REFERENCES apartments (id),
+    amount NUMERIC(10, 2) NOT NULL,
+    payment_type VARCHAR(50),
+    payment_method VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'pending',
+    due_date DATE,
+    paid_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Unique constraint on apartments needed by entity_create callback
 
 CREATE TABLE attendance (
     id SERIAL PRIMARY KEY,
@@ -165,16 +185,16 @@ CREATE TABLE asset_register (
 );
 
 CREATE TABLE IF NOT EXISTS society_settings (
-    id         SERIAL PRIMARY KEY,
-    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    key        VARCHAR(60) NOT NULL,
-    value      TEXT,
-    UNIQUE(society_id, key)
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    key VARCHAR(60) NOT NULL,
+    value TEXT,
+    UNIQUE (society_id, key)
 );
 -- Extra tables not in dashestatehub.sql
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
-    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    society_id INTEGER NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     title VARCHAR(200) NOT NULL,
     description TEXT,
     event_date DATE NOT NULL,
@@ -186,7 +206,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE TABLE IF NOT EXISTS concerns (
     id SERIAL PRIMARY KEY,
-    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    society_id INTEGER NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     flat_no VARCHAR(20),
     concern_type VARCHAR(50),
     description TEXT,
@@ -198,10 +218,10 @@ CREATE TABLE IF NOT EXISTS concerns (
 
 CREATE TABLE IF NOT EXISTS charges (
     id SERIAL PRIMARY KEY,
-    society_id INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    society_id INTEGER NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     charge_type VARCHAR(30),
-    amount NUMERIC(10,2),
+    amount NUMERIC(10, 2),
     applies_to VARCHAR(20) DEFAULT 'all',
     frequency VARCHAR(20) DEFAULT 'monthly',
     due_day INTEGER DEFAULT 15,

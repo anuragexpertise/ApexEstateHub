@@ -1,75 +1,73 @@
-# app/dash_apps/callbacks/qr_callbacks.py — REPLACE FILE
-
-from dash import Input, Output, State, html, dcc, no_update
+# app/dash_apps/callbacks/qr_callbacks.py — FULL REPLACEMENT
+from dash import Input, Output, State, html, no_update
 import dash
 import qrcode, base64
 from io import BytesIO
 from datetime import datetime, timedelta
 import dash_bootstrap_components as dbc
 
+
 def register_qr_callbacks(app):
 
-    # Inject the modal HTML into qr-modal-container on first load
     @app.callback(
         Output('qr-modal-container', 'children'),
-        Input('url', 'pathname'),
+        Input('show-qr-btn',  'n_clicks'),
+        Input('url',          'pathname'),
+        State('auth-store',   'data'),
         prevent_initial_call=False,
     )
-    def inject_qr_modal(_):
+    def render_qr_modal(show_n, pathname, auth_data):
+        ctx   = dash.callback_context
+        trig  = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'url'
+        opened = (trig == 'show-qr-btn' and bool(show_n)
+                  and auth_data and auth_data.get('authenticated'))
+
+        # Always render the modal shell; open state depends on trigger
+        src = valid = name = email = role = ''
+        if opened:
+            email = auth_data.get('email', '')
+            role  = auth_data.get('role', '')
+            uid   = auth_data.get('user_id', '')
+            name  = email.split('@')[0].title()
+            qr    = qrcode.QRCode(version=1, box_size=10, border=4)
+            qr.add_data(f"{uid}|{email}|{role}|{datetime.now().isoformat()}")
+            qr.make(fit=True)
+            img = qr.make_image(fill_color='black', back_color='white')
+            buf = BytesIO()
+            img.save(buf, format='PNG')
+            src   = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+            valid = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+
+        close_btn_id = {'type': 'close-qr', 'index': 0}
+
         return dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle('My QR Code'), close_button=True),
             dbc.ModalBody(html.Div([
-                html.Img(id='qr-code-img', src='',
-                         style={'width':'200px','height':'200px',
-                                'margin':'0 auto','display':'block',
-                                'border':'2px solid #667eea',
-                                'borderRadius':'10px','padding':'8px'}),
+                html.Img(src=src,
+                         style={'width': '200px', 'height': '200px',
+                                'margin': '0 auto', 'display': 'block',
+                                'border': '2px solid #667eea',
+                                'borderRadius': '10px', 'padding': '8px'}),
                 html.P('Scan at society gate for entry',
                        className='mt-3 text-muted text-center'),
                 html.Hr(),
-                html.Div([html.Small('Name: ',  className='text-muted'), html.Strong(id='qr-user-name',  children='')], className='mb-1'),
-                html.Div([html.Small('Email: ', className='text-muted'), html.Strong(id='qr-user-email', children='')], className='mb-1'),
-                html.Div([html.Small('Role: ',  className='text-muted'), html.Strong(id='qr-user-role',  children='')], className='mb-1'),
-                html.Div([html.Small('Valid Until: ', className='text-muted'), html.Strong(id='qr-valid-until', children='')]),
+                html.Div([html.Small('Name: ',  className='text-muted'), html.Strong(name)],  className='mb-1'),
+                html.Div([html.Small('Email: ', className='text-muted'), html.Strong(email)], className='mb-1'),
+                html.Div([html.Small('Role: ',  className='text-muted'), html.Strong(role)],  className='mb-1'),
+                html.Div([html.Small('Valid Until: ', className='text-muted'), html.Strong(valid)]),
             ])),
-            dbc.ModalFooter([
-                dbc.Button('Close', id='close-qr-modal', color='secondary'),
-            ]),
-        ], id='qr-modal', size='sm', is_open=False, centered=True)
+            dbc.ModalFooter(
+                dbc.Button('Close', id='close-qr-modal', color='secondary')
+            ),
+        ], id='qr-modal', size='sm', is_open=opened, centered=True)
 
+    # Close button handler
     @app.callback(
-        Output('qr-modal',      'is_open'),
-        Output('qr-code-img',   'src'),
-        Output('qr-user-name',  'children'),
-        Output('qr-user-email', 'children'),
-        Output('qr-user-role',  'children'),
-        Output('qr-valid-until','children'),
-        Input('show-qr-btn',    'n_clicks'),
+        Output('qr-modal-container', 'children', allow_duplicate=True),
         Input('close-qr-modal', 'n_clicks'),
-        State('qr-modal',       'is_open'),
-        State('auth-store',     'data'),
         prevent_initial_call=True,
     )
-    def toggle_qr_modal(show_n, close_n, is_open, auth_data):
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return no_update, no_update, no_update, no_update, no_update, no_update
-        trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger == 'close-qr-modal':
-            return False, '', '', '', '', ''
-        if not auth_data or not auth_data.get('authenticated'):
-            return False, '', '', '', '', ''
-        email = auth_data.get('email', '')
-        role  = auth_data.get('role', '')
-        uid   = auth_data.get('user_id', '')
-        name  = email.split('@')[0].title()
-        qr_data = f"{uid}|{email}|{role}|{datetime.now().isoformat()}"
-        qr = qrcode.QRCode(version=1, box_size=10, border=4)
-        qr.add_data(qr_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color='black', back_color='white')
-        buf = BytesIO()
-        img.save(buf, format='PNG')
-        src = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
-        valid = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-        return True, src, name, email, role, valid
+    def close_qr(_):
+        return dbc.Modal(
+            [], id='qr-modal', is_open=False
+        )
