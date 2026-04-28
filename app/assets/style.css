@@ -145,13 +145,11 @@ a {
     width: var(--sidebar-collapsed);
 }
 
-.app-sidebar.sidebar-open #sb-society-name,
-.app-sidebar.sidebar-open #hdr-portal-label,
+.app-sidebar.sidebar-open #sb-app-name,
 .app-sidebar.sidebar-open #sb-user-name,
 .app-sidebar.sidebar-open #sb-user-role,
 .app-sidebar.sidebar-open .snav-link span,
-.glass-sidebar.sidebar-open #sb-society-name,
-.glass-sidebar.sidebar-open #hdr-portal-label,
+.glass-sidebar.sidebar-open #sb-app-name,
 .glass-sidebar.sidebar-open #sb-user-name,
 .glass-sidebar.sidebar-open #sb-user-role,
 .glass-sidebar.sidebar-open .snav-link span {
@@ -304,6 +302,21 @@ a {
 
 #hdr-avatar {
     box-shadow: 0 0 0 5px rgba(var(--theme-dark-rgb), 0.12);
+}
+
+#hdr-society-name,
+#hdr-entity-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#hdr-society-logo {
+    box-shadow: 0 0 0 1px rgba(var(--theme-dark-rgb), 0.12);
+}
+
+#qr-modal-text {
+    letter-spacing: 0;
 }
 
 #main-content {
@@ -489,6 +502,14 @@ a {
     overflow: hidden;
 }
 
+.modal {
+    z-index: 20050 !important;
+}
+
+.modal-backdrop {
+    z-index: 20040 !important;
+}
+
 .modal-header {
     border-bottom-color: rgba(120, 148, 181, 0.16);
 }
@@ -621,13 +642,11 @@ a {
         transform: translateX(0);
     }
 
-    .app-sidebar.sidebar-open #sb-society-name,
-    .app-sidebar.sidebar-open #hdr-portal-label,
+    .app-sidebar.sidebar-open #sb-app-name,
     .app-sidebar.sidebar-open #sb-user-name,
     .app-sidebar.sidebar-open #sb-user-role,
     .app-sidebar.sidebar-open .snav-link span,
-    .glass-sidebar.sidebar-open #sb-society-name,
-    .glass-sidebar.sidebar-open #hdr-portal-label,
+    .glass-sidebar.sidebar-open #sb-app-name,
     .glass-sidebar.sidebar-open #sb-user-name,
     .glass-sidebar.sidebar-open #sb-user-role,
     .glass-sidebar.sidebar-open .snav-link span {
@@ -665,6 +684,18 @@ a {
         margin: 12px 12px 0;
         padding: 0 12px !important;
         gap: 10px;
+    }
+
+    #hdr-society-name,
+    #hdr-entity-name {
+        max-width: 88px;
+        font-size: 12px !important;
+    }
+
+    #hdr-portal-label {
+        min-width: 0 !important;
+        font-size: 12px !important;
+        padding: 0 8px !important;
     }
 
     .glass-footer {

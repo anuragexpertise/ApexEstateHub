@@ -447,12 +447,12 @@ def register_shell_callbacks(app):
         Output('url',         'pathname', allow_duplicate=True),
         Output('toast-store', 'data',     allow_duplicate=True),
         Output('login-modal', 'is_open',  allow_duplicate=True),
-        Input('logout-btn',    'n_clicks'),
         Input('sb-logout-btn', 'n_clicks'),
+        Input('qr-modal-logout-btn', 'n_clicks'),
         prevent_initial_call=True,
     )
-    def logout(n1, n2):
-        if not (n1 or n2):
+    def logout(n2, n3):
+        if not (n2 or n3):
             return no_update, no_update, no_update, no_update
         try:
             from flask_login import logout_user
@@ -466,11 +466,13 @@ def register_shell_callbacks(app):
         Output('app-root',          'className'),
         Output('portal-content',   'children'),
         Output('sb-nav-list',      'children'),
-        Output('sb-society-name',  'children'),
         Output('sb-user-name',     'children'),
         Output('sb-user-role',     'children'),
         Output('sb-avatar',        'children'),
+        Output('hdr-society-name', 'children'),
+        Output('hdr-society-logo', 'src'),
         Output('hdr-portal-label', 'children'),
+        Output('hdr-entity-name',  'children'),
         Output('hdr-avatar',       'children'),
         Output('breadcrumb-ol',    'children'),
         Output('login-modal',      'is_open', allow_duplicate=True),
@@ -481,7 +483,7 @@ def register_shell_callbacks(app):
     def router(pathname, auth):
         _not_auth = (
             'app-shell theme-guest',
-            html.Div(), [], '—', '—', '—', '?', '', '?',
+            html.Div(), [], '—', '—', '?', 'EstateHub', '/static/assets/logo.png', '', 'User', '?',
             [html.Li(html.A('Home', href='/dashboard/'), className='bc-item')],
             True,
         )
@@ -494,12 +496,14 @@ def register_shell_callbacks(app):
         is_master  = (role == 'admin' and society_id is None)
 
         society_name = 'ApexEstateHub'
+        society_logo = '/static/assets/logo.png'
         if society_id and not is_master:
             try:
                 from app.services.society_service import get_society_details
                 soc = get_society_details(society_id)
                 if soc:
                     society_name = soc.get('name', society_name)
+                    society_logo = soc.get('logo') or society_logo
             except Exception:
                 pass
 
@@ -516,11 +520,13 @@ def register_shell_callbacks(app):
             f'app-shell theme-{role_key}',
             _portal_content(role, society_id, pathname),
             _make_nav_items(role, society_id, pathname),
-            society_name,
             email.split('@')[0].title(),
             role_key.title(),
             email[:1].upper() if email else '?',
+            society_name,
+            society_logo,
             portal_label,
+            email.split('@')[0].title(),
             email[:1].upper() if email else '?',
             _breadcrumb(pathname),
             False,

@@ -236,12 +236,10 @@ def _sidebar():
             html.Div(
                 [
                     html.Img(src='/static/assets/logo.png',
-                             style={'width': '42px', 'borderRadius': '10px', 'marginBottom': '8px'}),
-                    html.Div('ApexEstateHub',
-                             id='sb-society-name',
-                             style={'fontWeight': '700', 'fontSize': '14px', 'marginBottom': '2px'}),
-                    html.Div('Portal', id='hdr-portal-label',
-                             style={'fontSize': '11px', 'opacity': '0.7'}),
+                             style={'width': '42px', 'borderRadius': '10px', 'marginBottom': '10px'}),
+                    html.Div('EstateHub',
+                             id='sb-app-name',
+                             style={'fontWeight': '700', 'fontSize': '15px', 'marginBottom': '2px'}),
                     html.Button(
                         html.I(className='fas fa-chevron-left'),
                         id='sb-collapse-btn',
@@ -331,39 +329,70 @@ def _header():
                 style={'zIndex': '1010'},
             ),
 
-            # Breadcrumb
-            html.Nav(
-                html.Ol(id='breadcrumb-ol', className='breadcrumb'),
-                className='glass-breadcrumb',
-                style={'flexGrow': '1', 'margin': '0 16px'},
+            # Left side
+            html.Div(
+                [
+                    html.Img(
+                        id='hdr-society-logo',
+                        src='/static/assets/logo.png',
+                        style={
+                            'width': '38px', 'height': '38px', 'borderRadius': '12px',
+                            'objectFit': 'cover', 'flexShrink': '0',
+                        },
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                id='hdr-society-name',
+                                children='EstateHub',
+                                style={'fontWeight': '700', 'fontSize': '15px', 'lineHeight': '1.2'},
+                            ),
+                        ],
+                        style={'marginLeft': '12px', 'minWidth': '0'},
+                    ),
+                ],
+                style={'display': 'flex', 'alignItems': 'center', 'minWidth': '0', 'flex': '1'},
+            ),
+
+            # Center
+            html.Div(
+                id='hdr-portal-label',
+                style={
+                    'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
+                    'textAlign': 'center', 'fontWeight': '700', 'fontSize': '14px',
+                    'minWidth': '180px', 'padding': '0 12px',
+                },
             ),
 
             # Right side
             html.Div(
                 [
-                    html.Div(id='hdr-avatar',
-                             style={
-                                 'width': '36px', 'height': '36px', 'borderRadius': '50%',
-                                 'background': 'linear-gradient(135deg,#667eea,#764ba2)',
-                                 'display': 'flex', 'alignItems': 'center',
-                                 'justifyContent': 'center',
-                                 'fontWeight': '700', 'color': '#fff', 'fontSize': '14px',
-                                 'cursor': 'pointer',
-                             }),
-                    dbc.Button(
-                        [html.I(className='fas fa-sign-out-alt')],
-                        id='logout-btn',
-                        color='link',
-                        size='sm',
-                        title='Logout',
-                        style={'color': '#e74c3c', 'marginLeft': '8px'},
+                    html.Div(
+                        id='hdr-entity-name',
+                        children='User',
+                        style={'fontWeight': '600', 'fontSize': '14px', 'marginRight': '10px'},
+                    ),
+                    html.Div(
+                        id='hdr-avatar',
+                        n_clicks=0,
+                        title='Show my QR code',
+                        role='button',
+                        tabIndex=0,
+                        style={
+                            'width': '36px', 'height': '36px', 'borderRadius': '50%',
+                            'background': 'linear-gradient(135deg,#667eea,#764ba2)',
+                            'display': 'flex', 'alignItems': 'center',
+                            'justifyContent': 'center',
+                            'fontWeight': '700', 'color': '#fff', 'fontSize': '14px',
+                            'cursor': 'pointer',
+                        },
                     ),
                 ],
-                style={'display': 'flex', 'alignItems': 'center'},
+                style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'flex-end', 'flex': '1'},
             ),
         ],
         className='glass-header',
-        style={'display': 'flex', 'alignItems': 'center', 'padding': '0 16px'},
+        style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'padding': '0 16px'},
     )
 
 
@@ -388,6 +417,7 @@ def shell_layout():
             dcc.Input(id='dnd-order-capture', value='',
                       debounce=False, style={'display': 'none'}),
             html.Div(id='dnd-init-dummy', style={'display': 'none'}),
+            html.Button(id='show-qr-btn', style={'display': 'none'}),
 
             # ── Login modal (always rendered; opened/closed by guard) ──
             _login_modal(),
@@ -412,8 +442,12 @@ def shell_layout():
                                     # Breadcrumb row
                                     html.Div(
                                         id='breadcrumb-container',
+                                        children=html.Nav(
+                                            html.Ol(id='breadcrumb-ol', className='breadcrumb'),
+                                            className='glass-breadcrumb',
+                                        ),
                                         style={
-                                            'padding': '70px 20px 0',
+                                            'padding': 'calc(var(--header-height) + 30px) 20px 0',
                                             'maxWidth': '100%',
                                         },
                                     ),
@@ -458,7 +492,67 @@ def shell_layout():
                      style={'position': 'fixed', 'top': '70px', 'right': '16px',
                             'zIndex': '9999', 'minWidth': '280px'}),
 
-            # ── QR modal (rendered by header.py callbacks) ─────────
-            html.Div(id='qr-modal-container'),
+            # ── QR modal ────────────────────────────────────────────
+            dbc.Modal(
+                [
+                    dbc.ModalHeader(dbc.ModalTitle('My QR Code'), close_button=True),
+                    dbc.ModalBody(
+                        html.Div([
+                            html.Img(
+                                id='qr-modal-img',
+                                src='',
+                                style={
+                                    'width': '200px', 'height': '200px',
+                                    'margin': '0 auto', 'display': 'block',
+                                    'border': '2px solid #667eea',
+                                    'borderRadius': '10px', 'padding': '8px',
+                                },
+                            ),
+                            html.P(
+                                'Show this QR to security for scanning at the gate',
+                                id='qr-modal-help',
+                                className='mt-3 text-muted text-center',
+                            ),
+                            dbc.Textarea(
+                                id='qr-modal-text',
+                                readOnly=True,
+                                style={
+                                    'marginTop': '12px',
+                                    'minHeight': '92px',
+                                    'fontSize': '12px',
+                                    'fontFamily': 'monospace',
+                                    'resize': 'none',
+                                },
+                            ),
+                            html.Hr(),
+                            html.Div([html.Small('Name: ', className='text-muted'), html.Strong(id='qr-modal-name')], className='mb-1'),
+                            html.Div([html.Small('Email: ', className='text-muted'), html.Strong(id='qr-modal-email')], className='mb-1'),
+                            html.Div([html.Small('Role: ', className='text-muted'), html.Strong(id='qr-modal-role')], className='mb-1'),
+                            html.Div([html.Small('Valid Until: ', className='text-muted'), html.Strong(id='qr-modal-valid')]),
+                        ])
+                    ),
+                    dbc.ModalFooter(
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    html.I(className='fas fa-sign-out-alt'),
+                                    id='qr-modal-logout-btn',
+                                    color='link',
+                                    title='Logout',
+                                    style={'color': '#e74c3c', 'fontSize': '18px', 'padding': '0 8px 0 0'},
+                                ),
+                                dbc.Button('Close', id='close-qr-modal', color='secondary'),
+                            ],
+                            style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'width': '100%'},
+                        )
+                    ),
+                ],
+                id='qr-modal',
+                size='sm',
+                is_open=False,
+                centered=True,
+                style={'zIndex': '20050'},
+                backdrop=True,
+            ),
         ]
     )
