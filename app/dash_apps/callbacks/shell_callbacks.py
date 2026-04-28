@@ -463,6 +463,7 @@ def register_shell_callbacks(app):
 
     # ── 7. Main router ────────────────────────────────────────────────────────
     @app.callback(
+        Output('app-root',          'className'),
         Output('portal-content',   'children'),
         Output('sb-nav-list',      'children'),
         Output('sb-society-name',  'children'),
@@ -479,6 +480,7 @@ def register_shell_callbacks(app):
     )
     def router(pathname, auth):
         _not_auth = (
+            'app-shell theme-guest',
             html.Div(), [], '—', '—', '—', '?', '', '?',
             [html.Li(html.A('Home', href='/dashboard/'), className='bc-item')],
             True,
@@ -511,6 +513,7 @@ def register_shell_callbacks(app):
         ], style={'display': 'flex', 'alignItems': 'center'})
 
         return (
+            f'app-shell theme-{role_key}',
             _portal_content(role, society_id, pathname),
             _make_nav_items(role, society_id, pathname),
             society_name,

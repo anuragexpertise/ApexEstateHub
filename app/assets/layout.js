@@ -1,4 +1,25 @@
 document.addEventListener("DOMContentLoaded", function () {
+    function syncThemeState() {
+        const root = document.getElementById("app-root");
+        const themeClasses = Array.from(document.body.classList).filter(function (className) {
+            return className.indexOf("theme-") === 0;
+        });
+
+        themeClasses.forEach(function (className) {
+            document.body.classList.remove(className);
+        });
+
+        if (!root) {
+            return;
+        }
+
+        Array.from(root.classList).forEach(function (className) {
+            if (className.indexOf("theme-") === 0) {
+                document.body.classList.add(className);
+            }
+        });
+    }
+
     function syncBodyState() {
         const sidebar = document.getElementById("app-sidebar");
         const mobileOpen = !!sidebar &&
@@ -6,28 +27,40 @@ document.addEventListener("DOMContentLoaded", function () {
             window.innerWidth <= 767;
 
         document.body.classList.toggle("sidebar-visible-mobile", mobileOpen);
+        syncThemeState();
     }
 
-    function attachSidebarObserver() {
+    function attachObservers() {
         const sidebar = document.getElementById("app-sidebar");
-        if (!sidebar || sidebar.dataset.layoutObserverAttached === "true") {
-            return !!sidebar;
+        const root = document.getElementById("app-root");
+
+        if (sidebar && sidebar.dataset.layoutObserverAttached !== "true") {
+            const sidebarObserver = new MutationObserver(syncBodyState);
+            sidebarObserver.observe(sidebar, {
+                attributes: true,
+                attributeFilter: ["class"],
+            });
+
+            sidebar.dataset.layoutObserverAttached = "true";
         }
 
-        const observer = new MutationObserver(syncBodyState);
-        observer.observe(sidebar, {
-            attributes: true,
-            attributeFilter: ["class"],
-        });
+        if (root && root.dataset.themeObserverAttached !== "true") {
+            const rootObserver = new MutationObserver(syncThemeState);
+            rootObserver.observe(root, {
+                attributes: true,
+                attributeFilter: ["class"],
+            });
 
-        sidebar.dataset.layoutObserverAttached = "true";
+            root.dataset.themeObserverAttached = "true";
+        }
+
         syncBodyState();
-        return true;
+        return !!(sidebar && root);
     }
 
-    if (!attachSidebarObserver()) {
+    if (!attachObservers()) {
         const intervalId = window.setInterval(function () {
-            if (attachSidebarObserver()) {
+            if (attachObservers()) {
                 window.clearInterval(intervalId);
             }
         }, 250);
@@ -39,4 +72,5 @@ document.addEventListener("DOMContentLoaded", function () {
 
     window.addEventListener("resize", syncBodyState);
     syncBodyState();
+    syncThemeState();
 });
