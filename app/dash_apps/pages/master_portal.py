@@ -33,13 +33,7 @@ def master_portal_layout():
 
         # Catalogue cards grid
         html.Div([
-            html.Div(make_form_card('society_create'), className='mb-4',
-                     style={'gridColumn': 'span 2'}),
-            html.Div(make_form_card('society_list'),   className='mb-4',
-                     style={'gridColumn': 'span 2'}),
-        ], style={
-            'display': 'grid',
-            'gridTemplateColumns': 'repeat(2, 1fr)',
-            'gap': '20px',
-        }),
-    ], style={'padding': '24px'})
+            html.Div(make_form_card('society_create')),
+            html.Div(make_form_card('society_list')),
+        ], className='card-grid'),
+    ], className='portal-page')

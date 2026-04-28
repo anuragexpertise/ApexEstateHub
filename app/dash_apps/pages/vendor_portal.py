@@ -10,8 +10,8 @@ def vendor_portal_layout(active_tab="dashboard"):
             html.H2("Vendor Dashboard", className="mb-4", style={"color": "#2c3e50"}),
             
             # KPI Cards
-            dbc.Row([
-                dbc.Col(
+            html.Div([
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -22,9 +22,9 @@ def vendor_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #ff9800"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -35,9 +35,9 @@ def vendor_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #4caf50"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -48,9 +48,9 @@ def vendor_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #2196f3"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -61,9 +61,9 @@ def vendor_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #ffc107"}),
-                    width=3
+                    className="kpi-card"
                 ),
-            ], className="mb-4"),
+            ], className="kpi-row mb-4"),
             
             # Service Requests
             dbc.Row([
@@ -183,8 +183,8 @@ def vendor_portal_layout(active_tab="dashboard"):
     elif active_tab == "vendor_charges":
         content = html.Div([
             html.H2("Service Charges", className="mb-4"),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Current Rates", className="mb-0")),
                         dbc.CardBody([
@@ -199,16 +199,16 @@ def vendor_portal_layout(active_tab="dashboard"):
                             ], bordered=True)
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-                dbc.Col([
+                ]),
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Pending Payments", className="mb-0")),
                         dbc.CardBody([
                             html.Div("No pending payments", className="text-muted text-center p-4")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-            ])
+                ]),
+            ], className="card-grid")
         ])
     
     else:
@@ -236,4 +236,4 @@ def vendor_portal_layout(active_tab="dashboard"):
         dbc.ModalFooter(dbc.Button("Close", id="close-vendor-qr-modal", className="ms-auto"))
     ], id="vendor-qr-modal", is_open=False)
     
-    return html.Div([content, qr_modal], style={"padding": "20px"})
+    return html.Div([content, qr_modal], className="portal-page")

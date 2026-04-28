@@ -546,10 +546,14 @@ def register_shell_callbacks(app):
         cur_class = cur_class or 'app-sidebar'
         is_open   = 'sidebar-open' in cur_class
         trig      = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
-        if trig in ('hdr-hamburger-btn', 'sb-collapse-btn'):
+        if trig == 'hdr-hamburger-btn':
             if is_open:
                 return 'app-sidebar', {'display': 'none'}
             return 'app-sidebar sidebar-open', {'display': 'block', 'zIndex': 1002}
+        if trig == 'sb-collapse-btn':
+            if is_open:
+                return 'app-sidebar', {'display': 'none'}
+            return 'app-sidebar sidebar-open', {'display': 'none'}
         return 'app-sidebar', {'display': 'none'}
 
     # ── 10. Toast renderer ────────────────────────────────────────────────────

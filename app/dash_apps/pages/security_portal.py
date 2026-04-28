@@ -8,8 +8,8 @@ def security_portal_layout(active_tab="pass_evaluation"):
     if active_tab == "pass_evaluation":
         content = html.Div([
             html.H2("QR Code Scanner", className="mb-4"),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Scan QR Code", className="mb-0")),
                         dbc.CardBody([
@@ -27,8 +27,8 @@ def security_portal_layout(active_tab="pass_evaluation"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-                dbc.Col([
+                ]),
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Recent Scans", className="mb-0")),
                         dbc.CardBody([
@@ -39,15 +39,15 @@ def security_portal_layout(active_tab="pass_evaluation"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-            ])
+                ]),
+            ], className="card-grid")
         ])
     
     elif active_tab == "attendance":
         content = html.Div([
             html.H2("Attendance Tracking", className="mb-4"),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Today's Status", className="mb-0")),
                         dbc.CardBody([
@@ -61,8 +61,8 @@ def security_portal_layout(active_tab="pass_evaluation"):
                             html.H3(id="today-hours", children="0 hrs", className="text-center text-primary")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-                dbc.Col([
+                ]),
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Attendance History", className="mb-0")),
                         dbc.CardBody([
@@ -78,8 +78,8 @@ def security_portal_layout(active_tab="pass_evaluation"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-            ])
+                ]),
+            ], className="card-grid")
         ])
     
     elif active_tab == "security_events":
@@ -186,4 +186,4 @@ def security_portal_layout(active_tab="pass_evaluation"):
             ], className="shadow-sm", style={"borderRadius": "15px"})
         ])
     
-    return html.Div(content, style={"padding": "20px"})
+    return html.Div(content, className="portal-page")
