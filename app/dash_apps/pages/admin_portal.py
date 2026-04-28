@@ -95,28 +95,30 @@ def admin_portal_layout(active_tab='dashboard'):
                     dbc.Card([
                         dbc.CardHeader(
                             html.H5('Quick Actions', className='mb-0')),
-                        dbc.CardBody(dbc.Row([
-                            dbc.Col(dbc.Button('➕ Add Society',
-                                id='add-society-btn', color='primary',
-                                className='w-100 mb-2'), width=6),
-                            dbc.Col(dbc.Button('👥 Add User',
-                                id='add-user-btn', color='success',
-                                className='w-100 mb-2'), width=6),
-                            dbc.Col(dbc.Button('🏢 Add Apartment',
-                                id='add-apartment-btn', color='info',
-                                className='w-100 mb-2'), width=6),
-                            dbc.Col(dbc.Button('📊 Generate Report',
-                                id='report-btn', color='warning',
-                                className='w-100 mb-2'), width=6),
-                        ]))
+                        dbc.CardBody(
+                            html.Div([
+                                dbc.Button('➕ Add Society',
+                                    id='add-society-btn', color='primary',
+                                    className='w-100'),
+                                dbc.Button('👥 Add User',
+                                    id='add-user-btn', color='success',
+                                    className='w-100'),
+                                dbc.Button('🏢 Add Apartment',
+                                    id='add-apartment-btn', color='info',
+                                    className='w-100'),
+                                dbc.Button('📊 Generate Report',
+                                    id='report-btn', color='warning',
+                                    className='w-100'),
+                            ], className='quick-actions-grid')
+                        )
                     ], className='shadow-sm', style={'borderRadius': '15px'}),
                     width=12
                 ),
             ], className='mb-4'),
 
             # ── Recent Lists ──────────────────────────────────────────
-            dbc.Row([
-                dbc.Col(
+            html.Div([
+                html.Div(
                     dbc.Card([
                         dbc.CardHeader(
                             html.H5('Recent Societies', className='mb-0')),
@@ -127,9 +129,8 @@ def admin_portal_layout(active_tab='dashboard'):
                             ])
                         ),
                     ], className='shadow-sm', style={'borderRadius': '15px'}),
-                    xs=12, md=6
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardHeader(
                             html.H5('Recent Payments', className='mb-0')),
@@ -140,9 +141,8 @@ def admin_portal_layout(active_tab='dashboard'):
                             ])
                         ),
                     ], className='shadow-sm', style={'borderRadius': '15px'}),
-                    xs=12, md=6
                 ),
-            ]),
+            ], className='card-grid'),
         ])
 
     # ──────────────────────────────────────────────────────────────
@@ -187,8 +187,8 @@ def admin_portal_layout(active_tab='dashboard'):
     elif active_tab == 'receipts':
         content = html.Div([
             html.H2('Receipts', className='mb-4'),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(
                             html.H5('Generate New Receipt', className='mb-0')),
@@ -226,8 +226,8 @@ def admin_portal_layout(active_tab='dashboard'):
                                        color='primary', className='mt-2'),
                         ])),
                     ], className='shadow-sm', style={'borderRadius': '15px'}),
-                ], xs=12, md=6),
-                dbc.Col([
+                ]),
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(
                             html.H5('Recent Receipts', className='mb-0')),
@@ -238,8 +238,8 @@ def admin_portal_layout(active_tab='dashboard'):
                             ])
                         ),
                     ], className='shadow-sm', style={'borderRadius': '15px'}),
-                ], xs=12, md=6),
-            ]),
+                ]),
+            ], className='card-grid'),
         ])
 
     # ──────────────────────────────────────────────────────────────
@@ -567,4 +567,4 @@ def admin_portal_layout(active_tab='dashboard'):
             ), className='shadow-sm', style={'borderRadius': '15px'}),
         ])
 
-    return html.Div(content, style={'padding': '20px'})
+    return html.Div(content, className='portal-page')

@@ -570,7 +570,7 @@ def make_kpi_card(card_id: str, value: str = "—") -> html.Div:
         ],
         id=f"dnd-card-{card_id}",
         **{"data-card-id": card_id, "data-card-type": "kpi"},
-        className="dnd-card",
+        className="dnd-card kpi-card",
         style={
             "position":"relative","background":"white","borderRadius":"12px",
             "padding":"16px 12px 12px","borderLeft":f"4px solid {color}",
@@ -718,12 +718,12 @@ def make_form_card(card_id: str) -> html.Div:
 
     return html.Div(
         [dbc.Card([header, body],
-                  className="h-100",
+                  className="h-100 form-card",
                   style={"borderRadius":"10px","boxShadow":"0 2px 8px rgba(0,0,0,0.07)",
                          "border":"1px solid #e9ecef"})],
         id=f"dnd-card-{card_id}",
         **{"data-card-id": card_id, "data-card-type": ctype},
-        className="dnd-card",
+        className="dnd-card form-card-shell",
         style={"userSelect":"none"},
     )
 

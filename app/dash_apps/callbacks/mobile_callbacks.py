@@ -13,11 +13,12 @@ def register_mobile_callbacks(app):
     # Auto-close sidebar when URL changes (mobile navigation)
     @app.callback(
         Output('app-sidebar',        'className',  allow_duplicate=True),
+        Output('sb-overlay',         'style',      allow_duplicate=True),
         Input('url', 'pathname'),
         prevent_initial_call=True,
     )
     def close_on_navigate(_pathname):
-        return 'app-sidebar'
+        return 'app-sidebar', {'display': 'none'}
 
     # Clientside: swap hamburger icon without a Python round-trip
     # clientside_callback(

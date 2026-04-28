@@ -450,6 +450,7 @@ def shell_layout():
                     ),
                 ],
                 id='app-root',
+                className='app-shell',
             ),
 
             # ── Toast container ────────────────────────────────────

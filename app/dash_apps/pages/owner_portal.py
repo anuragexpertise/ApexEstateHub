@@ -10,8 +10,8 @@ def owner_portal_layout(active_tab="dashboard"):
             html.H2("Owner Dashboard", className="mb-4", style={"color": "#2c3e50"}),
             
             # KPI Cards
-            dbc.Row([
-                dbc.Col(
+            html.Div([
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -22,9 +22,9 @@ def owner_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #e74c3c"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -35,9 +35,9 @@ def owner_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #2ecc71"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -48,9 +48,9 @@ def owner_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #f39c12"}),
-                    width=3
+                    className="kpi-card"
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
@@ -62,9 +62,9 @@ def owner_portal_layout(active_tab="dashboard"):
                             ], className="text-center")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px", "borderLeft": "4px solid #3498db"}),
-                    width=3
+                    className="kpi-card"
                 ),
-            ], className="mb-4"),
+            ], className="kpi-row mb-4"),
             
             # Quick Actions
             dbc.Row([
@@ -72,12 +72,12 @@ def owner_portal_layout(active_tab="dashboard"):
                     dbc.Card([
                         dbc.CardHeader(html.H5("Quick Actions", className="mb-0")),
                         dbc.CardBody([
-                            dbc.Row([
-                                dbc.Col(dbc.Button("💰 Pay Dues", id="pay-dues-btn", color="success", className="w-100 mb-2"), width=6),
-                                dbc.Col(dbc.Button("📝 Raise Concern", id="raise-concern-btn", color="warning", className="w-100 mb-2"), width=6),
-                                dbc.Col(dbc.Button("🎫 Gate Pass", id="gate-pass-btn", color="info", className="w-100 mb-2"), width=6),
-                                dbc.Col(dbc.Button("📄 Download Receipt", id="download-receipt-btn", color="secondary", className="w-100 mb-2"), width=6),
-                            ])
+                            html.Div([
+                                dbc.Button("💰 Pay Dues", id="pay-dues-btn", color="success", className="w-100"),
+                                dbc.Button("📝 Raise Concern", id="raise-concern-btn", color="warning", className="w-100"),
+                                dbc.Button("🎫 Gate Pass", id="gate-pass-btn", color="info", className="w-100"),
+                                dbc.Button("📄 Download Receipt", id="download-receipt-btn", color="secondary", className="w-100"),
+                            ], className="quick-actions-grid")
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"}),
                     width=12
@@ -85,8 +85,8 @@ def owner_portal_layout(active_tab="dashboard"):
             ], className="mb-4"),
             
             # Recent Payments and Notices
-            dbc.Row([
-                dbc.Col(
+            html.Div([
+                html.Div(
                     dbc.Card([
                         dbc.CardHeader(html.H5("Recent Payments", className="mb-0")),
                         dbc.CardBody([
@@ -95,9 +95,8 @@ def owner_portal_layout(active_tab="dashboard"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"}),
-                    width=6
                 ),
-                dbc.Col(
+                html.Div(
                     dbc.Card([
                         dbc.CardHeader(html.H5("Recent Notices", className="mb-0")),
                         dbc.CardBody([
@@ -106,16 +105,15 @@ def owner_portal_layout(active_tab="dashboard"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"}),
-                    width=6
                 ),
-            ]),
+            ], className="card-grid"),
         ])
     
     elif active_tab == "payments":
         content = html.Div([
             html.H2("Make a Payment", className="mb-4"),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Payment Details", className="mb-0")),
                         dbc.CardBody([
@@ -150,8 +148,8 @@ def owner_portal_layout(active_tab="dashboard"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-                dbc.Col([
+                ]),
+                html.Div([
                     dbc.Card([
                         dbc.CardHeader(html.H5("Payment History", className="mb-0")),
                         dbc.CardBody([
@@ -168,8 +166,8 @@ def owner_portal_layout(active_tab="dashboard"):
                             ])
                         ])
                     ], className="shadow-sm", style={"borderRadius": "15px"})
-                ], width=6),
-            ])
+                ]),
+            ], className="card-grid")
         ])
     
     elif active_tab == "charges":
@@ -315,4 +313,4 @@ def owner_portal_layout(active_tab="dashboard"):
         ])
     ], id="gatepass-modal", is_open=False)
     
-    return html.Div([content, concern_modal, gatepass_modal], style={"padding": "20px"})
+    return html.Div([content, concern_modal, gatepass_modal], className="portal-page")
