@@ -42,8 +42,8 @@ def owner_portal_layout(active_tab="dashboard"):
                         dbc.CardBody([
                             html.Div([
                                 html.I(className="fas fa-ticket-alt fa-2x", style={"color": "#f39c12"}),
-                                html.H4("Active Complaints", className="card-title mt-2"),
-                                html.H2(id="owner-complaints", children="0", className="card-text"),
+                                html.H4("Active Concerns", className="card-title mt-2"),
+                                html.H2(id="owner-concerns", children="0", className="card-text"),
                                 html.Small("In progress", className="text-muted")
                             ], className="text-center")
                         ])
@@ -74,7 +74,7 @@ def owner_portal_layout(active_tab="dashboard"):
                         dbc.CardBody([
                             dbc.Row([
                                 dbc.Col(dbc.Button("💰 Pay Dues", id="pay-dues-btn", color="success", className="w-100 mb-2"), width=6),
-                                dbc.Col(dbc.Button("📝 Raise Complaint", id="raise-complaint-btn", color="warning", className="w-100 mb-2"), width=6),
+                                dbc.Col(dbc.Button("📝 Raise Concern", id="raise-concern-btn", color="warning", className="w-100 mb-2"), width=6),
                                 dbc.Col(dbc.Button("🎫 Gate Pass", id="gate-pass-btn", color="info", className="w-100 mb-2"), width=6),
                                 dbc.Col(dbc.Button("📄 Download Receipt", id="download-receipt-btn", color="secondary", className="w-100 mb-2"), width=6),
                             ])
@@ -249,12 +249,12 @@ def owner_portal_layout(active_tab="dashboard"):
         ])
     
     # Modals
-    complaint_modal = dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle("Raise Complaint")),
+    concern_modal = dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Raise Concern")),
         dbc.ModalBody([
-            dbc.Label("Complaint Type"),
+            dbc.Label("Concern Type"),
             dcc.Dropdown(
-                id="complaint-type",
+                id="concern-type",
                 options=[
                     {"label": "Plumbing", "value": "plumbing"},
                     {"label": "Electrical", "value": "electrical"},
@@ -262,14 +262,14 @@ def owner_portal_layout(active_tab="dashboard"):
                     {"label": "Security", "value": "security"},
                     {"label": "Others", "value": "others"},
                 ],
-                placeholder="Select complaint type",
+                placeholder="Select concern type",
                 className="mb-3"
             ),
             dbc.Label("Description"),
-            dbc.Textarea(id="complaint-desc", placeholder="Describe your issue in detail...", rows=4, className="mb-3"),
+            dbc.Textarea(id="concern-desc", placeholder="Describe your issue in detail...", rows=4, className="mb-3"),
             dbc.Label("Preferred Time"),
             dcc.Dropdown(
-                id="complaint-time",
+                id="concern-time",
                 options=[
                     {"label": "Morning (9 AM - 12 PM)", "value": "morning"},
                     {"label": "Afternoon (12 PM - 3 PM)", "value": "afternoon"},
@@ -280,10 +280,10 @@ def owner_portal_layout(active_tab="dashboard"):
             )
         ]),
         dbc.ModalFooter([
-            dbc.Button("Submit", id="submit-complaint-btn", color="primary"),
-            dbc.Button("Cancel", id="close-complaint-modal", className="ms-auto")
+            dbc.Button("Submit", id="submit-concern-btn", color="primary"),
+            dbc.Button("Cancel", id="close-concern-modal", className="ms-auto")
         ])
-    ], id="complaint-modal", is_open=False)
+    ], id="concern-modal", is_open=False)
     
     gatepass_modal = dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("Generate Gate Pass")),
@@ -315,4 +315,4 @@ def owner_portal_layout(active_tab="dashboard"):
         ])
     ], id="gatepass-modal", is_open=False)
     
-    return html.Div([content, complaint_modal, gatepass_modal], style={"padding": "20px"})
+    return html.Div([content, concern_modal, gatepass_modal], style={"padding": "20px"})
