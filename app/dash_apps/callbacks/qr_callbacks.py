@@ -1,6 +1,7 @@
 from dash import Input, Output, State, no_update
 import qrcode
 import base64
+import hashlib
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -14,7 +15,8 @@ def _build_qr_src(user_id, email, role):
     img = qr.make_image(fill_color='black', back_color='white')
     buf = BytesIO()
     img.save(buf, format='PNG')
-    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode(), qr_payload
+    short_code = hashlib.sha256(qr_payload.encode('utf-8')).hexdigest()[:6].upper()
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode(), short_code
 
 
 def register_qr_callbacks(app):
