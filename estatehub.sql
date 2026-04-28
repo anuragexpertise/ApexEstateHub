@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     name                 VARCHAR(10)  NOT NULL UNIQUE,
     tab_name             VARCHAR(100),
     header               VARCHAR(255),
-    parent_account_id    INT REFERENCES accounts(id),   
+    parent_account_id    VARCHAR(10),
     drcr_account         VARCHAR(2)   CHECK (drcr_account IN ('Dr','Cr')),
     has_bf               BOOLEAN      DEFAULT FALSE,
     bf_type              VARCHAR(2)   CHECK (bf_type IN ('Dr','Cr')),

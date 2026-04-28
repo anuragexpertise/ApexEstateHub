@@ -1,12 +1,13 @@
 # app/dash_apps/callbacks/shell_callbacks.py
 """
-Shell-level callbacks:
+Shell-level callbacks — includes:
+  • DB connectivity check → error banner on login modal
   • Society dropdown population
-  • 2-stage login (society → credentials) for all 4 methods
+  • 2-stage login (all 4 methods)
   • Master admin login
   • Logout
-  • Main router: content + sidebar nav + header meta
-  • Sidebar collapse / hamburger
+  • Main router
+  • Sidebar / hamburger
   • Toast renderer
   • Login modal guard
 """
@@ -20,7 +21,7 @@ import dash_bootstrap_components as dbc
 from app.dash_apps.app_shell import ROLE_CONFIG
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _db():
     from database.db_manager import db
@@ -29,10 +30,6 @@ def _db():
 
 def _sid(auth):
     return (auth or {}).get('society_id')
-
-
-def _role(auth):
-    return (auth or {}).get('role')
 
 
 def _redirect_for_role(role, society_id):
@@ -51,22 +48,20 @@ def _redirect_for_role(role, society_id):
 
 def _make_nav_items(role, society_id, pathname):
     is_master = (role == 'admin' and society_id is None)
-    key = 'master' if is_master else (role or 'admin')
-    cfg   = ROLE_CONFIG.get(key, ROLE_CONFIG['admin'])
+    key  = 'master' if is_master else (role or 'admin')
+    cfg  = ROLE_CONFIG.get(key, ROLE_CONFIG['admin'])
     color = cfg['color']
     items = []
     for tab in cfg['tabs']:
-        label = tab['label']
-        href  = tab['href']
-        icon  = tab['icon']
+        href      = tab['href']
         is_active = bool(pathname and href.rstrip('/') in pathname)
         items.append(html.Li(
             html.A(
                 [
-                    html.I(className=f'fas {icon} me-2',
+                    html.I(className=f"fas {tab['icon']} me-2",
                            style={'width': '18px',
                                   'color': color if is_active else 'rgba(255,255,255,0.55)'}),
-                    html.Span(label),
+                    html.Span(tab['label']),
                 ],
                 href=href,
                 className='snav-link' + (' snav-link--active' if is_active else ''),
@@ -74,6 +69,7 @@ def _make_nav_items(role, society_id, pathname):
             className='snav-item',
         ))
     return items
+
 
 def _breadcrumb(pathname):
     path_map = {
@@ -98,7 +94,7 @@ def _breadcrumb(pathname):
         className='bc-item',
     )]
     for i, part in enumerate(parts):
-        name = path_map.get(part, part.replace('-', ' ').title())
+        name   = path_map.get(part, part.replace('-', ' ').title())
         active = (i == len(parts) - 1)
         items.append(html.Li(
             name if active else html.A(name, href=f'/dashboard/{part}'),
@@ -120,15 +116,15 @@ def _portal_content(role, society_id, pathname):
             return master_layout()
 
     if role == 'admin':
-        tab = ('cashbook' if '/cashbook' in p else
-               'receipts' if '/receipts' in p else
-               'expenses' if '/expenses' in p else
-               'enroll' if '/enroll' in p else
-               'users' if '/users' in p else
-               'events' if '/events' in p else
+        tab = ('cashbook'      if '/cashbook'      in p else
+               'receipts'      if '/receipts'      in p else
+               'expenses'      if '/expenses'      in p else
+               'enroll'        if '/enroll'        in p else
+               'users'         if '/users'         in p else
+               'events'        if '/events'        in p else
                'evaluate_pass' if '/evaluate-pass' in p else
-               'customize' if '/customize' in p else
-               'settings' if '/settings' in p else
+               'customize'     if '/customize'     in p else
+               'settings'      if '/settings'      in p else
                'dashboard')
         from app.dash_apps.pages.admin_portal import admin_portal_layout
         return admin_portal_layout(tab)
@@ -154,11 +150,11 @@ def _portal_content(role, society_id, pathname):
         return vendor_portal_layout(tab)
 
     if role == 'security':
-        tab = ('attendance'       if '/attendance'        in p else
-               'security_events'  if '/security-events'   in p else
-               'security_receipt' if '/security-receipt'  in p else
-               'security_users'   if '/security-users'    in p else
-               'security_settings'if '/security-settings' in p else
+        tab = ('attendance'        if '/attendance'        in p else
+               'security_events'   if '/security-events'   in p else
+               'security_receipt'  if '/security-receipt'  in p else
+               'security_users'    if '/security-users'    in p else
+               'security_settings' if '/security-settings' in p else
                'pass_evaluation')
         from app.dash_apps.pages.security_portal import security_portal_layout
         return security_portal_layout(tab)
@@ -167,7 +163,6 @@ def _portal_content(role, society_id, pathname):
 
 
 def _login_success(user, remember, email, society_id, method):
-    """Package a successful login into the 5-tuple outputs."""
     is_dict = isinstance(user, dict)
     role = user.get('role')       if is_dict else user.role
     sid  = user.get('society_id') if is_dict else user.society_id
@@ -181,47 +176,130 @@ def _login_success(user, remember, email, society_id, method):
     redirect = _redirect_for_role(role, sid)
     cookie   = ({'email': email, 'society_id': society_id, 'method': method}
                 if remember else no_update)
-    return (
-        user_dict,
-        redirect,
-        {'type': 'success', 'message': f'Welcome, {email.split("@")[0].title()}!'},
-        False,    # close modal
-        cookie,
+    return user_dict, redirect, {'type': 'success', 'message': f'Welcome, {email.split("@")[0].title()}!'}, False, cookie
+
+
+# ── DB status helper ──────────────────────────────────────────────────────────
+
+def _check_db_and_seed():
+    """
+    Returns (ok: bool, error_message: str | None, societies: list).
+    Also triggers master-admin / dummy-data creation on first run.
+    """
+    try:
+        db = _db()
+
+        # 1. Connectivity
+        if not db.test_connection():
+            return False, "Cannot reach the database. Check your network and .env settings.", []
+
+        # 2. First run: no users → create master admin
+        user_count = db.execute_query("SELECT COUNT(*) AS c FROM users", fetch_one=True)
+        if user_count and user_count['c'] == 0:
+            from werkzeug.security import generate_password_hash
+            db.execute_query(
+                """INSERT INTO users (email, password_hash, role, login_method)
+                   VALUES (%s, %s, 'admin', 'password')
+                   ON CONFLICT (email) DO NOTHING""",
+                ('master@estatehub.com', generate_password_hash('Master@2024'))
+            )
+            print("✓ First run: master admin created  (master@estatehub.com / Master@2024)")
+
+        # 3. Load societies
+        societies = db.execute_query(
+            "SELECT id, name FROM societies ORDER BY name", fetch_all=True
+        ) or []
+
+        return True, None, societies
+
+    except Exception as e:
+        msg = str(e)
+        # Surface a clean message for common Aiven errors
+        if 'could not connect' in msg.lower() or 'connection refused' in msg.lower():
+            friendly = "Database unreachable — check PGHOST / PGPORT in your .env file."
+        elif 'password authentication' in msg.lower():
+            friendly = "Database authentication failed — check PGUSER / PGPASSWORD."
+        elif 'ssl' in msg.lower():
+            friendly = "SSL error connecting to database — check PGSSLMODE / PGSSL_CA."
+        elif 'does not exist' in msg.lower():
+            friendly = "Database schema missing — run:  python3 database/migrate.py"
+        else:
+            friendly = f"Database error: {msg}"
+        return False, friendly, []
+
+
+def _db_error_banner(message: str):
+    return dbc.Alert(
+        [
+            html.I(className='fas fa-exclamation-triangle me-2'),
+            html.Strong("Connection Error: "),
+            message,
+            html.Br(),
+            html.Small(
+                "Run  python3 database/migrate.py  to initialise the database.",
+                className='text-muted mt-1 d-block',
+            ),
+        ],
+        color='danger',
+        className='mb-3 py-2',
+        style={'fontSize': '13px'},
     )
 
 
-# ── register ──────────────────────────────────────────────────────────────────
+# ── Register ──────────────────────────────────────────────────────────────────
 
 def register_shell_callbacks(app):
 
-    # 0. Populate society dropdown ─────────────────────────────────────────────
+    # ── 0. Populate society dropdown + DB error banner ────────────────────────
     @app.callback(
-        Output('society-dropdown', 'options'),
-        Input('login-modal', 'is_open'),
+        Output('society-dropdown',   'options'),
+        Output('login-db-error',     'children'),
+        Output('login-db-error',     'style'),
+        Input('login-modal',         'is_open'),
         prevent_initial_call=True,
     )
-    def load_society_options(_is_open):
-        try:
-            from app.services.society_service import get_societies
-            societies = get_societies() or []
-            return [{'label': s.get('name', '?'), 'value': s.get('id')}
-                    for s in societies]
-        except Exception as e:
-            print(f'society dropdown error: {e}')
-            return []
+    def load_society_options(is_open):
+        hidden = {'display': 'none'}
+        shown  = {'display': 'block'}
 
-    # 1. Stage 1 → Stage 2 / back ─────────────────────────────────────────────
+        ok, error_msg, societies = _check_db_and_seed()
+
+        if not ok:
+            return [], _db_error_banner(error_msg), shown
+
+        options = [{'label': s.get('name', '?'), 'value': s.get('id')}
+                   for s in societies]
+
+        if not options:
+            # Connected but no societies yet
+            info = dbc.Alert(
+                [
+                    html.I(className='fas fa-info-circle me-2'),
+                    "No societies yet. ",
+                    html.Strong("Login as Master Admin"),
+                    " below to create one, or run  ",
+                    html.Code("python3 database/migrate.py"),
+                    " with --seed.",
+                ],
+                color='info', className='mb-3 py-2',
+                style={'fontSize': '13px'},
+            )
+            return [], info, shown
+
+        return options, [], hidden
+
+    # ── 1. Stage 1 → Stage 2 / back ──────────────────────────────────────────
     @app.callback(
-        Output('login-stage-1',        'style'),
-        Output('login-stage-2',        'style'),
-        Output('login-society-label',  'children'),
-        Output('auth-store',           'data',  allow_duplicate=True),
-        Output('cookie-store',         'data',  allow_duplicate=True),
-        Input('society-select-btn',    'n_clicks'),
-        Input('back-to-stage1-btn',    'n_clicks'),
-        State('society-dropdown',      'value'),
-        State('society-dropdown',      'options'),
-        State('remember-society-checkbox', 'value'),
+        Output('login-stage-1',           'style'),
+        Output('login-stage-2',           'style'),
+        Output('login-society-label',     'children'),
+        Output('auth-store',              'data',  allow_duplicate=True),
+        Output('cookie-store',            'data',  allow_duplicate=True),
+        Input('society-select-btn',       'n_clicks'),
+        Input('back-to-stage1-btn',       'n_clicks'),
+        State('society-dropdown',         'value'),
+        State('society-dropdown',         'options'),
+        State('remember-society-checkbox','value'),
         prevent_initial_call=True,
     )
     def stage_transition(_fwd, _back, society_id, options, remember):
@@ -239,23 +317,23 @@ def register_shell_callbacks(app):
             auth, cookie,
         )
 
-    # 1b. Toggle master collapse ───────────────────────────────────────────────
+    # ── 1b. Toggle master collapse ────────────────────────────────────────────
     @app.callback(
         Output('master-login-collapse', 'style'),
-        Input('toggle-master-btn', 'n_clicks'),
+        Input('toggle-master-btn',      'n_clicks'),
         prevent_initial_call=True,
     )
     def toggle_master(n):
         return {'display': 'block'} if n and n % 2 == 1 else {'display': 'none'}
 
-    # 2. Password login ────────────────────────────────────────────────────────
+    # ── 2. Password login ─────────────────────────────────────────────────────
     @app.callback(
-        Output('auth-store',   'data',    allow_duplicate=True),
+        Output('auth-store',   'data',     allow_duplicate=True),
         Output('url',          'pathname', allow_duplicate=True),
-        Output('toast-store',  'data',    allow_duplicate=True),
-        Output('login-modal',  'is_open', allow_duplicate=True),
-        Output('cookie-store', 'data',    allow_duplicate=True),
-        Input('login-btn',     'n_clicks'),
+        Output('toast-store',  'data',     allow_duplicate=True),
+        Output('login-modal',  'is_open',  allow_duplicate=True),
+        Output('cookie-store', 'data',     allow_duplicate=True),
+        Input('login-btn',      'n_clicks'),
         State('login-email',    'value'),
         State('login-password', 'value'),
         State('auth-store',     'data'),
@@ -276,13 +354,13 @@ def register_shell_callbacks(app):
         except Exception as e:
             return no_update, no_update, {'type': 'error', 'message': str(e)}, no_update, no_update
 
-    # 3. PIN login ─────────────────────────────────────────────────────────────
+    # ── 3. PIN login ──────────────────────────────────────────────────────────
     @app.callback(
-        Output('auth-store',   'data',    allow_duplicate=True),
+        Output('auth-store',   'data',     allow_duplicate=True),
         Output('url',          'pathname', allow_duplicate=True),
-        Output('toast-store',  'data',    allow_duplicate=True),
-        Output('login-modal',  'is_open', allow_duplicate=True),
-        Output('cookie-store', 'data',    allow_duplicate=True),
+        Output('toast-store',  'data',     allow_duplicate=True),
+        Output('login-modal',  'is_open',  allow_duplicate=True),
+        Output('cookie-store', 'data',     allow_duplicate=True),
         Input('login-pin-btn',    'n_clicks'),
         State('login-email-pin',  'value'),
         State('login-pin',        'value'),
@@ -304,18 +382,18 @@ def register_shell_callbacks(app):
         except Exception as e:
             return no_update, no_update, {'type': 'error', 'message': str(e)}, no_update, no_update
 
-    # 4. Pattern login ─────────────────────────────────────────────────────────
+    # ── 4. Pattern login ──────────────────────────────────────────────────────
     @app.callback(
-        Output('auth-store',   'data',    allow_duplicate=True),
+        Output('auth-store',   'data',     allow_duplicate=True),
         Output('url',          'pathname', allow_duplicate=True),
-        Output('toast-store',  'data',    allow_duplicate=True),
-        Output('login-modal',  'is_open', allow_duplicate=True),
-        Output('cookie-store', 'data',    allow_duplicate=True),
-        Input('login-pattern-btn',     'n_clicks'),
-        State('login-email-pattern',   'value'),
-        State('login-pattern',         'value'),
-        State('auth-store',            'data'),
-        State('remember-me-checkbox',  'value'),
+        Output('toast-store',  'data',     allow_duplicate=True),
+        Output('login-modal',  'is_open',  allow_duplicate=True),
+        Output('cookie-store', 'data',     allow_duplicate=True),
+        Input('login-pattern-btn',    'n_clicks'),
+        State('login-email-pattern',  'value'),
+        State('login-pattern',        'value'),
+        State('auth-store',           'data'),
+        State('remember-me-checkbox', 'value'),
         prevent_initial_call=True,
     )
     def pattern_login(n, email, pattern, auth, remember):
@@ -332,16 +410,16 @@ def register_shell_callbacks(app):
         except Exception as e:
             return no_update, no_update, {'type': 'error', 'message': str(e)}, no_update, no_update
 
-    # 5. Master login ──────────────────────────────────────────────────────────
+    # ── 5. Master login ───────────────────────────────────────────────────────
     @app.callback(
-        Output('auth-store',   'data',    allow_duplicate=True),
+        Output('auth-store',   'data',     allow_duplicate=True),
         Output('url',          'pathname', allow_duplicate=True),
-        Output('toast-store',  'data',    allow_duplicate=True),
-        Output('login-modal',  'is_open', allow_duplicate=True),
-        Output('cookie-store', 'data',    allow_duplicate=True),
-        Input('master-admin-login-btn',  'n_clicks'),
-        State('master-admin-email',      'value'),
-        State('master-admin-password',   'value'),
+        Output('toast-store',  'data',     allow_duplicate=True),
+        Output('login-modal',  'is_open',  allow_duplicate=True),
+        Output('cookie-store', 'data',     allow_duplicate=True),
+        Input('master-admin-login-btn', 'n_clicks'),
+        State('master-admin-email',     'value'),
+        State('master-admin-password',  'value'),
         prevent_initial_call=True,
     )
     def master_login(n, email, password):
@@ -363,12 +441,12 @@ def register_shell_callbacks(app):
         except Exception as e:
             return no_update, no_update, {'type': 'error', 'message': str(e)}, no_update, no_update
 
-    # 6. Logout ────────────────────────────────────────────────────────────────
+    # ── 6. Logout ─────────────────────────────────────────────────────────────
     @app.callback(
-        Output('auth-store',  'data',    allow_duplicate=True),
+        Output('auth-store',  'data',     allow_duplicate=True),
         Output('url',         'pathname', allow_duplicate=True),
-        Output('toast-store', 'data',    allow_duplicate=True),
-        Output('login-modal', 'is_open', allow_duplicate=True),
+        Output('toast-store', 'data',     allow_duplicate=True),
+        Output('login-modal', 'is_open',  allow_duplicate=True),
         Input('logout-btn',    'n_clicks'),
         Input('sb-logout-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -381,14 +459,9 @@ def register_shell_callbacks(app):
             logout_user()
         except Exception:
             pass
-        return (
-            None,
-            '/dashboard/',
-            {'type': 'success', 'message': 'Signed out successfully'},
-            True,
-        )
+        return None, '/dashboard/', {'type': 'success', 'message': 'Signed out successfully'}, True
 
-    # 7. Main router ───────────────────────────────────────────────────────────
+    # ── 7. Main router ────────────────────────────────────────────────────────
     @app.callback(
         Output('portal-content',   'children'),
         Output('sb-nav-list',      'children'),
@@ -418,7 +491,6 @@ def register_shell_callbacks(app):
         email      = auth.get('email', '')
         is_master  = (role == 'admin' and society_id is None)
 
-        # Society name
         society_name = 'ApexEstateHub'
         if society_id and not is_master:
             try:
@@ -429,8 +501,8 @@ def register_shell_callbacks(app):
             except Exception:
                 pass
 
-        role_key    = 'master' if is_master else role
-        cfg         = ROLE_CONFIG.get(role_key, ROLE_CONFIG['admin'])
+        role_key     = 'master' if is_master else role
+        cfg          = ROLE_CONFIG.get(role_key, ROLE_CONFIG['admin'])
         portal_label = html.Div([
             html.I(className='fas fa-circle me-2',
                    style={'color': cfg['color'], 'fontSize': '9px'}),
@@ -438,20 +510,20 @@ def register_shell_callbacks(app):
                       style={'color': cfg['color'], 'fontWeight': '600', 'fontSize': '13px'}),
         ], style={'display': 'flex', 'alignItems': 'center'})
 
-        nav_items = _make_nav_items(role, society_id, pathname)
-        bc_items  = _breadcrumb(pathname)
-        content   = _portal_content(role, society_id, pathname)
-        initials  = email[:1].upper() if email else '?'
-        uname     = email.split('@')[0].title()
-
         return (
-            content, nav_items, society_name,
-            uname, role_key.title(), initials,
-            portal_label, initials,
-            bc_items, False,
+            _portal_content(role, society_id, pathname),
+            _make_nav_items(role, society_id, pathname),
+            society_name,
+            email.split('@')[0].title(),
+            role_key.title(),
+            email[:1].upper() if email else '?',
+            portal_label,
+            email[:1].upper() if email else '?',
+            _breadcrumb(pathname),
+            False,
         )
 
-    # 8. Guard modal when auth cleared ────────────────────────────────────────
+    # ── 8. Modal guard ────────────────────────────────────────────────────────
     @app.callback(
         Output('login-modal', 'is_open', allow_duplicate=True),
         Input('auth-store', 'data'),
@@ -460,11 +532,7 @@ def register_shell_callbacks(app):
     def guard_modal(auth):
         return not bool(auth and auth.get('authenticated'))
 
-    # 9. Sidebar collapse ─────────────────────────────────────────────────────
-    # shell_callbacks.py — replace toggle_sidebar callback entirely
-
-    # shell_callbacks.py — replace toggle_sidebar only
-
+    # ── 9. Sidebar toggle ─────────────────────────────────────────────────────
     @app.callback(
         Output('app-sidebar', 'className'),
         Output('sb-overlay',  'style'),
@@ -482,9 +550,9 @@ def register_shell_callbacks(app):
             if is_open:
                 return 'app-sidebar', {'display': 'none'}
             return 'app-sidebar sidebar-open', {'display': 'block', 'zIndex': 1002}
-        return 'app-sidebar', {'display': 'none'}   # overlay click → close
+        return 'app-sidebar', {'display': 'none'}
 
-    # 11. Toast renderer ──────────────────────────────────────────────────────
+    # ── 10. Toast renderer ────────────────────────────────────────────────────
     @app.callback(
         Output('toast-container', 'children'),
         Input('toast-store', 'data'),
@@ -495,8 +563,7 @@ def register_shell_callbacks(app):
             return []
         t   = data.get('type', 'info')
         msg = data.get('message', '')
-        color_map = {'success': 'success', 'error': 'danger',
-                     'warning': 'warning', 'info': 'info'}
+        color_map = {'success': 'success', 'error': 'danger', 'warning': 'warning', 'info': 'info'}
         icon_map  = {'success': 'fa-check-circle', 'error': 'fa-times-circle',
                      'warning': 'fa-exclamation-triangle', 'info': 'fa-info-circle'}
         return dbc.Toast(
@@ -506,7 +573,7 @@ def register_shell_callbacks(app):
             style={'minWidth': '280px'},
         )
 
-    # 12. Restore society from cookie ─────────────────────────────────────────
+    # ── 11. Restore society from cookie ───────────────────────────────────────
     @app.callback(
         Output('society-dropdown', 'value'),
         Input('cookie-store', 'data'),

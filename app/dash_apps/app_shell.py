@@ -104,7 +104,8 @@ def _login_modal():
                 close_button=False,
             ),
             dbc.ModalBody([
-
+                # ── DB error / info banner (hidden by default) ────────────
+                html.Div(id='login-db-error', style={'display': 'none'}),
                 # ── Stage 1: Society selection ────────────────────
                 html.Div(id='login-stage-1', children=[
                     html.P('Select your society to continue',
