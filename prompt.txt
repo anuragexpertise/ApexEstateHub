@@ -49,7 +49,7 @@ CORE REQUIREMENTS
   - Minimal memory footprint
 
 --------------------------------------------------
-2. DATABASE DESIGN (NeonDB PostgreSQL)
+2. DATABASE DESIGN (Aiven PostgreSQL)
 
 Design normalized schema based on dashestatehub.sql:
 
@@ -66,7 +66,7 @@ Ensure:
   Admin → full access
   Owner → limited
   Security → scanner
-  Contractor → passes
+  Contractor → limited
 
 - Session persistence
 - Password hashing (Werkzeug)
@@ -198,7 +198,7 @@ Prepare for ApexWeave:
 
 - Use psycopg2-binary
 
-- Add config for NeonDB:
+- Add config for Aiven:
   sslmode=require
 
 --------------------------------------------------
@@ -212,7 +212,7 @@ Generate:
 4. Procfile
 5. .env is done already
 6. Step-by-step deployment guide for ApexWeave
-7. Instructions to connect NeonDB
+7. Instructions to connect Aiven
 
 --------------------------------------------------
 11. CODE QUALITY
