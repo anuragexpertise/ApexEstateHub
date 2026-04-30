@@ -15,8 +15,7 @@ def register_security_callbacks(app):
         if not n_clicks or not qr_data:
             return no_update, no_update
         
-        # Validate QR code (mock for now)
-        result = {"status": "PASS", "message": "Access granted", "user": {"name": "John Doe"}}
+        result = validate_qr_code(qr_data, None)
         
         if result.get("status") == "PASS":
             return html.Div([
