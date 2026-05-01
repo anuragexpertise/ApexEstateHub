@@ -8,7 +8,7 @@ import base64
 import json
 import os
 from datetime import date, datetime
-from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH
+from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH, clientside_callback
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.pages.card_catalogue import (
@@ -870,48 +870,7 @@ def register_card_catalogue_callbacks(app):
             return _err(str(e)), no_update
 
     # ── 21. Evaluate Pass ────────────────────────────────────────
-    @app.callback(
-        Output("eval-result", "children"),
-        Output("eval-result", "style"),
-        Input("eval-validate-btn", "n_clicks"),
-        State("eval-qr-input",     "value"),
-        State("auth-store",        "data"),
-        prevent_initial_call=True,
-    )
-    def evaluate_pass(n, qr_data, auth_data):
-        if not n or not qr_data:
-            return no_update, no_update
-        sid = _sid(auth_data)
-        try:
-            from app.services.qr_service import validate_qr_code
-            result = validate_qr_code(qr_data, sid)
-            now_s  = datetime.now().strftime("%H:%M:%S")
-            if result.get("status") == "PASS":
-                content = html.Div([
-                    html.I(className="fas fa-check-circle me-1",
-                           style={"color":"#27ae60"}),
-                    html.Strong("Access Granted",
-                                style={"color":"#27ae60","fontSize":"13px"}),
-                    html.Br(),
-                    html.Small(f"{result.get('user',{}).get('name','Visitor')} "
-                               f"\u2022 {now_s}",
-                               style={"fontSize":"11px"}),
-                ])
-                style = {"background":"#d4edda","borderRadius":"8px","padding":"8px"}
-            else:
-                content = html.Div([
-                    html.I(className="fas fa-times-circle me-1",
-                           style={"color":"#e74c3c"}),
-                    html.Strong("Access Denied",
-                                style={"color":"#e74c3c","fontSize":"13px"}),
-                    html.Br(),
-                    html.Small(f"{result.get('reason','Invalid QR')} \u2022 {now_s}",
-                               style={"fontSize":"11px"}),
-                ])
-                style = {"background":"#f8d7da","borderRadius":"8px","padding":"8px"}
-            return content, style
-        except Exception as e:
-            return html.Small(str(e), style={"color":"#e74c3c"}), {}
+
 
     # ── 22. Load Rates into form ─────────────────────────────────
     @app.callback(
@@ -955,5 +914,306 @@ def register_card_catalogue_callbacks(app):
         except Exception as e:
             print(f"load_rates error: {e}")
             return empty
+        # ── 21. Camera clientside callback ───────────────────────────
+    
+    _CAMERA_JS = """
+    function(start_n, stop_n, switch_n, store) {
+    
+        /* ── which button fired? ───────────────────────────────────────── */
+        var ctx_obj = window.dash_clientside.callback_context;
+        if (!ctx_obj || !ctx_obj.triggered || !ctx_obj.triggered.length) {
+            return store || {facing: 'environment', active: false};
+        }
+        var trig = ctx_obj.triggered[0].prop_id.split('.')[0];
+    
+        /* ── helpers ───────────────────────────────────────────────────── */
+    
+        /** Push a value into a React-controlled input so Dash detects it */
+        function setReactVal(el, value) {
+            var setter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value').set;
+            setter.call(el, value);
+            el.dispatchEvent(new Event('input',  {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+    
+        /** Show element */
+        function show(id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = '';
+        }
+    
+        /** Hide element (display:none) */
+        function hide(id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+    
+        /** Update small status text */
+        function setStatus(msg) {
+            var el = document.getElementById('eval-scan-status');
+            if (el) el.textContent = msg;
+        }
+    
+        /** Completely stop the active media stream and scan loop */
+        function stopCamera() {
+            /* cancel scan loop */
+            if (window._evalRaf) {
+                cancelAnimationFrame(window._evalRaf);
+                window._evalRaf = null;
+            }
+            /* stop all tracks */
+            if (window._evalStream) {
+                window._evalStream.getTracks().forEach(function(t) { t.stop(); });
+                window._evalStream = null;
+            }
+            /* blank out video */
+            var vid = document.getElementById('eval-video');
+            if (vid) { vid.srcObject = null; vid.style.display = 'none'; }
+    
+            hide('eval-scanline');
+            setStatus('📷 Camera off — tap Start to scan');
+    
+            /* swap buttons */
+            show('eval-start-btn');
+            hide('eval-stop-btn');
+            hide('eval-switch-btn');
+        }
+    
+        /**
+        * Start (or restart) the camera.
+        * facing = 'environment'  →  back camera  (default for QR scanning)
+        * facing = 'user'         →  front / selfie camera
+        */
+        function startCamera(facing) {
+            stopCamera();   /* clean up any previous stream first */
+    
+            var constraints = {
+                video: {
+                    facingMode: {ideal: facing || 'environment'},
+                    width:  {ideal: 1280},
+                    height: {ideal: 720}
+                },
+                audio: false
+            };
+    
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(function(stream) {
+                    window._evalStream = stream;
+    
+                    var vid = document.getElementById('eval-video');
+                    if (!vid) { stopCamera(); return; }
+    
+                    vid.srcObject = stream;
+                    vid.style.display = 'block';
+    
+                    /* swap buttons */
+                    hide('eval-start-btn');
+                    show('eval-stop-btn');
+                    show('eval-switch-btn');
+    
+                    show('eval-scanline');
+                    setStatus('🔍 Scanning for QR code…');
+    
+                    /* ── jsQR scan loop ──────────────────────────────── */
+                    function runScan() {
+                        /* abort if stream was killed */
+                        if (!window._evalStream) return;
+    
+                        var v = document.getElementById('eval-video');
+                        var c = document.getElementById('eval-canvas');
+                        if (!v || !c || v.readyState < 2) {
+                            window._evalRaf = requestAnimationFrame(runScan);
+                            return;
+                        }
+    
+                        /* draw frame to hidden canvas */
+                        c.width  = v.videoWidth;
+                        c.height = v.videoHeight;
+                        var ctx2d = c.getContext('2d');
+                        ctx2d.drawImage(v, 0, 0, c.width, c.height);
+    
+                        /* attempt QR decode */
+                        if (typeof jsQR !== 'undefined') {
+                            var img = ctx2d.getImageData(0, 0, c.width, c.height);
+                            var code = jsQR(img.data, img.width, img.height, {
+                                inversionAttempts: 'dontInvert'
+                            });
+    
+                            if (code && code.data) {
+                                /* ✅ QR found ─ stop camera immediately */
+                                stopCamera();
+                                setStatus('✅ QR detected — validating…');
+    
+                                /* populate the Dash-controlled input */
+                                var inp = document.getElementById('eval-qr-input');
+                                if (inp) setReactVal(inp, code.data);
+    
+                                /* auto-click the Validate button after a short delay
+                                (gives React time to register the input change)   */
+                                setTimeout(function() {
+                                    var btn = document.getElementById('eval-validate-btn');
+                                    if (btn) btn.click();
+                                }, 350);
+    
+                                return;   /* do NOT schedule another frame */
+                            }
+                        }
+    
+                        /* no QR yet — schedule next frame */
+                        window._evalRaf = requestAnimationFrame(runScan);
+                    }
+    
+                    /* Load jsQR from CDN once, then start scan loop */
+                    if (typeof jsQR !== 'undefined') {
+                        runScan();
+                    } else if (!window._jsQRLoading) {
+                        window._jsQRLoading = true;
+                        var s = document.createElement('script');
+                        s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+                        s.onload = function() {
+                            window._jsQRLoading = false;
+                            runScan();
+                        };
+                        s.onerror = function() {
+                            window._jsQRLoading = false;
+                            setStatus('❌ Could not load QR library — use manual entry');
+                        };
+                        document.head.appendChild(s);
+                    } else {
+                        /* library is loading — wait and retry */
+                        setTimeout(function() { runScan(); }, 500);
+                    }
+                })
+                .catch(function(err) {
+                    /* Common errors: NotAllowedError (permission denied),
+                    NotFoundError (no camera), OverconstrainedError           */
+                    var msg = err.name === 'NotAllowedError'
+                        ? '🚫 Camera permission denied'
+                        : err.name === 'NotFoundError'
+                            ? '🚫 No camera found on this device'
+                            : '❌ Camera error: ' + err.message;
+                    setStatus(msg);
+                    /* reset buttons to initial state */
+                    show('eval-start-btn');
+                    hide('eval-stop-btn');
+                    hide('eval-switch-btn');
+                });
+        }
+    
+        /* ── dispatch ──────────────────────────────────────────────────── */
+    
+        var facing  = (store && store.facing)  || 'environment';
+        var newStore = Object.assign({}, store || {facing: 'environment', active: false});
+    
+        if (trig === 'eval-start-btn') {
+            startCamera(facing);
+            newStore.active = true;
+            return newStore;
+        }
+    
+        if (trig === 'eval-stop-btn') {
+            stopCamera();
+            newStore.active = false;
+            return newStore;
+        }
+    
+        if (trig === 'eval-switch-btn') {
+            var newFacing = (facing === 'environment') ? 'user' : 'environment';
+            newStore.facing  = newFacing;
+            newStore.active  = true;
+            startCamera(newFacing);
+            return newStore;
+        }
+    
+        return newStore;
+    }
+    """
+    
+   
+    
+    
+        # ── 23. Camera clientside callback ───────────────────────────────────────
+
+    
+ 
+    @app.callback(
+        Output("eval-result",        "children"),
+        Output("eval-result",        "style"),
+        Output("eval-scan-status",   "children",  allow_duplicate=True),
+        Input("eval-validate-btn",   "n_clicks"),
+        Input("eval-qr-input",       "value"),       # debounce=True on the Input
+        State("auth-store",          "data"),
+        prevent_initial_call=True,
+    )
+    def evaluate_pass(n_clicks, qr_data, auth_data):
+        """Validate QR code and return pass / fail result."""
+        from dash import ctx as dash_ctx
+        # Only run if triggered by button click OR by a non-empty qr-input change
+        triggered_id = dash_ctx.triggered_id
+        if triggered_id == "eval-validate-btn" and not n_clicks:
+            return no_update, no_update, no_update
+        if triggered_id == "eval-qr-input" and not qr_data:
+            return no_update, no_update, no_update
+        if not qr_data:
+            return (
+                "⚠️ Please enter or scan a QR code",
+                {"background": "#fff3cd", "borderRadius": "8px", "padding": "8px"},
+                "⚠️ No QR data",
+            )
+
+        sid = (auth_data or {}).get("society_id")
+        now_s = datetime.now().strftime("%H:%M:%S")
+
+        try:
+            from app.services.qr_service import validate_qr_code
+            result = validate_qr_code(qr_data, sid)
+
+            if result.get("status") == "PASS":
+                user_name = result.get("user", {}).get("name", "Visitor")
+                content = html.Div([
+                    html.I(className="fas fa-check-circle me-1",
+                        style={"color": "#27ae60", "fontSize": "18px"}),
+                    html.Strong("Access Granted",
+                                style={"color": "#27ae60", "fontSize": "14px"}),
+                    html.Br(),
+                    html.Small(f"{user_name}  •  {now_s}",
+                            style={"fontSize": "11px", "color": "#555"}),
+                ])
+                style = {
+                    "background": "#d4edda", "borderRadius": "8px",
+                    "padding": "10px", "textAlign": "center",
+                }
+                status = f"✅ PASS — {user_name} at {now_s}"
+            else:
+                reason = result.get("reason", "Invalid QR code")
+                content = html.Div([
+                    html.I(className="fas fa-times-circle me-1",
+                        style={"color": "#e74c3c", "fontSize": "18px"}),
+                    html.Strong("Access Denied",
+                                style={"color": "#e74c3c", "fontSize": "14px"}),
+                    html.Br(),
+                    html.Small(f"{reason}  •  {now_s}",
+                            style={"fontSize": "11px", "color": "#555"}),
+                ])
+                style = {
+                    "background": "#f8d7da", "borderRadius": "8px",
+                    "padding": "10px", "textAlign": "center",
+                }
+                status = f"❌ FAIL — {reason}"
+
+            return content, style, status
+
+        except Exception as e:
+            err_content = html.Small(str(e), style={"color": "#e74c3c"})
+            return err_content, {}, f"❌ Error: {e}"
+
+    
+    clientside_callback(_CAMERA_JS, Output("eval-camera-store", "data"), [
+        Input("eval-start-btn", "n_clicks"),
+        Input("eval-stop-btn", "n_clicks"),
+        Input("eval-switch-btn", "n_clicks"),
+    ], State("eval-camera-store", "data"))
 
     print("✓ Card catalogue callbacks registered")
+    
