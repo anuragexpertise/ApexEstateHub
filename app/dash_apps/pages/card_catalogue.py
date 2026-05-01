@@ -1,6 +1,6 @@
 """
 card_catalogue.py
-Master catalogue of every KPI, Form, and List card.
+Master catalogue of every KPI, Form and List card.
 Drop into: app/dash_apps/pages/card_catalogue.py
 """
 
@@ -34,7 +34,7 @@ KPI_CARDS = {
             "    WHERE society_id = %s AND status = 'pending' AND apartment_id IS NOT NULL"
             "  )"
         ),
-        "params": 2,   # needs society_id twice
+        "params": 2,
     },
     "apts_total": {
         "group": "Apartments", "title": "Total Apartments", "icon": "fa-home",
@@ -158,7 +158,6 @@ KPI_CARDS = {
 
 # ================================================================
 # ── FORM / LIST CARD DEFINITIONS
-# Each entry drives the universal make_form_card() renderer.
 # ================================================================
 FORM_CARDS = {
     # ────────────────────── SOCIETY ──────────────────────────────
@@ -570,7 +569,7 @@ def make_kpi_card(card_id: str, value: str = "—") -> html.Div:
         ],
         id=f"dnd-card-{card_id}",
         **{"data-card-id": card_id, "data-card-type": "kpi"},
-        className="dnd-card kpi-card",
+        className="dnd-card",
         style={
             "position":"relative","background":"white","borderRadius":"12px",
             "padding":"16px 12px 12px","borderLeft":f"4px solid {color}",
@@ -626,6 +625,139 @@ def _make_field(f: dict) -> dbc.Row:
     ], className="mb-2")
 
 
+def _evaluate_pass_card_body():
+    """
+    Evaluate Pass card with:
+      • Manual QR input + Validate button
+      • Camera that defaults to BACK camera (environment)
+      • Flip button to toggle front ↔ back
+      • Auto-stops camera on successful scan (saves mobile battery)
+      • Start Camera button to re-activate
+    """
+    return dbc.CardBody([
+
+        # ── Manual input & result ─────────────────────────────────
+        dcc.Input(
+            id="eval-qr-input",
+            type="text",
+            placeholder="Scan QR or enter code manually…",
+            debounce=True,
+            style={
+                "width": "100%", "padding": "8px", "fontSize": "13px",
+                "borderRadius": "6px", "border": "1px solid #ddd",
+                "marginBottom": "8px",
+            },
+        ),
+        dbc.Button(
+            [html.I(className="fas fa-check-circle me-1"), "Validate"],
+            id="eval-validate-btn", color="primary", size="sm",
+            className="w-100 mb-2",
+        ),
+        html.Div(
+            id="eval-result",
+            style={"minHeight": "60px", "borderRadius": "8px", "padding": "8px"},
+        ),
+
+        html.Hr(style={"margin": "8px 0"}),
+
+        # ── Camera section ────────────────────────────────────────
+        html.Div([
+
+            # Video element — hidden until camera starts
+            html.Div(
+                style={"position": "relative"},
+                children=[
+                    html.Video(
+                        id="eval-video",
+                        autoPlay=True,
+                        playsInline=True,
+                        muted=True,
+                        style={
+                            "width": "100%",
+                            "maxHeight": "200px",
+                            "objectFit": "cover",
+                            "borderRadius": "8px",
+                            "display": "none",
+                            "border": "2px solid #667eea",
+                        },
+                    ),
+                    # Animated scan-line overlay (shown while scanning)
+                    html.Div(
+                        id="eval-scanline",
+                        style={
+                            "display": "none",
+                            "position": "absolute",
+                            "left": "0", "right": "0",
+                            "top": "0",
+                            "height": "3px",
+                            "background": "linear-gradient(90deg, transparent, #667eea, transparent)",
+                            "animation": "evalScan 1.5s linear infinite",
+                            "borderRadius": "2px",
+                        },
+                    ),
+                    # Hidden canvas for frame capture / jsQR
+                    html.Canvas(id="eval-canvas", style={"display": "none"}),
+                ],
+            ),
+
+            # Status line
+            html.Small(
+                id="eval-scan-status",
+                children="📷 Camera off — tap Start to scan",
+                style={
+                    "fontSize": "11px", "color": "#888",
+                    "display": "block", "textAlign": "center",
+                    "margin": "6px 0 4px",
+                },
+            ),
+
+            # Camera control buttons
+            html.Div(
+                style={"display": "flex", "justifyContent": "center", "gap": "6px"},
+                children=[
+                    # Start (visible initially)
+                    dbc.Button(
+                        [html.I(className="fas fa-camera me-1"), "Start Camera"],
+                        id="eval-start-btn",
+                        color="secondary", size="sm", outline=True,
+                    ),
+                    # Flip front ↔ back (hidden until camera active)
+                    dbc.Button(
+                        [html.I(className="fas fa-sync-alt me-1"), "Flip"],
+                        id="eval-switch-btn",
+                        color="info", size="sm", outline=True,
+                        style={"display": "none"},
+                    ),
+                    # Stop (hidden until camera active)
+                    dbc.Button(
+                        [html.I(className="fas fa-stop-circle me-1"), "Stop"],
+                        id="eval-stop-btn",
+                        color="danger", size="sm", outline=True,
+                        style={"display": "none"},
+                    ),
+                ],
+            ),
+
+        ]),
+
+        # ── Hidden state store (facing mode + active flag) ────────
+        dcc.Store(
+            id="eval-camera-store",
+            data={"facing": "environment", "active": False},
+        ),
+
+        # ── CSS for scan-line animation ───────────────────────────
+        html.Style("""
+            @keyframes evalScan {
+                0%   { top: 0%;   opacity: 1; }
+                50%  { top: 95%;  opacity: 0.8; }
+                100% { top: 0%;   opacity: 1; }
+            }
+        """),
+
+    ], style={"padding": "10px"})
+
+
 def make_form_card(card_id: str) -> html.Div:
     """Render a Form or List card shell."""
     cfg   = FORM_CARDS.get(card_id)
@@ -672,31 +804,8 @@ def make_form_card(card_id: str) -> html.Div:
         ], style={"padding":"8px", "maxHeight":"320px","overflowY":"auto"})
 
     elif ctype == "special" and cfg.get("component") == "evaluate_pass_card":
-        body = dbc.CardBody([
-            html.Div([
-                dcc.Input(id="eval-qr-input",
-                          type="text",
-                          placeholder="Scan QR code or enter manually",
-                          debounce=True,
-                          style={"width":"100%","padding":"8px","fontSize":"13px",
-                                 "borderRadius":"6px","border":"1px solid #ddd",
-                                 "marginBottom":"8px"}),
-                dbc.Button([html.I(className="fas fa-check-circle me-1"), "Validate"],
-                            id="eval-validate-btn", color="primary", size="sm",
-                            className="w-100 mb-2"),
-                html.Div(id="eval-result",
-                         style={"minHeight":"60px","borderRadius":"8px","padding":"8px"}),
-                html.Hr(style={"margin":"8px 0"}),
-                html.Small("Camera scanning:", style={"fontSize":"11px","color":"#888"}),
-                html.Div([
-                    dbc.Button([html.I(className="fas fa-camera me-1"), "Open Camera"],
-                               id="eval-camera-btn", color="secondary", size="sm",
-                               outline=True, className="mt-1 w-100"),
-                    html.Div(id="camera-stream-container",
-                             style={"marginTop":"8px","display":"none"}),
-                ]),
-            ])
-        ], style={"padding":"10px"})
+        # ── NEW: full camera-capable evaluate pass card ───────────
+        body = _evaluate_pass_card_body()
 
     else:
         # profile / create form
@@ -718,12 +827,12 @@ def make_form_card(card_id: str) -> html.Div:
 
     return html.Div(
         [dbc.Card([header, body],
-                  className="h-100 form-card",
+                  className="h-100",
                   style={"borderRadius":"10px","boxShadow":"0 2px 8px rgba(0,0,0,0.07)",
                          "border":"1px solid #e9ecef"})],
         id=f"dnd-card-{card_id}",
         **{"data-card-id": card_id, "data-card-type": ctype},
-        className="dnd-card form-card-shell",
+        className="dnd-card",
         style={"userSelect":"none"},
     )
 
