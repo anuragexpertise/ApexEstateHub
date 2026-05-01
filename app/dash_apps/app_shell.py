@@ -414,6 +414,15 @@ def shell_layout():
             # Customize page stores
             dcc.Store(id='dnd-layout-store',    storage_type='session',
                       data={'active': [], 'available': []}),
+            # ── Stores (invisible) ────────────────────────────────────
+            dcc.Store(
+                id="eval-camera-store",         storage_type="memory",
+                data={"facing": "environment", "active": False, "torch": False},
+            ),
+            dcc.Store(
+                id="eval-scan-log",             storage_type="memory",
+                data=[],
+            ),
             dcc.Input(id='dnd-order-capture', value='',
                       debounce=False, style={'display': 'none'}),
             html.Div(id='dnd-init-dummy', style={'display': 'none'}),

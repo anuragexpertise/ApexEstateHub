@@ -653,23 +653,12 @@ def _evaluate_pass_card_body():
     eval-stop-btn       dbc.Button
     eval-switch-btn     dbc.Button
     eval-torch-btn      dbc.Button
-    eval-camera-store   dcc.Store  — {facing, active, torch}
-    eval-scan-log       dcc.Store  — list[dict] last 10 results
+   
     eval-recent-scans   dbc.ListGroup — rendered log
     """
     return dbc.CardBody(
         [
-            # ── Stores (invisible) ────────────────────────────────────
-            dcc.Store(
-                id="eval-camera-store",
-                storage_type="memory",
-                data={"facing": "environment", "active": False, "torch": False},
-            ),
-            dcc.Store(
-                id="eval-scan-log",
-                storage_type="memory",
-                data=[],
-            ),
+
 
             # ── Manual entry row ──────────────────────────────────────
             dcc.Input(

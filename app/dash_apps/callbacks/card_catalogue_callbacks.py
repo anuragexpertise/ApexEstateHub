@@ -10,7 +10,8 @@ import os
 from datetime import date, datetime
 from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH, clientside_callback
 import dash_bootstrap_components as dbc
-
+from dash.exceptions import PreventUpdate
+from dash.callback_context import callback_context
 from app.dash_apps.pages.card_catalogue import (
     KPI_CARDS, FORM_CARDS, CARD_CATALOGUE,
 )
@@ -1050,11 +1051,11 @@ def register_card_catalogue_callbacks(app):
                                 if (inp) setReactVal(inp, code.data);
     
                                 /* auto-click the Validate button after a short delay
-                                (gives React time to register the input change)   */
+                                (gives React time to register the input change)  
                                 setTimeout(function() {
                                     var btn = document.getElementById('eval-validate-btn');
                                     if (btn) btn.click();
-                                }, 350);
+                                }, 350); */
     
                                 return;   /* do NOT schedule another frame */
                             }
@@ -1109,12 +1110,14 @@ def register_card_catalogue_callbacks(app):
         if (trig === 'eval-start-btn') {
             startCamera(facing);
             newStore.active = true;
+            newStore.lastScan = null;  // Clear any previous scan
             return newStore;
         }
-    
+
         if (trig === 'eval-stop-btn') {
             stopCamera();
             newStore.active = false;
+            newStore.lastScan = null;
             return newStore;
         }
     
@@ -1136,17 +1139,86 @@ def register_card_catalogue_callbacks(app):
         # ── 23. Camera clientside callback ───────────────────────────────────────
 
     
- 
     @app.callback(
-        Output("eval-result",        "children"),
-        Output("eval-result",        "style"),
-        Output("eval-scan-status",   "children",  allow_duplicate=True),
-        Input("eval-validate-btn",   "n_clicks"),
-        Input("eval-qr-input",       "value"),       # debounce=True on the Input
-        State("auth-store",          "data"),
+        Output("eval-result", "children"),
+        Output("eval-result", "style"),
+        Output("eval-scan-status", "children"),
+        Input("eval-validate-btn", "n_clicks"),
+        Input("eval-qr-input", "value"),
+        State("auth-store", "data"),
+        State("eval-camera-store", "data"),  # Add this
         prevent_initial_call=True,
     )
-    def evaluate_pass(n_clicks, qr_data, auth_data):
+    def evaluate_pass(n_clicks, qr_data, auth_data, camera_data):
+        from dash import ctx as dash_ctx
+        
+        triggered_id = dash_ctx.triggered_id
+        
+        # Skip if triggered by button with no clicks
+        if triggered_id == "eval-validate-btn" and not (n_clicks and n_clicks > 0):
+            raise PreventUpdate
+        
+        # Skip if triggered by empty input
+        if triggered_id == "eval-qr-input" and not qr_data:
+            raise PreventUpdate
+        
+        # Check if camera is active (prevents re-processing same QR)
+        if camera_data and camera_data.get("active", False):
+            raise PreventUpdate
+        
+        if not qr_data:
+            return (
+                "⚠️ Please enter or scan a QR code",
+                {"background": "#fff3cd", "borderRadius": "8px", "padding": "8px"},
+                "⚠️ No QR data",
+            )
+
+        sid = (auth_data or {}).get("society_id")
+        now_s = datetime.now().strftime("%H:%M:%S")
+
+        try:
+            from app.services.qr_service import validate_qr_code
+            result = validate_qr_code(qr_data, sid)
+
+            if result.get("status") == "PASS":
+                user_name = result.get("user", {}).get("name", "Visitor")
+                content = html.Div([
+                    html.I(className="fas fa-check-circle me-1",
+                        style={"color": "#27ae60", "fontSize": "18px"}),
+                    html.Strong("Access Granted",
+                                style={"color": "#27ae60", "fontSize": "14px"}),
+                    html.Br(),
+                    html.Small(f"{user_name}  •  {now_s}",
+                            style={"fontSize": "11px", "color": "#555"}),
+                ])
+                style = {
+                    "background": "#d4edda", "borderRadius": "8px",
+                    "padding": "10px", "textAlign": "center",
+                }
+                status = f"✅ PASS — {user_name} at {now_s}"
+            else:
+                reason = result.get("reason", "Invalid QR code")
+                content = html.Div([
+                    html.I(className="fas fa-times-circle me-1",
+                        style={"color": "#e74c3c", "fontSize": "18px"}),
+                    html.Strong("Access Denied",
+                                style={"color": "#e74c3c", "fontSize": "14px"}),
+                    html.Br(),
+                    html.Small(f"{reason}  •  {now_s}",
+                            style={"fontSize": "11px", "color": "#555"}),
+                ])
+                style = {
+                    "background": "#f8d7da", "borderRadius": "8px",
+                    "padding": "10px", "textAlign": "center",
+                }
+                status = f"❌ FAIL — {reason}"
+
+            return content, style, status
+
+        except Exception as e:
+            err_content = html.Small(str(e), style={"color": "#e74c3c"})
+            return err_content, {}, f"❌ Error: {e}"
+    
         """Validate QR code and return pass / fail result."""
         from dash import ctx as dash_ctx
         # Only run if triggered by button click OR by a non-empty qr-input change
