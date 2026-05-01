@@ -627,135 +627,287 @@ def _make_field(f: dict) -> dbc.Row:
 
 def _evaluate_pass_card_body():
     """
-    Evaluate Pass card with:
-      • Manual QR input + Validate button
-      • Camera that defaults to BACK camera (environment)
-      • Flip button to toggle front ↔ back
-      • Auto-stops camera on successful scan (saves mobile battery)
-      • Start Camera button to re-activate
+    Evaluate Pass card body.
+
+    Features
+    --------
+    • Manual QR input + Validate button
+    • Camera preview with animated scan-line overlay
+    • Defaults to BACK camera (facingMode: environment) — ideal for QR
+    • Flip button: toggles front ↔ back, label updates to show next option
+    • Torch / flashlight button (appears only when device supports it)
+    • Auto-stops camera immediately after a QR is decoded (saves battery)
+    • "Start Camera" button re-activates it
+    • Running log of the last 10 scan results (Recent Scans panel)
+
+    DOM IDs consumed by camera_callbacks.py
+    ----------------------------------------
+    eval-qr-input       dcc.Input (debounce=True)
+    eval-validate-btn   dbc.Button
+    eval-result         html.Div  — result display
+    eval-scan-status    html.Small — status line
+    eval-video          html.Video
+    eval-canvas         html.Canvas (hidden)
+    eval-scanline       html.Div  — animated overlay
+    eval-start-btn      dbc.Button
+    eval-stop-btn       dbc.Button
+    eval-switch-btn     dbc.Button
+    eval-torch-btn      dbc.Button
+    eval-camera-store   dcc.Store  — {facing, active, torch}
+    eval-scan-log       dcc.Store  — list[dict] last 10 results
+    eval-recent-scans   dbc.ListGroup — rendered log
     """
-    return dbc.CardBody([
-
-        # ── Manual input & result ─────────────────────────────────
-        dcc.Input(
-            id="eval-qr-input",
-            type="text",
-            placeholder="Scan QR or enter code manually…",
-            debounce=True,
-            style={
-                "width": "100%", "padding": "8px", "fontSize": "13px",
-                "borderRadius": "6px", "border": "1px solid #ddd",
-                "marginBottom": "8px",
-            },
-        ),
-        dbc.Button(
-            [html.I(className="fas fa-check-circle me-1"), "Validate"],
-            id="eval-validate-btn", color="primary", size="sm",
-            className="w-100 mb-2",
-        ),
-        html.Div(
-            id="eval-result",
-            style={"minHeight": "60px", "borderRadius": "8px", "padding": "8px"},
-        ),
-
-        html.Hr(style={"margin": "8px 0"}),
-
-        # ── Camera section ────────────────────────────────────────
-        html.Div([
-
-            # Video element — hidden until camera starts
-            html.Div(
-                style={"position": "relative"},
-                children=[
-                    html.Video(
-                        id="eval-video",
-                        autoPlay=True,
-                        playsInline=True,
-                        muted=True,
-                        style={
-                            "width": "100%",
-                            "maxHeight": "200px",
-                            "objectFit": "cover",
-                            "borderRadius": "8px",
-                            "display": "none",
-                            "border": "2px solid #667eea",
-                        },
-                    ),
-                    # Animated scan-line overlay (shown while scanning)
-                    html.Div(
-                        id="eval-scanline",
-                        style={
-                            "display": "none",
-                            "position": "absolute",
-                            "left": "0", "right": "0",
-                            "top": "0",
-                            "height": "3px",
-                            "background": "linear-gradient(90deg, transparent, #667eea, transparent)",
-                            "animation": "evalScan 1.5s linear infinite",
-                            "borderRadius": "2px",
-                        },
-                    ),
-                    # Hidden canvas for frame capture / jsQR
-                    html.Canvas(id="eval-canvas", style={"display": "none"}),
-                ],
+    return dbc.CardBody(
+        [
+            # ── Stores (invisible) ────────────────────────────────────
+            dcc.Store(
+                id="eval-camera-store",
+                storage_type="memory",
+                data={"facing": "environment", "active": False, "torch": False},
+            ),
+            dcc.Store(
+                id="eval-scan-log",
+                storage_type="memory",
+                data=[],
             ),
 
-            # Status line
-            html.Small(
-                id="eval-scan-status",
-                children="📷 Camera off — tap Start to scan",
+            # ── Manual entry row ──────────────────────────────────────
+            dcc.Input(
+                id="eval-qr-input",
+                type="text",
+                placeholder="Scan QR or type code manually…",
+                debounce=True,          # fires on Enter / blur
                 style={
-                    "fontSize": "11px", "color": "#888",
-                    "display": "block", "textAlign": "center",
-                    "margin": "6px 0 4px",
+                    "width": "100%", "padding": "9px 12px",
+                    "fontSize": "13px", "borderRadius": "7px",
+                    "border": "1px solid #ddd", "marginBottom": "8px",
+                    "outline": "none",
+                },
+            ),
+            dbc.Button(
+                [html.I(className="fas fa-check-circle me-2"), "Validate"],
+                id="eval-validate-btn",
+                color="primary", size="sm",
+                className="w-100 mb-3",
+            ),
+
+            # ── Result panel ──────────────────────────────────────────
+            html.Div(
+                id="eval-result",
+                style={
+                    "minHeight": "72px",
+                    "borderRadius": "10px",
+                    "padding": "8px",
+                    "transition": "background 0.3s",
                 },
             ),
 
-            # Camera control buttons
+            html.Hr(style={"margin": "10px 0"}),
+
+            # ── Camera section ────────────────────────────────────────
+            html.Div([
+
+                # Video + scan-line overlay wrapper
+                html.Div(
+                    style={
+                        "position": "relative",
+                        "borderRadius": "10px",
+                        "overflow": "hidden",
+                        "background": "#111",
+                    },
+                    children=[
+                        # Live video feed
+                        html.Video(
+                            id="eval-video",
+                            autoPlay=True,
+                            playsInline=True,
+                            muted=True,
+                            style={
+                                "width": "100%",
+                                "maxHeight": "220px",
+                                "objectFit": "cover",
+                                "display": "none",          # shown by JS
+                                "borderRadius": "10px",
+                            },
+                        ),
+
+                        # Scan-line animation (shown while scanning)
+                        html.Div(
+                            id="eval-scanline",
+                            style={
+                                "display": "none",          # shown by JS
+                                "position": "absolute",
+                                "left": "0", "right": "0",
+                                "top": "0",
+                                "height": "3px",
+                                "background": (
+                                    "linear-gradient(90deg,"
+                                    "transparent 0%,"
+                                    "#667eea 50%,"
+                                    "transparent 100%)"
+                                ),
+                                "animation": "evalScanLine 1.8s ease-in-out infinite",
+                            },
+                        ),
+
+                        # Corner markers (decorative targeting UI)
+                        html.Div(
+                            id="eval-corners",
+                            style={"display": "none"},      # shown by JS
+                            children=[
+                                html.Div(style={
+                                    "position": "absolute",
+                                    "width": "22px", "height": "22px",
+                                    "border": "3px solid #667eea",
+                                    "borderRight": "none", "borderBottom": "none",
+                                    "top": "10px", "left": "10px",
+                                    "borderRadius": "3px 0 0 0",
+                                }),
+                                html.Div(style={
+                                    "position": "absolute",
+                                    "width": "22px", "height": "22px",
+                                    "border": "3px solid #667eea",
+                                    "borderLeft": "none", "borderBottom": "none",
+                                    "top": "10px", "right": "10px",
+                                    "borderRadius": "0 3px 0 0",
+                                }),
+                                html.Div(style={
+                                    "position": "absolute",
+                                    "width": "22px", "height": "22px",
+                                    "border": "3px solid #667eea",
+                                    "borderRight": "none", "borderTop": "none",
+                                    "bottom": "10px", "left": "10px",
+                                    "borderRadius": "0 0 0 3px",
+                                }),
+                                html.Div(style={
+                                    "position": "absolute",
+                                    "width": "22px", "height": "22px",
+                                    "border": "3px solid #667eea",
+                                    "borderLeft": "none", "borderTop": "none",
+                                    "bottom": "10px", "right": "10px",
+                                    "borderRadius": "0 0 3px 0",
+                                }),
+                            ],
+                        ),
+
+                        # Hidden canvas — frame capture for jsQR decode
+                        html.Canvas(id="eval-canvas", style={"display": "none"}),
+                    ],
+                ),
+
+                # Status text line
+                html.Small(
+                    id="eval-scan-status",
+                    children="📷 Camera off — tap Start to scan",
+                    style={
+                        "display": "block",
+                        "textAlign": "center",
+                        "fontSize": "11px",
+                        "color": "#888",
+                        "margin": "7px 0 5px",
+                    },
+                ),
+
+                # ── Camera control buttons ───────────────────────────
+                html.Div(
+                    style={
+                        "display": "flex",
+                        "justifyContent": "center",
+                        "gap": "6px",
+                        "flexWrap": "wrap",
+                    },
+                    children=[
+
+                        # Start (visible initially)
+                        dbc.Button(
+                            [html.I(className="fas fa-camera me-1"), "Start Camera"],
+                            id="eval-start-btn",
+                            color="primary", size="sm",
+                        ),
+
+                        # Flip front ↔ back  (hidden until camera active)
+                        dbc.Button(
+                            [html.I(className="fas fa-sync-alt me-1"), "Front"],
+                            id="eval-switch-btn",
+                            color="info", size="sm", outline=True,
+                            style={"display": "none"},
+                            title="Switch to front camera",
+                        ),
+
+                        # Torch / flashlight  (hidden; appears if hw supports it)
+                        dbc.Button(
+                            [html.I(className="fas fa-lightbulb me-1"), "Light"],
+                            id="eval-torch-btn",
+                            color="warning", size="sm", outline=True,
+                            style={"display": "none"},
+                            title="Toggle flashlight",
+                        ),
+
+                        # Stop  (hidden until camera active)
+                        dbc.Button(
+                            [html.I(className="fas fa-stop-circle me-1"), "Stop"],
+                            id="eval-stop-btn",
+                            color="danger", size="sm", outline=True,
+                            style={"display": "none"},
+                        ),
+                    ],
+                ),
+
+            ]),  # /camera section
+
+            html.Hr(style={"margin": "10px 0"}),
+
+            # ── Recent scans log ──────────────────────────────────────
             html.Div(
-                style={"display": "flex", "justifyContent": "center", "gap": "6px"},
-                children=[
-                    # Start (visible initially)
-                    dbc.Button(
-                        [html.I(className="fas fa-camera me-1"), "Start Camera"],
-                        id="eval-start-btn",
-                        color="secondary", size="sm", outline=True,
+                [
+                    html.Small(
+                        [
+                            html.I(className="fas fa-history me-1"),
+                            "Recent Scans",
+                        ],
+                        style={
+                            "fontSize": "11px", "fontWeight": "600",
+                            "color": "#666", "display": "block",
+                            "marginBottom": "5px",
+                        },
                     ),
-                    # Flip front ↔ back (hidden until camera active)
-                    dbc.Button(
-                        [html.I(className="fas fa-sync-alt me-1"), "Flip"],
-                        id="eval-switch-btn",
-                        color="info", size="sm", outline=True,
-                        style={"display": "none"},
+                    dbc.ListGroup(
+                        id="eval-recent-scans",
+                        children=[
+                            dbc.ListGroupItem(
+                                "No scans yet",
+                                className="text-muted text-center",
+                                style={"fontSize": "11px", "padding": "6px"},
+                            )
+                        ],
+                        flush=True,
+                        style={"maxHeight": "160px", "overflowY": "auto"},
                     ),
-                    # Stop (hidden until camera active)
-                    dbc.Button(
-                        [html.I(className="fas fa-stop-circle me-1"), "Stop"],
-                        id="eval-stop-btn",
-                        color="danger", size="sm", outline=True,
-                        style={"display": "none"},
-                    ),
-                ],
+                ]
             ),
 
-        ]),
+            # ── CSS: scan-line + corner animations ────────────────────
+            html.Style("""
+                @keyframes evalScanLine {
+                    0%   { top: 2%;   opacity: 0;   }
+                    10%  { opacity: 1;               }
+                    90%  { opacity: 1;               }
+                    100% { top: 96%;  opacity: 0;   }
+                }
+                #eval-corners { display: none; }
+                #eval-video:not([style*="display: none"]) ~ #eval-corners {
+                    display: block !important;
+                }
+                /* Touch-target minimum for mobile */
+                #eval-start-btn, #eval-stop-btn,
+                #eval-switch-btn, #eval-torch-btn {
+                    min-height: 38px;
+                }
+            """),
 
-        # ── Hidden state store (facing mode + active flag) ────────
-        dcc.Store(
-            id="eval-camera-store",
-            data={"facing": "environment", "active": False},
-        ),
-
-        # ── CSS for scan-line animation ───────────────────────────
-        html.Style("""
-            @keyframes evalScan {
-                0%   { top: 0%;   opacity: 1; }
-                50%  { top: 95%;  opacity: 0.8; }
-                100% { top: 0%;   opacity: 1; }
-            }
-        """),
-
-    ], style={"padding": "10px"})
+        ],
+        style={"padding": "10px"},
+    )
 
 
 def make_form_card(card_id: str) -> html.Div:
