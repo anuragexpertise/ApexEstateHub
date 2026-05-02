@@ -52,7 +52,7 @@ def render_kpi_card(card_id: str, title: str, value: str,
         [
             # Invisible trigger button — Dash callback listens to n_clicks
             html.Button(
-                id={"type": "kpi-click", "card_id": card_id},
+                id={"type": "kpi-card-div", "card_id": card_id},
                 n_clicks=0,
                 style={"display": "none"},
             ),
