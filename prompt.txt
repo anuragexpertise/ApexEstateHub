@@ -81,79 +81,150 @@ Create visually modern UI:
 - responsive layout
 
 Use Dash Bootstrap Components.
-
+header, sidebar, navbar crumbs, content, footer. Content (KPI Cards, and Form/List Cards). KPI Cards can be rearranged by Admin-Customize
 --------------------------------------------------
 5. ROLE-BASED DASH PORTALS
-header, sidebar, navbar crumbs, content, footer. Layout can be changed by Admin-Settings
 
-Role based entities: 'master','admin', 'apartment', 'vendor', 'security'
+
+Role based entities: 'master','admin', 'apartment', 'vendor', 'security'. So Webapp would have 5 portals ('master','admin', 'apartment', 'vendor', 'security').
+Each portal has header, sidebar, navbar crumbs, content, footer.
+Header:{'Left':['Society logo, Society Name], 'Center':'Name of Portal', 'Right': ['Name of User','Avatar']}.
+Sidebar: Tabs as described, according to Portal
+Content: KPI Cards and Form Cards
+Dril-down user experience. ie Buttons/Links drill down data. eg 'Total Apartments'>>'List Apartments'>>'Apartment Profile'>>'New Reciepts' {clicking 'Total Apartments value' shifts focus to 'List Apartments Card', where double click open specific Apartment in 'Apartment Profile Card', which might have 'Pay Dues' button, which opens pre-filled 'New Reciepts Card' for paying dues. that is seamless user experience}. All List Cards to have csv download at top-right header of list. crumbs should get updated when user opens different cards.
 
 Role based content:
-# --- Layout Constants for sidebar tabs and their path_name
+# --- Layout Constants for sidebar tabs and their path_name. Side bar Tabs are pages in the portals. These pages will have KPI cards or Forms/List cards, which can drill-down data, that is focus/link to filtered List or profile card
 ROLE_CONFIG = {
     'master':{'color:'#f08843','label':'Master Portal','tabs':[
-        ('Dashboard','/master-portal','fa-th-large'),
-        ('Society','/societies', 'fa-home'),
+        ('Dashboard','/master-portal','fa-th-large',
+          'Cards':['Total Societies'{'click':'List Societies'},
+                  'Revenue from Societies':{'click':'List Societies'},
+                  'Revenue Pending':{'click':'List Societies'},
+                  'Total Apartments':{'click':'List Apartments'},
+                  'Total Vendors':{'click':'List Vendors'},
+                  'Total Security':{'click':'List Security'}]),
+        ('Society','/societies', 'fa-home',
+          'Cards':['Create New Society',
+                  'List Societies':{'links':['Update','Delete'], 'doubleclick':['Society Profile']}]),
     ]}
     'admin': {'color': '#58c1e4', 'label': 'Admin Portal', 'tabs': [
-        ('Dashboard', '/admin-portal', 'fa-th-large'),
-        ('Cashbook', '/cashbook', 'fa-book'),
+        ('Dashboard', '/admin-portal', 'fa-th-large',
+          'Cards':['Total Apartments':{'click':'List Apartments', 'filter_by':'society_ID'},
+                  'Total Vendors':{'click':'List Vendors', 'filter_by':'society_ID'},
+                  'Total Security':{'click':'List Security', 'filter_by':'society_ID'},
+                  'Total Events':{'click':'List Events', 'filter_by':'society_ID'},
+                  'Total Concerns':{'click':'List Concerns', 'filter_by':'society_ID'},
+                  'Total Gate Logs':{'click':'List Gate Logs', 'filter_by':'society_ID'},
+                  'Total Reciepts':{'click':'List Reciepts', 'filter_by':'society_ID'},
+                  'Total Expenses':{'click':'List Expenses', 'filter_by':'society_ID'},
+                  'Total Balance':{'click':'Cashbook', 'filter_by':'society_ID'}]),
+        ('Enroll', '/enroll', 'fa-user-plus',
+          'Cards':['Enroll Entity',
+                  'List Apartments':{'links':['Update','Delete'], 'doubleclick':['Apartment Profile'], 'filter_by':'society_ID'}]),
+                  'List Vendors':{'links':['Update','Delete'], 'doubleclick':['Vendor Profile'], 'filter_by':'society_ID'}]),
+                  'List Security':{'links':['Update','Delete'], 'doubleclick':['Security Profile'], 'filter_by':'society_ID'}]),
+
+        ('Cashbook', '/cashbook', 'fa-book',
+          'Cards':['Cashbook':{'links':['Accounts], 'doubleclick':['New Reciepts', 'New Expenses'], 'filter_by':'society_ID'}],
         ('Receipts', '/receipts', 'fa-file-invoice-dollar'),
-        ('Expenses', '/expenses', 'fa-wallet'),
-        ('Enroll', '/enroll', 'fa-user-plus'),
-        ('Users', '/users', 'fa-users'),
-        ('Events', '/events', 'fa-calendar-alt'),
-        ('Evaluate Pass', '/evaluate-pass', 'fa-qrcode'),
-        ('Customize', '/customize', 'fa-edit'),
-        ('Settings', '/settings', 'fa-cog'),
+          'Cards':['Receipts':{'links':['Accounts], 'doubleclick':['New Reciepts'], 'filter_by':'society_ID'}],
+        ('Expenses', '/expenses', 'fa-wallet',
+          'Cards':['Expenses':{'links':['Accounts], 'doubleclick':['New Expenses'], 'filter_by':'society_ID'}],
+        ('Events', '/events', 'fa-calendar-alt',
+          'Cards':['New Event',
+                  'List Events':{'links':['Update','Delete'], 'doubleclick':['Event Details'], 'filter_by':'society_ID'}],
+        ('Concerns', '/concerns', 'fa-calendar-alt',
+          'Cards':['New Concern',
+                  'List Concerns':{'links':['Update','Delete'], 'doubleclick':['Concern Details'], 'filter_by':'society_ID'}],
+        ('Evaluate Pass', '/evaluate-pass', 'fa-qrcode',
+          'Cards':['QR Evaluation',
+        ('Customize', '/customize', 'fa-edit',
+          'Cards':['Customize Dashboard'- drag-n-drop KPIs, 'Customize Tabs'- with drag-n-drop Forms/List Cards],
+        ('Settings', '/settings', 'fa-cog',
+          'Cards':['Accounts':{'filter_by':'society_ID'},'Fines & Charges':{'filter_by':'society_ID'}]
     ]},
     'apartment': {'color': '#90EE90', 'label': 'Owner Portal', 'tabs': [
-        ('Dashboard', '/owner-portal', 'fa-th-large'),
-        ('Cashbook', '/owner-cashbook', 'fa-book'),
-        ('Payments', '/payments', 'fa-credit-card'),
-        ('Charges', '/charges', 'fa-file-invoice'),
-        ('Events', '/owner-events', 'fa-calendar-alt'),
-        ('Settings', '/owner-settings', 'fa-cog'),
+        ('Dashboard', '/owner-portal', 'fa-th-large',
+          'Cards':['Total Apartments':{'click':'List Apartments', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Vendors':{'click':'List Vendors', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Security':{'click':'List Security', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Events':{'click':'List Events', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Concerns':{'click':'List Concerns', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Gate Logs':{'click':'List Gate Logs', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Reciepts':{'click':'List Reciepts', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Expenses':{'click':'List Expenses', 'filter_by':['society_ID', 'apartment_ID']},
+                  'Total Balance':{'click':'Cashbook', 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Cashbook', '/owner-cashbook', 'fa-book',
+          'Cards':['Cashbook':{'links':['Accounts], 'doubleclick':['New Payments'(credit), 'New Charges'(credit)], 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Payments', '/payments', 'fa-credit-card',
+          'Cards':['Payments':{'links':['Accounts], 'doubleclick':['New Payments'(credit)], 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Charges', '/charges', 'fa-file-invoice',
+          'Cards':['Charges':{'links':['Accounts], 'doubleclick':['New Charges'(credit)], 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Events', '/owner-events', 'fa-calendar-alt',
+          'Cards':['List Events':{'links':['Update','Delete'], 'doubleclick':['Event Details'], 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Concerns', '/concerns', 'fa-calendar-alt',
+          'Cards':['New Concern',
+                  'List Concerns':{'links':['Update','Delete'], 'doubleclick':['Concern Details'], 'filter_by':['society_ID', 'apartment_ID']}],
+        ('Settings', '/owner-settings', 'fa-cog',
+          'Cards':['Create Profile':{'links':['Update','Delete']}],
     ]},
     'vendor': {'color': '#FFFF00', 'label': 'Vendor Portal', 'tabs': [
-        ('Dashboard', '/vendor-portal', 'fa-th-large'),
-        ('Cashbook', '/vendor-cashbook', 'fa-book'),
-        ('Payments', '/vendor-payments', 'fa-credit-card'),
-        ('Charges', '/vendor-charges', 'fa-file-invoice'),
-        ('Events', '/vendor-events', 'fa-calendar-alt'),
-        ('Settings', '/vendor-settings', 'fa-cog'),
+        ('Dashboard', '/vendor-portal', 'fa-th-large',
+          'Cards':['Total Apartments':{'click':'List Apartments', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Events':{'click':'List Events', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Jobs Listing':{'click':'List Concerns', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Gate Logs':{'click':'List Gate Logs', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Reciepts':{'click':'List Reciepts', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Expenses':{'click':'List Expenses', 'filter_by':['society_ID', 'vendor_ID']},
+                  'Total Balance':{'click':'Cashbook', 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Cashbook', '/vendor-cashbook', 'fa-book',
+          'Cards':['Cashbook':{'links':['Accounts], 'doubleclick':['New Payments'(credit), 'New Charges'(credit)], 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Payments', '/payments', 'fa-credit-card',
+          'Cards':['Payments':{'links':['Accounts], 'doubleclick':['New Payments'(credit)], 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Charges', '/charges', 'fa-file-invoice',
+          'Cards':['Charges':{'links':['Accounts], 'doubleclick':['New Charges'(credit)], 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Events', '/vendor-events', 'fa-calendar-alt',
+          'Cards':['List Events':{'links':['Update','Delete'], 'doubleclick':['Event Details'], 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Gate Pass', '/gate-pass', 'fa-calendar-alt',
+          'Cards':['New Gate Pass',
+                  'List Gate Pass':{'doubleclick':['Gate Pass Details'], 'filter_by':['society_ID', 'vendor_ID']}],
+        ('Settings', '/vendor-settings', 'fa-cog',
+          'Cards':['Create Profile':{'links':['Update','Delete']}],
     ]},
     'security': {'color': '#F08080', 'label': 'Security Portal', 'tabs': [
-        ('Pass Evaluation', '/pass-evaluation', 'fa-qrcode'),
-        ('Attendance', '/attendance', 'fa-clock'),
+        ('Evaluate Pass', '/evaluate-pass', 'fa-qrcode',
+          'Cards':['QR Evaluation',
+        ('Attendance', '/attendance', 'fa-clock',
+          'Cards':['Clock-n-clock-out':{'click':'List Shift Logs', 'filter_by':['society_ID', 'security_ID']},]
         ('Events', '/security-events', 'fa-calendar-alt'),
-        ('New Receipt', '/security-receipt', 'fa-plus-circle'),
-        ('Users', '/security-users', 'fa-users'),
-        ('Settings', '/security-settings', 'fa-cog'),
-    ]}
+          'Cards':['List Events':{ 'doubleclick':['Event Details'], 'filter_by':['society_ID', 'security_ID']}],
+        ('New Receipt', '/security-receipt', 'fa-plus-circle',
+          'Cards':['List Reciepts':{ 'doubleclick':['Event Details'], 'filter_by':['society_ID', 'security_ID']}],
+        ('Dashboard', '/security-portal', 'fa-th-large',
+          'Cards':['Total Apartments':{'click':'List Apartments', 'filter_by':['society_ID']},
+                  'Total Vendors':{'click':'List Vendors', 'filter_by':['society_ID']},
+                  'Total Security':{'click':'List Security', 'filter_by':['society_ID']},
+                  'Total Events':{'click':'List Events', 'filter_by':['society_ID']},
+                  'Total Concerns':{'click':'List Concerns', 'filter_by':['society_ID']},
+                  'Total Gate Logs':{'click':'List Gate Logs', 'filter_by':['society_ID'},
+        ('Cashbook', '/security-cashbook', 'fa-book'),
+          'Cards':['Cashbook':{'links':['Accounts], 'doubleclick':['New Unverified Reciepts'(credit), 'Salary'(debit)], 'filter_by':['society_ID', 'security_ID']}],
+        ('Reciepts', '/payments', 'fa-credit-card'),
+          'Cards':['Payments':{'links':['Accounts], 'doubleclick':['New Unverified Reciepts'(credit), Salary(debit)], 'filter_by':['society_ID', 'security_ID']}],
+        ('Charges', '/charges', 'fa-file-invoice'),
+          'Cards':['Charges':{'links':['Accounts], 'doubleclick':['New Charges'(credit)], 'filter_by':['society_ID', 'security_ID']}],
+        ('Concerns', '/concerns', 'fa-calendar-alt'),
+          'Cards':['New Concern',
+                  'List Concerns':{'links':['Update','Delete'], 'doubleclick':['Concern Details'], 'filter_by':['society_ID', 'security_ID']}],
+        ('Settings', '/owner-settings', 'fa-cog'),
+          'Cards':['Create Profile':{'links':['Update','Delete']}],
+    ]},
 }
 
-KPI cards - fillterd to specific entity:
-      {'Societies':[('/societies-free-plan', 'fa-home'), ('/societies-paid-plan', 'fa-home'), ('/societies-total', 'fa-home')]},
-      {'Apartments': [('/apartments-with-dues','fa-home'), ('/apartments-with-no-dues','fa-home'), ('/apartments-total','fa-home')]},
-      {'Vendors': [('/vendors-with-dues','fa-person-digging'), ('/vendors-with-no-dues','fa-person-digging'), ('/apartments-total','fa-person-digging')]},
-      {'Security': [('/security-on-duty','fa-user-shield'), ('/security-off-duty','fa-user-shield'), ('/security-total','fa-user-shield')]},
-      {'Events': [('/events','fa-calendar-check'), ('/gate-logs','fa-road-barrier'), ('/concerns','fa-hand-point-up')  ]},
-      {'Cashbook': [('/reciepts','fa-reciept'), ('/payments','fa-money-bills'), ('/Balance','fa-wallet')]},
-Forms or Lists - as cards on dashboards:
-      {'Society Profile': Society parameters}, {'Create Societies':  form parameters with uploading logo, secretary_sign, login_background}, {'Societies List': Listitems with action columns 'Update'/'Delete'},
-      {'Entities Profile': Entities parameters}, {'Create Entities':  form parameters with uploading avatar}, {'Entities List': Listitems with action columns 'Update'/'Delete'},
-      {'Accounts Profile': Accounts parameters}, {'Create Accounts':  form parameters }, {'Accounts List': Listitems with action columns 'Update'/'Delete'},
-      {'Payments Profile': Payments parameters}, {'Create Trasactions':  form parameters }, {'Payments List': Listitems with action columns 'Update'/'Delete'},
-      {'Charges Profile': Charges parameters}, {'Create Charges':  form parameters }, {'Charges List': Listitems with action columns 'Update'/'Delete'},
-      {'New Reciepts': All Credits to Society}, {'New Expenses': All Debits to Society}{'Cashbook ': Both Reciepts and PAyemnts (form Society's point of view viz Reciepts (payments by entities inrespective of charges to entities) = All Credits, Payments = All Debits to Society Cashbook) Listitems with action columns 'Update'/'Delete'},
-      {'Events Profile': Events parameters}, {'Create Events':  form parameters }, {'Events List': Listitems with action columns 'Update'/'Delete'},
-      {'Gate Logs Profile': Gate Logs parameters}, {'Create Gate Logs':  form parameters }, {'Gate Logs List': Listitems with action columns 'Update'/'Delete'},
-      {'Concerns Profile': Concerns parameters}, {'Create Concerns':  form parameters }, {'Concerns List': Listitems with action columns 'Update'/'Delete'},
-      {'Evaluate Pass: camera & manual entry},
-      {'Settings- Rates & Fines': Rates/Fines for Apartments, Vendors, Security},
-      ['Customize': Drag-n-drop cards and forms on dashboards/portals]
+Note: credit/ debit is through-eyes of Society. credit = Society's Reciepts, debit = Society's Expenses
 
+List all KPIs  and Form/List Cards for Customize in admin portal only
 --------------------------------------------------
 6. QR CODE SYSTEM
 
@@ -230,6 +301,247 @@ Generate:
 - Add pagination in tables
 
 --------------------------------------------------
+13. DATA-DRIVEN UI ARCHITECTURE (CRITICAL)
+--------------------------------------------------
 
+The application MUST strictly follow a database-driven UI rendering model.
+
+13.1 ENTITY → TABLE → UI MAPPING
+
+Each UI component MUST map to a PostgreSQL table:
+
+Entity	Table Name	Primary Key	Key Relations
+Society	societies	society_id	master_id
+Apartment	apartments	apartment_id	society_id
+Vendor	vendors	vendor_id	society_id
+Security	security	security_id	society_id
+Receipts	receipts	receipt_id	society_id, apartment_id
+Expenses	expenses	expense_id	society_id
+Events	events	event_id	society_id
+Concerns	concerns	concern_id	society_id
+Gate Logs	gate_logs	log_id	society_id
+14. CARD SYSTEM DESIGN
+14.1 CARD TYPES
+1. KPI CARD
+Purpose: Aggregated numeric insights
+Data Source: SQL aggregate queries
+
+Example:
+
+SELECT COUNT(*) FROM apartments WHERE society_id = :society_id;
+2. LIST CARD
+Purpose: Tabular data display
+Data Source: SELECT queries with filters
+Features:
+Pagination
+Search
+CSV Download (MANDATORY)
+3. FORM CARD
+Purpose: Insert/Update records
+Data Source: ORM model binding
+4. PROFILE CARD
+Purpose: Single entity detailed view
+Trigger: Double-click on List Card row
+15. STANDARD CARD STRUCTURE (MANDATORY)
+
+Each card must follow this schema:
+
+Card = {
+    "id": "card_<entity>_<type>",
+    "type": "kpi | list | form | profile",
+    "table": "<db_table>",
+    "filters": [],
+    "fields": [],
+    "actions": []
+}
+16. LIST CARD SPECIFICATION
+16.1 STRUCTURE
+{
+  "id": "card_apartments_list",
+  "type": "list",
+  "table": "apartments",
+  "filters": ["society_id"],
+  "columns": [
+      {"name": "Apartment No", "field": "apartment_no"},
+      {"name": "Owner Name", "field": "owner_name"},
+      {"name": "Status", "field": "status"}
+  ],
+  "actions": ["update", "delete"],
+  "row_double_click": "card_apartment_profile",
+  "csv_download": True
+}
+16.2 CSV DOWNLOAD (MANDATORY)
+
+Top-right button:
+
+id = "btn_download_csv_<entity>"
+
+Callback:
+
+@app.callback(
+    Output("download-dataframe-csv", "data"),
+    Input("btn_download_csv_apartments", "n_clicks")
+)
+17. FORM CARD SPECIFICATION
+17.1 STRUCTURE
+{
+  "id": "card_apartment_form",
+  "type": "form",
+  "table": "apartments",
+  "fields": [
+      {"name": "Apartment No", "id": "input_apartment_no"},
+      {"name": "Owner Name", "id": "input_owner_name"},
+      {"name": "Size", "id": "input_size"}
+  ],
+  "submit_button": {
+      "id": "btn_submit_apartment",
+      "action": "insert/update"
+  }
+}
+18. PROFILE CARD SPECIFICATION
+18.1 STRUCTURE
+{
+  "id": "card_apartment_profile",
+  "type": "profile",
+  "table": "apartments",
+  "primary_key": "apartment_id",
+  "actions": [
+      {
+        "label": "Pay Dues",
+        "id": "btn_pay_dues",
+        "target": "card_receipt_form"
+      }
+  ]
+}
+19. ACTION BUTTON STANDARDIZATION
+19.1 NAMING CONVENTION
+Action	Button ID
+Create	btn_create_<entity>
+Update	btn_update_<entity>
+Delete	btn_delete_<entity>
+Submit	btn_submit_<entity>
+Pay	btn_pay_<entity>
+View	btn_view_<entity>
+19.2 ROUTING / NAVIGATION
+
+Each action must trigger:
+
+dcc.Location(id='url', refresh=False)
+
+Route format:
+
+/<portal>/<entity>/<action>
+
+Example:
+
+/admin/apartment/list
+/admin/apartment/profile/<id>
+/admin/receipts/new?apartment_id=<id>
+20. DRILL-DOWN UX ENGINE (VERY IMPORTANT)
+20.1 FLOW STANDARD
+
+Example:
+
+KPI → List → Profile → Form
+20.2 IMPLEMENTATION
+KPI CLICK
+Input("kpi_total_apartments", "n_clicks")
+→ Output("card_apartments_list", "style")
+LIST ROW DOUBLE CLICK
+Input("table_apartments", "active_cell")
+→ Load Profile Card
+PROFILE ACTION
+Input("btn_pay_dues", "n_clicks")
+→ Open receipt form with pre-filled data
+20.3 PREFILL LOGIC
+dcc.Store(id="store_selected_apartment")
+
+Used to pass context between cards.
+
+21. FILTER PROPAGATION SYSTEM
+
+Every drill-down MUST carry filters:
+
+Level	Filters
+Master	None
+Admin	society_id
+Apartment	society_id + apartment_id
+Vendor	society_id + vendor_id
+Security	society_id + security_id
+22. BREADCRUMB ENGINE
+22.1 STRUCTURE
+breadcrumb = [
+  "Dashboard",
+  "Apartments",
+  "Apartment Profile",
+  "New Receipt"
+]
+22.2 UPDATE RULE
+
+Each navigation must update breadcrumbs dynamically.
+
+Component ID:
+
+id="breadcrumb_nav"
+23. DASH CALLBACK ARCHITECTURE
+
+Use pattern-matching callbacks:
+
+MATCH = {"type": "card", "entity": ALL}
+
+Avoid hardcoding.
+
+24. SIDEBAR → PAGE → CARD RELATION
+
+Hierarchy:
+
+Sidebar Tab (Page)
+   → KPI Cards
+   → List Cards
+   → Form Cards
+   → Profile Cards (dynamic)
+25. DATABASE QUERY RULES
+25.1 LIST QUERY
+SELECT * FROM apartments
+WHERE society_id = :society_id
+ORDER BY created_at DESC
+LIMIT :limit OFFSET :offset;
+25.2 KPI QUERY
+SELECT COUNT(*) as total_apartments
+FROM apartments
+WHERE society_id = :society_id;
+26. CASHFLOW LOGIC (IMPORTANT)
+Type	Meaning
+Credit	Receipt (money to society)
+Debit	Expense (money out)
+27. ERROR HANDLING
+Show toast notifications
+Log all DB errors
+Prevent empty submissions
+28. PERFORMANCE RULES
+Use server-side pagination
+Avoid loading full tables
+Cache KPI queries
+29. ADMIN CUSTOMIZATION (MANDATORY)
+
+Admin portal must expose:
+
+29.1 KPI Registry
+
+All KPI cards stored in DB:
+
+kpi_config table
+29.2 Layout Config
+
+Drag-and-drop persisted:
+
+layout_config table
+30. FINAL UX PRINCIPLE
+
+The system MUST feel like:
+
+“Click → Filter → Focus → Act → Return”
+
+NO page reloads. Only dynamic card transitions.
 IMPORTANT:
 This is NOT a demo. Generate a REAL working SaaS MVP that can be deployed immediately.
