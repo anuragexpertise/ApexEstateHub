@@ -1,63 +1,79 @@
 # app/dash_apps/callbacks/drilldown_callbacks.py
 """
-Drill-Down UX Engine — Dash Callbacks
-======================================
-Single callback file that handles ALL drill-down navigation:
+Drill-Down UX Engine — Master Callback Router
+=============================================
+Handles ALL card navigation without page reloads:
 
-  1. KPI card click  →  navigate to list card
-  2. List row view   →  navigate to profile card
-  3. List row edit   →  navigate to form card (pre-filled)
-  4. Profile action  →  navigate to form card (pre-filled)
-  5. Breadcrumb click →  navigate back to that level
-  6. List pagination  →  re-render same list at new page
-  7. List search      →  re-render same list with filter
-  8. CSV download     →  export entity as CSV
-  9. Form submit      →  save to DB, show toast, navigate back
+  KPI click       → list card      (filtered)
+  List row view   → profile card   (with entity data)
+  List row edit   → form card      (pre-filled)
+  List row delete → delete + refresh list
+  Profile action  → form card      (pre-filled from profile)
+  Breadcrumb      → navigate back  (stack pop)
+  Pagination      → same list, new page
+  Search          → same list, filtered
+  CSV download    → streamed file
+  Form submit     → save → back → refresh list
 
-All state lives in dcc.Store(id="drilldown-store").
-The single Output is the #drill-content div.
+Store schema (id="drilldown-store"):
+{
+  "stack":       [{"card_id", "label", "filters", "prefill", "entity_pk", "entity_label"}],
+  "active_card": "list_apartments",
+  "filters":     {"society_id": 1},
+  "prefill":     {},
+  "list_pages":  {"apartments": 1},
+  "list_search": {"apartments": ""},
+  "refresh":     false
+}
 """
 
 from __future__ import annotations
-from datetime import date
+from datetime import date as dt_date
 
 import dash
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc
 import dash_bootstrap_components as dbc
 
-from app.dash_apps.drilldown import registry, state as nav_state, loaders, renderers
+from app.dash_apps.drilldown.registry import (
+    DRILLDOWN_MAP, ENTITY_MAP, PK_MAP,
+    get_pk, to_singular, to_plural, build_prefill,
+)
+from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 
 
-# ── Card metadata (which fields/columns to show per entity) ──────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# ENTITY METADATA  ─ field specs for list, profile, and form cards
+# ═══════════════════════════════════════════════════════════════════════════
 
-ENTITY_META = {
+ENTITY_META: dict = {
+
     "apartments": {
-        "list_title": "Apartments",
-        "list_icon":  "fa-home",
+        "list_title":   "Apartments",
+        "list_icon":    "fa-home",
         "list_columns": [
-            {"name": "Flat",       "field": "flat_number"},
-            {"name": "Owner",      "field": "owner_name"},
-            {"name": "Size (sqft)","field": "apartment_size"},
-            {"name": "Mobile",     "field": "mobile"},
-            {"name": "Dues (₹)",   "field": "pending_dues"},
-            {"name": "Active",     "field": "active"},
+            {"name": "Flat",        "field": "flat_number"},
+            {"name": "Owner",       "field": "owner_name"},
+            {"name": "Area (sqft)", "field": "apartment_size"},
+            {"name": "Mobile",      "field": "mobile"},
+            {"name": "Dues (₹)",    "field": "pending_dues"},
+            {"name": "Active",      "field": "active"},
         ],
         "profile_title":  "Apartment Profile",
         "profile_icon":   "fa-home",
-        "profile_color":  "#1d74d8",
+        "profile_color":  "#1859b8",
         "profile_fields": [
-            {"label": "Flat Number",   "field": "flat_number",    "icon": "fa-hashtag"},
-            {"label": "Owner Name",    "field": "owner_name",     "icon": "fa-user"},
-            {"label": "Mobile",        "field": "mobile",         "icon": "fa-phone"},
-            {"label": "Area (sq ft)",  "field": "apartment_size", "icon": "fa-ruler"},
-            {"label": "Pending Dues",  "field": "pending_dues",   "icon": "fa-rupee-sign"},
-            {"label": "Active",        "field": "active",         "icon": "fa-circle-check"},
+            {"label": "Flat Number",  "field": "flat_number",    "icon": "fa-hashtag"},
+            {"label": "Owner Name",   "field": "owner_name",     "icon": "fa-user"},
+            {"label": "Mobile",       "field": "mobile",         "icon": "fa-phone"},
+            {"label": "Area (sq ft)", "field": "apartment_size", "icon": "fa-ruler-combined"},
+            {"label": "Pending Dues", "field": "pending_dues",   "icon": "fa-rupee-sign"},
+            {"label": "Status",       "field": "active",         "icon": "fa-circle-dot"},
         ],
         "profile_actions": [
-            {"label": "Pay Dues",   "action_id": "pay_dues",    "target_card": "form_receipt_new",  "icon": "fa-rupee-sign", "color": "success"},
-            {"label": "Gate Pass",  "action_id": "gate_pass",   "target_card": "form_gate_pass_new","icon": "fa-qrcode",     "color": "info"},
-            {"label": "Concern",    "action_id": "new_concern", "target_card": "form_concern_new",  "icon": "fa-comment",    "color": "warning"},
-            {"label": "Edit",       "action_id": "edit",        "target_card": "form_apartment_edit","icon": "fa-edit",      "color": "secondary"},
+            {"label": "Pay Dues",    "action_id": "pay_dues",    "target_card": "form_receipt_new",    "icon": "fa-rupee-sign",  "color": "success"},
+            {"label": "Gate Pass",   "action_id": "gate_pass",   "target_card": "form_gate_log_new",   "icon": "fa-qrcode",      "color": "info"},
+            {"label": "Raise Issue", "action_id": "new_concern", "target_card": "form_concern_new",    "icon": "fa-comment-alt", "color": "warning"},
+            {"label": "Edit",        "action_id": "edit",        "target_card": "form_apartment_edit", "icon": "fa-edit",        "color": "secondary"},
         ],
         "form_fields": {
             "new": [
@@ -71,20 +87,19 @@ ENTITY_META = {
                 {"id": "owner_name",     "label": "Owner Name",     "type": "text"},
                 {"id": "mobile",         "label": "Mobile",         "type": "text"},
                 {"id": "apartment_size", "label": "Area (sq ft)",   "type": "number"},
-                {"id": "active",         "label": "Active",         "type": "select", "options": ["true","false"]},
+                {"id": "active",         "label": "Active",         "type": "select", "options": ["true", "false"]},
             ],
         },
     },
 
     "vendors": {
-        "list_title": "Vendors",
-        "list_icon":  "fa-person-digging",
+        "list_title":   "Vendors",
+        "list_icon":    "fa-person-digging",
         "list_columns": [
-            {"name": "Name",         "field": "name"},
-            {"name": "Email",        "field": "email"},
-            {"name": "Service",      "field": "service_type"},
-            {"name": "Mobile",       "field": "mobile"},
-            {"name": "Dues (₹)",     "field": "pending_dues"},
+            {"name": "Name",        "field": "name"},
+            {"name": "Email",       "field": "email"},
+            {"name": "Service",     "field": "service_type"},
+            {"name": "Dues (₹)",    "field": "pending_dues"},
         ],
         "profile_title":  "Vendor Profile",
         "profile_icon":   "fa-person-digging",
@@ -94,17 +109,73 @@ ENTITY_META = {
             {"label": "Email",        "field": "email",        "icon": "fa-envelope"},
             {"label": "Service Type", "field": "service_type", "icon": "fa-wrench"},
             {"label": "Mobile",       "field": "mobile",       "icon": "fa-phone"},
+            {"label": "Pending Dues", "field": "pending_dues", "icon": "fa-rupee-sign"},
         ],
         "profile_actions": [
-            {"label": "Pay",      "action_id": "pay",  "target_card": "form_receipt_new", "icon": "fa-rupee-sign", "color": "success"},
-            {"label": "Gate Pass","action_id": "gate_pass","target_card": "form_gate_pass_new","icon": "fa-qrcode","color": "info"},
+            {"label": "Receive Payment", "action_id": "pay",       "target_card": "form_receipt_new",  "icon": "fa-rupee-sign", "color": "success"},
+            {"label": "Gate Pass",       "action_id": "gate_pass", "target_card": "form_gate_log_new", "icon": "fa-qrcode",     "color": "info"},
+            {"label": "Edit",            "action_id": "edit",      "target_card": "form_vendor_edit",  "icon": "fa-edit",       "color": "secondary"},
         ],
-        "form_fields": {"new": []},
+        "form_fields": {
+            "new": [
+                {"id": "email",        "label": "Login Email",    "type": "email",  "required": True},
+                {"id": "name",         "label": "Business Name",  "type": "text",   "required": True},
+                {"id": "service_type", "label": "Service Type",   "type": "text"},
+                {"id": "mobile",       "label": "Mobile",         "type": "text"},
+                {"id": "password",     "label": "Password",       "type": "password", "required": True},
+            ],
+            "edit": [
+                {"id": "email",        "label": "Email",          "type": "readonly"},
+                {"id": "name",         "label": "Business Name",  "type": "text"},
+                {"id": "service_type", "label": "Service Type",   "type": "text"},
+                {"id": "mobile",       "label": "Mobile",         "type": "text"},
+            ],
+        },
+    },
+
+    "security": {
+        "list_title":   "Security Staff",
+        "list_icon":    "fa-user-shield",
+        "list_columns": [
+            {"name": "Name",   "field": "name"},
+            {"name": "Email",  "field": "email"},
+            {"name": "Shift",  "field": "shift"},
+            {"name": "Mobile", "field": "mobile"},
+            {"name": "Active", "field": "active"},
+        ],
+        "profile_title":  "Security Profile",
+        "profile_icon":   "fa-user-shield",
+        "profile_color":  "#b63b3b",
+        "profile_fields": [
+            {"label": "Name",   "field": "name",   "icon": "fa-user"},
+            {"label": "Email",  "field": "email",  "icon": "fa-envelope"},
+            {"label": "Shift",  "field": "shift",  "icon": "fa-clock"},
+            {"label": "Mobile", "field": "mobile", "icon": "fa-phone"},
+            {"label": "Active", "field": "active", "icon": "fa-circle-dot"},
+        ],
+        "profile_actions": [
+            {"label": "Edit", "action_id": "edit", "target_card": "form_security_edit", "icon": "fa-edit", "color": "secondary"},
+        ],
+        "form_fields": {
+            "new": [
+                {"id": "email",    "label": "Login Email", "type": "email",    "required": True},
+                {"id": "name",     "label": "Full Name",   "type": "text",     "required": True},
+                {"id": "mobile",   "label": "Mobile",      "type": "text"},
+                {"id": "shift",    "label": "Shift",       "type": "select",   "options": ["morning", "evening", "night", "rotating"]},
+                {"id": "password", "label": "Password",    "type": "password", "required": True},
+            ],
+            "edit": [
+                {"id": "email",  "label": "Email",  "type": "readonly"},
+                {"id": "name",   "label": "Name",   "type": "text"},
+                {"id": "mobile", "label": "Mobile", "type": "text"},
+                {"id": "shift",  "label": "Shift",  "type": "select", "options": ["morning", "evening", "night", "rotating"]},
+            ],
+        },
     },
 
     "events": {
-        "list_title": "Events",
-        "list_icon":  "fa-calendar-check",
+        "list_title":   "Events",
+        "list_icon":    "fa-calendar-check",
         "list_columns": [
             {"name": "Date",    "field": "event_date"},
             {"name": "Title",   "field": "title"},
@@ -123,40 +194,46 @@ ENTITY_META = {
             {"label": "Description", "field": "description", "icon": "fa-align-left"},
         ],
         "profile_actions": [
-            {"label": "Edit",   "action_id": "edit",   "target_card": "form_event_edit",  "icon": "fa-edit",  "color": "primary"},
-            {"label": "Delete", "action_id": "delete", "target_card": "",                  "icon": "fa-trash", "color": "danger"},
+            {"label": "Edit", "action_id": "edit", "target_card": "form_event_edit", "icon": "fa-edit", "color": "primary"},
         ],
         "form_fields": {
             "new": [
-                {"id": "title",       "label": "Title",        "type": "text",   "required": True},
-                {"id": "description", "label": "Description",  "type": "textarea"},
-                {"id": "event_date",  "label": "Event Date",   "type": "date",   "required": True},
-                {"id": "event_time",  "label": "Time",         "type": "text"},
-                {"id": "venue",       "label": "Venue",        "type": "text"},
-                {"id": "open_to",     "label": "Open To",      "type": "select",
-                 "options": ["all", "apartment", "vendor", "security"]},
-            ]
+                {"id": "title",       "label": "Title",       "type": "text",     "required": True},
+                {"id": "event_date",  "label": "Event Date",  "type": "date",     "required": True},
+                {"id": "event_time",  "label": "Time",        "type": "text"},
+                {"id": "venue",       "label": "Venue",       "type": "text"},
+                {"id": "open_to",     "label": "Open To",     "type": "select",   "options": ["all", "apartment", "vendor", "security"]},
+                {"id": "description", "label": "Description", "type": "textarea"},
+            ],
+            "edit": [
+                {"id": "title",       "label": "Title",       "type": "text"},
+                {"id": "event_date",  "label": "Event Date",  "type": "date"},
+                {"id": "event_time",  "label": "Time",        "type": "text"},
+                {"id": "venue",       "label": "Venue",       "type": "text"},
+                {"id": "open_to",     "label": "Open To",     "type": "select",   "options": ["all", "apartment", "vendor", "security"]},
+                {"id": "description", "label": "Description", "type": "textarea"},
+            ],
         },
     },
 
     "concerns": {
-        "list_title": "Concerns",
-        "list_icon":  "fa-hand-point-up",
+        "list_title":   "Concerns",
+        "list_icon":    "fa-hand-point-up",
         "list_columns": [
-            {"name": "Flat",   "field": "flat_no"},
-            {"name": "Type",   "field": "concern_type"},
-            {"name": "Status", "field": "status"},
+            {"name": "Flat",     "field": "flat_no"},
+            {"name": "Type",     "field": "concern_type"},
+            {"name": "Status",   "field": "status"},
             {"name": "Assigned", "field": "assigned_to"},
         ],
         "profile_title":  "Concern Details",
         "profile_icon":   "fa-hand-point-up",
         "profile_color":  "#de5c52",
         "profile_fields": [
-            {"label": "Flat",        "field": "flat_no",       "icon": "fa-home"},
+            {"label": "Flat No",     "field": "flat_no",       "icon": "fa-home"},
             {"label": "Type",        "field": "concern_type",  "icon": "fa-tag"},
             {"label": "Description", "field": "description",   "icon": "fa-align-left"},
             {"label": "Status",      "field": "status",        "icon": "fa-circle-dot"},
-            {"label": "Assigned To", "field": "assigned_to",   "icon": "fa-user"},
+            {"label": "Assigned To", "field": "assigned_to",   "icon": "fa-user-check"},
             {"label": "Raised On",   "field": "created_at",    "icon": "fa-calendar"},
         ],
         "profile_actions": [
@@ -165,25 +242,28 @@ ENTITY_META = {
         ],
         "form_fields": {
             "new": [
-                {"id": "flat_no",      "label": "Flat No",      "type": "text"},
-                {"id": "concern_type", "label": "Type",         "type": "select",
-                 "options": ["plumbing","electrical","cleaning","security","other"]},
-                {"id": "description",  "label": "Description",  "type": "textarea", "required": True},
-                {"id": "preferred_time","label": "Preferred Time","type": "select",
-                 "options": ["morning","afternoon","evening","anytime"]},
+                {"id": "flat_no",       "label": "Flat No",       "type": "text"},
+                {"id": "concern_type",  "label": "Type",          "type": "select", "options": ["plumbing", "electrical", "cleaning", "security", "other"]},
+                {"id": "description",   "label": "Description",   "type": "textarea", "required": True},
+                {"id": "preferred_time","label": "Preferred Time","type": "select", "options": ["morning", "afternoon", "evening", "anytime"]},
+            ],
+            "edit": [
+                {"id": "flat_no",      "label": "Flat No",    "type": "readonly"},
+                {"id": "status",       "label": "Status",     "type": "select", "options": ["open", "in_progress", "resolved", "closed"]},
+                {"id": "assigned_to",  "label": "Assigned To","type": "text"},
             ],
         },
     },
 
     "gate_logs": {
-        "list_title": "Gate Logs",
-        "list_icon":  "fa-road-barrier",
+        "list_title":   "Gate Logs",
+        "list_icon":    "fa-road-barrier",
         "list_columns": [
-            {"name": "Time In",   "field": "time_in"},
-            {"name": "Time Out",  "field": "time_out"},
-            {"name": "Role",      "field": "role"},
-            {"name": "Entity",    "field": "entity_id"},
-            {"name": "Hours",     "field": "hours"},
+            {"name": "Time In",  "field": "time_in"},
+            {"name": "Time Out", "field": "time_out"},
+            {"name": "Role",     "field": "role"},
+            {"name": "Entity",   "field": "entity_id"},
+            {"name": "Hours",    "field": "hours"},
         ],
         "profile_title":  "Gate Log Details",
         "profile_icon":   "fa-road-barrier",
@@ -195,42 +275,100 @@ ENTITY_META = {
             {"label": "Entity ID", "field": "entity_id", "icon": "fa-id-badge"},
         ],
         "profile_actions": [],
-        "form_fields": {"new": []},
+        "form_fields": {
+            "new": [
+                {"id": "entity_id", "label": "Entity ID",    "type": "number", "required": True},
+                {"id": "role",      "label": "Role",         "type": "select", "options": ["a", "v", "s"]},
+            ],
+        },
     },
 
     "receipts": {
-        "list_title": "Receipts",
-        "list_icon":  "fa-receipt",
+        "list_title":   "Receipts",
+        "list_icon":    "fa-receipt",
         "list_columns": [
-            {"name": "Date",         "field": "trx_date"},
-            {"name": "Particulars",  "field": "acc_particulars"},
-            {"name": "Amount (₹)",   "field": "amount"},
-            {"name": "Mode",         "field": "mode"},
+            {"name": "Date",        "field": "trx_date"},
+            {"name": "Particulars", "field": "acc_particulars"},
+            {"name": "Amount (₹)",  "field": "amount"},
+            {"name": "Mode",        "field": "mode"},
         ],
         "profile_title":  "Receipt Details",
         "profile_icon":   "fa-receipt",
         "profile_color":  "#17976e",
         "profile_fields": [
-            {"label": "Date",        "field": "trx_date",       "icon": "fa-calendar"},
-            {"label": "Particulars", "field": "acc_particulars","icon": "fa-align-left"},
-            {"label": "Amount",      "field": "amount",         "icon": "fa-rupee-sign"},
-            {"label": "Mode",        "field": "mode",           "icon": "fa-credit-card"},
+            {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
+            {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
+            {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
+            {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
+            {"label": "Status",     "field": "status",          "icon": "fa-circle-dot"},
         ],
         "profile_actions": [],
         "form_fields": {
             "new": [
-                {"id": "trx_date",       "label": "Date",         "type": "date"},
-                {"id": "acc_particulars","label": "Particulars",  "type": "text",   "required": True},
-                {"id": "amount",         "label": "Amount (₹)",   "type": "number", "required": True},
-                {"id": "mode",           "label": "Mode",         "type": "select",
-                 "options": ["cash","upi","card","bank","cheque"]},
+                {"id": "trx_date",        "label": "Date",         "type": "date"},
+                {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
+                {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
+                {"id": "mode",            "label": "Mode",         "type": "select", "options": ["cash", "upi", "card", "bank", "cheque"]},
             ],
         },
     },
 
+    "expenses": {
+        "list_title":   "Expenses",
+        "list_icon":    "fa-wallet",
+        "list_columns": [
+            {"name": "Date",        "field": "trx_date"},
+            {"name": "Particulars", "field": "acc_particulars"},
+            {"name": "Amount (₹)",  "field": "amount"},
+            {"name": "Mode",        "field": "mode"},
+        ],
+        "profile_title":  "Expense Details",
+        "profile_icon":   "fa-wallet",
+        "profile_color":  "#e59620",
+        "profile_fields": [
+            {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
+            {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
+            {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
+            {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
+        ],
+        "profile_actions": [],
+        "form_fields": {
+            "new": [
+                {"id": "trx_date",        "label": "Date",         "type": "date"},
+                {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
+                {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
+                {"id": "mode",            "label": "Mode",         "type": "select", "options": ["cash", "upi", "card", "bank", "cheque"]},
+            ],
+        },
+    },
+
+    "cashbook": {
+        "list_title":   "Cashbook",
+        "list_icon":    "fa-book",
+        "list_columns": [
+            {"name": "Date",        "field": "trx_date"},
+            {"name": "Particulars", "field": "acc_particulars"},
+            {"name": "Amount (₹)",  "field": "amount"},
+            {"name": "Mode",        "field": "mode"},
+            {"name": "Status",      "field": "status"},
+        ],
+        "profile_title":  "Transaction Details",
+        "profile_icon":   "fa-book",
+        "profile_color":  "#2c3e50",
+        "profile_fields": [
+            {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
+            {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
+            {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
+            {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
+            {"label": "Status",     "field": "status",          "icon": "fa-circle-dot"},
+        ],
+        "profile_actions": [],
+        "form_fields": {"new": []},
+    },
+
     "societies": {
-        "list_title": "Societies",
-        "list_icon":  "fa-building",
+        "list_title":   "Societies",
+        "list_icon":    "fa-building",
         "list_columns": [
             {"name": "Name",    "field": "name"},
             {"name": "Email",   "field": "email"},
@@ -249,298 +387,324 @@ ENTITY_META = {
             {"label": "Address", "field": "address", "icon": "fa-location-dot"},
         ],
         "profile_actions": [
-            {"label": "Edit",   "action_id": "edit",   "target_card": "form_society_edit", "icon": "fa-edit",  "color": "primary"},
-            {"label": "Delete", "action_id": "delete", "target_card": "",                   "icon": "fa-trash", "color": "danger"},
+            {"label": "Edit", "action_id": "edit", "target_card": "form_society_edit", "icon": "fa-edit", "color": "primary"},
         ],
-        "form_fields": {"new": []},
+        "form_fields": {
+            "new": [
+                {"id": "name",          "label": "Society Name",     "type": "text",  "required": True},
+                {"id": "email",         "label": "Email",            "type": "email"},
+                {"id": "phone",         "label": "Phone",            "type": "text"},
+                {"id": "address",       "label": "Address",          "type": "textarea"},
+                {"id": "plan",          "label": "Plan",             "type": "select", "options": ["Free", "Paid"]},
+                {"id": "admin_email",   "label": "Admin Email *",    "type": "email", "required": True},
+                {"id": "admin_password","label": "Admin Password *", "type": "password", "required": True},
+            ],
+            "edit": [
+                {"id": "name",    "label": "Society Name", "type": "text"},
+                {"id": "email",   "label": "Email",        "type": "email"},
+                {"id": "phone",   "label": "Phone",        "type": "text"},
+                {"id": "address", "label": "Address",      "type": "textarea"},
+                {"id": "plan",    "label": "Plan",         "type": "select", "options": ["Free", "Paid"]},
+            ],
+        },
+    },
+
+    "accounts": {
+        "list_title":   "Accounts",
+        "list_icon":    "fa-book-open",
+        "list_columns": [
+            {"name": "Code",    "field": "name"},
+            {"name": "Group",   "field": "tab_name"},
+            {"name": "Dr/Cr",   "field": "drcr_account"},
+            {"name": "Opening", "field": "bf_amount"},
+        ],
+        "profile_title":  "Account Details",
+        "profile_icon":   "fa-book-open",
+        "profile_color":  "#6c5ce7",
+        "profile_fields": [
+            {"label": "Account Code", "field": "name",         "icon": "fa-hashtag"},
+            {"label": "Group",        "field": "tab_name",     "icon": "fa-folder"},
+            {"label": "Header",       "field": "header",       "icon": "fa-heading"},
+            {"label": "Dr / Cr",      "field": "drcr_account", "icon": "fa-exchange-alt"},
+            {"label": "Opening Bal",  "field": "bf_amount",    "icon": "fa-rupee-sign"},
+        ],
+        "profile_actions": [],
+        "form_fields": {
+            "new": [
+                {"id": "name",         "label": "Account Code",   "type": "text", "required": True},
+                {"id": "tab_name",     "label": "Group / Tab",    "type": "text"},
+                {"id": "drcr_account", "label": "Dr / Cr",        "type": "select", "options": ["Dr", "Cr"]},
+                {"id": "bf_amount",    "label": "Opening Balance", "type": "number"},
+                {"id": "bf_type",      "label": "Opening Type",   "type": "select", "options": ["Dr", "Cr"]},
+            ],
+        },
     },
 }
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# REGISTER
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# REGISTER ALL DRILLDOWN CALLBACKS
+# ═══════════════════════════════════════════════════════════════════════════
 
 def register_drilldown_callbacks(app):
 
-    # ── 1. Main drill-down router ──────────────────────────────────────────
+    # ── 1. MAIN ROUTER — handles all navigation events ─────────────────────
     @app.callback(
         Output("drilldown-store",  "data"),
         Output("drill-content",    "children"),
         Output("drill-breadcrumb", "children"),
 
-        # KPI click
-        Input({"type": "kpi-card-div", "card_id": ALL}, "n_clicks"),
-        # List row actions
-        Input({"type": "list-row-view",   "entity": ALL, "pk": ALL}, "n_clicks"),
-        Input({"type": "list-row-edit",   "entity": ALL, "pk": ALL}, "n_clicks"),
-        # Profile actions
+        Input({"type": "kpi-card-div",    "card_id": ALL},              "n_clicks"),
+        Input({"type": "list-row-view",   "entity": ALL, "pk": ALL},    "n_clicks"),
+        Input({"type": "list-row-edit",   "entity": ALL, "pk": ALL},    "n_clicks"),
+        Input({"type": "list-row-delete", "entity": ALL, "pk": ALL},    "n_clicks"),
         Input({"type": "profile-action",  "entity": ALL, "pk": ALL,
-               "action": ALL, "target": ALL}, "n_clicks"),
-        # Breadcrumb back
-        Input({"type": "breadcrumb-click","index": ALL}, "n_clicks"),
-        # Pagination
-        Input({"type": "list-page-prev",  "entity": ALL}, "n_clicks"),
-        Input({"type": "list-page-next",  "entity": ALL}, "n_clicks"),
-        # Search
-        Input({"type": "list-search",     "entity": ALL}, "value"),
-        # Create button on list
-        Input({"type": "btn-list-create", "entity": ALL, "target": ALL}, "n_clicks"),
+               "action": ALL, "target": ALL},                            "n_clicks"),
+        Input({"type": "breadcrumb-click","index": ALL},                 "n_clicks"),
+        Input({"type": "list-page-prev",  "entity": ALL},               "n_clicks"),
+        Input({"type": "list-page-next",  "entity": ALL},               "n_clicks"),
+        Input({"type": "list-search",     "entity": ALL},               "value"),
+        Input({"type": "btn-list-create", "entity": ALL, "target": ALL},"n_clicks"),
 
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
         prevent_initial_call=True,
     )
     def route_drilldown(*args):
-        """
-        Single callback that handles every drill-down navigation event.
-        Returns updated store + rendered content + breadcrumb.
-        """
-        ctx = dash.callback_context
+        ctx      = dash.callback_context
+        store    = args[-2] or {}
+        auth     = args[-1] or {}
+        role     = auth.get("role", "admin")
+        sid      = auth.get("society_id")
+
         if not ctx.triggered:
             return no_update, no_update, no_update
 
-        trig     = ctx.triggered[0]
-        prop_id  = trig["prop_id"]
-        trig_val = trig["value"]
-
-        # Ignore zero-click fires
-        if trig_val is None or trig_val == 0:
+        trig = ctx.triggered[0]
+        if not trig["value"]:
             return no_update, no_update, no_update
 
-        # Last two positional args are State values
-        store     = args[-2] or {}
-        auth_data = args[-1] or {}
-
-        role       = auth_data.get("role", "admin")
-        society_id = auth_data.get("society_id")
-
+        # Init store if empty
         if not store.get("stack"):
-            store = nav_state.initial_state(role, society_id)
+            store = nav_state.initial_state(role, sid)
 
         try:
-            import json
-            id_dict = json.loads(prop_id.split(".")[0])
+            import json as _json
+            id_dict = _json.loads(trig["prop_id"].split(".")[0])
         except Exception:
             return no_update, no_update, no_update
 
         trig_type = id_dict.get("type", "")
 
-        # ── KPI click → navigate to list ──────────────────────────────────
+        # ── KPI click → list ───────────────────────────────────────────────
         if trig_type == "kpi-card-div":
             card_id  = id_dict.get("card_id", "")
-            nav_info = registry.DRILLDOWN_MAP.get(card_id, {})
+            nav_info = DRILLDOWN_MAP.get(card_id, {})
             target   = nav_info.get("target")
             if not target:
                 return no_update, no_update, no_update
-            label    = nav_info.get("label", target)
-            filters  = nav_info.get("filter", {})
-            store    = nav_state.navigate_to(store, target, label, filters=filters)
+            store = nav_state.navigate_to(
+                store, target,
+                nav_info.get("label", target),
+                filters=nav_info.get("filter", {}),
+            )
 
-        # ── List row view → navigate to profile ───────────────────────────
+        # ── List row VIEW → profile ────────────────────────────────────────
         elif trig_type == "list-row-view":
-            entity   = id_dict.get("entity")
+            entity   = id_dict.get("entity")       # PLURAL
             pk       = id_dict.get("pk")
-            meta     = ENTITY_META.get(entity, {})
-            target   = f"profile_{entity.rstrip('s')}"   # apartments → profile_apartment
-            record   = loaders.load_profile(entity.rstrip("s"), pk, society_id)
+            singular = to_singular(entity)
+            record   = loaders.load_profile(singular, pk, sid)
             if not record:
                 return no_update, no_update, no_update
-            pk_label = _entity_label(entity, record)
-            store    = nav_state.navigate_to(store, target, meta.get("profile_title", target),
-                                              entity_pk=pk, entity_label=pk_label)
+            meta   = ENTITY_META.get(entity, {})
+            target = f"profile_{singular}"
+            store  = nav_state.navigate_to(
+                store, target,
+                meta.get("profile_title", singular.title()),
+                entity_pk=pk,
+                entity_label=_label_for(entity, record),
+            )
 
-        # ── List row edit → navigate to form (pre-filled) ─────────────────
+        # ── List row EDIT → pre-filled form ───────────────────────────────
         elif trig_type == "list-row-edit":
-            entity  = id_dict.get("entity")
-            pk      = id_dict.get("pk")
-            target  = f"form_{entity.rstrip('s')}_edit"
-            record  = loaders.load_profile(entity.rstrip("s"), pk, society_id)
+            entity   = id_dict.get("entity")       # PLURAL
+            pk       = id_dict.get("pk")
+            singular = to_singular(entity)
+            record   = loaders.load_profile(singular, pk, sid)
             if not record:
                 return no_update, no_update, no_update
-            store   = nav_state.navigate_to(store, target, f"Edit {entity.title().rstrip('s')}",
-                                             prefill=record, entity_pk=pk)
+            target = f"form_{singular}_edit"
+            store  = nav_state.navigate_to(
+                store, target,
+                f"Edit {singular.replace('_',' ').title()}",
+                prefill=record, entity_pk=pk,
+            )
 
-        # ── Profile action → form (pre-filled) ────────────────────────────
+        # ── List row DELETE → delete + refresh ────────────────────────────
+        elif trig_type == "list-row-delete":
+            entity = id_dict.get("entity")         # PLURAL
+            pk     = id_dict.get("pk")
+            ok, msg = loaders.delete_entity(entity, pk, sid)
+            store["refresh"] = True                # signal re-render of list
+            content, bc = _render_current(store, auth)
+            store["refresh"] = False
+            return store, content, bc
+
+        # ── Profile ACTION → pre-filled form ──────────────────────────────
         elif trig_type == "profile-action":
-            entity  = id_dict.get("entity")
-            pk      = id_dict.get("pk")
-            action  = id_dict.get("action")
-            target  = id_dict.get("target")
+            entity   = id_dict.get("entity")       # SINGULAR (from profile card)
+            pk       = id_dict.get("pk")
+            action   = id_dict.get("action")
+            target   = id_dict.get("target")
             if not target:
                 return no_update, no_update, no_update
 
-            # Fetch current record for prefill
-            record  = loaders.load_profile(entity.rstrip("s"), pk, society_id) or {}
-
-            # Get prefill map from registry
-            pmap    = (registry.DRILLDOWN_MAP
+            record  = loaders.load_profile(entity, pk, sid) or {}
+            pmap    = (DRILLDOWN_MAP
                        .get(f"profile_{entity}", {})
                        .get("actions", {})
                        .get(action, {})
                        .get("prefill", {}))
-            prefill = registry.build_prefill(record, pmap) if pmap else record
+            prefill = build_prefill(record, pmap) if pmap else dict(record)
+            store   = nav_state.navigate_to(
+                store, target,
+                action.replace("_", " ").title(),
+                prefill=prefill, entity_pk=pk,
+            )
 
-            # Inject status for concern resolve/assign
-            if entity == "concern" and action == "resolve":
-                prefill["status"] = "resolved"
-            elif entity == "concern" and action == "assign":
-                prefill["status"] = "in_progress"
-
-            store   = nav_state.navigate_to(store, target,
-                                             action.replace("_", " ").title(),
-                                             prefill=prefill, entity_pk=pk)
-
-        # ── Breadcrumb click → navigate back ──────────────────────────────
+        # ── Breadcrumb BACK ────────────────────────────────────────────────
         elif trig_type == "breadcrumb-click":
-            idx   = id_dict.get("index", 0)
-            store = nav_state.navigate_back(store, idx)
+            store = nav_state.navigate_back(store, id_dict.get("index", 0))
 
-        # ── List pagination ────────────────────────────────────────────────
+        # ── Pagination PREV / NEXT ─────────────────────────────────────────
         elif trig_type in ("list-page-prev", "list-page-next"):
-            entity      = id_dict.get("entity")
-            current_page = store.get("list_pages", {}).get(entity, 1)
-            new_page    = current_page + (1 if trig_type == "list-page-next" else -1)
-            if not store.get("list_pages"):
-                store["list_pages"] = {}
-            store["list_pages"][entity] = max(1, new_page)
+            entity = id_dict.get("entity")
+            pages  = store.setdefault("list_pages", {})
+            cur    = pages.get(entity, 1)
+            pages[entity] = max(1, cur + (1 if trig_type == "list-page-next" else -1))
 
-        # ── List search ───────────────────────────────────────────────────
+        # ── List SEARCH ────────────────────────────────────────────────────
         elif trig_type == "list-search":
             entity = id_dict.get("entity")
-            if not store.get("list_search"):
-                store["list_search"] = {}
-            store["list_search"][entity] = trig_val or ""
-            # Reset page on search
-            if not store.get("list_pages"):
-                store["list_pages"] = {}
-            store["list_pages"][entity] = 1
+            store.setdefault("list_search", {})[entity] = trig["value"] or ""
+            store.setdefault("list_pages",  {})[entity] = 1  # reset page
 
-        # ── Create button → new form ──────────────────────────────────────
+        # ── Create NEW entity ──────────────────────────────────────────────
         elif trig_type == "btn-list-create":
-            entity = id_dict.get("entity")
-            target = id_dict.get("target") or f"form_{entity.rstrip('s')}_new"
-            store  = nav_state.navigate_to(store, target, f"New {entity.title().rstrip('s')}",
-                                            prefill={})
+            entity  = id_dict.get("entity")        # PLURAL
+            target  = id_dict.get("target") or f"form_{to_singular(entity)}_new"
+            store   = nav_state.navigate_to(store, target,
+                                             f"New {to_singular(entity).replace('_',' ').title()}",
+                                             prefill={})
 
-        # ── Render ────────────────────────────────────────────────────────
-        content, breadcrumb = _render_current(store, auth_data)
-        return store, content, breadcrumb
+        content, bc = _render_current(store, auth)
+        return store, content, bc
 
-    # ── 2. Form submit ────────────────────────────────────────────────────
+    # ── 2. FORM SUBMIT → save → back → refresh ─────────────────────────────
     @app.callback(
-        Output("drilldown-store",  "data",  allow_duplicate=True),
+        Output("drilldown-store",  "data",     allow_duplicate=True),
         Output("drill-content",    "children", allow_duplicate=True),
         Output("drill-breadcrumb", "children", allow_duplicate=True),
-        Output("toast-store",      "data",  allow_duplicate=True),
+        Output("toast-store",      "data",     allow_duplicate=True),
+
         Input({"type": "form-submit", "entity": ALL, "card_id": ALL}, "n_clicks"),
-        State({"type": "form-field", "entity": ALL, "field": ALL}, "value"),
+        State({"type": "form-field",  "entity": ALL, "field": ALL},   "value"),
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
         prevent_initial_call=True,
     )
-    def handle_form_submit(n_clicks_list, field_values, store, auth_data):
+    def handle_form_submit(n_clicks_list, _field_vals, store, auth):
         ctx = dash.callback_context
-        if not ctx.triggered:
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
-        if not trig["value"]:
-            return no_update, no_update, no_update, no_update
-
         try:
-            import json
-            id_dict = json.loads(trig["prop_id"].split(".")[0])
+            import json as _json
+            id_dict = _json.loads(trig["prop_id"].split(".")[0])
         except Exception:
             return no_update, no_update, no_update, no_update
 
-        entity  = id_dict.get("entity")
-        card_id = id_dict.get("card_id", "")
-        society_id = (auth_data or {}).get("society_id")
+        entity_singular = id_dict.get("entity")   # SINGULAR
+        card_id         = id_dict.get("card_id", "")
+        sid             = (auth or {}).get("society_id")
 
-        # Collect field values
-        inputs_raw = ctx.inputs
-        form_data  = {}
-        for key, val in inputs_raw.items():
+        # Collect all form-field values for this entity
+        form_data: dict = {}
+        for key, val in ctx.inputs.items():
             if '"type":"form-field"' in key or '"type": "form-field"' in key:
                 try:
-                    k_dict = json.loads(key.split(".")[0])
-                    if k_dict.get("entity") == entity:
+                    k_dict = _json.loads(key.split(".")[0])
+                    if k_dict.get("entity") == entity_singular:
                         form_data[k_dict.get("field")] = val
                 except Exception:
                     pass
 
-        form_data["society_id"] = society_id
+        # Merge pre-fill (carries hidden IDs like apartment_id)
+        prefill   = nav_state.get_prefill(store or {})
+        form_data = {**prefill, **{k: v for k, v in form_data.items() if v not in (None, "")}}
+        form_data["society_id"] = sid
 
-        # Get pre-fill context (e.g. apartment_id pre-filled in receipt form)
-        prefill = nav_state.get_prefill(store or {})
-        form_data = {**prefill, **{k: v for k, v in form_data.items() if v is not None}}
+        ok, msg = _save_entity(entity_singular, card_id, form_data)
 
-        # Save to DB
-        ok, msg = _save_entity(entity, card_id, form_data)
+        # Navigate back and refresh
+        if ok and store and len(store.get("stack", [])) > 1:
+            store = nav_state.navigate_back(store, len(store["stack"]) - 2)
+            store["refresh"] = True
+        content, bc = _render_current(store or {}, auth)
+        store["refresh"] = False
 
-        if ok:
-            # Navigate back one level
-            if store and len(store.get("stack", [])) > 1:
-                store = nav_state.navigate_back(store, len(store["stack"]) - 2)
-            content, breadcrumb = _render_current(store, auth_data)
-            return store, content, breadcrumb, {"type": "success", "message": msg}
-        else:
-            content, breadcrumb = _render_current(store, auth_data)
-            return store, content, breadcrumb, {"type": "error", "message": msg}
+        toast = {"type": "success" if ok else "error", "message": msg}
+        return store, content, bc, toast
 
-    # ── 3. CSV download ───────────────────────────────────────────────────
+    # ── 3. CSV DOWNLOAD (MATCH callback — one per entity) ──────────────────
     @app.callback(
         Output({"type": "csv-download-trigger", "entity": MATCH}, "data"),
-        Input({"type":  "btn-csv-download",     "entity": MATCH}, "n_clicks"),
+        Input({"type": "btn-csv-download",      "entity": MATCH}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
         prevent_initial_call=True,
     )
-    def download_csv(n_clicks, store, auth_data):
+    def download_csv(n_clicks, store, auth):
         if not n_clicks:
             return no_update
-        ctx     = dash.callback_context
-        id_dict = ctx.triggered_id or {}
-        entity  = id_dict.get("entity", "data")
+        entity  = dash.callback_context.triggered_id.get("entity", "data")
         filters = nav_state.get_filters(store or {})
-        filters["society_id"] = (auth_data or {}).get("society_id")
+        filters["society_id"] = (auth or {}).get("society_id")
         csv_str = loaders.export_csv(entity, filters)
-        return dcc.send_string(
-            csv_str,
-            filename=f"{entity}_{date.today().isoformat()}.csv",
-        )
+        return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
 
-    print("✓ Drill-down callbacks registered")
+    print("✓ Drilldown callbacks registered")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# INTERNAL RENDER HELPERS
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# INTERNAL RENDER ENGINE
+# ═══════════════════════════════════════════════════════════════════════════
 
-def _render_current(store: dict, auth_data: dict) -> tuple:
-    """Render the current card based on navigation stack."""
-    active_card = store.get("active_card", "dashboard_admin")
-    filters     = nav_state.get_filters(store)
-    prefill     = nav_state.get_prefill(store)
-    society_id  = (auth_data or {}).get("society_id")
-    if society_id:
-        filters["society_id"] = society_id
+def _render_current(store: dict, auth: dict) -> tuple:
+    """Return (content_div, breadcrumb_nav) for the current active card."""
+    active  = store.get("active_card", "")
+    filters = dict(nav_state.get_filters(store))
+    prefill = nav_state.get_prefill(store)
+    sid     = (auth or {}).get("society_id")
+    if sid:
+        filters["society_id"] = sid
 
-    content    = _render_card(active_card, filters, prefill, store)
+    content    = _render_card(active, filters, prefill, store)
     breadcrumb = renderers.render_breadcrumb(store.get("stack", []))
     return content, breadcrumb
 
 
 def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> html.Div:
-    """Dispatch to correct renderer based on card_id prefix."""
+    """Route card_id to the correct renderer."""
 
-    # ── list_<entity> ─────────────────────────────────────────────────────
+    # ── list_<entity_plural> ──────────────────────────────────────────────
     if card_id.startswith("list_"):
-        entity     = card_id[5:]
-        meta       = ENTITY_META.get(entity, {})
-        page       = (store.get("list_pages") or {}).get(entity, 1)
-        search     = (store.get("list_search") or {}).get(entity, "")
+        entity  = card_id[5:]                       # e.g. "apartments"
+        meta    = ENTITY_META.get(entity, {})
+        page    = (store.get("list_pages") or {}).get(entity, 1)
+        search  = (store.get("list_search") or {}).get(entity, "")
         rows, total = loaders.load_list(entity, filters, page=page, search=search)
         return renderers.render_list_card(
             card_id=card_id,
@@ -553,38 +717,43 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
             total_rows=total,
         )
 
-    # ── profile_<entity> ──────────────────────────────────────────────────
+    # ── profile_<entity_singular> ─────────────────────────────────────────
     if card_id.startswith("profile_"):
-        entity = card_id[8:]
-        entity_key = entity + "s"   # apartment → apartments
-        meta   = ENTITY_META.get(entity_key, {})
-        pk     = store.get("stack", [{}])[-1].get("entity_pk")
-        record = loaders.load_profile(entity, pk, filters.get("society_id"))
+        singular   = card_id[8:]                    # e.g. "apartment"
+        entity_key = to_plural(singular)            # e.g. "apartments"
+        meta       = ENTITY_META.get(entity_key, {})
+        pk         = (store.get("stack") or [{}])[-1].get("entity_pk")
+        record     = loaders.load_profile(singular, pk, filters.get("society_id"))
         if not record:
-            return html.Div("Record not found.", className="text-muted p-3")
+            return _empty_state("Record not found")
         return renderers.render_profile_card(
             card_id=card_id,
-            title=meta.get("profile_title", entity.title()),
+            title=meta.get("profile_title", singular.title()),
             icon=meta.get("profile_icon", "fa-user"),
-            entity=entity,
+            entity=singular,
             record=record,
             fields=meta.get("profile_fields", []),
             actions=meta.get("profile_actions", []),
             color=meta.get("profile_color", "#1d74d8"),
         )
 
-    # ── form_<entity>_<action> ────────────────────────────────────────────
+    # ── form_<entity_singular>_<action> ───────────────────────────────────
     if card_id.startswith("form_"):
-        parts      = card_id[5:].rsplit("_", 1)
-        entity_raw = parts[0]
+        rest   = card_id[5:]                        # e.g. "apartment_edit"
+        # action is always the LAST segment
+        parts  = rest.rsplit("_", 1)
+        entity_raw = parts[0]                       # singular
         action     = parts[1] if len(parts) > 1 else "new"
-        entity_key = entity_raw + "s"
+        entity_key = to_plural(entity_raw)
         meta       = ENTITY_META.get(entity_key, {})
-        fields     = meta.get("form_fields", {}).get(action, meta.get("form_fields", {}).get("new", []))
-        title_map  = {"new": f"New {entity_raw.title()}", "edit": f"Edit {entity_raw.title()}"}
+        fields     = (meta.get("form_fields") or {}).get(
+            action, (meta.get("form_fields") or {}).get("new", [])
+        )
+        titles = {"new": f"New {entity_raw.replace('_',' ').title()}",
+                  "edit": f"Edit {entity_raw.replace('_',' ').title()}"}
         return renderers.render_form_card(
             card_id=card_id,
-            title=title_map.get(action, card_id),
+            title=titles.get(action, card_id),
             icon=meta.get("profile_icon", "fa-plus"),
             entity=entity_raw,
             fields=fields,
@@ -593,19 +762,23 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
             color=meta.get("profile_color", "#1d74d8"),
         )
 
-    # ── fallback ──────────────────────────────────────────────────────────
+    return _empty_state(f"No content for: {card_id}")
+
+
+def _empty_state(msg: str) -> html.Div:
     return html.Div(
         [
-            html.I(className="fas fa-compass fa-2x mb-3", style={"color": "#ccc"}),
-            html.P(f"No renderer for card: {card_id}", className="text-muted"),
+            html.I(className="fas fa-compass fa-3x mb-3",
+                   style={"color": "rgba(29,116,216,0.2)"}),
+            html.P(msg, className="text-muted", style={"fontSize": "13px"}),
         ],
-        className="text-center p-5",
+        className="text-center",
+        style={"padding": "60px 20px"},
     )
 
 
-def _entity_label(entity: str, record: dict) -> str:
-    """Generate a human-readable label for a profile (used in breadcrumb)."""
-    label_fields = {
+def _label_for(entity_plural: str, record: dict) -> str:
+    _LABEL_FIELDS = {
         "apartments": ("flat_number", "owner_name"),
         "vendors":    ("name", "email"),
         "security":   ("name", "email"),
@@ -613,126 +786,179 @@ def _entity_label(entity: str, record: dict) -> str:
         "concerns":   ("flat_no", "concern_type"),
         "societies":  ("name",),
         "receipts":   ("acc_particulars",),
+        "expenses":   ("acc_particulars",),
+        "gate_logs":  ("entity_id",),
+        "accounts":   ("name",),
     }
-    fields = label_fields.get(entity, ("id",))
-    for f in fields:
+    for f in _LABEL_FIELDS.get(entity_plural, ("id",)):
         v = record.get(f)
         if v:
-            return str(v)
-    return f"#{record.get('id', '?')}"
+            return str(v)[:24]
+    return f"#{record.get('id','?')}"
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# SAVE HELPERS (per entity)
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# DB SAVE HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
 
-def _save_entity(entity: str, card_id: str, data: dict) -> tuple[bool, str]:
-    """
-    Persist form data to the database.
-    Returns (success, message).
-    """
+def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
+    """Dispatch save by entity singular name. Returns (ok, message)."""
     from database.db_manager import db
-    sid = data.get("society_id")
+    sid     = data.get("society_id")
     is_edit = "edit" in card_id
+    pk      = data.get("id")
 
     try:
         if entity == "apartment":
-            return _save_apartment(db, data, sid, is_edit)
+            return _save_apartment(db, data, sid, is_edit, pk)
+        if entity == "vendor":
+            return _save_user_entity(db, data, sid, "vendor", is_edit, pk)
+        if entity == "security":
+            return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":
-            return _save_event(db, data, sid, is_edit)
+            return _save_event(db, data, sid, is_edit, pk)
         if entity == "concern":
-            return _save_concern(db, data, sid, is_edit)
-        if entity == "receipt":
-            return _save_receipt(db, data, sid)
-        if entity == "gate_pass" or entity == "gate_log":
+            return _save_concern(db, data, sid, is_edit, pk)
+        if entity in ("receipt", "expense"):
+            return _save_transaction(db, data, sid)
+        if entity == "gate_log":
             return _save_gate_log(db, data, sid)
-        return False, f"No save handler for entity '{entity}'"
+        if entity == "society":
+            return _save_society(db, data, sid, is_edit, pk)
+        if entity == "account":
+            return _save_account(db, data, sid, is_edit, pk)
+        return False, f"No save handler for '{entity}'"
     except Exception as e:
         return False, str(e)
 
 
-def _save_apartment(db, data, sid, is_edit):
+def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
         db.execute_query(
-            """UPDATE apartments SET owner_name=%s, mobile=%s, apartment_size=%s
-               WHERE id=%s AND society_id=%s""",
-            (data.get("owner_name"), data.get("mobile"),
-             data.get("apartment_size") or 0,
-             data.get("id"), sid)
+            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s WHERE id=%s AND society_id=%s",
+            (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, pk, sid),
         )
-        return True, f"Apartment updated"
-    else:
-        flat = data.get("flat_number", "").strip()
-        if not flat:
-            return False, "Flat number is required"
-        db.execute_query(
-            """INSERT INTO apartments (society_id, flat_number, owner_name, mobile, apartment_size, active)
-               VALUES (%s,%s,%s,%s,%s,TRUE)""",
-            (sid, flat, data.get("owner_name"), data.get("mobile"), data.get("apartment_size") or 0)
-        )
-        return True, f"Apartment '{flat}' created"
+        return True, "Apartment updated"
+    flat = (d.get("flat_number") or "").strip()
+    if not flat:
+        return False, "Flat number is required"
+    db.execute_query(
+        "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE)",
+        (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0),
+    )
+    return True, f"Apartment '{flat}' created"
 
 
-def _save_event(db, data, sid, is_edit):
+def _save_user_entity(db, d, sid, role, is_edit, pk):
+    from werkzeug.security import generate_password_hash
     if is_edit:
         db.execute_query(
-            """UPDATE events SET title=%s, description=%s, event_date=%s,
-               event_time=%s, venue=%s, open_to=%s WHERE id=%s AND society_id=%s""",
-            (data.get("title"), data.get("description"), data.get("event_date"),
-             data.get("event_time"), data.get("venue"), data.get("open_to","all"),
-             data.get("id"), sid)
+            "UPDATE users SET linked_id=%s WHERE id=%s AND society_id=%s",
+            (pk, pk, sid),
+        )
+        return True, f"{role.title()} updated"
+    email = (d.get("email") or "").strip()
+    if not email:
+        return False, "Email is required"
+    pw = d.get("password", "")
+    if not pw:
+        return False, "Password is required"
+    db.execute_query(
+        "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,%s,'password')",
+        (sid, email, generate_password_hash(pw), role),
+    )
+    return True, f"{role.title()} '{email}' created"
+
+
+def _save_event(db, d, sid, is_edit, pk):
+    if is_edit:
+        db.execute_query(
+            "UPDATE events SET title=%s,description=%s,event_date=%s,event_time=%s,venue=%s,open_to=%s WHERE id=%s AND society_id=%s",
+            (d.get("title"), d.get("description"), d.get("event_date"),
+             d.get("event_time"), d.get("venue"), d.get("open_to","all"), pk, sid),
         )
         return True, "Event updated"
-    else:
-        title = data.get("title","").strip()
-        if not title or not data.get("event_date"):
-            return False, "Title and date are required"
-        db.execute_query(
-            """INSERT INTO events (society_id, title, description, event_date, event_time, venue, open_to)
-               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-            (sid, title, data.get("description"), data.get("event_date"),
-             data.get("event_time"), data.get("venue"), data.get("open_to","all"))
-        )
-        return True, f"Event '{title}' created"
+    title = (d.get("title") or "").strip()
+    if not title:
+        return False, "Title is required"
+    db.execute_query(
+        "INSERT INTO events(society_id,title,description,event_date,event_time,venue,open_to) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+        (sid, title, d.get("description"), d.get("event_date"), d.get("event_time"),
+         d.get("venue"), d.get("open_to","all")),
+    )
+    return True, f"Event '{title}' created"
 
 
-def _save_concern(db, data, sid, is_edit):
+def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
         db.execute_query(
-            """UPDATE concerns SET status=%s, assigned_to=%s WHERE id=%s AND society_id=%s""",
-            (data.get("status","open"), data.get("assigned_to"), data.get("id"), sid)
+            "UPDATE concerns SET status=%s,assigned_to=%s WHERE id=%s AND society_id=%s",
+            (d.get("status","open"), d.get("assigned_to"), pk, sid),
         )
         return True, "Concern updated"
-    else:
-        db.execute_query(
-            """INSERT INTO concerns (society_id, flat_no, concern_type, description, preferred_time, status)
-               VALUES (%s,%s,%s,%s,%s,'open')""",
-            (sid, data.get("flat_no"), data.get("concern_type"),
-             data.get("description",""), data.get("preferred_time","anytime"))
-        )
-        return True, "Concern submitted"
+    db.execute_query(
+        "INSERT INTO concerns(society_id,flat_no,concern_type,description,preferred_time,status) VALUES(%s,%s,%s,%s,%s,'open')",
+        (sid, d.get("flat_no"), d.get("concern_type"), d.get("description",""),
+         d.get("preferred_time","anytime")),
+    )
+    return True, "Concern submitted"
 
 
-def _save_receipt(db, data, sid):
-    amt = data.get("amount") or data.get("pending_dues")
+def _save_transaction(db, d, sid):
+    from datetime import date
+    amt = d.get("amount") or d.get("pending_dues")
     if not amt:
         return False, "Amount is required"
     db.execute_query(
-        """INSERT INTO transactions (society_id, trx_date, acc_particulars, amount, mode, status)
-           VALUES (%s,%s,%s,%s,%s,'paid')""",
-        (sid,
-         data.get("trx_date") or date.today().isoformat(),
-         data.get("acc_particulars", "Receipt"),
-         float(amt),
-         data.get("mode","cash"))
+        "INSERT INTO transactions(society_id,trx_date,acc_particulars,amount,mode,status) VALUES(%s,%s,%s,%s,%s,'paid')",
+        (sid, d.get("trx_date") or date.today().isoformat(),
+         d.get("acc_particulars","Receipt"), float(amt), d.get("mode","cash")),
     )
-    return True, f"Receipt ₹{float(amt):,.0f} recorded"
+    return True, f"₹{float(amt):,.0f} recorded"
 
 
-def _save_gate_log(db, data, sid):
+def _save_gate_log(db, d, sid):
     db.execute_query(
-        """INSERT INTO gate_access (society_id, role, entity_id, time_in)
-           VALUES (%s,%s,%s,NOW())""",
-        (sid, data.get("role","v"), data.get("entity_id") or 0)
+        "INSERT INTO gate_access(society_id,role,entity_id,time_in) VALUES(%s,%s,%s,NOW())",
+        (sid, d.get("role","v"), d.get("entity_id") or 0),
     )
     return True, "Gate log created"
+
+
+def _save_society(db, d, sid, is_edit, pk):
+    from werkzeug.security import generate_password_hash
+    from datetime import date
+    if is_edit:
+        db.execute_query(
+            "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s WHERE id=%s",
+            (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), d.get("plan","Free"), pk),
+        )
+        return True, "Society updated"
+    result = db.execute_query(
+        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,arrear_start_date) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (d.get("name"), d.get("email"), d.get("phone"), d.get("address"),
+         d.get("plan","Free"), date.today().isoformat(), date.today().isoformat()),
+        fetch_one=True,
+    )
+    if result and result.get("id") and d.get("admin_email") and d.get("admin_password"):
+        soc_id = result["id"]
+        db.execute_query(
+            "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,'admin','password')",
+            (soc_id, d["admin_email"], generate_password_hash(d["admin_password"])),
+        )
+    return True, f"Society '{d.get('name')}' created"
+
+
+def _save_account(db, d, sid, is_edit, pk):
+    if is_edit:
+        db.execute_query(
+            "UPDATE accounts SET tab_name=%s,drcr_account=%s,bf_amount=%s WHERE id=%s AND society_id=%s",
+            (d.get("tab_name"), d.get("drcr_account"), d.get("bf_amount") or 0, pk, sid),
+        )
+        return True, "Account updated"
+    db.execute_query(
+        "INSERT INTO accounts(society_id,name,tab_name,drcr_account,bf_amount,bf_type) VALUES(%s,%s,%s,%s,%s,%s)",
+        (sid, d.get("name"), d.get("tab_name"), d.get("drcr_account","Dr"),
+         d.get("bf_amount") or 0, d.get("bf_type","Dr")),
+    )
+    return True, f"Account '{d.get('name')}' created"
