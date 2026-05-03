@@ -566,215 +566,222 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     ], className="portal-page")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# QR EVALUATE PASS — shared between Admin + Security portals
-# Fixed: HTML5 getUserMedia with proper constraints + jsQR via rAF
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _evaluate_pass_page() -> html.Div:
     return html.Div(
         [
             _page_title("fa-qrcode", "#1859b8", "Evaluate Gate Pass",
                         "scan QR or enter code manually"),
 
+            # ── Two-column layout: scanner | recent scans ─────────────────
             html.Div(
                 [
-                    # ── LEFT: Scanner ─────────────────────────────────────
+                    # ── LEFT: Scanner card ────────────────────────────────
                     html.Div(
-                        [
-                            dbc.Card(
-                                [
-                                    dbc.CardHeader(html.Div([
-                                        html.I(className="fas fa-camera me-2",
-                                               style={"color": "#1859b8"}),
-                                        html.Strong("QR Scanner"),
-                                        dbc.Badge("LIVE", color="success",
-                                                  className="ms-2",
-                                                  style={"fontSize": "9px"}),
-                                    ], style={"display": "flex", "alignItems": "center"}),
-                                    style={"padding": "10px 14px"}),
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(html.Div([
+                                    html.I(className="fas fa-camera me-2",
+                                           style={"color": "#1859b8"}),
+                                    html.Strong("QR Scanner"),
+                                    dbc.Badge("LIVE", color="success",
+                                              className="ms-2",
+                                              style={"fontSize": "9px"}),
+                                ], style={"display": "flex", "alignItems": "center"}),
+                                style={"padding": "10px 14px"}),
 
-                                    dbc.CardBody([
-                                        # Manual input + validate
-                                        dbc.InputGroup([
-                                            dbc.Input(
-                                                id="eval-qr-input",
-                                                placeholder="Scan QR or type code…",
-                                                debounce=False,
-                                                autoFocus=True,
-                                                style={"fontSize": "14px",
-                                                       "borderRadius": "10px 0 0 10px"},
+                                dbc.CardBody([
+                                    # Manual entry + validate button
+                                    dbc.InputGroup([
+                                        dbc.Input(
+                                            id="eval-qr-input",
+                                            placeholder="Scan QR or type code…",
+                                            debounce=False,
+                                            autoFocus=True,
+                                            style={"fontSize": "14px"},
+                                        ),
+                                        dbc.Button(
+                                            [html.I(className="fas fa-check me-1"),
+                                             "Validate"],
+                                            id="eval-validate-btn",
+                                            color="primary",
+                                            n_clicks=0,
+                                        ),
+                                    ], className="mb-3"),
+
+                                    # Result display panel
+                                    html.Div(
+                                        id="eval-result",
+                                        style={"minHeight": "72px",
+                                               "borderRadius": "10px",
+                                               "padding": "6px",
+                                               "transition": "all 0.3s"},
+                                    ),
+
+                                    html.Hr(style={"margin": "10px 0"}),
+
+                                    # ── Camera viewfinder ─────────────────
+                                    html.Div(
+                                        style={
+                                            "position": "relative",
+                                            "borderRadius": "10px",
+                                            "overflow": "hidden",
+                                            "background": "#1a1a2e",
+                                            "minHeight": "60px",
+                                            "marginBottom": "10px",
+                                        },
+                                        children=[
+                                            # Live video feed
+                                            html.Video(
+                                                id="eval-video",
+                                                **{
+                                                    "autoPlay": True,
+                                                    "playsInline": True,
+                                                    "muted": True,
+                                                },
+                                                style={
+                                                    "width": "100%",
+                                                    "maxHeight": "240px",
+                                                    "objectFit": "cover",
+                                                    "borderRadius": "10px",
+                                                    "display": "none",
+                                                    "background": "#000",
+                                                },
+                                            ),
+                                            # Animated scan line
+                                            html.Div(
+                                                id="eval-scanline",
+                                                style={
+                                                    "display": "none",
+                                                    "position": "absolute",
+                                                    "left": "0", "right": "0",
+                                                    "top": "0",
+                                                    "height": "3px",
+                                                    "background": (
+                                                        "linear-gradient(90deg,"
+                                                        "transparent,#1859b8 50%,transparent)"
+                                                    ),
+                                                    "animation": "ddScanLine 2s ease-in-out infinite",
+                                                },
+                                            ),
+                                            # Corner markers
+                                            html.Div(
+                                                id="eval-corners",
+                                                style={"display": "none"},
+                                                children=[
+                                                    _corner_div(v, h)
+                                                    for v in ("top", "bottom")
+                                                    for h in ("left", "right")
+                                                ],
+                                            ),
+                                            # Hidden canvas for frame capture
+                                            html.Canvas(
+                                                id="eval-canvas",
+                                                style={"display": "none"},
+                                            ),
+                                        ],
+                                    ),
+
+                                    # Status text
+                                    html.Small(
+                                        id="eval-scan-status",
+                                        children="Camera off — tap Start Camera",
+                                        style={
+                                            "color": "#aaa", "fontSize": "11px",
+                                            "display": "block", "textAlign": "center",
+                                            "marginBottom": "10px",
+                                        },
+                                    ),
+
+                                    # Camera control buttons
+                                    html.Div(
+                                        style={
+                                            "display": "flex", "gap": "6px",
+                                            "flexWrap": "wrap",
+                                            "justifyContent": "center",
+                                        },
+                                        children=[
+                                            dbc.Button(
+                                                [html.I(className="fas fa-camera me-1"),
+                                                 "Start Camera"],
+                                                id="eval-start-btn",
+                                                color="primary", size="sm",
+                                                n_clicks=0,
                                             ),
                                             dbc.Button(
-                                                [html.I(className="fas fa-check me-1"),
-                                                 "Validate"],
-                                                id="eval-validate-btn",
-                                                color="primary",
-                                                style={"borderRadius": "0 10px 10px 0"},
+                                                [html.I(className="fas fa-sync-alt me-1"),
+                                                 "Flip"],
+                                                id="eval-switch-btn",
+                                                color="info", size="sm", outline=True,
+                                                n_clicks=0,
+                                                style={"display": "none"},
                                             ),
-                                        ], className="mb-3"),
-
-                                        # Result display
-                                        html.Div(
-                                            id="eval-result",
-                                            style={"minHeight": "68px",
-                                                   "borderRadius": "10px",
-                                                   "padding": "10px",
-                                                   "transition": "all 0.3s"},
-                                        ),
-
-                                        html.Hr(style={"margin": "12px 0 10px"}),
-
-                                        # ── Camera viewfinder ─────────────
-                                        html.Div([
-                                            # Video + overlay
-                                            html.Div(
-                                                [
-                                                    html.Video(
-                                                        id="eval-video",
-                                                        autoPlay=True,
-                                                        playsInline=True,
-                                                        muted=True,
-                                                        style={
-                                                            "width": "100%",
-                                                            "maxHeight": "230px",
-                                                            "objectFit": "cover",
-                                                            "borderRadius": "10px",
-                                                            "display": "none",
-                                                            "background": "#000",
-                                                        },
-                                                    ),
-                                                    # Animated scan line
-                                                    html.Div(
-                                                        id="eval-scanline",
-                                                        style={
-                                                            "display": "none",
-                                                            "position": "absolute",
-                                                            "left": "0", "right": "0",
-                                                            "height": "3px",
-                                                            "background": "linear-gradient(90deg,transparent,#1859b8 50%,transparent)",
-                                                            "animation": "ddScanLine 2s ease-in-out infinite",
-                                                        },
-                                                    ),
-                                                    # Corner markers
-                                                    html.Div(
-                                                        [_corner_div(v, h)
-                                                         for v in ("top", "bottom")
-                                                         for h in ("left", "right")],
-                                                        id="eval-corners",
-                                                        style={"display": "none"},
-                                                    ),
-                                                    # Hidden canvas for rAF decode
-                                                    html.Canvas(
-                                                        id="eval-canvas",
-                                                        style={"display": "none"},
-                                                    ),
-                                                ],
-                                                style={
-                                                    "position": "relative",
-                                                    "borderRadius": "10px",
-                                                    "overflow": "hidden",
-                                                    "background": "#1a1a2e",
-                                                    "minHeight": "60px",
-                                                    "marginBottom": "10px",
-                                                },
+                                            dbc.Button(
+                                                [html.I(className="fas fa-lightbulb me-1"),
+                                                 "Light"],
+                                                id="eval-torch-btn",
+                                                color="warning", size="sm", outline=True,
+                                                n_clicks=0,
+                                                style={"display": "none"},
                                             ),
-
-                                            # Status line
-                                            html.Small(
-                                                id="eval-scan-status",
-                                                children="Camera off — tap Start Camera",
-                                                style={
-                                                    "color": "#aaa", "fontSize": "11px",
-                                                    "display": "block", "textAlign": "center",
-                                                    "marginBottom": "10px",
-                                                },
+                                            dbc.Button(
+                                                [html.I(className="fas fa-stop me-1"),
+                                                 "Stop"],
+                                                id="eval-stop-btn",
+                                                color="danger", size="sm", outline=True,
+                                                n_clicks=0,
+                                                style={"display": "none"},
                                             ),
-
-                                            # Camera controls
-                                            html.Div(
-                                                [
-                                                    dbc.Button(
-                                                        [html.I(className="fas fa-camera me-1"),
-                                                         "Start Camera"],
-                                                        id="eval-start-btn",
-                                                        color="primary", size="sm",
-                                                    ),
-                                                    dbc.Button(
-                                                        [html.I(className="fas fa-sync-alt me-1"),
-                                                         "Flip"],
-                                                        id="eval-switch-btn",
-                                                        color="info", size="sm", outline=True,
-                                                        style={"display": "none"},
-                                                    ),
-                                                    dbc.Button(
-                                                        [html.I(className="fas fa-lightbulb me-1"),
-                                                         "Torch"],
-                                                        id="eval-torch-btn",
-                                                        color="warning", size="sm", outline=True,
-                                                        style={"display": "none"},
-                                                    ),
-                                                    dbc.Button(
-                                                        [html.I(className="fas fa-stop me-1"),
-                                                         "Stop"],
-                                                        id="eval-stop-btn",
-                                                        color="danger", size="sm", outline=True,
-                                                        style={"display": "none"},
-                                                    ),
-                                                ],
-                                                style={
-                                                    "display": "flex", "gap": "6px",
-                                                    "flexWrap": "wrap",
-                                                    "justifyContent": "center",
-                                                },
-                                            ),
-                                        ]),
-                                    ], style={"padding": "14px"}),
-                                ],
-                                style={"borderRadius": "18px",
-                                       "boxShadow": "0 10px 28px rgba(24,89,184,0.1)"},
-                            ),
-                        ],
+                                        ],
+                                    ),
+                                ], style={"padding": "14px"}),
+                            ],
+                            style={"borderRadius": "18px",
+                                   "boxShadow": "0 10px 28px rgba(24,89,184,0.1)"},
+                        ),
                         style={"flex": "1 1 300px", "minWidth": "280px"},
                     ),
 
                     # ── RIGHT: Recent scans ───────────────────────────────
                     html.Div(
-                        [
-                            dbc.Card(
-                                [
-                                    dbc.CardHeader(html.Div([
-                                        html.I(className="fas fa-history me-2",
-                                               style={"color": "#7d8ea3"}),
-                                        html.Strong("Recent Scans"),
-                                    ], style={"display": "flex", "alignItems": "center"}),
-                                    style={"padding": "10px 14px"}),
-                                    dbc.CardBody(
-                                        dbc.ListGroup(
-                                            id="eval-recent-scans",
-                                            children=[dbc.ListGroupItem(
-                                                "No scans yet",
-                                                className="text-muted text-center",
-                                                style={"fontSize": "12px", "padding": "12px"},
-                                            )],
-                                            flush=True,
-                                            style={"maxHeight": "420px",
-                                                   "overflowY": "auto"},
-                                        ),
-                                        style={"padding": "8px"},
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(html.Div([
+                                    html.I(className="fas fa-history me-2",
+                                           style={"color": "#7d8ea3"}),
+                                    html.Strong("Recent Scans"),
+                                ], style={"display": "flex", "alignItems": "center"}),
+                                style={"padding": "10px 14px"}),
+                                dbc.CardBody(
+                                    dbc.ListGroup(
+                                        id="eval-recent-scans",
+                                        children=[dbc.ListGroupItem(
+                                            "No scans yet",
+                                            className="text-muted text-center",
+                                            style={"fontSize": "12px", "padding": "12px"},
+                                        )],
+                                        flush=True,
+                                        style={"maxHeight": "450px", "overflowY": "auto"},
                                     ),
-                                ],
-                                style={"borderRadius": "18px",
-                                       "boxShadow": "0 10px 28px rgba(0,0,0,0.06)"},
-                            ),
-                        ],
+                                    style={"padding": "8px"},
+                                ),
+                            ],
+                            style={"borderRadius": "18px",
+                                   "boxShadow": "0 10px 28px rgba(0,0,0,0.06)"},
+                        ),
                         style={"flex": "1 1 240px", "minWidth": "220px"},
                     ),
                 ],
                 style={"display": "flex", "gap": "20px", "flexWrap": "wrap"},
             ),
 
-            # ── CSS for camera animations ─────────────────────────────────
+            # ── FIX: Hidden drill divs required by drilldown_callbacks ────
+            # drilldown_callbacks.route_drilldown() always outputs to
+            # drill-content and drill-breadcrumb. If they don't exist in the
+            # DOM, Dash throws layout errors that break the whole page.
+            html.Div(id="drill-breadcrumb", style={"display": "none"}),
+            html.Div(id="drill-content",    style={"display": "none"}),
+
+            # Scan-line animation CSS
             html.Style("""
                 @keyframes ddScanLine {
                     0%   { top: 2%;  opacity: 0; }
@@ -782,14 +789,10 @@ def _evaluate_pass_page() -> html.Div:
                     90%  { opacity: 1; }
                     100% { top: 96%; opacity: 0; }
                 }
-                #eval-video { background: #000; }
-                #eval-corners > div { position: absolute; width: 20px; height: 20px;
-                    border: 3px solid #1859b8; }
             """),
         ],
         className="portal-page",
     )
-
 
 def _corner_div(v: str, h: str) -> html.Div:
     """QR viewfinder corner marker."""

@@ -53,10 +53,12 @@ def create_app(config_name=None):
         from app.routes.auth import auth_bp
         from app.routes.api  import api_bp
         from app.routes.web  import web_bp
+        from app.routes.scan import scan_bp
 
         app.register_blueprint(auth_bp, url_prefix='/auth')
         app.register_blueprint(api_bp,  url_prefix='/api')
         app.register_blueprint(web_bp)
+        app.register_blueprint(scan_bp)
         print("✓ Blueprints registered")
     except Exception as e:
         print(f"⚠️  Blueprint error: {e}")
