@@ -74,9 +74,16 @@ function evalCameraController(start_n, stop_n, switch_n, torch_n, cam_store) {
         }
         var vid = el('eval-video');
         if (vid) { vid.srcObject = null; vid.style.display = 'none'; }
+        
+        /* HIDE camera UI elements */
+        hide('eval-camera-container');
         hide('eval-scanline'); hide('eval-corners');
         hide('eval-stop-btn'); hide('eval-switch-btn'); hide('eval-torch-btn');
         show('eval-start-btn');
+        
+        /* SHOW result div */
+        show('eval-result');
+
         status('Camera off — tap Start Camera to scan');
         S.active = false; S.torch = false; S.scanning = false;
     }
@@ -105,8 +112,10 @@ function evalCameraController(start_n, stop_n, switch_n, torch_n, cam_store) {
         .then(function(d){
             S.scanning = false;
             if (d.status === 'success' && d.qr_data) {
-                stopCamera();
+                /* Stop camera and switch view to result div */
+                stopCamera(); 
                 status('QR detected — validating...');
+                
                 var inp = el('eval-qr-input');
                 if (inp) {
                     setReact(inp, d.qr_data);
@@ -127,7 +136,7 @@ function evalCameraController(start_n, stop_n, switch_n, torch_n, cam_store) {
     /* ── Toggle torch ──────────────────────────────────────────────── */
     function toggleTorch() {
         if (!S.stream) return;
-        var track = S.stream.getVideoTracks()[0];
+        var track = S.stream.getVideoTracks();
         if (!track || typeof track.applyConstraints !== 'function') {
             status('Torch not supported on this device'); return;
         }
@@ -147,6 +156,9 @@ function evalCameraController(start_n, stop_n, switch_n, torch_n, cam_store) {
         S.active = true;
         status('Requesting camera permission...');
 
+        /* Ensure result div is hidden when camera starts */
+        hide('eval-result');
+
         var constraints = {
             video: { facingMode: { ideal: S.facing },
                      width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -164,12 +176,13 @@ function evalCameraController(start_n, stop_n, switch_n, torch_n, cam_store) {
             var pp = vid.play();
             if (pp && pp.catch) pp.catch(function(e){ console.warn('play():', e); });
 
+            show('eval-camera-container');
             hide('eval-start-btn');
             show('eval-stop-btn'); show('eval-switch-btn');
             show('eval-scanline'); show('eval-corners');
 
             /* Torch availability check */
-            var track = stream.getVideoTracks()[0];
+            var track = stream.getVideoTracks();
             if (track && typeof track.getCapabilities === 'function') {
                 var caps = track.getCapabilities();
                 if (caps && caps.torch) show('eval-torch-btn');
