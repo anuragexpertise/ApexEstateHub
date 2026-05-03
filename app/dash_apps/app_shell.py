@@ -224,7 +224,7 @@ def _sidebar():
             html.Div(
                 [
                     html.Img(src='/static/assets/logo.png',
-                             style={'width': '42px', 'borderRadius': '10px', 'marginBottom': '10px'}),
+                             style={'width': '50px', 'borderRadius': '10px', 'marginBottom': '10px'}),
                     html.Div('EstateHub',
                              id='sb-app-name',
                              style={'fontWeight': '700', 'fontSize': '15px', 'marginBottom': '2px',
