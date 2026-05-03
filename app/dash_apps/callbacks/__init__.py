@@ -31,13 +31,19 @@ def register_all_callbacks(app):
     register_mobile_callbacks(app)
 
     # ── Camera + Evaluate Pass ────────────────────────────────────────────────
-    # Must come BEFORE card_catalogue_callbacks because that module previously
-    # owned the evaluate_pass callback — camera_callbacks now owns it.
     try:
         from .camera_callbacks import register_camera_callbacks
         register_camera_callbacks(app)
     except Exception as e:
         print(f"⚠  camera_callbacks skipped: {e}")
+        import traceback; traceback.print_exc()
+
+    # ── Drill-down UX engine — MUST come before card_catalogue ────────────────
+    try:
+        from .drilldown_callbacks import register_drilldown_callbacks
+        register_drilldown_callbacks(app)
+    except Exception as e:
+        print(f"⚠  drilldown_callbacks skipped: {e}")
         import traceback; traceback.print_exc()
 
     # ── Drag-and-drop dashboard customisation ─────────────────────────────────
@@ -48,8 +54,6 @@ def register_all_callbacks(app):
         print(f"⚠  customize_callbacks skipped: {e}")
 
     # ── Card catalogue (KPI refresh + all form/list CRUD) ─────────────────────
-    # NOTE: the old evaluate_pass callback (#21) must be REMOVED from
-    #       card_catalogue_callbacks.py — camera_callbacks owns it now.
     try:
         from .card_catalogue_callbacks import register_card_catalogue_callbacks
         register_card_catalogue_callbacks(app)
