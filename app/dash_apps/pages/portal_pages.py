@@ -635,7 +635,6 @@ def _evaluate_pass_page() -> html.Div:
                                                 id="eval-video",
                                                 **{
                                                     "autoPlay": True,
-                                                    "playsInline": True,
                                                     "muted": True,
                                                 },
                                                 style={
@@ -775,21 +774,27 @@ def _evaluate_pass_page() -> html.Div:
             ),
 
             # ── FIX: Hidden drill divs required by drilldown_callbacks ────
-            # drilldown_callbacks.route_drilldown() always outputs to
-            # drill-content and drill-breadcrumb. If they don't exist in the
-            # DOM, Dash throws layout errors that break the whole page.
             html.Div(id="drill-breadcrumb", style={"display": "none"}),
             html.Div(id="drill-content",    style={"display": "none"}),
 
-            # Scan-line animation CSS
-            html.Style("""
-                @keyframes ddScanLine {
-                    0%   { top: 2%;  opacity: 0; }
-                    10%  { opacity: 1; }
-                    90%  { opacity: 1; }
-                    100% { top: 96%; opacity: 0; }
+            # ── FIX: CSS Injection using dangerouslySetInnerHTML ──────────
+            html.Div(
+                style={
+                    "display": "none",
+                    "dangerouslySetInnerHTML": {
+                        "__html": """
+                            <style>
+                                @keyframes ddScanLine {
+                                    0%   { top: 2%;  opacity: 0; }
+                                    10%  { opacity: 1; }
+                                    90%  { opacity: 1; }
+                                    100% { top: 96%; opacity: 0; }
+                                }
+                            </style>
+                        """
+                    }
                 }
-            """),
+            ),
         ],
         className="portal-page",
     )

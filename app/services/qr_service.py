@@ -97,7 +97,7 @@ def _parse_issued_at(raw_value):
 
 def _load_user(user_id, email, role, society_id):
     query = """
-        SELECT id, email, role, society_id, name, phone
+        SELECT id, email, role, society_id
         FROM users
         WHERE 1 = 1
     """
