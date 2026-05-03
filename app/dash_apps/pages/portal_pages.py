@@ -621,6 +621,7 @@ def _evaluate_pass_page() -> html.Div:
 
                                     # ── Camera viewfinder ─────────────────
                                     html.Div(
+                                        id="eval-camera-container",
                                         style={
                                             "position": "relative",
                                             "borderRadius": "10px",
