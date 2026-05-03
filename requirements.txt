@@ -15,7 +15,6 @@ dash-bootstrap-components>=1.5.0
 plotly>=5.18.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
-# psycopg2-binary includes libpq with SSL support — works with Aiven out of the box
 psycopg2-binary>=2.9.0
 SQLAlchemy>=2.0.0
 alembic>=1.12.0
@@ -31,11 +30,16 @@ python-dotenv>=1.0.0
 pywebpush>=1.14.0
 cryptography>=41.0.0
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
+# ── QR Code — generation + server-side scanning ───────────────────────────────
 qrcode[pil]>=7.4.0
 Pillow>=10.0.0
+opencv-python-headless>=4.8.0   # headless = no GUI deps, works on servers
+pyzbar>=0.1.9                    # ZBar-based QR/barcode decoder
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 requests>=2.31.0
 email-validator>=2.0.0
+numpy>=1.24.0                    # required by opencv
 
 # ── Production ────────────────────────────────────────────────────────────────
 gunicorn>=21.0.0
