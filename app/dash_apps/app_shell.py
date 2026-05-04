@@ -480,7 +480,7 @@ def shell_layout():
                                             className='glass-breadcrumb',
                                         ),
                                         style={
-                                            'padding': '0 5px 0',
+                                            'padding': '5px 5px 0',
                                             'maxWidth': '100%',
                                         },
                                     ),
