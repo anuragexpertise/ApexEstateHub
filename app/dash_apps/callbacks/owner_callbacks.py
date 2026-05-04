@@ -8,30 +8,6 @@ from io import BytesIO
 def register_owner_callbacks(app):
     
     @app.callback(
-        Output("owner-qr-display", "src"),
-        Input("show-qr-btn", "n_clicks"),
-        prevent_initial_call=True
-    )
-    def generate_owner_qr(n_clicks):
-        if not n_clicks:
-            return no_update
-        
-        # Get user info from session
-        # This would come from auth-store in real implementation
-        user_data = {"user_id": 1, "email": "owner@example.com", "role": "apartment"}
-        
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(str(user_data))
-        qr.make(fit=True)
-        
-        img = qr.make_image(fill_color="black", back_color="white")
-        buffered = BytesIO()
-        img.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        return f"data:image/png;base64,{img_str}"
-    
-    @app.callback(
         Output("toast-store", "data", allow_duplicate=True),
         Input("process-payment-btn", "n_clicks"),
         State("payment-amount", "value"),

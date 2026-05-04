@@ -27,9 +27,6 @@ def register_all_callbacks(app):
     from .admin_callbacks import register_admin_callbacks
     register_admin_callbacks(app)
 
-    from .mobile_callbacks import register_mobile_callbacks
-    register_mobile_callbacks(app)
-
     # ── Camera + Evaluate Pass ────────────────────────────────────────────────
     try:
         from .camera_callbacks import register_camera_callbacks
