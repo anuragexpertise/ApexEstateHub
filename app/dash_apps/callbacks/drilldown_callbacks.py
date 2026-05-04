@@ -94,7 +94,7 @@ ENTITY_META: dict = {
 
     "vendors": {
         "list_title":   "Vendors",
-        "list_icon":    "fa-person-digging",
+        "list_icon":    "fa-truck",
         "list_columns": [
             {"name": "Name",        "field": "name"},
             {"name": "Email",       "field": "email"},
@@ -102,7 +102,7 @@ ENTITY_META: dict = {
             {"name": "Dues (₹)",    "field": "pending_dues"},
         ],
         "profile_title":  "Vendor Profile",
-        "profile_icon":   "fa-person-digging",
+        "profile_icon":   "fa-truck",
         "profile_color":  "#b98a07",
         "profile_fields": [
             {"label": "Name",         "field": "name",         "icon": "fa-user"},
@@ -257,7 +257,7 @@ ENTITY_META: dict = {
 
     "gate_logs": {
         "list_title":   "Gate Logs",
-        "list_icon":    "fa-road-barrier",
+        "list_icon":    "fa-receipt",
         "list_columns": [
             {"name": "Time In",  "field": "time_in"},
             {"name": "Time Out", "field": "time_out"},
@@ -266,7 +266,7 @@ ENTITY_META: dict = {
             {"name": "Hours",    "field": "hours"},
         ],
         "profile_title":  "Gate Log Details",
-        "profile_icon":   "fa-road-barrier",
+        "profile_icon":   "fa-receipt",
         "profile_color":  "#1abc9c",
         "profile_fields": [
             {"label": "Time In",   "field": "time_in",   "icon": "fa-sign-in-alt"},
