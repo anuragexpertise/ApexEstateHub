@@ -357,7 +357,7 @@ def _header():
                 children='',
                 style={
                     'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
-                    'textAlign': 'center', 'fontWeight': '700', 'fontSize': '14px',
+                    'textAlign': 'center', 'fontWeight': '700', 'fontSize': '24px',
                     'minWidth': '180px', 'padding': '0 12px',
                 },
             ),
@@ -480,7 +480,7 @@ def shell_layout():
                                             className='glass-breadcrumb',
                                         ),
                                         style={
-                                            'padding': 'calc(var(--header-height) + 30px) 20px 0',
+                                            'padding': '0 5px 0',
                                             'maxWidth': '100%',
                                         },
                                     ),
@@ -497,7 +497,7 @@ def shell_layout():
                                                    className='text-muted text-center mt-5'),
                                         ),
                                         style={
-                                            'padding': '10px 20px 80px',
+                                            'padding': '10px 20px 10px',
                                             'minHeight': 'calc(100vh - 130px)',
                                         },
                                     ),
