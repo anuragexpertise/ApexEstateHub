@@ -109,20 +109,60 @@ def register_card_catalogue_callbacks(app):
     )
     def refresh_kpi_values(pathname, auth_data):
         sid = _sid(auth_data)
+        role = (auth_data or {}).get("role", "admin")
+        is_master = role == "admin" and sid is None
+        
+        print(f"[KPI REFRESH] society_id={sid}, role={role}, is_master={is_master}")
+        
         results = []
         for card_id, cfg in KPI_CARDS.items():
+            # Master admin KPIs (no society_id needed)
+            if is_master and card_id.startswith("kpi_societies_"):
+                try:
+                    n_params = cfg.get("params", 0)
+                    params = () if n_params == 0 else tuple([sid] * n_params)
+                    row = _db().execute_query(cfg["query"], params, fetch_one=True)
+                    raw = (row or {}).get("v", 0)
+                    results.append(_fmt(raw, cfg.get("format", "count")))
+                    print(f"  ✓ {card_id}: {raw}")
+                except Exception as e:
+                    print(f"  ✗ {card_id} ERROR: {e}")
+                    print(f"    Query: {cfg.get('query', 'N/A')[:80]}")
+                    import traceback
+                    traceback.print_exc()
+                    results.append("—")
+                continue
+            
+            # Regular society KPIs
             if not sid:
                 results.append("—")
                 continue
+                
             try:
                 n_params = cfg.get("params", 1)
-                params   = tuple([sid] * n_params)
-                row      = _db().execute_query(cfg["query"], params, fetch_one=True)
-                raw      = (row or {}).get("v", 0)
+                params = tuple([sid] * n_params) if n_params > 0 else ()
+                
+                # Execute query
+                row = _db().execute_query(cfg["query"], params, fetch_one=True)
+                
+                # Check if 'v' column exists
+                if row and 'v' not in row:
+                    print(f"  ⚠ {card_id}: Query returned {list(row.keys())} but expected 'v'")
+                    results.append("—")
+                    continue
+                
+                raw = (row or {}).get("v", 0)
                 results.append(_fmt(raw, cfg.get("format", "count")))
+                print(f"  ✓ {card_id}: {raw} → {results[-1]}")
+                
             except Exception as e:
-                print(f"KPI [{card_id}] error: {e}")
+                print(f"  ✗ {card_id} ERROR: {e}")
+                print(f"    Query: {cfg.get('query', 'N/A')[:80]}")
+                print(f"    Params: {params}")
+                import traceback
+                traceback.print_exc()
                 results.append("—")
+        
         return results
 
     # ════════════════════════════════════════════════════════════════════
