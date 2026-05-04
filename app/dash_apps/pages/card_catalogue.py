@@ -375,7 +375,7 @@ FORM_CARDS = {
     },
     # ────────────────────── GATE LOGS ────────────────────────────
     "gate_log_profile": {
-        "group": "Gate Logs", "title": "Gate Log Profile", "icon": "fa-road-barrier",
+        "group": "Gate Logs", "title": "Gate Log Profile", "icon": "fa-receipt",
         "type": "profile", "entity": "gate_log",
         "fields": [
             {"id": "gl-entity", "label": "Person / Flat",  "type": "text"},
