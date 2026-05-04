@@ -563,26 +563,16 @@ def shell_layout():
                                 'Show this QR to security for scanning at the gate',
                                 className='mt-3 text-muted text-center',
                             ),
-                            # dbc.Textarea(
-                            #     id='qr-modal-text', readOnly=True,
-                            #     style={
-                            #         'marginTop': '12px', 'minHeight': '72px',
-                            #         'fontSize': '11px', 'fontFamily': 'monospace',
-                            #         'resize': 'none',
-                            #     },
-                            # ),
-                            # html.Hr(),
-                            # html.Div([html.Small('Name: ', className='text-muted'),
-                            #           html.Strong(id='qr-modal-name', children='')],
-                            #          className='mb-1'),
-                            # html.Div([html.Small('Email: ', className='text-muted'),
-                            #           html.Strong(id='qr-modal-email', children='')],
-                            #          className='mb-1'),
-                            # html.Div([html.Small('Role: ', className='text-muted'),
-                            #           html.Strong(id='qr-modal-role', children='')],
-                            #          className='mb-1'),
-                            # html.Div([html.Small('Valid Until: ', className='text-muted'),
-                            #           html.Strong(id='qr-modal-valid', children='')]),
+                            html.Hr(),
+                            dbc.Textarea(
+                                id='qr-modal-text', readOnly=True,
+                                style={
+                                    'marginTop': '12px', 'minHeight': '60px',
+                                    'fontSize': '13px', 'fontFamily': 'monospace',
+                                    'resize': 'none', 'textAlign': 'center',
+                                    'fontWeight': '600', 'letterSpacing': '1px',
+                                },
+                            ),
                         ])
                     ),
                     dbc.ModalFooter(
