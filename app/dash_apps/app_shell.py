@@ -358,7 +358,7 @@ def _header():
                 style={
                     'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     'textAlign': 'center', 'fontWeight': '700', 'fontSize': '24px',
-                    'minWidth': '180px', 'padding': '0 12px',
+                    'minWidth': '180px', 'padding': '0 2px',
                 },
             ),
 
