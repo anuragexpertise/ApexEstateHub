@@ -101,70 +101,48 @@ def _action_btns(row_id, entity):
 def register_card_catalogue_callbacks(app):
 
     # ── 1. KPI values — refresh on url change ────────────────────────────
+
     @app.callback(
-        [Output(f"kpi-val-{cid}", "children") for cid in KPI_CARDS],
+        Output({"type": "kpi-value", "card_id": ALL}, "children"),
         Input("url", "pathname"),
+        State({"type": "kpi-value", "card_id": ALL}, "id"),
         State("auth-store", "data"),
         prevent_initial_call=False,
     )
-    def refresh_kpi_values(pathname, auth_data):
-        sid = _sid(auth_data)
+    def refresh_kpi_values(pathname, kpi_ids, auth_data):
+        sid  = _sid(auth_data)
         role = (auth_data or {}).get("role", "admin")
         is_master = role == "admin" and sid is None
-        
-        print(f"[KPI REFRESH] society_id={sid}, role={role}, is_master={is_master}")
-        
+
         results = []
-        for card_id, cfg in KPI_CARDS.items():
-            # Master admin KPIs (no society_id needed)
-            if is_master and card_id.startswith("kpi_societies_"):
-                try:
-                    n_params = cfg.get("params", 0)
-                    params = () if n_params == 0 else tuple([sid] * n_params)
-                    row = _db().execute_query(cfg["query"], params, fetch_one=True)
-                    raw = (row or {}).get("v", 0)
-                    results.append(_fmt(raw, cfg.get("format", "count")))
-                    print(f"  ✓ {card_id}: {raw}")
-                except Exception as e:
-                    print(f"  ✗ {card_id} ERROR: {e}")
-                    print(f"    Query: {cfg.get('query', 'N/A')[:80]}")
-                    import traceback
-                    traceback.print_exc()
-                    results.append("—")
-                continue
-            
-            # Regular society KPIs
-            if not sid:
+        for id_dict in kpi_ids:
+            card_id = id_dict["card_id"]
+            cfg = KPI_CARDS.get(card_id)
+            if not cfg:
                 results.append("—")
                 continue
-                
-            try:
-                n_params = cfg.get("params", 1)
-                params = tuple([sid] * n_params) if n_params > 0 else ()
-                
-                # Execute query
-                row = _db().execute_query(cfg["query"], params, fetch_one=True)
-                
-                # Check if 'v' column exists
-                if row and 'v' not in row:
-                    print(f"  ⚠ {card_id}: Query returned {list(row.keys())} but expected 'v'")
+
+            n_params = cfg.get("params", 1)
+            # Master KPIs need no society_id
+            if n_params == 0:
+                params = ()
+            elif is_master:
+                params = ()   # master sees platform-wide counts
+            else:
+                if not sid:
                     results.append("—")
                     continue
-                
+                params = tuple([sid] * n_params)
+
+            try:
+                row = _db().execute_query(cfg["query"], params, fetch_one=True)
                 raw = (row or {}).get("v", 0)
                 results.append(_fmt(raw, cfg.get("format", "count")))
-                print(f"  ✓ {card_id}: {raw} → {results[-1]}")
-                
             except Exception as e:
-                print(f"  ✗ {card_id} ERROR: {e}")
-                print(f"    Query: {cfg.get('query', 'N/A')[:80]}")
-                print(f"    Params: {params}")
-                import traceback
-                traceback.print_exc()
+                print(f"KPI error [{card_id}]: {e}")
                 results.append("—")
-        
-        return results
 
+        return results
     # ════════════════════════════════════════════════════════════════════
     # LIST LOADERS
     # ════════════════════════════════════════════════════════════════════
