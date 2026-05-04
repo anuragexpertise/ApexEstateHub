@@ -415,32 +415,53 @@ def register_camera_callbacks(app) -> None:
         now_s = datetime.now().strftime("%H:%M:%S")
         log   = list(scan_log or [])
 
+        # Default to FAIL status
+        result = {"status": "FAIL", "reason": "Network error or validation failed"}
+        
         try:
             from app.services.qr_service import validate_qr_code
             result = validate_qr_code(qr_text, sid)
+        except Exception as net_err:
+            # Network or service error
+            result = {"status": "FAIL", "reason": f"System error: {str(net_err)[:60]}"}
 
-            if result.get("status") == "PASS":
-                user      = result.get("user", {})
-                user_name = (user.get("name") or
-                             user.get("email", "Visitor").split("@")[0].title())
-                flat      = user.get("flat_number", "")
-                extra     = f"Flat: {flat}" if flat else ""
-                c, s, st  = _pass_ui(user_name, now_s, extra)
-                log.insert(0, {"passed": True, "name": user_name,
-                               "time": now_s,  "qr_snippet": qr_text[:40]})
-            else:
-                reason   = result.get("reason", "Invalid QR code")
-                c, s, st = _fail_ui(reason, now_s)
-                log.insert(0, {"passed": False, "name": reason,
-                               "time": now_s,   "qr_snippet": qr_text[:40]})
-
-        except PreventUpdate:
-            raise
-        except Exception as exc:
-            msg      = str(exc)[:80]
-            c, s, st = _fail_ui(f"System error: {msg}", now_s)
-            log.insert(0, {"passed": False, "name": "Error",
-                           "time": now_s,   "qr_snippet": qr_text[:40]})
+        # Handle PASS result
+        if result.get("status") == "PASS":
+            user      = result.get("user", {})
+            user_id   = user.get("id")
+            user_name = (user.get("name") or
+                         user.get("email", "Visitor").split("@")[0].title())
+            role      = user.get("role", "")
+            
+            # Map role to role code for gate_access table
+            role_code_map = {"admin": "a", "apartment": "a", "vendor": "v", "security": "s"}
+            role_code = role_code_map.get(role, "v")
+            
+            flat = user.get("flat_number", "")
+            extra = f"Flat: {flat}" if flat else f"Role: {role.title()}"
+            
+            # Create gate log entry
+            try:
+                from database.db_manager import db
+                db.execute_query(
+                    "INSERT INTO gate_access (society_id, role, entity_id, time_in) "
+                    "VALUES (%s, %s, %s, NOW())",
+                    (sid, role_code, user_id)
+                )
+            except Exception as gate_err:
+                print(f"Gate log creation error: {gate_err}")
+                # Don't fail the validation, just log the error
+            
+            c, s, st = _pass_ui(user_name, now_s, extra)
+            log.insert(0, {"passed": True, "name": user_name,
+                           "time": now_s, "qr_snippet": qr_text[:40]})
+        
+        # Handle FAIL result
+        else:
+            reason = result.get("reason", "Invalid QR code")
+            c, s, st = _fail_ui(reason, now_s)
+            log.insert(0, {"passed": False, "name": reason[:30],
+                           "time": now_s, "qr_snippet": qr_text[:40]})
 
         return c, s, st, log[:20]
 

@@ -9,10 +9,10 @@ from database.db_manager import db
 
 
 ROLE_CODE_MAP = {
-    "a": "admin",
-    "v": "vendor",
-    "s": "security",
-    "o": "owner",
+    "A": "admin",
+    "O": "apartment",  # Owner
+    "V": "vendor",
+    "S": "security",
 }
 
 
@@ -45,42 +45,43 @@ def _fail(reason):
 
 
 def _parse_qr_payload(qr_data):
+    """Parse QR payload in format: user_id|role_code|society_id"""
     if not qr_data:
         raise ValueError("Empty QR code")
 
     qr_text = str(qr_data).strip()
 
-    # if qr_text.startswith("{"):
-    #     payload = json.loads(qr_text)
-    #     return {
-    #         "user_id": payload.get("user_id") or payload.get("id"),
-    #         "email": payload.get("email"),
-    #         "role": payload.get("role"),
-    #         "issued_at": payload.get("issued_at") or payload.get("timestamp"),
-    #     }
-
+    # Parse pipe-delimited format: user_id|role_code|society_id
     parts = [part.strip() for part in qr_text.split("|")]
     if len(parts) >= 3:
         return {
             "user_id": parts[0],
-            "role": parts[1],
-            "society_id": parts[],
+            "role": parts[1],  # Single letter code (A, O, V, S)
+            "society_id": parts[2],
         }
 
+    # Fallback: if only digits, treat as user_id
     if qr_text.isdigit():
         return {"user_id": qr_text}
 
-    raise ValueError("Unsupported QR format")
+    raise ValueError("Unsupported QR format - expected: user_id|role|society_id")
 
 
 def _normalize_role(role_value):
+    """Normalize role code to full role name"""
     if role_value is None:
         return None
 
-    role = str(role_value).strip().lower()
+    role = str(role_value).strip().upper()  # Convert to uppercase for code matching
     if not role:
         return None
-    return ROLE_CODE_MAP.get(role, role)
+    
+    # If it's a single letter code, map it
+    if len(role) == 1:
+        return ROLE_CODE_MAP.get(role, role.lower())
+    
+    # Otherwise return as lowercase
+    return role.lower()
 
 
 def _parse_issued_at(raw_value):
