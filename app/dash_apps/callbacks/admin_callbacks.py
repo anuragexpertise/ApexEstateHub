@@ -175,16 +175,7 @@ def register_admin_callbacks(app):
                 html.H4("Error", style={"color": "#f39c12", "marginTop": "10px"}),
                 html.P(str(e))
             ], className="text-center p-3", style={"backgroundColor": "#fff3cd", "borderRadius": "10px"})
-        
-    @app.callback(
-        Output("total-users",    "children"),
-        Output("total-revenue",  "children"),
-        Output("pending-dues",   "children"),
-        Input("url", "pathname"),
-        State("auth-store", "data"),
-        prevent_initial_call=False,
-    )
-    def update_admin_kpis(pathname, auth_data):
+  
         sid = (auth_data or {}).get('society_id')
         try:
             from database.db_manager import db
