@@ -558,16 +558,12 @@ def shell_layout():
                             }),
                             # NEW: Validity indicator
                             html.Div(id='qr-modal-validity', className='mt-2'),
-                            html.P(
-                                'Show this QR to security for scanning at the gate',
-                                className='mt-3 text-muted text-center',
-                            ),
                             html.Hr(),
                             dbc.Textarea(
                                 id='qr-modal-text', readOnly=True,
                                 style={
                                     'marginTop': '12px', 'minHeight': '60px',
-                                    'fontSize': '11px', 'fontFamily': 'monospace',
+                                    'fontSize': '24px', 'fontFamily': 'monospace',
                                     'resize': 'none', 'textAlign': 'center',
                                 },
                             ),
