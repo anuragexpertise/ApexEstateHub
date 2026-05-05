@@ -1,4 +1,4 @@
-# app/dash_apps/callbacks/qr_callbacks.py (CAMERA ENABLED)
+# app/dash_apps/callbacks/qr_callbacks.py (COMPLETE WITH CAMERA)
 
 from dash import Input, Output, State, html, no_update, clientside_callback
 from dash.exceptions import PreventUpdate
@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc
 from datetime import datetime
 
 # ════════════════════════════════════════════════════════════════
-# Camera JavaScript - Dual Mode (Entry/Exit)
+# Camera JavaScript - Dual Mode (Entry/Exit) with Auto-stop
 # ════════════════════════════════════════════════════════════════
 
 _CAMERA_JS = r"""
@@ -23,7 +23,6 @@ function qrCameraController(
     var val  = ctx.triggered[0].value;
     if (!val) return window.dash_clientside.no_update;
 
-    /* Persistent state */
     window._qrState = window._qrState || {
         stream: null, intervalId: null, mode: null,
         torch: false, facing: 'environment', active: false, scanning: false
@@ -37,6 +36,7 @@ function qrCameraController(
     function status(m) { var e=el('qr-scan-status'); if(e) e.textContent=m; }
 
     function setReact(inp, val) {
+        if (!inp) return;
         var setter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value').set;
         setter.call(inp, val);
@@ -90,7 +90,6 @@ function qrCameraController(
                 stopCamera();
                 status('QR detected — validating...');
                 
-                /* Set mode and payload */
                 var modeInput = el('qr-scan-mode');
                 var dataInput = el('qr-scan-input');
                 if (modeInput && dataInput) {
@@ -111,8 +110,10 @@ function qrCameraController(
 
     function toggleTorch() {
         if (!S.stream) return;
-        var track = S.stream.getVideoTracks()[0];
-        if (!track || typeof track.applyConstraints !== 'function') {
+        var tracks = S.stream.getVideoTracks();
+        if (!tracks || !tracks[0]) return;
+        var track = tracks[0];
+        if (typeof track.applyConstraints !== 'function') {
             status('Torch not supported'); return;
         }
         S.torch = !S.torch;
@@ -145,7 +146,11 @@ function qrCameraController(
             if (!vid) { stopCamera(); return; }
             vid.srcObject = stream;
             vid.style.display = 'block';
-            vid.play().catch(function(e){ console.warn('play:', e); });
+            
+            var playPromise = vid.play();
+            if (playPromise && playPromise.catch) {
+                playPromise.catch(function(e){ console.warn('play():', e); });
+            }
 
             show('qr-camera-container');
             hide('qr-entry-start-btn'); hide('qr-exit-start-btn');
@@ -153,9 +158,9 @@ function qrCameraController(
             if (mode === 'exit')  show('qr-exit-stop-btn');
             show('qr-switch-btn'); show('qr-scanline'); show('qr-corners');
 
-            var track = stream.getVideoTracks()[0];
-            if (track && track.getCapabilities) {
-                var caps = track.getCapabilities();
+            var tracks = stream.getVideoTracks();
+            if (tracks && tracks[0] && typeof tracks[0].getCapabilities === 'function') {
+                var caps = tracks[0].getCapabilities();
                 if (caps && caps.torch) show('qr-torch-btn');
             }
             
@@ -166,11 +171,18 @@ function qrCameraController(
                 if (!S.intervalId)
                     S.intervalId = setInterval(captureAndSend, INTERVAL_MS);
             }
+            
+            var started = false;
             vid.addEventListener('playing', function onPlaying(){
+                if (started) return;
+                started = true;
                 vid.removeEventListener('playing', onPlaying);
                 beginInterval();
-            }, { once: true });
-            setTimeout(function(){ if (S.stream && !S.intervalId) beginInterval(); }, 1500);
+            });
+            
+            setTimeout(function(){ 
+                if (S.stream && !S.intervalId) beginInterval(); 
+            }, 1500);
         })
         .catch(function(err){
             S.active = false;
@@ -188,10 +200,14 @@ function qrCameraController(
                     if (S.mode === 'entry') show('qr-entry-stop-btn');
                     if (S.mode === 'exit')  show('qr-exit-stop-btn');
                     show('qr-switch-btn'); show('qr-scanline');
-                    status('Scanning (single camera)...');
+                    status('Scanning...');
                     S.intervalId = setInterval(captureAndSend, INTERVAL_MS);
                 })
-                .catch(function(){ status('No camera found'); });
+                .catch(function(){ 
+                    status('No camera found'); 
+                    show('qr-entry-start-btn'); 
+                    show('qr-exit-start-btn'); 
+                });
                 return;
             }
             var msgs = {
@@ -253,12 +269,11 @@ def register_qr_callbacks(app):
         prevent_initial_call=True,
     )
 
-    # ── 2. Generate user's QR code (modal) ──────────────────────
+    # ── 2. Generate user's static QR code (modal) ───────────────
     @app.callback(
         Output('qr-modal', 'is_open'),
         Output('qr-modal-img', 'src'),
         Output('qr-modal-text', 'value'),
-        Output('qr-modal-validity', 'children'),
         Input('hdr-avatar', 'n_clicks'),
         Input('show-qr-btn', 'n_clicks'),
         Input('close-qr-modal', 'n_clicks'),
@@ -270,53 +285,41 @@ def register_qr_callbacks(app):
         from dash import ctx
         
         if ctx.triggered_id == 'close-qr-modal':
-            return False, no_update, no_update, no_update
+            return False, no_update, no_update
         
         if ctx.triggered_id not in ('hdr-avatar', 'show-qr-btn'):
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update
         
         if not auth_data or not auth_data.get('authenticated'):
-            return False, no_update, no_update, no_update
+            return False, no_update, no_update
         
-        from app.services.qr_service import generate_qr_code_with_validity
+        from app.services.qr_service import generate_static_qr_code
         
-        src, payload = generate_qr_code_with_validity(
+        src, payload = generate_static_qr_code(
             auth_data.get('user_id'),
             auth_data.get('role'),
             auth_data.get('society_id')
         )
         
         if not src:
-            # Failed to generate
-            return True, "", "", html.Div([
-                html.I(className="fas fa-exclamation-triangle me-2"),
-                f"Cannot generate QR: {payload}"
-            ], className="text-danger")
+            return True, "", f"Error: {payload}"
         
-        # Extract validity from payload
-        parts = payload.split("|")
-        validity_text = ""
-        if len(parts) >= 5 and parts[4]:
-            valid_until = datetime.fromisoformat(parts[4])
-            validity_text = html.Div([
-                html.I(className="fas fa-calendar-check me-2", style={"color": "#27ae60"}),
-                f"Valid until: {valid_until.strftime('%d %b %Y, %I:%M %p')}"
-            ], className="text-success mt-2")
-        
-        return True, src, payload, validity_text
+        return True, src, payload
 
-    # ── 3. Validate scanned QR (Entry/Exit) ─────────────────────
+    # ── 3. Validate scanned QR (Entry/Exit with different rules)
     @app.callback(
         Output("qr-result", "children"),
         Output("qr-result", "style"),
+        Output("qr-scan-log", "data", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("qr-validate-btn", "n_clicks"),
         State("qr-scan-input", "value"),
         State("qr-scan-mode",  "value"),  # 'entry' or 'exit'
+        State("qr-scan-log",   "data"),
         State("auth-store",    "data"),
         prevent_initial_call=True,
     )
-    def validate_qr_scanned(n_clicks, qr_payload, mode, auth_data):
+    def validate_qr_scanned(n_clicks, qr_payload, mode, scan_log, auth_data):
         if not n_clicks or not qr_payload:
             raise PreventUpdate
         
@@ -326,35 +329,113 @@ def register_qr_callbacks(app):
         society_id = (auth_data or {}).get("society_id")
         result = validate_qr_code(qr_payload.strip(), society_id)
         now_s = datetime.now().strftime("%H:%M:%S")
+        log = list(scan_log or [])
         
-        if result.get("status") == "PASS":
-            user = result.get("user", {})
-            user_id = user.get("id")
-            user_name = user.get("name") or user.get("email", "Visitor").split("@")[0].title()
-            role = user.get("role", "")
-            
-            # Determine local vs server validation
-            is_local = result.get("local_validation", False)
-            note = result.get("note", "")
-            validation_label = "✓ QR processed locally" if is_local else "✓ Verified with server"
-            
-            # Map role to gate_access role code
-            role_code_map = {"admin": "a", "apartment": "a", "vendor": "v", "security": "s"}
-            role_code = role_code_map.get(role, "v")
-            
-            # Create gate log entry
-            gate_msg = ""
-            try:
-                if mode == "entry":
-                    # Time IN
+        # Map role to gate_access code
+        role_code_map = {"admin": "a", "apartment": "o", "vendor": "v", "security": "s"}
+        
+        # ════════════════════════════════════════════════════════
+        # ENTRY MODE: Only PASS allowed
+        # ════════════════════════════════════════════════════════
+        if mode == "entry":
+            if result.get("status") == "PASS":
+                user = result.get("user", {})
+                user_id = user.get("id")
+                user_name = user.get("name", "Visitor")
+                role = user.get("role", "")
+                flat = user.get("flat_number", "")
+                
+                role_code = role_code_map.get(role, "a")
+                
+                # Create time_in gate log
+                try:
                     db.execute_query(
                         """INSERT INTO gate_access (society_id, role, entity_id, time_in)
                            VALUES (%s, %s, %s, NOW())""",
                         (society_id, role_code, user_id)
                     )
-                    gate_msg = "🟢 Entered"
-                elif mode == "exit":
-                    # Time OUT - update most recent open entry
+                    gate_msg = "🟢 ENTERED"
+                except Exception as e:
+                    print(f"Gate log error: {e}")
+                    gate_msg = "⚠️ Log failed"
+                
+                log.insert(0, {
+                    "passed": True, "name": user_name, "time": now_s,
+                    "qr_snippet": qr_payload[:30], "mode": "entry"
+                })
+                
+                return (
+                    html.Div([
+                        html.I(className="fas fa-check-circle fa-4x mb-3", 
+                               style={"color": "#27ae60"}),
+                        html.H3("Access Granted", style={"color": "#27ae60", "margin": 0}),
+                        html.Div(user_name, style={
+                            "fontSize": "18px", "fontWeight": "700", 
+                            "marginTop": "10px", "color": "#2c3e50"
+                        }),
+                        html.Div(f"Flat {flat}" if flat else role.title(), 
+                                 style={"fontSize": "14px", "color": "#7f8c8d", "marginTop": "4px"}),
+                        html.Div(gate_msg, style={
+                            "fontSize": "24px", "fontWeight": "700",
+                            "margin": "12px 0", "color": "#27ae60"
+                        }),
+                        html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
+                        html.Small(now_s, style={"color": "#95a5a6"}),
+                    ], style={"textAlign": "center", "padding": "24px"}),
+                    {
+                        "background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
+                        "border": "3px solid #27ae60",
+                        "borderRadius": "14px",
+                        "marginTop": "12px",
+                        "boxShadow": "0 4px 12px rgba(39,174,110,0.2)"
+                    },
+                    log[:20],
+                    {"type": "success", "message": f"{gate_msg} — {user_name}"}
+                )
+            else:
+                reason = result.get("reason", "Invalid QR")
+                user = result.get("user", {})
+                user_name = user.get("name", "Unknown") if user else "Unknown"
+                
+                log.insert(0, {
+                    "passed": False, "name": user_name, "time": now_s,
+                    "qr_snippet": qr_payload[:30], "mode": "entry"
+                })
+                
+                return (
+                    html.Div([
+                        html.I(className="fas fa-times-circle fa-4x mb-3", 
+                               style={"color": "#e74c3c"}),
+                        html.H3("Access Denied", style={"color": "#e74c3c"}),
+                        html.P(reason, style={"fontSize": "14px", "marginTop": "8px"}),
+                        html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
+                        html.Small(now_s, style={"color": "#95a5a6"}),
+                    ], style={"textAlign": "center", "padding": "24px"}),
+                    {
+                        "background": "linear-gradient(135deg, #f8d7da, #f5c6cb)",
+                        "border": "3px solid #e74c3c",
+                        "borderRadius": "14px",
+                        "marginTop": "12px",
+                        "boxShadow": "0 4px 12px rgba(231,76,60,0.2)"
+                    },
+                    log[:20],
+                    {"type": "error", "message": f"Entry denied — {reason}"}
+                )
+        
+        # ════════════════════════════════════════════════════════
+        # EXIT MODE: PASS or FAIL both allowed (always log exit)
+        # ════════════════════════════════════════════════════════
+        elif mode == "exit":
+            user = result.get("user", {})
+            user_id = user.get("id") if user else None
+            user_name = user.get("name", "Unknown") if user else "Unknown"
+            role = user.get("role", "") if user else ""
+            
+            role_code = role_code_map.get(role, "v") if role else "v"
+            
+            # Update time_out (even if validation failed)
+            try:
+                if user_id:
                     db.execute_query(
                         """UPDATE gate_access 
                            SET time_out = NOW()
@@ -363,50 +444,169 @@ def register_qr_callbacks(app):
                            ORDER BY time_in DESC LIMIT 1""",
                         (society_id, user_id, role_code)
                     )
-                    gate_msg = "🔴 Exited"
+                gate_msg = "🔴 EXITED"
             except Exception as e:
-                print(f"Gate log error: {e}")
-                gate_msg = "⚠️ Log failed"
+                print(f"Gate exit log error: {e}")
+                gate_msg = "🔴 EXIT (log failed)"
+            
+            log.insert(0, {
+                "passed": result.get("status") == "PASS",
+                "name": user_name, "time": now_s,
+                "qr_snippet": qr_payload[:30], "mode": "exit"
+            })
+            
+            if result.get("status") == "PASS":
+                color = "#e67e22"
+            else:
+                color = "#95a5a6"
             
             return (
                 html.Div([
-                    html.I(className="fas fa-check-circle fa-3x mb-3", 
-                           style={"color": "#27ae60"}),
-                    html.H4("Access Granted", style={"color": "#27ae60", "margin": 0}),
-                    html.Div(user_name, style={"fontSize": "16px", "fontWeight": "600", "marginTop": "8px"}),
-                    html.Div(gate_msg, style={"fontSize": "20px", "margin": "8px 0"}),
-                    html.Hr(style={"margin": "12px 0"}),
-                    html.Small(validation_label, className="text-muted d-block mb-1"),
-                    html.Small(now_s, style={"color": "#aaa"}),
-                ], style={"textAlign": "center", "padding": "20px"}),
+                    html.I(className="fas fa-sign-out-alt fa-4x mb-3", 
+                           style={"color": color}),
+                    html.H3(gate_msg, style={"color": color}),
+                    html.P(user_name, style={"fontSize": "16px", "fontWeight": "600"}),
+                    html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
+                    html.Small(now_s, style={"color": "#95a5a6"}),
+                ], style={"textAlign": "center", "padding": "24px"}),
                 {
-                    "background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
-                    "border": "2px solid #27ae60",
-                    "borderRadius": "12px",
-                    "marginTop": "10px"
+                    "background": f"linear-gradient(135deg, {color}18, {color}10)",
+                    "border": f"3px solid {color}",
+                    "borderRadius": "14px",
+                    "marginTop": "12px",
                 },
-                {"type": "success", "message": f"{gate_msg} — {user_name}"}
+                log[:20],
+                {"type": "info", "message": f"{gate_msg} — {user_name}"}
             )
-        else:
-            reason = result.get("reason", "Invalid QR code")
-            note = result.get("note", "")
-            return (
-                html.Div([
-                    html.I(className="fas fa-times-circle fa-3x mb-3", 
-                           style={"color": "#e74c3c"}),
-                    html.H4("Access Denied", style={"color": "#e74c3c"}),
-                    html.P(reason, style={"fontSize": "13px"}),
-                    html.Small(note, className="text-muted d-block") if note else None,
-                    html.Hr(style={"margin": "12px 0"}),
-                    html.Small(now_s, style={"color": "#aaa"}),
-                ], style={"textAlign": "center", "padding": "20px"}),
-                {
-                    "background": "linear-gradient(135deg, #f8d7da, #f5c6cb)",
-                    "border": "2px solid #e74c3c",
-                    "borderRadius": "12px",
-                    "marginTop": "10px"
-                },
-                {"type": "error", "message": f"✗ {reason}"}
-            )
+        
+        return no_update, no_update, no_update, no_update
 
-    print("✓ QR callbacks registered (camera + dual entry/exit)")
+    # ── 4. Render recent scans log ──────────────────────────────
+    @app.callback(
+        Output("qr-recent-scans", "children"),
+        Input("qr-scan-log", "data"),
+        prevent_initial_call=True,
+    )
+    def render_scans(log):
+        if not log:
+            return dbc.ListGroupItem(
+                "No scans yet",
+                className="text-muted text-center",
+                style={"fontSize": "11px", "padding": "10px"},
+            )
+        
+        items = []
+        for entry in log:
+            passed = entry.get("passed", False)
+            mode = entry.get("mode", "entry")
+            icon = "fa-sign-in-alt" if mode == "entry" else "fa-sign-out-alt"
+            color = "#27ae60" if passed else "#e74c3c"
+            
+            items.append(dbc.ListGroupItem([
+                html.Div([
+                    html.I(className=f"fas {icon} me-2", style={"color": color}),
+                    html.Strong(entry.get("name", "?"), style={"fontSize": "12px"}),
+                    html.Small(f" ({mode.upper()})", className="text-muted ms-1",
+                              style={"fontSize": "10px"}),
+                    html.Small(entry.get("time", ""), className="float-end",
+                              style={"fontSize": "10px", "color": "#aaa"}),
+                ]),
+                html.Small(entry.get("qr_snippet", "")[:30] + "…",
+                          style={"fontSize": "9px", "color": "#bbb", "display": "block"}),
+            ], style={"padding": "6px 10px", "marginBottom": "2px"}))
+        
+        return items
+
+    # ── 5. Emergency Alert ──────────────────────────────────────
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("emergency-btn", "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def trigger_emergency(n, auth_data):
+        if not n:
+            raise PreventUpdate
+        
+        from database.db_manager import db
+        society_id = (auth_data or {}).get("society_id")
+        
+        if not society_id:
+            return {"type": "error", "message": "No society selected"}
+        
+        try:
+            # Create emergency event for ALL entities
+            db.execute_query(
+                """INSERT INTO events 
+                   (society_id, title, description, event_date, open_to)
+                   VALUES (%s, 'SECURITY EMERGENCY', 
+                           'Emergency alert triggered by security at gate', 
+                           CURRENT_DATE, 'all')""",
+                (society_id,)
+            )
+            return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
+        except Exception as e:
+            return {"type": "error", "message": f"Emergency failed: {str(e)[:40]}"}
+
+    # ── 6. Call Admin ───────────────────────────────────────────
+    @app.callback(
+        Output("call-admin-modal", "is_open"),
+        Output("admin-phone-display", "children"),
+        Input("call-admin-btn", "n_clicks"),
+        Input("close-call-modal", "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def show_admin_contact(n1, n2, auth_data):
+        from dash import ctx
+        
+        if ctx.triggered_id == "close-call-modal":
+            return False, no_update
+        
+        if not n1:
+            raise PreventUpdate
+        
+        from database.db_manager import db
+        society_id = (auth_data or {}).get("society_id")
+        
+        if not society_id:
+            return True, "No society selected"
+        
+        try:
+            # Get admin contact
+            admin = db.execute_query(
+                """SELECT u.email, s.phone, s.secretary_phone
+                   FROM users u
+                   JOIN societies s ON u.society_id = s.id
+                   WHERE u.society_id = %s AND u.role = 'admin'
+                   LIMIT 1""",
+                (society_id,),
+                fetch_one=True
+            )
+            
+            if admin:
+                phone = admin.get("phone") or admin.get("secretary_phone") or "Not available"
+                email = admin.get("email", "Not available")
+                
+                return True, html.Div([
+                    html.Div([
+                        html.I(className="fas fa-phone-alt fa-2x mb-2", style={"color": "#1859b8"}),
+                        html.H5(phone, style={"fontWeight": "700"}),
+                        html.A(
+                            [html.I(className="fas fa-phone me-1"), "Call Now"],
+                            href=f"tel:{phone}",
+                            className="btn btn-success btn-lg w-100 mt-2",
+                        ) if phone != "Not available" else None,
+                    ], className="mb-3"),
+                    html.Hr(),
+                    html.Small([
+                        html.I(className="fas fa-envelope me-1"), email
+                    ], className="text-muted"),
+                ])
+            
+            return True, "No admin contact found"
+            
+        except Exception as e:
+            return True, f"Error: {str(e)}"
+
+    print("✓ QR callbacks registered (static QR + camera + emergency)")

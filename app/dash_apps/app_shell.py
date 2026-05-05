@@ -431,12 +431,16 @@ def shell_layout():
             # ── Customize page stores ──────────────────────────────────────
             dcc.Store(id='dnd-layout-store', storage_type='session',
                       data={'active': [], 'available': []}),
-
+            
             # ── Camera store (evaluate-pass page) ─────────────────────────
-            dcc.Store(id='eval-camera-store', storage_type='memory',
-                      data={'facing': 'environment', 'active': False, 'torch': False}),
-            dcc.Store(id='eval-scan-log',     storage_type='memory', data=[]),
-
+            
+            
+            
+            dcc.Store(id='qr-camera-store', storage_type='memory',
+                    data={'facing': 'environment', 'active': False, 'mode': None, 'torch': False}),
+            dcc.Store(id='qr-scan-log', storage_type='memory', data=[]),
+           
+            
             # ── Hidden utility elements ────────────────────────────────────
             dcc.Input(id='dnd-order-capture', value='',
                       debounce=False, style={'display': 'none'}),

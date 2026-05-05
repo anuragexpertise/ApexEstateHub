@@ -566,132 +566,202 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     ], className="portal-page")
 
 
+# In app/dash_apps/pages/portal_pages.py
+# Replace _evaluate_pass_page():
+
 def _evaluate_pass_page() -> html.Div:
     return html.Div([
         _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
                     "Entry IN / Exit OUT scanning"),
         
-        dbc.Card([
-            dbc.CardHeader(html.Div([
-                html.I(className="fas fa-camera me-2", style={"color": "#1859b8"}),
-                html.Strong("QR Scanner"),
-                dbc.Badge("DUAL MODE", color="success", className="ms-2", 
-                         style={"fontSize": "9px"}),
-            ], style={"display": "flex", "alignItems": "center"})),
-            
-            dbc.CardBody([
-                # Hidden inputs (set by camera JS)
-                dcc.Input(id="qr-scan-input", style={"display": "none"}),
-                dcc.Input(id="qr-scan-mode",  style={"display": "none"}),
-                html.Button(id="qr-validate-btn", n_clicks=0, style={"display": "none"}),
-                
-                # Result display
-                html.Div(id="qr-result", style={"minHeight": "60px"}),
-                
-                html.Hr(style={"margin": "10px 0"}),
-                
-                # Camera container
-                html.Div(
-                    id="qr-camera-container",
-                    style={
-                        "position": "relative",
-                        "borderRadius": "10px",
-                        "overflow": "hidden",
-                        "background": "#1a1a2e",
-                        "marginBottom": "10px",
-                    },
-                    children=[
-                        html.Video(
-                            id="qr-video",
-                            autoPlay=True, muted=True,
-                            style={
-                                "width": "100%", "maxHeight": "280px",
-                                "objectFit": "cover", "display": "none",
-                            },
-                        ),
+        # TWO-COLUMN LAYOUT
+        html.Div([
+            # ══════════════════════════════════════════════════════
+            # LEFT COLUMN: Scanner
+            # ══════════════════════════════════════════════════════
+            html.Div(
+                dbc.Card([
+                    dbc.CardHeader(html.Div([
+                        html.I(className="fas fa-camera me-2", style={"color": "#1859b8"}),
+                        html.Strong("QR Scanner"),
+                        dbc.Badge("LIVE", color="success", className="ms-2", 
+                                 style={"fontSize": "9px"}),
+                    ], style={"display": "flex", "alignItems": "center"}),
+                    style={"padding": "10px 14px"}),
+                    
+                    dbc.CardBody([
+                        # Hidden inputs
+                        dcc.Input(id="qr-scan-input", style={"display": "none"}),
+                        dcc.Input(id="qr-scan-mode",  style={"display": "none"}),
+                        html.Button(id="qr-validate-btn", n_clicks=0, style={"display": "none"}),
+                        
+                        # Result display
+                        html.Div(id="qr-result", style={"minHeight": "60px"}),
+                        
+                        html.Hr(style={"margin": "10px 0"}),
+                        
+                        # Camera container
                         html.Div(
-                            id="qr-scanline",
+                            id="qr-camera-container",
                             style={
-                                "display": "none", "position": "absolute",
-                                "left": 0, "right": 0, "top": 0, "height": "3px",
-                                "background": "linear-gradient(90deg,transparent,#1859b8 50%,transparent)",
-                                "animation": "qrScanLine 2s ease-in-out infinite",
+                                "position": "relative",
+                                "borderRadius": "10px",
+                                "overflow": "hidden",
+                                "background": "#1a1a2e",
+                                "marginBottom": "10px",
+                                "minHeight": "60px",
                             },
+                            children=[
+                                html.Video(
+                                    id="qr-video",
+                                    autoPlay=True, muted=True,
+                                    style={
+                                        "width": "100%", "maxHeight": "300px",
+                                        "objectFit": "cover", "display": "none",
+                                        "borderRadius": "10px",
+                                    },
+                                ),
+                                html.Div(
+                                    id="qr-scanline",
+                                    style={"display": "none"},
+                                ),
+                                html.Div(
+                                    id="qr-corners",
+                                    style={"display": "none"},
+                                    children=[
+                                        html.Div(style={
+                                            "position": "absolute", "width": "22px", "height": "22px",
+                                            "border": "3px solid #1859b8",
+                                            "borderRight": "none", "borderBottom": "none",
+                                            "top": "10px", "left": "10px", "borderRadius": "3px 0 0 0",
+                                        }),
+                                        html.Div(style={
+                                            "position": "absolute", "width": "22px", "height": "22px",
+                                            "border": "3px solid #1859b8",
+                                            "borderLeft": "none", "borderBottom": "none",
+                                            "top": "10px", "right": "10px", "borderRadius": "0 3px 0 0",
+                                        }),
+                                        html.Div(style={
+                                            "position": "absolute", "width": "22px", "height": "22px",
+                                            "border": "3px solid #1859b8",
+                                            "borderRight": "none", "borderTop": "none",
+                                            "bottom": "10px", "left": "10px", "borderRadius": "0 0 0 3px",
+                                        }),
+                                        html.Div(style={
+                                            "position": "absolute", "width": "22px", "height": "22px",
+                                            "border": "3px solid #1859b8",
+                                            "borderLeft": "none", "borderTop": "none",
+                                            "bottom": "10px", "right": "10px", "borderRadius": "0 0 3px 0",
+                                        }),
+                                    ],
+                                ),
+                                html.Canvas(id="qr-canvas", style={"display": "none"}),
+                            ],
                         ),
-                        html.Div(id="qr-corners", style={"display": "none"}),
-                        html.Canvas(id="qr-canvas", style={"display": "none"}),
-                    ],
-                ),
-                
-                # Status
-                html.Small(id="qr-scan-status", children="Camera off",
-                          style={"color": "#aaa", "fontSize": "11px", "display": "block",
-                                 "textAlign": "center", "marginBottom": "10px"}),
-                
-                # Control buttons
-                html.Div([
-                    # Entry IN
-                    dbc.Button(
-                        [html.I(className="fas fa-sign-in-alt me-1"), "Entry IN"],
-                        id="qr-entry-start-btn", color="success", size="sm",
-                        style={"minWidth": "120px"}, n_clicks=0,
-                    ),
-                    # Exit OUT
-                    dbc.Button(
-                        [html.I(className="fas fa-sign-out-alt me-1"), "Exit OUT"],
-                        id="qr-exit-start-btn", color="danger", size="sm",
-                        style={"minWidth": "120px"}, n_clicks=0,
-                    ),
-                    # Stop Entry
-                    dbc.Button(
-                        [html.I(className="fas fa-stop me-1"), "Stop"],
-                        id="qr-entry-stop-btn", color="secondary", size="sm", outline=True,
-                        style={"display": "none"}, n_clicks=0,
-                    ),
-                    # Stop Exit
-                    dbc.Button(
-                        [html.I(className="fas fa-stop me-1"), "Stop"],
-                        id="qr-exit-stop-btn", color="secondary", size="sm", outline=True,
-                        style={"display": "none"}, n_clicks=0,
-                    ),
-                    # Flip camera
-                    dbc.Button(
-                        [html.I(className="fas fa-sync-alt me-1"), "Flip"],
-                        id="qr-switch-btn", color="info", size="sm", outline=True,
-                        style={"display": "none"}, n_clicks=0,
-                    ),
-                    # Torch
-                    dbc.Button(
-                        [html.I(className="fas fa-lightbulb me-1"), "Light"],
-                        id="qr-torch-btn", color="warning", size="sm", outline=True,
-                        style={"display": "none"}, n_clicks=0,
-                    ),
-                ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap",
-                         "justifyContent": "center"}),
-                
-            ], style={"padding": "14px"}),
-        ], style={"maxWidth": "600px", "margin": "0 auto 20px",
-                  "borderRadius": "18px", "boxShadow": "0 10px 28px rgba(24,89,184,0.1)"}),
-        
-        # CSS for scan-line animation
-        html.Div(
-                style={
-                    "display": "none",
-                    "dangerouslySetInnerHTML": {
-                        "__html": """
-                            <style>
-                                @keyframes ddScanLine {
-                                    0%   { top: 2%;  opacity: 0; }
-                                    10%  { opacity: 1; }
-                                    90%  { opacity: 1; }
-                                    100% { top: 96%; opacity: 0; }
-                                }
-                            </style>
-                        """
-                    }
-                }
+                        
+                        # Status
+                        html.Small(id="qr-scan-status", children="Camera off",
+                                  style={"color": "#aaa", "fontSize": "11px", "display": "block",
+                                         "textAlign": "center", "marginBottom": "10px"}),
+                        
+                        # Control buttons
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-sign-in-alt me-1"), "Entry IN"],
+                                id="qr-entry-start-btn", color="success", size="sm",
+                                style={"flex": "1"}, n_clicks=0,
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-sign-out-alt me-1"), "Exit OUT"],
+                                id="qr-exit-start-btn", color="danger", size="sm",
+                                style={"flex": "1"}, n_clicks=0,
+                            ),
+                        ], style={"display": "flex", "gap": "6px", "marginBottom": "6px"}),
+                        
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-stop me-1"), "Stop"],
+                                id="qr-entry-stop-btn", color="secondary", size="sm", outline=True,
+                                style={"display": "none", "flex": "1"}, n_clicks=0,
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-stop me-1"), "Stop"],
+                                id="qr-exit-stop-btn", color="secondary", size="sm", outline=True,
+                                style={"display": "none", "flex": "1"}, n_clicks=0,
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-sync-alt me-1"), "Flip"],
+                                id="qr-switch-btn", color="info", size="sm", outline=True,
+                                style={"display": "none"}, n_clicks=0,
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-lightbulb me-1"), "Light"],
+                                id="qr-torch-btn", color="warning", size="sm", outline=True,
+                                style={"display": "none"}, n_clicks=0,
+                            ),
+                        ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
+                        
+                        html.Hr(style={"margin": "10px 0"}),
+                        
+                        # Emergency buttons
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-exclamation-triangle me-1"), "EMERGENCY"],
+                                id="emergency-btn", color="danger", size="sm",
+                                style={"flex": "1", "fontWeight": "700"}, n_clicks=0,
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-phone me-1"), "Call Admin"],
+                                id="call-admin-btn", color="primary", size="sm",
+                                style={"flex": "0"}, n_clicks=0,
+                            ),
+                        ], style={"display": "flex", "gap": "6px"}),
+                        
+                    ], style={"padding": "14px"}),
+                ], style={"borderRadius": "18px", "boxShadow": "0 10px 28px rgba(24,89,184,0.1)"}),
+                style={"flex": "1 1 320px", "minWidth": "280px"},
             ),
-        # Drill divs (required by drilldown)
+            
+            # ══════════════════════════════════════════════════════
+            # RIGHT COLUMN: Recent Scans
+            # ══════════════════════════════════════════════════════
+            html.Div(
+                dbc.Card([
+                    dbc.CardHeader(html.Div([
+                        html.I(className="fas fa-history me-2", style={"color": "#7d8ea3"}),
+                        html.Strong("Recent Scans"),
+                    ], style={"display": "flex", "alignItems": "center"}),
+                    style={"padding": "10px 14px"}),
+                    
+                    dbc.CardBody(
+                        dbc.ListGroup(
+                            id="qr-recent-scans",
+                            children=[dbc.ListGroupItem(
+                                "No scans yet",
+                                className="text-muted text-center",
+                                style={"fontSize": "11px", "padding": "10px"},
+                            )],
+                            flush=True,
+                            style={"maxHeight": "520px", "overflowY": "auto"},
+                        ),
+                        style={"padding": "8px"},
+                    ),
+                ], style={"borderRadius": "18px", "boxShadow": "0 10px 28px rgba(0,0,0,0.06)"}),
+                style={"flex": "1 1 280px", "minWidth": "240px"},
+            ),
+            
+        ], style={"display": "flex", "gap": "20px", "flexWrap": "wrap"}),
+        
+        # Call Admin Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Contact Admin"), close_button=True),
+            dbc.ModalBody(html.Div(id="admin-phone-display", className="text-center")),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-call-modal", color="secondary", n_clicks=0)
+            ),
+        ], id="call-admin-modal", centered=True, size="sm"),
+        
+        # Drill divs (required)
         html.Div(id="drill-breadcrumb", style={"display": "none"}),
         html.Div(id="drill-content", style={"display": "none"}),
         
