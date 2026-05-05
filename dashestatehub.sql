@@ -219,7 +219,21 @@ CREATE TABLE IF NOT EXISTS charges (
     due_day     INTEGER      DEFAULT 15,
     created_at  TIMESTAMP    NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS vendor_passes (
+    id SERIAL PRIMARY KEY,
+    society_id INTEGER NOT NULL REFERENCES societies(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    pass_type VARCHAR(50) DEFAULT 'temporary',
+    issued_date DATE DEFAULT CURRENT_DATE,
+    valid_until DATE NOT NULL,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(society_id, user_id, issued_date)
+);
 
+CREATE INDEX IF NOT EXISTS idx_vendor_passes_active 
+ON vendor_passes(society_id, user_id, valid_until) 
+WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_users_email             ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_society_role      ON users(society_id, role);
 CREATE INDEX IF NOT EXISTS idx_users_linked            ON users(linked_id);

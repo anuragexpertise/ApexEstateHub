@@ -550,15 +550,14 @@ def shell_layout():
                     dbc.ModalHeader(dbc.ModalTitle('My QR Code'), close_button=True),
                     dbc.ModalBody(
                         html.Div([
-                            html.Img(
-                                id='qr-modal-img', src='',
-                                style={
-                                    'width': '200px', 'height': '200px',
-                                    'margin': '0 auto', 'display': 'block',
-                                    'border': '2px solid #667eea',
-                                    'borderRadius': '10px', 'padding': '8px',
-                                },
-                            ),
+                            html.Img(id='qr-modal-img', src='', style={
+                                'width': '200px', 'height': '200px',
+                                'margin': '0 auto', 'display': 'block',
+                                'border': '2px solid #667eea',
+                                'borderRadius': '10px', 'padding': '8px',
+                            }),
+                            # NEW: Validity indicator
+                            html.Div(id='qr-modal-validity', className='mt-2'),
                             html.P(
                                 'Show this QR to security for scanning at the gate',
                                 className='mt-3 text-muted text-center',
@@ -568,9 +567,8 @@ def shell_layout():
                                 id='qr-modal-text', readOnly=True,
                                 style={
                                     'marginTop': '12px', 'minHeight': '60px',
-                                    'fontSize': '13px', 'fontFamily': 'monospace',
+                                    'fontSize': '11px', 'fontFamily': 'monospace',
                                     'resize': 'none', 'textAlign': 'center',
-                                    'fontWeight': '600', 'letterSpacing': '1px',
                                 },
                             ),
                         ])
