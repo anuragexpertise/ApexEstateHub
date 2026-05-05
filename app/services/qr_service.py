@@ -1,7 +1,6 @@
-# app/services/qr_service.py (ENHANCED)
+# app/services/qr_service.py (STATIC QR - NO EXPIRY)
 
 import base64
-import json
 from datetime import datetime, timedelta
 from io import BytesIO
 import qrcode
@@ -22,97 +21,22 @@ ROLE_CODE_MAP_REV = {
 }
 
 
-def _calculate_validity(user_id: int, role: str, society_id: int) -> tuple:
+def generate_static_qr_code(user_id: int, role: str, society_id: int):
     """
-    Calculate QR validity based on role-specific rules.
-    Returns: (is_valid: bool, reason: str, expiry: datetime|None)
-    """
-    try:
-        if role == "admin":
-            # Admin always valid
-            return True, "Admin access", datetime.now() + timedelta(days=365)
-        
-        elif role == "apartment":
-            # Valid if no pending dues
-            dues = db.execute_query(
-                """SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS total
-                   FROM payments 
-                   WHERE society_id = %s AND apartment_id = (
-                       SELECT linked_id FROM users WHERE id = %s
-                   ) AND status = 'pending'""",
-                (society_id, user_id),
-                fetch_one=True
-            ) or {"c": 0, "total": 0}
-            
-            if int(dues.get("c", 0)) > 0:
-                return False, f"Pending dues: ₹{float(dues.get('total', 0)):.0f}", None
-            return True, "Dues cleared", datetime.now() + timedelta(days=30)
-        
-        elif role == "vendor":
-            # Valid if has active vendor pass
-            active_pass = db.execute_query(
-                """SELECT id, valid_until 
-                   FROM vendor_passes 
-                   WHERE society_id = %s AND user_id = %s 
-                   AND status = 'active' 
-                   AND valid_until >= CURRENT_DATE
-                   ORDER BY valid_until DESC LIMIT 1""",
-                (society_id, user_id),
-                fetch_one=True
-            )
-            
-            if not active_pass:
-                return False, "No active vendor pass", None
-            
-            valid_until = active_pass.get("valid_until")
-            return True, f"Pass valid until {valid_until}", valid_until
-        
-        elif role == "security":
-            # Valid if currently on duty
-            on_duty = db.execute_query(
-                """SELECT id FROM gate_access 
-                   WHERE society_id = %s AND entity_id = %s 
-                   AND role = 's' AND time_out IS NULL
-                   ORDER BY time_in DESC LIMIT 1""",
-                (society_id, user_id),
-                fetch_one=True
-            )
-            
-            if not on_duty:
-                return False, "Not on duty", None
-            return True, "On duty", datetime.now() + timedelta(hours=12)
-        
-        return False, "Unknown role", None
-        
-    except Exception as e:
-        print(f"Validity check error: {e}")
-        return False, f"Error: {str(e)[:50]}", None
-
-
-def generate_qr_code_with_validity(user_id: int, role: str, society_id: int):
-    """
-    Generate QR code with embedded validity timestamp.
+    Generate STATIC QR code (never expires - for windshield stickers).
     
-    Payload format: user_id|role_code|society_id|issued_at|valid_until
-    Example: 42|O|1|2025-05-05T14:30:00|2025-06-05T14:30:00
+    Payload format: user_id|role_code|society_id
+    Example: 42|O|1
     """
     try:
-        is_valid, reason, expiry = _calculate_validity(user_id, role, society_id)
-        
-        if not is_valid:
-            return None, f"Cannot generate QR: {reason}"
-        
         role_code = ROLE_CODE_MAP_REV.get(role, "V")
-        issued_at = datetime.now().isoformat()
-        valid_until = expiry.isoformat() if expiry else ""
-        
-        qr_payload = f"{user_id}|{role_code}|{society_id or 0}|{issued_at}|{valid_until}"
+        qr_payload = f"{user_id}|{role_code}|{society_id or 0}"
         
         qr = qrcode.QRCode(
             version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction for outdoor use
+            box_size=12,  # Larger for distance scanning
+            border=6,
         )
         qr.add_data(qr_payload)
         qr.make(fit=True)
@@ -129,112 +53,200 @@ def generate_qr_code_with_validity(user_id: int, role: str, society_id: int):
         return None, str(e)
 
 
-def validate_qr_local(qr_payload: str) -> dict:
-    """
-    Client-side validation using embedded QR data (no DB query).
-    Returns status with 'local_validation' flag.
-    """
-    try:
-        parts = qr_payload.strip().split("|")
-        
-        if len(parts) < 5:
-            return {"status": "FAIL", "reason": "Invalid QR format"}
-        
-        user_id, role_code, society_id, issued_at, valid_until = parts[:5]
-        role = ROLE_CODE_MAP.get(role_code, "unknown")
-        
-        # Check expiry
-        if valid_until:
-            expiry = datetime.fromisoformat(valid_until)
-            if datetime.now() > expiry:
-                return {
-                    "status": "FAIL",
-                    "reason": f"QR expired on {expiry.strftime('%Y-%m-%d')}",
-                }
-        
-        # Check issued time (reject if > 1 year old as safety)
-        if issued_at:
-            issued = datetime.fromisoformat(issued_at)
-            if datetime.now() - issued > timedelta(days=365):
-                return {"status": "FAIL", "reason": "QR too old, regenerate"}
-        
-        return {
-            "status": "PASS",
-            "local_validation": True,
-            "user": {
-                "id": int(user_id),
-                "role": role,
-                "society_id": int(society_id),
-            },
-            "valid_until": valid_until,
-        }
-        
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Parse error: {str(e)[:30]}"}
-
-
 def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
     """
-    Full server-side validation with DB checks.
-    First tries local validation, then verifies against DB.
+    Server-side validation with live DB checks.
+    
+    Returns:
+        {
+            "status": "PASS" | "FAIL",
+            "reason": str,
+            "user": {...},
+            "gate_action": "allow" | "deny",
+        }
     """
-    # Try local validation first
-    local_result = validate_qr_local(qr_data)
-    
-    if local_result.get("status") != "PASS":
-        return local_result
-    
-    # Extract user info
-    user_id = local_result["user"]["id"]
-    role = local_result["user"]["role"]
-    qr_society_id = local_result["user"]["society_id"]
-    
-    # Verify society match
-    if society_id and qr_society_id != society_id:
-        return {"status": "FAIL", "reason": "QR not valid for this society"}
-    
-    # Load full user from DB
     try:
+        # Parse QR payload
+        parts = qr_data.strip().split("|")
+        
+        if len(parts) < 3:
+            return {"status": "FAIL", "reason": "Invalid QR format", "gate_action": "deny"}
+        
+        user_id = int(parts[0])
+        role_code = parts[1]
+        qr_society_id = int(parts[2])
+        
+        role = ROLE_CODE_MAP.get(role_code, "unknown")
+        
+        if role == "unknown":
+            return {"status": "FAIL", "reason": f"Unknown role code: {role_code}", "gate_action": "deny"}
+        
+        # Verify society match
+        if society_id and qr_society_id != society_id:
+            return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
+        
+        # Load user from DB
         user_row = db.execute_query(
-            """SELECT u.id, u.email, u.role, u.society_id,
-                      COALESCE(a.owner_name, u.email) AS name
+            """SELECT u.id, u.email, u.role, u.society_id, u.linked_id,
+                      COALESCE(a.owner_name, u.email) AS name,
+                      COALESCE(a.flat_number, '') AS flat_number
                FROM users u
-               LEFT JOIN apartments a ON u.linked_id = a.id
+               LEFT JOIN apartments a ON u.linked_id = a.id AND u.role = 'apartment'
                WHERE u.id = %s AND u.society_id = %s""",
             (user_id, qr_society_id),
             fetch_one=True
         )
         
         if not user_row:
-            return {"status": "FAIL", "reason": "User not found in database"}
+            return {"status": "FAIL", "reason": "User not found", "gate_action": "deny"}
         
-        # Re-check live validity
-        is_valid, reason, _ = _calculate_validity(user_id, role, qr_society_id)
-        
-        if not is_valid:
+        # Role mismatch check
+        if user_row["role"] != role:
             return {
-                "status": "FAIL",
-                "reason": f"Server check failed: {reason}",
-                "note": "QR was valid locally but failed live verification"
+                "status": "FAIL", 
+                "reason": f"Role mismatch: QR={role}, DB={user_row['role']}", 
+                "gate_action": "deny"
             }
         
-        return {
-            "status": "PASS",
-            "server_validation": True,
-            "user": {
-                "id": user_row["id"],
-                "name": user_row.get("name", "User"),
-                "email": user_row.get("email"),
-                "role": user_row["role"],
-                "society_id": user_row["society_id"],
-            },
-            "message": "Access granted (verified with server)",
-        }
+        # ═══════════════════════════════════════════════════════════════
+        # ROLE-SPECIFIC VALIDATION RULES
+        # ═══════════════════════════════════════════════════════════════
         
+        if role == "admin":
+            # Admin: Always pass
+            return {
+                "status": "PASS",
+                "user": {
+                    "id": user_row["id"],
+                    "name": user_row.get("name", "Admin"),
+                    "email": user_row.get("email"),
+                    "role": user_row["role"],
+                    "society_id": user_row["society_id"],
+                    "flat_number": "",
+                },
+                "message": "Admin access granted",
+                "gate_action": "allow",
+            }
+        
+        elif role == "apartment":
+            # Owner: Check pending dues
+            dues = db.execute_query(
+                """SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS total
+                   FROM payments 
+                   WHERE society_id = %s 
+                   AND apartment_id = %s 
+                   AND status = 'pending'""",
+                (qr_society_id, user_row.get("linked_id")),
+                fetch_one=True
+            ) or {"c": 0, "total": 0}
+            
+            if int(dues.get("c", 0)) > 0:
+                return {
+                    "status": "FAIL",
+                    "reason": f"Pending dues: ₹{float(dues.get('total', 0)):,.0f}",
+                    "user": {
+                        "id": user_row["id"],
+                        "name": user_row.get("name", "Owner"),
+                        "flat_number": user_row.get("flat_number", ""),
+                    },
+                    "gate_action": "deny",
+                }
+            
+            return {
+                "status": "PASS",
+                "user": {
+                    "id": user_row["id"],
+                    "name": user_row.get("name", "Owner"),
+                    "email": user_row.get("email"),
+                    "role": user_row["role"],
+                    "society_id": user_row["society_id"],
+                    "flat_number": user_row.get("flat_number", ""),
+                },
+                "message": f"Flat {user_row.get('flat_number', '?')} - Dues cleared",
+                "gate_action": "allow",
+            }
+        
+        elif role == "vendor":
+            # Vendor: Check active pass
+            active_pass = db.execute_query(
+                """SELECT id, valid_until 
+                   FROM vendor_passes 
+                   WHERE society_id = %s AND user_id = %s 
+                   AND status = 'active' 
+                   AND valid_until >= CURRENT_DATE
+                   ORDER BY valid_until DESC LIMIT 1""",
+                (qr_society_id, user_id),
+                fetch_one=True
+            )
+            
+            if not active_pass:
+                return {
+                    "status": "FAIL",
+                    "reason": "No active vendor pass",
+                    "user": {
+                        "id": user_row["id"],
+                        "name": user_row.get("name", "Vendor"),
+                    },
+                    "gate_action": "deny",
+                }
+            
+            valid_until = active_pass.get("valid_until")
+            return {
+                "status": "PASS",
+                "user": {
+                    "id": user_row["id"],
+                    "name": user_row.get("name", "Vendor"),
+                    "email": user_row.get("email"),
+                    "role": user_row["role"],
+                    "society_id": user_row["society_id"],
+                    "flat_number": "",
+                },
+                "message": f"Pass valid until {valid_until}",
+                "gate_action": "allow",
+            }
+        
+        elif role == "security":
+            # Security: Check if on duty
+            on_duty = db.execute_query(
+                """SELECT id FROM gate_access 
+                   WHERE society_id = %s AND entity_id = %s 
+                   AND role = 's' AND time_out IS NULL
+                   ORDER BY time_in DESC LIMIT 1""",
+                (qr_society_id, user_id),
+                fetch_one=True
+            )
+            
+            if not on_duty:
+                return {
+                    "status": "FAIL",
+                    "reason": "Not on duty",
+                    "user": {
+                        "id": user_row["id"],
+                        "name": user_row.get("name", "Security"),
+                    },
+                    "gate_action": "deny",
+                }
+            
+            return {
+                "status": "PASS",
+                "user": {
+                    "id": user_row["id"],
+                    "name": user_row.get("name", "Security"),
+                    "email": user_row.get("email"),
+                    "role": user_row["role"],
+                    "society_id": user_row["society_id"],
+                    "flat_number": "",
+                },
+                "message": "On duty - access granted",
+                "gate_action": "allow",
+            }
+        
+        return {"status": "FAIL", "reason": "Unknown validation error", "gate_action": "deny"}
+        
+    except ValueError as e:
+        return {"status": "FAIL", "reason": f"Parse error: {str(e)}", "gate_action": "deny"}
     except Exception as e:
-        print(f"Server validation error: {e}")
-        # Fall back to local validation if DB fails
-        return {
-            **local_result,
-            "note": "Validated locally (server check failed)",
-        }
+        print(f"QR validation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"status": "FAIL", "reason": f"System error: {str(e)[:50]}", "gate_action": "deny"}
