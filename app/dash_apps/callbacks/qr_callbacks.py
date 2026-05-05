@@ -64,8 +64,12 @@ function qrCameraController(
         S.active = false; S.mode = null; S.torch = false; S.scanning = false;
     }
 
-    function captureAndSend() {
+        function captureAndSend() {
         if (!S.stream || !S.active || S.scanning || !S.mode) return;
+        
+        // 1. Capture the mode BEFORE stopping the camera
+        var currentMode = S.mode; 
+
         var vid = el('qr-video');
         var cvs = el('qr-canvas');
         if (!vid || !cvs) return;
@@ -87,14 +91,19 @@ function qrCameraController(
         .then(function(d){
             S.scanning = false;
             if (d.status === 'success' && d.qr_data) {
-                stopCamera();
+                // 2. Stop camera (this sets S.mode = null)
+                stopCamera(); 
+                
                 status('QR detected — validating...');
                 
                 var modeInput = el('qr-scan-mode');
                 var dataInput = el('qr-scan-input');
+                
                 if (modeInput && dataInput) {
-                    setReact(modeInput, S.mode);
+                    // 3. Use the saved currentMode, NOT S.mode
+                    setReact(modeInput, currentMode); 
                     setReact(dataInput, d.qr_data);
+                    
                     setTimeout(function(){
                         var btn = el('qr-validate-btn');
                         if (btn) btn.click();
@@ -320,6 +329,7 @@ def register_qr_callbacks(app):
         prevent_initial_call=True,
     )
     def validate_qr_scanned(n_clicks, qr_payload, mode, scan_log, auth_data):
+        print(f"DEBUG: Callback validate_qr_scanned. Mode: {mode}, Payload: {qr_payload[:20]}")
         if not n_clicks or not qr_payload:
             raise PreventUpdate
         
@@ -436,12 +446,19 @@ def register_qr_callbacks(app):
             # Update time_out (even if validation failed)
             try:
                 if user_id:
+                    # Use a subquery to find the specific record ID first
                     db.execute_query(
                         """UPDATE gate_access 
                            SET time_out = NOW()
-                           WHERE society_id = %s AND entity_id = %s 
-                           AND role = %s AND time_out IS NULL
-                           ORDER BY time_in DESC LIMIT 1""",
+                           WHERE id = (
+                               SELECT id FROM gate_access 
+                               WHERE society_id = %s 
+                                 AND entity_id = %s 
+                                 AND role = %s 
+                                 AND time_out IS NULL
+                               ORDER BY time_in DESC 
+                               LIMIT 1
+                           )""",
                         (society_id, user_id, role_code)
                     )
                 gate_msg = "🔴 EXITED"
