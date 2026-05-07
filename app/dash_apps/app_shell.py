@@ -82,8 +82,10 @@ ROLE_CONFIG = {
 }
 
 
-# ── Login Modal ───────────────────────────────────────────────────────────────
+# ── Login Modal (NEW 2-STAGE SYSTEM) ──────────────────────────────────────
 def _login_modal():
+    from app.dash_apps.pages.login_system import society_select_layout
+
     return dbc.Modal(
         [
             dbc.ModalHeader(
@@ -99,111 +101,17 @@ def _login_modal():
                 },
                 close_button=False,
             ),
+
             dbc.ModalBody([
-                # DB error banner (hidden by default)
-                html.Div(id='login-db-error', style={'display': 'none'}),
+                html.Div(
+                    id='login-stage-1',
+                    children=society_select_layout()
+                ),
 
-                # Stage 1: Society selection
-                html.Div(id='login-stage-1', children=[
-                    html.P('Select your society to continue',
-                           className='text-muted text-center mb-3',
-                           style={'fontSize': '14px'}),
-                    dcc.Dropdown(
-                        id='society-dropdown',
-                        placeholder='Choose your society…',
-                        className='mb-3',
-                    ),
-                    dbc.Checkbox(
-                        id='remember-society-checkbox',
-                        label='Remember this society',
-                        className='mb-3',
-                        style={'fontSize': '13px'},
-                    ),
-                    dbc.Button(
-                        [html.I(className='fas fa-arrow-right me-2'), 'Continue'],
-                        id='society-select-btn',
-                        color='primary',
-                        className='w-100 mb-3',
-                    ),
-                    html.Hr(),
-                    dbc.Button(
-                        [html.I(className='fas fa-crown me-2'), 'Master Admin Login'],
-                        id='toggle-master-btn',
-                        color='link',
-                        size='sm',
-                        className='w-100 text-muted',
-                    ),
-                    html.Div(id='master-login-collapse', style={'display': 'none'}, children=[
-                        html.Hr(),
-                        dbc.Input(id='master-admin-email',    type='email',    placeholder='Master email',    className='mb-2'),
-                        dbc.Input(id='master-admin-password', type='password', placeholder='Master password', className='mb-3'),
-                        dbc.Button(
-                            [html.I(className='fas fa-sign-in-alt me-2'), 'Login as Master'],
-                            id='master-admin-login-btn',
-                            color='danger',
-                            className='w-100',
-                        ),
-                    ]),
-                ]),
-
-                # Stage 2: Credential entry
-                html.Div(id='login-stage-2', style={'display': 'none'}, children=[
-                    html.Div(
-                        id='login-society-label',
-                        className='text-center mb-3',
-                        style={'fontWeight': '600', 'color': '#667eea'},
-                    ),
-                    dbc.Button(
-                        [html.I(className='fas fa-arrow-left me-2'), 'Change Society'],
-                        id='back-to-stage1-btn',
-                        color='link',
-                        size='sm',
-                        className='mb-3 p-0',
-                    ),
-
-                    dcc.Tabs(id='login-tabs', value='password', children=[
-                        dcc.Tab(label='Password', value='password', children=[
-                            html.Div(className='pt-3', children=[
-                                dbc.Input(id='login-email',    type='email',    placeholder='Email',    className='mb-2'),
-                                dbc.Input(id='login-password', type='password', placeholder='Password', className='mb-3'),
-                                dbc.Button(
-                                    [html.I(className='fas fa-sign-in-alt me-2'), 'Login'],
-                                    id='login-btn', color='primary', className='w-100',
-                                ),
-                            ]),
-                        ]),
-                        dcc.Tab(label='PIN', value='pin', children=[
-                            html.Div(className='pt-3', children=[
-                                dbc.Input(id='login-email-pin', type='email',    placeholder='Email',      className='mb-2'),
-                                dbc.Input(id='login-pin',       type='password', placeholder='4-digit PIN',
-                                          maxLength=4,
-                                          style={'textAlign': 'center', 'letterSpacing': '6px'},
-                                          className='mb-3'),
-                                dbc.Button(
-                                    [html.I(className='fas fa-sign-in-alt me-2'), 'Login with PIN'],
-                                    id='login-pin-btn', color='primary', className='w-100',
-                                ),
-                            ]),
-                        ]),
-                        dcc.Tab(label='Pattern', value='pattern', children=[
-                            html.Div(className='pt-3', children=[
-                                dbc.Input(id='login-email-pattern', type='email', placeholder='Email',             className='mb-2'),
-                                dbc.Input(id='login-pattern',       type='text',  placeholder='Pattern e.g. 1-2-3-5-7', className='mb-3'),
-                                dbc.Button(
-                                    [html.I(className='fas fa-sign-in-alt me-2'), 'Login with Pattern'],
-                                    id='login-pattern-btn', color='primary', className='w-100',
-                                ),
-                            ]),
-                        ]),
-                    ]),
-
-                    dbc.Checkbox(
-                        id='remember-me-checkbox',
-                        label='Remember me on this device',
-                        className='mt-3',
-                        style={'fontSize': '13px'},
-                    ),
-                ]),
+                html.Div(
+                    id='login-stage-2',
+                    style={'display': 'none'}
+                ),
             ]),
         ],
         id='login-modal',
@@ -214,8 +122,6 @@ def _login_modal():
         size='md',
         style={'zIndex': '2000'},
     )
-
-
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 def _sidebar():
     return html.Aside(

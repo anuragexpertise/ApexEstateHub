@@ -262,59 +262,32 @@ def _check_db_and_seed():
 
 def register_shell_callbacks(app):
 
-    # ── 0. Populate society dropdown ──────────────────────────────────────
     @app.callback(
-        Output("society-dropdown", "options"),
-        Output("login-db-error",   "children"),
-        Output("login-db-error",   "style"),
-        Input("login-modal",       "is_open"),
+        Output("login-stage-2", "children"),
+        Input("auth-store", "data"),
+        State("society-dropdown", "options"),
         prevent_initial_call=True,
     )
-    def load_society_options(is_open):
-        hidden = {"display": "none"}
-        shown  = {"display": "block"}
-        ok, error_msg, societies = _check_db_and_seed()
-        if not ok:
-            return [], dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"),
-                                   f"DB Error: {error_msg}"],
-                                  color="danger", className="mb-3 py-2"), shown
-        options = [{"label": s.get("name","?"), "value": s.get("id")} for s in societies]
-        if not options:
-            return [], dbc.Alert(
-                [html.I(className="fas fa-info-circle me-2"),
-                 "No societies yet. Login as Master Admin to create one."],
-                color="info", className="mb-3 py-2"), shown
-        return options, [], hidden
+    def inject_login_stage2(auth_data, society_options):
 
-    # ── 1. Stage 1 → Stage 2 transition ──────────────────────────────────
-    @app.callback(
-        Output("login-stage-1",           "style"),
-        Output("login-stage-2",           "style"),
-        Output("login-society-label",     "children"),
-        Output("auth-store",              "data",  allow_duplicate=True),
-        Output("cookie-store",            "data",  allow_duplicate=True),
-        Input("society-select-btn",       "n_clicks"),
-        Input("back-to-stage1-btn",       "n_clicks"),
-        State("society-dropdown",         "value"),
-        State("society-dropdown",         "options"),
-        State("remember-society-checkbox","value"),
-        prevent_initial_call=True,
-    )
-    def stage_transition(_fwd, _back, society_id, options, remember):
-        trig = dash.callback_context.triggered[0]["prop_id"].split(".")[0]
-        if trig == "back-to-stage1-btn":
-            return {"display": "block"}, {"display": "none"}, no_update, no_update, no_update
+        if not auth_data or auth_data.get("authenticated"):
+            return no_update
+
+        society_id = auth_data.get("society_id")
         if not society_id:
-            return no_update, no_update, no_update, no_update, no_update
-        name   = next((o["label"] for o in (options or []) if o["value"] == society_id), "Society")
-        auth   = {"society_id": society_id, "authenticated": False}
-        cookie = {"society_id": society_id} if remember else no_update
-        return (
-            {"display": "none"}, {"display": "block"},
-            [html.I(className="fas fa-building me-2"), name],
-            auth, cookie,
+            return no_update
+
+        society_name = next(
+            (opt["label"] for opt in (society_options or [])
+            if opt["value"] == society_id),
+            "Society"
         )
 
+        from app.dash_apps.pages.login_system import login_layout
+        return login_layout(society_name)
+    
+    # ── 0. Populate society dropdown ──────────────────────────────────────
+    
     # ── 1b. Toggle master login ───────────────────────────────────────────
     @app.callback(
         Output("master-login-collapse", "style"),
@@ -324,120 +297,6 @@ def register_shell_callbacks(app):
     def toggle_master(n):
         return {"display": "block"} if n and n % 2 == 1 else {"display": "none"}
 
-    # ── 2. Password login ─────────────────────────────────────────────────
-    @app.callback(
-        Output("auth-store",   "data",     allow_duplicate=True),
-        Output("url",          "pathname", allow_duplicate=True),
-        Output("toast-store",  "data",     allow_duplicate=True),
-        Output("login-modal",  "is_open",  allow_duplicate=True),
-        Output("cookie-store", "data",     allow_duplicate=True),
-        Input("login-btn",      "n_clicks"),
-        State("login-email",    "value"),
-        State("login-password", "value"),
-        State("auth-store",     "data"),
-        State("remember-me-checkbox", "value"),
-        prevent_initial_call=True,
-    )
-    def password_login(n, email, password, auth, remember):
-        if not n:
-            return no_update, no_update, no_update, no_update, no_update
-        if not email or not password:
-            return no_update, no_update, {"type": "error", "message": "Enter email and password"}, no_update, no_update
-        try:
-            from app.services.auth_service import authenticate_user
-            user = authenticate_user(email, password, _sid(auth))
-            if not user:
-                return no_update, no_update, {"type": "error", "message": "Invalid credentials"}, no_update, no_update
-            return _login_success(user, remember, email, _sid(auth), "password")
-        except Exception as e:
-            return no_update, no_update, {"type": "error", "message": str(e)}, no_update, no_update
-
-    # ── 3. PIN login ──────────────────────────────────────────────────────
-    @app.callback(
-        Output("auth-store",   "data",     allow_duplicate=True),
-        Output("url",          "pathname", allow_duplicate=True),
-        Output("toast-store",  "data",     allow_duplicate=True),
-        Output("login-modal",  "is_open",  allow_duplicate=True),
-        Output("cookie-store", "data",     allow_duplicate=True),
-        Input("login-pin-btn",    "n_clicks"),
-        State("login-email-pin",  "value"),
-        State("login-pin",        "value"),
-        State("auth-store",       "data"),
-        State("remember-me-checkbox", "value"),
-        prevent_initial_call=True,
-    )
-    def pin_login(n, email, pin, auth, remember):
-        if not n:
-            return no_update, no_update, no_update, no_update, no_update
-        if not email or not pin:
-            return no_update, no_update, {"type": "error", "message": "Enter email and PIN"}, no_update, no_update
-        try:
-            from app.services.auth_service import authenticate_pin
-            user = authenticate_pin(email, pin, _sid(auth))
-            if not user:
-                return no_update, no_update, {"type": "error", "message": "Invalid PIN"}, no_update, no_update
-            return _login_success(user, remember, email, _sid(auth), "pin")
-        except Exception as e:
-            return no_update, no_update, {"type": "error", "message": str(e)}, no_update, no_update
-
-    # ── 4. Pattern login ──────────────────────────────────────────────────
-    @app.callback(
-        Output("auth-store",   "data",     allow_duplicate=True),
-        Output("url",          "pathname", allow_duplicate=True),
-        Output("toast-store",  "data",     allow_duplicate=True),
-        Output("login-modal",  "is_open",  allow_duplicate=True),
-        Output("cookie-store", "data",     allow_duplicate=True),
-        Input("login-pattern-btn",    "n_clicks"),
-        State("login-email-pattern",  "value"),
-        State("login-pattern",        "value"),
-        State("auth-store",           "data"),
-        State("remember-me-checkbox", "value"),
-        prevent_initial_call=True,
-    )
-    def pattern_login(n, email, pattern, auth, remember):
-        if not n:
-            return no_update, no_update, no_update, no_update, no_update
-        if not email or not pattern:
-            return no_update, no_update, {"type": "error", "message": "Enter email and pattern"}, no_update, no_update
-        try:
-            from app.services.auth_service import authenticate_pattern
-            user = authenticate_pattern(email, pattern, _sid(auth))
-            if not user:
-                return no_update, no_update, {"type": "error", "message": "Invalid pattern"}, no_update, no_update
-            return _login_success(user, remember, email, _sid(auth), "pattern")
-        except Exception as e:
-            return no_update, no_update, {"type": "error", "message": str(e)}, no_update, no_update
-
-    # ── 5. Master login ───────────────────────────────────────────────────
-    @app.callback(
-        Output("auth-store",   "data",     allow_duplicate=True),
-        Output("url",          "pathname", allow_duplicate=True),
-        Output("toast-store",  "data",     allow_duplicate=True),
-        Output("login-modal",  "is_open",  allow_duplicate=True),
-        Output("cookie-store", "data",     allow_duplicate=True),
-        Input("master-admin-login-btn", "n_clicks"),
-        State("master-admin-email",     "value"),
-        State("master-admin-password",  "value"),
-        prevent_initial_call=True,
-    )
-    def master_login(n, email, password):
-        if not n:
-            return no_update, no_update, no_update, no_update, no_update
-        if not email or not password:
-            return no_update, no_update, {"type": "error", "message": "Enter master credentials"}, no_update, no_update
-        try:
-            from app.services.auth_service import authenticate_user
-            user = authenticate_user(email, password, None)
-            if not user:
-                return no_update, no_update, {"type": "error", "message": "Invalid credentials"}, no_update, no_update
-            is_dict = isinstance(user, dict)
-            role = user.get("role") if is_dict else user.role
-            sid  = user.get("society_id") if is_dict else user.society_id
-            if role != "admin" or sid is not None:
-                return no_update, no_update, {"type": "error", "message": "Not a master admin account"}, no_update, no_update
-            return _login_success(user, False, email, None, "password")
-        except Exception as e:
-            return no_update, no_update, {"type": "error", "message": str(e)}, no_update, no_update
 
     # ── 6. Logout ─────────────────────────────────────────────────────────
     @app.callback(
