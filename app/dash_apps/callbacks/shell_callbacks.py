@@ -1,9 +1,15 @@
 # app/dash_apps/callbacks/shell_callbacks.py
+"""
+Shell callbacks - Core authentication and routing logic.
+CRITICAL: This file owns auth-store, url, login-modal, and society dropdown.
+Must be registered FIRST before login_callbacks.
+"""
 import json
 from datetime import datetime, timedelta
 
 import dash
 from dash import Input, Output, State, html, dcc, no_update, callback
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.app_shell import ROLE_CONFIG
@@ -199,70 +205,31 @@ def _portal_content(role, society_id, pathname):
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
 
-def _login_success(user, remember, email, society_id, method):
-    is_dict = isinstance(user, dict)
-    role    = user.get("role")       if is_dict else user.role
-    sid     = user.get("society_id") if is_dict else user.society_id
-    uid     = user.get("user_id")    if is_dict else user.id
-
-    user_dict = {
-        "user_id": uid, "email": email,
-        "role": role, "society_id": sid,
-        "authenticated": True,
-    }
-    redirect = _redirect_for_role(role, sid)
-    cookie   = ({"email": email, "society_id": society_id, "method": method}
-                if remember else no_update)
-    return (
-        user_dict, redirect,
-        {"type": "success", "message": f"Welcome, {email.split('@')[0].title()}!"},
-        False, cookie,
-    )
-
-
-def _check_db_and_seed():
-    try:
-        db = _db()
-        if not db.test_connection():
-            return False, "Cannot reach the database.", []
-        user_count = db.execute_query("SELECT COUNT(*) AS c FROM users", fetch_one=True)
-        if user_count and user_count["c"] == 0:
-            from werkzeug.security import generate_password_hash
-            db.execute_query(
-                "INSERT INTO users(email,password_hash,role,login_method) VALUES(%s,%s,'admin','password') ON CONFLICT(email) DO NOTHING",
-                ("master@estatehub.com", generate_password_hash("Master@2024")),
-            )
-        societies = db.execute_query(
-            "SELECT id, name FROM societies ORDER BY name", fetch_all=True
-        ) or []
-        return True, None, societies
-    except Exception as e:
-        return False, str(e), []
-
-
 # ── Register ──────────────────────────────────────────────────────────────────
-# app/dash_apps/callbacks/shell_callbacks.py
 
 def register_shell_callbacks(app):
     """Register all shell-level callbacks with the Dash app."""
 
-    # ── 0. Populate society dropdown when modal opens ──────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 0. SOCIETY DROPDOWN POPULATION (MUST BE FIRST)
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("society-dropdown", "options"),
         Output("society-dropdown", "disabled"),
         Output("login-db-error", "children"),
         Output("login-db-error", "style"),
-        Input("url", "pathname"),  # Trigger on URL change (page load)
+        Input("url", "pathname"),
         prevent_initial_call=False,
     )
     def load_societies(pathname):
         """Load societies from database into dropdown when page loads."""
         
         try:
-            from database.db_manager import db
+            db = _db()
             
             # Test connection first
             if not db.test_connection():
+                print("❌ Database connection failed")
                 return (
                     [],
                     True,
@@ -281,9 +248,10 @@ def register_shell_callbacks(app):
             societies = db.execute_query(
                 "SELECT id, name FROM societies WHERE active = true ORDER BY name",
                 fetch_all=True
-            ) or []
+            )
             
             if not societies:
+                print("⚠️  No societies found in database")
                 return (
                     [],
                     False,
@@ -299,7 +267,7 @@ def register_shell_callbacks(app):
                 )
             
             options = [{"label": s["name"], "value": s["id"]} for s in societies]
-            print(f"✓ Loaded {len(options)} societies")  # Debug print
+            print(f"✅ Loaded {len(options)} societies: {[s['name'] for s in societies]}")
             
             return (
                 options,
@@ -309,7 +277,7 @@ def register_shell_callbacks(app):
             )
             
         except Exception as e:
-            print(f"Error loading societies: {e}")
+            print(f"❌ Error loading societies: {e}")
             import traceback
             traceback.print_exc()
             return (
@@ -322,7 +290,10 @@ def register_shell_callbacks(app):
                 {"display": "block", "marginBottom": "15px", "padding": "8px", 
                  "background": "#f8d7da", "borderRadius": "8px"}
             )
-    # ── 1. Stage 1 → Stage 2 transition ─────────────────────────────────────────
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 1. STAGE 1 → STAGE 2 TRANSITION
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("login-stage-1", "style"),
         Output("login-stage-2", "style"),
@@ -338,6 +309,8 @@ def register_shell_callbacks(app):
         """Move from society selection to login form."""
         if not n_clicks or not society_id:
             raise PreventUpdate
+        
+        print(f"✅ Society selected: {society_id}, Remember: {remember_society}")
         
         # Update auth-store with society_id
         auth_data = auth_data or {}
@@ -356,7 +329,9 @@ def register_shell_callbacks(app):
             cookie_update
         )
     
-    # ── 1b. Back button to return to stage 1 ───────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 2. BACK BUTTON TO RETURN TO STAGE 1
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("login-stage-1", "style", allow_duplicate=True),
         Output("login-stage-2", "style", allow_duplicate=True),
@@ -369,7 +344,9 @@ def register_shell_callbacks(app):
             raise PreventUpdate
         return {"display": "block"}, {"display": "none"}
 
-    # ── 2. Restore society from cookie (auto-advance if cookie exists) ────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 3. RESTORE SOCIETY FROM COOKIE (AUTO-ADVANCE IF COOKIE EXISTS)
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("society-dropdown", "value", allow_duplicate=True),
         Output("login-stage-1", "style", allow_duplicate=True),
@@ -390,8 +367,10 @@ def register_shell_callbacks(app):
         if society_options:
             valid = any(opt["value"] == society_id for opt in society_options if isinstance(opt, dict))
             if not valid:
+                print(f"⚠️  Cookie society_id {society_id} not found in dropdown options")
                 return no_update, no_update, no_update, no_update
         
+        print(f"✅ Restored society from cookie: {society_id}")
         auth_data = {"society_id": society_id, "authenticated": False}
         
         return (
@@ -401,54 +380,9 @@ def register_shell_callbacks(app):
             auth_data
         )
     
-    # ── 3. Restore "remember me" cookie for login form ───────────────────────────────────
-    @app.callback(
-        Output("login-email", "value", allow_duplicate=True),
-        Output("login-email-pin", "value", allow_duplicate=True),
-        Output("login-email-pattern", "value", allow_duplicate=True),
-        Output("login-tabs", "value", allow_duplicate=True),
-        Input("cookie-store", "data"),
-        State("login-stage-2", "style"),
-        prevent_initial_call=True,
-    )
-    def restore_login_cookie(cookie, stage2_style):
-        """Pre-fill email and select correct tab from cookie."""
-        if not cookie or not cookie.get("remember_me"):
-            return no_update, no_update, no_update, no_update
-        
-        email = cookie.get("email", "")
-        method = cookie.get("method", "password")
-        
-        # Only pre-fill if stage 2 is visible
-        if stage2_style and stage2_style.get("display") == "block":
-            return email, email, email, method
-        
-        return no_update, no_update, no_update, no_update
-
-    # ── 4. Save "remember me" cookie on successful login ─────────────────────────────────
-    @app.callback(
-        Output("cookie-store", "data", allow_duplicate=True),
-        Input("auth-store", "data"),
-        State("remember-me-checkbox", "value"),
-        State("login-email", "value"),
-        State("login-tabs", "value"),
-        prevent_initial_call=True,
-    )
-    def save_login_cookie(auth_data, remember_me, email, method):
-        """Save remember me cookie after successful login."""
-        if not auth_data or not auth_data.get("authenticated"):
-            raise PreventUpdate
-        
-        if not remember_me:
-            return no_update
-        
-        return {
-            "email": email,
-            "method": method,
-            "remember_me": True
-        }
-
-    # ── 5. Populate login stage 2 content ─────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 4. POPULATE LOGIN STAGE 2 CONTENT
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("login-stage-2", "children"),
         Input("auth-store", "data"),
@@ -472,10 +406,14 @@ def register_shell_callbacks(app):
                     society_name = opt.get("label", "Society")
                     break
 
+        print(f"✅ Injecting login form for society: {society_name}")
+        
         from app.dash_apps.pages.login_system import login_layout
         return login_layout(society_name)
     
-    # ── 6. Toggle master login ───────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 5. TOGGLE MASTER LOGIN
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("master-login-collapse", "style"),
         Input("toggle-master-btn", "n_clicks"),
@@ -486,7 +424,9 @@ def register_shell_callbacks(app):
             raise PreventUpdate
         return {"display": "block"} if n and n % 2 == 1 else {"display": "none"}
 
-    # ── 7. Logout ─────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # 6. LOGOUT
+    # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("auth-store", "data", allow_duplicate=True),
         Output("url", "pathname", allow_duplicate=True),
@@ -506,7 +446,183 @@ def register_shell_callbacks(app):
             pass
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
 
-    # ── 8. Main Router (continued from your existing code) ─────────────────
-    # ... (keep your existing router and other callbacks here) ...
+    # ══════════════════════════════════════════════════════════════════════════
+    # 7. MAIN ROUTER (URL → PORTAL CONTENT)
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.callback(
+        Output("portal-content", "children"),
+        Output("sb-nav-list", "children"),
+        Output("breadcrumb-ol", "children"),
+        Output("hdr-portal-label", "children"),
+        Output("hdr-portal-label", "style"),
+        Output("sb-user-name", "children"),
+        Output("sb-user-role", "children"),
+        Output("sb-avatar", "children"),
+        Output("hdr-entity-name", "children"),
+        Output("hdr-avatar", "children"),
+        Output("hdr-society-name", "children"),
+        Output("hdr-society-logo", "src"),
+        Input("url", "pathname"),
+        State("auth-store", "data"),
+        prevent_initial_call=False,
+    )
+    def route_page(pathname, auth):
+        """Main router - update all shell components based on current URL."""
+        if not auth or not auth.get("authenticated"):
+            return (
+                html.Div("Please log in", className="text-muted text-center mt-5"),
+                [], [], "", {}, "—", "—", "?", "User", "?", "ApexEstateHub",
+                "/static/assets/logo.png"
+            )
+        
+        role = auth.get("role")
+        society_id = auth.get("society_id")
+        user_id = auth.get("user_id")
+        email = auth.get("email", "")
+        
+        # Get user details from database
+        db = _db()
+        user = db.execute_query(
+            "SELECT name FROM users WHERE id = %s",
+            (user_id,),
+            fetch_one=True
+        )
+        user_name = user["name"] if user else email.split("@")[0].title()
+        
+        # Get society details
+        society_name = "ApexEstateHub"
+        society_logo = "/static/assets/logo.png"
+        if society_id:
+            society = db.execute_query(
+                "SELECT name, logo FROM societies WHERE id = %s",
+                (society_id,),
+                fetch_one=True
+            )
+            if society:
+                society_name = society["name"]
+                if society.get("logo"):
+                    society_logo = society["logo"]
+        
+        # Get role config
+        is_master = role == "admin" and society_id is None
+        key = "master" if is_master else (role or "admin")
+        cfg = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
+        
+        # Portal label styling
+        portal_label = cfg["label"]
+        portal_style = {
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "textAlign": "center",
+            "fontWeight": "700",
+            "fontSize": "24px",
+            "minWidth": "180px",
+            "padding": "0 2px",
+            "color": cfg["color"],
+        }
+        
+        # Avatar initial
+        avatar = user_name[0].upper() if user_name else "?"
+        
+        return (
+            _portal_content(role, society_id, pathname),
+            _make_nav_items(role, society_id, pathname),
+            _breadcrumb(pathname),
+            portal_label,
+            portal_style,
+            user_name,
+            role.title(),
+            avatar,
+            user_name,
+            avatar,
+            society_name,
+            society_logo,
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 8. SIDEBAR TOGGLE (MOBILE)
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.callback(
+        Output("app-sidebar", "className"),
+        Output("sb-overlay", "style"),
+        Output("sidebar-open-store", "data"),
+        Input("hdr-hamburger-btn", "n_clicks"),
+        Input("sb-overlay", "n_clicks"),
+        Input("sb-collapse-btn", "n_clicks"),
+        State("sidebar-open-store", "data"),
+        prevent_initial_call=True,
+    )
+    def toggle_sidebar(ham_n, over_n, col_n, store):
+        """Toggle sidebar open/closed (mobile + desktop)."""
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        collapsed = store.get("collapsed", False) if store else False
+        
+        if trigger_id in ["hdr-hamburger-btn", "sb-overlay"]:
+            # Mobile: toggle open/closed
+            new_collapsed = not collapsed
+            return (
+                "app-sidebar" if new_collapsed else "app-sidebar sidebar-open",
+                {"display": "none"} if new_collapsed else {"display": "block"},
+                {"collapsed": new_collapsed}
+            )
+        
+        if trigger_id == "sb-collapse-btn":
+            # Desktop: toggle collapsed/expanded
+            new_collapsed = not collapsed
+            return (
+                "app-sidebar sidebar-collapsed" if new_collapsed else "app-sidebar",
+                {"display": "none"},
+                {"collapsed": new_collapsed}
+            )
+        
+        raise PreventUpdate
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 9. TOAST NOTIFICATIONS
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.callback(
+        Output("toast-container", "children"),
+        Input("toast-store", "data"),
+        prevent_initial_call=True,
+    )
+    def show_toast(toast_data):
+        """Display toast notification."""
+        if not toast_data:
+            return []
+        
+        toast_type = toast_data.get("type", "info")
+        message = toast_data.get("message", "")
+        
+        icon_map = {
+            "success": "fa-check-circle",
+            "error": "fa-exclamation-circle",
+            "warning": "fa-exclamation-triangle",
+            "info": "fa-info-circle",
+        }
+        
+        color_map = {
+            "success": "#10b981",
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "info": "#3b82f6",
+        }
+        
+        return dbc.Toast(
+            message,
+            id="toast",
+            header=html.Div([
+                html.I(className=f"fas {icon_map.get(toast_type, 'fa-info-circle')} me-2"),
+                toast_type.title()
+            ]),
+            icon=toast_type,
+            duration=4000,
+            is_open=True,
+            style={"borderLeft": f"4px solid {color_map.get(toast_type, '#3b82f6')}"},
+        )
 
     print("✓ Shell callbacks registered")

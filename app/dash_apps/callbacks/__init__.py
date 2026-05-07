@@ -5,16 +5,15 @@ Import order matters — shell must be first (owns auth-store / url).
 """
 
 
-from app.dash_apps.callbacks.login_callbacks import register_login_callbacks
-
-
 def register_all_callbacks(app):
     """Register every callback module in safe dependency order."""
-    from .login_callbacks import register_login_callbacks
-    register_login_callbacks(app)
-    # Shell first — owns auth-store, url, login-modal, router, toast
+    # Shell first — owns auth-store, url, login-modal, router, toast, society dropdown
     from .shell_callbacks import register_shell_callbacks
     register_shell_callbacks(app)
+    
+    # Login callbacks second — depends on auth-store from shell
+    from .login_callbacks import register_login_callbacks
+    register_login_callbacks(app)
 
     from .qr_callbacks import register_qr_callbacks
     register_qr_callbacks(app)
