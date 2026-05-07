@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 
 import dash
-from dash import Input, Output, State, html, dcc, no_update
+from dash import Input, Output, State, html, dcc, no_update, callback
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.app_shell import ROLE_CONFIG
@@ -252,14 +252,12 @@ def register_shell_callbacks(app):
         Output("society-dropdown", "disabled"),
         Output("login-db-error", "children"),
         Output("login-db-error", "style"),
-        Input("login-modal", "is_open"),
+        Input("url", "pathname"),  # Trigger on URL change (page load)
         prevent_initial_call=False,
     )
-    def load_societies(is_open):
-        """Load societies from database into dropdown."""
-        if not is_open:
-            return no_update, no_update, no_update, no_update
-            
+    def load_societies(pathname):
+        """Load societies from database into dropdown when page loads."""
+        
         try:
             from database.db_manager import db
             
@@ -301,6 +299,7 @@ def register_shell_callbacks(app):
                 )
             
             options = [{"label": s["name"], "value": s["id"]} for s in societies]
+            print(f"✓ Loaded {len(options)} societies")  # Debug print
             
             return (
                 options,
@@ -311,6 +310,8 @@ def register_shell_callbacks(app):
             
         except Exception as e:
             print(f"Error loading societies: {e}")
+            import traceback
+            traceback.print_exc()
             return (
                 [],
                 True,
@@ -321,7 +322,6 @@ def register_shell_callbacks(app):
                 {"display": "block", "marginBottom": "15px", "padding": "8px", 
                  "background": "#f8d7da", "borderRadius": "8px"}
             )
-
     # ── 1. Stage 1 → Stage 2 transition ─────────────────────────────────────────
     @app.callback(
         Output("login-stage-1", "style"),
