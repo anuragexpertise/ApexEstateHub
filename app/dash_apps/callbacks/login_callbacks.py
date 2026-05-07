@@ -161,6 +161,81 @@ def register_login_callbacks(app):
         
         raise PreventUpdate
 
+   # Clientside callback to handle pattern drawing and store result
+    app.clientside_callback(
+        """
+        function(patternValue, n_clicks) {
+            // This is triggered when pattern is drawn via JS
+            // The actual pattern drawing is handled by pattern.js
+            // This just passes through the value
+            return window.dash_clientside?.pattern?.getValue ? 
+                   window.dash_clientside.pattern.getValue() : 
+                   (patternValue || '');
+        }
+        """,
+        Output("login-pattern", "value"),
+        Input("login-pattern", "value"),
+        prevent_initial_call=True,
+    )
+    
+    # Clear pattern when clear button is clicked
+    app.clientside_callback(
+        """
+        function(n_clicks, current_value) {
+            if (!n_clicks) return dash_clientside.no_update;
+            // Clear the pattern in the hidden input
+            return '';
+        }
+        """,
+        Output("login-pattern", "value", allow_duplicate=True),
+        Input("pattern-clear-btn", "n_clicks"),
+        State("login-pattern", "value"),
+        prevent_initial_call=True,
+    )
+    
+    # ── Master Admin Login ────────────────────────────────────────────────────────────────
+    @app.callback(
+        Output("auth-store", "data", allow_duplicate=True),
+        Output("url", "pathname", allow_duplicate=True),
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("login-modal", "is_open", allow_duplicate=True),
+        Input("master-admin-login-btn", "n_clicks"),
+        State("master-admin-email", "value"),
+        State("master-admin-password", "value"),
+        prevent_initial_call=True,
+    )
+    def handle_master_admin_login(n_clicks, email, password):
+        """Handle master admin login (bypasses society selection)."""
+        if not n_clicks or not email or not password:
+            raise PreventUpdate
+        
+        # Check if this is a master admin
+        from app.services.auth_service import authenticate_user
+        
+        # Master admin has no society_id
+        user = authenticate_user(email, password, society_id=None)
+        
+        if not user or user.get("role") != "admin":
+            return no_update, no_update, {
+                "type": "error",
+                "message": "Invalid master admin credentials"
+            }, no_update
+        
+        # Check if user has platform-wide access (no society_id restriction)
+        from database.db_manager import db
+        result = db.execute_query(
+            "SELECT role FROM users WHERE email = %s AND is_master_admin = true",
+            (email,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return no_update, no_update, {
+                "type": "error",
+                "message": "Not authorized as master admin"
+            }, no_update
+        
+        return _build_login_response(user)
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
