@@ -106,14 +106,28 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024        # 16 MB
 
     # JWT
-    JWT_SECRET_KEY            = os.getenv('JWT_SECRET_KEY', 'jwt-secret-CHANGE-ME')
+    JWT_SECRET_KEY            = os.getenv('JWT_SECRET_KEY', 'Iamagoodboy9453')
     JWT_ACCESS_TOKEN_EXPIRES  = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES',  '3600'))
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '2592000'))
 
-    # Push Notifications
-    VAPID_PRIVATE_KEY  = os.getenv('VAPID_PRIVATE_KEY')
-    VAPID_PUBLIC_KEY   = os.getenv('VAPID_PUBLIC_KEY')
-    VAPID_CLAIM_EMAIL  = os.getenv('VAPID_CLAIM_EMAIL', 'admin@apexestatehub.com')
+    # Push Notifications (VAPID)
+  
+    VAPID_PRIVATE_KEY  = os.getenv('VAPID_PRIVATE')     # Matches your .env
+    VAPID_PUBLIC_KEY   = os.getenv('VAPID_PUBLIC')      # Matches your .env
+    VAPID_CLAIM_EMAIL  = os.getenv('VAPID_EMAIL', 'master@estatehub.com')
+
+    # FCM Push (for native mobile apps)
+    FCM_SERVER_KEY = os.getenv('FCM_SERVER_KEY', '')
+
+    # Email/SMTP Configuration
+    SMTP_HOST = os.getenv('SMTP_HOST', '')
+    SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+    SMTP_USER = os.getenv('SMTP_USER', '')
+    SMTP_PASS = os.getenv('SMTP_PASS', '')
+    SMTP_FROM = os.getenv('SMTP_FROM', 'noreply@apexestatehub.com')
+
+    # Frontend URL (for reset links, etc.)
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8050')
 
     # Misc
     QR_CODE_SIZE   = 250
@@ -148,3 +162,47 @@ config = {
     'testing':     TestingConfig,
     'default':     DevelopmentConfig,
 }
+
+
+# ── Module-level exports for easier imports ───────────────────────────────────
+# These allow direct imports like: from app.config import VAPID_PUBLIC_KEY
+
+# VAPID Keys (Web Push)
+VAPID_PUBLIC_KEY = Config.VAPID_PUBLIC_KEY
+VAPID_PRIVATE_KEY = Config.VAPID_PRIVATE_KEY
+VAPID_CLAIM_EMAIL = Config.VAPID_CLAIM_EMAIL
+
+# JWT
+JWT_SECRET_KEY = Config.JWT_SECRET_KEY
+
+# Email/SMTP
+SMTP_HOST = Config.SMTP_HOST
+SMTP_PORT = Config.SMTP_PORT
+SMTP_USER = Config.SMTP_USER
+SMTP_PASS = Config.SMTP_PASS
+SMTP_FROM = Config.SMTP_FROM
+
+# Frontend
+FRONTEND_URL = Config.FRONTEND_URL
+
+# FCM (optional, for native mobile)
+FCM_SERVER_KEY = Config.FCM_SERVER_KEY
+
+# Database (for modules that need direct access)
+DATABASE_URL = Config.SQLALCHEMY_DATABASE_URI
+
+
+# ── Optional: Print status for debugging (remove in production) ──────────────
+if __name__ == "__main__":
+    # Only runs when config.py is executed directly
+    print("=" * 60)
+    print("Configuration Status")
+    print("=" * 60)
+    print(f"Environment: {os.getenv('FLASK_ENV', 'development')}")
+    print(f"Database: {Config.SQLALCHEMY_DATABASE_URI[:50]}...")
+    print(f"VAPID Public Key: {'✅ Set' if Config.VAPID_PUBLIC_KEY else '❌ Missing'}")
+    print(f"VAPID Private Key: {'✅ Set' if Config.VAPID_PRIVATE_KEY else '❌ Missing'}")
+    print(f"VAPID Claim Email: {Config.VAPID_CLAIM_EMAIL}")
+    print(f"SMTP: {'✅ Configured' if Config.SMTP_HOST else '⚠️  Not set (fallback to print)'}")
+    print(f"Frontend URL: {Config.FRONTEND_URL}")
+    print("=" * 60)

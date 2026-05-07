@@ -1,5 +1,6 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from app.dash_apps.pages.login_system import society_select_layout, LOGIN_STYLES
 
 def society_select_layout(societies_list=None, error_message=None, show_master_login=False):
     """Society selection page - Primary Login with Master Admin option"""
@@ -11,147 +12,181 @@ def society_select_layout(societies_list=None, error_message=None, show_master_l
                 "value": s.get("id") if isinstance(s, dict) else i} 
                for i, s in enumerate(societies_list)]
     
-    layout = html.Div(
-        [
-            # Background
-            html.Div(
-                style={
-                    "position": "fixed",
-                    "top": "0",
-                    "left": "0",
-                    "width": "100vw",
-                    "height": "100%",
-                    "background-image": "url('/static/assets/EH_bk.jpg')",
-                    "background-size": "cover",
-                    "background-attachment": "fixed",
-                    "zIndex": "-1"
-                }
-            ),
+    # layout = html.Div(
+    #     [
+    #         # Background
+    #         html.Div(
+    #             style={
+    #                 "position": "fixed",
+    #                 "top": "0",
+    #                 "left": "0",
+    #                 "width": "100vw",
+    #                 "height": "100%",
+    #                 "background-image": "url('/static/assets/EH_bk.jpg')",
+    #                 "background-size": "cover",
+    #                 "background-attachment": "fixed",
+    #                 "zIndex": "-1"
+    #             }
+    #         ),
             
-            # Centered card
-            html.Div(
-                style={
-                    "display": "flex",
-                    "justifyContent": "center",
-                    "alignItems": "center",
-                    "minHeight": "100vh",
-                    "padding": "20px"
-                },
-                children=[
-                    html.Div(
-                        style={
-                            "maxWidth": "500px",
-                            "width": "100%",
-                            "backgroundColor": "white",
-                            "borderRadius": "20px",
-                            "boxShadow": "0 20px 60px rgba(0,0,0,0.3)",
-                            "overflow": "hidden",
-                            "padding": "40px"
-                        },
-                        children=[
-                            html.H1("ApexEstateHub", 
-                                   style={"textAlign": "center", "marginBottom": "20px", "color": "#333"}),
-                            html.H3("Welcome Back!", 
-                                   style={"textAlign": "center", "marginBottom": "10px"}),
-                            html.P("Please select your society to continue",
-                                   style={"textAlign": "center", "marginBottom": "30px", "color": "#666"}),
+    #         # Centered card
+    #         html.Div(
+    #             style={
+    #                 "display": "flex",
+    #                 "justifyContent": "center",
+    #                 "alignItems": "center",
+    #                 "minHeight": "100vh",
+    #                 "padding": "20px"
+    #             },
+    #             children=[
+    #                 html.Div(
+    #                     style={
+    #                         "maxWidth": "500px",
+    #                         "width": "100%",
+    #                         "backgroundColor": "white",
+    #                         "borderRadius": "20px",
+    #                         "boxShadow": "0 20px 60px rgba(0,0,0,0.3)",
+    #                         "overflow": "hidden",
+    #                         "padding": "40px"
+    #                     },
+    #                     children=[
+    #                         html.H1("ApexEstateHub", 
+    #                                style={"textAlign": "center", "marginBottom": "20px", "color": "#333"}),
+    #                         html.H3("Welcome Back!", 
+    #                                style={"textAlign": "center", "marginBottom": "10px"}),
+    #                         html.P("Please select your society to continue",
+    #                                style={"textAlign": "center", "marginBottom": "30px", "color": "#666"}),
                             
-                            # Error message
-                            html.Div(
-                                error_message,
-                                style={
-                                    "color": "red",
-                                    "textAlign": "center",
-                                    "marginBottom": "20px",
-                                    "display": "block" if error_message else "none"
-                                }
-                            ) if error_message else None,
+    #                         # Error message
+    #                         html.Div(
+    #                             error_message,
+    #                             style={
+    #                                 "color": "red",
+    #                                 "textAlign": "center",
+    #                                 "marginBottom": "20px",
+    #                                 "display": "block" if error_message else "none"
+    #                             }
+    #                         ) if error_message else None,
                             
-                            # Society dropdown
-                            html.Label("Select Society", 
-                                      style={"display": "block", "marginBottom": "8px", "fontWeight": "500"}),
-                            dcc.Dropdown(
-                                id="society-dropdown",
-                                options=options,
-                                placeholder="Choose your society...",
-                                style={"marginBottom": "20px"}
-                            ),
+    #                         # Society dropdown
+    #                         html.Label("Select Society", 
+    #                                   style={"display": "block", "marginBottom": "8px", "fontWeight": "500"}),
+    #                         dcc.Dropdown(
+    #                             id="society-dropdown",
+    #                             options=options,
+    #                             placeholder="Choose your society...",
+    #                             style={"marginBottom": "20px"}
+    #                         ),
                             
-                            # Remember checkbox
-                            html.Div(
-                                style={"marginBottom": "20px"},
-                                children=[
-                                    dbc.Checkbox(
-                                        id="remember-society-checkbox",
-                                        label="Remember this society",
-                                        style={"fontSize": "14px"}
-                                    )
-                                ]
-                            ),
+    #                         # Remember checkbox
+    #                         html.Div(
+    #                             style={"marginBottom": "20px"},
+    #                             children=[
+    #                                 dbc.Checkbox(
+    #                                     id="remember-society-checkbox",
+    #                                     label="Remember this society",
+    #                                     style={"fontSize": "14px"}
+    #                                 )
+    #                             ]
+    #                         ),
                             
-                            # Continue button
-                            dbc.Button(
-                                "Continue to Login",
-                                id="society-select-btn",
-                                color="primary",
-                                style={"width": "100%", "marginBottom": "20px"}
-                            ),
+    #                         # Continue button
+    #                         dbc.Button(
+    #                             "Continue to Login",
+    #                             id="society-select-btn",
+    #                             color="primary",
+    #                             style={"width": "100%", "marginBottom": "20px"}
+    #                         ),
                             
-                            html.Hr(),
+    #                         html.Hr(),
                             
-                            # Master Admin Section (conditional - shows when no societies)
-                            html.Div(
-                                id="master-admin-section",
-                                style={"display": "block" if show_master_login else "none"},
-                                children=[
-                                    html.P("No societies found. Login as Master Admin to create one.",
-                                           style={"textAlign": "center", "marginBottom": "15px", "color": "#e74c3c"}),
-                                    html.Div(
-                                        style={"marginBottom": "15px"},
-                                        children=[
-                                            dcc.Input(
-                                                id="master-admin-email",
-                                                type="email",
-                                                value="master@estatehub.com",
-                                                placeholder="Email",
-                                                style={
-                                                    "width": "100%",
-                                                    "padding": "10px",
-                                                    "marginBottom": "10px",
-                                                    "borderRadius": "8px",
-                                                    "border": "1px solid #ddd"
-                                                }
-                                            ),
-                                            dcc.Input(
-                                                id="master-admin-password",
-                                                type="password",
-                                                placeholder="Password",
-                                                style={
-                                                    "width": "100%",
-                                                    "padding": "10px",
-                                                    "marginBottom": "20px",
-                                                    "borderRadius": "8px",
-                                                    "border": "1px solid #ddd"
-                                                }
-                                            ),
-                                            dbc.Button(
-                                                "Master Admin Login",
-                                                id="master-admin-login-btn",
-                                                color="danger",
-                                                style={"width": "100%"}
-                                            )
-                                        ]
-                                    )
-                                ]
-                            ),
+    #                         # Master Admin Section (conditional - shows when no societies)
+    #                         html.Div(
+    #                             id="master-admin-section",
+    #                             style={"display": "block" if show_master_login else "none"},
+    #                             children=[
+    #                                 html.P("No societies found. Login as Master Admin to create one.",
+    #                                        style={"textAlign": "center", "marginBottom": "15px", "color": "#e74c3c"}),
+    #                                 html.Div(
+    #                                     style={"marginBottom": "15px"},
+    #                                     children=[
+    #                                         dcc.Input(
+    #                                             id="master-admin-email",
+    #                                             type="email",
+    #                                             value="master@estatehub.com",
+    #                                             placeholder="Email",
+    #                                             style={
+    #                                                 "width": "100%",
+    #                                                 "padding": "10px",
+    #                                                 "marginBottom": "10px",
+    #                                                 "borderRadius": "8px",
+    #                                                 "border": "1px solid #ddd"
+    #                                             }
+    #                                         ),
+    #                                         dcc.Input(
+    #                                             id="master-admin-password",
+    #                                             type="password",
+    #                                             placeholder="Password",
+    #                                             style={
+    #                                                 "width": "100%",
+    #                                                 "padding": "10px",
+    #                                                 "marginBottom": "20px",
+    #                                                 "borderRadius": "8px",
+    #                                                 "border": "1px solid #ddd"
+    #                                             }
+    #                                         ),
+    #                                         dbc.Button(
+    #                                             "Master Admin Login",
+    #                                             id="master-admin-login-btn",
+    #                                             color="danger",
+    #                                             style={"width": "100%"}
+    #                                         )
+    #                                     ]
+    #                                 )
+    #                             ]
+    #                         ),
                             
-                            html.P("Need help? Contact your society administrator",
-                                   style={"textAlign": "center", "color": "#999", "fontSize": "12px", "marginTop": "20px"})
-                        ]
-                    )
-                ]
-            )
-        ]
-    )
+    #                         html.P("Need help? Contact your society administrator",
+    #                                style={"textAlign": "center", "color": "#999", "fontSize": "12px", "marginTop": "20px"})
+    #                     ]
+    #                 )
+    #             ]
+    #         )
+    #     ]
+    # )
     
-    return layout
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                html.Div([
+                    html.Img(src='/static/assets/logo.png',
+                            style={'height': '36px', 'marginRight': '10px'}),
+                    html.Span('ApexEstateHub',
+                            style={'fontWeight': '700', 'fontSize': '20px', 
+                                    'color': '#fff'}),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+                style={
+                    'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
+                    'borderRadius': '15px 15px 0 0',
+                },
+                close_button=False,
+            ),
+            dbc.ModalBody([
+                # Inject CSS for tabs and pattern UI
+                html.Div(dangerouslySetInnerHTML={'__html': LOGIN_STYLES}),
+                
+                # Stage 1: Society selection (visible by default)
+                html.Div(id='login-stage-1', children=society_select_layout()),
+                
+                # Stage 2: Multi-method login (hidden, filled by callback)
+                html.Div(id='login-stage-2', style={'display': 'none'}),
+            ]),
+        ],
+        id='login-modal',
+        is_open=True,
+        backdrop='static',
+        keyboard=False,
+        centered=True,
+        size='md',
+        style={'zIndex': '2000'},
+    )
