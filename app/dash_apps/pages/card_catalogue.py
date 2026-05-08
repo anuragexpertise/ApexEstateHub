@@ -19,16 +19,11 @@ KPI_CARDS = {
         "params": 1, "format": "count",
     },
     "kpi_apartments_dues": {
-        "query": """SELECT COUNT(DISTINCT apartment_id) AS v FROM payments 
-                    WHERE society_id = %s AND status = 'pending'""",
+        "query": "SELECT COUNT(DISTINCT apartment_id) AS v FROM payments WHERE society_id = %s AND status = 'pending'",
         "params": 1, "format": "count",
     },
     "kpi_apartments_no_dues": {
-        "query": """SELECT COUNT(*) AS v FROM apartments 
-                    WHERE society_id = %s AND id NOT IN (
-                        SELECT DISTINCT apartment_id FROM payments 
-                        WHERE society_id = %s AND status = 'pending' AND apartment_id IS NOT NULL
-                    )""",
+        "query": "SELECT COUNT(*) AS v FROM apartments WHERE society_id = %s AND id NOT IN (SELECT DISTINCT apartment_id FROM payments WHERE society_id = %s AND status = 'pending' AND apartment_id IS NOT NULL)",
         "params": 2, "format": "count",   # note: params=2
     },
     "kpi_vendors_total": {
@@ -36,8 +31,7 @@ KPI_CARDS = {
         "params": 1, "format": "count",
     },
     "kpi_vendors_dues": {
-        "query": """SELECT COUNT(DISTINCT user_id) AS v FROM payments 
-                    WHERE society_id = %s AND status = 'pending' AND user_id IS NOT NULL""",
+        "query": "SELECT COUNT(DISTINCT user_id) AS v FROM payments WHERE society_id = %s AND status = 'pending' AND user_id IS NOT NULL",
         "params": 1, "format": "count",
     },
     "kpi_security_total": {
@@ -45,13 +39,11 @@ KPI_CARDS = {
         "params": 1, "format": "count",
     },
     "kpi_security_on_duty": {
-        "query": """SELECT COUNT(*) AS v FROM gate_access 
-                    WHERE society_id = %s AND role = 's' AND time_out IS NULL""",
+        "query": "SELECT COUNT(*) AS v FROM gate_access WHERE society_id = %s AND role = 's' AND time_out IS NULL",
         "params": 1, "format": "count",
     },
     "kpi_events_total": {
-        "query": """SELECT COUNT(*) AS v FROM events 
-                    WHERE society_id = %s AND event_date >= CURRENT_DATE""",
+        "query": "SELECT COUNT(*) AS v FROM events WHERE society_id = %s AND event_date >= CURRENT_DATE",
         "params": 1, "format": "count",
     },
     "kpi_concerns_open": {
@@ -59,25 +51,19 @@ KPI_CARDS = {
         "params": 1, "format": "count",
     },
     "kpi_gate_logs_today": {
-        "query": """SELECT COUNT(*) AS v FROM gate_access 
-                    WHERE society_id = %s AND time_in >= CURRENT_DATE""",
+        "query": "SELECT COUNT(*) AS v FROM gate_access WHERE society_id = %s AND time_in >= CURRENT_DATE",
         "params": 1, "format": "count",
     },
     "kpi_receipts_month": {
-        "query": """SELECT COALESCE(SUM(amount), 0) AS v FROM transactions 
-                    WHERE society_id = %s AND status = 'paid'
-                    AND trx_date >= DATE_TRUNC('month', CURRENT_DATE)""",
+        "query": "SELECT COALESCE(SUM(amount), 0) AS v FROM transactions WHERE society_id = %s AND status = 'paid' AND trx_date >= DATE_TRUNC('month', CURRENT_DATE)",
         "params": 1, "format": "currency",
     },
     "kpi_expenses_month": {
-        "query": """SELECT COALESCE(SUM(amount), 0) AS v FROM transactions 
-                    WHERE society_id = %s AND status = 'paid'
-                    AND trx_date >= DATE_TRUNC('month', CURRENT_DATE)""",
+        "query": "SELECT COALESCE(SUM(amount), 0) AS v FROM transactions WHERE society_id = %s AND status = 'paid' AND trx_date >= DATE_TRUNC('month', CURRENT_DATE)",
         "params": 1, "format": "currency",
     },
     "kpi_balance": {
-        "query": """SELECT COALESCE(SUM(amount), 0) AS v FROM transactions 
-                    WHERE society_id = %s AND status = 'paid'""",
+        "query": "SELECT COALESCE(SUM(amount), 0) AS v FROM transactions WHERE society_id = %s AND status = 'paid'",
         "params": 1, "format": "currency",
     },
     "kpi_societies_total": {
