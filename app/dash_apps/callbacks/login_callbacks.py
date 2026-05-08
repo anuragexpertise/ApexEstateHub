@@ -5,6 +5,9 @@ Handles all authentication flows:
   - Password / PIN / Pattern login
   - Password reset
   - Master admin bypass
+
+IMPORTANT: This file does NOT own the society dropdown callback.
+That's in shell_callbacks.py which must be registered first.
 """
 
 import dash
@@ -25,6 +28,8 @@ from app.services.auth_service import (
 def register_login_callbacks(app):
     """Register all login-related callbacks with the Dash app."""
     
+    print("  → Registering login callbacks...")
+    
     # ── Authentication Callbacks ───────────────────────────────────────────────
     
     @app.callback(
@@ -43,15 +48,19 @@ def register_login_callbacks(app):
         if not n or not email or not password:
             raise PreventUpdate
         
+        print(f"\n🔐 Password login attempt for: {email}")
+        
         society_id = (auth or {}).get("society_id")
         user = authenticate_user(email, password, society_id)
         
         if not user:
+            print(f"❌ Login failed for: {email}")
             return no_update, no_update, {
                 "type": "error",
                 "message": "Invalid email or password"
             }, no_update
         
+        print(f"✅ Login successful for: {email}")
         return _build_login_response(user)
     
     @app.callback(
@@ -70,15 +79,19 @@ def register_login_callbacks(app):
         if not n or not email or not pin:
             raise PreventUpdate
         
+        print(f"\n🔢 PIN login attempt for: {email}")
+        
         society_id = (auth or {}).get("society_id")
         user = authenticate_pin(email, pin, society_id)
         
         if not user:
+            print(f"❌ PIN login failed for: {email}")
             return no_update, no_update, {
                 "type": "error",
                 "message": "Invalid PIN"
             }, no_update
         
+        print(f"✅ PIN login successful for: {email}")
         return _build_login_response(user)
     
     @app.callback(
@@ -97,15 +110,19 @@ def register_login_callbacks(app):
         if not n or not email or not pattern:
             raise PreventUpdate
         
+        print(f"\n🔐 Pattern login attempt for: {email}")
+        
         society_id = (auth or {}).get("society_id")
         user = authenticate_pattern(email, pattern, society_id)
         
         if not user:
+            print(f"❌ Pattern login failed for: {email}")
             return no_update, no_update, {
                 "type": "error",
                 "message": "Invalid pattern"
             }, no_update
         
+        print(f"✅ Pattern login successful for: {email}")
         return _build_login_response(user)
     
     # ── Password Reset Callbacks ───────────────────────────────────────────────
@@ -125,9 +142,9 @@ def register_login_callbacks(app):
         return not is_open, email or ""
     
     @app.callback(
-        Output("forgot-password-modal", "is_open"),
+        Output("forgot-password-modal", "is_open", allow_duplicate=True),
         Output("reset-password-modal", "is_open"),
-        Output("toast-store", "data"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("send-reset-btn", "n_clicks"),
         Input("confirm-reset-btn", "n_clicks"),
         State("reset-email-input", "value"),
@@ -139,9 +156,15 @@ def register_login_callbacks(app):
     )
     def handle_reset_flow(send_clicks, confirm_clicks, email, token, new_pass, confirm_pass, auth):
         """Handle complete password reset flow."""
-        ctx = dash.ctx.triggered_id
+        ctx = dash.callback_context
         
-        if ctx == "send-reset-btn":
+        if not ctx.triggered:
+            raise PreventUpdate
+            
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        if trigger_id == "send-reset-btn":
+            print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
             success, message, _ = request_password_reset(email, society_id)
             return False if success else True, no_update, {
@@ -149,7 +172,8 @@ def register_login_callbacks(app):
                 "message": message
             }
         
-        elif ctx == "confirm-reset-btn":
+        elif trigger_id == "confirm-reset-btn":
+            print(f"\n🔑 Confirming password reset with token")
             if new_pass != confirm_pass:
                 return no_update, True, {"type": "error", "message": "Passwords don't match"}
             
@@ -161,7 +185,9 @@ def register_login_callbacks(app):
         
         raise PreventUpdate
 
-   # Clientside callback to handle pattern drawing and store result
+    # ── Pattern Drawing Clientside Callbacks ───────────────────────────────────
+    
+    # Clientside callback to handle pattern drawing and store result
     app.clientside_callback(
         """
         function(patternValue, n_clicks) {
@@ -193,7 +219,8 @@ def register_login_callbacks(app):
         prevent_initial_call=True,
     )
     
-    # ── Master Admin Login ────────────────────────────────────────────────────────────────
+    # ── Master Admin Login ─────────────────────────────────────────────────────
+    
     @app.callback(
         Output("auth-store", "data", allow_duplicate=True),
         Output("url", "pathname", allow_duplicate=True),
@@ -209,6 +236,8 @@ def register_login_callbacks(app):
         if not n_clicks or not email or not password:
             raise PreventUpdate
         
+        print(f"\n👑 Master admin login attempt for: {email}")
+        
         # Check if this is a master admin
         from app.services.auth_service import authenticate_user
         
@@ -216,6 +245,7 @@ def register_login_callbacks(app):
         user = authenticate_user(email, password, society_id=None)
         
         if not user or user.get("role") != "admin":
+            print(f"❌ Master admin login failed for: {email}")
             return no_update, no_update, {
                 "type": "error",
                 "message": "Invalid master admin credentials"
@@ -230,12 +260,17 @@ def register_login_callbacks(app):
         )
         
         if not result:
+            print(f"❌ User {email} is not a master admin")
             return no_update, no_update, {
                 "type": "error",
                 "message": "Not authorized as master admin"
             }, no_update
         
+        print(f"✅ Master admin login successful for: {email}")
         return _build_login_response(user)
+
+    print("  ✓ Login callbacks registered successfully")
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -250,12 +285,16 @@ def _build_login_response(user):
         "security": "/dashboard/pass-evaluation",
     }
     
+    # Handle master admin (no society_id)
+    if role == "admin" and user.get("society_id") is None:
+        redirect_paths["admin"] = "/dashboard/master"
+    
     return (
         {
             "user_id": user["user_id"],
             "email": user["email"],
             "role": role,
-            "society_id": user["society_id"],
+            "society_id": user.get("society_id"),
             "linked_id": user.get("linked_id"),
             "authenticated": True,
             "token": user["token"],

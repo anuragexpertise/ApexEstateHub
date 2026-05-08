@@ -18,15 +18,18 @@ from app.dash_apps.app_shell import ROLE_CONFIG
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _db():
+    """Get database instance."""
     from database.db_manager import db
     return db
 
 
 def _sid(auth):
+    """Extract society_id from auth data."""
     return (auth or {}).get("society_id")
 
 
 def _redirect_for_role(role, society_id):
+    """Get default redirect path for a given role."""
     if role == "admin" and society_id is None:
         return "/dashboard/master"
     if role == "admin":
@@ -41,6 +44,7 @@ def _redirect_for_role(role, society_id):
 
 
 def _make_nav_items(role, society_id, pathname):
+    """Generate sidebar navigation items based on role."""
     is_master = role == "admin" and society_id is None
     key  = "master" if is_master else (role or "admin")
     cfg  = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
@@ -72,6 +76,7 @@ def _make_nav_items(role, society_id, pathname):
 
 
 def _breadcrumb(pathname):
+    """Generate breadcrumb navigation."""
     path_map = {
         "admin-portal":    "Dashboard",
         "owner-portal":    "Dashboard",
@@ -209,6 +214,8 @@ def _portal_content(role, society_id, pathname):
 
 def register_shell_callbacks(app):
     """Register all shell-level callbacks with the Dash app."""
+    
+    print("  → Registering shell callbacks...")
 
     # ══════════════════════════════════════════════════════════════════════════
     # 0. SOCIETY DROPDOWN POPULATION (MUST BE FIRST)
@@ -218,11 +225,13 @@ def register_shell_callbacks(app):
         Output("society-dropdown", "disabled"),
         Output("login-db-error", "children"),
         Output("login-db-error", "style"),
-        Input("url", "pathname"),
+        Input("login-modal", "is_open"),
         prevent_initial_call=False,
     )
-    def load_societies(pathname):
-        """Load societies from database into dropdown when page loads."""
+    def load_societies(is_open):
+        """Load societies from database into dropdown when login modal opens."""
+        
+        print("\n🔍 Loading societies from database...")
         
         try:
             db = _db()
@@ -246,7 +255,7 @@ def register_shell_callbacks(app):
             
             # Fetch societies
             societies = db.execute_query(
-                "SELECT id, name FROM societies WHERE active = true ORDER BY name",
+                "SELECT id, name FROM societies WHERE (plan = 'Free') OR (plan = 'Paid' AND plan_validity >= CURRENT_DATE) ORDER BY name",
                 fetch_all=True
             )
             
@@ -310,7 +319,7 @@ def register_shell_callbacks(app):
         if not n_clicks or not society_id:
             raise PreventUpdate
         
-        print(f"✅ Society selected: {society_id}, Remember: {remember_society}")
+        print(f"\n✅ Society selected: {society_id}, Remember: {remember_society}")
         
         # Update auth-store with society_id
         auth_data = auth_data or {}
@@ -342,6 +351,8 @@ def register_shell_callbacks(app):
         """Return to society selection."""
         if not n_clicks:
             raise PreventUpdate
+        
+        print("\n← Returning to society selection")
         return {"display": "block"}, {"display": "none"}
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -370,7 +381,7 @@ def register_shell_callbacks(app):
                 print(f"⚠️  Cookie society_id {society_id} not found in dropdown options")
                 return no_update, no_update, no_update, no_update
         
-        print(f"✅ Restored society from cookie: {society_id}")
+        print(f"\n✅ Restored society from cookie: {society_id}")
         auth_data = {"society_id": society_id, "authenticated": False}
         
         return (
@@ -406,7 +417,7 @@ def register_shell_callbacks(app):
                     society_name = opt.get("label", "Society")
                     break
 
-        print(f"✅ Injecting login form for society: {society_name}")
+        print(f"\n✅ Injecting login form for society: {society_name}")
         
         from app.dash_apps.pages.login_system import login_layout
         return login_layout(society_name)
@@ -420,6 +431,7 @@ def register_shell_callbacks(app):
         prevent_initial_call=True,
     )
     def toggle_master(n):
+        """Toggle master admin login form visibility."""
         if not n:
             raise PreventUpdate
         return {"display": "block"} if n and n % 2 == 1 else {"display": "none"}
@@ -437,13 +449,18 @@ def register_shell_callbacks(app):
         prevent_initial_call=True,
     )
     def logout(n2, n3):
+        """Handle logout from sidebar or QR modal."""
         if not (n2 or n3):
             raise PreventUpdate
+        
+        print("\n🚪 User logging out...")
+        
         try:
             from flask_login import logout_user
             logout_user()
         except Exception:
             pass
+        
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -625,4 +642,4 @@ def register_shell_callbacks(app):
             style={"borderLeft": f"4px solid {color_map.get(toast_type, '#3b82f6')}"},
         )
 
-    print("✓ Shell callbacks registered")
+    print("  ✓ Shell callbacks registered successfully")
