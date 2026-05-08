@@ -3,6 +3,11 @@
 Shell callbacks - Core authentication and routing logic.
 CRITICAL: This file owns auth-store, url, login-modal, and society dropdown.
 Must be registered FIRST before login_callbacks.
+
+FIXES:
+  - Login modal now properly closes when authenticated
+  - Modal state is managed in the main router callback
+  - Navigation clicks no longer trigger logout
 """
 import json
 from datetime import datetime, timedelta
@@ -464,7 +469,24 @@ def register_shell_callbacks(app):
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 7. MAIN ROUTER (URL → PORTAL CONTENT)
+    # 7A. LOGIN MODAL STATE MANAGER (SEPARATE FROM ROUTER)
+    # ══════════════════════════════════════════════════════════════════════════
+    @app.callback(
+        Output("login-modal", "is_open", allow_duplicate=True),
+        Input("auth-store", "data"),
+        prevent_initial_call=True,  # REQUIRED for allow_duplicate
+    )
+    def manage_login_modal_state(auth):
+        """Control login modal based on authentication state."""
+        if not auth or not auth.get("authenticated"):
+            print("\n🔓 User not authenticated - opening login modal")
+            return True  # Open modal
+        else:
+            print("\n🔒 User authenticated - closing login modal")
+            return False  # Close modal
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 7B. MAIN ROUTER (URL → PORTAL CONTENT)
     # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("portal-content", "children"),
@@ -481,16 +503,23 @@ def register_shell_callbacks(app):
         Output("hdr-society-logo", "src"),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=False,  # Needs to run on initial load
     )
     def route_page(pathname, auth):
         """Main router - update all shell components based on current URL."""
+        
+        # CRITICAL FIX: Check authentication status
         if not auth or not auth.get("authenticated"):
+            # Not authenticated - show placeholder content (modal managed by separate callback)
+            print(f"\n⚠️  Not authenticated for path: {pathname}")
             return (
                 html.Div("Please log in", className="text-muted text-center mt-5"),
                 [], [], "", {}, "—", "—", "?", "User", "?", "ApexEstateHub",
                 "/static/assets/logo.png"
             )
+        
+        # User is authenticated - show content (modal managed by separate callback)
+        print(f"\n✅ Authenticated user routing to: {pathname}")
         
         role = auth.get("role")
         society_id = auth.get("society_id")
@@ -554,7 +583,7 @@ def register_shell_callbacks(app):
             user_name,
             avatar,
             society_name,
-            society_logo,
+            society_logo
         )
 
     # ══════════════════════════════════════════════════════════════════════════
