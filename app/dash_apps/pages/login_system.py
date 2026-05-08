@@ -20,6 +20,53 @@ import dash_bootstrap_components as dbc
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# CSS STYLES FOR TABS + PATTERN
+# ════════════════════════════════════════════════════════════════════════════
+
+LOGIN_STYLES = """
+<style>
+/* Tab styling */
+.custom-tab {
+    border: none !important;
+    background: rgba(102,126,234,0.05) !important;
+    padding: 10px 20px !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    color: #667eea !important;
+    border-radius: 10px 10px 0 0 !important;
+    margin-right: 4px !important;
+    transition: all 0.2s ease !important;
+}
+
+.custom-tab:hover {
+    background: rgba(102,126,234,0.12) !important;
+}
+
+.custom-tab--selected {
+    background: linear-gradient(135deg,#667eea,#764ba2) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(102,126,234,0.3) !important;
+}
+
+/* Pattern dot active state */
+.pattern-dot.active {
+    background: linear-gradient(135deg,#667eea,#764ba2) !important;
+    border-color: #667eea !important;
+    color: white !important;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+}
+
+/* Pattern dot hover state */
+.pattern-dot:hover {
+    background: rgba(102,126,234,0.2) !important;
+    transform: scale(1.05);
+}
+</style>
+"""
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # STAGE 1: SOCIETY SELECTION
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -29,10 +76,13 @@ def society_select_layout():
     
     Cookie restoration:
       - If "remember_society" cookie exists with society_id, this stage is skipped
-      - Callbacks in login_callbacks.py handle the auto-advance
+      - Callbacks in shell_callbacks.py handle the auto-advance
     """
     return html.Div(
         [
+            # # Inject CSS for tabs and pattern UI
+            # html.Div(dangerouslySetInnerHTML={'__html': LOGIN_STYLES}),
+            
             # Logo + Title
             html.Div(
                 [
@@ -180,10 +230,6 @@ def society_select_layout():
             "maxWidth": "420px",
             "margin": "0 auto",
             "padding": "40px 30px",
-            "background": "rgba(255,255,255,0.95)",
-            "borderRadius": "20px",
-            "boxShadow": "0 20px 60px rgba(0,0,0,0.15)",
-            "backdropFilter": "blur(10px)",
         },
     )
 
@@ -437,7 +483,7 @@ def login_layout(society_name: str = "Society"):
 
             # ═══════════════════════════════════════════════════════════════════
             # FORGOT PASSWORD MODALS
-            # ════════════════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════════════
 
             # Modal 1: Request Password Reset
             dbc.Modal(
@@ -568,10 +614,6 @@ def login_layout(society_name: str = "Society"):
             "maxWidth": "420px",
             "margin": "0 auto",
             "padding": "40px 30px",
-            "background": "rgba(255,255,255,0.95)",
-            "borderRadius": "20px",
-            "boxShadow": "0 20px 60px rgba(0,0,0,0.15)",
-            "backdropFilter": "blur(10px)",
         },
     )
 
@@ -704,50 +746,3 @@ def _pattern_dot(num: int):
             "userSelect": "none",
         },
     )
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# CSS STYLES FOR TABS + PATTERN
-# ════════════════════════════════════════════════════════════════════════════
-
-LOGIN_STYLES = """
-<style>
-/* Tab styling */
-.custom-tab {
-    border: none !important;
-    background: rgba(102,126,234,0.05) !important;
-    padding: 10px 20px !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    color: #667eea !important;
-    border-radius: 10px 10px 0 0 !important;
-    margin-right: 4px !important;
-    transition: all 0.2s ease !important;
-}
-
-.custom-tab:hover {
-    background: rgba(102,126,234,0.12) !important;
-}
-
-.custom-tab--selected {
-    background: linear-gradient(135deg,#667eea,#764ba2) !important;
-    color: white !important;
-    box-shadow: 0 4px 12px rgba(102,126,234,0.3) !important;
-}
-
-/* Pattern dot active state */
-.pattern-dot.active {
-    background: linear-gradient(135deg,#667eea,#764ba2) !important;
-    border-color: #667eea !important;
-    color: white !important;
-    transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(102,126,234,0.4);
-}
-
-/* Pattern dot hover state */
-.pattern-dot:hover {
-    background: rgba(102,126,234,0.2) !important;
-    transform: scale(1.05);
-}
-</style>
-"""
