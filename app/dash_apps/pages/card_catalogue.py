@@ -483,11 +483,12 @@ def make_kpi_card(card_id: str, value: str = "—") -> html.Div:
                        style={"color": color, "fontSize": "20px"}),
                 html.Div(title, style={"fontSize":"11px","fontWeight":"500",
                                        "color":"#888","marginTop":"5px"}),
-                html.Div(value,
-                         **{"data-kpi-value": card_id},
-                         id=f"kpi-val-{card_id}",
-                         style={"fontSize":"20px","fontWeight":"700",
-                                "color":"#2c3e50","margin":"2px 0"}),
+                html.Div(
+                    value,
+                    id={"type": "kpi-value", "card_id": card_id},
+                    style={"fontSize":"20px","fontWeight":"700",
+                        "color":"#2c3e50","margin":"2px 0"}
+                ),
                 html.Div(subtitle, style={"fontSize":"10px","color":"#aaa"}),
             ], style={"textAlign":"center"}),
         ],
