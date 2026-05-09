@@ -492,17 +492,21 @@ def make_kpi_card(card_id: str, value: str = "—") -> html.Div:
                 html.Div(subtitle, style={"fontSize":"10px","color":"#aaa"}),
             ], style={"textAlign":"center"}),
         ],
-        id=f"dnd-card-{card_id}",
+        # ─── CHANGED: Dict ID for pattern matching + n_clicks ───
+        id={"type": "kpi-card", "card_id": card_id},
+        n_clicks=0,
+        # ─────────────────────────────────────────────────────────
         **{"data-card-id": card_id, "data-card-type": "kpi"},
         className="dnd-card",
         style={
             "position":"relative","background":"white","borderRadius":"12px",
             "padding":"16px 12px 12px","borderLeft":f"4px solid {color}",
-            "boxShadow":"0 2px 8px rgba(0,0,0,0.07)","cursor":"default",
+            "boxShadow":"0 2px 8px rgba(0,0,0,0.07)",
+            "cursor":"pointer", 
             "userSelect":"none",
+            "transition": "transform 0.1s, box-shadow 0.1s",  # ← ADDED
         },
     )
-
 
 def _make_field(f: dict) -> dbc.Row:
     """Render a single form field."""

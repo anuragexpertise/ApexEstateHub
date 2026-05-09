@@ -807,3 +807,11 @@ a {
     background: linear-gradient(90deg, transparent 0%, #1859b8 50%, transparent 100%);
     animation: qrScanLine 2s ease-in-out infinite;
 }
+
+.dnd-card[data-card-type="kpi"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+}
+.dnd-card[data-card-type="kpi"]:active {
+    transform: translateY(0);
+}

@@ -232,6 +232,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(dbc.Badge(r.get("plan", "Free"), color="info")),
                 html.Td(str(r.get("created_at", ""))[:10]),
                 html.Td(dbc.Button("Edit", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "society", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "society", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -291,7 +305,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(dbc.Badge(
                     "Active" if r.get("active") else "Inactive",
                     color="success" if r.get("active") else "danger")),
-                html.Td(dbc.Button("Edit", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "entity", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "entity", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -339,7 +366,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(r.get("header") or "—"),
                 html.Td(r.get("drcr_account") or "—"),
                 html.Td(f"₹{float(r.get('bf_amount') or 0):,.2f}"),
-                html.Td(dbc.Button("Edit", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "account", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "account", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -400,7 +440,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td((r.get("payment_method") or "").title()),
                 html.Td(dbc.Badge((r.get("status") or "").title(),
                                    color=smap.get(r.get("status"), "secondary"))),
-                html.Td(dbc.Button("View", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "payment", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "payment", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -449,7 +502,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td((r.get("applies_to") or "all").title()),
                 html.Td((r.get("frequency") or "").replace("_", " ").title()),
                 html.Td(str(r.get("due_day") or "—")),
-                html.Td(dbc.Button("Edit", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "charges", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "charges", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -519,7 +585,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(f"₹{bal:,.2f}",
                         style={"fontWeight": "500",
                                "color": "#2c3e50" if bal >= 0 else "#e74c3c"}),
-                html.Td(dbc.Button("Edit", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "transactions", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "transactions", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r, amt, is_cr, bal in reversed(items)]
             
         except Exception as e:
@@ -567,7 +646,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(r.get("title", "")[:40]),
                 html.Td(r.get("venue") or "—"),
                 html.Td((r.get("open_to") or "all").title()),
-                html.Td(dbc.Button("View", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "event", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "event", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -625,7 +717,20 @@ def register_card_catalogue_callbacks(app):
                 html.Td(str(r.get("entity_id", ""))),
                 html.Td(role_map.get(r.get("role"), r.get("role", "—"))),
                 html.Td(f"{float(r.get('hrs') or 0):.1f} hrs"),
-                html.Td(dbc.Button("View", size="sm", color="link")),
+                # html.Td(dbc.Button(
+                #     "Edit",
+                #     id={"type": "list-action", "action": "edit", "entity": "gate_logs", "id": r["id"]},
+                #     n_clicks=0,
+                #     size="sm",
+                #     color="link"
+                # )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "gate_logs", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:
@@ -679,7 +784,20 @@ def register_card_catalogue_callbacks(app):
                     (r.get("status") or "open").replace("_", " ").title(),
                     color=smap.get(r.get("status", "open"), "secondary"))),
                 html.Td(r.get("assigned_to") or "—"),
-                html.Td(dbc.Button("View", size="sm", color="link")),
+                html.Td(dbc.Button(
+                    "Edit",
+                    id={"type": "list-action", "action": "edit", "entity": "concerns", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
+                html.Td(dbc.Button(
+                    "View",
+                    id={"type": "list-action", "action": "view", "entity": "concerns", "id": r["id"]},
+                    n_clicks=0,
+                    size="sm",
+                    color="link"
+                )),
             ]) for r in rows]
             
         except Exception as e:

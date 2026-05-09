@@ -378,7 +378,18 @@ def shell_layout():
 
                             html.Main(
                                 [
+                                    dbc.Button(
+                                        [html.I(className="fas fa-arrow-left me-2"), "Back"],
+                                        id="drill-back-btn",
+                                        n_clicks=0,
+                                        color="secondary",
+                                        size="sm",
+                                        outline=True,
+                                        className="mb-3",
+                                        style={"display": "none"},
+                                    ),
                                     # Tab-level breadcrumb (below header)
+                                    
                                     html.Div(
                                         id='breadcrumb-container',
                                         children=html.Nav(

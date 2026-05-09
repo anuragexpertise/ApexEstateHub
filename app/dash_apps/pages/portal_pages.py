@@ -164,10 +164,13 @@ def _drill_panel() -> html.Div:
     return html.Div(
         [
             # Sub-navigation breadcrumb (card-level, not tab-level)
+            
+            
             html.Div(id="drill-breadcrumb"),
 
             # Dynamic card: list / profile / form
             html.Div(
+                
                 id="drill-content",
                 children=html.Div(
                     [
