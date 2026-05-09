@@ -113,21 +113,46 @@ def _breadcrumb(pathname):
         "security-receipt":"New Receipt",
         "security-users":  "Users",
     }
+
     parts = [p for p in (pathname or "").strip("/").split("/") if p and p != "dashboard"]
     items = [
         html.Li(
-            html.A([html.I(className="fas fa-home me-1"), "Home"], href="/dashboard/"),
+            html.Button(
+                [html.I(className="fas fa-home me-1"), "Home"],
+                id={"type": "breadcrumb-link", "level": -1},
+                n_clicks=0,
+                className="breadcrumb-btn",
+                style={
+                    "background": "none", "border": "none", "color": "#667eea",
+                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
+                }
+            ),
             className="bc-item",
         )
     ]
     for i, part in enumerate(parts):
         name   = path_map.get(part, part.replace("-", " ").title())
         active = i == len(parts) - 1
-        items.append(
-            html.Li(
-                name if active else html.A(name, href=f"/dashboard/{part}"),
-                className="bc-item" + (" bc-item--active" if active else ""),
+        
+        # ─── CHANGED: Button instead of link for non-active items ───
+        if active:
+            elem = name
+        else:
+            elem = html.Button(
+                name,
+                id={"type": "breadcrumb-link", "level": i},
+                n_clicks=0,
+                className="breadcrumb-btn",
+                style={
+                    "background": "none", "border": "none", "color": "#667eea",
+                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
+                    "textDecoration": "underline",
+                }
             )
+        # ──────────────────────────────────────────────────────────────
+        
+        items.append(
+            html.Li(elem, className="bc-item" + (" bc-item--active" if active else ""))
         )
     return items
 
