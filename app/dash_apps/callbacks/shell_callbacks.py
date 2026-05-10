@@ -552,13 +552,8 @@ def register_shell_callbacks(app):
         email = auth.get("email", "")
         
         # Get user details from database
-        db = _db()
-        user = db._execute(
-            "SELECT name FROM users WHERE id = %s",
-            (user_id,),
-            fetch_one=True
-        )
-        user_name = user["name"] if user else email.split("@")[0].title()
+       
+        user_name = email.split("@")[0].title()
         
         # Get society details
         society_name = "ApexEstateHub"

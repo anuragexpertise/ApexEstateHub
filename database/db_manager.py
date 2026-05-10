@@ -117,44 +117,116 @@ class DatabaseManager:
         if self.engine:
             self.engine.dispose()
 
-    def _execute(query, params=None, fetch_one=False, fetch_all=False):
+    def _execute(self, query, params=None, fetch_one=False, fetch_all=False):
         """
-        Execute query with proper parameter handling.
-        Converts psycopg2-style %s to SQLAlchemy-style :param
+        Execute query with automatic psycopg2 (%s) -> SQLAlchemy (:param_n)
+        parameter conversion.
         """
+
         try:
-            # Convert params to dict if needed
+            # -----------------------------
+            # Normalize parameters
+            # -----------------------------
+            param_dict = {}
+
             if params is None:
                 param_dict = {}
+
             elif isinstance(params, dict):
+                # Already SQLAlchemy-compatible
                 param_dict = params
+
             elif isinstance(params, (tuple, list)):
-                # Convert positional params to named params
-                param_dict = {f"param_{i}": val for i, val in enumerate(params)}
-                # Replace %s with :param_N
+                # Convert positional params
+                param_dict = {
+                    f"param_{i}": value
+                    for i, value in enumerate(params)
+                }
+
+                # Replace %s placeholders one-by-one
                 for i in range(len(params)):
                     query = query.replace("%s", f":param_{i}", 1)
+
             else:
-                # Single value
+                # Single scalar value
                 param_dict = {"param_0": params}
                 query = query.replace("%s", ":param_0", 1)
-            
-            print(f"[DEBUG] Query: {query[:100]}...")
-            print(f"[DEBUG] Params: {param_dict}")
-            
-            result = db._execute(query, param_dict, fetch_one=fetch_one, fetch_all=fetch_all)
-            
-            print(f"[DEBUG] Result type: {type(result)}, Value: {str(result)[:100] if result else 'None'}")
-            
-            return result
-            
+
+            logger.debug(f"SQL Query: {query}")
+            logger.debug(f"SQL Params: {param_dict}")
+
+            # -----------------------------
+            # Execute query
+            # -----------------------------
+            with self.engine.connect() as conn:
+
+                result = conn.execute(text(query), param_dict)
+
+                # Auto-commit for INSERT/UPDATE/DELETE
+                if query.strip().lower().startswith(
+                    ("insert", "update", "delete", "create", "drop", "alter")
+                ):
+                    conn.commit()
+
+                if fetch_one:
+                    row = result.fetchone()
+                    return dict(row._mapping) if row else None
+
+                if fetch_all:
+                    rows = result.fetchall()
+                    return [dict(row._mapping) for row in rows]
+
+                return result
+
         except Exception as e:
-            print(f"❌ Query execution error: {e}")
-            print(f"   Query: {query[:200]}")
-            print(f"   Params: {params}")
+            logger.error(f"❌ Query execution error: {e}")
+
+            if isinstance(query, str):
+                logger.error(f"Query: {query[:300]}")
+
+            logger.error(f"Params: {params}")
+
             import traceback
             traceback.print_exc()
+
             return None
+            """
+            Execute query with proper parameter handling.
+            Converts psycopg2-style %s to SQLAlchemy-style :param
+            """
+            try:
+                # Convert params to dict if needed
+                if params is None:
+                    param_dict = {}
+                elif isinstance(params, dict):
+                    param_dict = params
+                elif isinstance(params, (tuple, list)):
+                    # Convert positional params to named params
+                    param_dict = {f"param_{i}": val for i, val in enumerate(params)}
+                    # Replace %s with :param_N
+                    for i in range(len(params)):
+                        query = query.replace("%s", f":param_{i}", 1)
+                else:
+                    # Single value
+                    param_dict = {"param_0": params}
+                    query = query.replace("%s", ":param_0", 1)
+                
+                print(f"[DEBUG] Query: {query[:100]}...")
+                print(f"[DEBUG] Params: {param_dict}")
+                
+                result = db._execute(query, param_dict, fetch_one=fetch_one, fetch_all=fetch_all)
+                
+                print(f"[DEBUG] Result type: {type(result)}, Value: {str(result)[:100] if result else 'None'}")
+                
+                return result
+                
+            except Exception as e:
+                print(f"❌ Query execution error: {e}")
+                print(f"   Query: {query[:200]}")
+                print(f"   Params: {params}")
+                import traceback
+                traceback.print_exc()
+                return None
 
 
 # Global instance
