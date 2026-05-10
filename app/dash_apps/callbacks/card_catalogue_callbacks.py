@@ -23,7 +23,7 @@ from dash.exceptions import PreventUpdate
 # Helpers
 # ════════════════════════════════════════════════════════════════════════════
 
-def _db():
+def db():
     from database.db_manager import db
     return db
 
@@ -139,7 +139,7 @@ def register_card_catalogue_callbacks(app):
                 print(f"    Query: {query[:80]}...")
                 print(f"    Params: {params}")
                 
-                row = _db().execute_query(query, params, fetch_one=True)
+                row = db().execute_query(query, params, fetch_one=True)
                 
                 if row:
                     raw = row.get("v", 0)
@@ -178,7 +178,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 50
             """
             
-            rows = _db._execute(query, fetch_all=True) or []
+            rows = db._execute(query, fetch_all=True) or []
             
             print(f"  Found {len(rows)} societies")
             
@@ -250,7 +250,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 50
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} entities")
             
@@ -314,7 +314,7 @@ def register_card_catalogue_callbacks(app):
                 ORDER BY name
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} accounts")
             
@@ -384,7 +384,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 50
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} payments")
             
@@ -449,7 +449,7 @@ def register_card_catalogue_callbacks(app):
                 ORDER BY name
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} charges")
             
@@ -519,7 +519,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 100
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} transactions")
             
@@ -595,7 +595,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 30
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} events")
             
@@ -662,7 +662,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 50
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} gate logs")
             
@@ -727,7 +727,7 @@ def register_card_catalogue_callbacks(app):
                 LIMIT 50
             """
             
-            rows = _db._execute(query, {"sid": sid}, fetch_all=True) or []
+            rows = db._execute(query, {"sid": sid}, fetch_all=True) or []
             
             print(f"  Found {len(rows)} concerns")
             
