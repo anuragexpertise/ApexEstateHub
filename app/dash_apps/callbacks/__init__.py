@@ -19,6 +19,7 @@ def register_all_callbacks(app):
     # Navigation callbacks next 
     from .navigation_callbacks import register_navigation_callbacks
     register_navigation_callbacks(app)
+    
     # Login callbacks second — depends on auth-store from shell
     from .login_callbacks import register_login_callbacks
     register_login_callbacks(app)

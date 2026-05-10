@@ -33,7 +33,7 @@ from datetime import date as dt_date
 import dash
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc
 import dash_bootstrap_components as dbc
-
+from database.db_manager import db
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP, ENTITY_MAP, PK_MAP,
     get_pk, to_singular, to_plural, build_prefill,
@@ -498,6 +498,7 @@ def register_drilldown_callbacks(app):
 
         # ── KPI click → list ───────────────────────────────────────────────
         if trig_type == "kpi-card-div":
+            print("KPI CARD CLICKED:", id_dict.get("card_id"),"")
             card_id  = id_dict.get("card_id", "")
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target   = nav_info.get("target")
