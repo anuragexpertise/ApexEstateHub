@@ -211,7 +211,7 @@ def _list_cashbook(filters, page, search, page_size):
 
 
 def _list_societies(filters, page, search, page_size):
-    ; offset = (page - 1) * page_size
+    offset = (page - 1) * page_size
     params = []; extra = ""
     if filters.get("plan"):
         extra = "WHERE plan=%s"; params.append(filters["plan"])
