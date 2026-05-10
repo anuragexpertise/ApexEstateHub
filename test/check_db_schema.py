@@ -22,7 +22,7 @@ def check_schema():
         WHERE table_name = 'users'
         ORDER BY ordinal_position
     """
-    columns = db.execute_query(query, fetch_all=True)
+    columns = db._execute(query, fetch_all=True)
     if columns:
         for col in columns:
             print(f"   - {col['column_name']}: {col['data_type']} (nullable: {col['is_nullable']})")
@@ -34,7 +34,7 @@ def check_schema():
         FROM information_schema.table_constraints 
         WHERE table_name = 'users'
     """
-    constraints = db.execute_query(query, fetch_all=True)
+    constraints = db._execute(query, fetch_all=True)
     if constraints:
         for con in constraints:
             print(f"   - {con['constraint_name']}: {con['constraint_type']}")
@@ -42,7 +42,7 @@ def check_schema():
     # Check if master admin exists
     print("\n3. Existing master admin:")
     query = "SELECT id, email, role, society_id FROM users WHERE email = 'master@estatehub.com'"
-    existing = db.execute_query(query, fetch_one=True)
+    existing = db._execute(query, fetch_one=True)
     if existing:
         print(f"   Found: ID={existing['id']}, Email={existing['email']}, Role={existing['role']}")
     else:

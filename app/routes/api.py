@@ -13,7 +13,7 @@ def get_societies(current_user):
     if current_user.role != 'admin' or current_user.society_id is not None:
         return jsonify({'error': 'Unauthorized'}), 403
 
-    societies = db.execute_query(
+    societies = db._execute(
         "SELECT id, name, email, phone, plan, created_at FROM societies ORDER BY name",
         fetch_all=True
     )
@@ -26,7 +26,7 @@ def get_society(current_user, society_id):
     if current_user.society_id != society_id and current_user.role != 'admin':
         return jsonify({'error': 'Unauthorized'}), 403
 
-    society = db.execute_query(
+    society = db._execute(
         "SELECT id, name, email, phone, address, plan FROM societies WHERE id = %s",
         (society_id,), fetch_one=True
     )
@@ -40,7 +40,7 @@ def get_kpis(current_user):
 
     if not society_id:
         # Master admin - return global KPIs
-        totals = db.execute_query(
+        totals = db._execute(
             "SELECT COUNT(*) as societies, SUM(CASE WHEN plan = 'Paid' THEN 1 ELSE 0 END) as paid FROM societies",
             fetch_one=True
         )
@@ -51,7 +51,7 @@ def get_kpis(current_user):
         })
 
     # Society-specific KPIs
-    kpis = db.execute_query("""
+    kpis = db._execute("""
         SELECT
             (SELECT COUNT(*) FROM apartments WHERE society_id = %s AND active = TRUE) as total_apartments,
             (SELECT COUNT(*) FROM users WHERE society_id = %s AND role = 'vendor') as total_vendors,

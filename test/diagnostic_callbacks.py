@@ -25,7 +25,7 @@ def test_database_connection():
     print("="*60)
     
     try:
-        result = db.execute_query("SELECT 1 AS test", fetch_one=True)
+        result = db._execute("SELECT 1 AS test", fetch_one=True)
         if result and result.get("test") == 1:
             print("✅ Database connection: SUCCESS")
             return True
@@ -44,7 +44,7 @@ def test_societies_exist():
     print("="*60)
     
     try:
-        result = db.execute_query(
+        result = db._execute(
             "SELECT COUNT(*) as cnt FROM societies",
             fetch_one=True
         )
@@ -53,7 +53,7 @@ def test_societies_exist():
         
         if count > 0:
             # Get sample society
-            sample = db.execute_query(
+            sample = db._execute(
                 "SELECT id, name FROM societies LIMIT 1",
                 fetch_one=True
             )
@@ -102,7 +102,7 @@ def test_kpi_queries(society_id):
             converted_query = converted_query.replace("%s", f":param_{i}", 1)
         
         try:
-            result = db.execute_query(converted_query, params, fetch_one=True)
+            result = db._execute(converted_query, params, fetch_one=True)
             value = result.get("v", 0) if result else 0
             
             print(f"   ✓ {card_id:30s} → {value}")
@@ -186,7 +186,7 @@ def test_list_queries(society_id):
     
     for name, query in queries.items():
         try:
-            result = db.execute_query(query, {"sid": society_id}, fetch_all=True)
+            result = db._execute(query, {"sid": society_id}, fetch_all=True)
             count = len(result) if result else 0
             
             print(f"   ✓ {name:20s} → {count} rows")

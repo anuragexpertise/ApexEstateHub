@@ -86,7 +86,7 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
             return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
         
         # Load user from DB
-        user_row = db.execute_query(
+        user_row = db._execute(
             """SELECT u.id, u.email, u.role, u.society_id, u.linked_id,
                       COALESCE(a.owner_name, u.email) AS name,
                       COALESCE(a.flat_number, '') AS flat_number
@@ -130,7 +130,7 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
         
         elif role == "apartment":
             # Owner: Check pending dues
-            dues = db.execute_query(
+            dues = db._execute(
                 """SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS total
                    FROM payments 
                    WHERE society_id = %s 
@@ -168,7 +168,7 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
         
         elif role == "vendor":
             # Vendor: Check active pass
-            active_pass = db.execute_query(
+            active_pass = db._execute(
                 """SELECT id, valid_until 
                    FROM vendor_passes 
                    WHERE society_id = %s AND user_id = %s 
@@ -207,7 +207,7 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
         
         elif role == "security":
             # Security: Check if on duty
-            on_duty = db.execute_query(
+            on_duty = db._execute(
                 """SELECT id FROM gate_access 
                    WHERE society_id = %s AND entity_id = %s 
                    AND role = 's' AND time_out IS NULL

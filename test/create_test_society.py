@@ -19,7 +19,7 @@ def create_test_society():
     try:
         # First, check if societies table exists
         check_table = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'societies')"
-        table_exists = db.execute_query(check_table, fetch_one=True)
+        table_exists = db._execute(check_table, fetch_one=True)
         
         if not table_exists or not table_exists.get('exists'):
             print("Creating societies table...")
@@ -41,12 +41,12 @@ def create_test_society():
                     login_background VARCHAR(100)
                 )
             """
-            db.execute_query(create_societies)
+            db._execute(create_societies)
             print("✓ Societies table created")
         
         # Check if society already exists
         check_society = "SELECT id FROM societies WHERE name = %s"
-        existing_society = db.execute_query(check_society, ("Green Valley Apartments",), fetch_one=True)
+        existing_society = db._execute(check_society, ("Green Valley Apartments",), fetch_one=True)
         
         # Set dates
         plan_validity = (datetime.now() + timedelta(days=365)).date()  # 1 year from now
@@ -66,7 +66,7 @@ def create_test_society():
                 RETURNING id
             """
             
-            result = db.execute_query(
+            result = db._execute(
                 insert_society,
                 (
                     "Green Valley Apartments", 
@@ -95,7 +95,7 @@ def create_test_society():
         
         # Check if admin already exists
         check_admin = "SELECT id FROM users WHERE email = %s"
-        existing_admin = db.execute_query(check_admin, ("admin@greenvalley.com",), fetch_one=True)
+        existing_admin = db._execute(check_admin, ("admin@greenvalley.com",), fetch_one=True)
         
         if existing_admin:
             print(f"\n⚠️ Admin already exists with ID: {existing_admin['id']}")
@@ -106,7 +106,7 @@ def create_test_society():
                 VALUES (%s, %s, %s, 'admin', 'password')
                 RETURNING id
             """
-            admin_result = db.execute_query(insert_admin, (society_id, "admin@greenvalley.com", hashed_password), fetch_one=True)
+            admin_result = db._execute(insert_admin, (society_id, "admin@greenvalley.com", hashed_password), fetch_one=True)
             
             if admin_result:
                 print(f"\n✅ Society admin created!")

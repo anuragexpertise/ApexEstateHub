@@ -253,7 +253,7 @@ def register_login_callbacks(app):
         
         # Check if user has platform-wide access (no society_id restriction)
         from database.db_manager import db
-        result = db.execute_query(
+        result = db._execute(
             "SELECT role FROM users WHERE email = %s AND is_master_admin = true",
             (email,),
             fetch_one=True

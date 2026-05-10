@@ -284,7 +284,7 @@ def register_shell_callbacks(app):
                 )
             
             # Fetch societies
-            societies = db.execute_query(
+            societies = db._execute(
                 "SELECT id, name FROM societies WHERE (plan = 'Free') OR (plan = 'Paid' AND plan_validity >= CURRENT_DATE) ORDER BY name",
                 fetch_all=True
             )
@@ -553,7 +553,7 @@ def register_shell_callbacks(app):
         
         # Get user details from database
         db = _db()
-        user = db.execute_query(
+        user = db._execute(
             "SELECT name FROM users WHERE id = %s",
             (user_id,),
             fetch_one=True
@@ -564,7 +564,7 @@ def register_shell_callbacks(app):
         society_name = "ApexEstateHub"
         society_logo = "/static/assets/logo.png"
         if society_id:
-            society = db.execute_query(
+            society = db._execute(
                 "SELECT name, logo FROM societies WHERE id = %s",
                 (society_id,),
                 fetch_one=True

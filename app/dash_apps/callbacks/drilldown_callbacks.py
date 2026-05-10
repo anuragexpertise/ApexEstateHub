@@ -834,7 +834,7 @@ def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
 
 def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s WHERE id=%s AND society_id=%s",
             (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, pk, sid),
         )
@@ -842,7 +842,7 @@ def _save_apartment(db, d, sid, is_edit, pk):
     flat = (d.get("flat_number") or "").strip()
     if not flat:
         return False, "Flat number is required"
-    db.execute_query(
+    db._execute(
         "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE)",
         (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0),
     )
@@ -852,7 +852,7 @@ def _save_apartment(db, d, sid, is_edit, pk):
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE users SET linked_id=%s WHERE id=%s AND society_id=%s",
             (pk, pk, sid),
         )
@@ -863,7 +863,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required"
-    db.execute_query(
+    db._execute(
         "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,%s,'password')",
         (sid, email, generate_password_hash(pw), role),
     )
@@ -872,7 +872,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
 
 def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE events SET title=%s,description=%s,event_date=%s,event_time=%s,venue=%s,open_to=%s WHERE id=%s AND society_id=%s",
             (d.get("title"), d.get("description"), d.get("event_date"),
              d.get("event_time"), d.get("venue"), d.get("open_to","all"), pk, sid),
@@ -881,7 +881,7 @@ def _save_event(db, d, sid, is_edit, pk):
     title = (d.get("title") or "").strip()
     if not title:
         return False, "Title is required"
-    db.execute_query(
+    db._execute(
         "INSERT INTO events(society_id,title,description,event_date,event_time,venue,open_to) VALUES(%s,%s,%s,%s,%s,%s,%s)",
         (sid, title, d.get("description"), d.get("event_date"), d.get("event_time"),
          d.get("venue"), d.get("open_to","all")),
@@ -891,12 +891,12 @@ def _save_event(db, d, sid, is_edit, pk):
 
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE concerns SET status=%s,assigned_to=%s WHERE id=%s AND society_id=%s",
             (d.get("status","open"), d.get("assigned_to"), pk, sid),
         )
         return True, "Concern updated"
-    db.execute_query(
+    db._execute(
         "INSERT INTO concerns(society_id,flat_no,concern_type,description,preferred_time,status) VALUES(%s,%s,%s,%s,%s,'open')",
         (sid, d.get("flat_no"), d.get("concern_type"), d.get("description",""),
          d.get("preferred_time","anytime")),
@@ -909,7 +909,7 @@ def _save_transaction(db, d, sid):
     amt = d.get("amount") or d.get("pending_dues")
     if not amt:
         return False, "Amount is required"
-    db.execute_query(
+    db._execute(
         "INSERT INTO transactions(society_id,trx_date,acc_particulars,amount,mode,status) VALUES(%s,%s,%s,%s,%s,'paid')",
         (sid, d.get("trx_date") or date.today().isoformat(),
          d.get("acc_particulars","Receipt"), float(amt), d.get("mode","cash")),
@@ -918,7 +918,7 @@ def _save_transaction(db, d, sid):
 
 
 def _save_gate_log(db, d, sid):
-    db.execute_query(
+    db._execute(
         "INSERT INTO gate_access(society_id,role,entity_id,time_in) VALUES(%s,%s,%s,NOW())",
         (sid, d.get("role","v"), d.get("entity_id") or 0),
     )
@@ -929,12 +929,12 @@ def _save_society(db, d, sid, is_edit, pk):
     from werkzeug.security import generate_password_hash
     from datetime import date
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s WHERE id=%s",
             (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), d.get("plan","Free"), pk),
         )
         return True, "Society updated"
-    result = db.execute_query(
+    result = db._execute(
         "INSERT INTO societies(name,email,phone,address,plan,plan_validity,arrear_start_date) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (d.get("name"), d.get("email"), d.get("phone"), d.get("address"),
          d.get("plan","Free"), date.today().isoformat(), date.today().isoformat()),
@@ -942,7 +942,7 @@ def _save_society(db, d, sid, is_edit, pk):
     )
     if result and result.get("id") and d.get("admin_email") and d.get("admin_password"):
         soc_id = result["id"]
-        db.execute_query(
+        db._execute(
             "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,'admin','password')",
             (soc_id, d["admin_email"], generate_password_hash(d["admin_password"])),
         )
@@ -951,12 +951,12 @@ def _save_society(db, d, sid, is_edit, pk):
 
 def _save_account(db, d, sid, is_edit, pk):
     if is_edit:
-        db.execute_query(
+        db._execute(
             "UPDATE accounts SET tab_name=%s,drcr_account=%s,bf_amount=%s WHERE id=%s AND society_id=%s",
             (d.get("tab_name"), d.get("drcr_account"), d.get("bf_amount") or 0, pk, sid),
         )
         return True, "Account updated"
-    db.execute_query(
+    db._execute(
         "INSERT INTO accounts(society_id,name,tab_name,drcr_account,bf_amount,bf_type) VALUES(%s,%s,%s,%s,%s,%s)",
         (sid, d.get("name"), d.get("tab_name"), d.get("drcr_account","Dr"),
          d.get("bf_amount") or 0, d.get("bf_type","Dr")),

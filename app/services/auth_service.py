@@ -164,7 +164,7 @@ def _authenticate(email, credential, society_id, hash_field, method):
             query += " AND society_id IS NULL"
         
         # Execute query
-        user = db.execute_query(query, params, fetch_one=True)
+        user = db._execute(query, params, fetch_one=True)
         
         # Verify credentials
         if not user or not user.get(hash_field):
@@ -293,7 +293,7 @@ def _validate_pattern(pattern):
 def _is_account_locked(email):
     """Check if account is locked due to failed attempts."""
     try:
-        result = db.execute_query(
+        result = db._execute(
             "SELECT locked_until FROM users WHERE email = :email",
             {"email": email},
             fetch_one=True
@@ -306,7 +306,7 @@ def _is_account_locked(email):
         
         # Check if lockout expired
         if datetime.utcnow() > locked_until:
-            db.execute_query(
+            db._execute(
                 "UPDATE users SET locked_until = NULL, failed_login_attempts = 0 WHERE email = :email",
                 {"email": email}
             )
@@ -326,13 +326,13 @@ def _increment_failed_attempts(user_id):
     
     try:
         # Increment counter
-        db.execute_query(
+        db._execute(
             "UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = :user_id",
             {"user_id": user_id}
         )
         
         # Check if locked
-        result = db.execute_query(
+        result = db._execute(
             "SELECT failed_login_attempts FROM users WHERE id = :user_id",
             {"user_id": user_id},
             fetch_one=True
@@ -340,7 +340,7 @@ def _increment_failed_attempts(user_id):
         
         if result and result["failed_login_attempts"] >= MAX_LOGIN_ATTEMPTS:
             lockout_time = datetime.utcnow() + timedelta(minutes=LOCKOUT_MINUTES)
-            db.execute_query(
+            db._execute(
                 "UPDATE users SET locked_until = :lockout_time WHERE id = :user_id",
                 {"lockout_time": lockout_time, "user_id": user_id}
             )
@@ -353,7 +353,7 @@ def _increment_failed_attempts(user_id):
 def _reset_failed_attempts(user_id):
     """Reset failed login counter."""
     try:
-        db.execute_query(
+        db._execute(
             "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = :user_id",
             {"user_id": user_id}
         )
@@ -364,7 +364,7 @@ def _reset_failed_attempts(user_id):
 def _update_last_login(user_id):
     """Update last login timestamp."""
     try:
-        db.execute_query(
+        db._execute(
             "UPDATE users SET last_login = NOW() WHERE id = :user_id",
             {"user_id": user_id}
         )
@@ -389,7 +389,7 @@ def request_password_reset(email, society_id):
             query += " AND society_id = :society_id"
             params["society_id"] = society_id
         
-        user = db.execute_query(query, params, fetch_one=True)
+        user = db._execute(query, params, fetch_one=True)
         
         # Security: Don't reveal if email exists
         if not user:
@@ -403,7 +403,7 @@ def request_password_reset(email, society_id):
         expires_at = datetime.utcnow() + timedelta(hours=RESET_TOKEN_EXPIRY_HOURS)
         
         # Store hashed token
-        db.execute_query(
+        db._execute(
             """UPDATE users 
                SET reset_token = :token_hash, reset_token_expires = :expires_at 
                WHERE id = :user_id""",
@@ -436,7 +436,7 @@ def reset_password(token, new_password):
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         
         # Find user with valid token
-        user = db.execute_query(
+        user = db._execute(
             """SELECT id FROM users 
                WHERE reset_token = :token_hash 
                  AND reset_token_expires > NOW()""",
@@ -451,7 +451,7 @@ def reset_password(token, new_password):
         password_hash = generate_password_hash(new_password)
         
         # Update password and clear token
-        db.execute_query(
+        db._execute(
             """UPDATE users 
                SET password_hash = :password_hash,
                    reset_token = NULL,
@@ -522,7 +522,7 @@ def register_push_token(user_id, token, platform="fcm"):
             "created_at": datetime.utcnow().isoformat()
         })
         
-        db.execute_query(
+        db._execute(
             "UPDATE users SET push_subscription = :subscription, push_enabled = TRUE WHERE id = :user_id",
             {"subscription": subscription, "user_id": user_id}
         )
@@ -549,7 +549,7 @@ def send_push_notification(user_id, title, body, data=None):
     """
     try:
         # Fetch user's push subscription
-        user = db.execute_query(
+        user = db._execute(
             "SELECT push_subscription FROM users WHERE id = :user_id",
             {"user_id": user_id},
             fetch_one=True
@@ -618,7 +618,7 @@ def set_user_pin(user_id, pin):
     
     pin_hash = generate_password_hash(pin)
     
-    db.execute_query(
+    db._execute(
         """UPDATE users 
            SET pin_hash = :pin_hash,
                login_method = CASE 
@@ -640,7 +640,7 @@ def set_user_pattern(user_id, pattern):
     
     pattern_hash = generate_password_hash(pattern)
     
-    db.execute_query(
+    db._execute(
         """UPDATE users 
            SET pattern_hash = :pattern_hash,
                login_method = CASE 
@@ -659,7 +659,7 @@ def change_password(user_id, old_password, new_password):
     """Change user's password (requires old password)."""
     try:
         # Verify old password
-        user = db.execute_query(
+        user = db._execute(
             "SELECT password_hash FROM users WHERE id = :user_id",
             {"user_id": user_id},
             fetch_one=True
@@ -674,7 +674,7 @@ def change_password(user_id, old_password, new_password):
         
         # Update password
         new_hash = generate_password_hash(new_password)
-        db.execute_query(
+        db._execute(
             "UPDATE users SET password_hash = :new_hash WHERE id = :user_id",
             {"new_hash": new_hash, "user_id": user_id}
         )
@@ -688,7 +688,7 @@ def change_password(user_id, old_password, new_password):
 def get_user_login_methods(user_id):
     """Get available login methods for a user."""
     try:
-        result = db.execute_query(
+        result = db._execute(
             "SELECT login_method, pin_hash, pattern_hash FROM users WHERE id = :user_id",
             {"user_id": user_id},
             fetch_one=True

@@ -108,7 +108,7 @@ def delete_subscription():
         
         # Clear subscription in database
         from database.db_manager import db
-        db.execute_query(
+        db._execute(
             "UPDATE users SET push_subscription = NULL WHERE id = :user_id",
             {"user_id": user_id}
         )

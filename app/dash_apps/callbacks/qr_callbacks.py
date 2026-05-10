@@ -359,7 +359,7 @@ def register_qr_callbacks(app):
                 
                 # Create time_in gate log
                 try:
-                    db.execute_query(
+                    db._execute(
                         """INSERT INTO gate_access (society_id, role, entity_id, time_in)
                            VALUES (%s, %s, %s, NOW())""",
                         (society_id, role_code, user_id)
@@ -447,7 +447,7 @@ def register_qr_callbacks(app):
             try:
                 if user_id:
                     # Use a subquery to find the specific record ID first
-                    db.execute_query(
+                    db._execute(
                         """UPDATE gate_access 
                            SET time_out = NOW()
                            WHERE id = (
@@ -553,7 +553,7 @@ def register_qr_callbacks(app):
         
         try:
             # Create emergency event for ALL entities
-            db.execute_query(
+            db._execute(
                 """INSERT INTO events 
                    (society_id, title, description, event_date, open_to)
                    VALUES (%s, 'SECURITY EMERGENCY', 
@@ -591,7 +591,7 @@ def register_qr_callbacks(app):
         
         try:
             # Get admin contact
-            admin = db.execute_query(
+            admin = db._execute(
                 """SELECT u.email, s.phone, s.secretary_phone
                    FROM users u
                    JOIN societies s ON u.society_id = s.id
