@@ -329,7 +329,7 @@ def register_qr_callbacks(app):
         prevent_initial_call=True,
     )
     def validate_qr_scanned(n_clicks, qr_payload, mode, scan_log, auth_data):
-        print(f"DEBUG: Callback validate_qr_scanned. Mode: {mode}, Payload: {qr_payload[:20]}")
+        # print(f"DEBUG: Callback validate_qr_scanned. Mode: {mode}, Payload: {qr_payload[:20]}")
         if not n_clicks or not qr_payload:
             raise PreventUpdate
         
