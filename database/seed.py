@@ -9,6 +9,7 @@ Handles:
 import os
 import sys
 import traceback
+from database.db_manager import db
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -40,10 +41,6 @@ def log_debug(label, query, params=None, result=None, error=None):
         # Uncomment below for full traceback if needed
         # print(f"   Traceback: {''.join(traceback.format_exception(type(error), error, error.__traceback__))}")
 
-def _db():
-    """Get the database singleton instance."""
-    from database.db_manager import db
-    return db
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -104,7 +101,7 @@ DUMMY_USERS = [
 
 def ensure_master_admin() -> bool:
     """Create master admin if no users exist at all. Returns True if created."""
-    db = _db()
+    
     log_debug("START: ensure_master_admin", "SELECT COUNT(*) FROM users", None)
 
     # Try empty list [] first, then empty dict {}
@@ -169,7 +166,7 @@ def ensure_master_admin() -> bool:
 
 def ensure_dummy_data():
     """If no societies exist, prompt user and optionally seed dummy data."""
-    db = _db()
+    
     log_debug("START: ensure_dummy_data", "SELECT COUNT(*) FROM societies", None)
 
     params_list = [[], {}]

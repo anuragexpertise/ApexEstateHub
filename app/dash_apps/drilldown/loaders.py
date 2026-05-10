@@ -10,12 +10,7 @@ from __future__ import annotations
 from datetime import datetime, date
 import csv
 import io
-from  ..callbacks.card_catalogue_callbacks import _execute
-
-def _db():
-    from database.db_manager import db
-    return db
-
+from database.db_manager import db
 
 PAGE_SIZE = 15
 
@@ -26,7 +21,7 @@ PAGE_SIZE = 15
 
 def delete_entity(entity_plural: str, pk, society_id=None) -> tuple:
     """Delete a record. Returns (ok, message)."""
-    db = _db()
+    db = db()
     TABLE_MAP = {
         "apartments": ("apartments",   "id"),
         "vendors":    ("users",        "id"),
@@ -85,7 +80,7 @@ def load_list(entity: str, filters: dict, page: int = 1,
 
 
 def _list_apartments(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     where, params = ["a.society_id=%s"], [sid]
@@ -108,7 +103,7 @@ def _list_apartments(filters, page, search, page_size):
 
 
 def _list_vendors(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     where, params = ["u.society_id=%s", "u.role='vendor'"], [sid]
@@ -126,7 +121,7 @@ def _list_vendors(filters, page, search, page_size):
 
 
 def _list_security(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     where, params = ["u.society_id=%s", "u.role='security'"], [sid]
@@ -142,7 +137,7 @@ def _list_security(filters, page, search, page_size):
 
 
 def _list_events(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     where, params = ["society_id=%s"], [sid]
@@ -158,7 +153,7 @@ def _list_events(filters, page, search, page_size):
 
 
 def _list_concerns(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     where, params = ["society_id=%s"], [sid]
@@ -175,7 +170,7 @@ def _list_concerns(filters, page, search, page_size):
 
 
 def _list_gate_logs(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     params = [sid]; extra = ""
@@ -194,7 +189,7 @@ def _list_gate_logs(filters, page, search, page_size):
 
 
 def _list_receipts(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     params = [sid]; extra = ""
@@ -216,7 +211,7 @@ def _list_cashbook(filters, page, search, page_size):
 
 
 def _list_societies(filters, page, search, page_size):
-    db = _db(); offset = (page - 1) * page_size
+    db = db(); offset = (page - 1) * page_size
     params = []; extra = ""
     if filters.get("plan"):
         extra = "WHERE plan=%s"; params.append(filters["plan"])
@@ -232,7 +227,7 @@ def _list_societies(filters, page, search, page_size):
 
 
 def _list_accounts(filters, page, search, page_size):
-    db = _db(); sid = filters.get("society_id")
+    db = db(); sid = filters.get("society_id")
     if not sid: return [], 0
     offset = (page - 1) * page_size
     params = [sid]; extra = ""
@@ -254,7 +249,7 @@ def _list_accounts(filters, page, search, page_size):
 # ════════════════════════════════════════════════════════════════════════════
 
 def load_profile(entity: str, pk, society_id=None) -> dict | None:
-    db = _db()
+    db = db()
     try:
         if entity == "apartment":
             row = _execute(

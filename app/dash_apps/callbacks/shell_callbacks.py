@@ -16,16 +16,11 @@ import dash
 from dash import Input, Output, State, html, dcc, no_update, callback
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
-
+from database.db_manager import db
 from app.dash_apps.app_shell import ROLE_CONFIG
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _db():
-    """Get database instance."""
-    from database.db_manager import db
-    return db
 
 
 def _sid(auth):
@@ -264,8 +259,7 @@ def register_shell_callbacks(app):
         print("\n🔍 Loading societies from database...")
         
         try:
-            db = _db()
-            
+                      
             # Test connection first
             if not db.test_connection():
                 print("❌ Database connection failed")
