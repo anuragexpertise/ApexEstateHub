@@ -141,7 +141,7 @@ def check_auth():
 @auth_bp.route('/societies', methods=['GET'])
 def get_societies_list():
     try:
-        societies = db.execute_query(
+        societies = db._execute(
             'SELECT id, name, address, logo FROM societies ORDER BY name',
             fetch_all=True,
         )
@@ -171,7 +171,7 @@ def subscribe_push():
 @login_required
 def unsubscribe_push():
     try:
-        db.execute_query(
+        db._execute(
             'UPDATE users SET push_subscription = NULL WHERE id = %s',
             (current_user.id,)
         )

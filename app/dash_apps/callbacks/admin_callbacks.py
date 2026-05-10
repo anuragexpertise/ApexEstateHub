@@ -15,7 +15,7 @@ def register_admin_callbacks(app):
         """Update total societies count"""
         try:
             from database.db_manager import db
-            result = db.execute_query("SELECT COUNT(*) as count FROM societies", fetch_one=True)
+            result = db._execute("SELECT COUNT(*) as count FROM societies", fetch_one=True)
             return str(result['count']) if result else "0"
         except Exception as e:
             print(f"Error updating society count: {e}")
@@ -30,7 +30,7 @@ def register_admin_callbacks(app):
         """Update recent societies list"""
         try:
             from database.db_manager import db
-            societies = db.execute_query(
+            societies = db._execute(
                 "SELECT id, name, email, created_at FROM societies ORDER BY created_at DESC LIMIT 5",
                 fetch_all=True
             )
@@ -92,14 +92,14 @@ def register_admin_callbacks(app):
             
             # Check if user already exists
             check_query = "SELECT id FROM users WHERE email = %s"
-            existing = db.execute_query(check_query, (email,), fetch_one=True)
+            existing = db._execute(check_query, (email,), fetch_one=True)
             
             if existing:
                 return {"type": "error", "message": f"User with email {email} already exists"}
             
             # Get society_id from session (you'll need to pass this)
             # For now, get the first society
-            society_result = db.execute_query("SELECT id FROM societies LIMIT 1", fetch_one=True)
+            society_result = db._execute("SELECT id FROM societies LIMIT 1", fetch_one=True)
             society_id = society_result['id'] if society_result else None
             
             if not society_id:
@@ -110,7 +110,7 @@ def register_admin_callbacks(app):
                 VALUES (%s, %s, %s, %s, 'password')
                 RETURNING id
             """
-            result = db.execute_query(insert_query, (society_id, email, hashed_password, role), fetch_one=True)
+            result = db._execute(insert_query, (society_id, email, hashed_password, role), fetch_one=True)
             
             if result:
                 # If role is apartment, also create apartment record
@@ -120,11 +120,11 @@ def register_admin_callbacks(app):
                         VALUES (%s, %s, %s, %s, TRUE)
                         RETURNING id
                     """
-                    apt_result = db.execute_query(apt_query, (society_id, flat, name, area or 0), fetch_one=True)
+                    apt_result = db._execute(apt_query, (society_id, flat, name, area or 0), fetch_one=True)
                     if apt_result:
                         # Link user to apartment
                         update_user = "UPDATE users SET linked_id = %s WHERE id = %s"
-                        db.execute_query(update_user, (apt_result['id'], result['id']))
+                        db._execute(update_user, (apt_result['id'], result['id']))
                 
                 return {"type": "success", "message": f"Member {name} enrolled successfully!"}
             else:
@@ -179,16 +179,16 @@ def register_admin_callbacks(app):
         sid = (auth_data or {}).get('society_id')
         try:
             from database.db_manager import db
-            users = db.execute_query(
+            users = db._execute(
                 "SELECT COUNT(*) AS c FROM users WHERE society_id=%s", (sid,), fetch_one=True
             ) or {'c': 0}
-            revenue = db.execute_query(
+            revenue = db._execute(
                 "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
                 "WHERE society_id=%s AND status='paid' "
                 "AND trx_date >= date_trunc('month', CURRENT_DATE)",
                 (sid,), fetch_one=True
             ) or {'s': 0}
-            dues = db.execute_query(
+            dues = db._execute(
                 "SELECT COALESCE(SUM(amount),0) AS s FROM payments "
                 "WHERE society_id=%s AND status='pending'",
                 (sid,), fetch_one=True

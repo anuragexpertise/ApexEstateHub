@@ -208,7 +208,7 @@ def register_customize_callbacks(app):
         if society_id:
             try:
                 from database.db_manager import db
-                row = db.execute_query(
+                row = db._execute(
                     "SELECT value FROM society_settings "
                     "WHERE society_id = %s AND key = 'dashboard_layout'",
                     (society_id,), fetch_one=True,
@@ -311,7 +311,7 @@ def _fetch_kpi_values(society_id: int | None) -> dict:
             if not query:
                 continue
             try:
-                row = db.execute_query(query, (society_id,), fetch_one=True)
+                row = db._execute(query, (society_id,), fetch_one=True)
                 raw = float((row or {}).get("v", 0) or 0)
                 fmt = cfg.get("format", "count")
                 if fmt == "currency":
@@ -329,7 +329,7 @@ def _fetch_kpi_values(society_id: int | None) -> dict:
 
 
 def _upsert_layout(db, society_id: int, value_json: str) -> None:
-    db.execute_query(
+    db._execute(
         """CREATE TABLE IF NOT EXISTS society_settings (
                id         SERIAL PRIMARY KEY,
                society_id INTEGER NOT NULL,
@@ -338,7 +338,7 @@ def _upsert_layout(db, society_id: int, value_json: str) -> None:
                UNIQUE(society_id, key)
            )"""
     )
-    db.execute_query(
+    db._execute(
         """INSERT INTO society_settings (society_id, key, value)
            VALUES (%s, 'dashboard_layout', %s)
            ON CONFLICT (society_id, key)

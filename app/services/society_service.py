@@ -5,7 +5,7 @@ def get_societies():
     """Get all societies"""
     try:
         query = "SELECT id, name, email, phone FROM societies ORDER BY name"
-        result = db.execute_query(query, fetch_all=True)
+        result = db._execute(query, fetch_all=True)
         return result if result else []
     except Exception as e:
         print(f"Error getting societies: {e}")
@@ -16,7 +16,7 @@ def get_society_details(society_id):
     """Get society details by ID"""
     try:
         query = "SELECT * FROM societies WHERE id = :society_id"
-        return db.execute_query(query, {"society_id": society_id}, fetch_one=True)
+        return db._execute(query, {"society_id": society_id}, fetch_one=True)
     except Exception as e:
         print(f"Error getting society details: {e}")
         return None
@@ -42,7 +42,7 @@ def create_society(data):
             'validity': data.get('validity'),
             'arrear': data.get('arrear')
         }
-        result = db.execute_query(query, params, fetch_one=True)
+        result = db._execute(query, params, fetch_one=True)
         
         if result and result.get('id'):
             society_id = result['id']
@@ -75,7 +75,7 @@ def create_society_admin(society_id, email, password):
             'email': email,
             'password_hash': password_hash
         }
-        result = db.execute_query(query, params, fetch_one=True)
+        result = db._execute(query, params, fetch_one=True)
         return result['id'] if result else None
     except Exception as e:
         print(f"Error creating society admin: {e}")
@@ -101,7 +101,7 @@ def update_society(society_id, data):
             'sec_phone': data.get('sec_phone'),
             'society_id': society_id
         }
-        result = db.execute_query(query, params, fetch_one=True)
+        result = db._execute(query, params, fetch_one=True)
         return result['id'] if result else None
     except Exception as e:
         print(f"Error updating society: {e}")
@@ -112,7 +112,7 @@ def delete_society(society_id):
     """Delete a society"""
     try:
         query = "DELETE FROM societies WHERE id = :society_id RETURNING id"
-        result = db.execute_query(query, {"society_id": society_id}, fetch_one=True)
+        result = db._execute(query, {"society_id": society_id}, fetch_one=True)
         return result['id'] if result else None
     except Exception as e:
         print(f"Error deleting society: {e}")

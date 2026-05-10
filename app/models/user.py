@@ -13,7 +13,7 @@ class User(UserMixin):
     @staticmethod
     def get(user_id):
         try:
-            result = db.execute_query(
+            result = db._execute(
                 "SELECT id, email, role, society_id FROM users WHERE id = %s",
                 (user_id,), fetch_one=True
             )
@@ -36,7 +36,7 @@ class User(UserMixin):
             if society_id:
                 query  += " AND society_id = %s"
                 params.append(society_id)
-            result = db.execute_query(query, tuple(params), fetch_one=True)
+            result = db._execute(query, tuple(params), fetch_one=True)
             if result:
                 return User(
                     user_id=result['id'],
@@ -53,7 +53,7 @@ class User(UserMixin):
     def create(email, password_hash, role, society_id=None, name=None, phone=None):
         """Create a new user"""
         try:
-            result = db.execute_query(
+            result = db._execute(
                 """INSERT INTO users (email, password_hash, role, society_id, name, phone, login_method)
                    VALUES (%s, %s, %s, %s, %s, %s, 'password')
                    RETURNING id""",

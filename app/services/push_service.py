@@ -18,7 +18,7 @@ def save_push_subscription(user_id, subscription_info):
     """Save push subscription to database"""
     try:
         from database.db_manager import db
-        db.execute_query(
+        db._execute(
             """UPDATE users SET push_subscription = :subscription WHERE id = :user_id""",
             {"subscription": json.dumps(subscription_info), "user_id": user_id}
         )
@@ -32,7 +32,7 @@ def get_push_subscription(user_id):
     """Get push subscription from database"""
     try:
         from database.db_manager import db
-        row = db.execute_query(
+        row = db._execute(
             "SELECT push_subscription FROM users WHERE id = :user_id",
             {"user_id": user_id}, 
             fetch_one=True

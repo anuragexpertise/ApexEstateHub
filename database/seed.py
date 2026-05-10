@@ -114,7 +114,7 @@ def ensure_master_admin() -> bool:
 
     for params in params_list:
         try:
-            result = db.execute_query("SELECT COUNT(*) AS c FROM users", params, fetch_one=True)
+            result = db._execute("SELECT COUNT(*) AS c FROM users", params, fetch_one=True)
             log_debug("SUCCESS: Count Query", "SELECT COUNT(*)", params, result)
             break
         except Exception as e:
@@ -140,7 +140,7 @@ def ensure_master_admin() -> bool:
     
     log_debug("START: Insert Master", "INSERT INTO users ...", insert_params)
     try:
-        db.execute_query(
+        db._execute(
             """
             INSERT INTO users (email, password_hash, role, login_method)
             VALUES (:email, :password_hash, :role, :login_method)
@@ -178,7 +178,7 @@ def ensure_dummy_data():
 
     for params in params_list:
         try:
-            result = db.execute_query("SELECT COUNT(*) AS c FROM societies", params, fetch_one=True)
+            result = db._execute("SELECT COUNT(*) AS c FROM societies", params, fetch_one=True)
             log_debug("SUCCESS: Count Societies", "SELECT COUNT(*)", params, result)
             break
         except Exception as e:
@@ -222,7 +222,7 @@ def _seed_dummy(db):
     check_params = {'name': DUMMY_SOCIETY['name']}
     log_debug("START: Check Society", "SELECT id FROM societies WHERE name = :name", check_params)
     try:
-        existing = db.execute_query(
+        existing = db._execute(
             "SELECT id FROM societies WHERE name = :name",
             check_params,
             fetch_one=True
@@ -247,7 +247,7 @@ def _seed_dummy(db):
             }
             log_debug("START: Insert Society", "INSERT INTO societies ...", insert_params)
             try:
-                result = db.execute_query(
+                result = db._execute(
                     """
                     INSERT INTO societies
                         (name, email, phone, address, secretary_name, secretary_phone,
@@ -267,7 +267,7 @@ def _seed_dummy(db):
                 else:
                     # Fallback: fetch again (in case RETURNING failed but insert succeeded)
                     log_debug("FALLBACK: Fetch Society", "SELECT id FROM societies WHERE name = :name", check_params)
-                    retry = db.execute_query(
+                    retry = db._execute(
                         "SELECT id FROM societies WHERE name = :name",
                         check_params,
                         fetch_one=True
@@ -285,7 +285,7 @@ def _seed_dummy(db):
                 # Handle race condition: duplicate key error
                 if 'duplicate key' in str(e).lower() or 'UniqueViolation' in str(type(e)):
                     log_debug("RETRY: Duplicate Key", "SELECT id FROM societies WHERE name = :name", check_params)
-                    retry = db.execute_query(
+                    retry = db._execute(
                         "SELECT id FROM societies WHERE name = :name",
                         check_params,
                         fetch_one=True
@@ -322,7 +322,7 @@ def _seed_dummy(db):
         }
         log_debug(f"START: Insert User ({u['role']})", "INSERT INTO users ...", user_params)
         try:
-            user = db.execute_query(
+            user = db._execute(
                 """
                 INSERT INTO users (society_id, email, password_hash, role, login_method)
                 VALUES (:society_id, :email, :password_hash, :role, :login_method)
@@ -350,7 +350,7 @@ def _seed_dummy(db):
                     'active': True
                 }
                 log_debug(f"START: Insert Apartment", "INSERT INTO apartments ...", apt_params)
-                apt = db.execute_query(
+                apt = db._execute(
                     """
                     INSERT INTO apartments
                         (society_id, flat_number, owner_name, mobile, apartment_size, active)
@@ -365,7 +365,7 @@ def _seed_dummy(db):
                 if apt:
                     update_params = {'linked_id': apt['id'], 'user_id': user_id}
                     log_debug("UPDATE: Link User", "UPDATE users SET linked_id ...", update_params)
-                    db.execute_query(
+                    db._execute(
                         "UPDATE users SET linked_id=:linked_id WHERE id=:user_id",
                         update_params
                     )
