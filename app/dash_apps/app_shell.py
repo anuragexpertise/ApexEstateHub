@@ -115,7 +115,7 @@ def _login_modal():
             ]),
         ],
         id='login-modal',
-        is_open=True,
+        is_open=False,
         backdrop='static',
         keyboard=False,
         centered=True,

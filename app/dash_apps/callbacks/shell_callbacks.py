@@ -55,7 +55,7 @@ def _make_nav_items(role, society_id, pathname):
         is_active = bool(pathname and href.rstrip("/") in pathname)
         items.append(
             html.Li(
-                html.A(
+                dcc.Link(
                     [
                         html.I(
                             className=f"fas {tab['icon']} me-2",
@@ -68,6 +68,7 @@ def _make_nav_items(role, society_id, pathname):
                     ],
                     href=href,
                     className="snav-link" + (" snav-link--active" if is_active else ""),
+                    refresh=False,
                 ),
                 className="snav-item",
             )
@@ -493,10 +494,12 @@ def register_shell_callbacks(app):
     @app.callback(
         Output("login-modal", "is_open", allow_duplicate=True),
         Input("auth-store", "data"),
-        prevent_initial_call=True,  # REQUIRED for allow_duplicate
+        prevent_initial_call='initial_duplicate',
     )
     def manage_login_modal_state(auth):
-        """Control login modal based on authentication state."""
+        """Control login modal based on authentication state.
+        Fires on initial load so returning authenticated users never see a flash.
+        """
         if not auth or not auth.get("authenticated"):
             print("\n🔓 User not authenticated - opening login modal")
             return True  # Open modal
