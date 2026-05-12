@@ -14,6 +14,10 @@ import jwt
 import logging
 import json
 import re
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -486,19 +490,101 @@ def _validate_password_strength(password):
 
 def _send_reset_email(email, token):
     """
-    Send password reset email.
-    Override this with your email service (SendGrid, SES, SMTP, etc.)
+    Send password reset email via SMTP.
+    Reads SMTP_USER and SMTP_PASSWORD from environment variables.
+    Auto-detects Gmail vs Outlook vs generic SMTP host.
     """
-    reset_url = f"https://apexestatehub.com/reset?token={token}"
-    
-    # In production, integrate with your email service
-    logger.info(f"Reset email for {email}: {reset_url}")
-    
-    # Placeholder - implement with SendGrid/Mailgun/SMTP
-    # Example with SendGrid:
-    # import sendgrid
-    # sg = sendgrid.SendGridAPIClient(SENDGRID_API_KEY)
-    # ...
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+
+    if not smtp_user or not smtp_password:
+        logger.warning("SMTP_USER or SMTP_PASSWORD not set — reset email not sent")
+        return
+
+    # Build reset URL using the app's public domain if available
+    domain = os.environ.get("REPLIT_DEV_DOMAIN") or os.environ.get("REPLIT_DOMAINS", "").split(",")[0].strip()
+    if domain:
+        reset_url = f"https://{domain}/dashboard/?reset_token={token}"
+    else:
+        reset_url = f"https://apexestatehub.com/dashboard/?reset_token={token}"
+
+    # Choose SMTP server based on sender domain
+    sender_domain = smtp_user.split("@")[-1].lower() if "@" in smtp_user else ""
+    if "gmail" in sender_domain:
+        smtp_host, smtp_port = "smtp.gmail.com", 587
+    elif "outlook" in sender_domain or "hotmail" in sender_domain or "live" in sender_domain:
+        smtp_host, smtp_port = "smtp.office365.com", 587
+    elif "yahoo" in sender_domain:
+        smtp_host, smtp_port = "smtp.mail.yahoo.com", 587
+    else:
+        smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+
+    # Build email
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Reset your ApexEstateHub password"
+    msg["From"] = f"ApexEstateHub <{smtp_user}>"
+    msg["To"] = email
+
+    plain = (
+        f"You requested a password reset for your ApexEstateHub account.\n\n"
+        f"Click the link below to set a new password (valid for 1 hour):\n\n"
+        f"{reset_url}\n\n"
+        f"If you did not request this, please ignore this email. "
+        f"Your password will not change.\n\n"
+        f"— ApexEstateHub Team"
+    )
+
+    html = f"""
+    <html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:30px;">
+      <div style="max-width:520px;margin:auto;background:#fff;border-radius:10px;
+                  padding:36px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">
+        <h2 style="color:#6c3fc5;margin-top:0;">ApexEstateHub</h2>
+        <p style="font-size:16px;color:#333;">Hi,</p>
+        <p style="font-size:15px;color:#555;">
+          You requested a password reset. Click the button below to set a new password.
+          This link is valid for <strong>1 hour</strong>.
+        </p>
+        <div style="text-align:center;margin:32px 0;">
+          <a href="{reset_url}"
+             style="background:linear-gradient(135deg,#6c3fc5,#9b59b6);
+                    color:#fff;padding:14px 32px;border-radius:8px;
+                    text-decoration:none;font-size:16px;font-weight:bold;">
+            Reset Password
+          </a>
+        </div>
+        <p style="font-size:13px;color:#999;">
+          If you didn't request this, you can safely ignore this email.<br>
+          Your password will remain unchanged.
+        </p>
+        <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+        <p style="font-size:12px;color:#bbb;text-align:center;">
+          &copy; 2025 ApexEstateHub. All rights reserved.
+        </p>
+      </div>
+    </body></html>
+    """
+
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, email, msg.as_string())
+        logger.info(f"Password reset email sent to {email}")
+    except smtplib.SMTPAuthenticationError:
+        logger.error(
+            "SMTP authentication failed. "
+            "For Gmail, use an App Password (not your normal password). "
+            "Generate one at myaccount.google.com/apppasswords"
+        )
+    except smtplib.SMTPException as e:
+        logger.error(f"SMTP error sending reset email to {email}: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error sending reset email to {email}: {e}")
 
 
 # ── Push Notifications ───────────────────────────────────────────────────────
