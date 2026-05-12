@@ -504,6 +504,9 @@ def register_drilldown_callbacks(app):
             target   = nav_info.get("target")
             if not target:
                 return no_update, no_update, no_update
+            # Reset stack to a clean Dashboard root, then navigate to target.
+            # This ensures breadcrumbs always start fresh on every KPI click.
+            store = nav_state.initial_state(role, sid)
             store = nav_state.navigate_to(
                 store, target,
                 nav_info.get("label", target),
