@@ -145,25 +145,47 @@ def register_login_callbacks(app):
         Output("forgot-password-modal", "is_open", allow_duplicate=True),
         Output("reset-password-modal", "is_open"),
         Output("toast-store", "data", allow_duplicate=True),
-        Input("send-reset-btn", "n_clicks"),
+        Input("send-reset-btn",    "n_clicks"),
         Input("confirm-reset-btn", "n_clicks"),
-        State("reset-email-input", "value"),
-        State("reset-token-input", "value"),
-        State("new-password-input", "value"),
-        State("confirm-password-input", "value"),
+        Input("close-forgot-modal","n_clicks"),
+        Input("close-reset-modal", "n_clicks"),
+        State("reset-email-input",     "value"),
+        State("reset-token-input",     "value"),
+        State("new-password-input",    "value"),
+        State("confirm-password-input","value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def handle_reset_flow(send_clicks, confirm_clicks, email, token, new_pass, confirm_pass, auth):
+    def handle_reset_flow(send_clicks, confirm_clicks,
+                          close_forgot, close_reset,
+                          email, token, new_pass, confirm_pass, auth):
         """Handle complete password reset flow."""
         ctx = dash.callback_context
-        
+
         if not ctx.triggered:
             raise PreventUpdate
-            
+
+        # Guard: Dash fires dynamically-added inputs with n_clicks=0 on injection.
+        # A value of 0 means no real click has happened yet — ignore it.
+        if not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        
+
+        # ── Cancel buttons ────────────────────────────────────────────────────
+        if trigger_id == "close-forgot-modal":
+            return False, no_update, no_update
+
+        if trigger_id == "close-reset-modal":
+            return no_update, False, no_update
+
+        # ── Send reset link ───────────────────────────────────────────────────
         if trigger_id == "send-reset-btn":
+            if not email:
+                return True, no_update, {
+                    "type": "error",
+                    "message": "Please enter your email address"
+                }
             print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
             success, message, _ = request_password_reset(email, society_id)
@@ -171,18 +193,23 @@ def register_login_callbacks(app):
                 "type": "success" if success else "error",
                 "message": message
             }
-        
-        elif trigger_id == "confirm-reset-btn":
+
+        # ── Confirm new password ──────────────────────────────────────────────
+        if trigger_id == "confirm-reset-btn":
             print(f"\n🔑 Confirming password reset with token")
+            if not token:
+                return no_update, True, {"type": "error", "message": "Please enter the reset token"}
+            if not new_pass or not confirm_pass:
+                return no_update, True, {"type": "error", "message": "Please fill in both password fields"}
             if new_pass != confirm_pass:
                 return no_update, True, {"type": "error", "message": "Passwords don't match"}
-            
+
             success, message = reset_password(token, new_pass)
             return no_update, False if success else True, {
                 "type": "success" if success else "error",
                 "message": message
             }
-        
+
         raise PreventUpdate
 
     # ── Pattern Drawing Clientside Callbacks ───────────────────────────────────
@@ -240,30 +267,29 @@ def register_login_callbacks(app):
         
         # Check if this is a master admin
         from app.services.auth_service import authenticate_user
-        
-        # Master admin has no society_id
-        user = authenticate_user(email, password, society_id=None)
-        
-        if not user or user.get("role") != "admin":
-            print(f"❌ Master admin login failed for: {email}")
-            return no_update, no_update, {
-                "type": "error",
-                "message": "Invalid master admin credentials"
-            }, no_update
-        
-        # Check if user has platform-wide access (no society_id restriction)
         from database.db_manager import db
+
+        # Verify master admin flag FIRST (fast, no password check)
         result = db._execute(
-            "SELECT role FROM users WHERE email = %s AND is_master_admin = true",
-            (email,),
-            fetch_one=True
+            "SELECT id FROM users WHERE email = :email AND is_master_admin = true",
+            {"email": email},
+            fetch_one=True,
         )
-        
         if not result:
             print(f"❌ User {email} is not a master admin")
             return no_update, no_update, {
                 "type": "error",
-                "message": "Not authorized as master admin"
+                "message": "Invalid master admin credentials"
+            }, no_update
+
+        # Authenticate credentials (society_id=None → queries users with NULL society)
+        user = authenticate_user(email, password, society_id=None)
+
+        if not user:
+            print(f"❌ Master admin login failed for: {email}")
+            return no_update, no_update, {
+                "type": "error",
+                "message": "Invalid master admin credentials"
             }, no_update
         
         print(f"✅ Master admin login successful for: {email}")

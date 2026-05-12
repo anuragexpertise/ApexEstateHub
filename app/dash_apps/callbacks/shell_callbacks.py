@@ -422,16 +422,24 @@ def register_shell_callbacks(app):
     @app.callback(
         Output("login-stage-2", "children"),
         Input("auth-store", "data"),
+        State("login-stage-2", "children"),
         State("society-dropdown", "options"),
         prevent_initial_call=True,
     )
-    def inject_login_stage2(auth_data, society_options):
-        """Generate the login form with society name."""
+    def inject_login_stage2(auth_data, current_children, society_options):
+        """Generate the login form with society name.
+        Only injects when society changes to avoid spurious re-renders
+        that cause dynamically-added button callbacks to fire with n_clicks=0.
+        """
         if not auth_data or auth_data.get("authenticated"):
             return no_update
 
         society_id = auth_data.get("society_id")
         if not society_id:
+            return no_update
+
+        # Don't re-inject if the form is already showing for this society
+        if current_children:
             return no_update
 
         # Find society name from options
