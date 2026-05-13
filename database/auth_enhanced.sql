@@ -1,8 +1,6 @@
--- Add missing columns for enhanced authentication
--- Run this script to add columns for PIN, Pattern, JWT, push notifications, and forgot password
-
--- Migration: auth_enhanced.sql
--- Run: python3 database/migrate.py --sql database/auth_enhanced.sql
+-- Additive migration patch for enhanced authentication columns.
+-- Safe to re-run on any existing database (all statements use IF NOT EXISTS).
+-- Automatically applied by: python3 database/migrate.py
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Add columns for rate limiting (failed login attempts tracking)

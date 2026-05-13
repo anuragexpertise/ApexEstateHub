@@ -127,21 +127,21 @@ def ensure_master_admin() -> bool:
         return False
 
     pw_hash = generate_password_hash(MASTER_PASSWORD)
-    # Use SINGLE DICT for params (not list of dicts)
     insert_params = {
         'email': MASTER_EMAIL,
         'password_hash': pw_hash,
         'role': 'admin',
-        'login_method': 'password'
+        'login_method': 'password',
+        'is_master_admin': True,
     }
     
     log_debug("START: Insert Master", "INSERT INTO users ...", insert_params)
     try:
         db._execute(
             """
-            INSERT INTO users (email, password_hash, role, login_method)
-            VALUES (:email, :password_hash, :role, :login_method)
-            ON CONFLICT (email) DO NOTHING
+            INSERT INTO users (email, password_hash, role, login_method, is_master_admin)
+            VALUES (:email, :password_hash, :role, :login_method, :is_master_admin)
+            ON CONFLICT (email) DO UPDATE SET is_master_admin = TRUE
             """,
             insert_params
         )

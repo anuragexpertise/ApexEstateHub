@@ -139,8 +139,16 @@ def main():
     print("✓ Connected to Aiven PostgreSQL")
 
     if already_migrated(conn) and not args.force:
-        print("✓ Tables already exist — skipping DDL (use --force to re-run).")
+        print("✓ Tables already exist — running additive patches only.")
         conn.close()
+        # Even on existing DBs, always run the full SQL so the additive
+        # ALTER TABLE / DO $$ blocks at the bottom apply safely.
+        conn = get_conn()
+        print("  Applying additive patches from main SQL …")
+        ok, err = run_migration(conn, sql_path)
+        conn.close()
+        print(f"  ✓ {ok} statements OK", end="")
+        print(f"  ({err} skipped)" if err else "")
     else:
         print("  Parsing and running SQL statements …")
         ok, err = run_migration(conn, sql_path)
@@ -149,6 +157,18 @@ def main():
         print(f"  ✓ {ok} statements OK")
         if err:
             print(f"  ⚠  {err} skipped (see above — usually safe)")
+
+    # Always run auth_enhanced.sql as a supplemental patch (all ADD COLUMN IF
+    # NOT EXISTS — completely safe to re-run on any existing database).
+    auth_sql = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth_enhanced.sql')
+    if os.path.isfile(auth_sql):
+        print()
+        print("  Applying auth_enhanced.sql patch …")
+        conn2 = get_conn()
+        ok2, err2 = run_migration(conn2, auth_sql)
+        conn2.close()
+        print(f"  ✓ {ok2} statements OK", end="")
+        print(f"  ({err2} skipped)" if err2 else "")
 
     print()
     print("=" * 55)

@@ -856,10 +856,19 @@ def _save_apartment(db, d, sid, is_edit, pk):
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
     if is_edit:
+        email = (d.get("email") or "").strip()
+        pw    = (d.get("password") or "").strip()
+        if not email:
+            return False, "Email is required"
         db._execute(
-            "UPDATE users SET linked_id=%s WHERE id=%s AND society_id=%s",
-            (pk, pk, sid),
+            "UPDATE users SET email=%s WHERE id=%s AND society_id=%s",
+            (email, pk, sid),
         )
+        if pw:
+            db._execute(
+                "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
+                (generate_password_hash(pw), pk, sid),
+            )
         return True, f"{role.title()} updated"
     email = (d.get("email") or "").strip()
     if not email:
