@@ -108,14 +108,25 @@ def _list_vendors(filters, page, search, page_size):
     offset = (page - 1) * page_size
     where, params = ["u.society_id=%s", "u.role='vendor'"], [sid]
     if search:
-        where.append("u.email ILIKE %s"); params.append(f"%{search}%")
+        where.append("(v.name ILIKE %s OR v.service_type ILIKE %s OR u.email ILIKE %s)")
+        params += [f"%{search}%", f"%{search}%", f"%{search}%"]
     ws = " AND ".join(where)
-    count = db._execute(f"SELECT COUNT(*) AS c FROM users u WHERE {ws}", params, fetch_one=True) or {"c": 0}
-    rows  = db._execute(
-        f"SELECT u.id,u.email,u.email AS name,'—' AS service_type,'—' AS mobile,"
+    count = db._execute(
+        f"SELECT COUNT(*) AS c FROM users u LEFT JOIN vendors v ON v.id=u.linked_id WHERE {ws}",
+        params, fetch_one=True) or {"c": 0}
+    rows = db._execute(
+        f"SELECT u.id, u.email,"
+        f"COALESCE(v.name, u.email) AS name,"
+        f"COALESCE(v.service_type, '—') AS service_type,"
+        f"COALESCE(v.mobile, '—') AS mobile,"
+        f"COALESCE(v.active, TRUE) AS active,"
         f"COALESCE(SUM(p.amount),0) AS pending_dues "
-        f"FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status='pending' "
-        f"WHERE {ws} GROUP BY u.id ORDER BY u.id DESC LIMIT %s OFFSET %s",
+        f"FROM users u "
+        f"LEFT JOIN vendors v ON v.id=u.linked_id "
+        f"LEFT JOIN payments p ON p.user_id=u.id AND p.status='pending' "
+        f"WHERE {ws} "
+        f"GROUP BY u.id,v.name,v.service_type,v.mobile,v.active "
+        f"ORDER BY v.name NULLS LAST LIMIT %s OFFSET %s",
         params + [page_size, offset], fetch_all=True) or []
     return rows, int(count.get("c", 0))
 
@@ -126,12 +137,22 @@ def _list_security(filters, page, search, page_size):
     offset = (page - 1) * page_size
     where, params = ["u.society_id=%s", "u.role='security'"], [sid]
     if search:
-        where.append("u.email ILIKE %s"); params.append(f"%{search}%")
+        where.append("(s.name ILIKE %s OR u.email ILIKE %s)")
+        params += [f"%{search}%", f"%{search}%"]
     ws = " AND ".join(where)
-    count = db._execute(f"SELECT COUNT(*) AS c FROM users u WHERE {ws}", params, fetch_one=True) or {"c": 0}
-    rows  = db._execute(
-        f"SELECT u.id,u.email,u.email AS name,'—' AS shift,'—' AS mobile,TRUE AS active "
-        f"FROM users u WHERE {ws} ORDER BY u.id DESC LIMIT %s OFFSET %s",
+    count = db._execute(
+        f"SELECT COUNT(*) AS c FROM users u LEFT JOIN security_staff s ON s.id=u.linked_id WHERE {ws}",
+        params, fetch_one=True) or {"c": 0}
+    rows = db._execute(
+        f"SELECT u.id, u.email,"
+        f"COALESCE(s.name, u.email) AS name,"
+        f"COALESCE(s.shift, '—') AS shift,"
+        f"COALESCE(s.mobile, '—') AS mobile,"
+        f"COALESCE(s.active, TRUE) AS active "
+        f"FROM users u "
+        f"LEFT JOIN security_staff s ON s.id=u.linked_id "
+        f"WHERE {ws} "
+        f"ORDER BY s.name NULLS LAST LIMIT %s OFFSET %s",
         params + [page_size, offset], fetch_all=True) or []
     return rows, int(count.get("c", 0))
 
