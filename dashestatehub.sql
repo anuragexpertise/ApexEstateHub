@@ -324,12 +324,6 @@ CREATE INDEX IF NOT EXISTS idx_attendance_security ON attendance (security_id);
 
 CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance (society_id, time_in);
 
-CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
-
-CREATE INDEX IF NOT EXISTS idx_accounts_parent ON accounts (parent_account_id);
-
-CREATE INDEX IF NOT EXISTS idx_accounts_tab ON accounts (tab_name);
-
 CREATE INDEX IF NOT EXISTS idx_asset_society ON asset_register (society_id);
 
 CREATE INDEX IF NOT EXISTS idx_asset_account ON asset_register (parent_account_id);
@@ -384,10 +378,6 @@ WHERE
 -- Fix accounts UNIQUE constraint: old schema used a global UNIQUE on name;
 -- correct is per-society. DROP IF EXISTS is safe on PostgreSQL 9.4+.
 ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_name_key;
-
-ALTER TABLE accounts
-ADD CONSTRAINT uq_account_society_name UNIQUE (society_id, name);
-
 -- Mark the existing master admin user so login_callbacks can find it.
 UPDATE users
 SET
