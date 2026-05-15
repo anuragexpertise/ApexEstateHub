@@ -155,11 +155,10 @@ CREATE TABLE IF NOT EXISTS gate_access (
 CREATE TABLE IF NOT EXISTS accounts (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    ac_no INT NOT NULL,
     name VARCHAR(20) NOT NULL,
     tab_name VARCHAR(10),
     header VARCHAR(50),
-    hierarchy INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
+    parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
     drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')) NOT NULL,
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
@@ -167,15 +166,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     depreciation_percent DECIMAL(5, 2) DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT uq_account_society_acno UNIQUE (society_id, ac_no)
+    CONSTRAINT uq_account_society_id UNIQUE (society_id, id)
 );
-
-CREATE INDEX idx_accounts_society ON accounts (society_id);
-
-CREATE INDEX idx_accounts_tab ON accounts (society_id, tab_name);
-
-CREATE INDEX idx_accounts_hierarchy ON accounts (society_id, hierarchy);
-
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -199,12 +191,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_by INTEGER REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW() CHECK (amount > 0)
 );
-
-CREATE INDEX idx_transactions_society_date ON transactions (society_id, trx_date DESC);
-
-CREATE INDEX idx_transactions_account ON transactions (acc_id);
-
-CREATE INDEX idx_transactions_entity ON transactions (entity_id);
 
 CREATE TABLE IF NOT EXISTS asset_register (
     id SERIAL PRIMARY KEY,
