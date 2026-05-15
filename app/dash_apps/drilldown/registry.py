@@ -54,7 +54,7 @@ ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ROLE FILTER HIERARCHY
+# ROLE FILTER parent_account_id
 # ══════════════════════════════════════════════════════════════════════════════
 ROLE_FILTERS: dict = {
     "master":    [],

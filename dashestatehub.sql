@@ -159,21 +159,19 @@ CREATE TABLE IF NOT EXISTS gate_access (
 -- ════════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS accounts (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY NOT NULL,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    ac_no INT NOT NULL,
     name VARCHAR(20) NOT NULL,
     tab_name VARCHAR(10),
     header VARCHAR(50),
-    hierarchy INT NOT NULL DEFAULT 1,
+    parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
     drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')) NOT NULL,
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
     bf_amount DECIMAL(12, 2) DEFAULT 0.00,
     depreciation_percent DECIMAL(5, 2) DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT uq_account_society_acno UNIQUE (society_id, ac_no)
+    CONSTRAINT uq_account_society_name UNIQUE (society_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -290,7 +288,7 @@ CREATE INDEX IF NOT EXISTS idx_security_society_active ON security_staff (societ
 -- Accounting indexes
 CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_tab ON accounts (society_id, tab_name);
-CREATE INDEX IF NOT EXISTS idx_accounts_hierarchy ON accounts (society_id, hierarchy);
+CREATE INDEX IF NOT EXISTS idx_accounts_parent_account_id ON accounts (society_id, parent_account_id);
 
 -- Transaction indexes
 CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);

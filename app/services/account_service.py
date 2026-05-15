@@ -2,6 +2,7 @@
 """
 Account Management Service - Complete Chart of Accounts & Cashbook System
 Handles: Accounts Master, Receipts, Expenses, Cashbook, Ledger
+Updated: Uses account.id instead of account.ac_no
 """
 
 from datetime import date, datetime
@@ -16,17 +17,18 @@ logger = logging.getLogger(__name__)
 # ACCOUNT MASTER MANAGEMENT
 # ════════════════════════════════════════════════════════════════════════════
 
-def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
+def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, str, int]:
     """
     Create new account in chart of accounts.
     
     Args:
+        society_id: Society ID
+        account_id: Account ID (user-specified, e.g. 1001, 2001, etc.)
         data: {
-            "ac_no": int (required),
             "name": str (required),
             "tab_name": str,
             "header": str,
-            "hierarchy": int (parent account id, default=1),
+            "parent_account_id": int (parent account id, default=1),
             "drcr_account": str ('Dr' or 'Cr', required),
             "has_bf": bool (default=False),
             "drcr_bf": str ('Dr' or 'Cr'),
@@ -39,8 +41,8 @@ def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
     """
     try:
         # Validate required fields
-        if not data.get("ac_no"):
-            return False, "Account number is required", 0
+        if not account_id or account_id <= 0:
+            return False, "Valid account ID is required", 0
         
         if not data.get("name"):
             return False, "Account name is required", 0
@@ -51,19 +53,19 @@ def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
         if data["drcr_account"] not in ("Dr", "Cr"):
             return False, "drcr_account must be 'Dr' or 'Cr'", 0
         
-        # Check for duplicate ac_no
+        # Check for duplicate id
         existing = db._execute(
-            "SELECT id FROM accounts WHERE society_id = %s AND ac_no = %s",
-            (society_id, data["ac_no"]),
+            "SELECT id FROM accounts WHERE society_id = :society_id AND id = :id",
+            {'society_id': society_id, 'id': account_id},
             fetch_one=True
         )
         if existing:
-            return False, f"Account number {data['ac_no']} already exists", 0
+            return False, f"Account ID {account_id} already exists", 0
         
         # Check for duplicate name
         existing = db._execute(
-            "SELECT id FROM accounts WHERE society_id = %s AND name = %s",
-            (society_id, data["name"]),
+            "SELECT id FROM accounts WHERE society_id = :society_id AND name = :name",
+            {'society_id': society_id, 'name': data["name"]},
             fetch_one=True
         )
         if existing:
@@ -75,34 +77,28 @@ def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
             drcr_bf = data["drcr_account"]
         
         # Create account
-        result = db._execute(
+        db._execute(
             """
             INSERT INTO accounts (
-                society_id, ac_no, name, tab_name, header, hierarchy,
+                id, society_id, name, tab_name, header, parent_account_id,
                 drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
+            ) VALUES (:id, :society_id, :name, :tab_name, :header, :parent_account_id,
+                      :drcr_account, :has_bf, :drcr_bf, :bf_amount, :depreciation_percent)
             """,
-            (
-                society_id,
-                data["ac_no"],
-                data["name"],
-                data.get("tab_name"),
-                data.get("header"),
-                data.get("hierarchy", 1),
-                data["drcr_account"],
-                data.get("has_bf", False),
-                drcr_bf,
-                data.get("bf_amount", 0),
-                data.get("depreciation_percent", 0)
-            ),
-            fetch_one=True
+            {
+                'id': account_id,
+                'society_id': society_id,
+                'name': data["name"],
+                'tab_name': data.get("tab_name"),
+                'header': data.get("header"),
+                'parent_account_id': data.get("parent_account_id", 1),
+                'drcr_account': data["drcr_account"],
+                'has_bf': data.get("has_bf", False),
+                'drcr_bf': drcr_bf,
+                'bf_amount': data.get("bf_amount", 0),
+                'depreciation_percent': data.get("depreciation_percent", 0)
+            }
         )
-        
-        if not result:
-            return False, "Failed to create account", 0
-        
-        account_id = result["id"]
         
         logger.info(f"Account created: {data['name']} (ID: {account_id})")
         return True, f"Account '{data['name']}' created successfully", account_id
@@ -117,25 +113,25 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
     Update account details.
     
     Args:
-        data: Fields to update (same as create_account)
+        data: Fields to update (same as create_account except id)
     
     Returns:
         (success: bool, message: str)
     """
     try:
         allowed_fields = [
-            "name", "tab_name", "header", "hierarchy",
+            "name", "tab_name", "header", "parent_account_id",
             "drcr_account", "has_bf", "drcr_bf", 
             "bf_amount", "depreciation_percent"
         ]
         
         updates = []
-        params = []
+        params = {}
         
         for field in allowed_fields:
             if field in data:
-                updates.append(f"{field} = %s")
-                params.append(data[field])
+                updates.append(f"{field} = :{field}")
+                params[field] = data[field]
         
         if not updates:
             return False, "No fields to update"
@@ -147,11 +143,12 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
         if "drcr_bf" in data and data["drcr_bf"] not in ("Dr", "Cr"):
             return False, "drcr_bf must be 'Dr' or 'Cr'"
         
-        params.extend([account_id, society_id])
+        params['account_id'] = account_id
+        params['society_id'] = society_id
         
         db._execute(
-            f"UPDATE accounts SET {', '.join(updates)} WHERE id = %s AND society_id = %s",
-            tuple(params)
+            f"UPDATE accounts SET {', '.join(updates)} WHERE id = :account_id AND society_id = :society_id",
+            params
         )
         
         logger.info(f"Account {account_id} updated")
@@ -166,8 +163,8 @@ def get_account(account_id: int, society_id: int) -> dict:
     """Get account details."""
     try:
         return db._execute(
-            "SELECT * FROM accounts WHERE id = %s AND society_id = %s",
-            (account_id, society_id),
+            "SELECT * FROM accounts WHERE id = :id AND society_id = :society_id",
+            {'id': account_id, 'society_id': society_id},
             fetch_one=True
         ) or {}
     except Exception as e:
@@ -192,33 +189,32 @@ def list_accounts(society_id: int, filters: dict = None, page: int = 1, page_siz
     """
     try:
         offset = (page - 1) * page_size
-        where_clauses = ["society_id = %s"]
-        params = [society_id]
+        where_clauses = ["society_id = :society_id"]
+        params = {'society_id': society_id, 'page_size': page_size, 'offset': offset}
         
         if filters:
             if filters.get("tab_name"):
-                where_clauses.append("tab_name = %s")
-                params.append(filters["tab_name"])
+                where_clauses.append("tab_name = :tab_name")
+                params['tab_name'] = filters["tab_name"]
             
             if filters.get("drcr_account"):
-                where_clauses.append("drcr_account = %s")
-                params.append(filters["drcr_account"])
+                where_clauses.append("drcr_account = :drcr_account")
+                params['drcr_account'] = filters["drcr_account"]
             
             if filters.get("has_bf") is not None:
-                where_clauses.append("has_bf = %s")
-                params.append(filters["has_bf"])
+                where_clauses.append("has_bf = :has_bf")
+                params['has_bf'] = filters["has_bf"]
             
             if filters.get("search"):
-                where_clauses.append("(name ILIKE %s OR header ILIKE %s)")
-                search_term = f"%{filters['search']}%"
-                params.extend([search_term, search_term])
+                where_clauses.append("(name ILIKE :search OR header ILIKE :search)")
+                params['search'] = f"%{filters['search']}%"
         
         where_sql = f"WHERE {' AND '.join(where_clauses)}"
         
         # Get total count
         count_result = db._execute(
             f"SELECT COUNT(*) as c FROM accounts {where_sql}",
-            tuple(params),
+            {k: v for k, v in params.items() if k not in ['page_size', 'offset']},
             fetch_one=True
         )
         total = count_result["c"] if count_result else 0
@@ -227,14 +223,14 @@ def list_accounts(society_id: int, filters: dict = None, page: int = 1, page_siz
         rows = db._execute(
             f"""
             SELECT 
-                id, ac_no, name, tab_name, header, hierarchy,
+                id, name, tab_name, header, parent_account_id,
                 drcr_account, has_bf, drcr_bf, bf_amount, 
                 depreciation_percent, created_at
             FROM accounts {where_sql}
-            ORDER BY ac_no
-            LIMIT %s OFFSET %s
+            ORDER BY id
+            LIMIT :page_size OFFSET :offset
             """,
-            tuple(params + [page_size, offset]),
+            params,
             fetch_all=True
         ) or []
         
@@ -253,12 +249,12 @@ def get_accounts_for_receipt(society_id: int) -> list:
     try:
         return db._execute(
             """
-            SELECT id, ac_no, name, tab_name, header
+            SELECT id, name, tab_name, header
             FROM accounts
-            WHERE society_id = %s AND drcr_account = 'Cr'
+            WHERE society_id = :society_id AND drcr_account = 'Cr'
             ORDER BY name
             """,
-            (society_id,),
+            {'society_id': society_id},
             fetch_all=True
         ) or []
     except Exception as e:
@@ -274,12 +270,12 @@ def get_accounts_for_expense(society_id: int) -> list:
     try:
         return db._execute(
             """
-            SELECT id, ac_no, name, tab_name, header
+            SELECT id, name, tab_name, header
             FROM accounts
-            WHERE society_id = %s AND drcr_account = 'Dr'
+            WHERE society_id = :society_id AND drcr_account = 'Dr'
             ORDER BY name
             """,
-            (society_id,),
+            {'society_id': society_id},
             fetch_all=True
         ) or []
     except Exception as e:
@@ -297,8 +293,8 @@ def delete_account(account_id: int, society_id: int) -> tuple[bool, str]:
     try:
         # Check if account has transactions
         has_transactions = db._execute(
-            "SELECT COUNT(*) as c FROM transactions WHERE acc_id = %s",
-            (account_id,),
+            "SELECT COUNT(*) as c FROM transactions WHERE acc_id = :acc_id",
+            {'acc_id': account_id},
             fetch_one=True
         )
         
@@ -306,8 +302,8 @@ def delete_account(account_id: int, society_id: int) -> tuple[bool, str]:
             return False, "Cannot delete account with existing transactions"
         
         db._execute(
-            "DELETE FROM accounts WHERE id = %s AND society_id = %s",
-            (account_id, society_id)
+            "DELETE FROM accounts WHERE id = :id AND society_id = :society_id",
+            {'id': account_id, 'society_id': society_id}
         )
         
         logger.info(f"Account {account_id} deleted")
@@ -318,17 +314,30 @@ def delete_account(account_id: int, society_id: int) -> tuple[bool, str]:
         return False, f"Error: {str(e)}"
 
 
-def get_next_account_number(society_id: int) -> int:
-    """Get next available account number for a society."""
+def get_next_account_id(society_id: int, range_start: int = 1000) -> int:
+    """
+    Get next available account ID for a society.
+    
+    Args:
+        society_id: Society ID
+        range_start: Starting range for account IDs (default 1000)
+        
+    Returns:
+        Next available account ID
+    """
     try:
         result = db._execute(
-            "SELECT COALESCE(MAX(ac_no), 0) + 1 as next_no FROM accounts WHERE society_id = %s",
-            (society_id,),
+            """
+            SELECT COALESCE(MAX(id), :range_start) + 1 as next_id 
+            FROM accounts 
+            WHERE society_id = :society_id AND id >= :range_start
+            """,
+            {'society_id': society_id, 'range_start': range_start},
             fetch_one=True
         )
-        return result["next_no"] if result else 1
+        return result["next_id"] if result else range_start
     except Exception:
-        return 1
+        return range_start
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -366,8 +375,8 @@ def record_receipt(society_id: int, data: dict, created_by: int = None) -> tuple
         
         # Validate account is Cr type
         account = db._execute(
-            "SELECT drcr_account, name FROM accounts WHERE id = %s AND society_id = %s",
-            (data["acc_id"], society_id),
+            "SELECT drcr_account, name FROM accounts WHERE id = :id AND society_id = :society_id",
+            {'id': data["acc_id"], 'society_id': society_id},
             fetch_one=True
         )
         
@@ -389,20 +398,21 @@ def record_receipt(society_id: int, data: dict, created_by: int = None) -> tuple
             INSERT INTO transactions (
                 society_id, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, payment_gateway_id, status, created_by
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'paid', %s)
+            ) VALUES (:society_id, :trx_date, :acc_id, :entity_id, :acc_particulars,
+                      :amount, :mode, :payment_gateway_id, 'paid', :created_by)
             RETURNING id
             """,
-            (
-                society_id,
-                data.get("trx_date", date.today()),
-                data["acc_id"],
-                data.get("entity_id"),
-                data["acc_particulars"],
-                data["amount"],
-                mode,
-                data.get("payment_gateway_id"),
-                created_by
-            ),
+            {
+                'society_id': society_id,
+                'trx_date': data.get("trx_date", date.today()),
+                'acc_id': data["acc_id"],
+                'entity_id': data.get("entity_id"),
+                'acc_particulars': data["acc_particulars"],
+                'amount': data["amount"],
+                'mode': mode,
+                'payment_gateway_id': data.get("payment_gateway_id"),
+                'created_by': created_by
+            },
             fetch_one=True
         )
         
@@ -450,8 +460,8 @@ def record_expense(society_id: int, data: dict, created_by: int = None) -> tuple
         
         # Validate account is Dr type
         account = db._execute(
-            "SELECT drcr_account, name FROM accounts WHERE id = %s AND society_id = %s",
-            (data["acc_id"], society_id),
+            "SELECT drcr_account, name FROM accounts WHERE id = :id AND society_id = :society_id",
+            {'id': data["acc_id"], 'society_id': society_id},
             fetch_one=True
         )
         
@@ -473,20 +483,21 @@ def record_expense(society_id: int, data: dict, created_by: int = None) -> tuple
             INSERT INTO transactions (
                 society_id, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, payment_gateway_id, status, created_by
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'paid', %s)
+            ) VALUES (:society_id, :trx_date, :acc_id, :entity_id, :acc_particulars,
+                      :amount, :mode, :payment_gateway_id, 'paid', :created_by)
             RETURNING id
             """,
-            (
-                society_id,
-                data.get("trx_date", date.today()),
-                data["acc_id"],
-                data.get("entity_id"),
-                data["acc_particulars"],
-                data["amount"],
-                mode,
-                data.get("payment_gateway_id"),
-                created_by
-            ),
+            {
+                'society_id': society_id,
+                'trx_date': data.get("trx_date", date.today()),
+                'acc_id': data["acc_id"],
+                'entity_id': data.get("entity_id"),
+                'acc_particulars': data["acc_particulars"],
+                'amount': data["amount"],
+                'mode': mode,
+                'payment_gateway_id': data.get("payment_gateway_id"),
+                'created_by': created_by
+            },
             fetch_one=True
         )
         
@@ -519,21 +530,22 @@ def update_transaction(transaction_id: int, society_id: int, data: dict) -> tupl
         ]
         
         updates = []
-        params = []
+        params = {}
         
         for field in allowed_fields:
             if field in data:
-                updates.append(f"{field} = %s")
-                params.append(data[field])
+                updates.append(f"{field} = :{field}")
+                params[field] = data[field]
         
         if not updates:
             return False, "No fields to update"
         
-        params.extend([transaction_id, society_id])
+        params['transaction_id'] = transaction_id
+        params['society_id'] = society_id
         
         db._execute(
-            f"UPDATE transactions SET {', '.join(updates)} WHERE id = %s AND society_id = %s",
-            tuple(params)
+            f"UPDATE transactions SET {', '.join(updates)} WHERE id = :transaction_id AND society_id = :society_id",
+            params
         )
         
         logger.info(f"Transaction {transaction_id} updated")
@@ -553,8 +565,8 @@ def delete_transaction(transaction_id: int, society_id: int) -> tuple[bool, str]
     """
     try:
         db._execute(
-            "UPDATE transactions SET status = 'cancelled' WHERE id = %s AND society_id = %s",
-            (transaction_id, society_id)
+            "UPDATE transactions SET status = 'cancelled' WHERE id = :id AND society_id = :society_id",
+            {'id': transaction_id, 'society_id': society_id}
         )
         
         logger.info(f"Transaction {transaction_id} cancelled")
@@ -592,15 +604,15 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
     """
     try:
         offset = (page - 1) * page_size
-        params = [society_id]
+        params = {'society_id': society_id, 'page_size': page_size, 'offset': offset}
         date_filter = ""
         
         if start_date:
-            date_filter += " AND t.trx_date >= %s"
-            params.append(start_date)
+            date_filter += " AND t.trx_date >= :start_date"
+            params['start_date'] = start_date
         if end_date:
-            date_filter += " AND t.trx_date <= %s"
-            params.append(end_date)
+            date_filter += " AND t.trx_date <= :end_date"
+            params['end_date'] = end_date
         
         # Get opening balance (before start_date)
         opening_balance = 0.0
@@ -616,11 +628,11 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
                     ), 0) as balance
                 FROM transactions t
                 JOIN accounts a ON t.acc_id = a.id
-                WHERE t.society_id = %s 
+                WHERE t.society_id = :society_id 
                   AND t.status = 'paid'
-                  AND t.trx_date < %s
+                  AND t.trx_date < :start_date
                 """,
-                (society_id, start_date),
+                {'society_id': society_id, 'start_date': start_date},
                 fetch_one=True
             )
             opening_balance = float(opening.get("balance", 0)) if opening else 0.0
@@ -629,11 +641,12 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
         count_query = f"""
             SELECT COUNT(*) as c
             FROM transactions t
-            WHERE t.society_id = %s 
+            WHERE t.society_id = :society_id 
               AND t.status = 'paid'
               {date_filter}
         """
-        count_result = db._execute(count_query, tuple(params), fetch_one=True)
+        count_params = {k: v for k, v in params.items() if k not in ['page_size', 'offset']}
+        count_result = db._execute(count_query, count_params, fetch_one=True)
         total = count_result["c"] if count_result else 0
         
         # Get transactions with running balance
@@ -651,11 +664,11 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
                     t.payment_gateway_id
                 FROM transactions t
                 JOIN accounts a ON t.acc_id = a.id
-                WHERE t.society_id = %s
+                WHERE t.society_id = :society_id
                   AND t.status = 'paid'
                   {date_filter}
                 ORDER BY t.trx_date, t.id
-                LIMIT %s OFFSET %s
+                LIMIT :page_size OFFSET :offset
             )
             SELECT 
                 id,
@@ -681,8 +694,7 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
             FROM cashbook
         """
         
-        query_params = params + [page_size, offset]
-        rows = db._execute(query, tuple(query_params), fetch_all=True) or []
+        rows = db._execute(query, params, fetch_all=True) or []
         
         # Calculate running balance
         balance = opening_balance
@@ -724,15 +736,15 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
         }
     """
     try:
-        params = [society_id]
+        params = {'society_id': society_id}
         date_filter = ""
         
         if start_date:
-            date_filter += " AND t.trx_date >= %s"
-            params.append(start_date)
+            date_filter += " AND t.trx_date >= :start_date"
+            params['start_date'] = start_date
         if end_date:
-            date_filter += " AND t.trx_date <= %s"
-            params.append(end_date)
+            date_filter += " AND t.trx_date <= :end_date"
+            params['end_date'] = end_date
         
         # Get opening balance
         opening_balance = 0.0
@@ -748,11 +760,11 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
                     ), 0) as balance
                 FROM transactions t
                 JOIN accounts a ON t.acc_id = a.id
-                WHERE t.society_id = %s 
+                WHERE t.society_id = :society_id 
                   AND t.status = 'paid'
-                  AND t.trx_date < %s
+                  AND t.trx_date < :start_date
                 """,
-                (society_id, start_date),
+                {'society_id': society_id, 'start_date': start_date},
                 fetch_one=True
             )
             opening_balance = float(opening.get("balance", 0)) if opening else 0.0
@@ -765,11 +777,11 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
                 COALESCE(SUM(CASE WHEN a.drcr_account = 'Dr' THEN t.amount END), 0) as total_payments
             FROM transactions t
             JOIN accounts a ON t.acc_id = a.id
-            WHERE t.society_id = %s
+            WHERE t.society_id = :society_id
               AND t.status = 'paid'
               {date_filter}
             """,
-            tuple(params),
+            params,
             fetch_one=True
         )
         
@@ -814,7 +826,7 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
         (rows: list, total_count: int, account_info: dict)
         
     Account info contains:
-        - ac_no: Account number
+        - id: Account ID
         - name: Account name
         - drcr_account: Dr or Cr
         - opening_balance: Balance at start_date (with Dr/Cr side)
@@ -824,11 +836,11 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
         # Get account info
         account = db._execute(
             """
-            SELECT ac_no, name, drcr_account, has_bf, drcr_bf, bf_amount
+            SELECT id, name, drcr_account, has_bf, drcr_bf, bf_amount
             FROM accounts 
-            WHERE id = %s AND society_id = %s
+            WHERE id = :id AND society_id = :society_id
             """,
-            (account_id, society_id),
+            {'id': account_id, 'society_id': society_id},
             fetch_one=True
         )
         
@@ -854,41 +866,46 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
                 SELECT 
                     COALESCE(SUM(
                         CASE 
-                            WHEN %s = 'Cr' THEN t.amount
+                            WHEN :drcr_account = 'Cr' THEN t.amount
                             ELSE -t.amount
                         END
                     ), 0) as balance
                 FROM transactions t
-                WHERE t.acc_id = %s
+                WHERE t.acc_id = :acc_id
                   AND t.status = 'paid'
-                  AND t.trx_date < %s
+                  AND t.trx_date < :start_date
                 """,
-                (account["drcr_account"], account_id, start_date),
+                {
+                    'drcr_account': account["drcr_account"],
+                    'acc_id': account_id,
+                    'start_date': start_date
+                },
                 fetch_one=True
             )
             opening_balance += float(before_start.get("balance", 0)) if before_start else 0.0
         
         # Build query params
         offset = (page - 1) * page_size
-        params = [account_id]
+        params = {'acc_id': account_id, 'page_size': page_size, 'offset': offset}
         date_filter = ""
         
         if start_date:
-            date_filter += " AND t.trx_date >= %s"
-            params.append(start_date)
+            date_filter += " AND t.trx_date >= :start_date"
+            params['start_date'] = start_date
         if end_date:
-            date_filter += " AND t.trx_date <= %s"
-            params.append(end_date)
+            date_filter += " AND t.trx_date <= :end_date"
+            params['end_date'] = end_date
         
         # Get total count
         count_query = f"""
             SELECT COUNT(*) as c
             FROM transactions t
-            WHERE t.acc_id = %s 
+            WHERE t.acc_id = :acc_id 
               AND t.status = 'paid'
               {date_filter}
         """
-        count_result = db._execute(count_query, tuple(params), fetch_one=True)
+        count_params = {k: v for k, v in params.items() if k not in ['page_size', 'offset']}
+        count_result = db._execute(count_query, count_params, fetch_one=True)
         total = count_result["c"] if count_result else 0
         
         # Get transactions
@@ -898,18 +915,16 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
                 t.trx_date AS date,
                 t.acc_particulars AS description,
                 t.amount,
-                t.mode,
-                %s AS dr_or_cr
+                t.mode
             FROM transactions t
-            WHERE t.acc_id = %s
+            WHERE t.acc_id = :acc_id
               AND t.status = 'paid'
               {date_filter}
             ORDER BY t.trx_date, t.id
-            LIMIT %s OFFSET %s
+            LIMIT :page_size OFFSET :offset
         """
         
-        query_params = [account["drcr_account"]] + params + [page_size, offset]
-        rows = db._execute(query, tuple(query_params), fetch_all=True) or []
+        rows = db._execute(query, params, fetch_all=True) or []
         
         # Calculate running balance and format debit/credit columns
         balance = opening_balance
@@ -932,7 +947,7 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
         
         # Account info summary
         account_info = {
-            "ac_no": account["ac_no"],
+            "id": account["id"],
             "name": account["name"],
             "drcr_account": account["drcr_account"],
             "opening_balance": round(abs(opening_balance), 2),
@@ -967,8 +982,8 @@ def get_account_balance(account_id: int, as_of_date: date = None) -> dict:
     """
     try:
         account = db._execute(
-            "SELECT drcr_account, has_bf, drcr_bf, bf_amount FROM accounts WHERE id = %s",
-            (account_id,),
+            "SELECT drcr_account, has_bf, drcr_bf, bf_amount FROM accounts WHERE id = :id",
+            {'id': account_id},
             fetch_one=True
         )
         
@@ -986,26 +1001,26 @@ def get_account_balance(account_id: int, as_of_date: date = None) -> dict:
         
         # Add all transactions
         date_filter = ""
-        params = [account["drcr_account"], account_id]
+        params = {'drcr_account': account["drcr_account"], 'acc_id': account_id}
         if as_of_date:
-            date_filter = " AND t.trx_date <= %s"
-            params.append(as_of_date)
+            date_filter = " AND t.trx_date <= :as_of_date"
+            params['as_of_date'] = as_of_date
         
         transactions = db._execute(
             f"""
             SELECT 
                 COALESCE(SUM(
                     CASE 
-                        WHEN %s = 'Cr' THEN t.amount
+                        WHEN :drcr_account = 'Cr' THEN t.amount
                         ELSE -t.amount
                     END
                 ), 0) as total
             FROM transactions t
-            WHERE t.acc_id = %s
+            WHERE t.acc_id = :acc_id
               AND t.status = 'paid'
               {date_filter}
             """,
-            tuple(params),
+            params,
             fetch_one=True
         )
         
@@ -1031,10 +1046,10 @@ def get_account_tabs(society_id: int) -> list:
             """
             SELECT DISTINCT tab_name 
             FROM accounts 
-            WHERE society_id = %s AND tab_name IS NOT NULL
+            WHERE society_id = :society_id AND tab_name IS NOT NULL
             ORDER BY tab_name
             """,
-            (society_id,),
+            {'society_id': society_id},
             fetch_all=True
         ) or []
         
