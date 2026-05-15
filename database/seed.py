@@ -9,9 +9,17 @@ Handles:
 import os
 import sys
 import traceback
+import argparse
+from pathlib import Path
+from openpyxl import load_workbook
+
+# Add project root BEFORE importing project modules
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
 from database.db_manager import db
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 from dotenv import load_dotenv
 load_dotenv(override=False)
@@ -384,13 +392,185 @@ def _seed_dummy(db):
     print("  │  Vendor : vendor@sunriseresidency.com / Vendor@2024      │")
     print("  │  Sec    : security@sunriseresidency.com / Security@2024  │")
     print("  └─────────────────────────────────────────────────────────┘")
+# ── 3. Estate Account Seeder (Excel Import) ──────────────────────────────────
 
-def run():
+def ensure_accounts_table():
+    """
+    Creates accounts table if not present.
+    Safe to run repeatedly.
+    """
+
+    create_sql = """
+        CREATE TABLE IF NOT EXISTS accounts (
+        id SERIAL PRIMARY KEY,
+        society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+        name VARCHAR(20) NOT NULL,
+        tab_name VARCHAR(10),
+        header VARCHAR(50),
+        parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
+        drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')) NOT NULL,
+        has_bf BOOLEAN DEFAULT FALSE,
+        drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
+        bf_amount DECIMAL(12, 2) DEFAULT 0.00,
+        depreciation_percent DECIMAL(5, 2) DEFAULT 0.00,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
+        CONSTRAINT uq_account_society_id UNIQUE (society_id, id)
+        );
+        """
+
+    try:
+        db._execute(create_sql, {})
+        print("  ✓ accounts table ready")
+    except Exception as e:
+        print(f"  ❌ Failed creating accounts table: {e}")
+        raise
+
+
+def import_estate_accounts(force=False):
+    """
+    Imports EstateAcc.xlsx into accounts table.
+
+    Runs only when:
+        migrate.py executed with --force
+    """
+
+    print()
+    print("── Estate Account Import ───────────────────────────────────")
+
+    ensure_accounts_table()
+
+    project_root = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    excel_path = project_root / "EstateAcc.xlsx"
+
+    if not excel_path.exists():
+        print(f"  ⚠ Excel file not found: {excel_path}")
+        return
+
+    try:
+        wb = load_workbook(excel_path, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        print(f"  ❌ Failed opening workbook: {e}")
+        return
+
+    imported = 0
+    skipped = 0
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+
+        if not row:
+            continue
+
+        id = row[0]
+
+        # skip blank rows
+        if id in (None, ''):
+            continue
+
+        try:
+            params = {
+                'id': int(id) if id is not None else None,
+                'name': row[1],
+                'tab_name': row[2],
+                'header': row[3],
+                'parent_account_id': row[4],
+                'drcr_bf': bool(row[5]) if row[5] is not None else None,
+                'has_bf': bool(row[6]) if row[6] is not None else None,
+                'bf_amount': float(row[7] or 0),
+                'depreciation_percent': float(row[8] or 0),
+                'drcr_ac': bool(row[9]) if row[9] is not None else None,
+            }
+
+            existing = db._execute(
+                """
+                SELECT id
+                FROM accounts
+                WHERE id = :id
+                """,
+                {'id': params['id']},
+                fetch_one=True
+            )
+
+            if existing and not force:
+                skipped += 1
+                continue
+
+            if existing and force:
+                db._execute(
+                    """
+                    UPDATE accounts
+                    SET
+                        name = :name,
+                        tab_name     = :tab_name,
+                        header  = :header,
+                        parent_account_id    = :parent_account_id,
+                        drcr_bf     = :drcr_bf,
+                        has_bf        = :has_bf,
+                        bf_amount    = :bf_amount,
+                        depreciation_percent = :depreciation_percent,
+                        drcr_ac     = :drcr_ac
+                    WHERE id = :id
+                    """,
+                    params
+                )
+            else:
+                db._execute(
+                    """
+                    INSERT INTO accounts (
+                        id,
+                        name,
+                        tab_name,
+                        header,
+                        parent_account_id,
+                        drcr_bf,
+                        has_bf,
+                        bf_amount,
+                        depreciation_percent,
+                        drcr_ac
+                    )
+                    VALUES (
+                        :id,
+                        :name,
+                        :tab_name,
+                        :header,
+                        :parent_account_id,
+                        :drcr_bf,
+                        :has_bf,
+                        :bf_amount,
+                        :depreciation_percent,
+                        :drcr_ac
+                    )
+                    """,
+                    params
+                )
+
+            imported += 1
+
+        except Exception as e:
+            skipped += 1
+            print(f"  ⚠ Skipped account row {id}: {e}")
+
+    print(f"  ✓ Imported : {imported}")
+    print(f"  ✓ Skipped  : {skipped}")
+
+def run(force=False):
     print()
     print("── Seed check (DEBUG MODE) ───────────────────────────────────────────────")
+
     ensure_master_admin()
     ensure_dummy_data()
+
+    # Import Excel account master only on forced migration
+    if force:
+        import_estate_accounts(force=True)
+
     print("─────────────────────────────────────────────────────────────")
 
 if __name__ == '__main__':
-    run()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--force', action='store_true')
+    args = parser.parse_args()
+
+    run(force=args.force)
