@@ -7,7 +7,7 @@
 
 Based on the uploaded Excel files, this document specifies the complete accounting system structure for ApexEstateHub, including:
 
-1. **Accounts Master** - Chart of accounts with hierarchy
+1. **Accounts Master** - Chart of accounts with parent_account_id
 2. **Cashbook** - Dual-entry receipt/payment register with running balance
 3. **Ledger** - Account-wise transaction history
 4. **Receipt & Expense Management** - With account selection
@@ -30,7 +30,7 @@ CREATE TABLE accounts (
     name VARCHAR(100) NOT NULL,                -- Account Name (e.g., "Patients", "Salary")
     tab_name VARCHAR(50),                      -- Tab/Group (e.g., "IncOther", "Salary")
     header VARCHAR(200),                       -- Full Header Name (e.g., "Income Other")
-    hierarchy INTEGER DEFAULT 0,               -- Hierarchy Level (0=root, 1=parent, 2=child, etc.)
+    parent_account_id INTEGER DEFAULT 0,               -- parent_account_id Level (0=root, 1=parent, 2=child, etc.)
     
     -- Dr/Cr designation (from columns K-L)
     drcr_account VARCHAR(2) NOT NULL,          -- 'Dr' or 'Cr' (from society's perspective)
@@ -56,12 +56,12 @@ CREATE TABLE accounts (
 
 CREATE INDEX idx_accounts_society ON accounts(society_id);
 CREATE INDEX idx_accounts_tab ON accounts(society_id, tab_name);
-CREATE INDEX idx_accounts_hierarchy ON accounts(society_id, hierarchy);
+CREATE INDEX idx_accounts_hierarchy ON accounts(society_id, parent_account_id);
 ```
 
 **Sample Data:**
 ```
-| ac_no | name      | tab_name  | header                 | hierarchy | drcr_account | drcr_bf | bf_amount | bf_year   | dep% |
+| ac_no | name      | tab_name  | header                 | parent_account_id | drcr_account | drcr_bf | bf_amount | bf_year   | dep% |
 |-------|-----------|-----------|------------------------|-----------|--------------|---------|-----------|-----------|------|
 | 1     | Bal       | Bal       | Balance Sheet          | 0         | Dr           | Dr      | 111339.00 | 2016-2017 | 100  |
 | 5     | CapAc     | CapAc     | Capital Account        | 1         | Cr           | Cr      | 66042.44  | 2016-2017 | 100  |
@@ -345,7 +345,7 @@ def get_ledger(society_id, account_id, start_date=None, end_date=None):
 - **List View:**
   - Show: Ac No, Name, Tab, Header, Dr/Cr, Opening Balance
   - Actions: View, Edit, Activate/Deactivate
-  - Filter by: Tab, Hierarchy Level
+  - Filter by: Tab, parent_account_id Level
   - Search by: Name
 
 - **Create/Edit Form:**
@@ -354,7 +354,7 @@ def get_ledger(society_id, account_id, start_date=None, end_date=None):
   Account Name:   [________________]
   Tab/Group:      [dropdown: existing tabs + "Create new"]
   Header:         [________________]
-  Hierarchy:      [0-5] (0=root)
+  parent_account_id:      [0-5] (0=root)
   Dr/Cr Account:  [Dr ○] [Cr ○]
   Opening Balance:
     - BF Amount:  [₹ ______]
@@ -460,7 +460,7 @@ def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
         result = db._execute(
             """
             INSERT INTO accounts (
-                society_id, ac_no, name, tab_name, header, hierarchy,
+                society_id, ac_no, name, tab_name, header, parent_account_id,
                 drcr_account, drcr_bf, bf_amount, bf_year, depreciation_percent
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
@@ -471,7 +471,7 @@ def create_account(society_id: int, data: dict) -> tuple[bool, str, int]:
                 data['name'],
                 data.get('tab_name'),
                 data.get('header'),
-                data.get('hierarchy', 0),
+                data.get('parent_account_id', 0),
                 data['drcr_account'],
                 data.get('drcr_bf', data['drcr_account']),
                 data.get('bf_amount', 0),

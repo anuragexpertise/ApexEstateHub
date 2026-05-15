@@ -493,7 +493,7 @@ Avoid hardcoding.
 
 24. SIDEBAR → PAGE → CARD RELATION
 
-Hierarchy:
+parent_account_id:
 
 Sidebar Tab (Page)
    → KPI Cards
