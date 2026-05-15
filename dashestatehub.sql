@@ -1,7 +1,14 @@
 -- ============================================================
--- ApexEstateHub  --  Database Schema  (Aiven PostgreSQL)
+-- ApexEstateHub  --  Unified Database Schema (Aiven PostgreSQL)
 -- Run via:  python3 database/migrate.py
 -- ============================================================
+-- All CREATE TABLE, ALTER TABLE, and INDEX statements merged
+-- Safe to re-run on existing databases (uses IF NOT EXISTS)
+-- ============================================================
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CORE TABLES
+-- ════════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS societies (
     id SERIAL PRIMARY KEY,
@@ -28,12 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     pattern_hash TEXT,
     role VARCHAR(20) NOT NULL CHECK (
-        role IN (
-            'admin',
-            'apartment',
-            'vendor',
-            'security'
-        )
+        role IN ('admin', 'apartment', 'vendor', 'security')
     ),
     linked_id INT,
     login_method VARCHAR(20) DEFAULT 'password',
@@ -152,13 +154,18 @@ CREATE TABLE IF NOT EXISTS gate_access (
     time_out TIMESTAMP
 );
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- ACCOUNTING TABLES
+-- ════════════════════════════════════════════════════════════════════════════
+
 CREATE TABLE IF NOT EXISTS accounts (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    ac_no INT NOT NULL,
     name VARCHAR(20) NOT NULL,
     tab_name VARCHAR(10),
     header VARCHAR(50),
-    parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
+    hierarchy INT NOT NULL DEFAULT 1,
     drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')) NOT NULL,
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
@@ -166,8 +173,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     depreciation_percent DECIMAL(5, 2) DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT uq_account_society_id UNIQUE (society_id, id)
+    CONSTRAINT uq_account_society_acno UNIQUE (society_id, ac_no)
 );
+
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -175,21 +183,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     acc_id INT REFERENCES accounts (id),
     entity_id INTEGER,
     acc_particulars VARCHAR(100),
-    amount DECIMAL(15, 2) NOT NULL,
+    amount DECIMAL(15, 2) NOT NULL CHECK (amount > 0),
     mode VARCHAR(6) CHECK (
-        mode IN (
-            'cash',
-            'cheque',
-            'upi',
-            'card',
-            'bank',
-            'crypto'
-        )
+        mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
     ) DEFAULT 'cash',
-    payment_gateway_ID VARCHAR(20), -- For online payments
-    status VARCHAR(20) NOT NULL DEFAULT 'paid', -- 'pending', 'paid', 'cancelled'
+    payment_gateway_ID VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'paid',
     created_by INTEGER REFERENCES users (id),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW() CHECK (amount > 0)
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS asset_register (
@@ -201,6 +202,10 @@ CREATE TABLE IF NOT EXISTS asset_register (
     parent_account_id INT REFERENCES accounts (id),
     last_depreciation_date DATE
 );
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FEATURE TABLES
+-- ════════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS society_settings (
     id SERIAL PRIMARY KEY,
@@ -255,120 +260,88 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     valid_until DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (
-        society_id,
-        user_id,
-        issued_date
-    )
+    UNIQUE (society_id, user_id, issued_date)
 );
 
--- ── Indexes ───────────────────────────────────────────────────────────────────
+-- ════════════════════════════════════════════════════════════════════════════
+-- INDEXES
+-- ════════════════════════════════════════════════════════════════════════════
 
-CREATE INDEX IF NOT EXISTS idx_vendor_passes_active ON vendor_passes (
-    society_id,
-    user_id,
-    valid_until
-)
-WHERE
-    status = 'active';
-
+-- Users indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
-
 CREATE INDEX IF NOT EXISTS idx_users_society_role ON users (society_id, role);
-
 CREATE INDEX IF NOT EXISTS idx_users_linked ON users (linked_id);
+CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users (reset_token);
+CREATE INDEX IF NOT EXISTS idx_users_reset_token_expires ON users (reset_token_expires);
+CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users (locked_until);
+CREATE INDEX IF NOT EXISTS idx_users_login_method ON users (login_method);
+CREATE INDEX IF NOT EXISTS idx_users_master_admin ON users (is_master_admin) WHERE is_master_admin = TRUE;
 
+-- Apartments indexes
 CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments (society_id);
-
 CREATE INDEX IF NOT EXISTS idx_apartments_active ON apartments (society_id, active);
 
+-- Vendors indexes
 CREATE INDEX IF NOT EXISTS idx_vendors_society_active ON vendors (society_id, active);
 
+-- Security indexes
 CREATE INDEX IF NOT EXISTS idx_security_society_active ON security_staff (society_id, active);
 
+-- Accounting indexes
+CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_tab ON accounts (society_id, tab_name);
+CREATE INDEX IF NOT EXISTS idx_accounts_hierarchy ON accounts (society_id, hierarchy);
+
+-- Transaction indexes
+CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions (acc_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_entity ON transactions (entity_id);
 CREATE INDEX IF NOT EXISTS idx_trx_society_date ON transactions (society_id, trx_date);
-
 CREATE INDEX IF NOT EXISTS idx_trx_account ON transactions (acc_id);
-
 CREATE INDEX IF NOT EXISTS idx_trx_entity ON transactions (entity_id);
-
 CREATE INDEX IF NOT EXISTS idx_trx_status ON transactions (status);
-
 CREATE INDEX IF NOT EXISTS idx_trx_society_status_date ON transactions (society_id, status, trx_date);
+CREATE INDEX IF NOT EXISTS idx_trx_paid_only ON transactions (society_id, trx_date) WHERE status = 'paid';
 
-CREATE INDEX IF NOT EXISTS idx_trx_paid_only ON transactions (society_id, trx_date)
-WHERE
-    status = 'paid';
-
+-- Gate access indexes
 CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access (society_id, time_in);
-
 CREATE INDEX IF NOT EXISTS idx_gate_entity ON gate_access (role, entity_id);
-
 CREATE INDEX IF NOT EXISTS idx_gate_open_entries ON gate_access (role, entity_id, time_out);
 
+-- Attendance indexes
 CREATE INDEX IF NOT EXISTS idx_attendance_security ON attendance (security_id);
-
 CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance (society_id, time_in);
 
+-- Asset register indexes
 CREATE INDEX IF NOT EXISTS idx_asset_society ON asset_register (society_id);
-
 CREATE INDEX IF NOT EXISTS idx_asset_account ON asset_register (parent_account_id);
 
+-- Payment indexes
 CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments (society_id, status);
-
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id);
-
 CREATE INDEX IF NOT EXISTS idx_payments_due_date ON payments (due_date);
 
+-- Event indexes
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
 
+-- Concern indexes
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns (society_id, status);
 
--- ── Additive patches for existing installs ────────────────────────────────────
--- All statements below use IF NOT EXISTS / safe forms so they are safe to
--- re-run on any existing database without side-effects.
+-- Vendor pass indexes
+CREATE INDEX IF NOT EXISTS idx_vendor_passes_active ON vendor_passes (society_id, user_id, valid_until) WHERE status = 'active';
 
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS is_master_admin BOOLEAN NOT NULL DEFAULT FALSE;
+-- ════════════════════════════════════════════════════════════════════════════
+-- DATA PATCHES (Safe to re-run)
+-- ════════════════════════════════════════════════════════════════════════════
 
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
-
-ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;
-
-ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64);
-
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;
-
-ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT;
-
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS push_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP;
-
--- Indexes that depend on the columns added above (must come after ALTER TABLE).
-CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users (reset_token);
-
-CREATE INDEX IF NOT EXISTS idx_users_reset_token_expires ON users (reset_token_expires);
-
-CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users (locked_until);
-
-CREATE INDEX IF NOT EXISTS idx_users_login_method ON users (login_method);
-
-CREATE INDEX IF NOT EXISTS idx_users_master_admin ON users (is_master_admin)
-WHERE
-    is_master_admin = TRUE;
-
--- Fix accounts UNIQUE constraint: old schema used a global UNIQUE on name;
--- correct is per-society. DROP IF EXISTS is safe on PostgreSQL 9.4+.
-ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_name_key;
--- Mark the existing master admin user so login_callbacks can find it.
-UPDATE users
-SET
-    is_master_admin = TRUE
-WHERE
-    email = 'master@estatehub.com'
-    AND society_id IS NULL
-    AND is_master_admin = FALSE;
+-- Mark existing master admin user
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM users WHERE email = 'master@estatehub.com' AND society_id IS NULL) THEN
+        UPDATE users
+        SET is_master_admin = TRUE
+        WHERE email = 'master@estatehub.com'
+          AND society_id IS NULL
+          AND is_master_admin = FALSE;
+    END IF;
+END $$;
