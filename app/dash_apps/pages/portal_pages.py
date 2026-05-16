@@ -21,7 +21,7 @@ HOW IT WORKS:
   The top-level breadcrumb (breadcrumb-ol in the header area) is still
   managed by shell_callbacks, showing which Sidebar Tab is active.
   The drill-breadcrumb inside the content area shows the card-level
-  navigation:  Dashboard → Apartments → Flat A-101 → Pay Dues
+  navigation:  Dashboard → Apartments → Flat A-101 → Pay
 """
 
 from __future__ import annotations

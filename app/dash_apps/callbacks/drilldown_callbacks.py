@@ -1,19 +1,32 @@
 # app/dash_apps/callbacks/drilldown_callbacks.py
 """
-Drill-Down UX Engine — Master Callback Router
-=============================================
+Drill-Down UX Engine — Master Callback Router (ENHANCED)
+=========================================================
 Handles ALL card navigation without page reloads:
 
-  KPI click       → list card      (filtered)
+  KPI click       → list card      (filtered) + HIDES KPIs
+  List row click  → profile card   (double-click)
   List row view   → profile card   (with entity data)
   List row edit   → form card      (pre-filled)
   List row delete → delete + refresh list
   Profile action  → form card      (pre-filled from profile)
-  Breadcrumb      → navigate back  (stack pop)
+  Breadcrumb      → navigate back  (stack pop) + SHOWS KPIs on root
   Pagination      → same list, new page
   Search          → same list, filtered
-  CSV download    → streamed file
+  Column sort     → same list, sorted (NEW)
+  CSV/XLS download → streamed file (NEW: both formats)
+  Bulk upload     → XLS import (NEW)
   Form submit     → save → back → refresh list
+
+ENHANCEMENTS:
+1. KPI hide/show when viewing drill-down content
+2. List column sorting (all columns, asc/desc toggle)
+3. Row click (double-click) to open profile
+4. Action button implementations with CRUD operations
+5. Context-aware account dropdowns for receipts/expenses
+6. Dues calculation (maintenance + fines) on list cards
+7. Show Cashbook action for apartments/vendors/security
+8. Bulk XLS upload for entities
 
 Store schema (id="drilldown-store"):
 {
@@ -23,15 +36,20 @@ Store schema (id="drilldown-store"):
   "prefill":     {},
   "list_pages":  {"apartments": 1},
   "list_search": {"apartments": ""},
+  "list_sort":   {"apartments": {"column": "flat_number", "direction": "asc"}},
   "refresh":     false
 }
 """
 
 from __future__ import annotations
-from datetime import date as dt_date
+from datetime import date as dt_date, datetime, timedelta
+import json
+import io
+import csv
+import pandas as pd
 
 import dash
-from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc
+from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.registry import (
@@ -42,7 +60,7 @@ from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ENTITY METADATA  ─ field specs for list, profile, and form cards
+# ENTITY METADATA  ─ field specs for list, profile, and form cards (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
 
 ENTITY_META: dict = {
@@ -51,12 +69,12 @@ ENTITY_META: dict = {
         "list_title":   "Apartments",
         "list_icon":    "fa-home",
         "list_columns": [
-            {"name": "Flat",        "field": "flat_number"},
-            {"name": "Owner",       "field": "owner_name"},
-            {"name": "Area (sqft)", "field": "apartment_size"},
-            {"name": "Mobile",      "field": "mobile"},
-            {"name": "Dues (₹)",    "field": "pending_dues"},
-            {"name": "Active",      "field": "active"},
+            {"name": "Flat",        "field": "flat_number", "sortable": True},
+            {"name": "Owner",       "field": "owner_name", "sortable": True},
+            {"name": "Area (sqft)", "field": "apartment_size", "sortable": True},
+            {"name": "Mobile",      "field": "mobile", "sortable": False},
+            {"name": "Dues (₹)",    "field": "pending_dues", "sortable": True},
+            {"name": "Active",      "field": "active", "sortable": True},
         ],
         "profile_title":  "Apartment Profile",
         "profile_icon":   "fa-home",
@@ -70,10 +88,11 @@ ENTITY_META: dict = {
             {"label": "Status",       "field": "active",         "icon": "fa-circle-dot"},
         ],
         "profile_actions": [
-            {"label": "Pay Dues",    "action_id": "pay_dues",    "target_card": "form_receipt_new",    "icon": "fa-rupee-sign",  "color": "success"},
-            {"label": "Gate Pass",   "action_id": "gate_pass",   "target_card": "form_gate_log_new",   "icon": "fa-qrcode",      "color": "info"},
-            {"label": "Raise Issue", "action_id": "new_concern", "target_card": "form_concern_new",    "icon": "fa-comment-alt", "color": "warning"},
-            {"label": "Edit",        "action_id": "edit",        "target_card": "form_apartment_edit", "icon": "fa-edit",        "color": "secondary"},
+            {"label": "Pay Dues",      "action_id": "pay_dues",      "target_card": "form_receipt_new",    "icon": "fa-rupee-sign",  "color": "success"},
+            {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook",       "icon": "fa-book",        "color": "info"},
+            {"label": "Gate Pass",     "action_id": "gate_pass",     "target_card": "form_gate_log_new",   "icon": "fa-qrcode",      "color": "info"},
+            {"label": "Raise Issue",   "action_id": "new_concern",   "target_card": "form_concern_new",    "icon": "fa-comment-alt", "color": "warning"},
+            {"label": "Edit",          "action_id": "edit",          "target_card": "form_apartment_edit", "icon": "fa-edit",        "color": "secondary"},
         ],
         "form_fields": {
             "new": [
@@ -96,10 +115,10 @@ ENTITY_META: dict = {
         "list_title":   "Vendors",
         "list_icon":    "fa-truck",
         "list_columns": [
-            {"name": "Name",        "field": "name"},
-            {"name": "Email",       "field": "email"},
-            {"name": "Service",     "field": "service_type"},
-            {"name": "Dues (₹)",    "field": "pending_dues"},
+            {"name": "Name",        "field": "name", "sortable": True},
+            {"name": "Email",       "field": "email", "sortable": True},
+            {"name": "Service",     "field": "service_type", "sortable": True},
+            {"name": "Dues (₹)",    "field": "pending_dues", "sortable": True},
         ],
         "profile_title":  "Vendor Profile",
         "profile_icon":   "fa-truck",
@@ -112,9 +131,10 @@ ENTITY_META: dict = {
             {"label": "Pending Dues", "field": "pending_dues", "icon": "fa-rupee-sign"},
         ],
         "profile_actions": [
-            {"label": "Receive Payment", "action_id": "pay",       "target_card": "form_receipt_new",  "icon": "fa-rupee-sign", "color": "success"},
-            {"label": "Gate Pass",       "action_id": "gate_pass", "target_card": "form_gate_log_new", "icon": "fa-qrcode",     "color": "info"},
-            {"label": "Edit",            "action_id": "edit",      "target_card": "form_vendor_edit",  "icon": "fa-edit",       "color": "secondary"},
+            {"label": "Receive Payment", "action_id": "pay_dues",      "target_card": "form_receipt_new",  "icon": "fa-rupee-sign", "color": "success"},
+            {"label": "Show Cashbook",   "action_id": "show_cashbook", "target_card": "list_cashbook",     "icon": "fa-book",       "color": "info"},
+            {"label": "Gate Pass",       "action_id": "gate_pass",     "target_card": "form_gate_log_new", "icon": "fa-qrcode",     "color": "info"},
+            {"label": "Edit",            "action_id": "edit",          "target_card": "form_vendor_edit",  "icon": "fa-edit",       "color": "secondary"},
         ],
         "form_fields": {
             "new": [
@@ -137,11 +157,11 @@ ENTITY_META: dict = {
         "list_title":   "Security Staff",
         "list_icon":    "fa-user-shield",
         "list_columns": [
-            {"name": "Name",   "field": "name"},
-            {"name": "Email",  "field": "email"},
-            {"name": "Shift",  "field": "shift"},
-            {"name": "Mobile", "field": "mobile"},
-            {"name": "Active", "field": "active"},
+            {"name": "Name",   "field": "name", "sortable": True},
+            {"name": "Email",  "field": "email", "sortable": True},
+            {"name": "Shift",  "field": "shift", "sortable": True},
+            {"name": "Mobile", "field": "mobile", "sortable": False},
+            {"name": "Active", "field": "active", "sortable": True},
         ],
         "profile_title":  "Security Profile",
         "profile_icon":   "fa-user-shield",
@@ -154,7 +174,8 @@ ENTITY_META: dict = {
             {"label": "Active", "field": "active", "icon": "fa-circle-dot"},
         ],
         "profile_actions": [
-            {"label": "Edit", "action_id": "edit", "target_card": "form_security_edit", "icon": "fa-edit", "color": "secondary"},
+            {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook",       "icon": "fa-book", "color": "info"},
+            {"label": "Edit",          "action_id": "edit",          "target_card": "form_security_edit", "icon": "fa-edit", "color": "secondary"},
         ],
         "form_fields": {
             "new": [
@@ -177,10 +198,10 @@ ENTITY_META: dict = {
         "list_title":   "Events",
         "list_icon":    "fa-calendar-check",
         "list_columns": [
-            {"name": "Date",    "field": "event_date"},
-            {"name": "Title",   "field": "title"},
-            {"name": "Venue",   "field": "venue"},
-            {"name": "Open To", "field": "open_to"},
+            {"name": "Date",    "field": "event_date", "sortable": True},
+            {"name": "Title",   "field": "title", "sortable": True},
+            {"name": "Venue",   "field": "venue", "sortable": True},
+            {"name": "Open To", "field": "open_to", "sortable": True},
         ],
         "profile_title":  "Event Details",
         "profile_icon":   "fa-calendar-check",
@@ -220,10 +241,10 @@ ENTITY_META: dict = {
         "list_title":   "Concerns",
         "list_icon":    "fa-hand-point-up",
         "list_columns": [
-            {"name": "Flat",     "field": "flat_no"},
-            {"name": "Type",     "field": "concern_type"},
-            {"name": "Status",   "field": "status"},
-            {"name": "Assigned", "field": "assigned_to"},
+            {"name": "Flat",     "field": "flat_no", "sortable": True},
+            {"name": "Type",     "field": "concern_type", "sortable": True},
+            {"name": "Status",   "field": "status", "sortable": True},
+            {"name": "Assigned", "field": "assigned_to", "sortable": True},
         ],
         "profile_title":  "Concern Details",
         "profile_icon":   "fa-hand-point-up",
@@ -259,11 +280,11 @@ ENTITY_META: dict = {
         "list_title":   "Gate Logs",
         "list_icon":    "fa-receipt",
         "list_columns": [
-            {"name": "Time In",  "field": "time_in"},
-            {"name": "Time Out", "field": "time_out"},
-            {"name": "Role",     "field": "role"},
-            {"name": "Entity",   "field": "entity_id"},
-            {"name": "Hours",    "field": "hours"},
+            {"name": "Time In",  "field": "time_in", "sortable": True},
+            {"name": "Time Out", "field": "time_out", "sortable": True},
+            {"name": "Role",     "field": "role", "sortable": True},
+            {"name": "Entity",   "field": "entity_id", "sortable": True},
+            {"name": "Hours",    "field": "hours", "sortable": True},
         ],
         "profile_title":  "Gate Log Details",
         "profile_icon":   "fa-receipt",
@@ -287,16 +308,20 @@ ENTITY_META: dict = {
         "list_title":   "Receipts",
         "list_icon":    "fa-receipt",
         "list_columns": [
-            {"name": "Date",        "field": "trx_date"},
-            {"name": "Particulars", "field": "acc_particulars"},
-            {"name": "Amount (₹)",  "field": "amount"},
-            {"name": "Mode",        "field": "mode"},
+            {"name": "Date",        "field": "trx_date", "sortable": True},
+            {"name": "Account",      "field": "account_id", "sortable": True},
+            {"name": "Flat/Vendor",  "field": "entity_name", "sortable": True},
+            {"name": "Particulars", "field": "acc_particulars", "sortable": True},
+            {"name": "Amount (₹)",  "field": "amount", "sortable": True},
+            {"name": "Mode",        "field": "mode", "sortable": True},
         ],
         "profile_title":  "Receipt Details",
         "profile_icon":   "fa-receipt",
         "profile_color":  "#17976e",
         "profile_fields": [
             {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
+            {"label": "Account",     "field": "account_id",     "icon": "fa-book"},
+            {"labe" : "Flat/Vendor", "field": "entity_name",    "icon": "fa-users"},
             {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
             {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
             {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
@@ -306,6 +331,8 @@ ENTITY_META: dict = {
         "form_fields": {
             "new": [
                 {"id": "trx_date",        "label": "Date",         "type": "date"},
+                {"id": "acc_id",          "label": "Account",      "type": "account_dropdown_cr", "required": True},
+                {"id": "entity_name",     "label": "Flat/Vendor",  "type": "text",   "required": True},
                 {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
                 {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
                 {"id": "mode",            "label": "Mode",         "type": "select", "options": ["cash", "upi", "card", "bank", "cheque"]},
@@ -317,16 +344,18 @@ ENTITY_META: dict = {
         "list_title":   "Expenses",
         "list_icon":    "fa-wallet",
         "list_columns": [
-            {"name": "Date",        "field": "trx_date"},
-            {"name": "Particulars", "field": "acc_particulars"},
-            {"name": "Amount (₹)",  "field": "amount"},
-            {"name": "Mode",        "field": "mode"},
+            {"name": "Date",        "field": "trx_date", "sortable": True},
+            {"name": "Account",     "field": "account_id", "sortable": True},
+            {"name": "Particulars", "field": "acc_particulars", "sortable": True},
+            {"name": "Amount (₹)",  "field": "amount", "sortable": True},
+            {"name": "Mode",        "field": "mode", "sortable": True},
         ],
         "profile_title":  "Expense Details",
         "profile_icon":   "fa-wallet",
         "profile_color":  "#e59620",
         "profile_fields": [
             {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
+            {"label": "Account",     "field": "account_id",     "icon": "fa-book"},
             {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
             {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
             {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
@@ -335,6 +364,7 @@ ENTITY_META: dict = {
         "form_fields": {
             "new": [
                 {"id": "trx_date",        "label": "Date",         "type": "date"},
+                {"id": "acc_id",          "label": "Account",      "type": "account_dropdown_dr", "required": True},
                 {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
                 {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
                 {"id": "mode",            "label": "Mode",         "type": "select", "options": ["cash", "upi", "card", "bank", "cheque"]},
@@ -346,11 +376,11 @@ ENTITY_META: dict = {
         "list_title":   "Cashbook",
         "list_icon":    "fa-book",
         "list_columns": [
-            {"name": "Date",        "field": "trx_date"},
-            {"name": "Particulars", "field": "acc_particulars"},
-            {"name": "Amount (₹)",  "field": "amount"},
-            {"name": "Mode",        "field": "mode"},
-            {"name": "Status",      "field": "status"},
+            {"name": "Date",        "field": "trx_date", "sortable": True},
+            {"name": "Particulars", "field": "acc_particulars", "sortable": True},
+            {"name": "Amount (₹)",  "field": "amount", "sortable": True},
+            {"name": "Mode",        "field": "mode", "sortable": True},
+            {"name": "Status",      "field": "status", "sortable": True},
         ],
         "profile_title":  "Transaction Details",
         "profile_icon":   "fa-book",
@@ -370,11 +400,11 @@ ENTITY_META: dict = {
         "list_title":   "Societies",
         "list_icon":    "fa-building",
         "list_columns": [
-            {"name": "Name",    "field": "name"},
-            {"name": "Email",   "field": "email"},
-            {"name": "Phone",   "field": "phone"},
-            {"name": "Plan",    "field": "plan"},
-            {"name": "Created", "field": "created_at"},
+            {"name": "Name",    "field": "name", "sortable": True},
+            {"name": "Email",   "field": "email", "sortable": True},
+            {"name": "Phone",   "field": "phone", "sortable": False},
+            {"name": "Plan",    "field": "plan", "sortable": True},
+            {"name": "Created", "field": "created_at", "sortable": True},
         ],
         "profile_title":  "Society Profile",
         "profile_icon":   "fa-building",
@@ -413,16 +443,16 @@ ENTITY_META: dict = {
         "list_title":   "Accounts",
         "list_icon":    "fa-book-open",
         "list_columns": [
-            {"name": "Code",    "field": "name"},
-            {"name": "Group",   "field": "tab_name"},
-            {"name": "Dr/Cr",   "field": "drcr_account"},
-            {"name": "Opening", "field": "bf_amount"},
+            {"name": "Account Name",    "field": "name", "sortable": True},
+            {"name": "Group",   "field": "tab_name", "sortable": True},
+            {"name": "Dr/Cr",   "field": "drcr_account", "sortable": True},
+            {"name": "Opening", "field": "bf_amount", "sortable": True},
         ],
         "profile_title":  "Account Details",
         "profile_icon":   "fa-book-open",
         "profile_color":  "#6c5ce7",
         "profile_fields": [
-            {"label": "Account Code", "field": "name",         "icon": "fa-hashtag"},
+            {"label": "Account Name", "field": "name",         "icon": "fa-hashtag"},
             {"label": "Group",        "field": "tab_name",     "icon": "fa-folder"},
             {"label": "Header",       "field": "header",       "icon": "fa-heading"},
             {"label": "Dr / Cr",      "field": "drcr_account", "icon": "fa-exchange-alt"},
@@ -431,11 +461,11 @@ ENTITY_META: dict = {
         "profile_actions": [],
         "form_fields": {
             "new": [
-                {"id": "name",         "label": "Account Code",   "type": "text", "required": True},
+                {"id": "name",         "label": "Account Name",   "type": "text", "required": True},
                 {"id": "tab_name",     "label": "Group / Tab",    "type": "text"},
                 {"id": "drcr_account", "label": "Dr / Cr",        "type": "select", "options": ["Dr", "Cr"]},
                 {"id": "bf_amount",    "label": "Opening Balance", "type": "number"},
-                {"id": "bf_type",      "label": "Opening Type",   "type": "select", "options": ["Dr", "Cr"]},
+                {"id": "drcr_bf",      "label": "Opening Type",   "type": "select", "options": ["Dr", "Cr"]},
             ],
         },
     },
@@ -443,18 +473,20 @@ ENTITY_META: dict = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# REGISTER ALL DRILLDOWN CALLBACKS
+# REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def register_drilldown_callbacks(app):
 
-    # ── 1. MAIN ROUTER — handles all navigation events ─────────────────────
+    # ── 1. ENHANCED MAIN ROUTER — handles all navigation events + KPI hide/show
     @app.callback(
         Output("drilldown-store",  "data"),
         Output("drill-content",    "children"),
         Output("drill-breadcrumb", "children"),
+        Output("kpi-row",          "style"),  # NEW: Hide/show KPIs
 
         Input({"type": "kpi-card-div",    "card_id": ALL},              "n_clicks"),
+        Input({"type": "list-row",        "entity": ALL, "pk": ALL},    "n_clicks"),  # NEW: Row click
         Input({"type": "list-row-view",   "entity": ALL, "pk": ALL},    "n_clicks"),
         Input({"type": "list-row-edit",   "entity": ALL, "pk": ALL},    "n_clicks"),
         Input({"type": "list-row-delete", "entity": ALL, "pk": ALL},    "n_clicks"),
@@ -464,6 +496,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-prev",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-page-next",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-search",     "entity": ALL},               "value"),
+        Input({"type": "list-sort",       "entity": ALL, "column": ALL},"n_clicks"),  # NEW: Sorting
         Input({"type": "btn-list-create", "entity": ALL, "target": ALL},"n_clicks"),
 
         State("drilldown-store", "data"),
@@ -471,56 +504,54 @@ def register_drilldown_callbacks(app):
         prevent_initial_call=True,
     )
     def route_drilldown(*args):
-        ctx      = dash.callback_context
         store    = args[-2] or {}
         auth     = args[-1] or {}
         role     = auth.get("role", "admin")
         sid      = auth.get("society_id")
 
         if not ctx.triggered:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
         if not trig["value"]:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         # Init store if empty
         if not store.get("stack"):
             store = nav_state.initial_state(role, sid)
 
         try:
-            import json as _json
-            id_dict = _json.loads(trig["prop_id"].split(".")[0])
+            id_dict = json.loads(trig["prop_id"].split(".")[0])
         except Exception:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         trig_type = id_dict.get("type", "")
+        hide_kpis = False  # Track KPI visibility
 
         # ── KPI click → list ───────────────────────────────────────────────
         if trig_type == "kpi-card-div":
-            print("KPI CARD CLICKED:", id_dict.get("card_id"),"")
             card_id  = id_dict.get("card_id", "")
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target   = nav_info.get("target")
             if not target:
-                return no_update, no_update, no_update
-            # Reset stack to a clean Dashboard root, then navigate to target.
-            # This ensures breadcrumbs always start fresh on every KPI click.
+                return no_update, no_update, no_update, no_update
+            # Reset stack to clean Dashboard root, then navigate
             store = nav_state.initial_state(role, sid)
             store = nav_state.navigate_to(
                 store, target,
                 nav_info.get("label", target),
                 filters=nav_info.get("filter", {}),
             )
+            hide_kpis = True
 
-        # ── List row VIEW → profile ────────────────────────────────────────
-        elif trig_type == "list-row-view":
-            entity   = id_dict.get("entity")       # PLURAL
+        # ── NEW: List row CLICK → profile ──────────────────────────────────
+        elif trig_type == "list-row":
+            entity   = id_dict.get("entity")  # PLURAL
             pk       = id_dict.get("pk")
             singular = to_singular(entity)
             record   = loaders.load_profile(singular, pk, sid)
             if not record:
-                return no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update
             meta   = ENTITY_META.get(entity, {})
             target = f"profile_{singular}"
             store  = nav_state.navigate_to(
@@ -529,57 +560,130 @@ def register_drilldown_callbacks(app):
                 entity_pk=pk,
                 entity_label=_label_for(entity, record),
             )
+            hide_kpis = True
 
-        # ── List row EDIT → pre-filled form ───────────────────────────────
-        elif trig_type == "list-row-edit":
-            entity   = id_dict.get("entity")       # PLURAL
+        # ── List row VIEW → profile ────────────────────────────────────────
+        elif trig_type == "list-row-view":
+            entity   = id_dict.get("entity")
             pk       = id_dict.get("pk")
             singular = to_singular(entity)
             record   = loaders.load_profile(singular, pk, sid)
             if not record:
-                return no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update
+            meta   = ENTITY_META.get(entity, {})
+            target = f"profile_{singular}"
+            store  = nav_state.navigate_to(
+                store, target,
+                meta.get("profile_title", singular.title()),
+                entity_pk=pk,
+                entity_label=_label_for(entity, record),
+            )
+            hide_kpis = True
+
+        # ── List row EDIT → pre-filled form ───────────────────────────────
+        elif trig_type == "list-row-edit":
+            entity   = id_dict.get("entity")
+            pk       = id_dict.get("pk")
+            singular = to_singular(entity)
+            record   = loaders.load_profile(singular, pk, sid)
+            if not record:
+                return no_update, no_update, no_update, no_update
             target = f"form_{singular}_edit"
             store  = nav_state.navigate_to(
                 store, target,
                 f"Edit {singular.replace('_',' ').title()}",
                 prefill=record, entity_pk=pk,
             )
+            hide_kpis = True
 
         # ── List row DELETE → delete + refresh ────────────────────────────
         elif trig_type == "list-row-delete":
-            entity = id_dict.get("entity")         # PLURAL
+            entity = id_dict.get("entity")
             pk     = id_dict.get("pk")
             ok, msg = loaders.delete_entity(entity, pk, sid)
-            store["refresh"] = True                # signal re-render of list
+            store["refresh"] = True
             content, bc = _render_current(store, auth)
             store["refresh"] = False
-            return store, content, bc
+            hide_kpis = len(store.get("stack", [])) > 1
+            kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+            return store, content, bc, kpi_style
 
-        # ── Profile ACTION → pre-filled form ──────────────────────────────
+        # ── Profile ACTION → form or special action ───────────────────────
         elif trig_type == "profile-action":
-            entity   = id_dict.get("entity")       # SINGULAR (from profile card)
+            entity   = id_dict.get("entity")  # SINGULAR
             pk       = id_dict.get("pk")
             action   = id_dict.get("action")
             target   = id_dict.get("target")
-            if not target:
-                return no_update, no_update, no_update
-
-            record  = loaders.load_profile(entity, pk, sid) or {}
-            pmap    = (DRILLDOWN_MAP
-                       .get(f"profile_{entity}", {})
-                       .get("actions", {})
-                       .get(action, {})
-                       .get("prefill", {}))
-            prefill = build_prefill(record, pmap) if pmap else dict(record)
-            store   = nav_state.navigate_to(
-                store, target,
-                action.replace("_", " ").title(),
-                prefill=prefill, entity_pk=pk,
-            )
+            
+            # SPECIAL: Show Cashbook action
+            if action == "show_cashbook":
+                # Navigate to cashbook filtered by entity
+                store = nav_state.navigate_to(
+                    store, "list_cashbook",
+                    f"{entity.title()} Cashbook",
+                    filters={"entity_id": pk},
+                )
+                hide_kpis = True
+            elif target:
+                record  = loaders.load_profile(entity, pk, sid) or {}
+                pmap    = (DRILLDOWN_MAP
+                           .get(f"profile_{entity}", {})
+                           .get("actions", {})
+                           .get(action, {})
+                           .get("prefill", {}))
+                prefill = build_prefill(record, pmap) if pmap else dict(record)
+                
+                # Auto-populate account for payment actions
+                if action == "pay_dues" and entity == "apartment":
+                    # Get maintenance account
+                    acc = _get_account_by_name(sid, "Maintenance")
+                    if acc:
+                        prefill["acc_id"] = acc["id"]
+                        prefill["acc_particulars"] = f"Maintenance - Flat {record.get('flat_number', '')}"
+                elif action == "pay_dues" and entity == "vendor":
+                    # Get pass fees account
+                    acc = _get_account_by_name(sid, "Pass Fees")
+                    if acc:
+                        prefill["acc_id"] = acc["id"]
+                        prefill["acc_particulars"] = f"Pass Fee - {record.get('name', '')}"
+                
+                store   = nav_state.navigate_to(
+                    store, target,
+                    action.replace("_", " ").title(),
+                    prefill=prefill, entity_pk=pk,
+                )
+                hide_kpis = True
+            else:
+                return no_update, no_update, no_update, no_update
 
         # ── Breadcrumb BACK ────────────────────────────────────────────────
         elif trig_type == "breadcrumb-click":
-            store = nav_state.navigate_back(store, id_dict.get("index", 0))
+            index = id_dict.get("index", 0)
+            if index == -1:  # Back to root
+                store = nav_state.initial_state(role, sid)
+                hide_kpis = False
+            else:
+                store = nav_state.navigate_back(store, index)
+                hide_kpis = len(store.get("stack", [])) > 1
+
+        # ── NEW: Column SORT ───────────────────────────────────────────────
+        elif trig_type == "list-sort":
+            entity = id_dict.get("entity")
+            column = id_dict.get("column")
+            
+            # Toggle sort direction
+            sort_state = store.setdefault("list_sort", {})
+            entity_sort = sort_state.get(entity, {})
+            
+            if entity_sort.get("column") == column:
+                # Same column - toggle direction
+                direction = "desc" if entity_sort.get("direction") == "asc" else "asc"
+            else:
+                # New column - default ascending
+                direction = "asc"
+            
+            sort_state[entity] = {"column": column, "direction": direction}
+            hide_kpis = True
 
         # ── Pagination PREV / NEXT ─────────────────────────────────────────
         elif trig_type in ("list-page-prev", "list-page-next"):
@@ -587,23 +691,31 @@ def register_drilldown_callbacks(app):
             pages  = store.setdefault("list_pages", {})
             cur    = pages.get(entity, 1)
             pages[entity] = max(1, cur + (1 if trig_type == "list-page-next" else -1))
+            hide_kpis = True
 
         # ── List SEARCH ────────────────────────────────────────────────────
         elif trig_type == "list-search":
             entity = id_dict.get("entity")
             store.setdefault("list_search", {})[entity] = trig["value"] or ""
             store.setdefault("list_pages",  {})[entity] = 1  # reset page
+            hide_kpis = True
 
         # ── Create NEW entity ──────────────────────────────────────────────
         elif trig_type == "btn-list-create":
-            entity  = id_dict.get("entity")        # PLURAL
+            entity  = id_dict.get("entity")
             target  = id_dict.get("target") or f"form_{to_singular(entity)}_new"
             store   = nav_state.navigate_to(store, target,
                                              f"New {to_singular(entity).replace('_',' ').title()}",
                                              prefill={})
+            hide_kpis = True
+
+        else:
+            hide_kpis = len(store.get("stack", [])) > 1
 
         content, bc = _render_current(store, auth)
-        return store, content, bc
+        kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+        
+        return store, content, bc, kpi_style
 
     # ── 2. FORM SUBMIT → save → back → refresh ─────────────────────────────
     @app.callback(
@@ -611,6 +723,7 @@ def register_drilldown_callbacks(app):
         Output("drill-content",    "children", allow_duplicate=True),
         Output("drill-breadcrumb", "children", allow_duplicate=True),
         Output("toast-store",      "data",     allow_duplicate=True),
+        Output("kpi-row",          "style",    allow_duplicate=True),
 
         Input({"type": "form-submit", "entity": ALL, "card_id": ALL}, "n_clicks"),
         State({"type": "form-field",  "entity": ALL, "field": ALL},   "value"),
@@ -619,33 +732,31 @@ def register_drilldown_callbacks(app):
         prevent_initial_call=True,
     )
     def handle_form_submit(n_clicks_list, _field_vals, store, auth):
-        ctx = dash.callback_context
         if not ctx.triggered or not ctx.triggered[0]["value"]:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
         try:
-            import json as _json
-            id_dict = _json.loads(trig["prop_id"].split(".")[0])
+            id_dict = json.loads(trig["prop_id"].split(".")[0])
         except Exception:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
-        entity_singular = id_dict.get("entity")   # SINGULAR
+        entity_singular = id_dict.get("entity")
         card_id         = id_dict.get("card_id", "")
         sid             = (auth or {}).get("society_id")
 
-        # Collect all form-field values for this entity
+        # Collect form data
         form_data: dict = {}
         for key, val in ctx.inputs.items():
             if '"type":"form-field"' in key or '"type": "form-field"' in key:
                 try:
-                    k_dict = _json.loads(key.split(".")[0])
+                    k_dict = json.loads(key.split(".")[0])
                     if k_dict.get("entity") == entity_singular:
                         form_data[k_dict.get("field")] = val
                 except Exception:
                     pass
 
-        # Merge pre-fill (carries hidden IDs like apartment_id)
+        # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
         form_data = {**prefill, **{k: v for k, v in form_data.items() if v not in (None, "")}}
         form_data["society_id"] = sid
@@ -653,14 +764,19 @@ def register_drilldown_callbacks(app):
         ok, msg = _save_entity(entity_singular, card_id, form_data)
 
         # Navigate back and refresh
+        hide_kpis = False
         if ok and store and len(store.get("stack", [])) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
             store["refresh"] = True
+            hide_kpis = len(store.get("stack", [])) > 1
+        
         content, bc = _render_current(store or {}, auth)
         store["refresh"] = False
 
         toast = {"type": "success" if ok else "error", "message": msg}
-        return store, content, bc, toast
+        kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+        
+        return store, content, bc, toast, kpi_style
 
     # ── 3. CSV DOWNLOAD (MATCH callback — one per entity) ──────────────────
     @app.callback(
@@ -673,13 +789,83 @@ def register_drilldown_callbacks(app):
     def download_csv(n_clicks, store, auth):
         if not n_clicks:
             return no_update
-        entity  = dash.callback_context.triggered_id.get("entity", "data")
+        entity  = ctx.triggered_id.get("entity", "data")
         filters = nav_state.get_filters(store or {})
         filters["society_id"] = (auth or {}).get("society_id")
         csv_str = loaders.export_csv(entity, filters)
         return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
 
-    print("✓ Drilldown callbacks registered")
+    # ── 4. NEW: XLS DOWNLOAD ────────────────────────────────────────────────
+    @app.callback(
+        Output({"type": "xls-download-trigger", "entity": MATCH}, "data"),
+        Input({"type": "btn-xls-download",      "entity": MATCH}, "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store",      "data"),
+        prevent_initial_call=True,
+    )
+    def download_xls(n_clicks, store, auth):
+        if not n_clicks:
+            return no_update
+        entity  = ctx.triggered_id.get("entity", "data")
+        filters = nav_state.get_filters(store or {})
+        filters["society_id"] = (auth or {}).get("society_id")
+        
+        rows, _ = loaders.load_list(entity, filters, page=1, page_size=10_000)
+        if not rows:
+            return no_update
+        
+        df = pd.DataFrame(rows)
+        # Convert datetime columns
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                try:
+                    df[col] = pd.to_datetime(df[col])
+                except:
+                    pass
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=entity.title(), index=False)
+        output.seek(0)
+        
+        return dcc.send_bytes(output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx")
+
+    # ── 5. NEW: BULK XLS UPLOAD ─────────────────────────────────────────────
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input({"type": "bulk-upload", "entity": MATCH}, "contents"),
+        State({"type": "bulk-upload", "entity": MATCH}, "filename"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_bulk_upload(contents, filename, auth):
+        if not contents:
+            return no_update
+        
+        entity = ctx.triggered_id.get("entity")
+        sid = (auth or {}).get("society_id")
+        
+        try:
+            # Decode file
+            content_type, content_string = contents.split(',')
+            decoded = base64.b64decode(content_string)
+            
+            # Read Excel
+            df = pd.read_excel(io.BytesIO(decoded))
+            
+            # Process based on entity
+            success_count, error_count = _bulk_import_entities(entity, df, sid)
+            
+            msg = f"Imported {success_count} records successfully"
+            if error_count > 0:
+                msg += f", {error_count} errors"
+            
+            return {"type": "success" if error_count == 0 else "warning", "message": msg}
+            
+        except Exception as e:
+            return {"type": "error", "message": f"Upload failed: {str(e)}"}
+
+    print("✓ Drilldown callbacks registered (ENHANCED)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -705,11 +891,24 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
 
     # ── list_<entity_plural> ──────────────────────────────────────────────
     if card_id.startswith("list_"):
-        entity  = card_id[5:]                       # e.g. "apartments"
+        entity  = card_id[5:]
         meta    = ENTITY_META.get(entity, {})
         page    = (store.get("list_pages") or {}).get(entity, 1)
         search  = (store.get("list_search") or {}).get(entity, "")
+        sort    = (store.get("list_sort") or {}).get(entity, {})
+        
         rows, total = loaders.load_list(entity, filters, page=page, search=search)
+        
+        # Apply sorting if specified
+        if sort and rows:
+            col = sort.get("column")
+            direction = sort.get("direction", "asc")
+            reverse = (direction == "desc")
+            try:
+                rows = sorted(rows, key=lambda x: x.get(col, ""), reverse=reverse)
+            except:
+                pass  # Skip sorting if error
+        
         return renderers.render_list_card(
             card_id=card_id,
             title=meta.get("list_title", entity.title()),
@@ -719,12 +918,13 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
             entity=entity,
             page=page,
             total_rows=total,
+            sort_state=sort,
         )
 
     # ── profile_<entity_singular> ─────────────────────────────────────────
     if card_id.startswith("profile_"):
-        singular   = card_id[8:]                    # e.g. "apartment"
-        entity_key = to_plural(singular)            # e.g. "apartments"
+        singular   = card_id[8:]
+        entity_key = to_plural(singular)
         meta       = ENTITY_META.get(entity_key, {})
         pk         = (store.get("stack") or [{}])[-1].get("entity_pk")
         record     = loaders.load_profile(singular, pk, filters.get("society_id"))
@@ -743,10 +943,9 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
 
     # ── form_<entity_singular>_<action> ───────────────────────────────────
     if card_id.startswith("form_"):
-        rest   = card_id[5:]                        # e.g. "apartment_edit"
-        # action is always the LAST segment
+        rest   = card_id[5:]
         parts  = rest.rsplit("_", 1)
-        entity_raw = parts[0]                       # singular
+        entity_raw = parts[0]
         action     = parts[1] if len(parts) > 1 else "new"
         entity_key = to_plural(entity_raw)
         meta       = ENTITY_META.get(entity_key, {})
@@ -764,6 +963,7 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
             submit_label="Save" if action == "edit" else "Create",
             prefill=prefill,
             color=meta.get("profile_color", "#1d74d8"),
+            society_id=filters.get("society_id"),
         )
 
     return _empty_state(f"No content for: {card_id}")
@@ -802,12 +1002,11 @@ def _label_for(entity_plural: str, record: dict) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# DB SAVE HELPERS
+# DB SAVE HELPERS (ENHANCED & COMPLETED)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
     """Dispatch save by entity singular name. Returns (ok, message)."""
-    from database.db_manager import db
     sid     = data.get("society_id")
     is_edit = "edit" in card_id
     pk      = data.get("id")
@@ -824,7 +1023,7 @@ def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
         if entity == "concern":
             return _save_concern(db, data, sid, is_edit, pk)
         if entity in ("receipt", "expense"):
-            return _save_transaction(db, data, sid)
+            return _save_transaction(db, data, sid, entity)
         if entity == "gate_log":
             return _save_gate_log(db, data, sid)
         if entity == "society":
@@ -839,8 +1038,9 @@ def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
 def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s WHERE id=%s AND society_id=%s",
-            (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, pk, sid),
+            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,active=%s WHERE id=%s AND society_id=%s",
+            (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, 
+             d.get("active", "true") == "true", pk, sid),
         )
         return True, "Apartment updated"
     flat = (d.get("flat_number") or "").strip()
@@ -857,121 +1057,361 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
     if is_edit:
         email = (d.get("email") or "").strip()
-        pw    = (d.get("password") or "").strip()
         if not email:
             return False, "Email is required"
+        
+        # Update user email
         db._execute(
             "UPDATE users SET email=%s WHERE id=%s AND society_id=%s",
             (email, pk, sid),
         )
+        
+        # Update linked table (vendors or security_staff)
+        if role == "vendor":
+            db._execute(
+                "UPDATE vendors v SET name=%s, service_type=%s, mobile=%s "
+                "FROM users u WHERE v.id=u.linked_id AND u.id=%s",
+                (d.get("name"), d.get("service_type"), d.get("mobile"), pk),
+            )
+        elif role == "security":
+            db._execute(
+                "UPDATE security_staff s SET name=%s, mobile=%s, shift=%s "
+                "FROM users u WHERE s.id=u.linked_id AND u.id=%s",
+                (d.get("name"), d.get("mobile"), d.get("shift"), pk),
+            )
+        
+        # Update password if provided
+        pw = (d.get("password") or "").strip()
         if pw:
             db._execute(
                 "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
                 (generate_password_hash(pw), pk, sid),
             )
         return True, f"{role.title()} updated"
+    
+    # Create new user
     email = (d.get("email") or "").strip()
     if not email:
         return False, "Email is required"
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required"
-    db._execute(
-        "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,%s,'password')",
+    
+    # Create user
+    user_result = db._execute(
+        "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,%s,'password') RETURNING id",
         (sid, email, generate_password_hash(pw), role),
+        fetch_one=True,
     )
+    user_id = user_result["id"]
+    
+    # Create linked entity
+    if role == "vendor":
+        vendor_result = db._execute(
+            "INSERT INTO vendors(society_id,name,service_type,mobile,active) VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
+            (sid, d.get("name"), d.get("service_type"), d.get("mobile")),
+            fetch_one=True,
+        )
+        db._execute(
+            "UPDATE users SET linked_id=%s WHERE id=%s",
+            (vendor_result["id"], user_id),
+        )
+    elif role == "security":
+        security_result = db._execute(
+            "INSERT INTO security_staff(society_id,name,mobile,shift,active) VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
+            (sid, d.get("name"), d.get("mobile"), d.get("shift")),
+            fetch_one=True,
+        )
+        db._execute(
+            "UPDATE users SET linked_id=%s WHERE id=%s",
+            (security_result["id"], user_id),
+        )
+    
     return True, f"{role.title()} '{email}' created"
 
 
 def _save_event(db, d, sid, is_edit, pk):
+    """Complete event save handler."""
     if is_edit:
         db._execute(
-            "UPDATE events SET title=%s,description=%s,event_date=%s,event_time=%s,venue=%s,open_to=%s WHERE id=%s AND society_id=%s",
+            "UPDATE events SET title=%s,description=%s,event_date=%s,event_time=%s,venue=%s,open_to=%s "
+            "WHERE id=%s AND society_id=%s",
             (d.get("title"), d.get("description"), d.get("event_date"),
              d.get("event_time"), d.get("venue"), d.get("open_to","all"), pk, sid),
         )
         return True, "Event updated"
+    
     title = (d.get("title") or "").strip()
     if not title:
         return False, "Title is required"
+    
+    event_date = d.get("event_date")
+    if not event_date:
+        return False, "Event date is required"
+    
     db._execute(
-        "INSERT INTO events(society_id,title,description,event_date,event_time,venue,open_to) VALUES(%s,%s,%s,%s,%s,%s,%s)",
-        (sid, title, d.get("description"), d.get("event_date"), d.get("event_time"),
+        "INSERT INTO events(society_id,title,description,event_date,event_time,venue,open_to,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,NOW())",
+        (sid, title, d.get("description"), event_date, d.get("event_time"),
          d.get("venue"), d.get("open_to","all")),
     )
     return True, f"Event '{title}' created"
 
 
 def _save_concern(db, d, sid, is_edit, pk):
+    """Complete concern save handler."""
     if is_edit:
         db._execute(
             "UPDATE concerns SET status=%s,assigned_to=%s WHERE id=%s AND society_id=%s",
             (d.get("status","open"), d.get("assigned_to"), pk, sid),
         )
         return True, "Concern updated"
+    
+    description = (d.get("description") or "").strip()
+    if not description:
+        return False, "Description is required"
+    
     db._execute(
-        "INSERT INTO concerns(society_id,flat_no,concern_type,description,preferred_time,status) VALUES(%s,%s,%s,%s,%s,'open')",
-        (sid, d.get("flat_no"), d.get("concern_type"), d.get("description",""),
+        "INSERT INTO concerns(society_id,flat_no,concern_type,description,preferred_time,status,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,'open',NOW())",
+        (sid, d.get("flat_no"), d.get("concern_type","other"), description,
          d.get("preferred_time","anytime")),
     )
     return True, "Concern submitted"
 
 
-def _save_transaction(db, d, sid):
-    from datetime import date
-    amt = d.get("amount") or d.get("pending_dues")
+def _save_transaction(db, d, sid, transaction_type):
+    """
+    Complete transaction save handler for receipts and expenses.
+    Receipts are credits (money IN), Expenses are debits (money OUT).
+    """
+    amt = d.get("amount")
     if not amt:
         return False, "Amount is required"
+    
+    try:
+        amt = float(amt)
+    except:
+        return False, "Invalid amount"
+    
+    acc_id = d.get("acc_id")
+    if not acc_id:
+        return False, "Account is required"
+    
+    particulars = d.get("acc_particulars", "")
+    if not particulars:
+        return False, "Particulars is required"
+    
+    trx_date = d.get("trx_date") or dt_date.today().isoformat()
+    mode = d.get("mode", "cash")
+    entity_id = d.get("entity_id")  # For linking to apartment/vendor/security
+    
     db._execute(
-        "INSERT INTO transactions(society_id,trx_date,acc_particulars,amount,mode,status) VALUES(%s,%s,%s,%s,%s,'paid')",
-        (sid, d.get("trx_date") or date.today().isoformat(),
-         d.get("acc_particulars","Receipt"), float(amt), d.get("mode","cash")),
+        "INSERT INTO transactions(society_id,trx_date,acc_id,entity_id,acc_particulars,amount,mode,status,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,'paid',NOW())",
+        (sid, trx_date, acc_id, entity_id, particulars, amt, mode),
     )
-    return True, f"₹{float(amt):,.0f} recorded"
+    
+    label = "Receipt" if transaction_type == "receipt" else "Expense"
+    return True, f"{label} of ₹{amt:,.2f} recorded"
 
 
 def _save_gate_log(db, d, sid):
+    """Complete gate log save handler."""
+    entity_id = d.get("entity_id")
+    if not entity_id:
+        return False, "Entity ID is required"
+    
+    role = d.get("role", "v")
+    
     db._execute(
         "INSERT INTO gate_access(society_id,role,entity_id,time_in) VALUES(%s,%s,%s,NOW())",
-        (sid, d.get("role","v"), d.get("entity_id") or 0),
+        (sid, role, entity_id),
     )
     return True, "Gate log created"
 
 
 def _save_society(db, d, sid, is_edit, pk):
+    """Complete society save handler."""
     from werkzeug.security import generate_password_hash
-    from datetime import date
+    
     if is_edit:
         db._execute(
             "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s WHERE id=%s",
             (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), d.get("plan","Free"), pk),
         )
         return True, "Society updated"
+    
+    name = (d.get("name") or "").strip()
+    if not name:
+        return False, "Society name is required"
+    
+    admin_email = d.get("admin_email")
+    admin_password = d.get("admin_password")
+    if not admin_email or not admin_password:
+        return False, "Admin email and password are required"
+    
     result = db._execute(
-        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,arrear_start_date) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-        (d.get("name"), d.get("email"), d.get("phone"), d.get("address"),
-         d.get("plan","Free"), date.today().isoformat(), date.today().isoformat()),
+        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,arrear_start_date,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
+        (name, d.get("email"), d.get("phone"), d.get("address"),
+         d.get("plan","Free"), dt_date.today().isoformat(), dt_date.today().isoformat()),
         fetch_one=True,
     )
-    if result and result.get("id") and d.get("admin_email") and d.get("admin_password"):
+    
+    if result and result.get("id"):
         soc_id = result["id"]
+        # Create admin user
         db._execute(
-            "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,'admin','password')",
-            (soc_id, d["admin_email"], generate_password_hash(d["admin_password"])),
+            "INSERT INTO users(society_id,email,password_hash,role,login_method,created_at) "
+            "VALUES(%s,%s,%s,'admin','password',NOW())",
+            (soc_id, admin_email, generate_password_hash(admin_password)),
         )
-    return True, f"Society '{d.get('name')}' created"
+        
+        # Create default accounts
+        _create_default_accounts(db, soc_id)
+    
+    return True, f"Society '{name}' created"
 
 
 def _save_account(db, d, sid, is_edit, pk):
+    """Complete account save handler."""
     if is_edit:
         db._execute(
             "UPDATE accounts SET tab_name=%s,drcr_account=%s,bf_amount=%s WHERE id=%s AND society_id=%s",
             (d.get("tab_name"), d.get("drcr_account"), d.get("bf_amount") or 0, pk, sid),
         )
         return True, "Account updated"
-    db._execute(
-        "INSERT INTO accounts(society_id,name,tab_name,drcr_account,bf_amount,bf_type) VALUES(%s,%s,%s,%s,%s,%s)",
-        (sid, d.get("name"), d.get("tab_name"), d.get("drcr_account","Dr"),
-         d.get("bf_amount") or 0, d.get("bf_type","Dr")),
+    
+    name = (d.get("name") or "").strip()
+    if not name:
+        return False, "Account Name is required"
+    
+    drcr = d.get("drcr_account", "Dr")
+    if drcr not in ("Dr", "Cr"):
+        return False, "Dr/Cr must be 'Dr' or 'Cr'"
+    
+    # Get next account ID
+    max_id_result = db._execute(
+        "SELECT MAX(id) as max_id FROM accounts WHERE society_id=%s",
+        (sid,),
+        fetch_one=True,
     )
-    return True, f"Account '{d.get('name')}' created"
+    next_id = (max_id_result.get("max_id") or 0) + 1
+    
+    db._execute(
+        "INSERT INTO accounts(id,society_id,name,tab_name,drcr_account,drcr_bf,bf_amount,parent_account_id) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,1)",
+        (next_id, sid, name, d.get("tab_name"), drcr, d.get("drcr_bf","Dr"), d.get("bf_amount") or 0),
+    )
+    return True, f"Account '{name}' created"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _get_account_by_name(society_id: int, account_name: str) -> dict | None:
+    """Get account by name for a society."""
+    try:
+        return db._execute(
+            "SELECT * FROM accounts WHERE society_id=%s AND name ILIKE %s LIMIT 1",
+            (society_id, f"%{account_name}%"),
+            fetch_one=True,
+        )
+    except:
+        return None
+
+
+def _create_default_accounts(db, society_id: int):
+    """Create default accounts for a new society."""
+    default_accounts = [
+        # ID, Name, Tab, Dr/Cr
+        (1, "Cash", "Assets", "Dr"),
+        (2, "Bank", "Assets", "Dr"),
+        (3, "Maintenance", "Income", "Cr"),
+        (4, "Pass Fees", "Income", "Cr"),
+        (5, "Late Fees", "Income", "Cr"),
+        (6, "Utilities", "Expenses", "Dr"),
+        (7, "Salaries", "Expenses", "Dr"),
+        (8, "Repairs", "Expenses", "Dr"),
+    ]
+    
+    for acc_id, name, tab, drcr in default_accounts:
+        try:
+            db._execute(
+                "INSERT INTO accounts(id,society_id,name,tab_name,drcr_account,drcr_bf,parent_account_id) "
+                "VALUES(%s,%s,%s,%s,%s,%s,1) ON CONFLICT DO NOTHING",
+                (acc_id, society_id, name, tab, drcr, drcr),
+            )
+        except:
+            pass
+
+
+def _bulk_import_entities(entity: str, df: pd.DataFrame, society_id: int) -> tuple:
+    """
+    Bulk import entities from DataFrame.
+    Returns (success_count, error_count).
+    """
+    success = 0
+    errors = 0
+    
+    for idx, row in df.iterrows():
+        try:
+            data = row.to_dict()
+            data["society_id"] = society_id
+            
+            # Route to appropriate save handler
+            if entity == "apartments":
+                ok, _ = _save_apartment(db, data, society_id, False, None)
+            elif entity == "vendors":
+                ok, _ = _save_user_entity(db, data, society_id, "vendor", False, None)
+            elif entity == "security":
+                ok, _ = _save_user_entity(db, data, society_id, "security", False, None)
+            elif entity == "events":
+                ok, _ = _save_event(db, data, society_id, False, None)
+            elif entity == "concerns":
+                ok, _ = _save_concern(db, data, society_id, False, None)
+            else:
+                ok = False
+            
+            if ok:
+                success += 1
+            else:
+                errors += 1
+        except:
+            errors += 1
+    
+    return success, errors
+
+
+def _calculate_apartment_dues(apartment_id: int, society_id: int) -> float:
+    """
+    Calculate total pending dues for an apartment (maintenance + fines).
+    """
+    try:
+        result = db._execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM payments "
+            "WHERE apartment_id=%s AND society_id=%s AND status='pending'",
+            (apartment_id, society_id),
+            fetch_one=True,
+        )
+        return float(result.get("total", 0))
+    except:
+        return 0.0
+
+
+def _calculate_vendor_charges(vendor_id: int, society_id: int) -> float:
+    """
+    Calculate total pending charges for a vendor (pass fees + fines).
+    """
+    try:
+        result = db._execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM payments "
+            "WHERE user_id=%s AND society_id=%s AND status='pending'",
+            (vendor_id, society_id),
+            fetch_one=True,
+        )
+        return float(result.get("total", 0))
+    except:
+        return 0.0
