@@ -666,32 +666,6 @@ def register_drilldown_callbacks(app):
                 store = nav_state.navigate_back(store, index)
                 hide_kpis = len(store.get("stack", [])) > 1
 
-        # ── NEW: Column SORT ───────────────────────────────────────────────
-        elif trig_type == "list-sort":
-            entity = id_dict.get("entity")
-            column = id_dict.get("column")
-            
-            # Toggle sort direction
-            sort_state = store.setdefault("list_sort", {})
-            entity_sort = sort_state.get(entity, {})
-            
-            if entity_sort.get("column") == column:
-                # Same column - toggle direction
-                direction = "desc" if entity_sort.get("direction") == "asc" else "asc"
-            else:
-                # New column - default ascending
-                direction = "asc"
-            
-            sort_state[entity] = {"column": column, "direction": direction}
-            hide_kpis = True
-
-        # ── Pagination PREV / NEXT ─────────────────────────────────────────
-        elif trig_type in ("list-page-prev", "list-page-next"):
-            entity = id_dict.get("entity")
-            pages  = store.setdefault("list_pages", {})
-            cur    = pages.get(entity, 1)
-            pages[entity] = max(1, cur + (1 if trig_type == "list-page-next" else -1))
-            hide_kpis = True
 
         # ── List SEARCH ────────────────────────────────────────────────────
         elif trig_type == "list-search":
@@ -829,41 +803,6 @@ def register_drilldown_callbacks(app):
         output.seek(0)
         
         return dcc.send_bytes(output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx")
-
-    # ── 5. NEW: BULK XLS UPLOAD ─────────────────────────────────────────────
-    @app.callback(
-        Output("toast-store", "data", allow_duplicate=True),
-        Input({"type": "bulk-upload", "entity": MATCH}, "contents"),
-        State({"type": "bulk-upload", "entity": MATCH}, "filename"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
-    )
-    def handle_bulk_upload(contents, filename, auth):
-        if not contents:
-            return no_update
-        
-        entity = ctx.triggered_id.get("entity")
-        sid = (auth or {}).get("society_id")
-        
-        try:
-            # Decode file
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
-            
-            # Read Excel
-            df = pd.read_excel(io.BytesIO(decoded))
-            
-            # Process based on entity
-            success_count, error_count = _bulk_import_entities(entity, df, sid)
-            
-            msg = f"Imported {success_count} records successfully"
-            if error_count > 0:
-                msg += f", {error_count} errors"
-            
-            return {"type": "success" if error_count == 0 else "warning", "message": msg}
-            
-        except Exception as e:
-            return {"type": "error", "message": f"Upload failed: {str(e)}"}
 
     print("✓ Drilldown callbacks registered (ENHANCED)")
 
