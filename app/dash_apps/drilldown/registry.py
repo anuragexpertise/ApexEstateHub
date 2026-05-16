@@ -80,7 +80,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_security_on_duty":   {"target": "list_security",    "label": "Security On Duty",      "filter": {"on_duty": True}},
     "kpi_events_total":       {"target": "list_events",      "label": "Upcoming Events"},
     "kpi_concerns_open":      {"target": "list_concerns",    "label": "Open Concerns"},
-    "kpi_gate_logs_today":    {"target": "list_gate_logs",   "label": "Gate Logs Today"},
+    "kpi_gate_logs":    {"target": "list_gate_logs",   "label": "Gate Logs Today"},
     "kpi_receipts_month":     {"target": "list_receipts",    "label": "Receipts This Month"},
     "kpi_expenses_month":     {"target": "list_expenses",    "label": "Expenses This Month"},
     "kpi_balance":            {"target": "list_cashbook",    "label": "Cashbook"},

@@ -3,11 +3,12 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.db_manager import db
 
-def check_schema():
+
+def check_schema(str_table="users"):
     """Check existing tables and constraints"""
     
     print("=" * 60)
@@ -19,9 +20,9 @@ def check_schema():
     query = """
         SELECT column_name, data_type, is_nullable 
         FROM information_schema.columns 
-        WHERE table_name = 'users'
+        WHERE table_name = '{str_table}'
         ORDER BY ordinal_position
-    """
+    """.format(str_table=str_table)
     columns = db._execute(query, fetch_all=True)
     if columns:
         for col in columns:
@@ -32,8 +33,8 @@ def check_schema():
     query = """
         SELECT constraint_name, constraint_type 
         FROM information_schema.table_constraints 
-        WHERE table_name = 'users'
-    """
+        WHERE table_name = '{str_table}'
+    """.format(str_table=str_table)
     constraints = db._execute(query, fetch_all=True)
     if constraints:
         for con in constraints:
@@ -49,4 +50,5 @@ def check_schema():
         print("   No master admin found")
 
 if __name__ == "__main__":
-    check_schema()
+    str_table = input("Enter table name to check (default: users): ").strip() or "users"
+    check_schema(str_table)

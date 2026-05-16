@@ -22,11 +22,9 @@ Stores the chart of accounts with hierarchical structure.
 
 ```sql
 CREATE TABLE accounts (
-    id SERIAL PRIMARY KEY,
+    id INT NOT NULL PRIMARY KEY,
     society_id INTEGER REFERENCES societies(id) ON DELETE CASCADE,
     
-    -- Core fields (from columns F-J in accounts.xlsx)
-    ac_no INTEGER NOT NULL,                    -- Account Number (unique per society)
     name VARCHAR(100) NOT NULL,                -- Account Name (e.g., "Patients", "Salary")
     tab_name VARCHAR(50),                      -- Tab/Group (e.g., "IncOther", "Salary")
     header VARCHAR(200),                       -- Full Header Name (e.g., "Income Other")
@@ -49,7 +47,7 @@ CREATE TABLE accounts (
     updated_at TIMESTAMP DEFAULT NOW(),
     
     -- Constraints
-    UNIQUE(society_id, ac_no),
+    UNIQUE(society_id, id),
     CHECK(drcr_account IN ('Dr', 'Cr')),
     CHECK(drcr_bf IN ('Dr', 'Cr'))
 );
@@ -61,7 +59,7 @@ CREATE INDEX idx_accounts_hierarchy ON accounts(society_id, parent_account_id);
 
 **Sample Data:**
 ```
-| ac_no | name      | tab_name  | header                 | parent_account_id | drcr_account | drcr_bf | bf_amount | bf_year   | dep% |
+| id | name      | tab_name  | header                 | parent_account_id | drcr_account | drcr_bf | bf_amount | bf_year   | dep% |
 |-------|-----------|-----------|------------------------|-----------|--------------|---------|-----------|-----------|------|
 | 1     | Bal       | Bal       | Balance Sheet          | 0         | Dr           | Dr      | 111339.00 | 2016-2017 | 100  |
 | 5     | CapAc     | CapAc     | Capital Account        | 1         | Cr           | Cr      | 66042.44  | 2016-2017 | 100  |
