@@ -434,7 +434,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     Generic profile card.
 
     fields = [{"label": "Flat Number", "field": "flat_number", "icon": "fa-home"}, ...]
-    actions = [{"label": "Pay Dues", "target_card": "form_receipt_new",
+    actions = [{"label": "Pay", "target_card": "form_receipt_new",
                 "color": "success", "icon": "fa-rupee-sign"}, ...]
     """
     pk_val = record.get("id", "")

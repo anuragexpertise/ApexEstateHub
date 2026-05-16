@@ -91,7 +91,7 @@ Each portal has header, sidebar, navbar crumbs, content, footer.
 Header:{'Left':['Society logo, Society Name], 'Center':'Name of Portal', 'Right': ['Name of User','Avatar']}.
 Sidebar: Tabs as described, according to Portal
 Content: KPI Cards and Form Cards
-Dril-down user experience. ie Buttons/Links drill down data. eg 'Total Apartments'>>'List Apartments'>>'Apartment Profile'>>'New Reciepts' {clicking 'Total Apartments value' shifts focus to 'List Apartments Card', where double click open specific Apartment in 'Apartment Profile Card', which might have 'Pay Dues' button, which opens pre-filled 'New Reciepts Card' for paying dues. that is seamless user experience}. All List Cards to have csv download at top-right header of list. crumbs should get updated when user opens different cards.
+Dril-down user experience. ie Buttons/Links drill down data. eg 'Total Apartments'>>'List Apartments'>>'Apartment Profile'>>'New Reciepts' {clicking 'Total Apartments value' shifts focus to 'List Apartments Card', where double click open specific Apartment in 'Apartment Profile Card', which might have 'Pay' button, which opens pre-filled 'New Reciepts Card' for paying dues. that is seamless user experience}. All List Cards to have csv download at top-right header of list. crumbs should get updated when user opens different cards.
 
 Role based content:
 # --- Layout Constants for sidebar tabs and their path_name. Side bar Tabs are pages in the portals. These pages will have KPI cards or Forms/List cards, which can drill-down data, that is focus/link to filtered List or profile card
@@ -407,7 +407,7 @@ Callback:
   "primary_key": "apartment_id",
   "actions": [
       {
-        "label": "Pay Dues",
+        "label": "Pay",
         "id": "btn_pay_dues",
         "target": "card_receipt_form"
       }
