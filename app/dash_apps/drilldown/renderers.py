@@ -200,6 +200,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                      columns: list[dict], rows: list[dict],
                      entity: str, page: int = 1, total_rows: int = 0,
                      page_size: int = 15, filters: dict | None = None,
+                     sort_state: dict | None = None,
                      show_create_btn: bool = True,
                      create_card_id: str | None = None) -> html.Div:
     """

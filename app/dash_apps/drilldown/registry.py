@@ -87,6 +87,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_societies_total":    {"target": "list_societies",   "label": "All Societies"},
     "kpi_societies_paid":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "Paid"}},
     "kpi_societies_free":     {"target": "list_societies",   "label": "Free Plan Societies",   "filter": {"plan": "Free"}},
+    "kpi_cash_in_hand":       {"target": "list_cashbook",    "label": "Cash in Hand"},
 
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
     "list_apartments": {"target": "profile_apartment",   "label": "Apartment Profile"},

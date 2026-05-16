@@ -486,6 +486,7 @@ def register_drilldown_callbacks(app):
         Output("kpi-row",          "style"),  # NEW: Hide/show KPIs
 
         Input({"type": "kpi-card-div",    "card_id": ALL},              "n_clicks"),
+        Input({"type": "kpi-card",        "card_id": ALL},              "n_clicks"),
         Input({"type": "list-row",        "entity": ALL, "pk": ALL},    "n_clicks"),  # NEW: Row click
         Input({"type": "list-row-view",   "entity": ALL, "pk": ALL},    "n_clicks"),
         Input({"type": "list-row-edit",   "entity": ALL, "pk": ALL},    "n_clicks"),
@@ -857,7 +858,6 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
             entity=entity,
             page=page,
             total_rows=total,
-            sort_state=sort,
         )
 
     # ── profile_<entity_singular> ─────────────────────────────────────────

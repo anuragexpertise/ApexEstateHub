@@ -150,6 +150,7 @@ def _sec_hdr(title: str, sub: str = "", icon: str = "fa-layer-group") -> html.Di
 def _kpi_row(*kpis, cols: str = "repeat(auto-fill,minmax(155px,1fr))") -> html.Div:
     return html.Div(
         list(kpis),
+        id="kpi-row",
         className="kpi-row",
         style={"gridTemplateColumns": cols, "marginBottom": "20px"},
     )
@@ -250,7 +251,7 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
                 _kpi("kpi_gate_logs",          "fa-receipt",       "#1abc9c", "Gate Logs"),
                 _kpi("kpi_receipts_month",     "fa-receipt",       "#17976e", "Receipts (Month)"),
                 _kpi("kpi_expenses_month",     "fa-exclamation-triangle",       "#aa241a", "Expenses (Month)"),
-                _kpi("kpi_CashinHand",         "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                    _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
                 _kpi("kpi_balance",            "fa-wallet",        "#2c3e50", "Balance"),
                 
             ),

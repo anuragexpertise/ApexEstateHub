@@ -66,6 +66,10 @@ KPI_CARDS = {
         "query": "SELECT COALESCE(SUM(amount), 0) AS v FROM transactions WHERE society_id = %s AND status = 'paid'",
         "params": 1, "format": "currency",
     },
+    "kpi_cash_in_hand": {
+        "query": "SELECT COALESCE(SUM(amount), 0) AS v FROM transactions WHERE society_id = %s AND status = 'paid'",
+        "params": 1, "format": "currency",
+    },
     "kpi_societies_total": {
         "query": "SELECT COUNT(*) AS v FROM societies",
         "params": 0, "format": "count",
