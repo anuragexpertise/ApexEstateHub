@@ -50,7 +50,7 @@ KPI_CARDS = {
         "query": "SELECT COUNT(*) AS v FROM concerns WHERE society_id = %s AND status = 'open'",
         "params": 1, "format": "count",
     },
-    "kpi_gate_logs_today": {
+    "kpi_gate_logs": {
         "query": "SELECT COUNT(*) AS v FROM gate_access WHERE society_id = %s AND time_in >= CURRENT_DATE",
         "params": 1, "format": "count",
     },

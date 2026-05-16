@@ -44,15 +44,15 @@ if not vapid_private or not vapid_public:
 # }
 
 # Uncomment below to test with a real subscription
-# try:
-#     webpush(
-#         subscription_info=dummy_subscription,
-#         data="Hello! This is a test message from your server.",
-#         vapid_private_key=vapid_private,
-#         vapid_claims={"sub": f"mailto:{vapid_email}"}
-#     )
-#     print("✅ Notification sent successfully!")
-# except WebPushException as e:
-#     print(f"❌ Failed: {e}")
-#     if hasattr(e, 'response') and e.response:
-#         print(f"Response body: {e.response.read()}")
+try:
+    webpush(
+        subscription_info="dummy_subscription",
+        data="Hello! This is a test message from your server.",
+        vapid_private_key=vapid_private,
+        vapid_claims={"sub": f"mailto:{vapid_email}"}
+    )
+    print("✅ Notification sent successfully!")
+except WebPushException as e:
+    print(f"❌ Failed: {e}")
+    if hasattr(e, 'response') and e.response:
+        print(f"Response body: {e.response.read()}")
