@@ -730,7 +730,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             # Load Credit accounts (for receipts - money IN)
             accounts = get_accounts_for_dropdown(db, society_id, transaction_type='receipt')
             options = [{"label": a["label"], "value": a["value"]} for a in accounts]
-            control = dcc.Dropdown(
+            ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 options=options,
                 value=pre_val,
@@ -743,7 +743,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             # Load Debit accounts (for expenses - money OUT)
             accounts = get_accounts_for_dropdown(db, society_id, transaction_type='expense')
             options = [{"label": a["label"], "value": a["value"]} for a in accounts]
-            control = dcc.Dropdown(
+            ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 options=options,
                 value=pre_val,

@@ -35,7 +35,12 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     pattern_hash TEXT,
     role VARCHAR(20) NOT NULL CHECK (
-        role IN ('admin', 'apartment', 'vendor', 'security')
+        role IN (
+            'admin',
+            'apartment',
+            'vendor',
+            'security'
+        )
     ),
     linked_id INT,
     login_method VARCHAR(20) DEFAULT 'password',
@@ -161,8 +166,8 @@ CREATE TABLE IF NOT EXISTS gate_access (
 CREATE TABLE IF NOT EXISTS accounts (
     id INT PRIMARY KEY NOT NULL,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    name VARCHAR(20) NOT NULL,
-    tab_name VARCHAR(10),
+    name VARCHAR(100) NOT NULL,
+    tab_name VARCHAR(20),
     header VARCHAR(50),
     parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
     drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')),
@@ -183,7 +188,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     acc_particulars VARCHAR(100),
     amount DECIMAL(15, 2) NOT NULL CHECK (amount > 0),
     mode VARCHAR(6) CHECK (
-        mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
     ) DEFAULT 'cash',
     payment_gateway_ID VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'paid',
@@ -258,7 +270,11 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     valid_until DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (society_id, user_id, issued_date)
+    UNIQUE (
+        society_id,
+        user_id,
+        issued_date
+    )
 );
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -267,16 +283,26 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 
 -- Users indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
 CREATE INDEX IF NOT EXISTS idx_users_society_role ON users (society_id, role);
+
 CREATE INDEX IF NOT EXISTS idx_users_linked ON users (linked_id);
+
 CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users (reset_token);
+
 CREATE INDEX IF NOT EXISTS idx_users_reset_token_expires ON users (reset_token_expires);
+
 CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users (locked_until);
+
 CREATE INDEX IF NOT EXISTS idx_users_login_method ON users (login_method);
-CREATE INDEX IF NOT EXISTS idx_users_master_admin ON users (is_master_admin) WHERE is_master_admin = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_users_master_admin ON users (is_master_admin)
+WHERE
+    is_master_admin = TRUE;
 
 -- Apartments indexes
 CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_apartments_active ON apartments (society_id, active);
 
 -- Vendors indexes
@@ -287,36 +313,54 @@ CREATE INDEX IF NOT EXISTS idx_security_society_active ON security_staff (societ
 
 -- Accounting indexes
 CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_tab ON accounts (society_id, tab_name);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_parent_account_id ON accounts (society_id, parent_account_id);
 
 -- Transaction indexes
 CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);
+
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions (acc_id);
+
 CREATE INDEX IF NOT EXISTS idx_transactions_entity ON transactions (entity_id);
+
 CREATE INDEX IF NOT EXISTS idx_trx_society_date ON transactions (society_id, trx_date);
+
 CREATE INDEX IF NOT EXISTS idx_trx_account ON transactions (acc_id);
+
 CREATE INDEX IF NOT EXISTS idx_trx_entity ON transactions (entity_id);
+
 CREATE INDEX IF NOT EXISTS idx_trx_status ON transactions (status);
+
 CREATE INDEX IF NOT EXISTS idx_trx_society_status_date ON transactions (society_id, status, trx_date);
-CREATE INDEX IF NOT EXISTS idx_trx_paid_only ON transactions (society_id, trx_date) WHERE status = 'paid';
+
+CREATE INDEX IF NOT EXISTS idx_trx_paid_only ON transactions (society_id, trx_date)
+WHERE
+    status = 'paid';
 
 -- Gate access indexes
 CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access (society_id, time_in);
+
 CREATE INDEX IF NOT EXISTS idx_gate_entity ON gate_access (role, entity_id);
+
 CREATE INDEX IF NOT EXISTS idx_gate_open_entries ON gate_access (role, entity_id, time_out);
 
 -- Attendance indexes
 CREATE INDEX IF NOT EXISTS idx_attendance_security ON attendance (security_id);
+
 CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance (society_id, time_in);
 
 -- Asset register indexes
 CREATE INDEX IF NOT EXISTS idx_asset_society ON asset_register (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_asset_account ON asset_register (parent_account_id);
 
 -- Payment indexes
 CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id);
+
 CREATE INDEX IF NOT EXISTS idx_payments_due_date ON payments (due_date);
 
 -- Event indexes
@@ -326,20 +370,34 @@ CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns (society_id, status);
 
 -- Vendor pass indexes
-CREATE INDEX IF NOT EXISTS idx_vendor_passes_active ON vendor_passes (society_id, user_id, valid_until) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_vendor_passes_active ON vendor_passes (
+    society_id,
+    user_id,
+    valid_until
+)
+WHERE
+    status = 'active';
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DATA PATCHES (Safe to re-run)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Mark existing master admin user
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM users WHERE email = 'master@estatehub.com' AND society_id IS NULL) THEN
-        UPDATE users
-        SET is_master_admin = TRUE
-        WHERE email = 'master@estatehub.com'
-          AND society_id IS NULL
-          AND is_master_admin = FALSE;
-    END IF;
+DO $$ BEGIN IF EXISTS (
+    SELECT 1
+    FROM users
+    WHERE
+        email = 'master@estatehub.com'
+        AND society_id IS NULL
+) THEN
+UPDATE users
+SET
+    is_master_admin = TRUE
+WHERE
+    email = 'master@estatehub.com'
+    AND society_id IS NULL
+    AND is_master_admin = FALSE;
+
+END IF;
+
 END $$;
