@@ -456,13 +456,52 @@ FORM_CARDS = {
 # ================================================================
 CARD_CATALOGUE = {**KPI_CARDS, **FORM_CARDS}
 
+# ================================================================
+# ── CUSTOMIZATION CATALOGUE
+# ================================================================
+# A normalized catalogue for UI customization and saved layout state.
+# This separates KPIs, forms, and lists so customization data can be
+# stored independently and later wired back into the drilldown engine.
+LIST_CARDS = {cid: cfg for cid, cfg in FORM_CARDS.items() if cfg.get("type") == "list"}
+FORM_CARDS_ONLY = {cid: cfg for cid, cfg in FORM_CARDS.items() if cfg.get("type") in ("profile", "create")}
+CUSTOMIZABLE_CARD_CATALOGUE = {
+    "kpis": KPI_CARDS,
+    "forms": FORM_CARDS_ONLY,
+    "lists": LIST_CARDS,
+}
+
 # ── Default dashboard cards per portal ─────────────────────────
 DEFAULT_LAYOUTS = {
-    "admin":    ["apts_with_dues","pending_dues","receipts_month","balance"],
-    "apartment":["apts_no_dues","gate_logs_today","events_count","concerns_open"],
-    "vendor":   ["vendors_no_dues","gate_logs_today","events_count","concerns_open"],
-    "security": ["security_on_duty","security_off_duty","gate_logs_today","concerns_open"],
-    "master":   ["apts_total","vendors_total","receipts_month","balance"],
+    "admin": [
+        "kpi_apartments_total",
+        "kpi_apartments_dues",
+        "kpi_receipts_month",
+        "kpi_balance",
+    ],
+    "apartment": [
+        "kpi_apartments_no_dues",
+        "kpi_gate_logs",
+        "kpi_events_total",
+        "kpi_concerns_open",
+    ],
+    "vendor": [
+        "kpi_vendors_total",
+        "kpi_gate_logs",
+        "kpi_events_total",
+        "kpi_concerns_open",
+    ],
+    "security": [
+        "kpi_security_on_duty",
+        "kpi_security_total",
+        "kpi_gate_logs",
+        "kpi_concerns_open",
+    ],
+    "master": [
+        "kpi_societies_total",
+        "kpi_societies_paid",
+        "kpi_receipts_month",
+        "kpi_balance",
+    ],
 }
 
 

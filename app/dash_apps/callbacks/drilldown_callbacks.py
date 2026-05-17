@@ -720,16 +720,22 @@ def register_drilldown_callbacks(app):
         card_id         = id_dict.get("card_id", "")
         sid             = (auth or {}).get("society_id")
 
+        store = store or {}
+        store.setdefault("prefill", {})
+        store.setdefault("stack", [])
+
         # Collect form data
         form_data: dict = {}
         for key, val in ctx.inputs.items():
-            if '"type":"form-field"' in key or '"type": "form-field"' in key:
-                try:
-                    k_dict = json.loads(key.split(".")[0])
-                    if k_dict.get("entity") == entity_singular:
-                        form_data[k_dict.get("field")] = val
-                except Exception:
-                    pass
+            try:
+                k_dict = json.loads(key.split(".")[0])
+            except Exception:
+                continue
+            if k_dict.get("type") != "form-field":
+                continue
+            if k_dict.get("entity") != entity_singular:
+                continue
+            form_data[k_dict.get("field")] = val
 
         # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
@@ -738,7 +744,19 @@ def register_drilldown_callbacks(app):
 
         ok, msg = _save_entity(entity_singular, card_id, form_data)
 
-        # Navigate back and refresh
+        # Preserve entered values on validation failure so the form keeps
+        # user input and does not clear when the callback returns.
+        if not ok:
+            print(f"🔴 Form save failed for {entity_singular}: {msg}")
+            print(f"    form_data={form_data}")
+            store["prefill"] = form_data
+            if store.get("stack"):
+                store["stack"][-1]["prefill"] = form_data
+
+            toast = {"type": "error", "message": msg}
+            return store, no_update, no_update, toast, no_update
+
+        # Navigate back and refresh on successful save
         hide_kpis = False
         if ok and store and len(store.get("stack", [])) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
@@ -748,7 +766,7 @@ def register_drilldown_callbacks(app):
         content, bc = _render_current(store or {}, auth)
         store["refresh"] = False
 
-        toast = {"type": "success" if ok else "error", "message": msg}
+        toast = {"type": "success", "message": msg}
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, toast, kpi_style
