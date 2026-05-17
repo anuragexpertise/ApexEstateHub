@@ -572,11 +572,107 @@ def render_profile_card(card_id: str, title: str, icon: str,
 # FORM CARD (generic)
 # ════════════════════════════════════════════════════════════════════════════
 
+def get_accounts_for_dropdown(db, society_id: int, transaction_type: str = None) -> list:
+    """
+    Get accounts for dropdown in transaction forms.
+    
+    Args:
+        society_id: Society ID
+        transaction_type: 'receipt', 'expense', or None for all
+    
+    Returns:
+        List of dicts: [{"id": 1, "name": "Cash", "tab": "Assets", "drcr": None}, ...]
+    
+    Logic:
+    ──────
+    • RECEIPTS (money IN):
+      - Show Income accounts (drcr_account = 'Cr')
+      - Show Asset/Liability accounts (drcr_account = NULL) - for selling assets, receiving loans
+    
+    • EXPENSES (money OUT):
+      - Show Expense accounts (drcr_account = 'Dr')
+      - Show Asset/Liability accounts (drcr_account = NULL) - for buying assets, repaying loans
+    
+    • ALL:
+      - Show all accounts
+    """
+    
+    try:
+        if transaction_type == 'receipt':
+            # RECEIPTS: Cr accounts + NULL accounts (Assets/Liabilities)
+            accounts = db._execute(
+                """
+                SELECT id, name, tab_name, drcr_account
+                FROM accounts
+                WHERE society_id=%s 
+                  AND (drcr_account = 'Cr' OR drcr_account IS NULL)
+                ORDER BY 
+                    CASE 
+                        WHEN drcr_account = 'Cr' THEN 1  -- Income first
+                        ELSE 2                            -- Assets/Liabilities second
+                    END,
+                    tab_name, name
+                """,
+                (society_id,),
+                fetch_all=True
+            ) or []
+        
+        elif transaction_type == 'expense':
+            # EXPENSES: Dr accounts + NULL accounts (Assets/Liabilities)
+            accounts = db._execute(
+                """
+                SELECT id, name, tab_name, drcr_account
+                FROM accounts
+                WHERE society_id=%s 
+                  AND (drcr_account = 'Dr' OR drcr_account IS NULL)
+                ORDER BY 
+                    CASE 
+                        WHEN drcr_account = 'Dr' THEN 1   -- Expenses first
+                        ELSE 2                             -- Assets/Liabilities second
+                    END,
+                    tab_name, name
+                """,
+                (society_id,),
+                fetch_all=True
+            ) or []
+        
+        else:
+            # ALL accounts
+            accounts = db._execute(
+                """
+                SELECT id, name, tab_name, drcr_account
+                FROM accounts
+                WHERE society_id=%s
+                ORDER BY tab_name, name
+                """,
+                (society_id,),
+                fetch_all=True
+            ) or []
+        
+        # Format for dropdown with grouping
+        formatted = []
+        for acc in accounts:
+            drcr_label = acc.get("drcr_account") or "Asset/Liability"
+            label = f"{acc['name']} ({acc['tab_name']}) [{drcr_label}]"
+            formatted.append({
+                "value": acc["id"],
+                "label": label,
+                "tab": acc.get("tab_name"),
+                "drcr": acc.get("drcr_account"),
+            })
+        
+        return formatted
+    
+    except Exception as e:
+        print(f"Error loading accounts: {e}")
+        return []
+
 def render_form_card(card_id: str, title: str, icon: str,
                      entity: str, fields: list[dict],
                      submit_label: str = "Save",
                      prefill: dict | None = None,
-                     color: str = "#17976e") -> html.Div:
+                     color: str = "#17976e",
+                     society_id: int | None = None) -> html.Div:
     """
     Generic form card with pre-fill support.
 
@@ -587,6 +683,7 @@ def render_form_card(card_id: str, title: str, icon: str,
        "options": ["apartment", "vendor", "security"]},
     ]
     """
+    from database.db_manager import db
     prefill = prefill or {}
     form_rows = []
 
@@ -629,6 +726,31 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px",
                        "background": "#f8f9fa"},
             )
+        elif ftype == "account_dropdown_receipt":
+            # Load Credit accounts (for receipts - money IN)
+            accounts = get_accounts_for_dropdown(db, society_id, transaction_type='receipt')
+            options = [{"label": a["label"], "value": a["value"]} for a in accounts]
+            control = dcc.Dropdown(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                options=options,
+                value=pre_val,
+                placeholder=f"Select {label_txt}",
+                clearable=False,
+                style={"fontSize": "13px"},
+            )
+        
+        elif ftype == "account_dropdown_expense":
+            # Load Debit accounts (for expenses - money OUT)
+            accounts = get_accounts_for_dropdown(db, society_id, transaction_type='expense')
+            options = [{"label": a["label"], "value": a["value"]} for a in accounts]
+            control = dcc.Dropdown(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                options=options,
+                value=pre_val,
+                placeholder=f"Select {label_txt}",
+                clearable=False,
+                style={"fontSize": "13px"},
+            )
         else:
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
@@ -638,18 +760,30 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
+        # form_rows.append(
+        #     dbc.Row(
+        #         [
+        #             dbc.Label(label_txt, width=4,
+        #                        style={"fontSize": "12px", "color": "#7d8ea3",
+        #                               "fontWeight": "600", "paddingTop": "8px"}),
+        #             dbc.Col(ctrl, width=8),
+        #         ],
+        #         className="mb-2",
+        #     )
+        # )
         form_rows.append(
-            dbc.Row(
-                [
-                    dbc.Label(label_txt, width=4,
-                               style={"fontSize": "12px", "color": "#7d8ea3",
-                                      "fontWeight": "600", "paddingTop": "8px"}),
-                    dbc.Col(ctrl, width=8),
-                ],
-                className="mb-2",
-            )
+            dbc.Row([
+                dbc.Col(
+                    dbc.Label(
+                        [label_txt, html.Span(" *", style={"color": "red"}) if required else None],
+                        style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}
+                    ),
+                    width=4,
+                    style={"paddingTop": "6px"}
+                ),
+                dbc.Col(ctrl, width=8),
+            ], className="mb-2")
         )
-
     return html.Div(
         dbc.Card(
             [

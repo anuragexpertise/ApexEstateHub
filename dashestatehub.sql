@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     tab_name VARCHAR(10),
     header VARCHAR(50),
     parent_account_id INT NOT NULL REFERENCES accounts (id) DEFAULT 1,
-    drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')) NOT NULL,
+    drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr')),
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
     bf_amount DECIMAL(12, 2) DEFAULT 0.00,
