@@ -1316,9 +1316,9 @@ def _save_account(db, d, sid, is_edit, pk):
     next_id = (max_id_result.get("max_id") or 0) + 1
     
     db._execute(
-        "INSERT INTO accounts(id,society_id,name,tab_name,drcr_account,drcr_bf,bf_amount,parent_account_id) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,1)",
-        (next_id, sid, name, d.get("tab_name"), drcr, d.get("drcr_bf","Dr"), d.get("bf_amount") or 0),
+        "INSERT INTO accounts(id,society_id,name,tab_name,drcr_account,drcr_bf,bf_amount,depreciation_percent,is_depreciable,parent_account_id) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+        (next_id, sid, name, d.get("tab_name"), drcr, d.get("drcr_bf","Dr"), d.get("bf_amount") or 0, 100, False),
     )
     return True, f"Account '{name}' created"
 
