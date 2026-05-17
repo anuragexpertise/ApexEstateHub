@@ -726,16 +726,17 @@ def register_drilldown_callbacks(app):
 
         # Collect form data
         form_data: dict = {}
-        for key, val in ctx.inputs.items():
-            try:
-                k_dict = json.loads(key.split(".")[0])
-            except Exception:
-                continue
-            if k_dict.get("type") != "form-field":
-                continue
-            if k_dict.get("entity") != entity_singular:
-                continue
-            form_data[k_dict.get("field")] = val
+        for source in (ctx.inputs, ctx.states):
+            for key, val in source.items():
+                try:
+                    k_dict = json.loads(key.split(".")[0])
+                except Exception:
+                    continue
+                if k_dict.get("type") != "form-field":
+                    continue
+                if to_singular(k_dict.get("entity")) != entity_singular:
+                    continue
+                form_data[k_dict.get("field")] = val
 
         # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
@@ -749,6 +750,13 @@ def register_drilldown_callbacks(app):
         if not ok:
             print(f"🔴 Form save failed for {entity_singular}: {msg}")
             print(f"    form_data={form_data}")
+            if not form_data:
+                print("    ctx.inputs keys:")
+                for key in ctx.inputs.keys():
+                    print(f"      {key}")
+                print("    ctx.states keys:")
+                for key in ctx.states.keys():
+                    print(f"      {key}")
             store["prefill"] = form_data
             if store.get("stack"):
                 store["stack"][-1]["prefill"] = form_data
