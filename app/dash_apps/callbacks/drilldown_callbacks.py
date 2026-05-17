@@ -716,7 +716,7 @@ def register_drilldown_callbacks(app):
         except Exception:
             return no_update, no_update, no_update, no_update, no_update
 
-        entity_singular = id_dict.get("entity")
+        entity_singular = to_singular(id_dict.get("entity"))
         card_id         = id_dict.get("card_id", "")
         sid             = (auth or {}).get("society_id")
 
@@ -886,6 +886,7 @@ def _render_card(card_id: str, filters: dict, prefill: dict, store: dict) -> htm
         parts  = rest.rsplit("_", 1)
         entity_raw = parts[0]
         action     = parts[1] if len(parts) > 1 else "new"
+        entity_raw = to_singular(entity_raw)
         entity_key = to_plural(entity_raw)
         meta       = ENTITY_META.get(entity_key, {})
         fields     = (meta.get("form_fields") or {}).get(
