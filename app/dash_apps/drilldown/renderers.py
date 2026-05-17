@@ -14,7 +14,7 @@ from datetime import datetime
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-from .registry import DRILLDOWN_MAP
+from .registry import DRILLDOWN_MAP, to_singular
 
 
 # ── Colour palette (matches app/assets/style.css CSS vars) ─────────────────
@@ -331,7 +331,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                                         dbc.Button(
                                             [html.I(className="fas fa-plus me-1"), "New"],
                                             id={"type": "btn-list-create", "entity": entity,
-                                                "target": create_card_id or f"form_{entity}_new"},
+                                                "target": create_card_id or f"form_{to_singular(entity)}_new"},
                                             size="sm",
                                             color="primary",
                                             style={"fontSize": "11px", "borderRadius": "8px"},
