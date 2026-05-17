@@ -1,0 +1,32 @@
+default_accounts = [
+        # (id, name, tab_name, header, drcr_account, parent_id)
+
+        # ASSETS (Dr)
+        (1,  "Cash",                  "Assets", "Current Assets", "Dr", 1),
+        (2,  "Bank",                  "Assets", "Current Assets", "Dr", 1),
+        (3,  "Accounts Receivable",   "Assets", "Current Assets", "Dr", 1),
+        (4,  "Fixed Assets",          "Assets", "Fixed Assets",   "Dr", 1),
+
+        # LIABILITIES (Cr)
+        (10, "Accounts Payable",      "Liabilities", "Current Liabilities", "Cr", 10),
+        (11, "Advance Received",      "Liabilities", "Current Liabilities", "Cr", 10),
+        (12, "Security Deposits",     "Liabilities", "Current Liabilities", "Cr", 10),
+
+        # INCOME (Cr)
+        (20, "Maintenance",           "Income", "Operating Income", "Cr", 20),
+        (21, "Pass Fees",             "Income", "Operating Income", "Cr", 20),
+        (22, "Late Fees",             "Income", "Operating Income", "Cr", 20),
+        (23, "Event Fees",            "Income", "Operating Income", "Cr", 20),
+        (24, "Other Income",          "Income", "Operating Income", "Cr", 20),
+        (25, "Interest Income",       "Income", "Other Income",     "Cr", 20),
+
+        # EXPENSES (Dr)
+        (30, "Salaries",              "Expenses", "Operating Expenses", "Dr", 30),
+        (31, "Utilities",             "Expenses", "Operating Expenses", "Dr", 30),
+        (32, "Repairs & Maintenance", "Expenses", "Operating Expenses", "Dr", 30),
+        (33, "Security Services",     "Expenses", "Operating Expenses", "Dr", 30),
+        (34, "Cleaning",              "Expenses", "Operating Expenses", "Dr", 30),
+        (35, "Admin Expenses",        "Expenses", "Operating Expenses", "Dr", 30),
+        (36, "Depreciation",          "Expenses", "Operating Expenses", "Dr", 30),
+        (37, "Bank Charges",          "Expenses", "Operating Expenses", "Dr", 30),
+    ]
