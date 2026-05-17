@@ -18,6 +18,8 @@ plotly>=5.18.0
 psycopg2-binary>=2.9.0
 SQLAlchemy>=2.0.0
 alembic>=1.12.0
+pandas>=3.0.3
+chime>=0.7.0
 
 # ── Auth & Security ───────────────────────────────────────────────────────────
 PyJWT>=2.8.0
