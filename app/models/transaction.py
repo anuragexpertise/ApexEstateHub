@@ -27,15 +27,15 @@ class Account(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=False, index=True)
-    name = db.Column(db.String(10), nullable=False, unique=True)
-    tab_name = db.Column(db.String(100), nullable=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    tab_name = db.Column(db.String(20), nullable=True)
     header = db.Column(db.String(255), nullable=True)
-    parent_account_id = db.Column(db.String(10), nullable=True, index=True)
+    parent_account_id = db.Column(db.Integer, nullable=True, index=True)
     drcr_account = db.Column(db.String(2), nullable=True)  # Dr, Cr
     has_bf = db.Column(db.Boolean, default=False)
-    bf_type = db.Column(db.String(2), nullable=True)  # Dr, Cr
+    drcr_bf = db.Column(db.String(2), nullable=True)  # Dr, Cr
     bf_amount = db.Column(db.Numeric(12, 2), nullable=True)
-    depreciation_percent = db.Column(db.Float, default=0)
+    depreciation_percent = db.Column(db.Numeric(5, 2), default=100)
     is_depreciable = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     

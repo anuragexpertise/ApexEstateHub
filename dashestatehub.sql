@@ -174,7 +174,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
     bf_amount DECIMAL(12, 2) DEFAULT 0.00,
-    depreciation_percent DECIMAL(5, 2) DEFAULT 0.00,
+    depreciation_percent DECIMAL(5, 2) DEFAULT 100.00,
+    is_depreciable BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name)
 );

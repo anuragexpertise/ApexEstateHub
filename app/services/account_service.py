@@ -75,15 +75,17 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
         drcr_bf = data.get("drcr_bf", data["drcr_account"])
         if drcr_bf not in ("Dr", "Cr"):
             drcr_bf = data["drcr_account"]
+        depreciation_percent = data.get("depreciation_percent", 100)
+        is_depreciable = depreciation_percent < 100
         
         # Create account
         db._execute(
             """
             INSERT INTO accounts (
                 id, society_id, name, tab_name, header, parent_account_id,
-                drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent
+                drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent, is_depreciable
             ) VALUES (:id, :society_id, :name, :tab_name, :header, :parent_account_id,
-                      :drcr_account, :has_bf, :drcr_bf, :bf_amount, :depreciation_percent)
+                      :drcr_account, :has_bf, :drcr_bf, :bf_amount, :depreciation_percent, :is_depreciable)
             """,
             {
                 'id': account_id,
@@ -96,7 +98,8 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
                 'has_bf': data.get("has_bf", False),
                 'drcr_bf': drcr_bf,
                 'bf_amount': data.get("bf_amount", 0),
-                'depreciation_percent': data.get("depreciation_percent", 0)
+                'depreciation_percent': depreciation_percent,
+                'is_depreciable': is_depreciable
             }
         )
         
@@ -122,7 +125,7 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
         allowed_fields = [
             "name", "tab_name", "header", "parent_account_id",
             "drcr_account", "has_bf", "drcr_bf", 
-            "bf_amount", "depreciation_percent"
+            "bf_amount", "depreciation_percent", "is_depreciable"
         ]
         
         updates = []
@@ -142,6 +145,11 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
         
         if "drcr_bf" in data and data["drcr_bf"] not in ("Dr", "Cr"):
             return False, "drcr_bf must be 'Dr' or 'Cr'"
+
+        if "depreciation_percent" in data:
+            params["is_depreciable"] = data["depreciation_percent"] < 100
+            if "is_depreciable" not in updates:
+                updates.append("is_depreciable = :is_depreciable")
         
         params['account_id'] = account_id
         params['society_id'] = society_id
