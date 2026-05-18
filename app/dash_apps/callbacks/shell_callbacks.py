@@ -11,7 +11,7 @@ FIXES:
 """
 import json
 from datetime import datetime, timedelta
-
+import chime
 import dash
 from dash import Input, Output, State, html, dcc, no_update, callback
 from dash.exceptions import PreventUpdate
@@ -682,7 +682,14 @@ def register_shell_callbacks(app):
             "warning": "#f59e0b",
             "info": "#3b82f6",
         }
-        
+        if toast_type=="success":
+            chime.success()
+        elif toast_type=="error":
+            chime.error()
+        elif toast_type=="warning":
+            chime.warning()
+        else:
+            chime.info()
         return dbc.Toast(
             message,
             id="toast",
