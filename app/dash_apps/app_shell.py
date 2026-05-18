@@ -505,8 +505,7 @@ def shell_layout():
                                            'padding': '0 8px 0 0'},
                                 ),
                                 dbc.Button(
-                                    html.I(className='fas fa-download me-2'),
-                                    'Save PNG',
+                                    [html.I(className='fas fa-download me-2'), 'Save PNG'],
                                     id='save-qr-png-btn',
                                     n_clicks=0,
                                     color='success',
