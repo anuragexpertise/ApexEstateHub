@@ -322,6 +322,8 @@ def shell_layout():
             dcc.Store(id='toast-store',         storage_type='memory'),
             dcc.Store(id='sidebar-open-store',  storage_type='memory',
                       data={'collapsed': False}),
+            dcc.Store(id='qr-entity-store',     storage_type='memory', data={}),
+            dcc.Store(id='profile-action-trigger', storage_type='memory', data=None),
 
             # ── Drilldown store — REQUIRED by shell_callbacks router ────────
             dcc.Store(id='drilldown-store',     storage_type='session',
@@ -468,7 +470,7 @@ def shell_layout():
             # ── QR modal ───────────────────────────────────────────────────
             dbc.Modal(
                 [
-                    dbc.ModalHeader(dbc.ModalTitle('My QR Code'), close_button=True),
+                    dbc.ModalHeader(dbc.ModalTitle('Gate Pass QR Code'), close_button=True),
                     dbc.ModalBody(
                         html.Div([
                             html.Img(id='qr-modal-img', src='', style={
@@ -503,13 +505,28 @@ def shell_layout():
                                            'padding': '0 8px 0 0'},
                                 ),
                                 dbc.Button(
+                                    html.I(className='fas fa-download me-2'),
+                                    'Save PNG',
+                                    id='save-qr-png-btn',
+                                    n_clicks=0,
+                                    color='success',
+                                    size='sm',
+                                ),
+                                dbc.Button(
                                     'Close', id='close-qr-modal',
                                     n_clicks=0, color='secondary',
+                                ),
+                                html.A(
+                                    id='qr-download-link',
+                                    href='#',
+                                    download='qr_code.png',
+                                    style={'display': 'none'},
                                 ),
                             ],
                             style={
                                 'display': 'flex', 'alignItems': 'center',
                                 'justifyContent': 'space-between', 'width': '100%',
+                                'gap': '8px',
                             },
                         )
                     ),

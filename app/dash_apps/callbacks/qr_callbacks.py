@@ -283,37 +283,67 @@ def register_qr_callbacks(app):
         Output('qr-modal', 'is_open'),
         Output('qr-modal-img', 'src'),
         Output('qr-modal-text', 'value'),
+        Output('qr-entity-store', 'data'),
+        
         Input('hdr-avatar', 'n_clicks'),
         Input('show-qr-btn', 'n_clicks'),
         Input('close-qr-modal', 'n_clicks'),
+        Input('profile-action-trigger', 'data'),
         State('auth-store', 'data'),
         State('qr-modal', 'is_open'),
         prevent_initial_call=True,
     )
-    def toggle_qr_modal(avatar_n, show_n, close_n, auth_data, is_open):
+    def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, auth_data, is_open):
         from dash import ctx
         
         if ctx.triggered_id == 'close-qr-modal':
-            return False, no_update, no_update
-        
-        if ctx.triggered_id not in ('hdr-avatar', 'show-qr-btn'):
-            return no_update, no_update, no_update
+            return False, no_update, no_update, no_update
         
         if not auth_data or not auth_data.get('authenticated'):
-            return False, no_update, no_update
+            return False, no_update, no_update, no_update
         
         from app.services.qr_service import generate_static_qr_code
+
+        entity_store = {}
         
-        src, payload = generate_static_qr_code(
-            auth_data.get('user_id'),
-            auth_data.get('role'),
-            auth_data.get('society_id')
-        )
+        if ctx.triggered_id == 'hdr-avatar':
+            # Logged-in user's QR
+            src, payload = generate_static_qr_code(
+                auth_data.get('user_id'),
+                auth_data.get('role'),
+                auth_data.get('society_id')
+            )
+            entity_store = {
+                'entity_id': auth_data.get('user_id'),
+                'role': auth_data.get('role'),
+                'society_id': auth_data.get('society_id'),
+                'name': auth_data.get('name', 'User'),
+            }
+        elif ctx.triggered_id == 'profile-action-trigger' and profile_action:
+            # Profile action "Gate Pass" clicked with entity data
+            entity_id = profile_action.get('entity_id')
+            role = profile_action.get('role')
+            society_id = profile_action.get('society_id')
+            entity_name = profile_action.get('name', 'Entity')
+            
+            src, payload = generate_static_qr_code(
+                entity_id,
+                role,
+                society_id
+            )
+            entity_store = {
+                'entity_id': entity_id,
+                'role': role,
+                'society_id': society_id,
+                'name': entity_name,
+            }
+        else:
+            return no_update, no_update, no_update, no_update
         
         if not src:
-            return True, "", f"Error: {payload}"
+            return True, "", f"Error: {payload}", no_update
         
-        return True, src, payload
+        return True, src, payload, entity_store
 
     # ── 3. Validate scanned QR (Entry/Exit with different rules)
     @app.callback(
@@ -533,6 +563,34 @@ def register_qr_callbacks(app):
             ], style={"padding": "6px 10px", "marginBottom": "2px"}))
         
         return items
+
+    # ── 5b. Save QR as PNG ────────────────────────────────────────
+    @app.callback(
+        Output('qr-download-link', 'href'),
+        Output('qr-download-link', 'download'),
+        Input('save-qr-png-btn', 'n_clicks'),
+        State('qr-modal-img', 'src'),
+        State('qr-entity-store', 'data'),
+        prevent_initial_call=True,
+    )
+    def save_qr_png(n_clicks, img_src, entity_data):
+        if not n_clicks or not img_src or not entity_data:
+            raise PreventUpdate
+        
+        # img_src format: "data:image/png;base64,{data}"
+        if not img_src.startswith('data:image/png;base64,'):
+            raise PreventUpdate
+        
+        try:
+            entity_id = entity_data.get('entity_id', 'qr')
+            role = entity_data.get('role', 'entity')
+            filename = f"Gate_Pass_{entity_id}_{role}.png"
+            
+            # Return data URL and filename for browser download
+            return img_src, filename
+        except Exception as e:
+            print(f"QR PNG save error: {e}")
+            raise PreventUpdate
 
     # ── 5. Emergency Alert ──────────────────────────────────────
     @app.callback(

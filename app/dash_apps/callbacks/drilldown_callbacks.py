@@ -90,7 +90,7 @@ ENTITY_META: dict = {
         "profile_actions": [
             {"label": "Pay Dues",      "action_id": "pay_dues",      "target_card": "form_receipt_new",    "icon": "fa-rupee-sign",  "color": "success"},
             {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook",       "icon": "fa-book",        "color": "info"},
-            {"label": "Gate Pass",     "action_id": "gate_pass",     "target_card": "form_gate_log_new",   "icon": "fa-qrcode",      "color": "info"},
+            {"label": "Gate Pass",     "action_id": "show_qr",       "target_card": "modal_qr",            "icon": "fa-qrcode",      "color": "primary"},  # ← CHANGED
             {"label": "Raise Issue",   "action_id": "new_concern",   "target_card": "form_concern_new",    "icon": "fa-comment-alt", "color": "warning"},
             {"label": "Edit",          "action_id": "edit",          "target_card": "form_apartment_edit", "icon": "fa-edit",        "color": "secondary"},
         ],
@@ -133,7 +133,7 @@ ENTITY_META: dict = {
         "profile_actions": [
             {"label": "Receive Payment", "action_id": "pay_dues",      "target_card": "form_receipt_new",  "icon": "fa-rupee-sign", "color": "success"},
             {"label": "Show Cashbook",   "action_id": "show_cashbook", "target_card": "list_cashbook",     "icon": "fa-book",       "color": "info"},
-            {"label": "Gate Pass",       "action_id": "gate_pass",     "target_card": "form_gate_log_new", "icon": "fa-qrcode",     "color": "info"},
+            {"label": "Gate Pass",     "action_id": "show_qr",       "target_card": "modal_qr",            "icon": "fa-qrcode",      "color": "primary"},  # ← CHANGED
             {"label": "Edit",            "action_id": "edit",          "target_card": "form_vendor_edit",  "icon": "fa-edit",       "color": "secondary"},
         ],
         "form_fields": {
@@ -175,6 +175,7 @@ ENTITY_META: dict = {
         ],
         "profile_actions": [
             {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook",       "icon": "fa-book", "color": "info"},
+            {"label": "Gate Pass",     "action_id": "show_qr",       "target_card": "modal_qr",            "icon": "fa-qrcode",      "color": "primary"}, 
             {"label": "Edit",          "action_id": "edit",          "target_card": "form_security_edit", "icon": "fa-edit", "color": "secondary"},
         ],
         "form_fields": {
@@ -484,6 +485,7 @@ def register_drilldown_callbacks(app):
         Output("drill-content",    "children"),
         Output("drill-breadcrumb", "children"),
         Output("kpi-row",          "style"),  # NEW: Hide/show KPIs
+        Output("profile-action-trigger", "data", allow_duplicate=True),
 
         Input({"type": "kpi-card-div",    "card_id": ALL},              "n_clicks"),
         Input({"type": "kpi-card",        "card_id": ALL},              "n_clicks"),
@@ -511,11 +513,11 @@ def register_drilldown_callbacks(app):
         sid      = auth.get("society_id")
 
         if not ctx.triggered:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
         if not trig["value"]:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         # Init store if empty
         if not store.get("stack"):
@@ -524,7 +526,7 @@ def register_drilldown_callbacks(app):
         try:
             id_dict = json.loads(trig["prop_id"].split(".")[0])
         except Exception:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         trig_type = id_dict.get("type", "")
         hide_kpis = False  # Track KPI visibility
@@ -607,7 +609,7 @@ def register_drilldown_callbacks(app):
             store["refresh"] = False
             hide_kpis = len(store.get("stack", [])) > 1
             kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
-            return store, content, bc, kpi_style
+            return store, content, bc, kpi_style, no_update
 
         # ── Profile ACTION → form or special action ───────────────────────
         elif trig_type == "profile-action":
@@ -616,8 +618,42 @@ def register_drilldown_callbacks(app):
             action   = id_dict.get("action")
             target   = id_dict.get("target")
             
+            # SPECIAL: Show QR code action (Gate Pass)
+            if action == "show_qr":
+                # Load entity record and prepare QR data
+                record = loaders.load_profile(entity, pk, sid) or {}
+                
+                # Map entity type to role code for QR
+                role_map = {
+                    "apartment": "apartment",
+                    "vendor": "vendor",
+                    "security": "security",
+                }
+                role = role_map.get(entity, entity)
+                
+                # Determine entity name for QR
+                entity_name = ""
+                if entity == "apartment":
+                    entity_name = record.get("owner_name", "Apartment")
+                elif entity == "vendor":
+                    entity_name = record.get("name", "Vendor")
+                elif entity == "security":
+                    entity_name = record.get("name", "Security")
+                else:
+                    entity_name = str(record.get("name", entity))
+                
+                # Set profile-action-trigger store to trigger QR modal
+                profile_action_data = {
+                    "entity_id": pk,
+                    "role": role,
+                    "society_id": sid,
+                    "name": entity_name,
+                }
+                return (no_update, no_update, no_update, no_update,
+                        profile_action_data)  # Return to trigger QR modal
+            
             # SPECIAL: Show Cashbook action
-            if action == "show_cashbook":
+            elif action == "show_cashbook":
                 # Navigate to cashbook filtered by entity
                 store = nav_state.navigate_to(
                     store, "list_cashbook",
@@ -655,7 +691,7 @@ def register_drilldown_callbacks(app):
                 )
                 hide_kpis = True
             else:
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update
 
         # ── Breadcrumb BACK ────────────────────────────────────────────────
         elif trig_type == "breadcrumb-click":
@@ -690,7 +726,7 @@ def register_drilldown_callbacks(app):
         content, bc = _render_current(store, auth)
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
-        return store, content, bc, kpi_style
+        return store, content, bc, kpi_style, no_update
 
     # ── 2. FORM SUBMIT → save → back → refresh ─────────────────────────────
     @app.callback(
