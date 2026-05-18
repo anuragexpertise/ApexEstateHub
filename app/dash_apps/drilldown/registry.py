@@ -110,7 +110,7 @@ DRILLDOWN_MAP: dict = {
     "profile_apartment": {
         "actions": {
             "pay_dues":    {"target": "form_receipt_new",    "prefill": {"apartment_id": "id", "flat_number": "flat_number", "amount": "pending_dues", "acc_particulars": "flat_number"}},
-            "gate_pass":   {"target": "form_gate_log_new",   "prefill": {"entity_id": "id", "role": "_const_a"}},
+            "gate_pass":   {"target": "modal_qr",   "prefill": {"entity_id": "id", "role": "_const_a"}},
             "new_concern": {"target": "form_concern_new",    "prefill": {"flat_no": "flat_number"}},
             "edit":        {"target": "form_apartment_edit", "prefill": {"*": "*"}},
         }
@@ -118,10 +118,16 @@ DRILLDOWN_MAP: dict = {
     "profile_vendor": {
         "actions": {
             "pay":       {"target": "form_receipt_new",  "prefill": {"entity_id": "id", "amount": "pending_dues", "acc_particulars": "email"}},
-            "gate_pass": {"target": "form_gate_log_new", "prefill": {"entity_id": "id", "role": "_const_v"}},
+            "gate_pass": {"target": "modal_qr", "prefill": {"entity_id": "id", "role": "_const_v"}},
             "edit":      {"target": "form_vendor_edit",  "prefill": {"*": "*"}},
         }
     },
+    "profile_security": {
+        "actions": {
+            "gate_pass": {"target": "modal_qr", "prefill": {"entity_id": "id", "role": "_const_s"}},
+        }
+    },
+    
     "profile_concern": {
         "actions": {
             "assign":  {"target": "form_concern_edit", "prefill": {"*": "*", "status": "_const_in_progress"}},
