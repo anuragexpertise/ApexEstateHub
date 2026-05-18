@@ -107,6 +107,7 @@ ENTITY_META: dict = {
                 {"id": "mobile",         "label": "Mobile",         "type": "text"},
                 {"id": "apartment_size", "label": "Area (sq ft)",   "type": "number"},
                 {"id": "active",         "label": "Active",         "type": "select", "options": ["true", "false"]},
+                {"id": "created_at",     "label": "Created At",     "type": "readonly"},
             ],
         },
     },
@@ -175,7 +176,7 @@ ENTITY_META: dict = {
         ],
         "profile_actions": [
             {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook",       "icon": "fa-book", "color": "info"},
-            {"label": "Gate Pass",     "action_id": "show_qr",       "target_card": "modal_qr",            "icon": "fa-qrcode",      "color": "primary"}, 
+            {"label": "Gate Pass",     "action_id": "show_qr",       "target_card": "modal_qr",            "icon": "fa-qrcode",      "color": "primary"},
             {"label": "Edit",          "action_id": "edit",          "target_card": "form_security_edit", "icon": "fa-edit", "color": "secondary"},
         ],
         "form_fields": {
@@ -183,6 +184,8 @@ ENTITY_META: dict = {
                 {"id": "email",    "label": "Login Email", "type": "email",    "required": True},
                 {"id": "name",     "label": "Full Name",   "type": "text",     "required": True},
                 {"id": "mobile",   "label": "Mobile",      "type": "text"},
+                {"id": "joining_date", "label": "Joining Date", "type": "date"},
+                {"id": "salary_per_shift", "label": "Salary Per Shift", "type": "number"},
                 {"id": "shift",    "label": "Shift",       "type": "select",   "options": ["morning", "evening", "night", "rotating"]},
                 {"id": "password", "label": "Password",    "type": "password", "required": True},
             ],
@@ -333,6 +336,7 @@ ENTITY_META: dict = {
             "new": [
                 {"id": "trx_date",        "label": "Date",         "type": "date"},
                 {"id": "acc_id",          "label": "Account",      "type": "account_dropdown_receipt", "required": True},
+                {"id": "entity_id",       "label": "Entity ID",    "type": "number"},
                 {"id": "entity_name",     "label": "Flat/Vendor",  "type": "text",   "required": True},
                 {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
                 {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
@@ -367,6 +371,7 @@ ENTITY_META: dict = {
                 {"id": "trx_date",        "label": "Date",         "type": "date"},
                 {"id": "acc_id",          "label": "Account",      "type": "account_dropdown_expense", "required": True},
                 {"id": "acc_particulars", "label": "Particulars",  "type": "text",   "required": True},
+                {"id": "entity_id",       "label": "Entity ID",    "type": "number"},
                 {"id": "amount",          "label": "Amount (₹)",   "type": "number", "required": True},
                 {"id": "mode",            "label": "Mode",         "type": "select", "options": ["cash", "upi", "card", "bank", "cheque"]},
             ],
@@ -401,41 +406,65 @@ ENTITY_META: dict = {
         "list_title":   "Societies",
         "list_icon":    "fa-building",
         "list_columns": [
+            {"name": "Logo",    "field": "logo", "sortable": False},
             {"name": "Name",    "field": "name", "sortable": True},
-            {"name": "Email",   "field": "email", "sortable": True},
-            {"name": "Phone",   "field": "phone", "sortable": False},
-            {"name": "Plan",    "field": "plan", "sortable": True},
+            {"name": "Sec. Email",   "field": "email", "sortable": False},
+            {"name": "Sec. Phone",   "field": "secretary_phone", "sortable": False},
             {"name": "Created", "field": "created_at", "sortable": True},
+            {"name": "Plan",    "field": "plan", "sortable": True},
+            {"name": "Plan Validity",    "field": "plan_validity", "sortable": True},
+
         ],
         "profile_title":  "Society Profile",
         "profile_icon":   "fa-building",
         "profile_color":  "#c96a19",
         "profile_fields": [
+            {"label": "Logo",    "field": "logo",    "icon": "fa-building"},
             {"label": "Name",    "field": "name",    "icon": "fa-building"},
+            {"label": "Address", "field": "address", "icon": "fa-location-dot"},
             {"label": "Email",   "field": "email",   "icon": "fa-envelope"},
             {"label": "Phone",   "field": "phone",   "icon": "fa-phone"},
             {"label": "Plan",    "field": "plan",    "icon": "fa-star"},
-            {"label": "Address", "field": "address", "icon": "fa-location-dot"},
+            {"label": "Plan Validity",    "field": "plan_validity",    "icon": "fa-calender"},
+            {"label": "Plan Status",    "field": "plan_status",    "icon": "fa-star"},
+            {"label": "Secretary's Name",    "field": "secretary_name",    "icon": "fa-star"},
+            {"label": "Secretary's Phone",    "field": "secretary_phone",    "icon": "fa-star"},
+            {"label": "Secretary's Sign",    "field": "secretary_sign",    "icon": "fa-star"},
+            {"label": "Arrear Start Date",    "field": "arrear_start_date",    "icon": "fa-calender"},
+            {"label": "Login Background",    "field": "login_background",    "icon": "fa-star"},
+
         ],
         "profile_actions": [
             {"label": "Edit", "action_id": "edit", "target_card": "form_society_edit", "icon": "fa-edit", "color": "primary"},
         ],
         "form_fields": {
             "new": [
+                {"id": "logo",         "label": "Logo",            "type": "text"},
+                {"id": "login_background",         "label": "Login Background",            "type": "text"},
                 {"id": "name",          "label": "Society Name",     "type": "text",  "required": True},
+                {"id": "address",       "label": "Address",          "type": "textarea"},
                 {"id": "email",         "label": "Email",            "type": "email"},
                 {"id": "phone",         "label": "Phone",            "type": "text"},
-                {"id": "address",       "label": "Address",          "type": "textarea"},
+
                 {"id": "plan",          "label": "Plan",             "type": "select", "options": ["Free", "Paid"]},
+                {"id": "secretary_name",       "label": "Secretary's Name",          "type": "text"},
+                {"id": "secretary_phone",       "label": "Secretary's Phone",          "type": "text"},
+                {"id": "secretary_sign",       "label": "Secretary's Sign",          "type": "text"},
+                {"id": "arrear_start_date",       "label": "Arrear Start Date",          "type": "datetime"},
                 {"id": "admin_email",   "label": "Admin Email *",    "type": "email", "required": True},
                 {"id": "admin_password","label": "Admin Password *", "type": "password", "required": True},
             ],
             "edit": [
-                {"id": "name",    "label": "Society Name", "type": "text"},
                 {"id": "email",   "label": "Email",        "type": "email"},
                 {"id": "phone",   "label": "Phone",        "type": "text"},
                 {"id": "address", "label": "Address",      "type": "textarea"},
                 {"id": "plan",    "label": "Plan",         "type": "select", "options": ["Free", "Paid"]},
+                {"id": "plan_validity", "label": "Plan Validity", "type": "date"},
+                {"id": "secretary_name", "label": "Secretary Name", "type": "text"},
+                {"id": "secretary_phone", "label": "Secretary Phone", "type": "text"},
+                {"id": "secretary_sign", "label": "Secretary Sign", "type": "text"},
+                {"id": "arrear_start_date", "label": "Arrear Start Date", "type": "date"},
+                {"id": "login_background", "label": "Login Background", "type": "text"},
             ],
         },
     },
@@ -445,8 +474,8 @@ ENTITY_META: dict = {
         "list_icon":    "fa-book-open",
         "list_columns": [
             {"name": "Account Name",    "field": "name", "sortable": True},
-            {"name": "Group",   "field": "tab_name", "sortable": True},
-            {"name": "Dr/Cr",   "field": "drcr_account", "sortable": True},
+            {"name": "Tab Name",   "field": "tab_name", "sortable": True},
+            {"name": "DrCr  Account",   "field": "drcr_account", "sortable": True},
             {"name": "Opening", "field": "bf_amount", "sortable": True},
         ],
         "profile_title":  "Account Details",
@@ -454,23 +483,32 @@ ENTITY_META: dict = {
         "profile_color":  "#6c5ce7",
         "profile_fields": [
             {"label": "Account Name", "field": "name",         "icon": "fa-hashtag"},
-            {"label": "Group",        "field": "tab_name",     "icon": "fa-folder"},
+            {"label": "Tab Name",        "field": "tab_name",     "icon": "fa-folder"},
             {"label": "Header",       "field": "header",       "icon": "fa-heading"},
-            {"label": "Dr / Cr",      "field": "drcr_account", "icon": "fa-exchange-alt"},
-            {"label": "Opening Bal",  "field": "bf_amount",    "icon": "fa-rupee-sign"},
+            {"label": "DrCr Account",      "field": "drcr_account", "icon": "fa-exchange-alt"},
+            {"label": "DrCr BF",      "field": "drcr_bf", "icon": "fa-exchange-alt"},
+            {"label": "BF Amount",  "field": "bf_amount",    "icon": "fa-rupee-sign"},
+            {"label": "Depreciation",  "field": "depreciation_percent",    "icon": "fa-percent"},
         ],
         "profile_actions": [],
         "form_fields": {
             "new": [
                 {"id": "name",         "label": "Account Name",   "type": "text", "required": True},
                 {"id": "tab_name",     "label": "Group / Tab",    "type": "text"},
-                {"id": "drcr_account", "label": "Dr / Cr",        "type": "select", "options": ["Dr", "Cr"]},
+                {"id": "header",       "label": "Header",         "type": "text"},
+                {"id": "parent_account_id", "label": "Parent Account", "type": "number"},
+                {"id": "drcr_account", "label": "DrCr Acccount",        "type": "select", "options": ["Dr", "Cr", NULL]},
+                {"id": "is_depreciable", "label": "Is Depreciable", "type": "select", "options": ["true", "false"]},
+                {"id": "depreciation_percent", "label": "Depreciation Percent", "type": "number"},
+                {"id": "has_bf",       "label": "Has Opening Balance", "type": "select", "options": ["true", "false"]},
                 {"id": "bf_amount",    "label": "Opening Balance", "type": "number"},
-                {"id": "drcr_bf",      "label": "Opening Type",   "type": "select", "options": ["Dr", "Cr"]},
+                {"id": "drcr_bf",      "label": "DrCr BF",   "type": "select", "options": ["Dr", "Cr"]},
             ],
         },
     },
 }
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -779,7 +817,7 @@ def register_drilldown_callbacks(app):
         form_data = {**prefill, **{k: v for k, v in form_data.items() if v not in (None, "")}}
         form_data["society_id"] = sid
 
-        ok, msg = _save_entity(entity_singular, card_id, form_data)
+        ok, msg, new_id = _save_entity(entity_singular, card_id, form_data)
 
         # Preserve entered values on validation failure so the form keeps
         # user input and does not clear when the callback returns.
@@ -804,6 +842,9 @@ def register_drilldown_callbacks(app):
         hide_kpis = False
         if ok and store and len(store.get("stack", [])) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
+            # Update entity_pk with newly created ID if applicable
+            if new_id and store.get("stack"):
+                store["stack"][-1]["entity_pk"] = new_id
             store["refresh"] = True
             hide_kpis = len(store.get("stack", [])) > 1
         
@@ -1008,7 +1049,7 @@ def _label_for(entity_plural: str, record: dict) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
-    """Dispatch save by entity singular name. Returns (ok, message)."""
+    """Dispatch save by entity singular name. Returns (ok, message, new_id)."""
     sid     = data.get("society_id")
     is_edit = "edit" in card_id
     pk      = data.get("id")
@@ -1034,33 +1075,32 @@ def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
             return _save_account(db, data, sid, is_edit, pk)
         return False, f"No save handler for '{entity}'"
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
-        db._execute(
-            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,active=%s WHERE id=%s AND society_id=%s",
+        result =db._execute(
+            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,active=%s WHERE id=%s AND society_id=%s RETURNING id",
             (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, 
              d.get("active", "true") == "true", pk, sid),
         )
-        return True, "Apartment updated"
+        return True, "Apartment updated", result["id"] if result else None
     flat = (d.get("flat_number") or "").strip()
     if not flat:
         return False, "Flat number is required"
-    db._execute(
-        "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE)",
+    result =db._execute(
+        "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0),
     )
-    return True, f"Apartment '{flat}' created"
-
+    return True, f"Apartment '{flat}' created", result["id"] if result else None
 
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
     if is_edit:
         email = (d.get("email") or "").strip()
         if not email:
-            return False, "Email is required"
+            return False, "Email is required", None
         
         # Update user email
         db._execute(
@@ -1070,15 +1110,15 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         
         # Update linked table (vendors or security_staff)
         if role == "vendor":
-            db._execute(
+            result_id=db._execute(
                 "UPDATE vendors v SET name=%s, service_type=%s, mobile=%s "
-                "FROM users u WHERE v.id=u.linked_id AND u.id=%s",
+                "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
                 (d.get("name"), d.get("service_type"), d.get("mobile"), pk),
             )
         elif role == "security":
-            db._execute(
+            result_id =db._execute(
                 "UPDATE security_staff s SET name=%s, mobile=%s, shift=%s "
-                "FROM users u WHERE s.id=u.linked_id AND u.id=%s",
+                "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
                 (d.get("name"), d.get("mobile"), d.get("shift"), pk),
             )
         
@@ -1089,7 +1129,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
                 (generate_password_hash(pw), pk, sid),
             )
-        return True, f"{role.title()} updated"
+        return True, f"{role.title()} updated", 
     
     # Create new user
     email = (d.get("email") or "").strip()
@@ -1118,6 +1158,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             "UPDATE users SET linked_id=%s WHERE id=%s",
             (vendor_result["id"], user_id),
         )
+        result_id = vendor_result["id"] if vendor_result else None
     elif role == "security":
         security_result = db._execute(
             "INSERT INTO security_staff(society_id,name,mobile,shift,active) VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
@@ -1128,8 +1169,9 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             "UPDATE users SET linked_id=%s WHERE id=%s",
             (security_result["id"], user_id),
         )
+        result_id = security_result["id"] if security_result else None
     
-    return True, f"{role.title()} '{email}' created"
+    return True, f"{role.title()} '{email}' created", result_id
 
 
 def _save_event(db, d, sid, is_edit, pk):
