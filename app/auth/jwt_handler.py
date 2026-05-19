@@ -1,6 +1,6 @@
 import jwt
 import os
-from datetime import datetime, timedelta
+import time
 from functools import wraps
 from flask import request, jsonify, current_app
 from app.models.user import User
@@ -11,24 +11,27 @@ JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000))
 
 def generate_tokens(user):
     """Generate access and refresh tokens for user"""
+    now = int(time.time())
     access_payload = {
         'user_id': user.id,
         'email': user.email,
         'role': user.role,
         'society_id': user.society_id,
         'type': 'access',
-        'exp': datetime.utcnow() + timedelta(seconds=JWT_ACCESS_TOKEN_EXPIRES)
+        'iat': now,
+        'exp': now + JWT_ACCESS_TOKEN_EXPIRES
     }
-    
+
     refresh_payload = {
         'user_id': user.id,
         'type': 'refresh',
-        'exp': datetime.utcnow() + timedelta(seconds=JWT_REFRESH_TOKEN_EXPIRES)
+        'iat': now,
+        'exp': now + JWT_REFRESH_TOKEN_EXPIRES
     }
-    
+
     access_token = jwt.encode(access_payload, JWT_SECRET, algorithm='HS256')
     refresh_token = jwt.encode(refresh_payload, JWT_SECRET, algorithm='HS256')
-    
+
     return access_token, refresh_token
 
 def verify_token(token):
@@ -46,11 +49,11 @@ def refresh_access_token(refresh_token):
     payload = verify_token(refresh_token)
     if payload.get('error') or payload.get('type') != 'refresh':
         return None, 'Invalid refresh token'
-    
-    user = User.query.get(payload.get('user_id'))
+
+    user = User.get(payload.get('user_id'))
     if not user:
         return None, 'User not found'
-    
+
     access_token, _ = generate_tokens(user)
     return access_token, None
 
