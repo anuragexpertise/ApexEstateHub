@@ -1,4 +1,4 @@
-self.addEventListener('push', function(event) {
+self.addEventListener('push', function (event) {
     let data = {};
     if (event.data) {
         data = event.data.json();
@@ -6,7 +6,7 @@ self.addEventListener('push', function(event) {
     const title = data.title || 'Test Notification';
     const options = {
         body: data.body || 'This is a test message from your server.',
-        icon: data.icon || '/static/assets/logo.png',
+        icon: data.icon || '/static/assets/EH_logo.png',
         badge: '/static/assets/badge.png',
         data: {
             url: data.url || '/'
@@ -15,7 +15,7 @@ self.addEventListener('push', function(event) {
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
-self.addEventListener('notificationclick', function(event) {
+self.addEventListener('notificationclick', function (event) {
     event.notification.close();
     if (event.notification.data && event.notification.data.url) {
         event.waitUntil(clients.openWindow(event.notification.data.url));

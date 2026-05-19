@@ -455,6 +455,80 @@ def register_shell_callbacks(app):
         from app.dash_apps.pages.login_system import login_layout
         return login_layout(society_name)
     
+    @app.callback(
+        Output("login-modal-header", "style"),
+        Output("login-modal-body", "style"),
+        Output("login-society-logo", "src"),
+        Input("auth-store", "data"),
+        State("society-dropdown", "options"),
+        prevent_initial_call=True,
+    )
+    def update_login_branding(auth_data, society_options):
+        """Update login modal branding based on selected society."""
+        if not auth_data:
+            # Stage 1: Default EstateHub branding
+            return (
+                {
+                    'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
+                    'borderRadius': '15px 15px 0 0',
+                },
+                {
+                    'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                    'backgroundSize': 'cover',
+                    'backgroundPosition': 'center',
+                },
+                '/assets/EH_logo.png'
+            )
+        
+        society_id = auth_data.get("society_id")
+        if not society_id or auth_data.get("authenticated"):
+            return no_update, no_update, no_update
+        
+        # Stage 2: Load society-specific branding
+        try:
+            society = db._execute(
+                "SELECT logo, login_background FROM societies WHERE id=%s",
+                (society_id,),
+                fetch_one=True
+            )
+            
+            if society:
+                logo = society.get("logo") or "/assets/EH_logo.png"
+                background = society.get("login_background") or "/assets/EH_bk.jpg"
+                
+                header_style = {
+                    'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
+                    'borderRadius': '15px 15px 0 0',
+                }
+                
+                body_style = {
+                    'backgroundImage': f'url({background})',
+                    'backgroundSize': 'cover',
+                    'backgroundPosition': 'center',
+                    'position': 'relative',
+                }
+                # Add overlay for better text readability
+                if background != "/assets/EH_bk.jpg":
+                    body_style['background'] = f'linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92)), url({background})'
+                
+                return header_style, body_style, logo
+        except Exception as e:
+            print(f"Error loading society branding: {e}")
+        
+        # Fallback to default
+        return (
+            {
+                'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
+                'borderRadius': '15px 15px 0 0',
+            },
+            {
+                'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                'backgroundSize': 'cover',
+                'backgroundPosition': 'center',
+            },
+            '/assets/EH_logo.png'
+        )
+
     # ══════════════════════════════════════════════════════════════════════════
     # 5. TOGGLE MASTER LOGIN
     # ══════════════════════════════════════════════════════════════════════════
@@ -545,7 +619,7 @@ def register_shell_callbacks(app):
             return (
                 html.Div("Please log in", className="text-muted text-center mt-5"),
                 [], [], "", {}, "—", "—", "?", "User", "?", "EsateHub",
-                "/static/assets/logo.png"
+                "/static/assets/EH_logo.png"
             )
         
         # User is authenticated - show content (modal managed by separate callback)
@@ -562,7 +636,7 @@ def register_shell_callbacks(app):
         
         # Get society details
         society_name = "EsateHub"
-        society_logo = "/static/assets/logo.png"
+        society_logo = "/static/assets/EH_logo.png"
         if society_id:
             society = db._execute(
                 "SELECT name, logo FROM societies WHERE id = %s",
