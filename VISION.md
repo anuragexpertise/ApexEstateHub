@@ -1,4 +1,4 @@
-# ApexEstateHub — Complete Society Management System
+# EsateHub — Complete Society Management System
 ### Professional Property Management Software for Modern Communities
 
 ![Version](https://img.shields.io/badge/version-2.0-blue)
@@ -9,9 +9,9 @@
 
 ## 🏢 Executive Summary
 
-**ApexEstateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with cutting-edge technology and a mobile-first approach, it streamlines every aspect of community management—from financial tracking to security operations.
+**EsateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with cutting-edge technology and a mobile-first approach, it streamlines every aspect of community management—from financial tracking to security operations.
 
-### Why Choose ApexEstateHub?
+### Why Choose EsateHub?
 
 - ✅ **Complete Digital Transformation** - Eliminate paper-based processes entirely
 - ✅ **Real-Time Operations** - Instant updates across web and mobile platforms
@@ -43,7 +43,7 @@
 
 ### Competitive Advantages
 
-| Feature | ApexEstateHub | Traditional Software |
+| Feature | EsateHub | Traditional Software |
 |---------|---------------|---------------------|
 | **Deployment** | Cloud-instant setup | On-premise, weeks of setup |
 | **Mobile Access** | Native mobile experience | Desktop-only or basic mobile |
@@ -548,7 +548,7 @@ Desktop (1920px+)     Tablet (768-1919px)    Mobile (320-767px)
 
 ### **Time Savings**
 
-| Task | Manual Process | With ApexEstateHub | Time Saved |
+| Task | Manual Process | With EsateHub | Time Saved |
 |------|----------------|-------------------|------------|
 | Monthly billing | 8 hours | 30 minutes | **93%** |
 | Payment collection | 40 hours | 2 hours | **95%** |
@@ -663,7 +663,7 @@ Desktop (1920px+)     Tablet (768-1919px)    Mobile (320-767px)
 ### **Green Valley Residences** (Mumbai)
 *250 apartments, Professional Plan*
 
-> "ApexEstateHub transformed our operations. Bill generation that took 2 days now takes 30 minutes. Collection efficiency improved from 60% to 95%. The QR gate system eliminated unauthorized entries completely. Best investment we've made!"
+> "EsateHub transformed our operations. Bill generation that took 2 days now takes 30 minutes. Collection efficiency improved from 60% to 95%. The QR gate system eliminated unauthorized entries completely. Best investment we've made!"
 > 
 > **— Rajesh Kumar, Society Secretary**
 
@@ -774,7 +774,7 @@ Desktop (1920px+)     Tablet (768-1919px)    Mobile (320-767px)
 
 ### **Request a Demo**
 
-See ApexEstateHub in action with a personalized demo:
+See EsateHub in action with a personalized demo:
 
 - 🎥 **Live Demo**: Schedule a 30-minute walkthrough
 - 📱 **Try It**: Get 14-day free trial (no credit card required)
@@ -791,7 +791,7 @@ See ApexEstateHub in action with a personalized demo:
 ### **Sales Contacts**
 
 **Corporate Office:**
-ApexEstateHub Technologies Pvt. Ltd.
+EsateHub Technologies Pvt. Ltd.
 123, Tech Park, Electronic City
 Bangalore - 560100, India
 
@@ -850,9 +850,9 @@ Bangalore - 560100, India
 
 ### **General**
 
-**Q: How is ApexEstateHub different from Excel/Google Sheets?**
+**Q: How is EsateHub different from Excel/Google Sheets?**
 
-A: While spreadsheets work for small societies, they become error-prone and time-consuming as you grow. ApexEstateHub offers:
+A: While spreadsheets work for small societies, they become error-prone and time-consuming as you grow. EsateHub offers:
 - Automated calculations (no formula errors)
 - Multi-user access with permissions
 - Mobile apps for residents
@@ -948,9 +948,9 @@ A: Maintenance windows are announced 7 days in advance and scheduled during low-
 
 ## 📜 Conclusion
 
-ApexEstateHub is more than software—it's a complete digital transformation for your society. From automated billing to smart gate access, from complaint management to financial transparency, we've thought of everything.
+EsateHub is more than software—it's a complete digital transformation for your society. From automated billing to smart gate access, from complaint management to financial transparency, we've thought of everything.
 
-**Join 500+ societies already using ApexEstateHub**
+**Join 500+ societies already using EsateHub**
 
 ### **Transform Your Society Management Today**
 
@@ -962,7 +962,7 @@ ApexEstateHub is more than software—it's a complete digital transformation for
 
 ---
 
-**© 2026 ApexEstateHub Technologies Pvt. Ltd. All rights reserved.**
+**© 2026 EsateHub Technologies Pvt. Ltd. All rights reserved.**
 
 *Making Society Management Effortless*
 

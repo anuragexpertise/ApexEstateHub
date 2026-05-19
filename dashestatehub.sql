@@ -1,5 +1,5 @@
 -- ============================================================
--- ApexEstateHub  --  Unified Database Schema (Aiven PostgreSQL)
+-- EsateHub  --  Unified Database Schema (Aiven PostgreSQL)
 -- Run via:  python3 database/migrate.py
 -- ============================================================
 -- All CREATE TABLE, ALTER TABLE, and INDEX statements merged

@@ -1,6 +1,6 @@
 # app/services/auth_service.py
 """
-Complete Authentication Service for ApexEstateHub
+Complete Authentication Service for EsateHub
 - JWT token generation
 - Password/PIN/9-dot-pattern authentication
 - Push notification (FCM/VAPID)
@@ -522,24 +522,24 @@ def _send_reset_email(email, token):
 
     # Build email
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Reset your ApexEstateHub password"
-    msg["From"] = f"ApexEstateHub <{smtp_user}>"
+    msg["Subject"] = "Reset your EsateHub password"
+    msg["From"] = f"EsateHub <{smtp_user}>"
     msg["To"] = email
 
     plain = (
-        f"You requested a password reset for your ApexEstateHub account.\n\n"
+        f"You requested a password reset for your EsateHub account.\n\n"
         f"Click the link below to set a new password (valid for 1 hour):\n\n"
         f"{reset_url}\n\n"
         f"If you did not request this, please ignore this email. "
         f"Your password will not change.\n\n"
-        f"— ApexEstateHub Team"
+        f"— EsateHub Team"
     )
 
     html = f"""
     <html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:30px;">
       <div style="max-width:520px;margin:auto;background:#fff;border-radius:10px;
                   padding:36px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">
-        <h2 style="color:#6c3fc5;margin-top:0;">ApexEstateHub</h2>
+        <h2 style="color:#6c3fc5;margin-top:0;">EsateHub</h2>
         <p style="font-size:16px;color:#333;">Hi,</p>
         <p style="font-size:15px;color:#555;">
           You requested a password reset. Click the button below to set a new password.
@@ -559,7 +559,7 @@ def _send_reset_email(email, token):
         </p>
         <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
         <p style="font-size:12px;color:#bbb;text-align:center;">
-          &copy; 2025 ApexEstateHub. All rights reserved.
+          &copy; 2025 EsateHub. All rights reserved.
         </p>
       </div>
     </body></html>

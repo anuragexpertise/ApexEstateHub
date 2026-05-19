@@ -50,7 +50,7 @@ def society_select_layout(societies_list=None, error_message=None, show_master_l
     #                         "padding": "40px"
     #                     },
     #                     children=[
-    #                         html.H1("ApexEstateHub", 
+    #                         html.H1("EsateHub", 
     #                                style={"textAlign": "center", "marginBottom": "20px", "color": "#333"}),
     #                         html.H3("Welcome Back!", 
     #                                style={"textAlign": "center", "marginBottom": "10px"}),
@@ -159,9 +159,9 @@ def society_select_layout(societies_list=None, error_message=None, show_master_l
         [
             dbc.ModalHeader(
                 html.Div([
-                    html.Img(src='/static/assets/logo.png',
+                    html.Img(src='/static/assets/EH_logo.png',
                             style={'height': '36px', 'marginRight': '10px'}),
-                    html.Span('ApexEstateHub',
+                    html.Span('EstateHub',
                             style={'fontWeight': '700', 'fontSize': '20px', 
                                     'color': '#fff'}),
                 ], style={'display': 'flex', 'alignItems': 'center'}),
@@ -180,6 +180,10 @@ def society_select_layout(societies_list=None, error_message=None, show_master_l
                 
                 # Stage 2: Multi-method login (hidden, filled by callback)
                 html.Div(id='login-stage-2', style={'display': 'none'}),
+            ]),
+            dbc.ModalFooter([
+                html.Div(id='modal-footer', style={"color": "#999", "fontSize": "12px", "marginTop": "20px",'textAlign': 'center'}, 
+                         children=["Need help? Contact your society administrator"])
             ]),
         ],
         id='login-modal',

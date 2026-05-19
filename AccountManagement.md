@@ -1,11 +1,11 @@
 # Account Management System Specification
-## ApexEstateHub - Society Accounting Module
+## EsateHub - Society Accounting Module
 
 ---
 
 ## 📋 Overview
 
-Based on the uploaded Excel files, this document specifies the complete accounting system structure for ApexEstateHub, including:
+Based on the uploaded Excel files, this document specifies the complete accounting system structure for EsateHub, including:
 
 1. **Accounts Master** - Chart of accounts with parent_account_id
 2. **Cashbook** - Dual-entry receipt/payment register with running balance

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # database/seed.py
 """
-First-run seeder for ApexEstateHub.
+First-run seeder for EsateHub.
 Handles:
  1. Creating Master Admin if no users exist.
  2. Creating Dummy Society + Users if no societies exist.

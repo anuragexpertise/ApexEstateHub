@@ -544,7 +544,7 @@ def register_shell_callbacks(app):
             print(f"\n⚠️  Not authenticated for path: {pathname}")
             return (
                 html.Div("Please log in", className="text-muted text-center mt-5"),
-                [], [], "", {}, "—", "—", "?", "User", "?", "ApexEstateHub",
+                [], [], "", {}, "—", "—", "?", "User", "?", "EsateHub",
                 "/static/assets/logo.png"
             )
         
@@ -561,7 +561,7 @@ def register_shell_callbacks(app):
         user_name = email.split("@")[0].title()
         
         # Get society details
-        society_name = "ApexEstateHub"
+        society_name = "EsateHub"
         society_logo = "/static/assets/logo.png"
         if society_id:
             society = db._execute(

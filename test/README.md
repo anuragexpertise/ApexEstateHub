@@ -1,4 +1,4 @@
-# ApexEstateHub — Society Management Platform
+# EsateHub — Society Management Platform
 ### Professional Property Management Software for Modern Communities
 
 ![Version](https://img.shields.io/badge/version-2.0-blue)
@@ -11,7 +11,7 @@
 
 ## 🏢 Executive Summary
 
-**ApexEstateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with Plotly Dash and Flask, it provides a mobile-first, single-page application experience with real-time updates and role-based access control.
+**EsateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with Plotly Dash and Flask, it provides a mobile-first, single-page application experience with real-time updates and role-based access control.
 
 ### Core Capabilities
 
@@ -520,7 +520,7 @@ python3 database/migrate.py
 ```bash
 # 1. Clone repository
 git clone <repo-url>
-cd ApexEstateHub
+cd EsateHub
 
 # 2. Create virtual environment
 python3 -m venv venv
@@ -569,7 +569,7 @@ apexweave run python database/migrate.py
 ## 📦 Project Structure
 
 ```
-ApexEstateHub/
+EsateHub/
 ├── app/
 │   ├── __init__.py
 │   ├── dash_apps/
@@ -826,7 +826,7 @@ for _, row in df.iterrows():
 
 ## 📄 License
 
-**Commercial License** - All rights reserved by ApexEstateHub Technologies Pvt. Ltd.
+**Commercial License** - All rights reserved by EsateHub Technologies Pvt. Ltd.
 
 This software is proprietary. Unauthorized copying, modification, or distribution is prohibited.
 
@@ -846,7 +846,7 @@ For licensing inquiries: sales@estatehub.com
 
 **Version:** 2.0  
 **Last Updated:** May 2026  
-**Maintained By:** ApexEstateHub Development Team
+**Maintained By:** EsateHub Development Team
 
 ---
 

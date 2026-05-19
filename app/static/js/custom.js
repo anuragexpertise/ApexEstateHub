@@ -1,5 +1,5 @@
-// Custom JavaScript for ApexEstateHub
-console.log('ApexEstateHub - Custom JS loaded');
+// Custom JavaScript for EsateHub
+console.log('EsateHub - Custom JS loaded');
 
 // Handle sidebar toggle for mobile
 function initSidebarToggle() {

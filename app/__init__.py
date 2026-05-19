@@ -107,12 +107,12 @@ def create_dash_app(flask_app):
         ],
         suppress_callback_exceptions = True,
         # Show a loading indicator while callbacks run
-        update_title         = 'Loading… | ApexEstateHub',
+        update_title         = 'Loading… | EsateHub',
     )
 
     # Expose the server for gunicorn / ApexWeave
     # (entry point:  from app import create_dash_app; server = dash_app.server)
-    dash_app.title = 'ApexEstateHub'
+    dash_app.title = 'EsateHub'
 
     # ── Layout ────────────────────────────────────────────────────
     try:
@@ -139,7 +139,7 @@ def _fallback_layout(error_msg: str):
     """Minimal layout shown when the real layout cannot be imported."""
     return html.Div(
         [
-            html.H1("ApexEstateHub",
+            html.H1("EsateHub",
                     style={"textAlign": "center", "marginTop": "60px", "color": "#2c3e50"}),
             html.P("⚠️  Could not load dashboard layout.",
                    style={"textAlign": "center", "color": "#e74c3c", "marginTop": "10px"}),

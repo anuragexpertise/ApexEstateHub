@@ -178,7 +178,7 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("  ApexEstateHub — Aiven Database Migration")
+    print("  EsateHub — Aiven Database Migration")
     print("=" * 60)
     print(f"  SQL file : {sql_path}")
     print(f"  Host     : {os.getenv('PGHOST', '?')}:{os.getenv('PGPORT', '?')}")
