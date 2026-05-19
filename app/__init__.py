@@ -26,7 +26,7 @@ def create_app(config_name=None):
 
     app = Flask(
         __name__,
-        # Flask static files (login.html, sw.js, push.js, logo.png …)
+        # Flask static files (login.html, sw.js, push.js, EH_logo.png …)
         static_folder=os.path.join(os.path.dirname(__file__), 'static'),
         static_url_path='/static',
     )
@@ -86,7 +86,7 @@ def create_dash_app(flask_app):
         • templates/login.html  (references /static/css/style.css)
         • static/js/sw.js       (service-worker, registered at root scope)
         • static/js/push.js
-        • static/assets/logo.png
+        • static/assets/EH_logo.png
     """
 
     # Absolute path → app/assets/  (sibling of this __init__.py)

@@ -10,6 +10,7 @@ Key fixes vs previous version:
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+# from app.dash_apps.pages.login_system import LOGIN_STYLES
 
 # ── Role configuration ────────────────────────────────────────────────────────
 ROLE_CONFIG = {
@@ -87,41 +88,65 @@ def _login_modal():
     from app.dash_apps.pages.login_system import society_select_layout
 
     return dbc.Modal(
-        [
-            dbc.ModalHeader(
-                html.Div([
-                    html.Img(src='/static/assets/logo.png',
-                             style={'height': '36px', 'marginRight': '10px'}),
-                    html.Span('EsateHub',
-                              style={'fontWeight': '700', 'fontSize': '20px', 'color': '#fff'}),
-                ], style={'display': 'flex', 'alignItems': 'center'}),
+    [
+        dbc.ModalHeader(
+            html.Div([
+                html.Img(
+                    # id="login-society-logo",  # Dynamic logo
+                    src='/assets/EH_logo.png',  # Default
+                    style={'height': '36px', 'marginRight': '10px'}
+                ),
+                html.Span('EstateHub',
+                        style={'fontWeight': '700', 'fontSize': '20px', 
+                                'color': '#fff'}),
+            ], style={'display': 'flex', 'alignItems': 'center'}),
+            id="login-modal-header",  # NEW: ID for dynamic styling
+            style={
+                'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
+                'borderRadius': '15px 15px 0 0',
+            },
+            close_button=False,
+        ),
+        dbc.ModalBody(
+            [
+                # Inject CSS for tabs and pattern UI
+                # html.Div(dangerouslySetInnerHTML={'__html': LOGIN_STYLES}),
+                
+                # Stage 1: Society selection (visible by default)
+                html.Div(id='login-stage-1', children=society_select_layout()),
+                
+                # Stage 2: Multi-method login (hidden, filled by callback)
+                html.Div(id='login-stage-2', style={'display': 'none'}),
+            ],
+            id="login-modal-body",  # NEW: ID for dynamic background
+            style={
+                'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                'backgroundSize': 'cover',
+                'backgroundPosition': 'center',
+                'minHeight': '400px',
+            }
+        ),
+        dbc.ModalFooter([
+            html.Div(
+                id='modal-footer', 
                 style={
-                    'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
-                    'borderRadius': '15px 15px 0 0',
-                },
-                close_button=False,
-            ),
-
-            dbc.ModalBody([
-                html.Div(
-                    id='login-stage-1',
-                    children=society_select_layout()
-                ),
-
-                html.Div(
-                    id='login-stage-2',
-                    style={'display': 'none'}
-                ),
-            ]),
-        ],
-        id='login-modal',
-        is_open=False,
-        backdrop='static',
-        keyboard=False,
-        centered=True,
-        size='md',
-        style={'zIndex': '2000'},
-    )
+                    "color": "#999", 
+                    "fontSize": "12px", 
+                    "marginTop": "20px",
+                    'textAlign': 'center'
+                }, 
+                children=["Need help? Contact your society administrator"]
+            )
+        ]),
+    ],
+    id='login-modal',
+    is_open=True,
+    backdrop='static',
+    keyboard=False,
+    centered=True,
+    size='md',
+    style={'zIndex': '2000'},
+)
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 def _sidebar():
     return html.Aside(
@@ -129,7 +154,7 @@ def _sidebar():
             # Brand
             html.Div(
                 [
-                    html.Img(src='/static/assets/logo.png',
+                    html.Img(src='/static/assets/EH_logo.png',
                              style={'width': '50px', 'borderRadius': '10px', 'marginBottom': '10px'}),
                     html.Div('EstateHub',
                              id='sb-app-name',
@@ -239,7 +264,7 @@ def _header():
                 [
                     html.Img(
                         id='hdr-society-logo',
-                        src='/static/assets/logo.png',
+                        src='/static/assets/EH_logo.png',
                         style={
                             'width': '38px', 'height': '38px', 'borderRadius': '12px',
                             'objectFit': 'cover', 'flexShrink': '0',

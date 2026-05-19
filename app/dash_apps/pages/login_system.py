@@ -87,7 +87,8 @@ def society_select_layout():
             html.Div(
                 [
                     html.Img(
-                        src="/static/assets/logo.png",
+                        id="login-society-logo",
+                        src="/static/assets/EH_logo.png",
                         style={
                             "height": "80px",
                             "marginBottom": "20px",

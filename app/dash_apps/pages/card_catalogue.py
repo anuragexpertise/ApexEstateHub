@@ -681,7 +681,7 @@ def _evaluate_pass_card_body():
                         html.Video(
                             id="eval-video",
                             autoPlay=True,
-                            playsInline=True,
+                            # playsInline=True,
                             muted=True,
                             style={
                                 "width": "100%",

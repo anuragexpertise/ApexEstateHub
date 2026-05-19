@@ -15,7 +15,9 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from .registry import DRILLDOWN_MAP, to_singular
-
+import base64
+import os
+from pathlib import Path
 
 # ── Colour palette (matches app/assets/style.css CSS vars) ─────────────────
 COLORS = {
@@ -426,6 +428,7 @@ def render_list_card(card_id: str, title: str, icon: str,
 # PROFILE CARD (generic)
 # ════════════════════════════════════════════════════════════════════════════
 
+
 def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record: dict,
                         fields: list[dict],
@@ -453,22 +456,33 @@ def render_profile_card(card_id: str, title: str, icon: str,
         else:
             val = str(val)
 
+        # logo_path = society_data.get('logo') if society_data else None
+        # bg_path = society_data.get('login_background') if society_data else None
+        # sign_path = society_data.get('secretary_sign') if society_data else None
+
+        # if f.get("label") ="Logo":
+        #     field_rows.append(          _add_image_upload_field("logo", "Society Logo", logo_path))
+        # elif f.get("label") ="Login Background":
+        #     field_rows.append(         _add_image_upload_field("login_background", "Login Background Image", bg_path))
+        # elif f.get("label") = "Secretary's Sign":
+        #     field_rows.append(          _add_image_upload_field("secretary_sign", "Secretary's Signature", sign_path))
+        # else:
         field_rows.append(
             html.Div(
                 [
                     html.Div(
                         [
                             html.I(className=f"fas {f.get('icon', 'fa-circle-dot')} me-2",
-                                   style={"color": "#aaa", "width": "14px"}),
+                                style={"color": "#aaa", "width": "14px"}),
                             html.Span(f["label"],
-                                      style={"color": "#7d8ea3", "fontSize": "11px",
-                                             "fontWeight": "600", "textTransform": "uppercase",
-                                             "letterSpacing": "0.4px"}),
+                                    style={"color": "#7d8ea3", "fontSize": "11px",
+                                            "fontWeight": "600", "textTransform": "uppercase",
+                                            "letterSpacing": "0.4px"}),
                         ],
                         style={"marginBottom": "2px"},
                     ),
                     html.Div(val, style={"fontSize": "14px", "fontWeight": "500",
-                                         "color": "#15304f", "paddingLeft": "22px"}),
+                                        "color": "#15304f", "paddingLeft": "22px"}),
                 ],
                 style={"marginBottom": "14px"},
             )
@@ -674,7 +688,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                      color: str = "#17976e",
                      society_id: int | None = None) -> html.Div:
     """
-    Generic form card with pre-fill support.
+    Generic form card with pre-fill support and image upload
 
     fields = [
       {"id": "flat_number", "label": "Flat Number", "type": "text", "required": True},
@@ -684,6 +698,7 @@ def render_form_card(card_id: str, title: str, icon: str,
     ]
     """
     from database.db_manager import db
+   
     prefill = prefill or {}
     form_rows = []
 
@@ -751,6 +766,58 @@ def render_form_card(card_id: str, title: str, icon: str,
                 clearable=False,
                 style={"fontSize": "13px"},
             )
+        elif ftype == "image_upload":
+            # Image upload field with preview
+            current_image = pre_val if pre_val else None
+            ctrl = html.Div([
+                dcc.Upload(
+                    id={"type": "form-field", "entity": entity, "field": fid},
+                    children=html.Div([
+                        html.I(className="fas fa-cloud-upload-alt me-2"),
+                        html.Span("Drag & Drop or Click to Upload Image")
+                    ]),
+                    style={
+                        "width": "100%",
+                        "height": "80px",
+                        "lineHeight": "80px",
+                        "borderWidth": "2px",
+                        "borderStyle": "dashed",
+                        "borderRadius": "10px",
+                        "textAlign": "center",
+                        "borderColor": "#667eea",
+                        "background": "rgba(102,126,234,0.05)",
+                        "cursor": "pointer",
+                        "fontSize": "13px",
+                        "color": "#667eea"
+                    },
+                    multiple=False,
+                    accept="image/*"
+                ),
+                # Image preview
+                html.Div(
+                    id={"type": "image-preview", "entity": entity, "field": fid},
+                    children=[
+                        html.Img(
+                            src=current_image if current_image else "",
+                            style={
+                                "maxWidth": "200px",
+                                "maxHeight": "150px",
+                                "marginTop": "10px",
+                                "borderRadius": "8px",
+                                "border": "1px solid #ddd",
+                                "display": "block" if current_image else "none"
+                            }
+                        )
+                    ],
+                    style={"marginTop": "10px"}
+                ),
+                # Hidden field to store the uploaded file path
+                dcc.Input(
+                    id={"type": "form-field-hidden", "entity": entity, "field": fid},
+                    type="hidden",
+                    value=current_image or ""
+                )
+            ])
         else:
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},

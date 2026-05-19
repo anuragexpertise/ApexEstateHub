@@ -47,7 +47,11 @@ import json
 import io
 import csv
 import pandas as pd
-
+import base64
+import os
+from pathlib import Path
+from PIL import Image
+import io
 import dash
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
@@ -434,26 +438,28 @@ ENTITY_META: dict = {
         ],
         "form_fields": {
             "new": [
-                {"id": "logo",         "label": "Logo",            "type": "text"},
-                {"id": "login_background",         "label": "Login Background",            "type": "text"},
-                {"id": "name",          "label": "Society Name",     "type": "text",  "required": True},
-                {"id": "address",       "label": "Address",          "type": "textarea"},
-                {"id": "email",         "label": "Email",            "type": "email"},
-                {"id": "phone",         "label": "Phone",            "type": "text"},
-
-                {"id": "plan",          "label": "Plan",             "type": "select", "options": ["Free", "10 Apts","99 Apts","999 Apts","Unlimited"]},
-                {"id": "secretary_name",       "label": "Secretary's Name",          "type": "text"},
-                {"id": "secretary_phone",       "label": "Secretary's Phone",          "type": "text"},
-                {"id": "secretary_sign",       "label": "Secretary's Sign",          "type": "text"},
-                {"id": "arrear_start_date",       "label": "Arrear Start Date",          "type": "datetime"},
-                {"id": "admin_email",   "label": "Admin Email *",    "type": "email", "required": True},
-                {"id": "admin_password","label": "Admin Password *", "type": "password", "required": True},
+                {"id": "logo", "label": "Society Logo", "type": "image_upload"},
+                {"id": "login_background", "label": "Login Background", "type": "image_upload"},
+                {"id": "name", "label": "Society Name", "type": "text", "required": True},
+                {"id": "address", "label": "Address", "type": "textarea"},
+                {"id": "email", "label": "Email", "type": "email"},
+                {"id": "phone", "label": "Phone", "type": "text"},
+                {"id": "plan", "label": "Plan", "type": "select", "options": ["Free", "10 Apts","99 Apts","999 Apts","Unlimited"]},
+                {"id": "secretary_name", "label": "Secretary's Name", "type": "text"},
+                {"id": "secretary_phone", "label": "Secretary's Phone", "type": "text"},
+                {"id": "secretary_sign", "label": "Secretary's Signature", "type": "image_upload"},
+                {"id": "arrear_start_date", "label": "Arrear Start Date", "type": "date"},
+                {"id": "admin_email", "label": "Admin Email *", "type": "email", "required": True},
+                {"id": "admin_password", "label": "Admin Password *", "type": "password", "required": True},
             ],
             "edit": [
-                {"id": "email",   "label": "Email",        "type": "email"},
-                {"id": "phone",   "label": "Phone",        "type": "text"},
-                {"id": "address", "label": "Address",      "type": "textarea"},
-                {"id": "plan",    "label": "Plan",         "type": "select", "options": ["Free", "10 Apts","99 Apts","999 Apts","Unlimited"]},
+                {"id": "logo", "label": "Society Logo", "type": "image_upload"},
+                {"id": "login_background", "label": "Login Background", "type": "image_upload"},
+                {"id": "email", "label": "Email", "type": "email"},
+                {"id": "phone", "label": "Phone", "type": "text"},
+                {"id": "address", "label": "Address", "type": "textarea"},
+                {"id": "plan", "label": "Plan", "type": "select", "options": ["Free", "10 Apts","99 Apts","999 Apts","Unlimited"]},
+                {"id": "secretary_sign", "label": "Secretary's Signature", "type": "image_upload"},
             ],
         },
     },
@@ -748,6 +754,88 @@ def register_drilldown_callbacks(app):
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, kpi_style, no_update
+    # -----1A FORM HANDLE IMAGE UPLOAD (NEW) ─────────────────────────────────────────────
+    @app.callback(
+        Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
+        Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
+        Input({"type": "form-field", "entity": MATCH, "field": MATCH}, "contents"),
+        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
+        State("auth-store", "data"),
+        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
+        prevent_initial_call=True,
+    )
+    def handle_image_upload(contents, filename, auth, field_id):
+        """Handle image upload and save to assets folder."""
+        if not contents:
+            return no_update, no_update
+        
+        try:
+            society_id = (auth or {}).get("society_id")
+            if not society_id:
+                return no_update, no_update
+            
+            # Parse the base64 image
+            content_type, content_string = contents.split(',')
+            decoded = base64.b64decode(content_string)
+            
+            # Create society assets directory
+            assets_dir = Path("app/assets") / str(society_id)
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate unique filename
+            field_name = field_id.get("field", "image")
+            file_ext = os.path.splitext(filename)[1] if filename else ".png"
+            file_path = assets_dir / f"{field_name}{file_ext}"
+            
+            # Optimize and save image
+            img = Image.open(io.BytesIO(decoded))
+            
+            # Resize if too large (max 1920px width)
+            max_width = 1920
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convert RGBA to RGB if needed
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            
+            # Save optimized image
+            img.save(file_path, 'JPEG', quality=85, optimize=True)
+            
+            # Return web-accessible path
+            web_path = f"/assets/{society_id}/{field_name}{file_ext}"
+            
+            # Preview component
+            preview = html.Div([
+                html.Img(
+                    src=web_path,
+                    style={
+                        "maxWidth": "200px",
+                        "maxHeight": "150px",
+                        "borderRadius": "8px",
+                        "border": "1px solid #ddd",
+                        "display": "block"
+                    }
+                ),
+                html.Small(
+                    f"✓ {filename}",
+                    style={"color": "#17976e", "marginTop": "5px", "display": "block"}
+                )
+            ])
+            
+            return preview, web_path
+            
+        except Exception as e:
+            print(f"Error uploading image: {e}")
+            error_msg = html.Small(
+                f"✗ Upload failed: {str(e)}",
+                style={"color": "#dc3545", "marginTop": "5px", "display": "block"}
+            )
+            return error_msg, no_update
 
     # ── 2. FORM SUBMIT → save → back → refresh ─────────────────────────────
     @app.callback(
@@ -759,6 +847,7 @@ def register_drilldown_callbacks(app):
 
         Input({"type": "form-submit", "entity": ALL, "card_id": ALL}, "n_clicks"),
         State({"type": "form-field",  "entity": ALL, "field": ALL},   "value"),
+        State({"type": "form-field-hidden", "entity": ALL, "field": ALL}, "value"),
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
         prevent_initial_call=True,
@@ -789,11 +878,17 @@ def register_drilldown_callbacks(app):
                     k_dict = json.loads(key.split(".")[0])
                 except Exception:
                     continue
-                if k_dict.get("type") != "form-field":
-                    continue
-                if to_singular(k_dict.get("entity")) != entity_singular:
-                    continue
-                form_data[k_dict.get("field")] = val
+                
+                # Handle both regular and hidden fields
+                if k_dict.get("type") in ("form-field", "form-field-hidden"):
+                    if to_singular(k_dict.get("entity")) != entity_singular:
+                        continue
+                    field_name = k_dict.get("field")
+                    # Hidden fields (image paths) override regular fields
+                    if k_dict.get("type") == "form-field-hidden" and val:
+                        form_data[field_name] = val
+                    elif field_name not in form_data:
+                        form_data[field_name] = val
 
         # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
@@ -897,6 +992,7 @@ def register_drilldown_callbacks(app):
 # ═══════════════════════════════════════════════════════════════════════════
 # INTERNAL RENDER ENGINE
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _render_current(store: dict, auth: dict) -> tuple:
     """Return (content_div, breadcrumb_nav) for the current active card."""
@@ -1030,6 +1126,8 @@ def _label_for(entity_plural: str, record: dict) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # DB SAVE HELPERS (ENHANCED & COMPLETED)
 # ═══════════════════════════════════════════════════════════════════════════
+
+
 
 def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
     """Dispatch save by entity singular name. Returns (ok, message, new_id)."""
@@ -1287,7 +1385,7 @@ def _save_transaction(db, d, sid, transaction_type):
         )
         
         label = "Receipt" if transaction_type == "receipt" else "Expense"
-        return True, f"{label} of ₹{amt:,.2f} recorded in {account['name']}"
+        return True, f"{label} of ₹{amt:,.2f} recorded successfully"
         
     except Exception as e:
         return False, f"Database error: {str(e)}"
@@ -1314,10 +1412,13 @@ def _save_society(db, d, sid, is_edit, pk):
     
     if is_edit:
         db._execute(
-            "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s WHERE id=%s",
-            (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), d.get("plan","Free"), pk),
+            "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
+            "logo=%s,login_background=%s,secretary_sign=%s WHERE id=%s",
+            (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), 
+             d.get("plan","Free"), d.get("logo"), d.get("login_background"),
+             d.get("secretary_sign"), pk),
         )
-        return True, "Society updated"
+        return True, "Society updated", pk
     
     name = (d.get("name") or "").strip()
     if not name:
@@ -1329,10 +1430,15 @@ def _save_society(db, d, sid, is_edit, pk):
         return False, "Admin email and password are required"
     
     result = db._execute(
-        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,arrear_start_date,created_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
+        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,"
+        "arrear_start_date,logo,login_background,secretary_name,secretary_phone,"
+        "secretary_sign,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
         (name, d.get("email"), d.get("phone"), d.get("address"),
-         d.get("plan","Free"), dt_date.today().isoformat(), dt_date.today().isoformat()),
+         d.get("plan","Free"), dt_date.today().isoformat(), 
+         d.get("arrear_start_date") or dt_date.today().isoformat(),
+         d.get("logo"), d.get("login_background"), d.get("secretary_name"),
+         d.get("secretary_phone"), d.get("secretary_sign")),
         fetch_one=True,
     )
     
@@ -1387,6 +1493,7 @@ def _save_account(db, d, sid, is_edit, pk):
 # ═══════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _get_account_by_name(society_id: int, account_name: str) -> dict | None:
     """Get account by name for a society."""

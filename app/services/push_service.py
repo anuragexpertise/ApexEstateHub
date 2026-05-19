@@ -59,7 +59,7 @@ def send_push_notification(user_id, title, body, icon=None, url=None):
         notification_data = {
             'title': title,
             'body': body,
-            'icon': icon or '/static/assets/logo.png',
+            'icon': icon or '/static/assets/EH_logo.png',
             'url': url or '/dashboard/',
         }
         
