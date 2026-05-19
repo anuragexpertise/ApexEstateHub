@@ -52,13 +52,13 @@ def generate_jwt_token(user_id, email, role, society_id=None):
     """
     now = int(time.time())
     payload = {
-        "sub": user_id,          # Subject (user_id)
-        "email": email,          # User email
-        "role": role,            # User role (admin/apartment/vendor/security)
-        "society_id": society_id, # Associated society
-        "iat": now,              # Issued at (Unix timestamp)
+        "sub": str(user_id),         # Subject (user_id as string per JWT spec)
+        "email": email,              # User email
+        "role": role,                # User role (admin/apartment/vendor/security)
+        "society_id": society_id,    # Associated society
+        "iat": now,                  # Issued at (Unix timestamp)
         "exp": now + (JWT_EXPIRY_HOURS * 3600),  # Expiry (Unix timestamp)
-        "type": "access"         # Token type
+        "type": "access"             # Token type
     }
 
     token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
