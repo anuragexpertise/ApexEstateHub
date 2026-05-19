@@ -92,8 +92,8 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
                       COALESCE(a.flat_number, '') AS flat_number
                FROM users u
                LEFT JOIN apartments a ON u.linked_id = a.id AND u.role = 'apartment'
-               WHERE u.id = %s AND u.society_id = %s""",
-            (user_id, qr_society_id),
+               WHERE u.id = :user_id AND u.society_id = :society_id""",
+            {"user_id": user_id, "society_id": qr_society_id},
             fetch_one=True
         )
         
@@ -132,11 +132,11 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
             # Owner: Check pending dues
             dues = db._execute(
                 """SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS total
-                   FROM payments 
-                   WHERE society_id = %s 
-                   AND apartment_id = %s 
+                   FROM payments
+                   WHERE society_id = :society_id
+                   AND apartment_id = :apartment_id
                    AND status = 'pending'""",
-                (qr_society_id, user_row.get("linked_id")),
+                {"society_id": qr_society_id, "apartment_id": user_row.get("linked_id")},
                 fetch_one=True
             ) or {"c": 0, "total": 0}
             
@@ -169,13 +169,13 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
         elif role == "vendor":
             # Vendor: Check active pass
             active_pass = db._execute(
-                """SELECT id, valid_until 
-                   FROM vendor_passes 
-                   WHERE society_id = %s AND user_id = %s 
-                   AND status = 'active' 
+                """SELECT id, valid_until
+                   FROM vendor_passes
+                   WHERE society_id = :society_id AND user_id = :user_id
+                   AND status = 'active'
                    AND valid_until >= CURRENT_DATE
                    ORDER BY valid_until DESC LIMIT 1""",
-                (qr_society_id, user_id),
+                {"society_id": qr_society_id, "user_id": user_id},
                 fetch_one=True
             )
             
@@ -208,11 +208,11 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
         elif role == "security":
             # Security: Check if on duty
             on_duty = db._execute(
-                """SELECT id FROM gate_access 
-                   WHERE society_id = %s AND entity_id = %s 
+                """SELECT id FROM gate_access
+                   WHERE society_id = :society_id AND entity_id = :entity_id
                    AND role = 's' AND time_out IS NULL
                    ORDER BY time_in DESC LIMIT 1""",
-                (qr_society_id, user_id),
+                {"society_id": qr_society_id, "entity_id": user_id},
                 fetch_one=True
             )
             

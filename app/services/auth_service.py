@@ -15,6 +15,7 @@ import logging
 import json
 import re
 import os
+import time
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -46,19 +47,20 @@ LOCKOUT_MINUTES = 15
 def generate_jwt_token(user_id, email, role, society_id=None):
     """
     Generate JWT access token.
-    
+
     Returns: encoded JWT string
     """
+    now = int(time.time())
     payload = {
         "sub": user_id,          # Subject (user_id)
         "email": email,          # User email
         "role": role,            # User role (admin/apartment/vendor/security)
         "society_id": society_id, # Associated society
-        "iat": datetime.utcnow(),  # Issued at
-        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),  # Expiry
+        "iat": now,              # Issued at (Unix timestamp)
+        "exp": now + (JWT_EXPIRY_HOURS * 3600),  # Expiry (Unix timestamp)
         "type": "access"         # Token type
     }
-    
+
     token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return token
 

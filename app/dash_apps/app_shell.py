@@ -93,7 +93,7 @@ def _login_modal():
             html.Div([
                 html.Img(
                     # id="login-society-logo",  # Dynamic logo
-                    src='/assets/EH_logo.png',  # Default
+                    src='/static/assets/EH_logo.png',  # Default
                     style={'height': '36px', 'marginRight': '10px'}
                 ),
                 html.Span('EstateHub',
