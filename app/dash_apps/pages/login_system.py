@@ -96,7 +96,7 @@ def society_select_layout():
                         },
                     ),
                     html.H2(
-                        "ApexEstateHub",
+                        "EsateHub",
                         style={
                             "fontWeight": "800",
                             "background": "linear-gradient(135deg,#667eea,#764ba2)",

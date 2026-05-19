@@ -92,7 +92,7 @@ def _login_modal():
                 html.Div([
                     html.Img(src='/static/assets/logo.png',
                              style={'height': '36px', 'marginRight': '10px'}),
-                    html.Span('ApexEstateHub',
+                    html.Span('EsateHub',
                               style={'fontWeight': '700', 'fontSize': '20px', 'color': '#fff'}),
                 ], style={'display': 'flex', 'alignItems': 'center'}),
                 style={
@@ -247,7 +247,7 @@ def _header():
                     ),
                     html.Div(
                         id='hdr-society-name',
-                        children='ApexEstateHub',
+                        children='EsateHub',
                         style={
                             'fontWeight': '700', 'fontSize': '15px',
                             'marginLeft': '12px', 'minWidth': '0',
@@ -433,7 +433,7 @@ def shell_layout():
                                 html.Div(
                                     [
                                         html.Small(
-                                            '© 2025 ApexEstateHub. All rights reserved.',
+                                            '© 2025 EsateHub. All rights reserved.',
                                             style={'fontSize': '11px', 'color': '#888'},
                                         ),
                                         html.Small(

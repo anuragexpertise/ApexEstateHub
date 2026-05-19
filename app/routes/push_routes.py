@@ -74,7 +74,7 @@ def send_test():
         # Send test notification
         success, message = send_push_notification(
             user_id,
-            title="🔔 Test Notification from ApexEstateHub",
+            title="🔔 Test Notification from EsateHub",
             body="This is a test message! Your push notifications are working correctly.",
             url="/dashboard/"
         )

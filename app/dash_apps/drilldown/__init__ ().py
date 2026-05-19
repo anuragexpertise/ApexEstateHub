@@ -1,6 +1,6 @@
 # app/dash_apps/drilldown/__init__.py
 """
-Drill-Down UX Engine for ApexEstateHub
+Drill-Down UX Engine for EsateHub
 =======================================
 Central navigation engine that powers:
   KPI → List → Profile → Form transitions

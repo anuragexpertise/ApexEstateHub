@@ -9,7 +9,7 @@ Your task is to generate a production-ready web application using:
 - Authentication: Flask-Login + role-based access control
 - Deployment target: ApexWeave (Linux hosting)
 
-The application is called "ApexEstateHub" — a multi-tenant estate management SaaS platform.
+The application is called "EsateHub" — a multi-tenant estate management SaaS platform.
 
 --------------------------------------------------
 CORE REQUIREMENTS
