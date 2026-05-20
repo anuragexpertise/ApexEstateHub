@@ -852,7 +852,8 @@ def register_drilldown_callbacks(app):
         State("auth-store",      "data"),
         prevent_initial_call=True,
     )
-    def handle_form_submit(n_clicks_list, _field_vals, store, auth):
+    def handle_form_submit(n_clicks_list, _field_vals, _hidden_vals, store, auth):
+        
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
 
@@ -1154,7 +1155,7 @@ def _save_entity(entity: str, card_id: str, data: dict) -> tuple:
             return _save_society(db, data, sid, is_edit, pk)
         if entity == "account":
             return _save_account(db, data, sid, is_edit, pk)
-        return False, f"No save handler for '{entity}'"
+        return False, f"No save handler for '{entity}'", None
     except Exception as e:
         return False, str(e), None
 
@@ -1169,7 +1170,7 @@ def _save_apartment(db, d, sid, is_edit, pk):
         return True, "Apartment updated", result["id"] if result else None
     flat = (d.get("flat_number") or "").strip()
     if not flat:
-        return False, "Flat number is required"
+        return False, "Flat number is required", None
     result =db._execute(
         "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0),
@@ -1210,15 +1211,15 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
                 (generate_password_hash(pw), pk, sid),
             )
-        return True, f"{role.title()} updated", 
+        return True, f"{role.title()} updated", pk
     
     # Create new user
     email = (d.get("email") or "").strip()
     if not email:
-        return False, "Email is required"
+        return False, "Email is required", None
     pw = d.get("password", "")
     if not pw:
-        return False, "Password is required"
+        return False, "Password is required", None
     
     # Create user
     user_result = db._execute(
@@ -1264,15 +1265,15 @@ def _save_event(db, d, sid, is_edit, pk):
             (d.get("title"), d.get("description"), d.get("event_date"),
              d.get("event_time"), d.get("venue"), d.get("open_to","all"), pk, sid),
         )
-        return True, "Event updated"
+        return True, "Event updated", pk
     
     title = (d.get("title") or "").strip()
     if not title:
-        return False, "Title is required"
+        return False, "Title is required", None
     
     event_date = d.get("event_date")
     if not event_date:
-        return False, "Event date is required"
+        return False, "Event date is required", None
     
     db._execute(
         "INSERT INTO events(society_id,title,description,event_date,event_time,venue,open_to,created_at) "
@@ -1280,7 +1281,7 @@ def _save_event(db, d, sid, is_edit, pk):
         (sid, title, d.get("description"), event_date, d.get("event_time"),
          d.get("venue"), d.get("open_to","all")),
     )
-    return True, f"Event '{title}' created"
+    return True, f"Event '{title}' created", None
 
 
 def _save_concern(db, d, sid, is_edit, pk):
@@ -1290,11 +1291,11 @@ def _save_concern(db, d, sid, is_edit, pk):
             "UPDATE concerns SET status=%s,assigned_to=%s WHERE id=%s AND society_id=%s",
             (d.get("status","open"), d.get("assigned_to"), pk, sid),
         )
-        return True, "Concern updated"
+        return True, "Concern updated", pk
     
     description = (d.get("description") or "").strip()
     if not description:
-        return False, "Description is required"
+        return False, "Description is required", None
     
     db._execute(
         "INSERT INTO concerns(society_id,flat_no,concern_type,description,preferred_time,status,created_at) "
@@ -1302,7 +1303,7 @@ def _save_concern(db, d, sid, is_edit, pk):
         (sid, d.get("flat_no"), d.get("concern_type","other"), description,
          d.get("preferred_time","anytime")),
     )
-    return True, "Concern submitted"
+    return True, "Concern submitted", None
 
 
 def _save_transaction(db, d, sid, transaction_type):
@@ -1325,34 +1326,34 @@ def _save_transaction(db, d, sid, transaction_type):
     # Validate amount
     amt = d.get("amount")
     if not amt:
-        return False, "Amount is required"
+        return False, "Amount is required", None
     
     try:
         amt = float(amt)
         if amt <= 0:
-            return False, "Amount must be greater than zero"
+            return False, "Amount must be greater than zero", None
     except (ValueError, TypeError):
-        return False, "Invalid amount format"
+        return False, "Invalid amount format", None
     
     # Validate account
     acc_id = d.get("acc_id")
     if not acc_id:
-        return False, "Account is required"
+        return False, "Account is required", None
     
     try:
         acc_id = int(acc_id)
     except (ValueError, TypeError):
-        return False, "Invalid account ID"
+        return False, "Invalid account ID", None
     
     is_valid, error_msg = validate_transaction_account(db, acc_id, sid, transaction_type)
     if not is_valid:
-        return False, error_msg
+        return False, error_msg, None
       
     
     # Get particulars
     particulars = (d.get("acc_particulars") or "").strip()
     if not particulars:
-        return False, "Particulars/description is required"
+        return False, "Particulars/description is required", None
     
     # Get optional fields
     trx_date = d.get("trx_date") or dt_date.today().isoformat()
@@ -1385,17 +1386,17 @@ def _save_transaction(db, d, sid, transaction_type):
         )
         
         label = "Receipt" if transaction_type == "receipt" else "Expense"
-        return True, f"{label} of ₹{amt:,.2f} recorded successfully"
+        return True, f"{label} of ₹{amt:,.2f} recorded successfully", None
         
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        return False, f"Database error: {str(e)}", None
 
 
 def _save_gate_log(db, d, sid):
     """Complete gate log save handler."""
     entity_id = d.get("entity_id")
     if not entity_id:
-        return False, "Entity ID is required"
+        return False, "Entity ID is required", None
     
     role = d.get("role", "v")
     
@@ -1403,7 +1404,7 @@ def _save_gate_log(db, d, sid):
         "INSERT INTO gate_access(society_id,role,entity_id,time_in) VALUES(%s,%s,%s,NOW())",
         (sid, role, entity_id),
     )
-    return True, "Gate log created"
+    return True, "Gate log created", None
 
 
 def _save_society(db, d, sid, is_edit, pk):
@@ -1422,12 +1423,12 @@ def _save_society(db, d, sid, is_edit, pk):
     
     name = (d.get("name") or "").strip()
     if not name:
-        return False, "Society name is required"
+        return False, "Society name is required", None
     
     admin_email = d.get("admin_email")
     admin_password = d.get("admin_password")
     if not admin_email or not admin_password:
-        return False, "Admin email and password are required"
+        return False, "Admin email and password are required", None
     
     result = db._execute(
         "INSERT INTO societies(name,email,phone,address,plan,plan_validity,"
@@ -1454,7 +1455,7 @@ def _save_society(db, d, sid, is_edit, pk):
         # Create default accounts
         create_default_accounts(db, soc_id)
     
-    return True, f"Society '{name}' created"
+    return True, f"Society '{name}' created", result["id"] if result and result.get("id") else None
 
 
 def _save_account(db, d, sid, is_edit, pk):
@@ -1464,11 +1465,11 @@ def _save_account(db, d, sid, is_edit, pk):
             "UPDATE accounts SET tab_name=%s,drcr_account=%s,bf_amount=%s WHERE id=%s AND society_id=%s",
             (d.get("tab_name"), d.get("drcr_account"), d.get("bf_amount") or 0, pk, sid),
         )
-        return True, "Account updated"
+        return True, "Account updated", pk
     
     name = (d.get("name") or "").strip()
     if not name:
-        return False, "Account Name is required"
+        return False, "Account Name is required", None
     
     drcr = d.get("drcr_account", "Dr")
     if drcr not in ("Dr", "Cr"):
@@ -1487,7 +1488,7 @@ def _save_account(db, d, sid, is_edit, pk):
         "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
         (next_id, sid, name, d.get("tab_name"), drcr, d.get("drcr_bf","Dr"), d.get("bf_amount") or 0, 100, False),
     )
-    return True, f"Account '{name}' created"
+    return True, f"Account '{name}' created", next_id
 
 
 # ═══════════════════════════════════════════════════════════════════════════
