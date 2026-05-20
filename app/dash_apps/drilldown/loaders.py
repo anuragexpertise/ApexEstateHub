@@ -279,14 +279,46 @@ def load_profile(entity: str, pk, society_id=None) -> dict | None:
                 "WHERE a.id=%s GROUP BY a.id", (pk,), fetch_one=True)
             if row: row["subtitle"] = f"Flat {row.get('flat_number','?')}"
             return row
-        if entity in ("vendor", "security"):
-            return db._execute("SELECT * FROM users WHERE id=%s", (pk,), fetch_one=True)
+        
+        # ═══ FIXED: Load vendor with linked data ═══
+        if entity == "vendor":
+            row = db._execute(
+                """SELECT u.id, u.email, u.society_id, u.linked_id,
+                          v.name, v.service_type, v.mobile, v.active,
+                          COALESCE(SUM(p.amount),0) AS pending_dues
+                   FROM users u
+                   LEFT JOIN vendors v ON v.id = u.linked_id
+                   LEFT JOIN payments p ON p.user_id = u.id AND p.status='pending'
+                   WHERE u.id=%s AND u.role='vendor'
+                   GROUP BY u.id, v.name, v.service_type, v.mobile, v.active""",
+                (pk,), fetch_one=True)
+            if row: row["subtitle"] = row.get("name", "Vendor")
+            return row
+        
+        # ═══ FIXED: Load security with linked data ═══
+        if entity == "security":
+            row = db._execute(
+                """SELECT u.id, u.email, u.society_id, u.linked_id,
+                          s.name, s.shift, s.mobile, s.active
+                   FROM users u
+                   LEFT JOIN security_staff s ON s.id = u.linked_id
+                   WHERE u.id=%s AND u.role='security'""",
+                (pk,), fetch_one=True)
+            if row: row["subtitle"] = row.get("name", "Security")
+            return row
+        
         if entity == "event":
             return db._execute("SELECT * FROM events WHERE id=%s", (pk,), fetch_one=True)
         if entity == "concern":
             return db._execute("SELECT * FROM concerns WHERE id=%s", (pk,), fetch_one=True)
+        
+        # ═══ FIXED: Load society with image paths ═══
         if entity == "society":
-            return db._execute("SELECT * FROM societies WHERE id=%s", (pk,), fetch_one=True)
+            return db._execute(
+                "SELECT *, "
+                "CASE WHEN plan_validity >= CURRENT_DATE THEN 'Active' ELSE 'Expired' END AS plan_status "
+                "FROM societies WHERE id=%s", (pk,), fetch_one=True)
+        
         if entity in ("receipt", "expense", "transaction"):
             return db._execute("SELECT * FROM transactions WHERE id=%s", (pk,), fetch_one=True)
         if entity == "gate_log":

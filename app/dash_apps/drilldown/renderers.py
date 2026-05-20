@@ -689,13 +689,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                      society_id: int | None = None) -> html.Div:
     """
     Generic form card with pre-fill support and image upload
-
-    fields = [
-      {"id": "flat_number", "label": "Flat Number", "type": "text", "required": True},
-      {"id": "amount",      "label": "Amount (₹)",  "type": "number"},
-      {"id": "role",        "label": "Role",         "type": "select",
-       "options": ["apartment", "vendor", "security"]},
-    ]
     """
     from database.db_manager import db
    
@@ -742,7 +735,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                        "background": "#f8f9fa"},
             )
         elif ftype == "account_dropdown_receipt":
-            # Load Credit accounts (for receipts - money IN)
             accounts = get_accounts_for_dropdown(db, society_id, transaction_type='receipt')
             options = [{"label": a["label"], "value": a["value"]} for a in accounts]
             ctrl = dcc.Dropdown(
@@ -755,7 +747,6 @@ def render_form_card(card_id: str, title: str, icon: str,
             )
         
         elif ftype == "account_dropdown_expense":
-            # Load Debit accounts (for expenses - money OUT)
             accounts = get_accounts_for_dropdown(db, society_id, transaction_type='expense')
             options = [{"label": a["label"], "value": a["value"]} for a in accounts]
             ctrl = dcc.Dropdown(
@@ -767,14 +758,26 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px"},
             )
         elif ftype == "image_upload":
-            # Image upload field with preview
+            # ═══ FIXED: Show existing image on load ═══
             current_image = pre_val if pre_val else None
+            
+            # Check if image exists
+            img_exists = False
+            if current_image and isinstance(current_image, str):
+                if current_image.startswith('/assets/'):
+                    # Check if file exists
+                    img_path = Path("app") / current_image.lstrip('/')
+                    img_exists = img_path.exists()
+                elif current_image.startswith('http'):
+                    img_exists = True  # External URL
+            
             ctrl = html.Div([
                 dcc.Upload(
                     id={"type": "form-field", "entity": entity, "field": fid},
                     children=html.Div([
                         html.I(className="fas fa-cloud-upload-alt me-2"),
-                        html.Span("Drag & Drop or Click to Upload Image")
+                        html.Span("Drag & Drop or Click to Upload Image" if not img_exists 
+                                 else "Click to Replace Image")
                     ]),
                     style={
                         "width": "100%",
@@ -793,19 +796,28 @@ def render_form_card(card_id: str, title: str, icon: str,
                     multiple=False,
                     accept="image/*"
                 ),
-                # Image preview
+                # ═══ FIXED: Show preview if image exists ═══
                 html.Div(
                     id={"type": "image-preview", "entity": entity, "field": fid},
                     children=[
                         html.Img(
-                            src=current_image if current_image else "",
+                            src=current_image if img_exists else "",
                             style={
                                 "maxWidth": "200px",
                                 "maxHeight": "150px",
                                 "marginTop": "10px",
                                 "borderRadius": "8px",
                                 "border": "1px solid #ddd",
-                                "display": "block" if current_image else "none"
+                                "display": "block" if img_exists else "none"
+                            }
+                        ),
+                        html.Small(
+                            f"✓ Current: {Path(current_image).name if current_image else ''}" if img_exists else "",
+                            style={
+                                "color": "#17976e", 
+                                "marginTop": "5px", 
+                                "display": "block" if img_exists else "none",
+                                "fontSize": "11px"
                             }
                         )
                     ],
@@ -827,17 +839,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
-        # form_rows.append(
-        #     dbc.Row(
-        #         [
-        #             dbc.Label(label_txt, width=4,
-        #                        style={"fontSize": "12px", "color": "#7d8ea3",
-        #                               "fontWeight": "600", "paddingTop": "8px"}),
-        #             dbc.Col(ctrl, width=8),
-        #         ],
-        #         className="mb-2",
-        #     )
-        # )
         form_rows.append(
             dbc.Row([
                 dbc.Col(
@@ -851,6 +852,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                 dbc.Col(ctrl, width=8),
             ], className="mb-2")
         )
+    
     return html.Div(
         dbc.Card(
             [
@@ -907,7 +909,6 @@ def render_form_card(card_id: str, title: str, icon: str,
             },
         )
     )
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # HELPER STYLES

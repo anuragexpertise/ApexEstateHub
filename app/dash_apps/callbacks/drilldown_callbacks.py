@@ -503,8 +503,108 @@ ENTITY_META: dict = {
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
-
+   
 def register_drilldown_callbacks(app):
+ # -----0 FORM HANDLE IMAGE UPLOAD (NEW) ─────────────────────────────────────────────
+    @app.callback(
+        Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
+        Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
+        Input({"type": "form-field", "entity": MATCH, "field": MATCH}, "contents"),
+        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
+        State("auth-store", "data"),
+        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
+        prevent_initial_call=True,
+    )
+    def handle_image_upload(contents, filename, auth, field_id):
+        """Handle image upload and save to assets folder."""
+        if not contents:
+            return no_update, no_update
+        
+        try:
+            society_id = (auth or {}).get("society_id")
+            if not society_id:
+                society_id = "default"  # For master admin
+            
+            # Parse the base64 image
+            content_type, content_string = contents.split(',')
+            decoded = base64.b64decode(content_string)
+            
+            # ═══ FIXED: Create directory with proper permissions ═══
+            assets_dir = Path("app/assets") / str(society_id)
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Verify directory was created
+            if not assets_dir.exists():
+                raise Exception(f"Failed to create directory: {assets_dir}")
+            
+            # Generate unique filename
+            field_name = field_id.get("field", "image")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_ext = os.path.splitext(filename)[1] if filename else ".png"
+            safe_filename = f"{field_name}_{timestamp}{file_ext}"
+            file_path = assets_dir / safe_filename
+            
+            print(f"💾 Saving image to: {file_path}")
+            
+            # Optimize and save image
+            img = Image.open(io.BytesIO(decoded))
+            
+            # Resize if too large (max 1920px width)
+            max_width = 1920
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convert RGBA to RGB if needed
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            
+            # Save optimized image
+            img.save(file_path, 'JPEG', quality=85, optimize=True)
+            
+            # Verify file was saved
+            if not file_path.exists():
+                raise Exception(f"Failed to save image to: {file_path}")
+            
+            print(f"✅ Image saved successfully: {file_path} ({file_path.stat().st_size} bytes)")
+            
+            # Return web-accessible path
+            web_path = f"/assets/{society_id}/{safe_filename}"
+            
+            # Preview component
+            preview = html.Div([
+                html.Img(
+                    src=web_path,
+                    style={
+                        "maxWidth": "200px",
+                        "maxHeight": "150px",
+                        "borderRadius": "8px",
+                        "border": "1px solid #ddd",
+                        "display": "block"
+                    }
+                ),
+                html.Small(
+                    f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
+                    style={"color": "#17976e", "marginTop": "5px", "display": "block", "fontSize": "11px"}
+                )
+            ])
+            
+            return preview, web_path
+            
+        except Exception as e:
+            print(f"❌ Error uploading image: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            error_msg = html.Small(
+                f"✗ Upload failed: {str(e)}",
+                style={"color": "#dc3545", "marginTop": "5px", "display": "block", "fontSize": "11px"}
+            )
+            return error_msg, no_update
+
 
     # ── 1. ENHANCED MAIN ROUTER — handles all navigation events + KPI hide/show
     @app.callback(
@@ -754,89 +854,8 @@ def register_drilldown_callbacks(app):
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, kpi_style, no_update
-    # -----1A FORM HANDLE IMAGE UPLOAD (NEW) ─────────────────────────────────────────────
-    @app.callback(
-        Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
-        Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
-        Input({"type": "form-field", "entity": MATCH, "field": MATCH}, "contents"),
-        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
-        State("auth-store", "data"),
-        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
-        prevent_initial_call=True,
-    )
-    def handle_image_upload(contents, filename, auth, field_id):
-        """Handle image upload and save to assets folder."""
-        if not contents:
-            return no_update, no_update
-        
-        try:
-            society_id = (auth or {}).get("society_id")
-            if not society_id:
-                return no_update, no_update
-            
-            # Parse the base64 image
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
-            
-            # Create society assets directory
-            assets_dir = Path("app/assets") / str(society_id)
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Generate unique filename
-            field_name = field_id.get("field", "image")
-            file_ext = os.path.splitext(filename)[1] if filename else ".png"
-            file_path = assets_dir / f"{field_name}{file_ext}"
-            
-            # Optimize and save image
-            img = Image.open(io.BytesIO(decoded))
-            
-            # Resize if too large (max 1920px width)
-            max_width = 1920
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_size = (max_width, int(img.height * ratio))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-            
-            # Convert RGBA to RGB if needed
-            if img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[3])
-                img = background
-            
-            # Save optimized image
-            img.save(file_path, 'JPEG', quality=85, optimize=True)
-            
-            # Return web-accessible path
-            web_path = f"/assets/{society_id}/{field_name}{file_ext}"
-            
-            # Preview component
-            preview = html.Div([
-                html.Img(
-                    src=web_path,
-                    style={
-                        "maxWidth": "200px",
-                        "maxHeight": "150px",
-                        "borderRadius": "8px",
-                        "border": "1px solid #ddd",
-                        "display": "block"
-                    }
-                ),
-                html.Small(
-                    f"✓ {filename}",
-                    style={"color": "#17976e", "marginTop": "5px", "display": "block"}
-                )
-            ])
-            
-            return preview, web_path
-            
-        except Exception as e:
-            print(f"Error uploading image: {e}")
-            error_msg = html.Small(
-                f"✗ Upload failed: {str(e)}",
-                style={"color": "#dc3545", "marginTop": "5px", "display": "block"}
-            )
-            return error_msg, no_update
 
+ 
     # ── 2. FORM SUBMIT → save → back → refresh ─────────────────────────────
     @app.callback(
         Output("drilldown-store",  "data",     allow_duplicate=True),
@@ -871,45 +890,50 @@ def register_drilldown_callbacks(app):
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
 
-        # Collect form data
+        # ═══ FIXED: Collect both regular and hidden fields (images) ═══
         form_data: dict = {}
-        for source in (ctx.inputs, ctx.states):
-            for key, val in source.items():
-                try:
-                    k_dict = json.loads(key.split(".")[0])
-                except Exception:
+        
+        # First pass: collect all form-field values
+        for key, val in ctx.states.items():
+            try:
+                k_dict = json.loads(key.split(".")[0])
+            except Exception:
+                continue
+            
+            if k_dict.get("type") == "form-field":
+                if to_singular(k_dict.get("entity")) != entity_singular:
                     continue
-                
-                # Handle both regular and hidden fields
-                if k_dict.get("type") in ("form-field", "form-field-hidden"):
-                    if to_singular(k_dict.get("entity")) != entity_singular:
-                        continue
-                    field_name = k_dict.get("field")
-                    # Hidden fields (image paths) override regular fields
-                    if k_dict.get("type") == "form-field-hidden" and val:
-                        form_data[field_name] = val
-                    elif field_name not in form_data:
-                        form_data[field_name] = val
+                field_name = k_dict.get("field")
+                if val not in (None, ""):
+                    form_data[field_name] = val
+        
+        # Second pass: override with hidden field values (image paths)
+        for key, val in ctx.states.items():
+            try:
+                k_dict = json.loads(key.split(".")[0])
+            except Exception:
+                continue
+            
+            if k_dict.get("type") == "form-field-hidden":
+                if to_singular(k_dict.get("entity")) != entity_singular:
+                    continue
+                field_name = k_dict.get("field")
+                if val:  # Image path exists
+                    form_data[field_name] = val
+        
+        print(f"\n📝 Form submit for {entity_singular}:")
+        print(f"   Collected fields: {list(form_data.keys())}")
+        print(f"   Image fields: {[k for k,v in form_data.items() if isinstance(v, str) and '/assets/' in v]}")
 
         # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
-        form_data = {**prefill, **{k: v for k, v in form_data.items() if v not in (None, "")}}
+        form_data = {**prefill, **form_data}
         form_data["society_id"] = sid
 
         ok, msg, new_id = _save_entity(entity_singular, card_id, form_data)
 
-        # Preserve entered values on validation failure so the form keeps
-        # user input and does not clear when the callback returns.
         if not ok:
             print(f"🔴 Form save failed for {entity_singular}: {msg}")
-            print(f"    form_data={form_data}")
-            if not form_data:
-                print("    ctx.inputs keys:")
-                for key in ctx.inputs.keys():
-                    print(f"      {key}")
-                print("    ctx.states keys:")
-                for key in ctx.states.keys():
-                    print(f"      {key}")
             store["prefill"] = form_data
             if store.get("stack"):
                 store["stack"][-1]["prefill"] = form_data
@@ -921,7 +945,6 @@ def register_drilldown_callbacks(app):
         hide_kpis = False
         if ok and store and len(store.get("stack", [])) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
-            # Update entity_pk with newly created ID if applicable
             if new_id and store.get("stack"):
                 store["stack"][-1]["entity_pk"] = new_id
             store["refresh"] = True
@@ -934,7 +957,6 @@ def register_drilldown_callbacks(app):
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, toast, kpi_style
-
     # ── 3. CSV DOWNLOAD (MATCH callback — one per entity) ──────────────────
     @app.callback(
         Output({"type": "csv-download-trigger", "entity": MATCH}, "data"),
