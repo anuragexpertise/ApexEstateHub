@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS societies (
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
     secretary_sign VARCHAR(100),
-    plan VARCHAR(4) NOT NULL DEFAULT 'Free' CHECK (plan IN ('Free', 'Paid')),
+    plan VARCHAR(4) NOT NULL DEFAULT 'Free' CHECK (plan IN ('Free', '9Apts','99Apts','999Apts','unlimited')),
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     arrear_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
             'security'
         )
     ),
-    linked_id INT,
+    linked_id INT,  -- apartment_id, vendor_id, or security_id
     login_method VARCHAR(20) DEFAULT 'password',
     push_subscription TEXT,
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS payments (
     confirmed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT payments_status_check 
-        CHECK (status IN ('pending', 'confirmed', 'verified', 'failed', 'cancelled')),
+        CHECK (status IN ('pending', 'confirmed', 'verified', 'failed', 'cancelled'))
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
@@ -127,38 +127,40 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apt_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    start_date DATE,
+    start_date DATE NOT NULL,
     end_date DATE,
-    apt_maintenance_rate FLOAT,
-    apt_due_day INTEGER DEFAULT 0,
-    apt_delay_fine DECIMAL(10, 2) DEFAULT 0,
-    apt_fine DECIMAL(10, 2) DEFAULT 0,
-    apt_status BOOLEAN
+    apt_maintenance_rate FLOAT NOT NULL DEFAULT 0,  -- Per sqft rate
+    apt_due_day INTEGER DEFAULT 10,  -- Day of month (1-31)
+    apt_delay_fine DECIMAL(10, 2) DEFAULT 0,  -- Per day late fee
+    apt_fine DECIMAL(10, 2) DEFAULT 0,  -- One-time fine
+    apt_status BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS ven_charges_fines (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     ven_id INT NOT NULL REFERENCES vendors (id) ON DELETE CASCADE,
-    start_date DATE,
+    start_date DATE NOT NULL,
     end_date DATE,
     vendor_1day DECIMAL(10, 2) DEFAULT 0,
     vendor_7day DECIMAL(10, 2) DEFAULT 0,
     vendor_1mth DECIMAL(10, 2) DEFAULT 0,
     vendor_fine DECIMAL(10, 2) DEFAULT 0,
-    ven_status BOOLEAN
+    ven_status BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS security_charges_fines (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     sec_id INT NOT NULL REFERENCES security_staff (id) ON DELETE CASCADE,
-    start_date DATE,
+    start_date DATE NOT NULL,
     end_date DATE,
     security_fine DECIMAL(10, 2) DEFAULT 0,
-    sec_status BOOLEAN
+    sec_status BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS gate_access (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
