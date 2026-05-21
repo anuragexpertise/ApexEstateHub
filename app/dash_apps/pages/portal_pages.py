@@ -330,9 +330,14 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts & charge rates"),
             _kpi_row(
-                _kpi("kpi_balance",       "fa-book-open",   "#6c5ce7", "Accounts"),
-                _kpi("kpi_concerns_open", "fa-rupee-sign",  "#de5c52", "Pending Dues"),
-                cols="repeat(2,1fr)",
+                _kpi("kpi-plan-validity", "fa-clock", "#34ee45", "Society Plan Validity"),
+
+                _kpi("kpi_accounts_count",       "fa-book-open",   "#6c5ce7", "Accounts"),
+                _kpi("kpi_apt_charges", "fa-rupee-sign",  "#de5c52", "Apartment Charges"),
+                _kpi("kpi_ven_charges", "fa-rupee-sign",  "#de5c52", "Vendor Charges"),
+                _kpi("kpi_sec_charges", "fa-rupee-sign",  "#de5c52", "Security Charges"),
+                _kpi("kpi_attendance", "fa-book-open",  "#6638bd", "Attendance"),
+                cols="repeat(3,1fr)",
             ),
             _divider(),
             _drill_panel(),
