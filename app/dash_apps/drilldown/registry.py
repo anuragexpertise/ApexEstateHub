@@ -1,6 +1,6 @@
 # app/dash_apps/drilldown/registry.py
 """
-Card Registry & Drill-Down Navigation Map
+Card Registry & Drill-Down Navigation Map - SETTINGS TAB ENHANCED
 ==========================================
 CARD ID CONVENTION:
   kpi_<entity>_<metric>       e.g. kpi_apartments_total
@@ -25,11 +25,16 @@ PK_MAP: dict = {
     "events":      "id",
     "concerns":    "id",
     "gate_logs":   "id",
-    "receipts":    "id",
-    "expenses":    "id",
+    "receipts_tbl": "id",  # New receipts table
+    "expenses_tbl": "id",  # New expenses table
     "cashbook":    "id",
     "societies":   "id",
     "accounts":    "id",
+    "apt_charges": "id",
+    "ven_charges": "id",
+    "sec_charges": "id",
+    "attendance":  "id",
+    "receivables": "id",
 }
 
 
@@ -43,11 +48,16 @@ ENTITY_MAP: dict = {
     "events":      "event",
     "concerns":    "concern",
     "gate_logs":   "gate_log",
-    "receipts":    "receipt",
-    "expenses":    "expense",
+    "receipts_tbl": "receipt_entry",  # New
+    "expenses_tbl": "expense_entry",  # New
     "cashbook":    "transaction",
     "societies":   "society",
     "accounts":    "account",
+    "apt_charges": "apt_charge",
+    "ven_charges": "ven_charge",
+    "sec_charges": "sec_charge",
+    "attendance":  "attendance_entry",
+    "receivables": "receivable",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -66,7 +76,7 @@ ROLE_FILTERS: dict = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DRILL-DOWN NAVIGATION MAP
+# DRILL-DOWN NAVIGATION MAP - ENHANCED WITH SETTINGS
 # ══════════════════════════════════════════════════════════════════════════════
 DRILLDOWN_MAP: dict = {
 
@@ -80,27 +90,40 @@ DRILLDOWN_MAP: dict = {
     "kpi_security_on_duty":   {"target": "list_security",    "label": "Security On Duty",      "filter": {"on_duty": True}},
     "kpi_events_total":       {"target": "list_events",      "label": "Upcoming Events"},
     "kpi_concerns_open":      {"target": "list_concerns",    "label": "Open Concerns"},
-    "kpi_gate_logs":    {"target": "list_gate_logs",   "label": "Gate Logs Today"},
-    "kpi_receipts_month":     {"target": "list_receipts",    "label": "Receipts This Month"},
-    "kpi_expenses_month":     {"target": "list_expenses",    "label": "Expenses This Month"},
+    "kpi_gate_logs":          {"target": "list_gate_logs",   "label": "Gate Logs Today"},
+    "kpi_receipts_month":     {"target": "list_receipts_tbl","label": "Receipts This Month"},
+    "kpi_expenses_month":     {"target": "list_expenses_tbl","label": "Expenses This Month"},
     "kpi_balance":            {"target": "list_cashbook",    "label": "Cashbook"},
     "kpi_societies_total":    {"target": "list_societies",   "label": "All Societies"},
     "kpi_societies_paid":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "Paid"}},
     "kpi_societies_free":     {"target": "list_societies",   "label": "Free Plan Societies",   "filter": {"plan": "Free"}},
     "kpi_cash_in_hand":       {"target": "list_cashbook",    "label": "Cash in Hand"},
+    
+    # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
+    "kpi_plan_validity":      {"target": "list_societies",   "label": "Society Plan Validity"},
+    "kpi_accounts_count":     {"target": "list_accounts",    "label": "Chart of Accounts"},
+    "kpi_apt_charges":        {"target": "list_apt_charges", "label": "Apartment Charges"},
+    "kpi_ven_charges":        {"target": "list_ven_charges", "label": "Vendor Charges"},
+    "kpi_sec_charges":        {"target": "list_sec_charges", "label": "Security Charges"},
+    "kpi_attendance":         {"target": "list_attendance",  "label": "Attendance Records"},
 
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
-    "list_apartments": {"target": "profile_apartment",   "label": "Apartment Profile"},
-    "list_vendors":    {"target": "profile_vendor",      "label": "Vendor Profile"},
-    "list_security":   {"target": "profile_security",    "label": "Security Profile"},
-    "list_events":     {"target": "profile_event",       "label": "Event Details"},
-    "list_concerns":   {"target": "profile_concern",     "label": "Concern Details"},
-    "list_gate_logs":  {"target": "profile_gate_log",    "label": "Gate Log Details"},
-    "list_receipts":   {"target": "profile_receipt",     "label": "Receipt Details"},
-    "list_expenses":   {"target": "profile_expense",     "label": "Expense Details"},
-    "list_cashbook":   {"target": "profile_transaction", "label": "Transaction Details"},
-    "list_societies":  {"target": "profile_society",     "label": "Society Profile"},
-    "list_accounts":   {"target": "profile_account",     "label": "Account Details"},
+    "list_apartments":    {"target": "profile_apartment",      "label": "Apartment Profile"},
+    "list_vendors":       {"target": "profile_vendor",         "label": "Vendor Profile"},
+    "list_security":      {"target": "profile_security",       "label": "Security Profile"},
+    "list_events":        {"target": "profile_event",          "label": "Event Details"},
+    "list_concerns":      {"target": "profile_concern",        "label": "Concern Details"},
+    "list_gate_logs":     {"target": "profile_gate_log",       "label": "Gate Log Details"},
+    "list_receipts_tbl":  {"target": "profile_receipt_entry",  "label": "Receipt Details"},
+    "list_expenses_tbl":  {"target": "profile_expense_entry",  "label": "Expense Details"},
+    "list_cashbook":      {"target": "profile_transaction",    "label": "Transaction Details"},
+    "list_societies":     {"target": "profile_society",        "label": "Society Profile"},
+    "list_accounts":      {"target": "profile_account",        "label": "Account Details"},
+    "list_apt_charges":   {"target": "profile_apt_charge",     "label": "Apartment Charge Details"},
+    "list_ven_charges":   {"target": "profile_ven_charge",     "label": "Vendor Charge Details"},
+    "list_sec_charges":   {"target": "profile_sec_charge",     "label": "Security Charge Details"},
+    "list_attendance":    {"target": "profile_attendance_entry","label": "Attendance Details"},
+    "list_receivables":   {"target": "profile_receivable",     "label": "Receivable Details"},
 
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     # prefill_map: {form_field: profile_field}
@@ -109,17 +132,17 @@ DRILLDOWN_MAP: dict = {
 
     "profile_apartment": {
         "actions": {
-            "pay_dues":    {"target": "form_receipt_new",    "prefill": {"apartment_id": "id", "flat_number": "flat_number", "amount": "pending_dues", "acc_particulars": "flat_number"}},
-            "gate_pass":   {"target": "modal_qr",   "prefill": {"entity_id": "id", "role": "_const_a"}},
-            "new_concern": {"target": "form_concern_new",    "prefill": {"flat_no": "flat_number"}},
-            "edit":        {"target": "form_apartment_edit", "prefill": {"*": "*"}},
+            "pay_dues":    {"target": "form_receipt_entry_new", "prefill": {"entity_id": "id", "entity_type": "_const_apartment", "amount": "pending_dues"}},
+            "gate_pass":   {"target": "modal_qr",               "prefill": {"entity_id": "id", "role": "_const_a"}},
+            "new_concern": {"target": "form_concern_new",       "prefill": {"flat_no": "flat_number"}},
+            "edit":        {"target": "form_apartment_edit",    "prefill": {"*": "*"}},
         }
     },
     "profile_vendor": {
         "actions": {
-            "pay":       {"target": "form_receipt_new",  "prefill": {"entity_id": "id", "amount": "pending_dues", "acc_particulars": "email"}},
-            "gate_pass": {"target": "modal_qr", "prefill": {"entity_id": "id", "role": "_const_v"}},
-            "edit":      {"target": "form_vendor_edit",  "prefill": {"*": "*"}},
+            "pay":       {"target": "form_receipt_entry_new", "prefill": {"entity_id": "id", "entity_type": "_const_vendor", "amount": "pending_dues"}},
+            "gate_pass": {"target": "modal_qr",               "prefill": {"entity_id": "id", "role": "_const_v"}},
+            "edit":      {"target": "form_vendor_edit",       "prefill": {"*": "*"}},
         }
     },
     "profile_security": {
@@ -127,7 +150,6 @@ DRILLDOWN_MAP: dict = {
             "gate_pass": {"target": "modal_qr", "prefill": {"entity_id": "id", "role": "_const_s"}},
         }
     },
-    
     "profile_concern": {
         "actions": {
             "assign":  {"target": "form_concern_edit", "prefill": {"*": "*", "status": "_const_in_progress"}},
@@ -144,9 +166,24 @@ DRILLDOWN_MAP: dict = {
             "edit": {"target": "form_society_edit", "prefill": {"*": "*"}},
         }
     },
-    "profile_receipt": {
+    "profile_apt_charge": {
         "actions": {
-            "download": {"action": "download_pdf"},
+            "edit": {"target": "form_apt_charge_edit", "prefill": {"*": "*"}},
+        }
+    },
+    "profile_ven_charge": {
+        "actions": {
+            "edit": {"target": "form_ven_charge_edit", "prefill": {"*": "*"}},
+        }
+    },
+    "profile_sec_charge": {
+        "actions": {
+            "edit": {"target": "form_sec_charge_edit", "prefill": {"*": "*"}},
+        }
+    },
+    "profile_attendance_entry": {
+        "actions": {
+            "edit": {"target": "form_attendance_entry_edit", "prefill": {"*": "*"}},
         }
     },
 }
