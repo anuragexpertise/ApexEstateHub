@@ -90,12 +90,15 @@ CREATE TABLE IF NOT EXISTS security_staff (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
+-- ════════════════════════════════════════════════════════════════════════════
+-- PAYMENTS TABLE UPDATE - Auto-calculated Debits (pending payables)
+-- ════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
-    apartment_id INT REFERENCES apartments (id),
+    entity_id INT,
+    entity_type VARCHAR(20) CHECK (entity_type IN ('apartment', 'vendor', 'security', 'other')),
     amount NUMERIC(10, 2) NOT NULL,
     payment_type VARCHAR(50),
     payment_method VARCHAR(50),
@@ -103,7 +106,13 @@ CREATE TABLE IF NOT EXISTS payments (
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     due_date DATE,
     paid_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    source_table VARCHAR(50),
+    source_id INT,
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT payments_status_check 
+        CHECK (status IN ('pending', 'confirmed', 'verified', 'failed', 'cancelled')),
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
@@ -214,6 +223,115 @@ CREATE TABLE IF NOT EXISTS asset_register (
     last_depreciation_date DATE
 );
 
+CREATE TABLE IF NOT EXISTS receivables (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),  -- Admin who confirmed
+    entity_id INT NOT NULL,  -- apartment_id or vendor_id or security_id
+    entity_type VARCHAR(20) NOT NULL CHECK (entity_type IN ('apartment', 'vendor', 'security')),
+    
+    -- Charge details
+    charge_type VARCHAR(50) NOT NULL,  -- 'maintenance', 'fine', 'late_fee', etc.
+    description TEXT,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    
+    -- Due date tracking
+    due_date DATE,
+    
+    -- Status
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    
+    -- Reference to charge source
+    source_table VARCHAR(50),  -- 'apt_charges_fines', 'ven_charges_fines', etc.
+    source_id INT,  -- ID in source table
+    
+    -- Audit
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT fk_receivables_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
+CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables (due_date);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- RECEIPTS TABLE - Manually added Credits (manually recorded income)
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS receipts (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),  -- Who created the receipt
+    entity_id INT,  -- Optional: apartment_id or vendor_id or security_id
+    entity_type VARCHAR(20) CHECK (entity_type IN ('apartment', 'vendor', 'security', 'other')),
+    
+    -- Receipt details
+    receipt_date DATE NOT NULL,
+    acc_id INT REFERENCES accounts (id),  -- Link to chart of accounts
+    particulars TEXT NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    
+    -- Payment mode
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')),
+    cheque_no VARCHAR(50),
+    transaction_id VARCHAR(255),
+    
+    -- Status (needs admin confirmation)
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    
+    -- Audit
+    confirmed_by INT REFERENCES users (id),  -- Must be admin
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT fk_receipts_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, status);
+CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts (receipt_date);
+CREATE INDEX IF NOT EXISTS idx_receipts_entity ON receipts (entity_type, entity_id);
+
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EXPENSES TABLE - Manually added Debits (manually recorded expenses)
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS expenses (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),  -- Who created the expense
+    entity_id INT,  -- Optional: vendor_id or security_id (payee)
+    entity_type VARCHAR(20) CHECK (entity_type IN ('vendor', 'security', 'other')),
+    
+    -- Expense details
+    expense_date DATE NOT NULL,
+    acc_id INT REFERENCES accounts (id),  -- Link to chart of accounts
+    particulars TEXT NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    
+    -- Payment mode
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')),
+    cheque_no VARCHAR(50),
+    transaction_id VARCHAR(255),
+    
+    -- Status (needs admin confirmation)
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    
+    -- Audit
+    confirmed_by INT REFERENCES users (id),  -- Must be admin
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT fk_expenses_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, status);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (expense_date);
+CREATE INDEX IF NOT EXISTS idx_expenses_entity ON expenses (entity_type, entity_id);
 -- ════════════════════════════════════════════════════════════════════════════
 -- FEATURE TABLES
 -- ════════════════════════════════════════════════════════════════════════════

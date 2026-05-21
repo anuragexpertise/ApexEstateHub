@@ -13,3 +13,4 @@ app/static/uploads/
 generate_vapid_keys.py
 *.db
 migrations/
+database_migration_settings.sql
