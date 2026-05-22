@@ -242,18 +242,17 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
             _sec_hdr("Society Overview", "click any KPI to drill down"),
             _kpi_row(
                 _kpi("kpi_apartments_total",   "fa-home",          "#1859b8", "Apartments"),
-                # _kpi("kpi_apartments_dues",    "fa-rupee-sign",    "#de5c52", "With Dues",      "tap to view"),
-                # _kpi("kpi_apartments_no_dues", "fa-check-circle",  "#17976e", "Dues Clear"),
                 _kpi("kpi_vendors_total",      "fa-truck",         "#b98a07", "Vendors"),
-                _kpi("kpi_security_total",     "fa-user-shield",   "#b63b3b", "Security"),
+                _kpi("kpi_security_total",     "fa-user-shield",   "#b63b3b", "Security Total"),
+                _kpi("kpi_security_on_duty",   "fa-user-shield",   "#691b1b", "Security On Duty"),
                 _kpi("kpi_events_total",       "fa-calendar-check","#8e44ad", "Upcoming Events"),
                 _kpi("kpi_concerns_open",      "fa-hand-point-up", "#de5c52", "Open Concerns"),
-                _kpi("kpi_gate_logs",          "fa-receipt",       "#1abc9c", "Gate Logs"),
+                _kpi("kpi_gate_logs",          "fa-receipt",       "#1abc9c", "Gate Logs -24hrs"),
                 _kpi("kpi_receipts_month",     "fa-receipt",       "#17976e", "Receipts (Month)"),
                 _kpi("kpi_expenses_month",     "fa-exclamation-triangle",       "#aa241a", "Expenses (Month)"),
-                    _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
                 _kpi("kpi_balance",            "fa-wallet",        "#2c3e50", "Balance"),
-                
+                # cols="repeat(5,1fr)"
             ),
             _divider(),
             _drill_panel(),
@@ -268,7 +267,7 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
                 _kpi("kpi_apartments_total", "fa-home",          "#1859b8", "Apartments"),
                 _kpi("kpi_vendors_total",    "fa-truck","#b98a07", "Vendors"),
                 _kpi("kpi_security_total",   "fa-user-shield",   "#b63b3b", "Security Staff"),
-                cols="repeat(3,1fr)",
+                # cols="repeat(3,1fr)",
             ),
             _divider(),
             _drill_panel(),
@@ -278,11 +277,18 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-book", c, "Cashbook", "full transaction ledger"),
             _kpi_row(
+                _kpi("kpi_receivables_total", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_payables_total", "fa-wallet",  "#de5c52", "Expenses (Month)"),
                 _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
                 _kpi("kpi_expenses_month", "fa-wallet",  "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
                 _kpi("kpi_balance",        "fa-coins",   "#2c3e50", "Balance"),
-                cols="repeat(3,1fr)",
-            ),
+                _kpi("kpi_maintenance_due", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_late_fees_due", "fa-wallet",  "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_security_salaries_due", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_vendor_payments_due",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                # cols="repeat(3,1fr)",
+                ),
             _divider(),
             _drill_panel(),
         ], className="portal-page")
@@ -290,8 +296,16 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "receipts":
         return html.Div([
             _page_title("fa-file-invoice-dollar", c, "Receipts", "all incoming payments"),
-            _kpi_row(_kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
-                     cols="1fr"),
+            
+                _kpi_row(
+                _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_receivables_total", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_maintenance_due", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_late_fees_due", "fa-wallet",  "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_security_salaries_due", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_vendor_payments_due",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                #  cols="repeat(3,1fr)",
+                ),
             _divider(),
             _drill_panel(),
         ], className="portal-page")
@@ -299,8 +313,13 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "expenses":
         return html.Div([
             _page_title("fa-wallet", c, "Expenses", "outgoing payments"),
-            _kpi_row(_kpi("kpi_expenses_month", "fa-wallet", "#de5c52", "Expenses (Month)"),
-                     cols="1fr"),
+            _kpi_row(
+                _kpi("kpi_expenses_month", "fa-wallet", "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_payables_total", "fa-wallet",  "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_security_salaries_due", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_vendor_payments_due",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                # cols="repeat(3,1fr)",
+                ),
             _divider(),
             _drill_panel(),
         ], className="portal-page")
@@ -330,7 +349,7 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts & charge rates"),
             _kpi_row(
-                _kpi("kpi-plan-validity", "fa-clock", "#34ee45", "Society Plan Validity"),
+                _kpi("kpi_plan_validity", "fa-clock", "#34ee45", "Society Plan Validity"),
 
                 _kpi("kpi_accounts_count",       "fa-book-open",   "#6c5ce7", "Accounts"),
                 _kpi("kpi_apt_charges", "fa-rupee-sign",  "#de5c52", "Apartment Charges"),

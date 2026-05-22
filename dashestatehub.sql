@@ -522,3 +522,13 @@ WHERE
 END IF;
 
 END $$;
+-- ════════════════════════════════════════════════════════════════════════════
+-- pg_cron scheduling
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- CREATE EXTENSION pg_cron;
+-- SELECT cron.schedule(
+--     'update-society-status',
+--     '0 0 * * *',  -- Daily at 00:00 UTC
+--     $$UPDATE societies SET status = FALSE WHERE plan_validity < CURRENT_DATE$$
+-- );   
