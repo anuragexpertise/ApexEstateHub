@@ -1,19 +1,26 @@
 # app/dash_apps/callbacks/card_catalogue_callbacks.py
 """
-Card Catalogue Callbacks - FIXED VERSION
-All KPI refresh, list loaders, and CRUD operations.
+Card Catalogue Callbacks - ENHANCED VERSION
+═══════════════════════════════════════════════════════════════
+All KPI refresh with full support for:
+- Numbers (with thousand separators)
+- Currency (₹ with smart formatting: K, L, Cr)
+- Percentages (with 1 decimal)
+- Dates (smart relative/absolute formatting)
+- Text (plain string values)
 
-CRITICAL FIXES:
-1. Proper query parameter conversion for SQLAlchemy
-2. Better error handling with detailed logging
-3. Fallback values for missing data
-4. Proper society_id filtering
+CRITICAL ENHANCEMENTS:
+1. Proper NULL handling
+2. Type-aware formatting
+3. Error recovery with fallbacks
+4. Smart number abbreviations
+5. Relative date display
 """
 
 import base64
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
@@ -33,20 +40,115 @@ def _sid(auth_data):
     return (auth_data or {}).get("society_id")
 
 
-
-
-def _fmt(value, fmt):
-    """Format value according to type"""
-    try:
-        v = float(value or 0)
-    except (TypeError, ValueError):
+def format_kpi_value(value, format_type: str) -> str:
+    """
+    Format a KPI value based on its type.
+    
+    Supported formats:
+    - number: Plain integer with thousand separators (e.g., 1,234)
+    - currency: ₹ symbol with smart abbreviations (K/L/Cr)
+    - percent: % symbol with 1 decimal (e.g., 85.5%)
+    - date: Smart relative/absolute formatting
+    - text: Plain text (unchanged)
+    """
+    
+    # Handle None/NULL values
+    if value is None or value == "":
         return "—"
     
-    if fmt == "currency":
-        return f"₹{int(v):,}"
-    if fmt == "percent":
-        return f"{int(v)}%"
-    return str(int(v))
+    try:
+        if format_type == "number":
+            # Plain number with thousand separators
+            v = int(float(value))
+            return f"{v:,}"
+        
+        elif format_type == "currency":
+            # Currency with ₹ symbol and smart formatting
+            v = float(value)
+            
+            # Handle negative values
+            is_negative = v < 0
+            v = abs(v)
+            
+            if v >= 10_000_000:  # 1 Crore+
+                formatted = f"₹{v/10_000_000:.2f}Cr"
+            elif v >= 100_000:  # 1 Lakh+
+                formatted = f"₹{v/100_000:.2f}L"
+            elif v >= 1000:  # 1 Thousand+
+                formatted = f"₹{v/1000:.1f}K"
+            else:
+                formatted = f"₹{int(v):,}"
+            
+            return f"-{formatted}" if is_negative else formatted
+        
+        elif format_type == "percent":
+            # Percentage with 1 decimal
+            v = float(value)
+            return f"{v:.1f}%"
+        
+        elif format_type == "date":
+            # Date formatting
+            if isinstance(value, str):
+                # Try parsing common date formats
+                for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"]:
+                    try:
+                        value = datetime.strptime(value, fmt).date()
+                        break
+                    except:
+                        continue
+            
+            if isinstance(value, datetime):
+                value = value.date()
+            
+            if isinstance(value, date):
+                today = date.today()
+                diff = (value - today).days
+                
+                # Past dates
+                if diff < 0:
+                    days_ago = abs(diff)
+                    if days_ago == 0:
+                        return "Today"
+                    elif days_ago == 1:
+                        return "Yesterday"
+                    elif days_ago < 7:
+                        return f"{days_ago}d ago"
+                    elif days_ago < 30:
+                        return f"{days_ago//7}w ago"
+                    else:
+                        return value.strftime("%d %b %Y")
+                
+                # Future dates
+                elif diff > 0:
+                    if diff == 1:
+                        return "Tomorrow"
+                    elif diff < 7:
+                        return f"in {diff}d"
+                    elif diff < 30:
+                        return f"in {diff//7}w"
+                    elif diff < 365:
+                        return f"in {diff//30}m"
+                    else:
+                        return value.strftime("%d %b %Y")
+                
+                # Today
+                else:
+                    return "Today"
+            else:
+                return str(value)
+        
+        elif format_type == "text":
+            # Plain text - capitalize first letter
+            text = str(value).strip()
+            return text.title() if text else "—"
+        
+        else:
+            # Unknown format - return as string
+            return str(value)
+    
+    except (TypeError, ValueError) as e:
+        print(f"⚠️  Format error: value='{value}', format='{format_type}', error={e}")
+        return "—"
 
 
 def _ok(msg):
@@ -88,8 +190,8 @@ def register_card_catalogue_callbacks(app):
         prevent_initial_call=False,
     )
     def refresh_kpi_values(pathname, kpi_ids, auth_data):
-        """Refresh all KPI values."""
-        print(f"\n🔄 Refreshing KPI values for {len(kpi_ids) if kpi_ids else 0} cards")
+        print(f"\n🔄 Refreshing {len(kpi_ids) if kpi_ids else 0} KPI values (ENHANCED)")
+        
         
         if not auth_data or not auth_data.get("authenticated"):
             print("  ⚠️  Not authenticated")
@@ -102,6 +204,7 @@ def register_card_catalogue_callbacks(app):
         print(f"  Society ID: {sid}, Role: {role}, Is Master: {is_master}")
         
         results = []
+        
         for id_dict in kpi_ids:
             card_id = id_dict.get("card_id")
             cfg = KPI_CARDS.get(card_id)
@@ -111,44 +214,55 @@ def register_card_catalogue_callbacks(app):
                 results.append("—")
                 continue
             
-            print(f"  → Processing KPI: {card_id}")
+            print(f"  → Processing: {card_id}")
             
             n_params = cfg.get("params", 0)
+            format_type = cfg.get("format", "number")
             
-            # Build params
+            # ═══ Build query parameters ═══
             if n_params == 0 or is_master:
                 params = {}
             else:
-                if not sid:
-                    print(f"    ⚠️  No society ID for {card_id}")
+                if not sid and n_params > 0:
+                    print(f"    ⚠️  No society ID for {card_id} (needs {n_params} params)")
                     results.append("—")
                     continue
                 
-                # Create dict params
-                if n_params == 1:
-                    params = {"param_0": sid}
-                else:
-                    params = {f"param_{i}": sid for i in range(n_params)}
+                # Create dict params for SQLAlchemy
+                params = {f"param_{i}": sid for i in range(n_params)}
             
             try:
-                # Replace %s with :param_N in query
+                # ═══ Replace %s with :param_N ═══
                 query = cfg["query"]
                 for i in range(n_params):
                     query = query.replace("%s", f":param_{i}", 1)
                 
-                print(f"    Query: {query[:80]}...")
+                print(f"    Query: {query[:100]}...")
                 print(f"    Params: {params}")
                 
+                # ═══ Execute query ═══
                 row = db().execute_query(query, params, fetch_one=True)
                 
-                if row:
-                    raw = row.get("v", 0)
-                    formatted = _fmt(raw, cfg.get("format", "count"))
-                    print(f"    ✓ Result: {raw} → {formatted}")
+                if row and "v" in row:
+                    raw_value = row.get("v")
+                    
+                    # ═══ Format value based on type ═══
+                    formatted = format_kpi_value(raw_value, format_type)
+                    
+                    print(f"    ✓ Raw: {raw_value} → Formatted: {formatted} (type: {format_type})")
                     results.append(formatted)
+                    
                 else:
-                    print(f"    ⚠️  No data returned")
-                    results.append("0")
+                    print(f"    ⚠️  No data returned (empty result)")
+                    # Return appropriate zero value based on format
+                    if format_type == "currency":
+                        results.append("₹0")
+                    elif format_type == "percent":
+                        results.append("0%")
+                    elif format_type in ("date", "text"):
+                        results.append("—")
+                    else:
+                        results.append("0")
                     
             except Exception as e:
                 print(f"    ❌ Error: {e}")
@@ -156,7 +270,7 @@ def register_card_catalogue_callbacks(app):
                 traceback.print_exc()
                 results.append("—")
         
-        print(f"  ✓ Returning {len(results)} results")
+        print(f"  ✓ Returning {len(results)} formatted results")
         return results
 
     # ── 2. SOCIETIES LIST ─────────────────────────────────────────────────
@@ -770,3 +884,32 @@ def register_card_catalogue_callbacks(app):
                                       className="text-danger")])]
 
     print("  ✓ Card catalogue callbacks registered successfully")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# HELPER: Test KPI Formatting
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_kpi_formatting():
+    """Test all KPI format types."""
+    test_cases = [
+        # (value, format, expected_contains)
+        (1234, "number", "1,234"),
+        (1234567, "currency", "₹1.23Cr"),
+        (123456, "currency", "₹1.23L"),
+        (5678, "currency", "₹5.7K"),
+        (85.5, "percent", "85.5%"),
+        ("2024-12-25", "date", "Dec"),
+        ("Free Plan", "text", "Free Plan"),
+        (None, "number", "—"),
+    ]
+    
+    print("\n🧪 Testing KPI formatting...")
+    for value, fmt, expected in test_cases:
+        result = format_kpi_value(value, fmt)
+        status = "✓" if expected in result else "✗"
+        print(f"  {status} format_kpi_value({value}, '{fmt}') = '{result}'")
+
+
+if __name__ == "__main__":
+    test_kpi_formatting()

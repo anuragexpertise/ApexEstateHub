@@ -32,7 +32,6 @@ PAYABLES (Debits Due):
 # ════════════════════════════════════════════════════════════════════════════
  
 KPI_CARDS = {
-    
     # ── RECEIVABLES (Money Society Should Receive) ─────────────────────────
     
     "kpi_receivables_total": {
@@ -97,6 +96,60 @@ KPI_CARDS = {
         "description": "Total outstanding receivables (maintenance + late fees + vendor dues)",
     },
     
+    "kpi_apartments_dues": {
+        "query": """
+            SELECT COUNT(DISTINCT a.id) AS v 
+            FROM apartments a
+            INNER JOIN payments p ON p.apartment_id = a.id
+            WHERE a.society_id = %s 
+              AND p.status = 'pending'
+              AND a.active = TRUE
+        """,
+        "params": 1,
+        "format": "number",
+        "icon": "fa-exclamation-triangle",
+        "color": "#de5c52",
+        "title": "With Dues",
+        "group": "pending payments",
+    },
+    
+    "kpi_apartments_no_dues": {
+        "query": """
+            SELECT COUNT(*) AS v 
+            FROM apartments a
+            WHERE a.society_id = %s 
+              AND a.active = TRUE
+              AND NOT EXISTS (
+                  SELECT 1 FROM payments p 
+                  WHERE p.apartment_id = a.id 
+                    AND p.status = 'pending'
+              )
+        """,
+        "params": 1,
+        "format": "number",
+        "icon": "fa-check-circle",
+        "color": "#17976e",
+        "title": "Dues Clear",
+        "group": "up to date",
+    },
+
+    "kpi_apartments_total_dues": {
+        "query": """
+            SELECT COALESCE(SUM(p.amount), 0) AS v 
+            FROM payments p
+            INNER JOIN apartments a ON a.id = p.apartment_id
+            WHERE a.society_id = %s 
+              AND p.status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-rupee-sign",
+        "color": "#e59620",
+        "title": "Total Pending Dues",
+        "group": "all apartments",
+    },
+    
+
     "kpi_maintenance_due": {
         "query": """
             WITH maintenance_calculation AS (
@@ -152,38 +205,7 @@ KPI_CARDS = {
         "description": "Late fees on overdue payments (2% per month)",
     },
     
-    "kpi_apartments_dues": {
-        "query": """
-            SELECT COUNT(DISTINCT apartment_id) AS v
-            FROM payments
-            WHERE society_id = %s 
-              AND status = 'pending' 
-              AND apartment_id IS NOT NULL
-        """,
-        "params": 1,
-        "format": "count",
-        "description": "Number of apartments with pending dues",
-    },
-    
-    "kpi_apartments_no_dues": {
-        "query": """
-            SELECT COUNT(*) AS v
-            FROM apartments
-            WHERE society_id = %s 
-              AND active = TRUE
-              AND id NOT IN (
-                  SELECT DISTINCT apartment_id 
-                  FROM payments 
-                  WHERE society_id = %s 
-                    AND status = 'pending' 
-                    AND apartment_id IS NOT NULL
-              )
-        """,
-        "params": 2,
-        "format": "count",
-        "description": "Apartments with no pending dues",
-    },
-    
+
     # ── PAYABLES (Money Society Needs to Pay) ──────────────────────────────
     
     "kpi_payables_total": {
@@ -441,7 +463,32 @@ KPI_CARDS = {
         "format": "count",
         "description": "Gate entries today",
     },
+    # ── SETTINGS KPIs ───────────────────────────────────────────────────────────
     
+        # ──────────────────────────────────────────────────────────────────────
+    # TEXT-BASED KPIs (Status/Names)
+    # ──────────────────────────────────────────────────────────────────────
+    "kpi_society_plan": {
+        "query": "SELECT plan AS v FROM societies WHERE id = %s",
+        "params": 1,
+        "format": "text",
+        "icon": "fa-award",
+        "color": "#8e44ad",
+        "title": "Current Plan",
+        "group": "subscription",
+    },
+    
+    "kpi_plan_validity": {
+        "query": "SELECT plan_validity AS v FROM societies WHERE id = %s",
+        "params": 1,
+        "format": "date",
+        "icon": "fa-calendar-times",
+        "color": "#e67e22",
+        "title": "Plan Expires",
+        "group": "validity",
+    },
+
+
     # ── MASTER ADMIN KPIs ───────────────────────────────────────────────────
     
     "kpi_societies_total": {
@@ -908,7 +955,7 @@ DEFAULT_LAYOUTS = {
 # ── RENDERERS
 # ================================================================
 
-def make_kpi_card(card_id: str, value: str = "—") -> html.Div:
+def make_kpi_card(card_id: str, value) -> html.Div:
     cfg = KPI_CARDS.get(card_id, {})
     color  = cfg.get("color", "#3498db")
     icon   = cfg.get("icon", "fa-chart-bar")
@@ -1502,3 +1549,101 @@ def calculate_security_salary_due(db, security_id: int, society_id: int) -> dict
         'pending_salary': float(pending)
     }
  
+
+# ════════════════════════════════════════════════════════════════════════════
+# ── FORMAT HELPERS (ENHANCED)
+# ════════════════════════════════════════════════════════════════════════════
+
+def format_kpi_value(value, format_type: str) -> str:
+    """
+    Format a KPI value based on its type.
+    
+    Supported formats:
+    - number: Plain integer with thousand separators
+    - currency: ₹ symbol with 2 decimals
+    - percent: % symbol with 1 decimal
+    - date: DD MMM YYYY format
+    - text: Plain text (unchanged)
+    """
+    from datetime import date, datetime
+    
+    # Handle None/NULL values
+    if value is None or value == "":
+        return "—"
+    
+    try:
+        if format_type == "number":
+            # Plain number with thousand separators
+            v = int(float(value))
+            return f"{v:,}"
+        
+        elif format_type == "currency":
+            # Currency with ₹ symbol
+            v = float(value)
+            if v >= 10_000_000:  # 1 Crore
+                return f"₹{v/10_000_000:.2f}Cr"
+            elif v >= 100_000:  # 1 Lakh
+                return f"₹{v/100_000:.2f}L"
+            elif v >= 1000:
+                return f"₹{v/1000:.1f}K"
+            else:
+                return f"₹{v:,.2f}"
+        
+        elif format_type == "percent":
+            # Percentage with 1 decimal
+            v = float(value)
+            return f"{v:.1f}%"
+        
+        elif format_type == "date":
+            # Date formatting
+            if isinstance(value, str):
+                # Try parsing common date formats
+                for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"]:
+                    try:
+                        value = datetime.strptime(value, fmt).date()
+                        break
+                    except:
+                        continue
+            
+            if isinstance(value, (date, datetime)):
+                if isinstance(value, datetime):
+                    value = value.date()
+                
+                # Check if date is in the past/future
+                today = date.today()
+                if value < today:
+                    days_ago = (today - value).days
+                    if days_ago == 0:
+                        return "Today"
+                    elif days_ago == 1:
+                        return "Yesterday"
+                    elif days_ago < 7:
+                        return f"{days_ago}d ago"
+                    else:
+                        return value.strftime("%d %b %Y")
+                elif value > today:
+                    days_left = (value - today).days
+                    if days_left == 1:
+                        return "Tomorrow"
+                    elif days_left < 7:
+                        return f"in {days_left}d"
+                    elif days_left < 30:
+                        return f"in {days_left//7}w"
+                    else:
+                        return value.strftime("%d %b %Y")
+                else:
+                    return "Today"
+            else:
+                return str(value)
+        
+        elif format_type == "text":
+            # Plain text (no formatting)
+            return str(value).strip()
+        
+        else:
+            # Unknown format - return as string
+            return str(value)
+    
+    except (TypeError, ValueError) as e:
+        print(f"Format error for value '{value}' with format '{format_type}': {e}")
+        return "—"
