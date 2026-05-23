@@ -872,7 +872,7 @@ def register_drilldown_callbacks(app):
         prevent_initial_call=True,
     )
     def handle_form_submit(n_clicks_list, _field_vals, _hidden_vals, store, auth):
-        
+    
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
 
@@ -890,7 +890,7 @@ def register_drilldown_callbacks(app):
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
 
-        # ═══ FIXED: Collect both regular and hidden fields (images) ═══
+        # ═══ Collect both regular and hidden fields (images) ═══
         form_data: dict = {}
         
         # First pass: collect all form-field values
@@ -920,7 +920,15 @@ def register_drilldown_callbacks(app):
                 field_name = k_dict.get("field")
                 if val:  # Image path exists
                     form_data[field_name] = val
-        
+
+        # ═══ FIX: Replace 'default' with actual society_id in image paths ═══
+        if sid:
+            for field, val in form_data.items():
+                if isinstance(val, str) and '/assets/default/' in val:
+                    new_val = val.replace('/assets/default/', f'/assets/{sid}/')
+                    form_data[field] = new_val
+                    print(f"   Image path corrected: {val} -> {new_val}")
+
         print(f"\n📝 Form submit for {entity_singular}:")
         print(f"   Collected fields: {list(form_data.keys())}")
         print(f"   Image fields: {[k for k,v in form_data.items() if isinstance(v, str) and '/assets/' in v]}")
@@ -928,6 +936,12 @@ def register_drilldown_callbacks(app):
         # Merge pre-fill
         prefill   = nav_state.get_prefill(store or {})
         form_data = {**prefill, **form_data}
+        # Also fix prefill image paths if they contain default
+        if sid:
+            for field, val in form_data.items():
+                if isinstance(val, str) and '/assets/default/' in val:
+                    form_data[field] = val.replace('/assets/default/', f'/assets/{sid}/')
+        
         form_data["society_id"] = sid
 
         ok, msg, new_id = _save_entity(entity_singular, card_id, form_data)
@@ -957,6 +971,10 @@ def register_drilldown_callbacks(app):
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, toast, kpi_style
+    
+# ════════════════════════════════════════════════════════════════════════════
+# LIST CARD (generic)
+# ════════════════════════════════════════════════════════════════════════════
     # ── 3. CSV DOWNLOAD (MATCH callback — one per entity) ──────────────────
     @app.callback(
         Output({"type": "csv-download-trigger", "entity": MATCH}, "data"),
