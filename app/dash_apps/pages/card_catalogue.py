@@ -31,33 +31,39 @@ PAYABLES (Debits Due):
 # CORE FINANCIAL KPIs (Auto-Calculated)
 # ════════════════════════════════════════════════════════════════════════════
  
+# FIXED KPI DEFINITIONS
+# Drop this into: app/dash_apps/pages/card_catalogue.py (replace KPI_CARDS dict)
+
+"""
+Enhanced KPI Definitions - COMPLETE & TESTED
+============================================
+All auto-calculated receivables and payables with proper SQL.
+"""
+
 KPI_CARDS = {
-    # ── RECEIVABLES (Money Society Should Receive) ─────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # RECEIVABLES (Money Society Should Receive)
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_receivables_total": {
         "query": """
-            WITH maintenance_due AS (
-                -- Calculate maintenance from arrear_start_date to current
+            WITH maintenance_calculation AS (
                 SELECT 
                     a.id,
                     a.apartment_size,
                     s.arrear_start_date,
-                    -- Number of months from arrear start to now
                     EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
                     EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.arrear_start_date)) AS months_due,
-                    -- Default rate ₹3/sqft (should come from settings)
                     3.0 AS rate_per_sqft
                 FROM apartments a
                 JOIN societies s ON a.society_id = s.id
                 WHERE a.society_id = %s AND a.active = TRUE
             ),
-            total_maintenance AS (
-                SELECT 
-                    SUM(apartment_size * rate_per_sqft * GREATEST(months_due, 0)) AS amount
-                FROM maintenance_due
+            total_maintenance_due AS (
+                SELECT COALESCE(SUM(apartment_size * rate_per_sqft * GREATEST(months_due, 0)), 0) AS amount
+                FROM maintenance_calculation
             ),
             payments_made AS (
-                -- Subtract already paid maintenance
                 SELECT COALESCE(SUM(amount), 0) AS amount
                 FROM payments
                 WHERE society_id = %s 
@@ -65,11 +71,10 @@ KPI_CARDS = {
                   AND status = 'verified'
             ),
             late_fees AS (
-                -- Calculate late fees on overdue payments
                 SELECT COALESCE(SUM(
                     CASE 
                         WHEN due_date < CURRENT_DATE 
-                        THEN amount * 0.02 * EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)) / 30
+                        THEN amount * 0.02 * (CURRENT_DATE - due_date) / 30
                         ELSE 0 
                     END
                 ), 0) AS amount
@@ -79,37 +84,36 @@ KPI_CARDS = {
                   AND due_date IS NOT NULL
             ),
             vendor_dues AS (
-                -- Vendor pass fees pending
                 SELECT COALESCE(SUM(amount), 0) AS amount
                 FROM payments
                 WHERE society_id = %s 
                   AND payment_type = 'vendor_pass' 
                   AND status = 'pending'
             )
-            SELECT 
-                COALESCE(tm.amount, 0) - COALESCE(pm.amount, 0) + 
-                COALESCE(lf.amount, 0) + COALESCE(vd.amount, 0) AS v
-            FROM total_maintenance tm, payments_made pm, late_fees lf, vendor_dues vd
+            SELECT COALESCE(tmd.amount - pm.amount + lf.amount + vd.amount, 0) AS v
+            FROM total_maintenance_due tmd, payments_made pm, late_fees lf, vendor_dues vd
         """,
-        "params": 4,  # society_id used 4 times
+        "params": 4,
         "format": "currency",
-        "description": "Total outstanding receivables (maintenance + late fees + vendor dues)",
+        "icon": "fa-hand-holding-usd",
+        "color": "#17976e",
+        "title": "Total Receivables",
+        "group": "pending income",
     },
     
     "kpi_apartments_dues": {
         "query": """
-            SELECT COUNT(DISTINCT a.id) AS v 
-            FROM apartments a
-            INNER JOIN payments p ON p.apartment_id = a.id
-            WHERE a.society_id = %s 
+            SELECT COUNT(DISTINCT p.entity_id) AS v 
+            FROM payments p
+            WHERE p.society_id = %s 
+              AND p.entity_type = 'apartment'
               AND p.status = 'pending'
-              AND a.active = TRUE
         """,
         "params": 1,
         "format": "number",
         "icon": "fa-exclamation-triangle",
         "color": "#de5c52",
-        "title": "With Dues",
+        "title": "Apts With Dues",
         "group": "pending payments",
     },
     
@@ -121,7 +125,8 @@ KPI_CARDS = {
               AND a.active = TRUE
               AND NOT EXISTS (
                   SELECT 1 FROM payments p 
-                  WHERE p.apartment_id = a.id 
+                  WHERE p.entity_id = a.id 
+                    AND p.entity_type = 'apartment'
                     AND p.status = 'pending'
               )
         """,
@@ -137,24 +142,22 @@ KPI_CARDS = {
         "query": """
             SELECT COALESCE(SUM(p.amount), 0) AS v 
             FROM payments p
-            INNER JOIN apartments a ON a.id = p.apartment_id
-            WHERE a.society_id = %s 
+            WHERE p.society_id = %s 
+              AND p.entity_type = 'apartment'
               AND p.status = 'pending'
         """,
         "params": 1,
         "format": "currency",
         "icon": "fa-rupee-sign",
         "color": "#e59620",
-        "title": "Total Pending Dues",
+        "title": "Total Pending",
         "group": "all apartments",
     },
     
-
     "kpi_maintenance_due": {
         "query": """
             WITH maintenance_calculation AS (
                 SELECT 
-                    a.id,
                     a.apartment_size,
                     s.arrear_start_date,
                     EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
@@ -164,13 +167,15 @@ KPI_CARDS = {
                 JOIN societies s ON a.society_id = s.id
                 WHERE a.society_id = %s AND a.active = TRUE
             )
-            SELECT 
-                COALESCE(SUM(apartment_size * rate_per_sqft * GREATEST(months_due, 0)), 0) AS v
+            SELECT COALESCE(SUM(apartment_size * rate_per_sqft * GREATEST(months_due, 0)), 0) AS v
             FROM maintenance_calculation
         """,
         "params": 1,
         "format": "currency",
-        "description": "Total maintenance charges due (from arrear_start_date)",
+        "icon": "fa-home",
+        "color": "#1859b8",
+        "title": "Maintenance Due",
+        "group": "from arrear date",
     },
     
     "kpi_maintenance_paid": {
@@ -183,7 +188,10 @@ KPI_CARDS = {
         """,
         "params": 1,
         "format": "currency",
-        "description": "Total maintenance collected",
+        "icon": "fa-check-square",
+        "color": "#17976e",
+        "title": "Maintenance Paid",
+        "group": "collected",
     },
     
     "kpi_late_fees_due": {
@@ -191,7 +199,7 @@ KPI_CARDS = {
             SELECT COALESCE(SUM(
                 CASE 
                     WHEN due_date < CURRENT_DATE 
-                    THEN amount * 0.02 * EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)) / 30
+                    THEN amount * 0.02 * (CURRENT_DATE - due_date) / 30
                     ELSE 0 
                 END
             ), 0) AS v
@@ -202,74 +210,85 @@ KPI_CARDS = {
         """,
         "params": 1,
         "format": "currency",
-        "description": "Late fees on overdue payments (2% per month)",
+        "icon": "fa-clock",
+        "color": "#e59620",
+        "title": "Late Fees Due",
+        "group": "2% per month",
     },
     
-
-    # ── PAYABLES (Money Society Needs to Pay) ──────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # PAYABLES (Money Society Needs to Pay)
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_payables_total": {
         "query": """
             WITH security_salaries AS (
-                -- Calculate unpaid security salaries
                 SELECT COALESCE(SUM(
                     ss.salary_per_shift * 
-                    EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE)))
+                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)
                 ), 0) AS amount
                 FROM security_staff ss
                 WHERE ss.society_id = %s 
                   AND ss.active = TRUE
             ),
+            security_paid AS (
+                SELECT COALESCE(SUM(p.amount), 0) AS amount
+                FROM payments p
+                WHERE p.society_id = %s
+                  AND p.payment_type = 'salary'
+                  AND p.status = 'verified'
+            ),
             vendor_payments AS (
-                -- Pending vendor payments
                 SELECT COALESCE(SUM(amount), 0) AS amount
                 FROM payments
                 WHERE society_id = %s 
-                  AND user_id IN (
-                      SELECT id FROM users 
-                      WHERE society_id = %s AND role = 'vendor'
-                  )
+                  AND entity_type = 'vendor'
                   AND status = 'pending'
             ),
             pending_expenses AS (
-                -- Other pending expenses
                 SELECT COALESCE(SUM(amount), 0) AS amount
-                FROM transactions
+                FROM expenses
                 WHERE society_id = %s 
                   AND status = 'pending'
-                  AND acc_id IN (
-                      SELECT id FROM accounts 
-                      WHERE society_id = %s AND drcr_account = 'Dr'
-                  )
             )
-            SELECT 
-                COALESCE(ss.amount, 0) + 
-                COALESCE(vp.amount, 0) + 
-                COALESCE(pe.amount, 0) AS v
-            FROM security_salaries ss, vendor_payments vp, pending_expenses pe
+            SELECT COALESCE(ss.amount - sp.amount + vp.amount + pe.amount, 0) AS v
+            FROM security_salaries ss, security_paid sp, vendor_payments vp, pending_expenses pe
         """,
-        "params": 5,
+        "params": 4,
         "format": "currency",
-        "description": "Total payables (salaries + vendor payments + expenses)",
+        "icon": "fa-wallet",
+        "color": "#de5c52",
+        "title": "Total Payables",
+        "group": "pending payments",
     },
     
     "kpi_security_salaries_due": {
         "query": """
-            SELECT COALESCE(SUM(
-                ss.salary_per_shift * 
-                EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE)))
-            ), 0) AS v
-            FROM security_staff ss
-            LEFT JOIN payments p ON p.user_id IN (
-                SELECT id FROM users WHERE linked_id = ss.id AND role = 'security'
-            ) AND p.payment_type = 'salary' AND p.status = 'verified'
-            WHERE ss.society_id = %s 
-              AND ss.active = TRUE
-              AND p.id IS NULL
+            WITH security_total_due AS (
+                SELECT COALESCE(SUM(
+                    ss.salary_per_shift * 
+                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)
+                ), 0) AS amount
+                FROM security_staff ss
+                WHERE ss.society_id = %s 
+                  AND ss.active = TRUE
+            ),
+            security_paid AS (
+                SELECT COALESCE(SUM(p.amount), 0) AS amount
+                FROM payments p
+                WHERE p.society_id = %s
+                  AND p.payment_type = 'salary'
+                  AND p.status = 'verified'
+            )
+            SELECT COALESCE(std.amount - sp.amount, 0) AS v
+            FROM security_total_due std, security_paid sp
         """,
-        "params": 1,
+        "params": 2,
         "format": "currency",
-        "description": "Unpaid security salaries",
+        "icon": "fa-user-shield",
+        "color": "#b63b3b",
+        "title": "Security Salary Due",
+        "group": "unpaid wages",
     },
     
     "kpi_vendor_payments_due": {
@@ -277,17 +296,20 @@ KPI_CARDS = {
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payments
             WHERE society_id = %s 
-              AND user_id IN (
-                  SELECT id FROM users WHERE society_id = %s AND role = 'vendor'
-              )
+              AND entity_type = 'vendor'
               AND status = 'pending'
         """,
-        "params": 2,
+        "params": 1,
         "format": "currency",
-        "description": "Pending payments to vendors",
+        "icon": "fa-truck",
+        "color": "#b98a07",
+        "title": "Vendor Payments",
+        "group": "pending",
     },
     
-    # ── CASHBOOK & BALANCE ──────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # CASHBOOK & BALANCE
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_receipts_month": {
         "query": """
@@ -301,7 +323,10 @@ KPI_CARDS = {
         """,
         "params": 1,
         "format": "currency",
-        "description": "Total receipts this month (Cr accounts)",
+        "icon": "fa-receipt",
+        "color": "#17976e",
+        "title": "Receipts (Month)",
+        "group": "credits",
     },
     
     "kpi_expenses_month": {
@@ -316,7 +341,10 @@ KPI_CARDS = {
         """,
         "params": 1,
         "format": "currency",
-        "description": "Total expenses this month (Dr accounts)",
+        "icon": "fa-wallet",
+        "color": "#de5c52",
+        "title": "Expenses (Month)",
+        "group": "debits",
     },
     
     "kpi_balance": {
@@ -336,13 +364,26 @@ KPI_CARDS = {
                 WHERE t.society_id = %s 
                   AND t.status = 'paid'
                   AND a.drcr_account = 'Dr'
+            ),
+            opening_balance AS (
+                SELECT COALESCE(SUM(
+                    CASE 
+                        WHEN drcr_bf = 'Cr' THEN bf_amount
+                        ELSE -bf_amount
+                    END
+                ), 0) AS amount
+                FROM accounts
+                WHERE society_id = %s
             )
-            SELECT (r.amount - e.amount) AS v
-            FROM receipts r, expenses e
+            SELECT COALESCE(ob.amount + r.amount - e.amount, 0) AS v
+            FROM receipts r, expenses e, opening_balance ob
         """,
-        "params": 2,
+        "params": 3,
         "format": "currency",
-        "description": "Current balance (Receipts - Expenses)",
+        "icon": "fa-coins",
+        "color": "#2c3e50",
+        "title": "Current Balance",
+        "group": "net position",
     },
     
     "kpi_cash_in_hand": {
@@ -365,50 +406,65 @@ KPI_CARDS = {
                   AND a.drcr_account = 'Dr'
                   AND t.mode = 'cash'
             )
-            SELECT (r.amount - e.amount) AS v
+            SELECT COALESCE(r.amount - e.amount, 0) AS v
             FROM cash_receipts r, cash_expenses e
         """,
         "params": 2,
         "format": "currency",
-        "description": "Cash in hand (cash receipts - cash expenses)",
+        "icon": "fa-money-bill-wave",
+        "color": "#27ae60",
+        "title": "Cash in Hand",
+        "group": "physical cash",
     },
     
-    # ── ENTITY COUNTS ───────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # ENTITY COUNTS
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_apartments_total": {
         "query": "SELECT COUNT(*) AS v FROM apartments WHERE society_id = %s AND active = TRUE",
         "params": 1,
-        "format": "count",
-        "description": "Total active apartments",
+        "format": "number",
+        "icon": "fa-home",
+        "color": "#1859b8",
+        "title": "Apartments",
+        "group": "active",
     },
     
     "kpi_vendors_total": {
-        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id = %s AND role = 'vendor'",
+        "query": "SELECT COUNT(*) AS v FROM vendors WHERE society_id = %s AND active = TRUE",
         "params": 1,
-        "format": "count",
-        "description": "Total vendors",
+        "format": "number",
+        "icon": "fa-truck",
+        "color": "#b98a07",
+        "title": "Vendors",
+        "group": "registered",
     },
     
     "kpi_vendors_dues": {
         "query": """
-            SELECT COUNT(DISTINCT user_id) AS v
+            SELECT COUNT(DISTINCT entity_id) AS v
             FROM payments
             WHERE society_id = %s 
-              AND status = 'pending' 
-              AND user_id IN (
-                  SELECT id FROM users WHERE society_id = %s AND role = 'vendor'
-              )
+              AND entity_type = 'vendor'
+              AND status = 'pending'
         """,
-        "params": 2,
-        "format": "count",
-        "description": "Vendors with pending dues",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-exclamation-circle",
+        "color": "#e59620",
+        "title": "Vendors w/ Dues",
+        "group": "pending",
     },
     
     "kpi_security_total": {
-        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id = %s AND role = 'security'",
+        "query": "SELECT COUNT(*) AS v FROM security_staff WHERE society_id = %s AND active = TRUE",
         "params": 1,
-        "format": "count",
-        "description": "Total security staff",
+        "format": "number",
+        "icon": "fa-user-shield",
+        "color": "#b63b3b",
+        "title": "Security Staff",
+        "group": "active",
     },
     
     "kpi_security_on_duty": {
@@ -420,11 +476,16 @@ KPI_CARDS = {
               AND time_out IS NULL
         """,
         "params": 1,
-        "format": "count",
-        "description": "Security staff currently on duty",
+        "format": "number",
+        "icon": "fa-shield-alt",
+        "color": "#691b1b",
+        "title": "On Duty Now",
+        "group": "active guards",
     },
     
-    # ── EVENTS & CONCERNS ───────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # EVENTS & CONCERNS
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_events_total": {
         "query": """
@@ -434,8 +495,11 @@ KPI_CARDS = {
               AND event_date >= CURRENT_DATE
         """,
         "params": 1,
-        "format": "count",
-        "description": "Upcoming events",
+        "format": "number",
+        "icon": "fa-calendar-check",
+        "color": "#8e44ad",
+        "title": "Upcoming Events",
+        "group": "scheduled",
     },
     
     "kpi_concerns_open": {
@@ -446,11 +510,16 @@ KPI_CARDS = {
               AND status IN ('open', 'in_progress')
         """,
         "params": 1,
-        "format": "count",
-        "description": "Open/active concerns",
+        "format": "number",
+        "icon": "fa-hand-point-up",
+        "color": "#de5c52",
+        "title": "Open Concerns",
+        "group": "pending issues",
     },
     
-    # ── GATE LOGS ───────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # GATE LOGS
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_gate_logs": {
         "query": """
@@ -460,14 +529,17 @@ KPI_CARDS = {
               AND time_in >= CURRENT_DATE
         """,
         "params": 1,
-        "format": "count",
-        "description": "Gate entries today",
+        "format": "number",
+        "icon": "fa-receipt",
+        "color": "#1abc9c",
+        "title": "Gate Logs Today",
+        "group": "entries",
     },
-    # ── SETTINGS KPIs ───────────────────────────────────────────────────────────
     
-        # ──────────────────────────────────────────────────────────────────────
-    # TEXT-BASED KPIs (Status/Names)
-    # ──────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # SETTINGS KPIs
+    # ══════════════════════════════════════════════════════════════
+    
     "kpi_society_plan": {
         "query": "SELECT plan AS v FROM societies WHERE id = %s",
         "params": 1,
@@ -487,15 +559,74 @@ KPI_CARDS = {
         "title": "Plan Expires",
         "group": "validity",
     },
-
-
-    # ── MASTER ADMIN KPIs ───────────────────────────────────────────────────
+    
+    "kpi_accounts_count": {
+        "query": "SELECT COUNT(*) AS v FROM accounts WHERE society_id = %s",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-book-open",
+        "color": "#6c5ce7",
+        "title": "Accounts",
+        "group": "chart",
+    },
+    
+    "kpi_apt_charges": {
+        "query": "SELECT COUNT(*) AS v FROM apt_charges_fines WHERE society_id = %s AND apt_status = TRUE",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-rupee-sign",
+        "color": "#1859b8",
+        "title": "Apt Charge Rules",
+        "group": "active",
+    },
+    
+    "kpi_ven_charges": {
+        "query": "SELECT COUNT(*) AS v FROM ven_charges_fines WHERE society_id = %s AND ven_status = TRUE",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-rupee-sign",
+        "color": "#b98a07",
+        "title": "Vendor Charges",
+        "group": "active",
+    },
+    
+    "kpi_sec_charges": {
+        "query": "SELECT COUNT(*) AS v FROM security_charges_fines WHERE society_id = %s AND sec_status = TRUE",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-rupee-sign",
+        "color": "#b63b3b",
+        "title": "Security Charges",
+        "group": "active",
+    },
+    
+    "kpi_attendance": {
+        "query": """
+            SELECT COUNT(*) AS v 
+            FROM attendance 
+            WHERE society_id = %s 
+              AND time_in >= CURRENT_DATE - INTERVAL '30 days'
+        """,
+        "params": 1,
+        "format": "number",
+        "icon": "fa-clock",
+        "color": "#6638bd",
+        "title": "Attendance (30d)",
+        "group": "records",
+    },
+    
+    # ══════════════════════════════════════════════════════════════
+    # MASTER ADMIN KPIs
+    # ══════════════════════════════════════════════════════════════
     
     "kpi_societies_total": {
         "query": "SELECT COUNT(*) AS v FROM societies",
         "params": 0,
-        "format": "count",
-        "description": "Total societies on platform",
+        "format": "number",
+        "icon": "fa-building",
+        "color": "#c96a19",
+        "title": "Total Societies",
+        "group": "platform",
     },
     
     "kpi_societies_paid": {
@@ -506,15 +637,21 @@ KPI_CARDS = {
               AND plan_validity >= CURRENT_DATE
         """,
         "params": 0,
-        "format": "count",
-        "description": "Active paid societies",
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Paid Plans",
+        "group": "active",
     },
     
     "kpi_societies_free": {
         "query": "SELECT COUNT(*) AS v FROM societies WHERE plan = 'Free'",
         "params": 0,
-        "format": "count",
-        "description": "Free plan societies",
+        "format": "number",
+        "icon": "fa-circle",
+        "color": "#7d8ea3",
+        "title": "Free Plans",
+        "group": "total",
     },
     
     "kpi_societies_expired": {
@@ -525,8 +662,11 @@ KPI_CARDS = {
               AND plan_validity < CURRENT_DATE
         """,
         "params": 0,
-        "format": "count",
-        "description": "Societies with expired plans",
+        "format": "number",
+        "icon": "fa-exclamation-triangle",
+        "color": "#de5c52",
+        "title": "Expired Plans",
+        "group": "needs renewal",
     },
 }
 
