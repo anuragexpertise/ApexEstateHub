@@ -286,7 +286,7 @@ def register_card_catalogue_callbacks(app):
         
         try:
             query = """
-                SELECT id, name, email, phone, plan, created_at 
+                SELECT id, name, email, phone, plan, plan_validity, created_at 
                 FROM societies 
                 ORDER BY created_at DESC 
                 LIMIT 50
@@ -306,6 +306,7 @@ def register_card_catalogue_callbacks(app):
                 html.Td(r.get("email", "")),
                 html.Td(r.get("phone", "")),
                 html.Td(dbc.Badge(r.get("plan", "Free"), color="info")),
+                html.Td(r.get("plan_validity","")),
                 html.Td(str(r.get("created_at", ""))[:10]),
                 html.Td(dbc.Button("Edit", size="sm", color="link")),
                 html.Td(dbc.Button(
@@ -422,7 +423,7 @@ def register_card_catalogue_callbacks(app):
         
         try:
             query = """
-                SELECT name, tab_name, header, drcr_account, bf_amount 
+                SELECT name, tab_name, header, drcr_account, bf_amount, depreciation_percent
                 FROM accounts 
                 WHERE society_id = :sid 
                 ORDER BY name
@@ -442,6 +443,7 @@ def register_card_catalogue_callbacks(app):
                 html.Td(r.get("header") or "—"),
                 html.Td(r.get("drcr_account") or "—"),
                 html.Td(f"₹{float(r.get('bf_amount') or 0):,.2f}"),
+                html.Td(r.get("depreciation_percent", "—")),
                 html.Td(dbc.Button(
                     "Edit",
                     id={"type": "list-action", "action": "edit", "entity": "account", "id": r["id"]},
