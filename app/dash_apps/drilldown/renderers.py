@@ -423,50 +423,123 @@ def render_list_card(card_id: str, title: str, icon: str,
         ]
     )
 
-
 # ════════════════════════════════════════════════════════════════════════════
-# PROFILE CARD (generic)
+# IMAGE FIELD RENDERER (for profile cards)
 # ════════════════════════════════════════════════════════════════════════════
 
-
+def _render_image_field(field_label: str, image_path: str | None) -> html.Div:
+    """
+    Render an image field in profile view.
+    Shows the image if it exists, otherwise shows placeholder.
+    """
+    if not image_path:
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.I(className="fas fa-image me-2",
+                            style={"color": "#aaa", "width": "14px"}),
+                        html.Span(field_label,
+                                style={"color": "#7d8ea3", "fontSize": "11px",
+                                        "fontWeight": "600", "textTransform": "uppercase",
+                                        "letterSpacing": "0.4px"}),
+                    ],
+                    style={"marginBottom": "2px"},
+                ),
+                html.Div(
+                    [
+                        html.I(className="fas fa-image-slash me-2",
+                            style={"color": "#ddd", "fontSize": "24px"}),
+                        html.Span("No image uploaded",
+                                style={"fontSize": "12px", "color": "#aaa"}),
+                    ],
+                    style={
+                        "fontSize": "14px", "fontWeight": "500",
+                        "color": "#ccc", "paddingLeft": "22px",
+                        "padding": "20px", "background": "#f8f9fa",
+                        "borderRadius": "8px", "textAlign": "center",
+                    }
+                ),
+            ],
+            style={"marginBottom": "14px"},
+        )
+    
+    # Image exists - display it
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.I(className="fas fa-image me-2",
+                        style={"color": "#aaa", "width": "14px"}),
+                    html.Span(field_label,
+                            style={"color": "#7d8ea3", "fontSize": "11px",
+                                    "fontWeight": "600", "textTransform": "uppercase",
+                                    "letterSpacing": "0.4px"}),
+                ],
+                style={"marginBottom": "8px"},
+            ),
+            html.Div(
+                html.Img(
+                    src=image_path,
+                    style={
+                        "maxWidth": "300px",
+                        "maxHeight": "200px",
+                        "borderRadius": "8px",
+                        "border": "1px solid #ddd",
+                        "objectFit": "contain",
+                        "background": "#fff",
+                        "padding": "4px",
+                    }
+                ),
+                style={"paddingLeft": "22px"},
+            ),
+        ],
+        style={"marginBottom": "14px"},
+    )
+ 
+ 
+# ═══════════════════════════════════════════════════════════════════
+# RENDER PROFILE CARD
+# ═══════════════════════════════════════════════════════════════════
+ 
 def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record: dict,
                         fields: list[dict],
                         actions: list[dict] | None = None,
                         color: str = "#1d74d8") -> html.Div:
     """
-    Generic profile card.
-
-    fields = [{"label": "Flat Number", "field": "flat_number", "icon": "fa-home"}, ...]
-    actions = [{"label": "Pay", "target_card": "form_receipt_new",
-                "color": "success", "icon": "fa-rupee-sign"}, ...]
+    Generic profile card with IMAGE SUPPORT.
+    
+    fields = [
+        {"label": "Flat Number", "field": "flat_number", "icon": "fa-home"},
+        {"label": "Logo", "field": "logo", "icon": "fa-image", "type": "image"},  # ← NEW
+        ...
+    ]
     """
     pk_val = record.get("id", "")
-
-    # ── Field rows ────────────────────────────────────────────────────────
+ 
+    # ── Field rows with IMAGE support ─────────────────────────────
     field_rows = []
     for f in fields:
+        field_type = f.get("type", "text")
+        
+        # ═══ IMAGE FIELD ═══
+        if field_type == "image":
+            image_path = record.get(f["field"])
+            field_rows.append(_render_image_field(f["label"], image_path))
+            continue
+        
+        # ═══ REGULAR TEXT FIELDS ═══
         val = record.get(f["field"])
         if val is None:
             val = "—"
         elif isinstance(val, bool):
-            val = "Yes" if val else "No"
+            val = "✓ Yes" if val else "✗ No"
         elif hasattr(val, "strftime"):
             val = val.strftime("%d %b %Y")
         else:
             val = str(val)
-
-        # logo_path = society_data.get('logo') if society_data else None
-        # bg_path = society_data.get('login_background') if society_data else None
-        # sign_path = society_data.get('secretary_sign') if society_data else None
-
-        # if f.get("label") ="Logo":
-        #     field_rows.append(          _add_image_upload_field("logo", "Society Logo", logo_path))
-        # elif f.get("label") ="Login Background":
-        #     field_rows.append(         _add_image_upload_field("login_background", "Login Background Image", bg_path))
-        # elif f.get("label") = "Secretary's Sign":
-        #     field_rows.append(          _add_image_upload_field("secretary_sign", "Secretary's Signature", sign_path))
-        # else:
+        
         field_rows.append(
             html.Div(
                 [
@@ -487,8 +560,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
                 style={"marginBottom": "14px"},
             )
         )
-
-    # ── Action buttons ────────────────────────────────────────────────────
+ 
+    # ── Action buttons ────────────────────────────────────────────
     action_btns = []
     for act in (actions or []):
         action_btns.append(
@@ -504,7 +577,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                 style={"borderRadius": "10px", "fontWeight": "600"},
             )
         )
-
+ 
     return html.Div(
         dbc.Card(
             [
@@ -559,7 +632,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                     style={"padding": "12px 16px",
                            "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
                 ),
-
+ 
                 # ── Body ──────────────────────────────────────────────
                 dbc.CardBody(
                     [
@@ -567,7 +640,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         html.Hr(style={"margin": "8px 0", "opacity": "0.3"}) if action_btns else None,
                         html.Div(action_btns, style={"display": "flex", "flexWrap": "wrap"}),
                     ],
-                    style={"padding": "16px"},
+                    style={"padding": "16px", "maxHeight": "600px", "overflowY": "auto"},
                 ),
             ],
             style={
@@ -580,7 +653,6 @@ def render_profile_card(card_id: str, title: str, icon: str,
             },
         )
     )
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # FORM CARD (generic)
