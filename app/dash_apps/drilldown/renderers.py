@@ -426,8 +426,14 @@ def render_list_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 # IMAGE FIELD RENDERER (for profile cards)
 # ════════════════════════════════════════════════════════════════════════════
-def _get_image_url(image_path: str | None, society_id: int | None = None) -> str | None:
-    """Convert stored filename to a full asset URL using society_id."""
+def _get_image_url(image_path: str | None, society_id: int | None = None,
+                   entity: str = None, pk: int | None = None) -> str | None:
+    """
+    Convert stored filename to a full asset URL.
+    
+    For new records (no pk), uses temporary /assets/default/{entity}/.
+    For existing records, uses /assets/{society_id}/{entity}_{pk}/.
+    """
     if not image_path or str(image_path).strip() == "":
         return None
     path = str(image_path).strip()
@@ -436,30 +442,45 @@ def _get_image_url(image_path: str | None, society_id: int | None = None) -> str
     if path.startswith(('http://', 'https://', 'data:image')):
         return path
     
-    # If it's just a filename (no slashes), construct path with society_id
+    # If it's just a filename (no slashes), construct the correct path
     if '/' not in path and '\\' not in path:
-        if society_id:
-            return f'/assets/{society_id}/{path}'
+        if society_id and pk and entity:
+            # Record-specific folder: e.g. /assets/1/apartment_42/logo.png
+            return f"/assets/{society_id}/{entity}_{pk}/{path}"
+        elif society_id:
+            # Legacy fallback: /assets/{society_id}/filename
+            return f"/assets/{society_id}/{path}"
         else:
-            # Fallback for when society_id is missing (should not happen in production)
-            return f'/assets/default/{path}'
+            # Temporary default folder for new records
+            return f"/assets/default/{entity}/{path}" if entity else f"/assets/default/{path}"
     
-    # Legacy full paths (migration): replace 'default' with actual society_id
+    # Legacy full paths: try to replace 'default' with actual society_id
     if '/assets/default/' in path and society_id:
         return path.replace('/assets/default/', f'/assets/{society_id}/')
     
-    # Any other path: assume it's already correct
+    # Already correct absolute path
     if path.startswith('/assets/'):
         return path
     
-    return f'/assets/{path}'
+    return f"/assets/{path}"
 
-def _render_image_field(field_label: str, image_path: str | None) -> html.Div:
+def _render_image_field(field_label: str, image_path: str | None, 
+                        image_size: str = "medium", 
+                        society_id: int | None = None,
+                        entity: str = None,
+                        pk: int | None = None) -> html.Div:
     """
-    Render an image field in profile view.
-    Shows the image if it exists, otherwise shows placeholder.
+    Render an image field in profile view with record‑specific folder.
     """
-    if not image_path:
+    # Size mapping (unchanged)
+    size_map = {
+        "small": {"maxWidth": "150px", "maxHeight": "100px"},
+        "medium": {"maxWidth": "300px", "maxHeight": "200px"},
+        "large": {"maxWidth": "500px", "maxHeight": "350px"},
+    }
+    img_dimensions = size_map.get(image_size, size_map["medium"])
+    
+    if not image_path or str(image_path).strip() == "":
         return html.Div(
             [
                 html.Div(
@@ -491,6 +512,33 @@ def _render_image_field(field_label: str, image_path: str | None) -> html.Div:
             style={"marginBottom": "14px"},
         )
     
+    # Construct full image URL
+    full_image_url = _get_image_url(str(image_path).strip(), society_id, entity, pk)
+    
+    if not full_image_url:
+        # Fallback to placeholder if URL construction fails
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.I(className="fas fa-image me-2", style={"color": "#aaa", "width": "14px"}),
+                        html.Span(field_label, style={"color": "#7d8ea3", "fontSize": "11px",
+                                                       "fontWeight": "600", "textTransform": "uppercase",
+                                                       "letterSpacing": "0.4px"}),
+                    ],
+                    style={"marginBottom": "2px"},
+                ),
+                html.Div(
+                    [
+                        html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                        html.Span(f"Image not found: {image_path}", style={"fontSize": "11px", "color": "#e59620"}),
+                    ],
+                    style={"paddingLeft": "22px", "marginTop": "4px"}
+                ),
+            ],
+            style={"marginBottom": "14px"},
+        )
+    
     # Image exists - display it
     return html.Div(
         [
@@ -507,23 +555,27 @@ def _render_image_field(field_label: str, image_path: str | None) -> html.Div:
             ),
             html.Div(
                 html.Img(
-                    src=image_path,
+                    src=full_image_url,
                     style={
-                        "maxWidth": "300px",
-                        "maxHeight": "200px",
+                        **img_dimensions,
                         "borderRadius": "8px",
                         "border": "1px solid #ddd",
                         "objectFit": "contain",
                         "background": "#fff",
                         "padding": "4px",
-                    }
+                    },
+                    title=f"Image: {Path(image_path).name if image_path else 'Unknown'}"
                 ),
                 style={"paddingLeft": "22px"},
+            ),
+            html.Small(
+                f"📁 {Path(image_path).name if image_path else ''}",
+                style={"fontSize": "10px", "color": "#aaa", "paddingLeft": "22px", 
+                       "display": "block", "marginTop": "4px"}
             ),
         ],
         style={"marginBottom": "14px"},
     )
- 
  
 # ═══════════════════════════════════════════════════════════════════
 # RENDER PROFILE CARD
@@ -536,7 +588,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         color: str = "#1d74d8") -> html.Div:
     
     pk_val = record.get("id", "")
-    society_id = record.get("society_id")  # Important!
+    society_id = record.get("society_id")
     
     field_rows = []
     for f in fields:
@@ -544,7 +596,10 @@ def render_profile_card(card_id: str, title: str, icon: str,
         if field_type == "image":
             image_path = record.get(f["field"])
             image_size = f.get("size", "medium")
-            field_rows.append(_render_image_field(f["label"], image_path, image_size, society_id))
+            # ✅ Pass entity and pk_val
+            field_rows.append(_render_image_field(
+                f["label"], image_path, image_size, society_id, entity, pk_val
+            ))
             continue
         
         # ═══ REGULAR TEXT FIELDS ═══
@@ -783,6 +838,7 @@ def render_form_card(card_id: str, title: str, icon: str,
     from database.db_manager import db
    
     prefill = prefill or {}
+    current_pk = prefill.get("id") or ""
     form_rows = []
 
     for f in fields:
@@ -848,72 +904,51 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px"},
             )
         elif ftype == "image_upload":
-            # ═══ FIXED: Show existing image on load ═══
             current_image = pre_val if pre_val else None
-            
-            # Check if image exists
-            img_exists = False
-            if current_image and isinstance(current_image, str):
-                if current_image.startswith('/assets/'):
-                    # Check if file exists
-                    img_path = Path("app") / current_image.lstrip('/')
-                    img_exists = img_path.exists()
-                elif current_image.startswith('http'):
-                    img_exists = True  # External URL
+            display_url = _get_image_url(current_image, society_id, entity, current_pk) if current_image else None
+            img_exists = bool(display_url and not display_url.startswith('/assets/default/'))
             
             ctrl = html.Div([
+                # Hidden field to pass the current record PK to upload callback
+                dcc.Input(
+                    id={"type": "form-entity-pk", "entity": entity},
+                    type="hidden",
+                    value=str(current_pk)
+                ),
                 dcc.Upload(
                     id={"type": "form-field", "entity": entity, "field": fid},
                     children=html.Div([
                         html.I(className="fas fa-cloud-upload-alt me-2"),
-                        html.Span("Drag & Drop or Click to Upload Image" if not img_exists 
-                                 else "Click to Replace Image")
+                        html.Span("Drag & Drop or Click to Upload Image")
                     ]),
                     style={
-                        "width": "100%",
-                        "height": "80px",
-                        "lineHeight": "80px",
-                        "borderWidth": "2px",
-                        "borderStyle": "dashed",
-                        "borderRadius": "10px",
-                        "textAlign": "center",
-                        "borderColor": "#667eea",
-                        "background": "rgba(102,126,234,0.05)",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "color": "#667eea"
+                        "width": "100%", "height": "80px", "lineHeight": "80px",
+                        "borderWidth": "2px", "borderStyle": "dashed", "borderRadius": "10px",
+                        "textAlign": "center", "borderColor": "#667eea",
+                        "background": "rgba(102,126,234,0.05)", "cursor": "pointer",
+                        "fontSize": "13px", "color": "#667eea"
                     },
                     multiple=False,
                     accept="image/*"
                 ),
-                # ═══ FIXED: Show preview if image exists ═══
                 html.Div(
                     id={"type": "image-preview", "entity": entity, "field": fid},
                     children=[
                         html.Img(
-                            src=current_image if img_exists else "",
+                            src=display_url if img_exists else "",
                             style={
-                                "maxWidth": "200px",
-                                "maxHeight": "150px",
-                                "marginTop": "10px",
-                                "borderRadius": "8px",
-                                "border": "1px solid #ddd",
+                                "maxWidth": "200px", "maxHeight": "150px", "marginTop": "10px",
+                                "borderRadius": "8px", "border": "1px solid #ddd",
                                 "display": "block" if img_exists else "none"
                             }
                         ),
                         html.Small(
                             f"✓ Current: {Path(current_image).name if current_image else ''}" if img_exists else "",
-                            style={
-                                "color": "#17976e", 
-                                "marginTop": "5px", 
-                                "display": "block" if img_exists else "none",
-                                "fontSize": "11px"
-                            }
+                            style={"color": "#17976e", "marginTop": "5px", "display": "block" if img_exists else "none"}
                         )
                     ],
                     style={"marginTop": "10px"}
                 ),
-                # Hidden field to store the uploaded file path
                 dcc.Input(
                     id={"type": "form-field-hidden", "entity": entity, "field": fid},
                     type="hidden",
