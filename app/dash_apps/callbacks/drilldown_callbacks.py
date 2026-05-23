@@ -405,7 +405,6 @@ ENTITY_META: dict = {
         "list_title":   "Societies",
         "list_icon":    "fa-building",
         "list_columns": [
-            {"name": "Logo",    "field": "logo", "sortable": False},
             {"name": "Name",    "field": "name", "sortable": True},
             {"name": "Sec. Email",   "field": "email", "sortable": False},
             {"name": "Sec. Phone",   "field": "secretary_phone", "sortable": False},
@@ -418,20 +417,19 @@ ENTITY_META: dict = {
         "profile_icon":   "fa-building",
         "profile_color":  "#c96a19",
         "profile_fields": [
-            {"label": "Logo",    "field": "logo",    "icon": "fa-building"},
-            {"label": "Name",    "field": "name",    "icon": "fa-building"},
+            {"label": "Logo", "field": "logo", "icon": "fa-building", "type": "image", "size": "small"},
+            {"label": "Name", "field": "name", "icon": "fa-building"},
             {"label": "Address", "field": "address", "icon": "fa-location-dot"},
-            {"label": "Email",   "field": "email",   "icon": "fa-envelope"},
-            {"label": "Phone",   "field": "phone",   "icon": "fa-phone"},
-            {"label": "Plan",    "field": "plan",    "icon": "fa-star"},
-            {"label": "Plan Validity",    "field": "plan_validity",    "icon": "fa-calender"},
-            {"label": "Plan Status",    "field": "plan_status",    "icon": "fa-star"},
-            {"label": "Secretary's Name",    "field": "secretary_name",    "icon": "fa-star"},
-            {"label": "Secretary's Phone",    "field": "secretary_phone",    "icon": "fa-star"},
-            {"label": "Secretary's Sign",    "field": "secretary_sign",    "icon": "fa-star"},
-            {"label": "Arrear Start Date",    "field": "arrear_start_date",    "icon": "fa-calender"},
-            {"label": "Login Background",    "field": "login_background",    "icon": "fa-star"},
-
+            {"label": "Email", "field": "email", "icon": "fa-envelope"},
+            {"label": "Phone", "field": "phone", "icon": "fa-phone"},
+            {"label": "Plan", "field": "plan", "icon": "fa-star"},
+            {"label": "Plan Validity", "field": "plan_validity", "icon": "fa-calendar"},
+            {"label": "Plan Status", "field": "plan_status", "icon": "fa-star"},
+            {"label": "Secretary's Name", "field": "secretary_name", "icon": "fa-star"},
+            {"label": "Secretary's Phone", "field": "secretary_phone", "icon": "fa-star"},
+            {"label": "Secretary's Sign", "field": "secretary_sign", "icon": "fa-image", "type": "image", "size": "small"},
+            {"label": "Arrear Start Date", "field": "arrear_start_date", "icon": "fa-calendar"},
+            {"label": "Login Background", "field": "login_background", "icon": "fa-image", "type": "image", "size": "large"},
         ],
         "profile_actions": [
             {"label": "Edit", "action_id": "edit", "target_card": "form_society_edit", "icon": "fa-edit", "color": "primary"},
@@ -497,8 +495,24 @@ ENTITY_META: dict = {
 }
 
 
-
-
+def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict):
+    """Move images from /assets/default/{entity}/ to /assets/{society_id}/{entity}_{new_id}/"""
+    temp_dir = Path("app/assets/default") / entity
+    if not temp_dir.exists():
+        return
+    
+    final_dir = Path("app/assets") / str(society_id) / f"{entity}_{new_id}"
+    final_dir.mkdir(parents=True, exist_ok=True)
+    
+    for field, filename in form_data.items():
+        if isinstance(filename, str) and '/' not in filename and '.' in filename:
+            src = temp_dir / filename
+            if src.exists():
+                dst = final_dir / filename
+                if dst.exists():
+                    dst.unlink()
+                src.rename(dst)
+                print(f"📁 Moved {filename} to {dst}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
@@ -507,104 +521,72 @@ ENTITY_META: dict = {
 def register_drilldown_callbacks(app):
  # -----0 FORM HANDLE IMAGE UPLOAD (NEW) ─────────────────────────────────────────────
     @app.callback(
-        Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
-        Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
-        Input({"type": "form-field", "entity": MATCH, "field": MATCH}, "contents"),
-        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
-        State("auth-store", "data"),
-        State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
-        prevent_initial_call=True,
-    )
-    def handle_image_upload(contents, filename, auth, field_id):
-        """Handle image upload and save to assets folder."""
+    Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
+    Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
+    Input({"type": "form-field", "entity": MATCH, "field": MATCH}, "contents"),
+    State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
+    State("auth-store", "data"),
+    State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
+    State({"type": "form-entity-pk", "entity": MATCH}, "value"),  # NEW: get PK from hidden field
+    prevent_initial_call=True,
+)
+    def handle_image_upload(contents, filename, auth, field_id, entity_pk):
         if not contents:
             return no_update, no_update
         
         try:
             society_id = (auth or {}).get("society_id")
             if not society_id:
-                society_id = "default"  # For master admin
+                society_id = "default"
             
-            # Parse the base64 image
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
+            entity = field_id.get("entity")
+            field_name = field_id.get("field", "image")
             
-            # ═══ FIXED: Create directory with proper permissions ═══
-            assets_dir = Path("app/assets") / str(society_id)
-            assets_dir.mkdir(parents=True, exist_ok=True)
+            # Determine target directory
+            if entity_pk and str(entity_pk).strip() and society_id != "default":
+                # Editing an existing record: save to record-specific folder
+                target_dir = Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
+            else:
+                # New record: save to temporary default folder
+                target_dir = Path("app/assets/default") / entity
             
-            # Verify directory was created
-            if not assets_dir.exists():
-                raise Exception(f"Failed to create directory: {assets_dir}")
+            target_dir.mkdir(parents=True, exist_ok=True)
             
             # Generate unique filename
-            field_name = field_id.get("field", "image")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_ext = os.path.splitext(filename)[1] if filename else ".png"
             safe_filename = f"{field_name}_{timestamp}{file_ext}"
-            file_path = assets_dir / safe_filename
+            file_path = target_dir / safe_filename
             
-            print(f"💾 Saving image to: {file_path}")
-            
-            # Optimize and save image
+            # Process and save image (same as before)
+            content_type, content_string = contents.split(',')
+            decoded = base64.b64decode(content_string)
             img = Image.open(io.BytesIO(decoded))
-            
-            # Resize if too large (max 1920px width)
-            max_width = 1920
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_size = (max_width, int(img.height * ratio))
+            if img.width > 1920:
+                ratio = 1920 / img.width
+                new_size = (1920, int(img.height * ratio))
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
-            
-            # Convert RGBA to RGB if needed
             if img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255, 255, 255))
+                background = Image.new('RGB', img.size, (255,255,255))
                 background.paste(img, mask=img.split()[3])
                 img = background
-            
-            # Save optimized image
             img.save(file_path, 'JPEG', quality=85, optimize=True)
             
-            # Verify file was saved
-            if not file_path.exists():
-                raise Exception(f"Failed to save image to: {file_path}")
+            # Build web path
+            if entity_pk and society_id != "default":
+                web_path = f"/assets/{society_id}/{entity}_{entity_pk}/{safe_filename}"
+            else:
+                web_path = f"/assets/default/{entity}/{safe_filename}"
             
-            print(f"✅ Image saved successfully: {file_path} ({file_path.stat().st_size} bytes)")
-            
-            # Return web-accessible path
-            web_path = f"/assets/{society_id}/{safe_filename}"
-            
-            # Preview component
             preview = html.Div([
-                html.Img(
-                    src=web_path,
-                    style={
-                        "maxWidth": "200px",
-                        "maxHeight": "150px",
-                        "borderRadius": "8px",
-                        "border": "1px solid #ddd",
-                        "display": "block"
-                    }
-                ),
-                html.Small(
-                    f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
-                    style={"color": "#17976e", "marginTop": "5px", "display": "block", "fontSize": "11px"}
-                )
+                html.Img(src=web_path, style={"maxWidth": "200px", "maxHeight": "150px"}),
+                html.Small(f"✓ {filename} ({file_path.stat().st_size // 1024}KB)")
             ])
-            
             return preview, web_path
             
         except Exception as e:
-            print(f"❌ Error uploading image: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            error_msg = html.Small(
-                f"✗ Upload failed: {str(e)}",
-                style={"color": "#dc3545", "marginTop": "5px", "display": "block", "fontSize": "11px"}
-            )
-            return error_msg, no_update
-
+            print(f"❌ Upload error: {e}")
+            return html.Small(f"✗ {e}", style={"color": "red"}), no_update
 
     # ── 1. ENHANCED MAIN ROUTER — handles all navigation events + KPI hide/show
     @app.callback(
@@ -955,6 +937,9 @@ def register_drilldown_callbacks(app):
                 store["stack"][-1]["prefill"] = form_data
             toast = {"type": "error", "message": msg}
             return store, no_update, no_update, toast, no_update
+        
+        if ok and new_id and "edit" not in card_id and sid:
+            _move_temp_images(entity_singular, new_id, sid, form_data)
 
         # ── Navigation after success ─────────────────────────────────────────
         hide_kpis = False
@@ -1446,9 +1431,8 @@ def _save_gate_log(db, d, sid):
     )
     return True, "Gate log created", None
 
-
 def _save_society(db, d, sid, is_edit, pk):
-    """Complete society save handler."""
+    """Complete society save handler with image moving from /assets/default/."""
     from werkzeug.security import generate_password_hash
     
     if is_edit:
@@ -1461,6 +1445,7 @@ def _save_society(db, d, sid, is_edit, pk):
         )
         return True, "Society updated", pk
     
+    # ── NEW SOCIETY CREATION ─────────────────────────────────────────────
     name = (d.get("name") or "").strip()
     if not name:
         return False, "Society name is required", None
@@ -1470,11 +1455,17 @@ def _save_society(db, d, sid, is_edit, pk):
     if not admin_email or not admin_password:
         return False, "Admin email and password are required", None
     
+    # Insert society WITHOUT image fields yet (store filenames as-is)
     result = db._execute(
-        "INSERT INTO societies(name,email,phone,address,plan,plan_validity,"
-        "arrear_start_date,logo,login_background,secretary_name,secretary_phone,"
-        "secretary_sign,created_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
+        """
+        INSERT INTO societies(
+            name, email, phone, address, plan, plan_validity,
+            arrear_start_date, logo, login_background, secretary_name,
+            secretary_phone, secretary_sign, created_at
+        )
+        VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        RETURNING id
+        """,
         (name, d.get("email"), d.get("phone"), d.get("address"),
          d.get("plan","Free"), dt_date.today().isoformat(), 
          d.get("arrear_start_date") or dt_date.today().isoformat(),
@@ -1483,20 +1474,33 @@ def _save_society(db, d, sid, is_edit, pk):
         fetch_one=True,
     )
     
-    if result and result.get("id"):
-        soc_id = result["id"]
-        # Create admin user
-        db._execute(
-            "INSERT INTO users(society_id,email,password_hash,role,login_method,created_at) "
-            "VALUES(%s,%s,%s,'admin','password',NOW())",
-            (soc_id, admin_email, generate_password_hash(admin_password)),
-        )
-        
-        # Create default accounts
-        create_default_accounts(db, soc_id)
+    if not result or not result.get("id"):
+        return False, "Failed to create society", None
     
-    return True, f"Society '{name}' created", result["id"] if result and result.get("id") else None
-
+    soc_id = result["id"]
+    
+    # ── MOVE IMAGES FROM DEFAULT FOLDER TO NEW SOCIETY FOLDER ────────────
+    # Check each image field
+    image_fields = ["logo", "login_background", "secretary_sign"]
+    updates = {}
+    for field in image_fields:
+        filename = d.get(field)
+        if filename and isinstance(filename, str) and '/' not in filename:
+            if _move_temp_images(soc_id, filename):
+                # No need to update DB – the filename is already correct
+                pass
+    
+    # Create admin user
+    db._execute(
+        "INSERT INTO users(society_id,email,password_hash,role,login_method,created_at) "
+        "VALUES(%s,%s,%s,'admin','password',NOW())",
+        (soc_id, admin_email, generate_password_hash(admin_password)),
+    )
+    
+    # Create default accounts
+    create_default_accounts(db, soc_id)
+    
+    return True, f"Society '{name}' created", soc_id
 
 def _save_account(db, d, sid, is_edit, pk):
     """Complete account save handler."""
