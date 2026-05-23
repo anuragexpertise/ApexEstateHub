@@ -426,6 +426,33 @@ def render_list_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 # IMAGE FIELD RENDERER (for profile cards)
 # ════════════════════════════════════════════════════════════════════════════
+def _get_image_url(image_path: str | None, society_id: int | None = None) -> str | None:
+    """Convert stored filename to a full asset URL using society_id."""
+    if not image_path or str(image_path).strip() == "":
+        return None
+    path = str(image_path).strip()
+    
+    # Already a full URL or data URI
+    if path.startswith(('http://', 'https://', 'data:image')):
+        return path
+    
+    # If it's just a filename (no slashes), construct path with society_id
+    if '/' not in path and '\\' not in path:
+        if society_id:
+            return f'/assets/{society_id}/{path}'
+        else:
+            # Fallback for when society_id is missing (should not happen in production)
+            return f'/assets/default/{path}'
+    
+    # Legacy full paths (migration): replace 'default' with actual society_id
+    if '/assets/default/' in path and society_id:
+        return path.replace('/assets/default/', f'/assets/{society_id}/')
+    
+    # Any other path: assume it's already correct
+    if path.startswith('/assets/'):
+        return path
+    
+    return f'/assets/{path}'
 
 def _render_image_field(field_label: str, image_path: str | None) -> html.Div:
     """
@@ -507,26 +534,17 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         fields: list[dict],
                         actions: list[dict] | None = None,
                         color: str = "#1d74d8") -> html.Div:
-    """
-    Generic profile card with IMAGE SUPPORT.
     
-    fields = [
-        {"label": "Flat Number", "field": "flat_number", "icon": "fa-home"},
-        {"label": "Logo", "field": "logo", "icon": "fa-image", "type": "image"},  # ← NEW
-        ...
-    ]
-    """
     pk_val = record.get("id", "")
- 
-    # ── Field rows with IMAGE support ─────────────────────────────
+    society_id = record.get("society_id")  # Important!
+    
     field_rows = []
     for f in fields:
         field_type = f.get("type", "text")
-        
-        # ═══ IMAGE FIELD ═══
         if field_type == "image":
             image_path = record.get(f["field"])
-            field_rows.append(_render_image_field(f["label"], image_path))
+            image_size = f.get("size", "medium")
+            field_rows.append(_render_image_field(f["label"], image_path, image_size, society_id))
             continue
         
         # ═══ REGULAR TEXT FIELDS ═══

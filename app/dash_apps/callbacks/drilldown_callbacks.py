@@ -872,7 +872,7 @@ def register_drilldown_callbacks(app):
         prevent_initial_call=True,
     )
     def handle_form_submit(n_clicks_list, _field_vals, _hidden_vals, store, auth):
-    
+        
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
 
@@ -884,16 +884,16 @@ def register_drilldown_callbacks(app):
 
         entity_singular = to_singular(id_dict.get("entity"))
         card_id         = id_dict.get("card_id", "")
-        sid             = (auth or {}).get("society_id")
+        sid             = (auth or {}).get("society_id")  # may be None for new records
 
         store = store or {}
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
 
-        # ═══ Collect both regular and hidden fields (images) ═══
+        # ── Collect all form fields ───────────────────────────────────────────
         form_data: dict = {}
         
-        # First pass: collect all form-field values
+        # Regular fields
         for key, val in ctx.states.items():
             try:
                 k_dict = json.loads(key.split(".")[0])
@@ -907,7 +907,7 @@ def register_drilldown_callbacks(app):
                 if val not in (None, ""):
                     form_data[field_name] = val
         
-        # Second pass: override with hidden field values (image paths)
+        # Hidden fields (image paths from upload)
         for key, val in ctx.states.items():
             try:
                 k_dict = json.loads(key.split(".")[0])
@@ -918,44 +918,45 @@ def register_drilldown_callbacks(app):
                 if to_singular(k_dict.get("entity")) != entity_singular:
                     continue
                 field_name = k_dict.get("field")
-                if val:  # Image path exists
+                if val:
                     form_data[field_name] = val
 
-        # ═══ FIX: Replace 'default' with actual society_id in image paths ═══
-        if sid:
-            for field, val in form_data.items():
-                if isinstance(val, str) and '/assets/default/' in val:
-                    new_val = val.replace('/assets/default/', f'/assets/{sid}/')
-                    form_data[field] = new_val
-                    print(f"   Image path corrected: {val} -> {new_val}")
+        # ═══ CRITICAL: Store only the filename for image fields ═══
+        # This avoids needing the society_id before insert.
+        for field, val in list(form_data.items()):
+            if isinstance(val, str) and '/assets/' in val:
+                # Extract just the filename (last part after '/')
+                filename = val.split('/')[-1]
+                if filename:
+                    form_data[field] = filename
+                    print(f"   Image field '{field}' stripped to filename: {filename}")
 
         print(f"\n📝 Form submit for {entity_singular}:")
-        print(f"   Collected fields: {list(form_data.keys())}")
-        print(f"   Image fields: {[k for k,v in form_data.items() if isinstance(v, str) and '/assets/' in v]}")
+        print(f"   Fields: {list(form_data.keys())}")
+        print(f"   Image filenames: {[v for v in form_data.values() if isinstance(v, str) and '/' not in v]}")
 
-        # Merge pre-fill
-        prefill   = nav_state.get_prefill(store or {})
+        # Merge prefill (and also strip image paths in prefill)
+        prefill = nav_state.get_prefill(store or {})
+        for field, val in prefill.items():
+            if isinstance(val, str) and '/assets/' in val:
+                filename = val.split('/')[-1]
+                if filename:
+                    prefill[field] = filename
         form_data = {**prefill, **form_data}
-        # Also fix prefill image paths if they contain default
-        if sid:
-            for field, val in form_data.items():
-                if isinstance(val, str) and '/assets/default/' in val:
-                    form_data[field] = val.replace('/assets/default/', f'/assets/{sid}/')
         
         form_data["society_id"] = sid
 
         ok, msg, new_id = _save_entity(entity_singular, card_id, form_data)
 
         if not ok:
-            print(f"🔴 Form save failed for {entity_singular}: {msg}")
+            print(f"🔴 Save failed: {msg}")
             store["prefill"] = form_data
             if store.get("stack"):
                 store["stack"][-1]["prefill"] = form_data
-
             toast = {"type": "error", "message": msg}
             return store, no_update, no_update, toast, no_update
 
-        # Navigate back and refresh on successful save
+        # ── Navigation after success ─────────────────────────────────────────
         hide_kpis = False
         if ok and store and len(store.get("stack", [])) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
@@ -971,7 +972,6 @@ def register_drilldown_callbacks(app):
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         
         return store, content, bc, toast, kpi_style
-    
 # ════════════════════════════════════════════════════════════════════════════
 # LIST CARD (generic)
 # ════════════════════════════════════════════════════════════════════════════
