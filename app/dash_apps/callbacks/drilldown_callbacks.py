@@ -494,25 +494,47 @@ ENTITY_META: dict = {
     },
 }
 
-
 def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict):
-    """Move images from /assets/default/{entity}/ to /assets/{society_id}/{entity}_{new_id}/"""
+    """
+    Move images from /assets/default/{entity}/ to proper production folder.
+    
+    FOLDER STRUCTURE:
+    ─────────────────
+    • Societies:   /assets/{society_id}/
+    • Apartments:  /assets/{society_id}/apartment/{apartment_id}/
+    • Vendors:     /assets/{society_id}/vendor/{vendor_id}/
+    • Security:    /assets/{society_id}/security/{security_id}/
+    """
+    from pathlib import Path
+    
     temp_dir = Path("app/assets/default") / entity
     if not temp_dir.exists():
         return
     
-    final_dir = Path("app/assets") / str(society_id) / f"{entity}_{new_id}"
+    # ✅ FIXED: Determine correct production folder structure
+    if entity == "society":
+        final_dir = Path("app/assets") / str(society_id)
+    elif entity in ("apartment", "vendor", "security"):
+        # Create entity-type subfolder
+        final_dir = Path("app/assets") / str(society_id) / entity / str(new_id)
+    else:
+        # Fallback for other entities
+        final_dir = Path("app/assets") / str(society_id) / f"{entity}_{new_id}"
+    
+    # Create production folder
     final_dir.mkdir(parents=True, exist_ok=True)
     
+    # Move all image files from temp to production
     for field, filename in form_data.items():
         if isinstance(filename, str) and '/' not in filename and '.' in filename:
             src = temp_dir / filename
             if src.exists():
                 dst = final_dir / filename
                 if dst.exists():
-                    dst.unlink()
+                    dst.unlink()  # Remove existing file
                 src.rename(dst)
-                print(f"📁 Moved {filename} to {dst}")
+                print(f"✅ Moved {filename} → {dst}")
+ 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
@@ -1203,7 +1225,10 @@ def _save_apartment(db, d, sid, is_edit, pk):
     return True, f"Apartment '{flat}' created", result["id"] if result else None
 
 def _save_user_entity(db, d, sid, role, is_edit, pk):
+    """Save vendor or security entity with proper image handling."""
     from werkzeug.security import generate_password_hash
+    from pathlib import Path
+    
     if is_edit:
         email = (d.get("email") or "").strip()
         if not email:
@@ -1215,18 +1240,74 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             (email, pk, sid),
         )
         
-        # Update linked table (vendors or security_staff)
-        if role == "vendor":
-            result_id=db._execute(
-                "UPDATE vendors v SET name=%s, service_type=%s, mobile=%s "
-                "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
-                (d.get("name"), d.get("service_type"), d.get("mobile"), pk),
+        # ✅ FIXED: Handle image updates for security
+        if role == "security":
+            # Get linked_id (security_staff.id)
+            user = db._execute(
+                "SELECT linked_id FROM users WHERE id=%s",
+                (pk,),
+                fetch_one=True
             )
-        elif role == "security":
-            result_id =db._execute(
-                "UPDATE security_staff s SET name=%s, mobile=%s, shift=%s "
-                "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
+            linked_id = user.get("linked_id") if user else None
+            
+            if linked_id:
+                # Check if security folder exists
+                security_dir = Path("app/assets") / str(sid) / "security" / str(linked_id)
+                security_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Move any new images from temp
+                for field in ["photo", "id_proof"]:  # Add your image fields
+                    filename = d.get(field)
+                    if filename and isinstance(filename, str) and '/' not in filename:
+                        temp_file = Path("app/assets/default/security") / filename
+                        if temp_file.exists():
+                            final_file = security_dir / filename
+                            if final_file.exists():
+                                final_file.unlink()
+                            temp_file.rename(final_file)
+                            print(f"✅ Moved {field}: {filename} → {final_file}")
+            
+            # Update database
+            result_id = db._execute(
+                """UPDATE security_staff s 
+                   SET name=%s, mobile=%s, shift=%s 
+                   FROM users u 
+                   WHERE s.id=u.linked_id AND u.id=%s 
+                   RETURNING s.id""",
                 (d.get("name"), d.get("mobile"), d.get("shift"), pk),
+            )
+        
+        elif role == "vendor":
+            # Get linked_id
+            user = db._execute(
+                "SELECT linked_id FROM users WHERE id=%s",
+                (pk,),
+                fetch_one=True
+            )
+            linked_id = user.get("linked_id") if user else None
+            
+            if linked_id:
+                # Similar handling for vendors
+                vendor_dir = Path("app/assets") / str(sid) / "vendor" / str(linked_id)
+                vendor_dir.mkdir(parents=True, exist_ok=True)
+                
+                for field in ["logo", "license"]:  # Add your image fields
+                    filename = d.get(field)
+                    if filename and isinstance(filename, str) and '/' not in filename:
+                        temp_file = Path("app/assets/default/vendor") / filename
+                        if temp_file.exists():
+                            final_file = vendor_dir / filename
+                            if final_file.exists():
+                                final_file.unlink()
+                            temp_file.rename(final_file)
+            
+            result_id = db._execute(
+                """UPDATE vendors v 
+                   SET name=%s, service_type=%s, mobile=%s 
+                   FROM users u 
+                   WHERE v.id=u.linked_id AND u.id=%s 
+                   RETURNING v.id""",
+                (d.get("name"), d.get("service_type"), d.get("mobile"), pk),
             )
         
         # Update password if provided
@@ -1236,19 +1317,22 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
                 (generate_password_hash(pw), pk, sid),
             )
+        
         return True, f"{role.title()} updated", pk
     
-    # Create new user
+    # ── CREATE NEW USER ──────────────────────────────────────────────────
     email = (d.get("email") or "").strip()
     if not email:
         return False, "Email is required", None
+    
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required", None
     
     # Create user
     user_result = db._execute(
-        "INSERT INTO users(society_id,email,password_hash,role,login_method) VALUES(%s,%s,%s,%s,'password') RETURNING id",
+        """INSERT INTO users(society_id, email, password_hash, role, login_method)
+           VALUES(%s, %s, %s, %s, 'password') RETURNING id""",
         (sid, email, generate_password_hash(pw), role),
         fetch_one=True,
     )
@@ -1257,7 +1341,8 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     # Create linked entity
     if role == "vendor":
         vendor_result = db._execute(
-            "INSERT INTO vendors(society_id,name,service_type,mobile,active) VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
+            """INSERT INTO vendors(society_id, name, service_type, mobile, active)
+               VALUES(%s, %s, %s, %s, TRUE) RETURNING id""",
             (sid, d.get("name"), d.get("service_type"), d.get("mobile")),
             fetch_one=True,
         )
@@ -1265,10 +1350,15 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             "UPDATE users SET linked_id=%s WHERE id=%s",
             (vendor_result["id"], user_id),
         )
-        result_id = vendor_result["id"] if vendor_result else None
+        linked_id = vendor_result["id"]
+        
+        # ✅ Move images for new vendor
+        _move_temp_images("vendor", linked_id, sid, d)
+    
     elif role == "security":
         security_result = db._execute(
-            "INSERT INTO security_staff(society_id,name,mobile,shift,active) VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
+            """INSERT INTO security_staff(society_id, name, mobile, shift, active)
+               VALUES(%s, %s, %s, %s, TRUE) RETURNING id""",
             (sid, d.get("name"), d.get("mobile"), d.get("shift")),
             fetch_one=True,
         )
@@ -1276,10 +1366,12 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             "UPDATE users SET linked_id=%s WHERE id=%s",
             (security_result["id"], user_id),
         )
-        result_id = security_result["id"] if security_result else None
+        linked_id = security_result["id"]
+        
+        # ✅ Move images for new security
+        _move_temp_images("security", linked_id, sid, d)
     
-    return True, f"{role.title()} '{email}' created", result_id
-
+    return True, f"{role.title()} '{email}' created", linked_id
 
 def _save_event(db, d, sid, is_edit, pk):
     """Complete event save handler."""
@@ -1432,13 +1524,38 @@ def _save_gate_log(db, d, sid):
     return True, "Gate log created", None
 
 def _save_society(db, d, sid, is_edit, pk):
-    """Complete society save handler with image moving from /assets/default/."""
+    """Complete society save handler with proper image handling."""
     from werkzeug.security import generate_password_hash
+    from pathlib import Path
+    from datetime import date as dt_date
     
     if is_edit:
+        # ✅ EDIT MODE: Handle image updates
+        updates = {}
+        image_fields = ["logo", "login_background", "secretary_sign"]
+        
+        # Check if society folder exists, create if not
+        society_dir = Path("app/assets") / str(pk)
+        society_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Move any new images from temp folder
+        for field in image_fields:
+            filename = d.get(field)
+            if filename and isinstance(filename, str) and '/' not in filename:
+                temp_file = Path("app/assets/default/society") / filename
+                if temp_file.exists():
+                    final_file = society_dir / filename
+                    if final_file.exists():
+                        final_file.unlink()
+                    temp_file.rename(final_file)
+                    print(f"✅ Moved {field}: {filename} → {final_file}")
+        
+        # Update database
         db._execute(
-            "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
-            "logo=%s,login_background=%s,secretary_sign=%s WHERE id=%s",
+            """UPDATE societies 
+               SET name=%s, email=%s, phone=%s, address=%s, plan=%s,
+                   logo=%s, login_background=%s, secretary_sign=%s 
+               WHERE id=%s""",
             (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), 
              d.get("plan","Free"), d.get("logo"), d.get("login_background"),
              d.get("secretary_sign"), pk),
@@ -1455,17 +1572,15 @@ def _save_society(db, d, sid, is_edit, pk):
     if not admin_email or not admin_password:
         return False, "Admin email and password are required", None
     
-    # Insert society WITHOUT image fields yet (store filenames as-is)
+    # Insert society with filenames
     result = db._execute(
-        """
-        INSERT INTO societies(
+        """INSERT INTO societies(
             name, email, phone, address, plan, plan_validity,
             arrear_start_date, logo, login_background, secretary_name,
             secretary_phone, secretary_sign, created_at
         )
         VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-        RETURNING id
-        """,
+        RETURNING id""",
         (name, d.get("email"), d.get("phone"), d.get("address"),
          d.get("plan","Free"), dt_date.today().isoformat(), 
          d.get("arrear_start_date") or dt_date.today().isoformat(),
@@ -1479,21 +1594,13 @@ def _save_society(db, d, sid, is_edit, pk):
     
     soc_id = result["id"]
     
-    # ── MOVE IMAGES FROM DEFAULT FOLDER TO NEW SOCIETY FOLDER ────────────
-    # Check each image field
-    image_fields = ["logo", "login_background", "secretary_sign"]
-    updates = {}
-    for field in image_fields:
-        filename = d.get(field)
-        if filename and isinstance(filename, str) and '/' not in filename:
-            if _move_temp_images(soc_id, filename):
-                # No need to update DB – the filename is already correct
-                pass
+    # ✅ FIXED: Move images from temp to production folder
+    _move_temp_images("society", soc_id, soc_id, d)
     
     # Create admin user
     db._execute(
-        "INSERT INTO users(society_id,email,password_hash,role,login_method,created_at) "
-        "VALUES(%s,%s,%s,'admin','password',NOW())",
+        """INSERT INTO users(society_id, email, password_hash, role, login_method, created_at)
+           VALUES(%s, %s, %s, 'admin', 'password', NOW())""",
         (soc_id, admin_email, generate_password_hash(admin_password)),
     )
     
