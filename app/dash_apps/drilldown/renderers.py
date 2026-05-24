@@ -431,22 +431,41 @@ def _get_image_url(image_path: str | None, society_id: int | None = None,
     """
     Convert stored filename to a full asset URL.
     
-    For new records (no pk), uses temporary /assets/default/{entity}/.
-    For existing records, uses /assets/{society_id}/{entity}_{pk}/.
+    FOLDER STRUCTURE:
+    ─────────────────
+    • Societies:   /assets/{society_id}/logo.png
+    • Apartments:  /assets/{society_id}/apartment/{apartment_id}/image.png
+    • Vendors:     /assets/{society_id}/vendor/{vendor_id}/image.png
+    • Security:    /assets/{society_id}/security/{security_id}/image.png
+    • Temporary:   /assets/default/{entity}/image.png
     """
     if not image_path or str(image_path).strip() == "":
         return None
+    
     path = str(image_path).strip()
     
     # Already a full URL or data URI
     if path.startswith(('http://', 'https://', 'data:image')):
         return path
     
+    # Already a correct absolute path
+    if path.startswith('/assets/'):
+        return path
+    
     # If it's just a filename (no slashes), construct the correct path
     if '/' not in path and '\\' not in path:
         if society_id and pk and entity:
-            # Record-specific folder: e.g. /assets/1/apartment_42/logo.png
-            return f"/assets/{society_id}/{entity}_{pk}/{path}"
+            # ✅ FIXED: Handle different entity folder structures
+            if entity == "society":
+                # Societies store images directly in their folder
+                return f"/assets/{society_id}/{path}"
+            elif entity in ("apartment", "vendor", "security"):
+                # These use entity-type subfolders
+                return f"/assets/{society_id}/{entity}/{pk}/{path}"
+            else:
+                # Fallback for other entities
+                return f"/assets/{society_id}/{entity}_{pk}/{path}"
+        
         elif society_id:
             # Legacy fallback: /assets/{society_id}/filename
             return f"/assets/{society_id}/{path}"
@@ -457,10 +476,6 @@ def _get_image_url(image_path: str | None, society_id: int | None = None,
     # Legacy full paths: try to replace 'default' with actual society_id
     if '/assets/default/' in path and society_id:
         return path.replace('/assets/default/', f'/assets/{society_id}/')
-    
-    # Already correct absolute path
-    if path.startswith('/assets/'):
-        return path
     
     return f"/assets/{path}"
 

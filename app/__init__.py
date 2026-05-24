@@ -12,7 +12,21 @@ db           = SQLAlchemy()
 login_manager = LoginManager()
 migrate      = Migrate()
 
-
+def ensure_temp_folders():
+    """Create all necessary temp folders on startup."""
+    from pathlib import Path
+    
+    temp_folders = [
+        "app/assets/default/society",
+        "app/assets/default/apartment",
+        "app/assets/default/vendor",
+        "app/assets/default/security",
+    ]
+    
+    for folder in temp_folders:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+    
+    print("✅ Temp image folders created")
 # ══════════════════════════════════════════════════════════════════════════════
 # Flask application factory
 # ══════════════════════════════════════════════════════════════════════════════
@@ -37,6 +51,7 @@ def create_app(config_name=None):
     login_manager.init_app(app)
     migrate.init_app(app, db)
     CORS(app)
+    ensure_temp_folders()
 
     @login_manager.user_loader
     def load_user(user_id):
