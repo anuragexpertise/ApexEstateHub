@@ -1,8 +1,9 @@
 # app/dash_apps/drilldown/loaders_enhanced.py
 """
-Enhanced Data Loaders - Show Data Instead of IDs
-================================================
+Enhanced Data Loaders - Show Data Instead of IDs + IMAGE DEBUGGING
+===================================================================
 Returns human-readable data with proper joins and lookups.
+ENHANCED: Comprehensive image path debugging for all entities.
 """
 
 from __future__ import annotations
@@ -10,12 +11,107 @@ from datetime import datetime, date
 import csv
 import io
 from database.db_manager import db
+from pathlib import Path
 
 PAGE_SIZE = 15
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# DELETE HELPER  (used by drilldown_callbacks.route_drilldown)
+# IMAGE PATH DEBUGGING
+# ════════════════════════════════════════════════════════════════════════════
+
+def debug_image_in_profile(entity: str, pk: int, row: dict):
+    """
+    Print debug info for all image fields in a profile.
+    """
+    print(f"\n{'='*70}")
+    print(f"🖼️  IMAGE DEBUG: {entity.upper()} Profile (PK={pk})")
+    print(f"{'='*70}")
+    
+    society_id = row.get('society_id')
+    print(f"Society ID: {society_id}")
+    print(f"Record ID:  {pk}")
+    print(f"Entity:     {entity}")
+    
+    # List of potential image fields by entity
+    image_fields_map = {
+        "society": ["logo", "login_background", "secretary_sign"],
+        "apartment": ["photo", "id_proof", "owner_photo"],
+        "vendor": ["logo", "license", "photo"],
+        "security": ["photo", "id_proof"],
+    }
+    
+    image_fields = image_fields_map.get(entity, [])
+    
+    if not image_fields:
+        print(f"⚠️  No known image fields for entity '{entity}'")
+        print(f"{'='*70}\n")
+        return
+    
+    found_any = False
+    for field in image_fields:
+        if field in row:
+            value = row[field]
+            if value and str(value).strip():
+                found_any = True
+                print(f"\n  📁 Field: {field}")
+                print(f"     Database Value: {value}")
+                
+                # Determine expected path
+                if entity == "society":
+                    expected_url = f"/assets/{society_id}/{value}"
+                    expected_disk = Path(f"app/assets/{society_id}/{value}")
+                elif entity in ("apartment", "vendor", "security"):
+                    expected_url = f"/assets/{society_id}/{entity}/{pk}/{value}"
+                    expected_disk = Path(f"app/assets/{society_id}/{entity}/{pk}/{value}")
+                else:
+                    expected_url = f"/assets/{society_id}/{entity}_{pk}/{value}"
+                    expected_disk = Path(f"app/assets/{society_id}/{entity}_{pk}/{value}")
+                
+                print(f"     Expected URL:   {expected_url}")
+                print(f"     Expected Disk:  {expected_disk}")
+                print(f"     Folder Exists:  {expected_disk.parent.exists()}")
+                print(f"     File Exists:    {expected_disk.exists()}")
+                
+                if not expected_disk.exists():
+                    print(f"     ❌ FILE NOT FOUND!")
+                    
+                    # Check alternative locations
+                    print(f"\n     🔍 Checking alternative locations...")
+                    
+                    # Check default folder
+                    default_path = Path(f"app/assets/default/{entity}/{value}")
+                    if default_path.exists():
+                        print(f"        ✅ Found in default folder: {default_path}")
+                    
+                    # Check root society folder
+                    if entity != "society":
+                        root_path = Path(f"app/assets/{society_id}/{value}")
+                        if root_path.exists():
+                            print(f"        ✅ Found in society root: {root_path}")
+                    
+                    # List what's actually in the expected folder
+                    if expected_disk.parent.exists():
+                        actual_files = list(expected_disk.parent.glob("*"))
+                        if actual_files:
+                            print(f"        📂 Files in {expected_disk.parent}:")
+                            for f in actual_files[:5]:
+                                print(f"           - {f.name}")
+                            if len(actual_files) > 5:
+                                print(f"           ... and {len(actual_files) - 5} more")
+                        else:
+                            print(f"        📂 Folder exists but is empty")
+                else:
+                    print(f"     ✅ FILE FOUND!")
+    
+    if not found_any:
+        print(f"\n  ℹ️  No image fields contain data")
+    
+    print(f"\n{'='*70}\n")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# DELETE HELPER
 # ════════════════════════════════════════════════════════════════════════════
 
 def delete_entity(entity_plural: str, pk, society_id=None) -> tuple:
@@ -54,6 +150,254 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# ENHANCED PROFILE LOADER (With Image Debugging)
+# ════════════════════════════════════════════════════════════════════════════
+
+def load_profile(entity: str, pk, society_id=None) -> dict | None:
+    """Load profile with calculated fields and IMAGE DEBUGGING."""
+    
+    try:
+        if entity == "apartment":
+            row = db._execute(
+                """
+                WITH apartment_data AS (
+                    SELECT 
+                        a.*,
+                        s.arrear_start_date,
+                        EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
+                        EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.arrear_start_date)) AS months_due,
+                        3.0 AS rate_per_sqft
+                    FROM apartments a
+                    JOIN societies s ON a.society_id = s.id
+                    WHERE a.id = %s
+                ),
+                payment_summary AS (
+                    SELECT 
+                        COALESCE(SUM(amount) FILTER (WHERE status='verified'), 0) AS paid,
+                        COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0) AS pending
+                    FROM payments
+                    WHERE apartment_id = %s
+                ),
+                late_fee_calc AS (
+                    SELECT COALESCE(SUM(
+                        CASE 
+                            WHEN due_date < CURRENT_DATE 
+                            THEN amount * 0.02 * EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)) / 30
+                            ELSE 0 
+                        END
+                    ), 0) AS late_fee
+                    FROM payments
+                    WHERE apartment_id = %s AND status = 'pending'
+                )
+                SELECT 
+                    ad.*,
+                    ps.paid AS paid_amount,
+                    ps.pending AS pending_amount,
+                    lf.late_fee,
+                    (ad.apartment_size * ad.rate_per_sqft * GREATEST(ad.months_due, 0)) AS total_maintenance_due,
+                    (ad.apartment_size * ad.rate_per_sqft * GREATEST(ad.months_due, 0)) - ps.paid + lf.late_fee AS pending_dues
+                FROM apartment_data ad, payment_summary ps, late_fee_calc lf
+                """,
+                (pk, pk, pk),
+                fetch_one=True
+            )
+            
+            if row:
+                row["subtitle"] = f"Flat {row.get('flat_number', '?')} - {row.get('owner_name', '')}"
+                debug_image_in_profile("apartment", pk, row)
+            
+            return row
+        
+        if entity == "vendor":
+            row = db._execute(
+                """
+                SELECT 
+                    u.id,
+                    u.email,
+                    u.society_id,
+                    u.linked_id,
+                    v.name AS business_name,
+                    v.service_type,
+                    v.mobile,
+                    v.active,
+                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='pending'), 0) AS pending_dues,
+                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified'), 0) AS paid_amount
+                FROM users u
+                LEFT JOIN vendors v ON v.id = u.linked_id
+                LEFT JOIN payments p ON p.user_id = u.id
+                WHERE u.id = %s AND u.role = 'vendor'
+                GROUP BY u.id, v.name, v.service_type, v.mobile, v.active
+                """,
+                (pk,),
+                fetch_one=True
+            )
+            
+            if row:
+                row["subtitle"] = row.get("business_name", "Vendor")
+                debug_image_in_profile("vendor", pk, row)
+            
+            return row
+        
+        if entity == "security":
+            row = db._execute(
+                """
+                SELECT 
+                    u.id,
+                    u.email,
+                    u.society_id,
+                    u.linked_id,
+                    s.name,
+                    s.shift,
+                    s.mobile,
+                    s.active,
+                    s.salary_per_shift,
+                    s.joining_date,
+                    EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE))) AS days_worked,
+                    s.salary_per_shift * EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE))) AS total_salary_due,
+                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified' AND p.payment_type='salary'), 0) AS salary_paid,
+                    (s.salary_per_shift * EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE)))) - 
+                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified' AND p.payment_type='salary'), 0) AS salary_pending
+                FROM users u
+                LEFT JOIN security_staff s ON s.id = u.linked_id
+                LEFT JOIN payments p ON p.user_id = u.id
+                WHERE u.id = %s AND u.role = 'security'
+                GROUP BY u.id, s.name, s.shift, s.mobile, s.active, s.salary_per_shift, s.joining_date
+                """,
+                (pk,),
+                fetch_one=True
+            )
+            
+            if row:
+                row["subtitle"] = row.get("name", "Security")
+                debug_image_in_profile("security", pk, row)
+            
+            return row
+        
+        if entity == "society":
+            row = db._execute(
+                """
+                SELECT 
+                    s.*,
+                    CASE 
+                        WHEN s.plan = 'Free' THEN 'Free'
+                        WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
+                        ELSE 'Expired'
+                    END AS plan_status,
+                    (SELECT COUNT(*) FROM apartments WHERE society_id = s.id AND active = TRUE) AS total_apartments,
+                    (SELECT COUNT(*) FROM users WHERE society_id = s.id) AS total_users,
+                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE society_id = s.id AND status = 'pending') AS total_receivables
+                FROM societies s
+                WHERE s.id = %s
+                """,
+                (pk,),
+                fetch_one=True,
+            )
+            
+            if row:
+                debug_image_in_profile("society", pk, row)
+            
+            return row
+        
+        # Simple entities (no debugging for now)
+        if entity == "event":
+            return db._execute("SELECT * FROM events WHERE id=%s", (pk,), fetch_one=True)
+        
+        if entity == "concern":
+            return db._execute("SELECT * FROM concerns WHERE id=%s", (pk,), fetch_one=True)
+        
+        if entity in ("receipt", "expense", "transaction"):
+            return db._execute(
+                """
+                SELECT 
+                    t.*,
+                    acc.name AS account_name,
+                    acc.tab_name AS account_group,
+                    CASE 
+                        WHEN a.id IS NOT NULL THEN CONCAT('Flat ', a.flat_number)
+                        WHEN v.id IS NOT NULL THEN v.name
+                        ELSE '—'
+                    END AS entity_name
+                FROM transactions t
+                JOIN accounts acc ON t.acc_id = acc.id
+                LEFT JOIN apartments a ON t.entity_id = a.id
+                LEFT JOIN vendors v ON t.entity_id IN (
+                    SELECT linked_id FROM users WHERE role='vendor' AND linked_id IS NOT NULL
+                )
+                WHERE t.id = %s
+                """,
+                (pk,),
+                fetch_one=True
+            )
+        
+        if entity == "gate_log":
+            return db._execute(
+                """
+                SELECT 
+                    g.*,
+                    CASE 
+                        WHEN g.role = 'a' THEN (SELECT CONCAT('Flat ', flat_number) FROM apartments WHERE id = g.entity_id)
+                        WHEN g.role = 'v' THEN (SELECT name FROM vendors JOIN users ON users.linked_id = vendors.id WHERE users.id = g.entity_id)
+                        WHEN g.role = 's' THEN (SELECT name FROM security_staff JOIN users ON users.linked_id = security_staff.id WHERE users.id = g.entity_id)
+                        ELSE CONCAT('Guest #', g.entity_id)
+                    END AS entity_name
+                FROM gate_access g
+                WHERE g.id = %s
+                """,
+                (pk,),
+                fetch_one=True
+            )
+        
+        if entity == "account":
+            return db._execute(
+                """
+                SELECT 
+                    a.*,
+                    COALESCE(parent.name, '—') AS parent_account_name,
+                    COALESCE(
+                        (SELECT SUM(
+                            CASE 
+                                WHEN a.drcr_account = 'Cr' THEN t.amount
+                                ELSE -t.amount
+                            END
+                        )
+                        FROM transactions t
+                        WHERE t.acc_id = a.id AND t.status = 'paid'),
+                        0
+                    ) + a.bf_amount AS current_balance
+                FROM accounts a
+                LEFT JOIN accounts parent ON a.parent_account_id = parent.id
+                WHERE a.id = %s
+                """,
+                (pk,),
+                fetch_one=True
+            )
+        
+    except Exception as e:
+        print(f"❌ load_profile({entity}, {pk}) error: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# CSV EXPORT
+# ════════════════════════════════════════════════════════════════════════════
+
+def export_csv(entity: str, filters: dict) -> str:
+    rows, _ = load_list(entity, filters, page=1, page_size=10_000)
+    if not rows:
+        return "No data"
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=rows[0].keys(), extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        safe = {k: (v.isoformat() if isinstance(v, (datetime, date)) else v)
+                for k, v in row.items()}
+        writer.writerow(safe)
+    return buf.getvalue()
+
+# ═══════════════════════════════════════════════════════════════════════
 # LIST LOADERS
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -625,255 +969,3 @@ def _list_accounts(filters, page, search, page_size):
     return rows, int(count.get("c", 0))
 
 
-# ════════════════════════════════════════════════════════════════════════════
-
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# ENHANCED PROFILE LOADER (With Calculations)
-# ════════════════════════════════════════════════════════════════════════════
-
-def load_profile(entity: str, pk, society_id=None) -> dict | None:
-    """Load profile with calculated fields and proper data."""
-    
-    try:
-        if entity == "apartment":
-            # ═══ ENHANCED: Full maintenance breakdown ═══
-            row = db._execute(
-                """
-                WITH apartment_data AS (
-                    SELECT 
-                        a.*,
-                        s.arrear_start_date,
-                        EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
-                        EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.arrear_start_date)) AS months_due,
-                        3.0 AS rate_per_sqft
-                    FROM apartments a
-                    JOIN societies s ON a.society_id = s.id
-                    WHERE a.id = %s
-                ),
-                payment_summary AS (
-                    SELECT 
-                        COALESCE(SUM(amount) FILTER (WHERE status='verified'), 0) AS paid,
-                        COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0) AS pending
-                    FROM payments
-                    WHERE apartment_id = %s
-                ),
-                late_fee_calc AS (
-                    SELECT COALESCE(SUM(
-                        CASE 
-                            WHEN due_date < CURRENT_DATE 
-                            THEN amount * 0.02 * EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)) / 30
-                            ELSE 0 
-                        END
-                    ), 0) AS late_fee
-                    FROM payments
-                    WHERE apartment_id = %s AND status = 'pending'
-                )
-                SELECT 
-                    ad.*,
-                    ps.paid AS paid_amount,
-                    ps.pending AS pending_amount,
-                    lf.late_fee,
-                    (ad.apartment_size * ad.rate_per_sqft * GREATEST(ad.months_due, 0)) AS total_maintenance_due,
-                    (ad.apartment_size * ad.rate_per_sqft * GREATEST(ad.months_due, 0)) - ps.paid + lf.late_fee AS pending_dues
-                FROM apartment_data ad, payment_summary ps, late_fee_calc lf
-                """,
-                (pk, pk, pk),
-                fetch_one=True
-            )
-            
-            if row:
-                row["subtitle"] = f"Flat {row.get('flat_number', '?')} - {row.get('owner_name', '')}"
-            
-            return row
-        
-        if entity == "vendor":
-            # ═══ ENHANCED: Business details + payment summary ═══
-            row = db._execute(
-                """
-                SELECT 
-                    u.id,
-                    u.email,
-                    u.society_id,
-                    u.linked_id,
-                    v.name AS business_name,
-                    v.service_type,
-                    v.mobile,
-                    v.active,
-                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='pending'), 0) AS pending_dues,
-                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified'), 0) AS paid_amount
-                FROM users u
-                LEFT JOIN vendors v ON v.id = u.linked_id
-                LEFT JOIN payments p ON p.user_id = u.id
-                WHERE u.id = %s AND u.role = 'vendor'
-                GROUP BY u.id, v.name, v.service_type, v.mobile, v.active
-                """,
-                (pk,),
-                fetch_one=True
-            )
-            
-            if row:
-                row["subtitle"] = row.get("business_name", "Vendor")
-            
-            return row
-        
-        if entity == "security":
-            # ═══ ENHANCED: Salary calculation ═══
-            row = db._execute(
-                """
-                SELECT 
-                    u.id,
-                    u.email,
-                    u.society_id,
-                    u.linked_id,
-                    s.name,
-                    s.shift,
-                    s.mobile,
-                    s.active,
-                    s.salary_per_shift,
-                    s.joining_date,
-                    EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE))) AS days_worked,
-                    s.salary_per_shift * EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE))) AS total_salary_due,
-                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified' AND p.payment_type='salary'), 0) AS salary_paid,
-                    (s.salary_per_shift * EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE)))) - 
-                    COALESCE(SUM(p.amount) FILTER (WHERE p.status='verified' AND p.payment_type='salary'), 0) AS salary_pending
-                FROM users u
-                LEFT JOIN security_staff s ON s.id = u.linked_id
-                LEFT JOIN payments p ON p.user_id = u.id
-                WHERE u.id = %s AND u.role = 'security'
-                GROUP BY u.id, s.name, s.shift, s.mobile, s.active, s.salary_per_shift, s.joining_date
-                """,
-                (pk,),
-                fetch_one=True
-            )
-            
-            if row:
-                row["subtitle"] = row.get("name", "Security")
-            
-            return row
-        
-        if entity == "society":
-            # ═══ ENHANCED: Financial summary ═══
-            row = db._execute(
-                """
-                SELECT 
-                    s.*,
-                    CASE 
-                        WHEN s.plan = 'Free' THEN 'Free'
-                        WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
-                        ELSE 'Expired'
-                    END AS plan_status,
-                    (SELECT COUNT(*) FROM apartments WHERE society_id = s.id AND active = TRUE) AS total_apartments,
-                    (SELECT COUNT(*) FROM users WHERE society_id = s.id) AS total_users,
-                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE society_id = s.id AND status = 'pending') AS total_receivables
-                FROM societies s
-                WHERE s.id = %s
-                """,
-                (pk,),
-                fetch_one=True
-            )
-            
-            return row
-        
-        # Simple entities (no changes needed)
-        if entity == "event":
-            return db._execute("SELECT * FROM events WHERE id=%s", (pk,), fetch_one=True)
-        
-        if entity == "concern":
-            return db._execute("SELECT * FROM concerns WHERE id=%s", (pk,), fetch_one=True)
-        
-        if entity in ("receipt", "expense", "transaction"):
-            # ═══ ENHANCED: Show account name and entity details ═══
-            return db._execute(
-                """
-                SELECT 
-                    t.*,
-                    acc.name AS account_name,
-                    acc.tab_name AS account_group,
-                    CASE 
-                        WHEN a.id IS NOT NULL THEN CONCAT('Flat ', a.flat_number)
-                        WHEN v.id IS NOT NULL THEN v.name
-                        ELSE '—'
-                    END AS entity_name
-                FROM transactions t
-                JOIN accounts acc ON t.acc_id = acc.id
-                LEFT JOIN apartments a ON t.entity_id = a.id
-                LEFT JOIN vendors v ON t.entity_id IN (
-                    SELECT linked_id FROM users WHERE role='vendor' AND linked_id IS NOT NULL
-                )
-                WHERE t.id = %s
-                """,
-                (pk,),
-                fetch_one=True
-            )
-        
-        if entity == "gate_log":
-            # ═══ ENHANCED: Show entity name ═══
-            return db._execute(
-                """
-                SELECT 
-                    g.*,
-                    CASE 
-                        WHEN g.role = 'a' THEN (SELECT CONCAT('Flat ', flat_number) FROM apartments WHERE id = g.entity_id)
-                        WHEN g.role = 'v' THEN (SELECT name FROM vendors JOIN users ON users.linked_id = vendors.id WHERE users.id = g.entity_id)
-                        WHEN g.role = 's' THEN (SELECT name FROM security_staff JOIN users ON users.linked_id = security_staff.id WHERE users.id = g.entity_id)
-                        ELSE CONCAT('Guest #', g.entity_id)
-                    END AS entity_name
-                FROM gate_access g
-                WHERE g.id = %s
-                """,
-                (pk,),
-                fetch_one=True
-            )
-        
-        if entity == "account":
-            # ═══ ENHANCED: Show parent name and current balance ═══
-            return db._execute(
-                """
-                SELECT 
-                    a.*,
-                    COALESCE(parent.name, '—') AS parent_account_name,
-                    COALESCE(
-                        (SELECT SUM(
-                            CASE 
-                                WHEN a.drcr_account = 'Cr' THEN t.amount
-                                ELSE -t.amount
-                            END
-                        )
-                        FROM transactions t
-                        WHERE t.acc_id = a.id AND t.status = 'paid'),
-                        0
-                    ) + a.bf_amount AS current_balance
-                FROM accounts a
-                LEFT JOIN accounts parent ON a.parent_account_id = parent.id
-                WHERE a.id = %s
-                """,
-                (pk,),
-                fetch_one=True
-            )
-        
-    except Exception as e:
-        print(f"❌ load_profile({entity}, {pk}) error: {e}")
-        # import traceback
-        # traceback.print_exc()
-    
-    return None
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# CSV EXPORT
-# ════════════════════════════════════════════════════════════════════════════
-
-def export_csv(entity: str, filters: dict) -> str:
-    rows, _ = load_list(entity, filters, page=1, page_size=10_000)
-    if not rows:
-        return "No data"
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=rows[0].keys(), extrasaction="ignore")
-    writer.writeheader()
-    for row in rows:
-        safe = {k: (v.isoformat() if isinstance(v, (datetime, date)) else v)
-                for k, v in row.items()}
-        writer.writerow(safe)
-    return buf.getvalue()
