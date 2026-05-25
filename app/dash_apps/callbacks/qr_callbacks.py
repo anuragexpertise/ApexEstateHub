@@ -289,7 +289,7 @@ def register_qr_callbacks(app):
         Input('show-qr-btn', 'n_clicks'),
         Input('close-qr-modal', 'n_clicks'),
         Input('profile-action-trigger', 'data'),
-        Input('hdr-logout', 'n_clicks'),  # ✅ ADDED
+        Input('qr-modal-logout-btn', 'n_clicks'),
         State('auth-store', 'data'),
         State('qr-modal', 'is_open'),
         prevent_initial_call=True,
@@ -297,8 +297,7 @@ def register_qr_callbacks(app):
     def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, logout_n, auth_data, is_open):
         from dash import ctx
         
-        # ✅ ADDED: Close modal on logout
-        if ctx.triggered_id == 'hdr-logout':
+        if ctx.triggered_id == 'qr-modal-logout-btn':
             return False, no_update, no_update, no_update
         
         if ctx.triggered_id == 'close-qr-modal':
