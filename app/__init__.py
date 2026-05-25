@@ -21,6 +21,8 @@ def ensure_temp_folders():
         "app/assets/default/apartment",
         "app/assets/default/vendor",
         "app/assets/default/security",
+        "app/assets/default/concern",
+        "app/assets/default/event",
     ]
     
     for folder in temp_folders:

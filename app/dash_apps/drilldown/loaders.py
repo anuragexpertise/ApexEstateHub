@@ -274,6 +274,7 @@ def load_profile(entity: str, pk, society_id=None) -> dict | None:
             return row
         
         if entity == "society":
+            # ═══ ENHANCED: Financial summary ═══
             row = db._execute(
                 """
                 SELECT 
@@ -290,11 +291,12 @@ def load_profile(entity: str, pk, society_id=None) -> dict | None:
                 WHERE s.id = %s
                 """,
                 (pk,),
-                fetch_one=True,
+                fetch_one=True
             )
             
+            # ✅ CRITICAL: Add the record's own ID as society_id for image resolution
             if row:
-                debug_image_in_profile("society", pk, row)
+                row['_image_society_id'] = row['id']  # Use society's own ID for images
             
             return row
         

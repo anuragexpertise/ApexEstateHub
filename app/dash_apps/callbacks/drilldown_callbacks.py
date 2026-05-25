@@ -500,22 +500,35 @@ def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict
     
     FOLDER STRUCTURE:
     ─────────────────
-    • Societies:   /assets/{society_id}/
-    • Apartments:  /assets/{society_id}/apartment/{apartment_id}/
-    • Vendors:     /assets/{society_id}/vendor/{vendor_id}/
-    • Security:    /assets/{society_id}/security/{security_id}/
+    • Societies:   /assets/{society_id}/logo.png
+    • Apartments:  /assets/{society_id}/apartment/{apartment_id}/image.png
+    • Vendors:     /assets/{society_id}/vendor/{vendor_id}/image.png
+    • Security:    /assets/{society_id}/security/{security_id}/image.png
+    • Concerns:    /assets/{society_id}/concern/{concern_id}/image.png
+    • Events:      /assets/{society_id}/event/{event_id}/image.png
+    
+    Args:
+        entity: Entity type (singular) e.g. 'society', 'apartment', 'vendor'
+        new_id: The new record ID from database
+        society_id: Society ID (for nested folders)
+        form_data: Form data containing filenames
     """
     from pathlib import Path
     
     temp_dir = Path("app/assets/default") / entity
     if not temp_dir.exists():
+        print(f"⚠️  Temp directory does not exist: {temp_dir}")
         return
     
-    # ✅ FIXED: Determine correct production folder structure
+    # ═══════════════════════════════════════════════════════════════════
+    # DETERMINE PRODUCTION FOLDER
+    # ═══════════════════════════════════════════════════════════════════
+    
     if entity == "society":
+        # Societies store images directly in /assets/{society_id}/
         final_dir = Path("app/assets") / str(society_id)
-    elif entity in ("apartment", "vendor", "security"):
-        # Create entity-type subfolder
+    elif entity in ("apartment", "vendor", "security", "concern", "event"):
+        # These use entity-type subfolders
         final_dir = Path("app/assets") / str(society_id) / entity / str(new_id)
     else:
         # Fallback for other entities
@@ -523,18 +536,33 @@ def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict
     
     # Create production folder
     final_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Created production folder: {final_dir}")
     
-    # Move all image files from temp to production
+    # ═══════════════════════════════════════════════════════════════════
+    # MOVE IMAGE FILES
+    # ═══════════════════════════════════════════════════════════════════
+    
+    moved_count = 0
     for field, filename in form_data.items():
-        if isinstance(filename, str) and '/' not in filename and '.' in filename:
+        # Only process if it's a filename (no slashes, has extension)
+        if isinstance(filename, str) and '/' not in filename and '\\' not in filename and '.' in filename:
             src = temp_dir / filename
+            
             if src.exists():
                 dst = final_dir / filename
+                
+                # Remove existing file if present
                 if dst.exists():
-                    dst.unlink()  # Remove existing file
+                    dst.unlink()
+                
+                # Move file
                 src.rename(dst)
-                print(f"✅ Moved {filename} → {dst}")
- 
+                moved_count += 1
+                print(f"✅ Moved: {filename} → {dst}")
+            else:
+                print(f"⚠️  File not found in temp: {src}")
+    
+    print(f"📦 Moved {moved_count} image(s) for {entity} #{new_id}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
@@ -549,7 +577,7 @@ def register_drilldown_callbacks(app):
     State({"type": "form-field", "entity": MATCH, "field": MATCH}, "filename"),
     State("auth-store", "data"),
     State({"type": "form-field", "entity": MATCH, "field": MATCH}, "id"),
-    State({"type": "form-entity-pk", "entity": MATCH}, "value"),  # NEW: get PK from hidden field
+    State({"type": "form-entity-pk", "entity": MATCH}, "value"),
     prevent_initial_call=True,
 )
     def handle_image_upload(contents, filename, auth, field_id, entity_pk):
@@ -558,19 +586,30 @@ def register_drilldown_callbacks(app):
         
         try:
             society_id = (auth or {}).get("society_id")
-            if not society_id:
-                society_id = "default"
-            
             entity = field_id.get("entity")
             field_name = field_id.get("field", "image")
             
-            # Determine target directory
-            if entity_pk and str(entity_pk).strip() and society_id != "default":
-                # Editing an existing record: save to record-specific folder
-                target_dir = Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
+            # ═══════════════════════════════════════════════════════════════
+            # DETERMINE TARGET DIRECTORY
+            # ═══════════════════════════════════════════════════════════════
+            
+            # CASE 1: Editing existing record (have entity_pk and society_id)
+            if entity_pk and str(entity_pk).strip() and society_id:
+                if entity == "society":
+                    target_dir = Path("app/assets") / str(society_id)
+                elif entity in ("apartment", "vendor", "security", "concern", "event"):
+                    target_dir = Path("app/assets") / str(society_id) / entity / str(entity_pk)
+                else:
+                    target_dir = Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
+            
+            # CASE 2: New record - use temp folder
             else:
-                # New record: save to temporary default folder
+                # ✅ FIXED: Always use /default/{entity}/ for new records
                 target_dir = Path("app/assets/default") / entity
+            
+            # ═══════════════════════════════════════════════════════════════
+            # CREATE FOLDER & SAVE IMAGE
+            # ═══════════════════════════════════════════════════════════════
             
             target_dir.mkdir(parents=True, exist_ok=True)
             
@@ -580,36 +619,61 @@ def register_drilldown_callbacks(app):
             safe_filename = f"{field_name}_{timestamp}{file_ext}"
             file_path = target_dir / safe_filename
             
-            # Process and save image (same as before)
+            # Process and save image
             content_type, content_string = contents.split(',')
             decoded = base64.b64decode(content_string)
             img = Image.open(io.BytesIO(decoded))
+            
+            # Resize if too large
             if img.width > 1920:
                 ratio = 1920 / img.width
                 new_size = (1920, int(img.height * ratio))
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convert RGBA to RGB
             if img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255,255,255))
+                background = Image.new('RGB', img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[3])
                 img = background
+            
+            # Save as JPEG
             img.save(file_path, 'JPEG', quality=85, optimize=True)
             
-            # Build web path
-            if entity_pk and society_id != "default":
-                web_path = f"/assets/{society_id}/{entity}_{entity_pk}/{safe_filename}"
+            print(f"✅ Image saved: {file_path}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # RETURN PREVIEW & FILENAME (NOT FULL PATH)
+            # ═══════════════════════════════════════════════════════════════
+            
+            # Build preview web path
+            if entity_pk and str(entity_pk).strip() and society_id:
+                if entity == "society":
+                    web_path = f"/assets/{society_id}/{safe_filename}"
+                else:
+                    web_path = f"/assets/{society_id}/{entity}/{entity_pk}/{safe_filename}"
             else:
                 web_path = f"/assets/default/{entity}/{safe_filename}"
             
             preview = html.Div([
-                html.Img(src=web_path, style={"maxWidth": "200px", "maxHeight": "150px"}),
-                html.Small(f"✓ {filename} ({file_path.stat().st_size // 1024}KB)")
+                html.Img(src=web_path, style={
+                    "maxWidth": "200px", "maxHeight": "150px",
+                    "borderRadius": "8px", "border": "1px solid #ddd"
+                }),
+                html.Small(
+                    f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
+                    style={"color": "#17976e", "marginTop": "5px", "display": "block"}
+                )
             ])
-            return preview, web_path
+            
+            # ✅ CRITICAL: Return ONLY filename (not full path)
+            # This allows _move_temp_images to work correctly
+            return preview, safe_filename
             
         except Exception as e:
             print(f"❌ Upload error: {e}")
+            import traceback
+            traceback.print_exc()
             return html.Small(f"✗ {e}", style={"color": "red"}), no_update
-
     # ── 1. ENHANCED MAIN ROUTER — handles all navigation events + KPI hide/show
     @app.callback(
         Output("drilldown-store",  "data"),
@@ -1530,84 +1594,72 @@ def _save_society(db, d, sid, is_edit, pk):
     from datetime import date as dt_date
     
     if is_edit:
-        # ✅ EDIT MODE: Handle image updates
-        updates = {}
-        image_fields = ["logo", "login_background", "secretary_sign"]
+        # ═══════════════════════════════════════════════════════════════
+        # EDIT MODE: Handle image updates
+        # ═══════════════════════════════════════════════════════════════
         
-        # Check if society folder exists, create if not
+        # ✅ FIXED: For societies, use the society's own ID (pk) as the folder
         society_dir = Path("app/assets") / str(pk)
         society_dir.mkdir(parents=True, exist_ok=True)
         
         # Move any new images from temp folder
+        image_fields = ["logo", "login_background", "secretary_sign"]
         for field in image_fields:
             filename = d.get(field)
-            if filename and isinstance(filename, str) and '/' not in filename:
+            if filename and isinstance(filename, str) and '/' not in filename and '.' in filename:
                 temp_file = Path("app/assets/default/society") / filename
+                
                 if temp_file.exists():
                     final_file = society_dir / filename
+                    
+                    # Remove existing file if present
                     if final_file.exists():
                         final_file.unlink()
+                    
+                    # Move file
                     temp_file.rename(final_file)
                     print(f"✅ Moved {field}: {filename} → {final_file}")
+                else:
+                    print(f"⚠️  Temp file not found: {temp_file}")
+                    
+                    # Check if file already exists in production folder
+                    final_file = society_dir / filename
+                    if final_file.exists():
+                        print(f"   ℹ️  File already in production: {final_file}")
+                    else:
+                        print(f"   ❌ File missing completely: {filename}")
+        # DEBUG: Show what's about to be saved
+        print(f"\n📸 SOCIETY IMAGE SAVE DEBUG:")
+        print(f"   Society ID (pk): {pk}")
+        print(f"   Target folder: {society_dir}")
+        print(f"   Files to save: {[d.get(f) for f in image_fields if d.get(f)]}")
         
-        # Update database
+        # Check what's in production folder
+        if society_dir.exists():
+            files_in_production = list(society_dir.glob("*.png")) + list(society_dir.glob("*.jpg"))
+            print(f"   Files in production: {[f.name for f in files_in_production]}")
+        
+        # Check what's in temp folder
+        temp_dir = Path("app/assets/default/society")
+        if temp_dir.exists():
+            files_in_temp = list(temp_dir.glob("*.png")) + list(temp_dir.glob("*.jpg"))
+            print(f"   Files in temp: {[f.name for f in files_in_temp]}")
+        
+        # Update database with just filenames
         db._execute(
             """UPDATE societies 
                SET name=%s, email=%s, phone=%s, address=%s, plan=%s,
-                   logo=%s, login_background=%s, secretary_sign=%s 
+                   logo=%s, login_background=%s, secretary_sign=%s,
+                   secretary_name=%s, secretary_phone=%s
                WHERE id=%s""",
             (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), 
-             d.get("plan","Free"), d.get("logo"), d.get("login_background"),
-             d.get("secretary_sign"), pk),
+             d.get("plan", "Free"), d.get("logo"), d.get("login_background"),
+             d.get("secretary_sign"), d.get("secretary_name"), 
+             d.get("secretary_phone"), pk),
         )
+        
+        print(f"✅ Society #{pk} updated, images moved to: {society_dir}")
         return True, "Society updated", pk
-    
-    # ── NEW SOCIETY CREATION ─────────────────────────────────────────────
-    name = (d.get("name") or "").strip()
-    if not name:
-        return False, "Society name is required", None
-    
-    admin_email = d.get("admin_email")
-    admin_password = d.get("admin_password")
-    if not admin_email or not admin_password:
-        return False, "Admin email and password are required", None
-    
-    # Insert society with filenames
-    result = db._execute(
-        """INSERT INTO societies(
-            name, email, phone, address, plan, plan_validity,
-            arrear_start_date, logo, login_background, secretary_name,
-            secretary_phone, secretary_sign, created_at
-        )
-        VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-        RETURNING id""",
-        (name, d.get("email"), d.get("phone"), d.get("address"),
-         d.get("plan","Free"), dt_date.today().isoformat(), 
-         d.get("arrear_start_date") or dt_date.today().isoformat(),
-         d.get("logo"), d.get("login_background"), d.get("secretary_name"),
-         d.get("secretary_phone"), d.get("secretary_sign")),
-        fetch_one=True,
-    )
-    
-    if not result or not result.get("id"):
-        return False, "Failed to create society", None
-    
-    soc_id = result["id"]
-    
-    # ✅ FIXED: Move images from temp to production folder
-    _move_temp_images("society", soc_id, soc_id, d)
-    
-    # Create admin user
-    db._execute(
-        """INSERT INTO users(society_id, email, password_hash, role, login_method, created_at)
-           VALUES(%s, %s, %s, 'admin', 'password', NOW())""",
-        (soc_id, admin_email, generate_password_hash(admin_password)),
-    )
-    
-    # Create default accounts
-    create_default_accounts(db, soc_id)
-    
-    return True, f"Society '{name}' created", soc_id
 
 def _save_account(db, d, sid, is_edit, pk):
     """Complete account save handler."""
