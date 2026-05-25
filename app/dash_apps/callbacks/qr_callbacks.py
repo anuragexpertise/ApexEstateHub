@@ -289,12 +289,17 @@ def register_qr_callbacks(app):
         Input('show-qr-btn', 'n_clicks'),
         Input('close-qr-modal', 'n_clicks'),
         Input('profile-action-trigger', 'data'),
+        Input('hdr-logout', 'n_clicks'),  # ✅ ADDED
         State('auth-store', 'data'),
         State('qr-modal', 'is_open'),
         prevent_initial_call=True,
     )
-    def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, auth_data, is_open):
+    def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, logout_n, auth_data, is_open):
         from dash import ctx
+        
+        # ✅ ADDED: Close modal on logout
+        if ctx.triggered_id == 'hdr-logout':
+            return False, no_update, no_update, no_update
         
         if ctx.triggered_id == 'close-qr-modal':
             return False, no_update, no_update, no_update
@@ -344,7 +349,6 @@ def register_qr_callbacks(app):
             return True, "", f"Error: {payload}", no_update
         
         return True, src, payload, entity_store
-
     # ── 3. Validate scanned QR (Entry/Exit with different rules)
     @app.callback(
         Output("qr-result", "children"),
