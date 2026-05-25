@@ -426,18 +426,13 @@ def render_list_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 # IMAGE FIELD RENDERER (for profile cards)
 # ════════════════════════════════════════════════════════════════════════════
+
 def _get_image_url(image_path: str | None, society_id: int | None = None,
                    entity: str = None, pk: int | None = None) -> str | None:
     """
     Convert stored filename to a full asset URL.
     
-    FOLDER STRUCTURE:
-    ─────────────────
-    • Societies:   /assets/{society_id}/logo.png
-    • Apartments:  /assets/{society_id}/apartment/{apartment_id}/image.png
-    • Vendors:     /assets/{society_id}/vendor/{vendor_id}/image.png
-    • Security:    /assets/{society_id}/security/{security_id}/image.png
-    • Temporary:   /assets/default/{entity}/image.png
+    SPECIAL CASE: For societies, society_id IS the pk (society's own ID)
     """
     if not image_path or str(image_path).strip() == "":
         return None
@@ -452,31 +447,46 @@ def _get_image_url(image_path: str | None, society_id: int | None = None,
     if path.startswith('/assets/'):
         return path
     
+    # ═══════════════════════════════════════════════════════════════════
+    # CONSTRUCT PATH FROM FILENAME
+    # ═══════════════════════════════════════════════════════════════════
+    
     # If it's just a filename (no slashes), construct the correct path
     if '/' not in path and '\\' not in path:
-        if society_id and pk and entity:
-            # ✅ FIXED: Handle different entity folder structures
-            if entity == "society":
-                # Societies store images directly in their folder
-                return f"/assets/{society_id}/{path}"
-            elif entity in ("apartment", "vendor", "security"):
-                # These use entity-type subfolders
+        
+        # ✅ SPECIAL CASE: Societies use their own ID as the folder
+        if entity == "society" and pk:
+            # Production: /assets/{society_id}/filename
+            return f"/assets/{pk}/{path}"
+        
+        # CASE 1: Have society_id and pk - production folder
+        elif society_id and pk:
+            if entity in ("apartment", "vendor", "security", "concern", "event"):
+                # Entity subfolders: /assets/{society_id}/{entity}/{pk}/filename
                 return f"/assets/{society_id}/{entity}/{pk}/{path}"
             else:
-                # Fallback for other entities
+                # Fallback: /assets/{society_id}/{entity}_{pk}/filename
                 return f"/assets/{society_id}/{entity}_{pk}/{path}"
         
-        elif society_id:
-            # Legacy fallback: /assets/{society_id}/filename
-            return f"/assets/{society_id}/{path}"
+        # CASE 2: Have society_id but no pk - new record being created
+        elif society_id and not pk:
+            if entity == "society":
+                # New society being edited before save
+                return f"/assets/default/{entity}/{path}"
+            else:
+                # New entity record - use temp folder
+                return f"/assets/default/{entity}/{path}"
+        
+        # CASE 3: No society_id (master admin creating new society)
         else:
             # Temporary default folder for new records
             return f"/assets/default/{entity}/{path}" if entity else f"/assets/default/{path}"
     
-    # Legacy full paths: try to replace 'default' with actual society_id
-    if '/assets/default/' in path and society_id:
-        return path.replace('/assets/default/', f'/assets/{society_id}/')
+    # If path contains /assets/, return as-is
+    if '/assets/' in path:
+        return path
     
+    # Last resort - prefix with /assets/
     return f"/assets/{path}"
 
 def _render_image_field(field_label: str, image_path: str | None, 
@@ -603,7 +613,10 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         color: str = "#1d74d8") -> html.Div:
     
     pk_val = record.get("id", "")
-    society_id = record.get("society_id")
+    if entity == "society":
+        society_id = record.get("_image_society_id") or record.get("id")
+    else:
+        society_id = record.get("society_id")
     
     field_rows = []
     for f in fields:
