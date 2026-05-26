@@ -52,13 +52,13 @@ def register_all_callbacks(app):
         print(f"⚠  owner_callbacks skipped: {e}")
 
     # Vendor callbacks
-    try:
-        from .vendor_callbacks import register_vendor_callbacks
-        register_vendor_callbacks(app)
-    except ImportError:
-        print("⚠  vendor_callbacks module not found - skipping")
-    except Exception as e:
-        print(f"⚠  vendor_callbacks skipped: {e}")
+    # try:
+    #     from .vendor_callbacks import register_vendor_callbacks
+    #     register_vendor_callbacks(app)
+    # except ImportError:
+    #     print("⚠  vendor_callbacks module not found - skipping")
+    # except Exception as e:
+    #     print(f"⚠  vendor_callbacks skipped: {e}")
 
     # Admin callbacks
     try:

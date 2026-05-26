@@ -545,3 +545,23 @@ The system MUST feel like:
 NO page reloads. Only dynamic card transitions.
 IMPORTANT:
 This is NOT a demo. Generate a REAL working SaaS MVP that can be deployed immediately.
+
+In view of the above migration of business logic into Postgrep Sql, with images as filenames and later used by python scripts.
+Use dashestatehub.sql, fn_apartments.sql, fn_assets.sql, fn_vendors.sql, fn_security.sql for business logic, and write thin loaders.
+The Main application has 5 portals - Master-Admin, Admin, Owner, Vendor, Security (as earlier).
+These portals have multiple Tabs- Dashboards, Cashbook etc   with KPIs. Clicking on KPIs , open their respective List_cards, following which are the profile_cards.
+Both List_cards and profile_cards can have various fileds/columns from fn_XXX_list.sql.
+But the new records or updating/edit records should directly write in tables.
+There might be functions in sql to trigger entry into reference tables.
+Four tables= 'RECIEVABLES' TABLE UPDATE -Auto-calculated Credits (Maintanence);
+'PAYMENTS' TABLE UPDATE - Auto-calculated Debits (pending payables);
+'RECEIPTS' TABLE - Manually added Credits (manually recorded income);
+EXPENSES TABLE - Manually added Debits (manually recorded expenses).
+Both RECIEVABLES & PAYMENTS need Admin Verification => then entry into 'transactions' table.
+Both RECEIPTS & EXPENSES => entry directly into 'transactions' table.
+'Account' table specifies the properties of accounts. Each transaction has to be associated with 'account'. 
+'Transaction' table gives the whole cashbook. 
+Check for syntax errors of all sqls , incoporate them in your project.
+Check for business logic in sqls. Update the project for all portals, tabs, KPIs, List_cards, profile_cards, New entry, Edit entry, Image management.
+All KPIs, List_cards, profile_cards, New Entry, Update entry, Delete Entry should have role-based access control in Customize tab of Admin.
+Check  requirement of new models and prefer OOP programming. Create more sqls for fn_assets_list, fn_events_list, fn_concerns_list. Fn_accounts_list, fn_society_list.
