@@ -42,9 +42,40 @@ BEGIN
         WHERE u.society_id = p_society_id AND u.role = 'security'
           AND (p_search IS NULL OR s.name ILIKE '%'||p_search||'%' OR u.email ILIKE '%'||p_search||'%')
     ),
-    payment_summary AS ( /* ... same as before ... */ ),
-    fine_summary AS ( /* ... same as before ... */ ),
-    current_status AS ( /* ... same as before ... */ ),
+    payment_summary AS (
+        SELECT 
+            p.user_id,
+            SUM(CASE WHEN p.status = 'verified' AND p.payment_type = 'salary' THEN p.amount ELSE 0 END) AS salary_paid,
+            SUM(CASE WHEN p.status IN ('pending','confirmed') THEN p.amount ELSE 0 END) AS total_pending
+        FROM payments p
+        WHERE p.society_id = p_society_id AND p.entity_type = 'security'
+        GROUP BY p.user_id
+    ),
+    fine_summary AS (
+        SELECT 
+            u.id AS user_id,
+            COALESCE(SUM(CASE WHEN scf.security_fine > 0 THEN scf.security_fine ELSE 0 END), 0) AS active_fines
+        FROM users u
+        LEFT JOIN security_charges_fines scf ON scf.sec_id = u.linked_id
+        WHERE u.society_id = p_society_id AND u.role = 'security'
+        GROUP BY u.id
+    ),
+    current_status AS (
+        SELECT 
+            g.entity_id,
+            'PASS' AS status
+        FROM gate_access g
+        WHERE g.society_id = p_society_id
+          AND g.role = 's'
+          AND g.time_out IS NULL
+          AND g.time_in >= CURRENT_DATE - INTERVAL '1 day'
+          AND (
+               -- Morning Shift: 9AM to 9PM
+               (EXTRACT(HOUR FROM g.time_in) BETWEEN 9 AND 20) OR
+               -- Evening Shift: 9PM to 9AM
+               (EXTRACT(HOUR FROM g.time_in) >= 21 OR EXTRACT(HOUR FROM g.time_in) < 9)
+          )
+    ),
     today_roster AS (
         SELECT entity_id, 'ON DUTY' AS today_duty
         FROM security_roster 
