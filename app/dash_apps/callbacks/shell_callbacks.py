@@ -1,19 +1,18 @@
-# app/dash_apps/callbacks/shell_callbacks.py
+# app/dash_apps/callbacks/shell_callbacks_FIXED.py
 """
-Shell callbacks - Core authentication and routing logic.
-CRITICAL: This file owns auth-store, url, login-modal, and society dropdown.
-Must be registered FIRST before login_callbacks.
-
+Shell callbacks - FIXED - Core authentication and routing logic.
 FIXES:
-  - Login modal now properly closes when authenticated
-  - Modal state is managed in the main router callback
-  - Navigation clicks no longer trigger logout
+  ✅ Corrected SQL query for society list (plan validity check)
+  ✅ Login modal properly closes when authenticated
+  ✅ Society dropdown only shows valid societies
+  ✅ Proper error handling with database connection test
 """
+
 import json
 from datetime import datetime, timedelta
 import chime
 import dash
-from dash import Input, Output, State, html, dcc, no_update, callback
+from dash import Input, Output, State, html, dcc, no_update, callback, ctx
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
@@ -21,7 +20,6 @@ from app.dash_apps.app_shell import ROLE_CONFIG
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
 
 def _sid(auth):
     """Extract society_id from auth data."""
@@ -130,7 +128,6 @@ def _breadcrumb(pathname):
         name   = path_map.get(part, part.replace("-", " ").title())
         active = i == len(parts) - 1
         
-        # ─── CHANGED: Button instead of link for non-active items ───
         if active:
             elem = name
         else:
@@ -145,7 +142,6 @@ def _breadcrumb(pathname):
                     "textDecoration": "underline",
                 }
             )
-        # ──────────────────────────────────────────────────────────────
         
         items.append(
             html.Li(elem, className="bc-item" + (" bc-item--active" if active else ""))
@@ -246,6 +242,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 0. SOCIETY DROPDOWN POPULATION (MUST BE FIRST)
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("society-dropdown", "options"),
         Output("society-dropdown", "disabled"),
@@ -255,12 +252,17 @@ def register_shell_callbacks(app):
         prevent_initial_call=False,
     )
     def load_societies(is_open):
-        """Load societies from database into dropdown when login modal opens."""
+        """Load societies from database into dropdown when login modal opens.
+        
+        FIXED: Uses corrected SQL query that:
+        1. Handles both Free and Paid plans correctly
+        2. Checks plan_validity for Paid plans
+        3. Shows only valid societies
+        """
         
         print("\n🔍 Loading societies from database...")
         
         try:
-                      
             # Test connection first
             if not db.test_connection():
                 print("❌ Database connection failed")
@@ -278,9 +280,21 @@ def register_shell_callbacks(app):
                      "background": "#f8d7da", "borderRadius": "8px"}
                 )
             
-            # Fetch societies
+            # ✅ FIXED: Corrected SQL query
+            # Shows:
+            # - All Free plan societies
+            # - Paid plan societies with validity >= today
+            print("Load Dropdown Societies ")
             societies = db._execute(
-                "SELECT id, name FROM societies WHERE (plan = 'Free') OR (plan = 'Paid' AND plan_validity >= CURRENT_DATE) ORDER BY name",
+                """
+                SELECT id, name, plan, plan_validity 
+                FROM societies 
+                WHERE 
+                    plan = 'Free' 
+                    OR (plan IN ('9Apts', '99Apts', '999Apts', 'Unlimited') 
+                        AND plan_validity >= CURRENT_DATE)
+                ORDER BY name ASC
+                """,
                 fetch_all=True
             )
             
@@ -300,8 +314,28 @@ def register_shell_callbacks(app):
                      "background": "#fff3cd", "borderRadius": "8px"}
                 )
             
-            options = [{"label": s["name"], "value": s["id"]} for s in societies]
-            print(f"✅ Loaded {len(options)} societies: {[s['name'] for s in societies]}")
+            # Build dropdown options with plan info as subtitle
+            options = []
+            for s in societies:
+                plan_status = "Free"
+                if s.get("plan") != "Free":
+                    validity = s.get("plan_validity")
+                    if validity:
+                        # Show days remaining
+                        from datetime import date
+                        days_left = (validity - date.today()).days
+                        plan_status = f"{s.get('plan')} ({days_left}d left)"
+                    else:
+                        plan_status = s.get("plan")
+                
+                options.append({
+                    "label": f"{s['name']} [{plan_status}]",
+                    "value": s["id"]
+                })
+            
+            print(f"✅ Loaded {len(options)} societies:")
+            for opt in options:
+                print(f"   • {opt['label']}")
             
             return (
                 options,
@@ -318,7 +352,8 @@ def register_shell_callbacks(app):
                 [],
                 True,
                 html.Div(
-                    [html.I(className="fas fa-database me-2"), f"Database error: {str(e)[:100]}"],
+                    [html.I(className="fas fa-database me-2"), 
+                     f"Database error: {str(e)[:80]}"],
                     style={"color": "#dc3545", "fontSize": "12px", "textAlign": "center"},
                 ),
                 {"display": "block", "marginBottom": "15px", "padding": "8px", 
@@ -328,6 +363,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 1. STAGE 1 → STAGE 2 TRANSITION
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("login-stage-1", "style"),
         Output("login-stage-2", "style"),
@@ -366,6 +402,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 2. BACK BUTTON TO RETURN TO STAGE 1
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("login-stage-1", "style", allow_duplicate=True),
         Output("login-stage-2", "style", allow_duplicate=True),
@@ -383,6 +420,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 3. RESTORE SOCIETY FROM COOKIE (AUTO-ADVANCE IF COOKIE EXISTS)
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("society-dropdown", "value", allow_duplicate=True),
         Output("login-stage-1", "style", allow_duplicate=True),
@@ -419,6 +457,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 4. POPULATE LOGIN STAGE 2 CONTENT
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("login-stage-2", "children"),
         Input("auth-store", "data"),
@@ -447,7 +486,9 @@ def register_shell_callbacks(app):
         if society_options:
             for opt in society_options:
                 if isinstance(opt, dict) and opt.get("value") == society_id:
-                    society_name = opt.get("label", "Society")
+                    # Extract just the society name (before the plan info)
+                    label = opt.get("label", "Society")
+                    society_name = label.split("[")[0].strip()
                     break
 
         print(f"\n✅ Injecting login form for society: {society_name}")
@@ -638,15 +679,18 @@ def register_shell_callbacks(app):
         society_name = "EsateHub"
         society_logo = "/static/assets/EH_logo.png"
         if society_id:
-            society = db._execute(
-                "SELECT name, logo FROM societies WHERE id = %s",
-                (society_id,),
-                fetch_one=True
-            )
-            if society:
-                society_name = society["name"]
-                if society.get("logo"):
-                    society_logo = society["logo"]
+            try:
+                society = db._execute(
+                    "SELECT name, logo FROM societies WHERE id = %s",
+                    (society_id,),
+                    fetch_one=True
+                )
+                if society:
+                    society_name = society["name"]
+                    if society.get("logo"):
+                        society_logo = f"/assets/{society_id}/{society['logo']}"
+            except:
+                pass
         
         # Get role config
         is_master = role == "admin" and society_id is None
@@ -699,8 +743,7 @@ def register_shell_callbacks(app):
         prevent_initial_call=True,
     )
     def toggle_sidebar(ham_n, over_n, col_n, store):
-        """Toggle sidebar open/closed (mobile + desktop)."""
-        ctx = dash.callback_context
+        """Toggle sidebar."""
         if not ctx.triggered:
             raise PreventUpdate
         
@@ -730,6 +773,7 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 9. TOAST NOTIFICATIONS
     # ══════════════════════════════════════════════════════════════════════════
+    
     @app.callback(
         Output("toast-container", "children"),
         Input("toast-store", "data"),
@@ -756,14 +800,20 @@ def register_shell_callbacks(app):
             "warning": "#f59e0b",
             "info": "#3b82f6",
         }
-        if toast_type=="success":
-            chime.success()
-        elif toast_type=="error":
-            chime.error()
-        elif toast_type=="warning":
-            chime.warning()
-        else:
-            chime.info()
+        
+        # Play sound
+        try:
+            if toast_type == "success":
+                chime.success()
+            elif toast_type == "error":
+                chime.error()
+            elif toast_type == "warning":
+                chime.warning()
+            else:
+                chime.info()
+        except:
+            pass
+        
         return dbc.Toast(
             message,
             id="toast",
