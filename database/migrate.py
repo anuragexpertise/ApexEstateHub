@@ -76,45 +76,45 @@ def _strip_comments(sql: str) -> str:
 
 def split_statements(raw_sql: str) -> list:
     """
-    Split SQL on semicolons, skip empty/comment-only statements.
-    Preserves DO $$ ... $$ blocks intact.
+    Improved splitter that properly handles $$ delimited PL/pgSQL functions.
     """
     stmts = []
     buffer = []
-    in_do_block = False
-    
-    for line in raw_sql.split('\n'):
-        # Track DO $$ blocks
-        if re.match(r'^\s*DO\s+\$\$', line, re.IGNORECASE):
-            in_do_block = True
-        
+    in_dollar_block = False
+    lines = raw_sql.split('\n')
+
+    for line in lines:
         buffer.append(line)
-        
-        # End of DO block
-        if in_do_block and '$$;' in line:
-            in_do_block = False
+        stripped = line.strip()
+
+        # Detect start of a $$ function block
+        if not in_dollar_block and re.search(r'CREATE OR REPLACE FUNCTION|DO\s+\$\$', stripped, re.IGNORECASE):
+            in_dollar_block = True
+
+        # End of $$ block - look for $$;
+        if in_dollar_block and stripped.endswith('$$;'):
+            in_dollar_block = False
             stmt = '\n'.join(buffer).strip()
             if stmt:
                 stmts.append(stmt)
             buffer = []
             continue
-        
-        # Regular statement end
-        if not in_do_block and ';' in line:
+
+        # Regular statements (outside dollar blocks)
+        if not in_dollar_block and stripped.endswith(';') and not stripped.startswith('--'):
             stmt = '\n'.join(buffer).strip()
-            # Check if there's real SQL after stripping comments
             cleaned = _strip_comments(stmt).strip()
-            if cleaned and not cleaned == ';':
+            if cleaned and cleaned != ';':
                 stmts.append(stmt)
             buffer = []
-    
-    # Catch any remaining buffered content
+
+    # Handle any remaining content
     if buffer:
         stmt = '\n'.join(buffer).strip()
         cleaned = _strip_comments(stmt).strip()
-        if cleaned:
+        if cleaned and cleaned != ';':
             stmts.append(stmt)
-    
+
     return stmts
 
 
@@ -167,11 +167,11 @@ def main():
     parser.add_argument('--force', action='store_true',
                         help='Re-run even if tables already exist')
     parser.add_argument('--sql', default=None,
-                        help='Path to SQL file (default: dashestatehub.sql)')
+                        help='Path to SQL file (default: estatehub.sql)')
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sql_path = args.sql or os.path.join(project_root, 'dashestatehub.sql')
+    sql_path = args.sql or os.path.join(project_root, 'estatehub.sql')
 
     if not os.path.isfile(sql_path):
         print(f"❌  SQL file not found: {sql_path}")

@@ -61,7 +61,7 @@ from app.dash_apps.drilldown.registry import (
     get_pk, to_singular, to_plural, build_prefill,
 )
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
-
+from app.security.rbac import RBACManager, Permisson
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ENTITY METADATA  ─ field specs for list, profile, and form cards (ENHANCED)
@@ -746,6 +746,7 @@ def register_drilldown_callbacks(app):
     def route_drilldown(*args):
         store    = args[-2] or {}
         auth     = args[-1] or {}
+        card_id = nav_state.get()
         role     = auth.get("role", "admin")
         sid      = auth.get("society_id")
 
