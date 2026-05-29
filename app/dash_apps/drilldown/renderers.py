@@ -360,7 +360,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         
         field_rows.append(html.Div([
             html.Div([
-                html.I(className=f.get("icon", "fas fa-circle-dot"), style={"color": "#aaa", "width": "14px"}, className="me-2"),
+                html.I(className=f.get("icon", "fas fa-circle-dot"), style={"color": "#aaa", "width": "14px"}),
                 html.Span(f["label"], style={"color": "#7d8ea3", "fontSize": "11px", "fontWeight": "600"}),
             ], style={"marginBottom": "2px"}),
             html.Div(val, style={"fontSize": "14px", "fontWeight": "500", "color": "#15304f", "paddingLeft": "22px"}),
