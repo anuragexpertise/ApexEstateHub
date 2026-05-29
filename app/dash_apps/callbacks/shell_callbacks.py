@@ -284,7 +284,6 @@ def register_shell_callbacks(app):
             # Shows:
             # - All Free plan societies
             # - Paid plan societies with validity >= today
-            print("Load Dropdown Societies ")
             societies = db._execute(
                 """
                 SELECT id, name, plan, plan_validity 
