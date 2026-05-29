@@ -158,9 +158,13 @@ def render_list_card(card_id: str, title: str, icon: str,
     total_pages = max(1, -(-total_rows // page_size))
     
     # ── Header cells ──
-    header_cells = [html.Th(c["label"], style={
-        "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3"
-    }) for c in columns]
+    # Handle flexible column format: {"label": "X", "field": "y"} or {"name": "X", "field": "y"}
+    header_cells = []
+    for c in columns:
+        col_label = c.get("label") or c.get("name") or c.get("field", "").title()
+        header_cells.append(html.Th(col_label, style={
+            "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3"
+        }))
     header_cells.append(html.Th("Actions", style={
         "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3"
     }))
@@ -171,10 +175,14 @@ def render_list_card(card_id: str, title: str, icon: str,
         row_dict = row.to_dict(include_calculated=True) if hasattr(row, 'to_dict') else row
         pk_val = row_dict.get("id")
         
-        cells = [html.Td(
-            str(row_dict.get(c["field"], "—") or "—"),
-            style={"fontSize": "12px", "verticalAlign": "middle"},
-        ) for c in columns]
+        cells = []
+        for c in columns:
+            field_key = c.get("field") or c.get("name") or list(row_dict.keys())[0]
+            val = str(row_dict.get(field_key, "—") or "—")
+            cells.append(html.Td(
+                val,
+                style={"fontSize": "12px", "verticalAlign": "middle"},
+            ))
         
         # Action buttons
         can_view = RBACManager.has_permission(user_role, f"profile_{entity}", Permission.VIEW, society_id)

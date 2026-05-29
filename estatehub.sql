@@ -513,7 +513,7 @@ RETURNS TABLE (id INT, email VARCHAR, society_id INT, business_name TEXT, servic
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
     PERFORM fn_auto_generate_vendor_receivables(p_society_id);
-    PERFORM fn_auto_process_vendor_payments(p_society_id);
+    -- PERFORM fn_auto_process_vendor_payments(p_society_id);
     RETURN QUERY
     WITH vendor_data AS (
         SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) AS business_name,
