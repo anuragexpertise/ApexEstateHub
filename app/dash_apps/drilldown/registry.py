@@ -1,6 +1,6 @@
 # app/dash_apps/drilldown/registry.py
 """
-Card Registry & Drill-Down Navigation Map - SETTINGS TAB ENHANCED
+Card Registry & Drill-Down Navigation Map
 ==========================================
 CARD ID CONVENTION:
   kpi_<entity>_<metric>       e.g. kpi_apartments_total
@@ -11,7 +11,7 @@ CARD ID CONVENTION:
 NAMING STANDARDS:
   - List/loader keys use PLURAL   (apartments, gate_logs)
   - Profile/form/save keys use SINGULAR (apartment, gate_log)
-  - PK_MAP and ENTITY_MAP are the single source of truth - no rstrip("s") anywhere
+  - PK_MAP and ENTITY_MAP are the single source of truth
 """
 
 
@@ -25,8 +25,8 @@ PK_MAP: dict = {
     "events":      "id",
     "concerns":    "id",
     "gate_logs":   "id",
-    "receipts_tbl": "id",  # New receipts table
-    "expenses_tbl": "id",  # New expenses table
+    "receipts_tbl": "id",
+    "expenses_tbl": "id",
     "cashbook":    "id",
     "societies":   "id",
     "accounts":    "id",
@@ -39,7 +39,7 @@ PK_MAP: dict = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ENTITY MAP  — plural → singular  (replaces ALL fragile .rstrip("s") calls)
+# ENTITY MAP  — plural → singular
 # ══════════════════════════════════════════════════════════════════════════════
 ENTITY_MAP: dict = {
     "apartments":  "apartment",
@@ -48,8 +48,8 @@ ENTITY_MAP: dict = {
     "events":      "event",
     "concerns":    "concern",
     "gate_logs":   "gate_log",
-    "receipts_tbl": "receipt_entry",  # New
-    "expenses_tbl": "expense_entry",  # New
+    "receipts_tbl": "receipt_entry",
+    "expenses_tbl": "expense_entry",
     "cashbook":    "transaction",
     "societies":   "society",
     "accounts":    "account",
@@ -64,7 +64,7 @@ ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ROLE FILTER parent_account_id
+# ROLE FILTERS
 # ══════════════════════════════════════════════════════════════════════════════
 ROLE_FILTERS: dict = {
     "master":    [],
@@ -76,7 +76,7 @@ ROLE_FILTERS: dict = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DRILL-DOWN NAVIGATION MAP - ENHANCED WITH SETTINGS
+# DRILL-DOWN NAVIGATION MAP
 # ══════════════════════════════════════════════════════════════════════════════
 DRILLDOWN_MAP: dict = {
 
@@ -126,10 +126,6 @@ DRILLDOWN_MAP: dict = {
     "list_receivables":   {"target": "profile_receivable",     "label": "Receivable Details"},
 
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
-    # prefill_map: {form_field: profile_field}
-    # Special: "_const_<val>" injects a literal constant
-    # Special: {"*":"*"} copies all profile fields first
-
     "profile_apartment": {
         "actions": {
             "pay_dues":    {"target": "form_receipt_entry_new", "prefill": {"entity_id": "id", "entity_type": "_const_apartment", "amount": "pending_dues"}},
@@ -190,26 +186,27 @@ DRILLDOWN_MAP: dict = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPERS  — single source of truth, used by all engine modules
+# HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_pk(entity_plural: str, row: dict):
-    """Extract PK value from a DB row using PK_MAP. Falls back to 'id'."""
+    """Extract PK value from a DB row using PK_MAP."""
     pk_field = PK_MAP.get(entity_plural, "id")
     return row.get(pk_field) or row.get("id")
 
 
 def to_singular(entity_plural: str) -> str:
-    """plural → singular via ENTITY_MAP. Never use rstrip('s')."""
-    return ENTITY_MAP.get(entity_plural, entity_plural)
+    """Convert plural → singular via ENTITY_MAP."""
+    return ENTITY_MAP.get(entity_plural, entity_plural.rstrip('s'))
 
 
 def to_plural(entity_singular: str) -> str:
-    """singular → plural via reverse map."""
-    return ENTITY_MAP_REV.get(entity_singular, entity_singular)
+    """Convert singular → plural via reverse map."""
+    return ENTITY_MAP_REV.get(entity_singular, entity_singular + 's')
 
 
 def build_breadcrumb(nav_stack: list) -> list:
+    """Build breadcrumb from navigation stack."""
     crumbs = []
     for i, item in enumerate(nav_stack):
         crumbs.append({
@@ -222,6 +219,7 @@ def build_breadcrumb(nav_stack: list) -> list:
 
 
 def propagate_filters(auth_data: dict, extra: dict = None) -> dict:
+    """Merge auth filters with extra filters."""
     filters = {
         "society_id":   auth_data.get("society_id"),
         "user_id":      auth_data.get("user_id"),
@@ -237,16 +235,11 @@ def propagate_filters(auth_data: dict, extra: dict = None) -> dict:
 
 def build_prefill(profile_data: dict, prefill_map: dict) -> dict:
     """
-    Map profile record fields → form fields using prefill_map.
-
+    Map profile fields → form fields.
+    
     Special source values:
-      "_const_<value>"  →  inject literal string  (e.g. "_const_a" → "a")
+      "_const_<value>"  →  inject literal string
       "*"               →  copy ALL profile fields first
-
-    Example:
-      prefill_map  = {"amount": "pending_dues", "role": "_const_a"}
-      profile_data = {"id": 42, "pending_dues": 3600, ...}
-      → result     = {"amount": 3600, "role": "a"}
     """
     result: dict = {}
 

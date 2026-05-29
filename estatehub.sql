@@ -443,7 +443,7 @@ BEGIN
         acf.society_id, acf.apt_id, 'apartment', 'maintenance',
         'Maintenance - ' || a.flat_number,
         (a.apartment_size * acf.apt_maintenance_rate)::NUMERIC,
-        (DATE_TRUNC('month', CURRENT_DATE) + (COALESCE(acf.apt_due_day, 10)-1) || ' days')::DATE,
+        (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 day' * (COALESCE(acf.apt_due_day, 10)-1))::DATE,
         'pending', 'apt_charges_fines', acf.id, NOW()
     FROM apt_charges_fines acf
     JOIN apartments a ON a.id = acf.apt_id

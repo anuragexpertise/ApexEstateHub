@@ -746,7 +746,8 @@ def register_drilldown_callbacks(app):
     def route_drilldown(*args):
         store    = args[-2] or {}
         auth     = args[-1] or {}
-        card_id = nav_state.get()
+        # State is passed via store parameter, not global
+        card_id = store.get("active_card", "dashboard")
         role     = auth.get("role", "admin")
         sid      = auth.get("society_id")
 

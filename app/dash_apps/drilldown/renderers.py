@@ -1,11 +1,10 @@
-# app/dash_apps/drilldown/renderers_complete.py
+# app/dash_apps/drilldown/renderers.py
 """
 COMPLETE RENDERERS - All Card Types for All 5 Portals
 ======================================================
-- Works with OOP models from loaders_thin.py
+- Works with OOP models from loaders
 - Implements RBAC checks
 - Handles image upload/storage
-- Supports all portal views (Master, Admin, Owner, Vendor, Security)
 """
 
 from __future__ import annotations
@@ -21,10 +20,9 @@ from app.models import (
     Event, Concern, Receivable, Transaction
 )
 from app.security.rbac import RBACManager, Permission
-from database.db_manager import db
 
 # ════════════════════════════════════════════════════════════════════════════
-# COLORS & STYLE CONSTANTS
+# COLORS & STYLES
 # ════════════════════════════════════════════════════════════════════════════
 
 COLORS = {
@@ -37,19 +35,12 @@ COLORS = {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# IMAGE URL RESOLUTION (Master Function)
+# IMAGE URL RESOLUTION
 # ════════════════════════════════════════════════════════════════════════════
 
 def get_image_url(image_path: str | None, society_id: int | None = None,
                   entity: str = None, pk: int | None = None) -> str | None:
-    """
-    Convert stored filename to full asset URL.
-    
-    SPECIAL CASE:
-    - For societies: uses society's own ID as folder
-    - For other entities: uses /assets/{society_id}/{entity}/{pk}/
-    - For new records: uses /assets/default/{entity}/
-    """
+    """Convert stored filename to full asset URL."""
     if not image_path or str(image_path).strip() == "":
         return None
     
@@ -147,7 +138,6 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     "background": f"linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,251,255,0.9))",
                     "backdropFilter": "blur(10px)",
                 },
-                onClick=lambda: html.Div() if not clickable else None,
             ),
         ]
     )
@@ -160,10 +150,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                      columns: list[dict], rows: list[dict],
                      entity: str, page: int = 1, total_rows: int = 0,
                      page_size: int = 15, auth_data: dict | None = None) -> html.Div:
-    """
-    Generic list card with pagination, search, and actions.
-    rows = list of OOP model objects (e.g., [Apartment, Apartment, ...])
-    """
+    """Generic list card with pagination, search, and actions."""
     auth_data = auth_data or {}
     user_role = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
@@ -297,13 +284,10 @@ def render_list_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_profile_card(card_id: str, title: str, icon: str,
-                       entity: str, record: Apartment | Vendor | SecurityStaff | Society | Account,
+                       entity: str, record,
                        fields: list[dict], actions: list[dict] | None = None,
                        color: str = "#1d74d8", auth_data: dict | None = None) -> html.Div:
-    """
-    Render profile card with image support.
-    record = OOP model object with calculated fields already computed.
-    """
+    """Render profile card with image support."""
     auth_data = auth_data or {}
     user_role = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
@@ -313,7 +297,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     
     # Determine society_id for image resolution
     if entity == "society":
-        img_society_id = pk_val  # Societies use their own ID
+        img_society_id = pk_val
     else:
         img_society_id = record_dict.get("_image_society_id") or record_dict.get("society_id")
     
@@ -433,9 +417,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                     prefill: dict | None = None,
                     color: str = "#17976e",
                     society_id: int | None = None) -> html.Div:
-    """
-    Generic form card with dynamic field types.
-    """
+    """Generic form card with dynamic field types."""
     prefill = prefill or {}
     current_pk = prefill.get("id") or ""
     form_rows = []
@@ -568,7 +550,7 @@ def render_breadcrumb(nav_stack: list[dict]) -> html.Nav:
     )
 
 # ════════════════════════════════════════════════════════════════════════════
-# UTILITY: Model to Dict Converter
+# UTILITY
 # ════════════════════════════════════════════════════════════════════════════
 
 def model_to_display(record: any) -> dict:
