@@ -1,4 +1,4 @@
-# app/dash_apps/drilldown/loaders_thin.py
+# app/dash_apps/drilldown/loaders.py
 """
 THIN LOADERS - Just database queries, no business logic
 All calculations done in PostgreSQL functions
@@ -14,6 +14,95 @@ from app.models import (
 )
 
 PAGE_SIZE = 15
+
+# ════════════════════════════════════════════════════════════════════════════
+# GENERIC DISPATCHERS - Work with any entity
+# ════════════════════════════════════════════════════════════════════════════
+
+def load_list(entity: str, filters: dict, page: int = 1, search: str = "", page_size: int = PAGE_SIZE) -> tuple[list, int]:
+    """Generic list loader that dispatches to entity-specific loaders."""
+    society_id = filters.get("society_id")
+    
+    loaders_map = {
+        "apartments": load_apartments_list,
+        "vendors": load_vendors_list,
+        "security": load_security_list,
+        "events": load_events_list,
+        "concerns": load_concerns_list,
+        "accounts": load_accounts_list,
+        "societies": load_societies_list,
+        "cashbook": load_cashbook_list,
+        "receivables": load_receivables_list,
+    }
+    
+    loader = loaders_map.get(entity)
+    if not loader:
+        print(f"❌ No loader for entity: {entity}")
+        return [], 0
+    
+    # Call the specific loader with appropriate params
+    if entity == "societies":
+        return loader(search, filters.get("plan"), page, page_size)
+    elif entity in ("cashbook", "receivables"):
+        status = filters.get("status", "pending")
+        return loader(society_id, search, status, page, page_size)
+    elif entity == "concerns":
+        status = filters.get("status", "open")
+        return loader(society_id, search, status, page, page_size)
+    else:
+        return loader(society_id, search, page, page_size)
+
+
+def load_profile(entity: str, pk: any, society_id: int):
+    """Generic profile loader that dispatches to entity-specific loaders."""
+    loaders_map = {
+        "apartment": load_apartment_profile,
+        "vendor": load_vendor_profile,
+        "security": load_security_profile,
+        "event": load_event_profile,
+        "concern": load_concern_profile,
+        "account": load_account_profile,
+        "society": load_society_profile,
+        "transaction": lambda x: load_cashbook_profile(x),
+        "receivable": load_receivable_profile,
+    }
+    
+    loader = loaders_map.get(entity)
+    if not loader:
+        print(f"❌ No profile loader for entity: {entity}")
+        return None
+    
+    return loader(pk)
+
+
+def delete_entity(entity: str, pk: any, society_id: int) -> tuple[bool, str]:
+    """Generic delete that uses SQL directly."""
+    table_map = {
+        "apartment": "apartments",
+        "vendor": "vendors",
+        "security": "security_staff",
+        "event": "events",
+        "concern": "concerns",
+        "account": "accounts",
+    }
+    
+    table = table_map.get(entity)
+    if not table:
+        return False, f"Cannot delete {entity}"
+    
+    try:
+        db._execute(
+            f"DELETE FROM {table} WHERE id = %s AND society_id = %s",
+            (pk, society_id)
+        )
+        return True, f"{entity.title()} deleted"
+    except Exception as e:
+        return False, str(e)
+
+
+def export_csv(entity: str, society_id: int) -> str:
+    """Export entity list as CSV"""
+    return export_list_as_csv(entity, society_id)
 
 # ════════════════════════════════════════════════════════════════════════════
 # APARTMENTS
@@ -369,6 +458,15 @@ def load_cashbook_list(
     
     transactions = [dict_to_transaction(r) for r in rows]
     return transactions, total
+
+def load_cashbook_profile(transaction_id: int) -> Transaction | None:
+    """Load transaction profile"""
+    row = db._execute(
+        "SELECT * FROM fn_cashbook_profile(%s)",
+        (transaction_id,),
+        fetch_one=True
+    )
+    return dict_to_transaction(row) if row else None
 
 # ════════════════════════════════════════════════════════════════════════════
 # CSV EXPORT

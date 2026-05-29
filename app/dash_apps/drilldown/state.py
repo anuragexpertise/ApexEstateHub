@@ -104,3 +104,10 @@ def _home_card_for_role(role: str) -> str:
         "vendor":    "dashboard_vendor",
         "security":  "dashboard_security",
     }.get(role, "dashboard_admin")
+
+def get() -> any:
+    """
+    Legacy compatibility - state is now managed through callback parameters.
+    Returns None - state is in the store dict passed to callbacks.
+    """
+    return None
