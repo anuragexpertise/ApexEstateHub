@@ -468,8 +468,8 @@ BEGIN
           AND NOT EXISTS (
               SELECT 1 FROM receipts r 
               WHERE r.transaction_id = p.transaction_id 
-                 OR (r.entity_id = p.entity_id AND r.entity_type = p.entity_type 
-                     AND r.amount = p.amount AND r.receipt_date = COALESCE(p.paid_at::DATE, CURRENT_DATE))
+                --  OR ((r.entity_id = p.entity_id) AND (r.entity_type = p.entity_type) 
+                --      AND r.amount = p.amount AND r.receipt_date = COALESCE(p.paid_at::DATE, CURRENT_DATE))
           )
     LOOP
         INSERT INTO receipts (society_id, user_id, entity_id, entity_type, receipt_date, acc_id,
