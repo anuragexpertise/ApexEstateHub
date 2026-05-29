@@ -1,15 +1,18 @@
-# app/dash_apps/callbacks/shell_callbacks_FIXED.py
+# app/dash_apps/callbacks/shell_callbacks.py
 """
-Shell callbacks - FIXED - Core authentication and routing logic.
-FIXES:
-  ✅ Corrected SQL query for society list (plan validity check)
-  ✅ Login modal properly closes when authenticated
-  ✅ Society dropdown only shows valid societies
-  ✅ Proper error handling with database connection test
-"""
+Shell callbacks - Core authentication and routing logic (FIXED).
+CRITICAL: This file owns auth-store, url, login-modal, and society dropdown.
+Must be registered FIRST before login_callbacks.
 
+FIXES:
+  ✅ Fixed society dropdown SQL query (uses correct plan values: Free, 9Apts, 99Apts, etc.)
+  ✅ Added plan validity checking (shows only valid plans)
+  ✅ Displays plan type in dropdown options
+  ✅ Login modal properly closes when authenticated
+  ✅ Modal state is managed in the main router callback
+"""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as dt_date
 import chime
 import dash
 from dash import Input, Output, State, html, dcc, no_update, callback, ctx
@@ -183,7 +186,6 @@ def _portal_content(role, society_id, pathname):
             "settings"      if "/settings"       in p else
             "dashboard"
         )
-        # Customize has its own layout
         if tab == "customize":
             try:
                 from app.dash_apps.pages.customize_layout import customize_layout
@@ -242,7 +244,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 0. SOCIETY DROPDOWN POPULATION (MUST BE FIRST)
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("society-dropdown", "options"),
         Output("society-dropdown", "disabled"),
@@ -256,8 +257,9 @@ def register_shell_callbacks(app):
         
         FIXED: Uses corrected SQL query that:
         1. Handles both Free and Paid plans correctly
-        2. Checks plan_validity for Paid plans
+        2. Checks plan_validity for Paid plans (9Apts, 99Apts, 999Apts, Unlimited)
         3. Shows only valid societies
+        4. Displays plan info in dropdown label
         """
         
         print("\n🔍 Loading societies from database...")
@@ -298,14 +300,14 @@ def register_shell_callbacks(app):
             )
             
             if not societies:
-                print("⚠️  No societies found in database")
+                print("⚠️  No valid societies found in database")
                 return (
                     [],
                     False,
                     html.Div(
                         [
                             html.I(className="fas fa-exclamation-triangle me-2"),
-                            "No societies found. Please contact the administrator.",
+                            "No valid societies available. Please contact the administrator.",
                         ],
                         style={"color": "#856404", "fontSize": "12px", "textAlign": "center"},
                     ),
@@ -316,16 +318,23 @@ def register_shell_callbacks(app):
             # Build dropdown options with plan info as subtitle
             options = []
             for s in societies:
+                plan = s.get("plan", "Free")
                 plan_status = "Free"
-                if s.get("plan") != "Free":
+                
+                if plan != "Free" and s.get("plan_validity"):
+                    # Show days remaining for paid plans
                     validity = s.get("plan_validity")
-                    if validity:
-                        # Show days remaining
-                        from datetime import date
-                        days_left = (validity - date.today()).days
-                        plan_status = f"{s.get('plan')} ({days_left}d left)"
+                    if isinstance(validity, str):
+                        from datetime import datetime
+                        validity = datetime.fromisoformat(validity).date()
+                    
+                    days_left = (validity - dt_date.today()).days
+                    if days_left > 0:
+                        plan_status = f"{plan} ({days_left}d left)"
+                    elif days_left == 0:
+                        plan_status = f"{plan} (expires today)"
                     else:
-                        plan_status = s.get("plan")
+                        plan_status = f"{plan} (expired)"
                 
                 options.append({
                     "label": f"{s['name']} [{plan_status}]",
@@ -362,7 +371,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 1. STAGE 1 → STAGE 2 TRANSITION
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("login-stage-1", "style"),
         Output("login-stage-2", "style"),
@@ -401,7 +409,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 2. BACK BUTTON TO RETURN TO STAGE 1
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("login-stage-1", "style", allow_duplicate=True),
         Output("login-stage-2", "style", allow_duplicate=True),
@@ -419,7 +426,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 3. RESTORE SOCIETY FROM COOKIE (AUTO-ADVANCE IF COOKIE EXISTS)
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("society-dropdown", "value", allow_duplicate=True),
         Output("login-stage-1", "style", allow_duplicate=True),
@@ -456,7 +462,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 4. POPULATE LOGIN STAGE 2 CONTENT
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("login-stage-2", "children"),
         Input("auth-store", "data"),
@@ -476,7 +481,7 @@ def register_shell_callbacks(app):
         if not society_id:
             return no_update
 
-        # Don't re-inject if the form is already showing for this society
+        # Don't re-inject if form already showing
         if current_children:
             return no_update
 
@@ -596,7 +601,7 @@ def register_shell_callbacks(app):
         prevent_initial_call=True,
     )
     def logout(n2, n3):
-        """Handle logout from sidebar or QR modal."""
+        """Handle logout."""
         if not (n2 or n3):
             raise PreventUpdate
         
@@ -605,7 +610,7 @@ def register_shell_callbacks(app):
         try:
             from flask_login import logout_user
             logout_user()
-        except Exception:
+        except:
             pass
         
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
@@ -630,7 +635,7 @@ def register_shell_callbacks(app):
             return False  # Close modal
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 7B. MAIN ROUTER (URL → PORTAL CONTENT)
+    # 6. MAIN ROUTER (URL → PORTAL CONTENT)
     # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("portal-content", "children"),
@@ -647,14 +652,12 @@ def register_shell_callbacks(app):
         Output("hdr-society-logo", "src"),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,  # Needs to run on initial load
+        prevent_initial_call=False,
     )
     def route_page(pathname, auth):
         """Main router - update all shell components based on current URL."""
         
-        # CRITICAL FIX: Check authentication status
         if not auth or not auth.get("authenticated"):
-            # Not authenticated - show placeholder content (modal managed by separate callback)
             print(f"\n⚠️  Not authenticated for path: {pathname}")
             return (
                 html.Div("Please log in", className="text-muted text-center mt-5"),
@@ -670,8 +673,6 @@ def register_shell_callbacks(app):
         user_id = auth.get("user_id")
         email = auth.get("email", "")
         
-        # Get user details from database
-       
         user_name = email.split("@")[0].title()
         
         # Get society details
@@ -696,7 +697,6 @@ def register_shell_callbacks(app):
         key = "master" if is_master else (role or "admin")
         cfg = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
         
-        # Portal label styling
         portal_label = cfg["label"]
         portal_style = {
             "display": "flex",
@@ -710,7 +710,6 @@ def register_shell_callbacks(app):
             "color": cfg["color"],
         }
         
-        # Avatar initial
         avatar = user_name[0].upper() if user_name else "?"
         
         return (
@@ -728,8 +727,10 @@ def register_shell_callbacks(app):
             society_logo
         )
 
+
+
     # ══════════════════════════════════════════════════════════════════════════
-    # 8. SIDEBAR TOGGLE (MOBILE)
+    # 8. SIDEBAR TOGGLE
     # ══════════════════════════════════════════════════════════════════════════
     @app.callback(
         Output("app-sidebar", "className"),
@@ -750,7 +751,6 @@ def register_shell_callbacks(app):
         collapsed = store.get("collapsed", False) if store else False
         
         if trigger_id in ["hdr-hamburger-btn", "sb-overlay"]:
-            # Mobile: toggle open/closed
             new_collapsed = not collapsed
             return (
                 "app-sidebar" if new_collapsed else "app-sidebar sidebar-open",
@@ -759,7 +759,6 @@ def register_shell_callbacks(app):
             )
         
         if trigger_id == "sb-collapse-btn":
-            # Desktop: toggle collapsed/expanded
             new_collapsed = not collapsed
             return (
                 "app-sidebar sidebar-collapsed" if new_collapsed else "app-sidebar",
@@ -772,7 +771,6 @@ def register_shell_callbacks(app):
     # ══════════════════════════════════════════════════════════════════════════
     # 9. TOAST NOTIFICATIONS
     # ══════════════════════════════════════════════════════════════════════════
-    
     @app.callback(
         Output("toast-container", "children"),
         Input("toast-store", "data"),

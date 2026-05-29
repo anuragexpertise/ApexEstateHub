@@ -61,7 +61,7 @@ from app.dash_apps.drilldown.registry import (
     get_pk, to_singular, to_plural, build_prefill,
 )
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
-from app.security.rbac import RBACManager, Permisson
+from app.security.rbac import RBACManager, Permission
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ENTITY METADATA  ─ field specs for list, profile, and form cards (ENHANCED)
@@ -775,7 +775,7 @@ def register_drilldown_callbacks(app):
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target   = nav_info.get("target")
             if not target:
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update
             # Reset stack to clean Dashboard root, then navigate
             store = nav_state.initial_state(role, sid)
             store = nav_state.navigate_to(
@@ -792,7 +792,7 @@ def register_drilldown_callbacks(app):
             singular = to_singular(entity)
             record   = loaders.load_profile(singular, pk, sid)
             if not record:
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update
             meta   = ENTITY_META.get(entity, {})
             target = f"profile_{singular}"
             store  = nav_state.navigate_to(
@@ -810,7 +810,7 @@ def register_drilldown_callbacks(app):
             singular = to_singular(entity)
             record   = loaders.load_profile(singular, pk, sid)
             if not record:
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update
             meta   = ENTITY_META.get(entity, {})
             target = f"profile_{singular}"
             store  = nav_state.navigate_to(
