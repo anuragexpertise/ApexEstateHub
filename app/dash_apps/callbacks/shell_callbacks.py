@@ -300,7 +300,7 @@ def register_shell_callbacks(app):
             )
             
             if not societies:
-                print("⚠️  No valid societies found in database")
+                print("⚠️ No valid societies found in database")
                 return (
                     [],
                     False,
@@ -446,7 +446,7 @@ def register_shell_callbacks(app):
         if society_options:
             valid = any(opt["value"] == society_id for opt in society_options if isinstance(opt, dict))
             if not valid:
-                print(f"⚠️  Cookie society_id {society_id} not found in dropdown options")
+                print(f"⚠️ Cookie society_id {society_id} not found in dropdown options")
                 return no_update, no_update, no_update, no_update
         
         print(f"\n✅ Restored society from cookie: {society_id}")
@@ -658,7 +658,7 @@ def register_shell_callbacks(app):
         """Main router - update all shell components based on current URL."""
         
         if not auth or not auth.get("authenticated"):
-            print(f"\n⚠️  Not authenticated for path: {pathname}")
+            print(f"\n⚠️ Not authenticated for path: {pathname}")
             return (
                 html.Div("Please log in", className="text-muted text-center mt-5"),
                 [], [], "", {}, "—", "—", "?", "User", "?", "EsateHub",
@@ -822,4 +822,4 @@ def register_shell_callbacks(app):
             style={"borderLeft": f"4px solid {color_map.get(toast_type, '#3b82f6')}"},
         )
 
-    print("  ✓ Shell callbacks registered successfully")
+    print("  ✓Shell callbacks registered successfully")

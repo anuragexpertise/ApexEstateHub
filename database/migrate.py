@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # database/migrate.py
 """
-Run dashestatehub.sql against Aiven PostgreSQL.
+Run estatehub.sql against Aiven PostgreSQL.
 
 Usage:
     python3 database/migrate.py            # normal run
@@ -203,7 +203,7 @@ def main():
     conn.close()
     
     print()
-    print(f"  ✓ {ok} statements executed successfully")
+    print(f"  ✓{ok} statements executed successfully")
     if err:
         print(f"  ⚠  {err} statements skipped (see above — usually safe)")
 

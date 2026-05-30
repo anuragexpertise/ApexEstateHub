@@ -147,7 +147,7 @@ def format_kpi_value(value, format_type: str) -> str:
             return str(value)
     
     except (TypeError, ValueError) as e:
-        print(f"⚠️  Format error: value='{value}', format='{format_type}', error={e}")
+        print(f"⚠️ Format error: value='{value}', format='{format_type}', error={e}")
         return "—"
 
 
@@ -178,7 +178,7 @@ def register_card_catalogue_callbacks(app):
     try:
         from app.dash_apps.pages.card_catalogue import KPI_CARDS
     except ImportError:
-        print("  ⚠️  Could not import KPI_CARDS")
+        print("  ⚠️ Could not import KPI_CARDS")
         KPI_CARDS = {}
 
     # ── 1. KPI REFRESH ────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ def register_card_catalogue_callbacks(app):
         
         
         if not auth_data or not auth_data.get("authenticated"):
-            print("  ⚠️  Not authenticated")
+            print("  ⚠️ Not authenticated")
             return ["—"] * len(kpi_ids) if kpi_ids else []
         
         sid = _sid(auth_data)
@@ -210,7 +210,7 @@ def register_card_catalogue_callbacks(app):
             cfg = KPI_CARDS.get(card_id)
             
             if not cfg:
-                print(f"  ⚠️  Unknown KPI: {card_id}")
+                print(f"  ⚠️ Unknown KPI: {card_id}")
                 results.append("—")
                 continue
             
@@ -224,7 +224,7 @@ def register_card_catalogue_callbacks(app):
                 params = {}
             else:
                 if not sid and n_params > 0:
-                    print(f"    ⚠️  No society ID for {card_id} (needs {n_params} params)")
+                    print(f"    ⚠️ No society ID for {card_id} (needs {n_params} params)")
                     results.append("—")
                     continue
                 
@@ -249,11 +249,11 @@ def register_card_catalogue_callbacks(app):
                     # ═══ Format value based on type ═══
                     formatted = format_kpi_value(raw_value, format_type)
                     
-                    print(f"    ✓ Raw: {raw_value} → Formatted: {formatted} (type: {format_type})")
+                    print(f"    ✓Raw: {raw_value} → Formatted: {formatted} (type: {format_type})")
                     results.append(formatted)
                     
                 else:
-                    print(f"    ⚠️  No data returned (empty result)")
+                    print(f"    ⚠️ No data returned (empty result)")
                     # Return appropriate zero value based on format
                     if format_type == "currency":
                         results.append("₹0")
@@ -270,7 +270,7 @@ def register_card_catalogue_callbacks(app):
                 traceback.print_exc()
                 results.append("—")
         
-        print(f"  ✓ Returning {len(results)} formatted results")
+        print(f"  ✓Returning {len(results)} formatted results")
         return results
 
     # ── 2. SOCIETIES LIST ─────────────────────────────────────────────────
@@ -345,7 +345,7 @@ def register_card_catalogue_callbacks(app):
         
         sid = _sid(auth_data)
         if not sid:
-            print("  ⚠️  No society ID")
+            print("  ⚠️ No society ID")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])]
         
@@ -885,7 +885,7 @@ def register_card_catalogue_callbacks(app):
             return [html.Tr([html.Td(f"Error: {str(e)[:100]}", colSpan=6, 
                                       className="text-danger")])]
 
-    print("  ✓ Card catalogue callbacks registered successfully")
+    print("  ✓Card catalogue callbacks registered successfully")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -909,7 +909,7 @@ def test_kpi_formatting():
     print("\n🧪 Testing KPI formatting...")
     for value, fmt, expected in test_cases:
         result = format_kpi_value(value, fmt)
-        status = "✓" if expected in result else "✗"
+        status = "✓ " if expected in result else "✗"
         print(f"  {status} format_kpi_value({value}, '{fmt}') = '{result}'")
 
 

@@ -559,7 +559,7 @@ def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict
     
     temp_dir = Path("app/assets/default") / entity
     if not temp_dir.exists():
-        print(f"⚠️  Temp directory does not exist: {temp_dir}")
+        print(f"⚠️ Temp directory does not exist: {temp_dir}")
         return
     
     # ═══════════════════════════════════════════════════════════════════
@@ -602,7 +602,7 @@ def _move_temp_images(entity: str, new_id: int, society_id: int, form_data: dict
                 moved_count += 1
                 print(f"✅ Moved: {filename} → {dst}")
             else:
-                print(f"⚠️  File not found in temp: {src}")
+                print(f"⚠️ File not found in temp: {src}")
     
     print(f"📦 Moved {moved_count} image(s) for {entity} #{new_id}")
 
@@ -1683,7 +1683,7 @@ def _save_society(db, d, sid, is_edit, pk):
                     temp_file.rename(final_file)
                     print(f"✅ Moved {field}: {filename} → {final_file}")
                 else:
-                    print(f"⚠️  Temp file not found: {temp_file}")
+                    print(f"⚠️ Temp file not found: {temp_file}")
                     
                     # Check if file already exists in production folder
                     final_file = society_dir / filename
@@ -1948,13 +1948,13 @@ def validate_transaction_account(db, acc_id: int, society_id: int, transaction_t
     Validation Logic:
     ─────────────────
     • RECEIPTS (money IN):
-      ✓ Income accounts (drcr_account = 'Cr')
-      ✓ Assets/Liabilities (drcr_account = NULL) - selling asset, receiving loan
+      ✓Income accounts (drcr_account = 'Cr')
+      ✓Assets/Liabilities (drcr_account = NULL) - selling asset, receiving loan
       ✗ Expense accounts (drcr_account = 'Dr')
     
     • EXPENSES (money OUT):
-      ✓ Expense accounts (drcr_account = 'Dr')
-      ✓ Assets/Liabilities (drcr_account = NULL) - buying asset, repaying loan
+      ✓Expense accounts (drcr_account = 'Dr')
+      ✓Assets/Liabilities (drcr_account = NULL) - buying asset, repaying loan
       ✗ Income accounts (drcr_account = 'Cr')
     """
     

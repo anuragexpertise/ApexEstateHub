@@ -9,7 +9,7 @@ HOST="estatehub-28042026-anurag-bdd9.a.aivencloud.com"
 PORT="21207"
 USER="avnadmin"
 DB="defaultdb"
-SQL_FILE="dashestatehub.sql"
+SQL_FILE="estatehub.sql"
 
 # Prompt for password securely
 read -s -p "Enter Aiven DB Password: " PGPASSWORD
@@ -79,7 +79,7 @@ EOF
     psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
     UPDATE myapp.users
     SET password_hash = '$HASH'
-    WHERE email = 'master@apexestatehub.com';
+    WHERE email = 'master@estatehub.com';
     "
 
     echo "✅ Master admin password updated"

@@ -113,7 +113,7 @@ def ensure_master_admin() -> bool:
         
         print()
         print("  ┌─────────────────────────────────────────────┐")
-        print("  │          Master Admin Created  ✓             │")
+        print("  │          Master Admin Created  ✓            │")
         print("  ├─────────────────────────────────────────────┤")
         print(f"  │  Email    : {MASTER_EMAIL:<33}│")
         print(f"  │  Password : {MASTER_PASSWORD:<33}│")
@@ -190,7 +190,7 @@ def _seed_dummy():
         
         if existing and existing.get('id'):
             society_id = existing['id']
-            print(f"  ✓ Society already exists (id={society_id}): {DUMMY_SOCIETY['name']}")
+            print(f"  ✓Society already exists (id={society_id}): {DUMMY_SOCIETY['name']}")
         else:
             # Create society
             result = db._execute(
@@ -218,7 +218,7 @@ def _seed_dummy():
             
             if result and result.get('id'):
                 society_id = result['id']
-                print(f"  ✓ Society created (id={society_id}): {DUMMY_SOCIETY['name']}")
+                print(f"  ✓Society created (id={society_id}): {DUMMY_SOCIETY['name']}")
             else:
                 print(f"  ❌  Failed to create society")
                 return
@@ -288,14 +288,14 @@ def _seed_dummy():
                         {'linked_id': apt['id'], 'user_id': user_id}
                     )
 
-            print(f"  ✓ {u['description']:<30} → {u['email']}  /  {u['password']}")
+            print(f"  ✓{u['description']:<30} → {u['email']}  /  {u['password']}")
 
         except Exception as e:
             print(f"  ❌  {u['description']} failed: {e}")
 
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
-    print("  │              Dummy Data Created  ✓                       │")
+    print("  │              Dummy Data Created  ✓                      │")
     print("  │  Login at http://127.0.0.1:8050                          │")
     print("  │  Master : master@estatehub.com     / Master@2024         │")
     print("  │  Admin  : admin@sunriseresidency.com / Admin@2024        │")
