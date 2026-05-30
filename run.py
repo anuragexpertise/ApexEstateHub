@@ -1,12 +1,39 @@
-# run.py — REPLACE ENTIRE FILE
+#!/usr/bin/env python3
+"""
+run.py — LOCAL DEVELOPMENT SERVER
+Uses: python3 run.py
+Features: Debug mode, auto-reload, detailed error pages
+"""
 import os
 from app import create_app, create_dash_app
 
-flask_app = create_app(os.getenv('FLASK_CONFIG', 'development'))
-dash_app  = create_dash_app(flask_app)
-server    = dash_app.server
+# Configuration
+FLASK_CONFIG = os.getenv('FLASK_CONFIG', 'development')
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
+PORT = int(os.getenv('PORT', 8050))
+HOST = os.getenv('HOST', '0.0.0.0')
+
+# Create Flask app
+flask_app = create_app(FLASK_CONFIG)
+
+# Create Dash app
+dash_app = create_dash_app(flask_app)
+server = dash_app.server
 
 if __name__ == '__main__':
-    port  = int(os.environ.get('PORT', 8050))
-    debug = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
-    server.run(host='0.0.0.0', port=port, debug=debug)
+    print(f"\n{'='*70}")
+    print(f"🚀 EstateHub - Development Server")
+    print(f"{'='*70}")
+    print(f"Config: {FLASK_CONFIG}")
+    print(f"Debug: {FLASK_DEBUG}")
+    print(f"URL: http://{HOST}:{PORT}")
+    print(f"{'='*70}\n")
+    
+    # Development server with auto-reload
+    server.run(
+        host=HOST,
+        port=PORT,
+        debug=FLASK_DEBUG,
+        use_reloader=True,      # ✅ Auto-reload on code changes
+        use_debugger=True,       # ✅ Debugger enabled
+    )
