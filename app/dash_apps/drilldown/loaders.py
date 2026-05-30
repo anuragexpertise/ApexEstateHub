@@ -105,6 +105,55 @@ def export_csv(entity: str, society_id: int) -> str:
     return export_list_as_csv(entity, society_id)
 
 # ════════════════════════════════════════════════════════════════════════════
+# SQL INTROSPECTION - For Customize Tab
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_function_sql(function_name: str) -> str:
+    """Get SQL definition of a PostgreSQL function"""
+    try:
+        row = db._execute(
+            "SELECT get_function_sql(%s) as sql",
+            (function_name,),
+            fetch_one=True
+        )
+        return row['sql'] if row else "Function not found"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+def get_kpi_functions() -> list[dict]:
+    """Get all KPI functions with their definitions"""
+    try:
+        rows = db._execute(
+            "SELECT * FROM get_kpi_functions()",
+            fetch_all=True
+        ) or []
+        return rows
+    except Exception as e:
+        print(f"❌ Error fetching KPI functions: {e}")
+        return []
+
+
+def get_portal_kpis(portal: str = None) -> list[dict]:
+    """Get all KPIs for a portal with their metadata"""
+    try:
+        if portal:
+            rows = db._execute(
+                "SELECT * FROM get_portal_kpis(%s)",
+                (portal,),
+                fetch_all=True
+            ) or []
+        else:
+            rows = db._execute(
+                "SELECT * FROM get_portal_kpis()",
+                fetch_all=True
+            ) or []
+        return rows
+    except Exception as e:
+        print(f"❌ Error fetching portal KPIs: {e}")
+        return []
+
+# ════════════════════════════════════════════════════════════════════════════
 # APARTMENTS
 # ════════════════════════════════════════════════════════════════════════════
 
