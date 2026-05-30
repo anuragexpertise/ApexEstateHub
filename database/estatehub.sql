@@ -404,18 +404,18 @@ BEGIN
         FROM apartment_base
     ),
     payments_summary AS (
-        SELECT id AS apartment_id,
+        SELECT entity_id AS apartment_id,
                SUM(CASE WHEN status='verified' THEN amount ELSE 0 END) AS paid_amount,
                SUM(CASE WHEN status IN ('pending','confirmed') THEN amount ELSE 0 END) AS pending_amount
         FROM payments WHERE society_id = p_society_id AND entity_type = 'apartment'
-        GROUP BY id
+        GROUP BY entity_id
     ),
     late_fee_calc AS (
-        SELECT id AS apartment_id,
+        SELECT entity_id AS apartment_id,
                SUM(CASE WHEN due_date < CURRENT_DATE THEN amount * 0.02 * GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)),0)/30 ELSE 0 END) AS late_fee
         FROM payments 
         WHERE society_id = p_society_id AND entity_type = 'apartment' AND status IN ('pending','confirmed')
-        GROUP BY id
+        GROUP BY entity_id
     )
     SELECT 
         mc.id, mc.flat_number, mc.owner_name, mc.mobile, mc.apartment_size, mc.active, mc.society_id,

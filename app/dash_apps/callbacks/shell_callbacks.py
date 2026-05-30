@@ -300,11 +300,14 @@ def register_shell_callbacks(app):
             )
             
             if not societies:
-                print("⚠️  DEBUG: No societies found - check:")
-                print(f"   1. Connection works: {db.test_connection()}")
-                print(f"   2. Table exists: {check_table_exists('societies')}")
-                print(f"   3. Row count: {get_society_count()}")
-                print(f"   4. Valid plans: {get_valid_plans()}")
+                print("\n⚠️  DEBUG: No societies found")
+                print(f"   Possible causes:")
+                print(f"   1. No societies in database")
+                print(f"   2. All societies have expired plans")
+                print(f"   3. Database connection issue")
+                print(f"\n   Fix steps:")
+                print(f"   • python3 db_query.py --test")
+                print(f"   • python3 db_query.py --command 'SELECT * FROM societies'")
                 return (
                     [],
                     False,
