@@ -1142,9 +1142,28 @@ def register_drilldown_callbacks(app):
         
         return dcc.send_bytes(output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx")
 
+        
+    @app.callback(
+        Output("drilldown-store", "data"),
+        Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
+        State("drilldown-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_new_button(n_clicks, store):
+        """Navigate to 'new' form when New button clicked."""
+        if not n_clicks:
+            return store
+        
+        entity = dash.ctx.triggered_id["entity"]
+        
+        # Navigate to form_<entity>_new card
+        return state.navigate_to(
+            store,
+            f"form_{entity}_new",
+            f"New {entity.rstrip('s').title()}",
+            prefill={}
+        )
     print("✓ Drilldown callbacks registered (ENHANCED)")
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # INTERNAL RENDER ENGINE
 # ═══════════════════════════════════════════════════════════════════════════

@@ -96,6 +96,16 @@ def register_all_callbacks(app):
     except Exception as e:
         print(f"⚠  customize_callbacks skipped: {e}")
 
+    try:
+        from .customize_kpi_callbacks import register_customize_kpi_callbacks
+        register_customize_kpi_callbacks(app)
+
+    except ImportError:
+        print("customize kpi callbacks not found - skipping")
+    except Exception as e:
+        print(f"customize kpi callbacks skipped: {e}")
+
+
     # ── Card catalogue (KPI refresh + all form/list CRUD) ─────────────────────
     try:
         from .card_catalogue_callbacks import register_card_catalogue_callbacks
