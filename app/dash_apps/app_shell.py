@@ -349,7 +349,10 @@ def shell_layout():
                       data={'collapsed': False}),
             dcc.Store(id='qr-entity-store',     storage_type='memory', data={}),
             dcc.Store(id='profile-action-trigger', storage_type='memory', data=None),
-
+            # ── Debug stores ───────────────────────────────────────────   
+            dcc.Store(id="debug-kpi-log", data={}),           # Track KPI values
+            dcc.Store(id="debug-list-log", data={}),          # Track list counts
+            dcc.Store(id="debug-sql-error", data={}),         # Track SQL errors     
             # ── Drilldown store — REQUIRED by shell_callbacks router ────────
             dcc.Store(id='drilldown-store',     storage_type='session',
                       data={
@@ -366,8 +369,6 @@ def shell_layout():
                       data={'active': [], 'available': []}),
             
             # ── Camera store (evaluate-pass page) ─────────────────────────
-            
-            
             
             dcc.Store(id='qr-camera-store', storage_type='memory',
                     data={'facing': 'environment', 'active': False, 'mode': None, 'torch': False}),

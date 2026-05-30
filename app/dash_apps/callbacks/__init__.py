@@ -99,7 +99,6 @@ def register_all_callbacks(app):
     try:
         from .customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
-
     except ImportError:
         print("customize kpi callbacks not found - skipping")
     except Exception as e:
@@ -118,6 +117,16 @@ def register_all_callbacks(app):
     print("\n" + "="*60)
     print("✅ ALL CALLBACKS REGISTERED SUCCESSFULLY")
     print("="*60 + "\n")
+
+    try:
+        from .debug_callbacks import register_debug_callbacks
+        register_debug_callbacks(app)
+    except ImportError:
+        print("⚠  debug_callbacks module not found - skipping")
+    except Exception as e:
+        print(f"⚠  debug_callbacks skipped: {e}")  
+
+
 
 
 # Keep the old alias so any code that imports register_callbacks still works
