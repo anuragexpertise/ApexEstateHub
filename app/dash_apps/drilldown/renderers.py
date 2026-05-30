@@ -241,6 +241,12 @@ def render_list_card(card_id: str, title: str, icon: str,
                     dbc.Badge(str(total_rows), color="primary", className="ms-2"),
                 ], style={"display": "flex", "alignItems": "center"}),
                 html.Div([
+                    dbc.Button(
+                        [html.I(className="fas fa-plus me-1"), "New"],
+                        id={"type": "btn-new", "entity": entity},
+                        size="sm", color="success", outline=True,
+                        style={"fontSize": "11px", "borderRadius": "8px"},
+                    ),
                     dbc.Input(
                         id={"type": "list-search", "entity": entity},
                         placeholder="Search…", size="sm", debounce=True,
@@ -566,3 +572,152 @@ def model_to_display(record: any) -> dict:
     if hasattr(record, 'to_dict'):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
+
+# ════════════════════════════════════════════════════════════════════════════
+# CUSTOMIZE TAB - KPI Configuration
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_customize_kpi_config() -> html.Div:
+    """Render KPI customization panel for Admin Portal."""
+    from app.dash_apps.drilldown import registry, loaders
+    
+    # Get available portals and KPIs
+    available_portals = ["admin", "apartment", "vendor", "security", "master"]
+    
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Div([
+                html.I(className="fas fa-cog me-2", style={"color": COLORS["primary"]}),
+                html.Strong("Customize KPI Layout"),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px", "background": f"linear-gradient(135deg,{COLORS['primary']}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            dbc.Row([
+                # ── Portal Selector ──
+                dbc.Col([
+                    dbc.Label("Select Portal", style={"fontSize": "12px", "fontWeight": "600"}),
+                    dcc.Dropdown(
+                        id="customize-portal-select",
+                        options=[{"label": p.title(), "value": p} for p in available_portals],
+                        value="admin",
+                        clearable=False,
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=4),
+                
+                # ── Tab Selector ──
+                dbc.Col([
+                    dbc.Label("Select Tab", style={"fontSize": "12px", "fontWeight": "600"}),
+                    dcc.Dropdown(
+                        id="customize-tab-select",
+                        options=[
+                            {"label": "Overview", "value": "overview"},
+                            {"label": "Accounts", "value": "accounts"},
+                            {"label": "Events", "value": "events"},
+                            {"label": "Concerns", "value": "concerns"},
+                            {"label": "Settings", "value": "settings"},
+                        ],
+                        value="overview",
+                        clearable=False,
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=4),
+                
+                # ── KPI Selector ──
+                dbc.Col([
+                    dbc.Label("Select KPI", style={"fontSize": "12px", "fontWeight": "600"}),
+                    dcc.Dropdown(
+                        id="customize-kpi-select",
+                        options=[
+                            {"label": "Apartments Total", "value": "kpi_apartments_total"},
+                            {"label": "Apartments with Dues", "value": "kpi_apartments_dues"},
+                            {"label": "Vendors Total", "value": "kpi_vendors_total"},
+                            {"label": "Security Staff", "value": "kpi_security_total"},
+                            {"label": "Open Concerns", "value": "kpi_concerns_open"},
+                            {"label": "Events", "value": "kpi_events_total"},
+                            {"label": "Cash in Hand", "value": "kpi_cash_in_hand"},
+                        ],
+                        value="kpi_apartments_total",
+                        clearable=False,
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=4),
+            ], className="mb-4"),
+            
+            # ── Selected KPI Details ──
+            html.Hr(style={"margin": "16px 0"}),
+            
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("KPI Function SQL", style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                    dcc.Loading(
+                        dbc.Textarea(
+                            id="customize-kpi-sql",
+                            placeholder="SQL definition will appear here...",
+                            rows=10,
+                            style={
+                                "fontSize": "11px",
+                                "fontFamily": "monospace",
+                                "backgroundColor": "#f5f7fa",
+                                "border": "1px solid #ddd",
+                                "borderRadius": "8px",
+                                "color": "#2c3e50",
+                            },
+                            readOnly=True,
+                        ),
+                        type="default",
+                    ),
+                ], width=6),
+                
+                dbc.Col([
+                    dbc.Label("Profile Card Actions", style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                    html.Div(
+                        id="customize-actions-display",
+                        style={
+                            "fontSize": "11px",
+                            "backgroundColor": "#f5f7fa",
+                            "border": "1px solid #ddd",
+                            "borderRadius": "8px",
+                            "padding": "12px",
+                            "maxHeight": "300px",
+                            "overflowY": "auto",
+                            "color": "#2c3e50",
+                        },
+                        children="Select a KPI to see its profile card actions",
+                    ),
+                ], width=6),
+            ]),
+            
+            html.Hr(style={"margin": "16px 0"}),
+            
+            # ── Action Buttons ──
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className="fas fa-save me-2"), "Save Configuration"],
+                        id="btn-save-kpi-config",
+                        color="success",
+                        className="w-100",
+                        style={"borderRadius": "8px", "fontWeight": "600"},
+                    ),
+                ], width=6),
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className="fas fa-undo me-2"), "Reset to Default"],
+                        id="btn-reset-kpi-config",
+                        color="warning",
+                        outline=True,
+                        className="w-100",
+                        style={"borderRadius": "8px", "fontWeight": "600"},
+                    ),
+                ], width=6),
+            ]),
+            
+        ], style={"padding": "16px"}),
+    ], style={
+        "borderRadius": "16px",
+        "border": f"1px solid {COLORS['primary']}22",
+        "boxShadow": f"0 10px 30px {COLORS['primary']}18",
+    })
+
