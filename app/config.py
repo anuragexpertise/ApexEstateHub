@@ -40,7 +40,7 @@ def get_database_url() -> str:
 
     if not all([host, name, user, password]):
         # Nothing configured — use SQLite for local dev
-        return 'sqlite:///apexestatehub.db'
+        return 'sqlite:///estatehub.db'
 
     # Validate port is a number (guards against stray quotes / whitespace)
     try:
@@ -124,7 +124,7 @@ class Config:
     SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
     SMTP_USER = os.getenv('SMTP_USER', '')
     SMTP_PASS = os.getenv('SMTP_PASS', '')
-    SMTP_FROM = os.getenv('SMTP_FROM', 'noreply@apexestatehub.com')
+    SMTP_FROM = os.getenv('SMTP_FROM', 'noreply@estatehub.com')
 
     # Frontend URL (for reset links, etc.)
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8050')
@@ -203,6 +203,6 @@ if __name__ == "__main__":
     print(f"VAPID Public Key: {'✅ Set' if Config.VAPID_PUBLIC_KEY else '❌ Missing'}")
     print(f"VAPID Private Key: {'✅ Set' if Config.VAPID_PRIVATE_KEY else '❌ Missing'}")
     print(f"VAPID Claim Email: {Config.VAPID_CLAIM_EMAIL}")
-    print(f"SMTP: {'✅ Configured' if Config.SMTP_HOST else '⚠️  Not set (fallback to print)'}")
+    print(f"SMTP: {'✅ Configured' if Config.SMTP_HOST else '⚠️ Not set (fallback to print)'}")
     print(f"Frontend URL: {Config.FRONTEND_URL}")
     print("=" * 60)

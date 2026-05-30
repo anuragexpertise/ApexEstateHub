@@ -295,13 +295,13 @@ def validate_transaction_account(db, acc_id: int, society_id: int, transaction_t
     Validation Logic:
     ─────────────────
     • RECEIPTS (money IN):
-      ✓ Income accounts (drcr_account = 'Cr')
-      ✓ Assets/Liabilities (drcr_account = NULL) - selling asset, receiving loan
+      ✓Income accounts (drcr_account = 'Cr')
+      ✓Assets/Liabilities (drcr_account = NULL) - selling asset, receiving loan
       ✗ Expense accounts (drcr_account = 'Dr')
     
     • EXPENSES (money OUT):
-      ✓ Expense accounts (drcr_account = 'Dr')
-      ✓ Assets/Liabilities (drcr_account = NULL) - buying asset, repaying loan
+      ✓Expense accounts (drcr_account = 'Dr')
+      ✓Assets/Liabilities (drcr_account = NULL) - buying asset, repaying loan
       ✗ Income accounts (drcr_account = 'Cr')
     """
     

@@ -218,7 +218,7 @@ def register_navigation_callbacks(app):
         current_stack = drilldown_data.get("stack", [])
         
         if not current_stack:
-            print("\n⚠️  Back button clicked but stack is empty")
+            print("\n⚠️ Back button clicked but stack is empty")
             raise PreventUpdate
         
         print(f"\n🔙 Back Button → POPPING nav_stack from {len(current_stack)} to {len(current_stack) - 1}")
@@ -343,7 +343,7 @@ def register_navigation_callbacks(app):
             "prefill": {},  # Clear prefill
         }
 
-    print("  ✓ Navigation state callbacks registered successfully")
+    print("  ✓Navigation state callbacks registered successfully")
 
 
 # ══════════════════════════════════════════════════════════════════════════

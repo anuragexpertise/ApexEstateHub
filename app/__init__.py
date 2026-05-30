@@ -80,7 +80,7 @@ def create_app(config_name=None):
         app.register_blueprint(push_bp)
         print("✓ Blueprints registered")
     except Exception as e:
-        print(f"⚠️  Blueprint error: {e}")
+        print(f"⚠️ Blueprint error: {e}")
 
     return app
 
@@ -137,7 +137,7 @@ def create_dash_app(flask_app):
         dash_app.layout = serve_layout()
         print("✓ Dash layout loaded")
     except ImportError as e:
-        print(f"⚠️  Layout import error: {e}")
+        print(f"⚠️ Layout import error: {e}")
         dash_app.layout = _fallback_layout(str(e))
 
     # ── Callbacks ─────────────────────────────────────────────────
@@ -146,7 +146,7 @@ def create_dash_app(flask_app):
         register_callbacks(dash_app)
         print("✓ Callbacks registered")
     except ImportError as e:
-        print(f"⚠️  Callback import error: {e}")
+        print(f"⚠️ Callback import error: {e}")
 
     return dash_app
 
@@ -158,7 +158,7 @@ def _fallback_layout(error_msg: str):
         [
             html.H1("EsateHub",
                     style={"textAlign": "center", "marginTop": "60px", "color": "#2c3e50"}),
-            html.P("⚠️  Could not load dashboard layout.",
+            html.P("⚠️ Could not load dashboard layout.",
                    style={"textAlign": "center", "color": "#e74c3c", "marginTop": "10px"}),
             html.Pre(error_msg,
                      style={"maxWidth": "700px", "margin": "20px auto",

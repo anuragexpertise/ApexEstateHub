@@ -508,7 +508,7 @@ def _send_reset_email(email, token):
     if domain:
         reset_url = f"https://{domain}/dashboard/?reset_token={token}"
     else:
-        reset_url = f"https://apexestatehub.com/dashboard/?reset_token={token}"
+        reset_url = f"https://estatehub.com/dashboard/?reset_token={token}"
 
     # Choose SMTP server based on sender domain
     sender_domain = smtp_user.split("@")[-1].lower() if "@" in smtp_user else ""

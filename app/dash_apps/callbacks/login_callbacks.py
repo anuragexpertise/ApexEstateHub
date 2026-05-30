@@ -295,7 +295,7 @@ def register_login_callbacks(app):
         print(f"✅ Master admin login successful for: {email}")
         return _build_login_response(user)
 
-    print("  ✓ Login callbacks registered successfully")
+    print("  ✓Login callbacks registered successfully")
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
