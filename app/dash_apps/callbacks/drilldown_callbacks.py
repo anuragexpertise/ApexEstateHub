@@ -1157,7 +1157,7 @@ def register_drilldown_callbacks(app):
         entity = dash.ctx.triggered_id["entity"]
         
         # Navigate to form_<entity>_new card
-        return state.navigate_to(
+        return nav_state.navigate_to(
             store,
             f"form_{entity}_new",
             f"New {entity.rstrip('s').title()}",

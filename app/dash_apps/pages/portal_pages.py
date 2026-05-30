@@ -27,7 +27,7 @@ HOW IT WORKS:
 from __future__ import annotations
 from dash import html, dcc
 import dash_bootstrap_components as dbc
-
+from app.dash_apps.drilldown import renderers
 
 # ── Role colour palette ───────────────────────────────────────────────────────
 _C = {
@@ -345,6 +345,31 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "evaluate_pass":
         return _evaluate_pass_page()
 
+    if active_tab == "customize":
+        return html.Div([
+            _page_title("fa-cog", c, "Customize Dashboard",
+                        "Reorder KPIs · View SQL · Manage Settings"),
+            
+            # Two-panel customize interface
+            dbc.Tabs(id="customize-sub-tabs", children=[
+                # TAB 1: Dashboard Layout Editor
+                dbc.Tab(label=[html.I(className="fas fa-th-large me-2"), "Layout Editor"],
+                        children=[
+                            html.Div(id="customize-layout-container",
+                                    style={"marginTop": "20px"}),
+                        ]),
+                
+                # TAB 2: KPI Configuration Inspector
+                dbc.Tab(label=[html.I(className="fas fa-database me-2"), "KPI Inspector"],
+                        children=[
+                            html.Div([
+                                renderers.render_customize_kpi_config(),
+                            ], style={"marginTop": "20px"}),
+                        ]),
+            ], style={"marginBottom": "20px"}),
+            
+        ], className="portal-page")
+    
     if active_tab == "settings":
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts & charge rates"),
