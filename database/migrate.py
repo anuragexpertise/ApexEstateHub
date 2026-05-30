@@ -167,11 +167,11 @@ def main():
     parser.add_argument('--force', action='store_true',
                         help='Re-run even if tables already exist')
     parser.add_argument('--sql', default=None,
-                        help='Path to SQL file (default: estatehub.sql)')
+                        help='Path to SQL file (default: database/estatehub.sql)')
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sql_path = args.sql or os.path.join(project_root, 'estatehub.sql')
+    sql_path = args.sql or os.path.join(project_root, 'database/estatehub.sql')
 
     if not os.path.isfile(sql_path):
         print(f"❌  SQL file not found: {sql_path}")
