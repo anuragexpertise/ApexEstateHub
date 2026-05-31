@@ -21,8 +21,15 @@ CREATE TABLE IF NOT EXISTS societies (
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
     secretary_sign VARCHAR(100),
-    plan VARCHAR(20) NOT NULL DEFAULT 'Free' 
-        CHECK (plan IN ('Free', '9Apts','99Apts','999Apts','unlimited')),
+    plan VARCHAR(20) NOT NULL DEFAULT 'Free' CHECK (
+        plan IN (
+            'Free',
+            '9Apts',
+            '99Apts',
+            '999Apts',
+            'unlimited'
+        )
+    ),
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     arrear_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
@@ -37,8 +44,14 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     pattern_hash TEXT,
     name VARCHAR(100),
-    role VARCHAR(20) NOT NULL 
-        CHECK (role IN ('admin','apartment','vendor','security')),
+    role VARCHAR(20) NOT NULL CHECK (
+        role IN (
+            'admin',
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
     linked_id INT,
     login_method VARCHAR(20) DEFAULT 'password',
     push_subscription TEXT,
@@ -101,14 +114,27 @@ CREATE TABLE IF NOT EXISTS payments (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    entity_type VARCHAR(20) 
-        CHECK (entity_type IN ('apartment', 'vendor', 'security', 'other')),
+    entity_type VARCHAR(20) CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security',
+            'other'
+        )
+    ),
     amount NUMERIC(10, 2) NOT NULL,
     payment_type VARCHAR(50),
     payment_method VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'confirmed', 'verified', 'failed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'verified',
+            'failed',
+            'cancelled'
+        )
+    ),
     due_date DATE,
     paid_at TIMESTAMP,
     source_table VARCHAR(50),
@@ -181,7 +207,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     tab_name VARCHAR(20),
     header VARCHAR(50),
     parent_account_id INT,
-    drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr', NULL)),
+    drcr_account VARCHAR(2) CHECK (
+        drcr_account IN ('Dr', 'Cr', NULL)
+    ),
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
     bf_amount NUMERIC(12, 2) DEFAULT 0.00,
@@ -189,8 +217,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     is_depreciable BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) 
-        REFERENCES accounts(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
+    CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -201,8 +228,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     entity_id INTEGER,
     acc_particulars VARCHAR(100),
     amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(6) DEFAULT 'cash' 
-        CHECK (mode IN ('cash','cheque','upi','card','bank','crypto')),
+    mode VARCHAR(6) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
     payment_gateway_ID VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'paid',
     created_by INTEGER REFERENCES users (id),
@@ -225,14 +260,24 @@ CREATE TABLE IF NOT EXISTS receivables (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT NOT NULL,
-    entity_type VARCHAR(20) NOT NULL 
-        CHECK (entity_type IN ('apartment', 'vendor', 'security')),
+    entity_type VARCHAR(20) NOT NULL CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
     charge_type VARCHAR(50) NOT NULL,
     description TEXT,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
     due_date DATE,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
     source_table VARCHAR(50),
     source_id INT,
     confirmed_by INT REFERENCES users (id),
@@ -245,18 +290,37 @@ CREATE TABLE IF NOT EXISTS receipts (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    entity_type VARCHAR(20) 
-        CHECK (entity_type IN ('apartment', 'vendor', 'security', 'other')),
+    entity_type VARCHAR(20) CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security',
+            'other'
+        )
+    ),
     receipt_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
     particulars TEXT NOT NULL,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(20) DEFAULT 'cash' 
-        CHECK (mode IN ('cash','cheque','upi','card','bank','crypto')),
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
     cheque_no VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -267,18 +331,32 @@ CREATE TABLE IF NOT EXISTS expenses (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    entity_type VARCHAR(20) 
-        CHECK (entity_type IN ('vendor', 'security', 'other')),
+    entity_type VARCHAR(20) CHECK (
+        entity_type IN ('vendor', 'security', 'other')
+    ),
     expense_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
     particulars TEXT NOT NULL,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(20) DEFAULT 'cash' 
-        CHECK (mode IN ('cash','cheque','upi','card','bank','crypto')),
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
     cheque_no VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -317,7 +395,11 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     valid_until DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (society_id, user_id, issued_date)
+    UNIQUE (
+        society_id,
+        user_id,
+        issued_date
+    )
 );
 
 CREATE TABLE IF NOT EXISTS security_roster (
@@ -325,10 +407,16 @@ CREATE TABLE IF NOT EXISTS security_roster (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     security_id INT NOT NULL REFERENCES security_staff (id) ON DELETE CASCADE,
     roster_date DATE NOT NULL,
-    shift_type VARCHAR(20) CHECK (shift_type IN ('morning', 'evening', 'night')),
+    shift_type VARCHAR(20) CHECK (
+        shift_type IN ('morning', 'evening', 'night')
+    ),
     assigned_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(society_id, security_id, roster_date)
+    UNIQUE (
+        society_id,
+        security_id,
+        roster_date
+    )
 );
 
 CREATE TABLE IF NOT EXISTS role_permissions (
@@ -336,9 +424,21 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL,
     card_id VARCHAR(100) NOT NULL,
-    permission VARCHAR(20) NOT NULL CHECK (permission IN ('view', 'create', 'edit', 'delete')),
+    permission VARCHAR(20) NOT NULL CHECK (
+        permission IN (
+            'view',
+            'create',
+            'edit',
+            'delete'
+        )
+    ),
     created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (COALESCE(society_id, 0), role, card_id, permission)
+    UNIQUE (
+        society_id,
+        role,
+        card_id,
+        permission
+    )
 );
 
 -- ════════════════════════════════════════════════════════════════
@@ -346,20 +446,35 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 -- ════════════════════════════════════════════════════════════════
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
 CREATE INDEX IF NOT EXISTS idx_users_society_role ON users (society_id, role);
+
 CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_apartments_active ON apartments (society_id, active);
+
 CREATE INDEX IF NOT EXISTS idx_vendors_society ON vendors (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_security_society ON security_staff (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);
+
 CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access (society_id, time_in);
+
 CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster (society_id, roster_date);
 
 -- ════════════════════════════════════════════════════════════════
@@ -369,7 +484,9 @@ CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster (society_
 -- ═══ APARTMENTS ═══
 
 DROP FUNCTION IF EXISTS fn_apartments_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_process_verified_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apartments_list(
@@ -404,18 +521,18 @@ BEGIN
         FROM apartment_base
     ),
     payments_summary AS (
-        SELECT payments.entity_id AS apartment_id,
+        SELECT p.entity_id AS apartment_id,
                SUM(CASE WHEN status='verified' THEN amount ELSE 0 END) AS paid_amount,
                SUM(CASE WHEN status IN ('pending','confirmed') THEN amount ELSE 0 END) AS pending_amount
-        FROM payments WHERE society_id = p_society_id AND entity_type = 'apartment'
-        GROUP BY payments.entity_id
+        FROM payments  p WHERE society_id = p_society_id AND entity_type = 'apartment'
+        GROUP BY p.entity_id
     ),
     late_fee_calc AS (
-        SELECT payments.entity_id AS apartment_id,
+        SELECT p.entity_id AS apartment_id,
                SUM(CASE WHEN due_date < CURRENT_DATE THEN amount * 0.02 * GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)),0)/30 ELSE 0 END) AS late_fee
-        FROM payments 
+        FROM payments  p
         WHERE society_id = p_society_id AND entity_type = 'apartment' AND status IN ('pending','confirmed')
-        GROUP BY payments.entity_id
+        GROUP BY p.entity_id
     )
     SELECT 
         mc.id, mc.flat_number, mc.owner_name, mc.mobile, mc.apartment_size, mc.active, mc.society_id,
@@ -504,7 +621,9 @@ $$;
 -- ═══ VENDORS ═══
 
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_generate_vendor_receivables CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_process_vendor_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendors_list(p_society_id INT, p_search TEXT DEFAULT NULL)
@@ -587,10 +706,15 @@ $$;
 -- ═══ SECURITY ═══
 
 DROP FUNCTION IF EXISTS fn_security_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_generate_security_receivables CASCADE;
+
 DROP FUNCTION IF EXISTS fn_auto_process_security_payments CASCADE;
+
 DROP FUNCTION IF EXISTS fn_security_roster_assign CASCADE;
+
 DROP FUNCTION IF EXISTS fn_security_roster_today CASCADE;
+
 DROP FUNCTION IF EXISTS fn_security_roster_report CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFAULT NULL)
@@ -726,7 +850,9 @@ $$;
 -- ═══ ASSETS ═══
 
 DROP FUNCTION IF EXISTS fn_asset_set_from_account CASCADE;
+
 DROP FUNCTION IF EXISTS fn_asset_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_calculate_asset_depreciation CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_set_from_account(p_asset_id INT, p_account_id INT)
@@ -785,15 +911,25 @@ $$;
 -- ═══ EVENTS, CONCERNS, ACCOUNTS, SOCIETIES, RECEIVABLES, CASHBOOK ═══
 
 DROP FUNCTION IF EXISTS fn_events_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_event_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_concerns_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_concern_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_accounts_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_account_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_societies_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_society_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_receivables_list CASCADE;
+
 DROP FUNCTION IF EXISTS fn_receivable_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_cashbook_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_events_list(p_society_id INT, p_search TEXT DEFAULT NULL, p_status VARCHAR DEFAULT NULL)
@@ -997,7 +1133,7 @@ BEGIN
     RETURN COALESCE(v_sql, 'Function not found: ' || p_function_name);
 END;
 $$ LANGUAGE plpgsql;
- 
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- List all KPI functions with metadata
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1022,7 +1158,7 @@ BEGIN
     ORDER BY p.proname;
 END;
 $$ LANGUAGE plpgsql;
- 
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Get KPIs by portal with their function mappings
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1068,7 +1204,7 @@ BEGIN
     ORDER BY portal, tab_name, kpi_label;
 END;
 $$ LANGUAGE plpgsql;
- 
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Helper: Get profile card actions for an entity
 -- ════════════════════════════════════════════════════════════════════════════
