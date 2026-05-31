@@ -35,5 +35,5 @@ if __name__ == '__main__':
         port=PORT,
         debug=FLASK_DEBUG,
         use_reloader=False,      # ✅ Auto-reload on code changes
-        use_debugger=False,       # ✅ Debugger enabled
+        use_debugger=True,       # ✅ Debugger enabled
     )
