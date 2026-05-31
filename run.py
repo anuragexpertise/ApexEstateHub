@@ -29,11 +29,11 @@ if __name__ == '__main__':
     print(f"URL: http://{HOST}:{PORT}")
     print(f"{'='*70}\n")
     
-    # Development server with auto-reload
+    # Development server with auto-reload disabled
     server.run(
         host=HOST,
         port=PORT,
         debug=FLASK_DEBUG,
-        use_reloader=True,      # ✅ Auto-reload on code changes
-        use_debugger=True,       # ✅ Debugger enabled
+        use_reloader=False,      # ✅ Auto-reload on code changes
+        use_debugger=False,       # ✅ Debugger enabled
     )
