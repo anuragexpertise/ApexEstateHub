@@ -13,16 +13,32 @@ def register_all_callbacks(app):
     print("="*60)
     
     # Shell first — owns auth-store, url, login-modal, router, toast, society dropdown
-    from .shell_callbacks import register_shell_callbacks
-    register_shell_callbacks(app)
+    try:
+        from .shell_callbacks import register_shell_callbacks
+        register_shell_callbacks(app)
+    except ImportError:
+        print("⚠  shell_callbacks module not found - skipping")
+    except Exception as e:
+        print(f"⚠  shell_callbacks skipped: {e}")        
+    
     
     # Navigation callbacks next 
-    from .navigation_callbacks import register_navigation_callbacks
-    register_navigation_callbacks(app)
-    
+    try:    
+        from .navigation_callbacks import register_navigation_callbacks
+        register_navigation_callbacks(app)
+    except ImportError:
+        print("⚠  navigation_callbacks module not found - skipping")
+    except Exception as e:
+        print(f"⚠  navigation_callbacks skipped: {e}")
+
     # Login callbacks second — depends on auth-store from shell
-    from .login_callbacks import register_login_callbacks
-    register_login_callbacks(app)
+    try:
+        from .login_callbacks import register_login_callbacks
+        register_login_callbacks(app)
+    except ImportError:
+        print("⚠  login_callbacks module not found - skipping")
+    except Exception as e:
+        print(f"⚠  login_callbacks skipped: {e}")
 
     # QR callbacks
     try:
