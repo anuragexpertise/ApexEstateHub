@@ -53,6 +53,6 @@ if __name__ == '__main__':
     server.run(
         host='0.0.0.0',
         port=port,
-        debug=False,           # ✅ No debug in production
+        debug=True,           # ✅ No debug in production
         use_reloader=False,    # ✅ No reload with gunicorn
     )

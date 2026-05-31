@@ -291,7 +291,7 @@ def register_shell_callbacks(app):
 
         print(f"\n✅ Injecting login form for society: {society_name}")
         
-        from app.dash_apps.pages.login_system import login_layout
+        from app.dash_apps.pages.login_systemOLD import login_layout
         return login_layout(society_name)
     
     @app.callback(

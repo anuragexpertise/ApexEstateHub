@@ -311,7 +311,7 @@ def check_html_structure():
     issues = []
     
     try:
-        from app.dash_apps.pages.login_system import society_select_layout
+        from app.dash_apps.pages.login_systemOLD import society_select_layout
         
         layout = society_select_layout()
         layout_str = str(layout)

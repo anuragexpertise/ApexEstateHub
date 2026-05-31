@@ -4,11 +4,11 @@ Callback registration hub — called by create_dash_app().
 
 Registration order matters:
   1. shell_callbacks   — owns auth-store, login-modal, society-dropdown
-  2. login_callbacks   — owns password/PIN/pattern login
+  2. login_callbacks   — owns password/PIN/pattern login (depends on shell being first)
   3. drilldown_callbacks
   4. card_catalogue_callbacks
   5. navigation_callbacks
-  6. debug_callbacks    — last
+  6. debug_callbacks    — last (depends on all stores existing)
 """
 
 
@@ -21,7 +21,7 @@ def register_all_callbacks(app):
 
     errors = []
 
-    # ── 1. Shell callbacks (MUST be first) ─────────────────────────────
+    # ── 1. Shell callbacks (MUST be first) ──────────────────────────────
     try:
         from app.dash_apps.callbacks.shell_callbacks import register_shell_callbacks
         register_shell_callbacks(app)
@@ -31,17 +31,17 @@ def register_all_callbacks(app):
         import traceback; traceback.print_exc()
         errors.append(f"shell_callbacks: {e}")
 
-    # ── 2. Login callbacks ──────────────────────────────────────────────
+    # ── 2. Login callbacks ───────────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.login_callbacks import register_login_callbacks
         register_login_callbacks(app)
-        print("  ✅ login_callbacks registered")
+        print("  ✅ login_callbacks registered (password/PIN/pattern/reset)")
     except Exception as e:
         print(f"  ❌ login_callbacks FAILED: {e}")
         import traceback; traceback.print_exc()
         errors.append(f"login_callbacks: {e}")
 
-    # ── 3. Drilldown callbacks ──────────────────────────────────────────
+    # ── 3. Drilldown callbacks ───────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.drilldown_callbacks import register_drilldown_callbacks
         register_drilldown_callbacks(app)
@@ -52,7 +52,7 @@ def register_all_callbacks(app):
         print(f"  ❌ drilldown_callbacks FAILED: {e}")
         errors.append(f"drilldown_callbacks: {e}")
 
-    # ── 4. Card catalogue callbacks ────────────────────────────────────
+    # ── 4. Card catalogue callbacks ─────────────────────────────────────
     try:
         from app.dash_apps.callbacks.card_catalogue_callbacks import register_card_catalogue_callbacks
         register_card_catalogue_callbacks(app)
@@ -63,7 +63,7 @@ def register_all_callbacks(app):
         print(f"  ❌ card_catalogue_callbacks FAILED: {e}")
         errors.append(f"card_catalogue_callbacks: {e}")
 
-    # ── 5. Navigation callbacks ─────────────────────────────────────────
+    # ── 5. Navigation callbacks ──────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.navigation_callbacks import register_navigation_callbacks
         register_navigation_callbacks(app)
@@ -74,7 +74,7 @@ def register_all_callbacks(app):
         print(f"  ❌ navigation_callbacks FAILED: {e}")
         errors.append(f"navigation_callbacks: {e}")
 
-    # ── 6. Customize callbacks ──────────────────────────────────────────
+    # ── 6. Customize callbacks ───────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_callbacks import register_customize_callbacks
         register_customize_callbacks(app)
@@ -85,7 +85,7 @@ def register_all_callbacks(app):
         print(f"  ❌ customize_callbacks FAILED: {e}")
         errors.append(f"customize_callbacks: {e}")
 
-    # ── 7. KPI customize callbacks ──────────────────────────────────────
+    # ── 7. KPI customize callbacks ───────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
@@ -96,7 +96,7 @@ def register_all_callbacks(app):
         print(f"  ❌ customize_kpi_callbacks FAILED: {e}")
         errors.append(f"customize_kpi_callbacks: {e}")
 
-    # ── 8. Camera / QR callbacks ────────────────────────────────────────
+    # ── 8. Camera / QR callbacks ─────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.camera_callbacks import register_camera_callbacks
         register_camera_callbacks(app)
@@ -107,7 +107,7 @@ def register_all_callbacks(app):
         print(f"  ❌ camera_callbacks FAILED: {e}")
         errors.append(f"camera_callbacks: {e}")
 
-    # ── 9. Debug callbacks (last) ───────────────────────────────────────
+    # ── 9. Debug callbacks (last) ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.debug_callbacks import register_debug_callbacks
         register_debug_callbacks(app)
@@ -118,7 +118,7 @@ def register_all_callbacks(app):
         print(f"  ❌ debug_callbacks FAILED: {e}")
         errors.append(f"debug_callbacks: {e}")
 
-    # ── Summary ─────────────────────────────────────────────────────────
+    # ── Summary ──────────────────────────────────────────────────────────
     print("="*60)
     if errors:
         print(f"  ⚠️  {len(errors)} callback module(s) failed:")
