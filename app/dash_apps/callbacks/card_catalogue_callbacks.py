@@ -494,7 +494,7 @@ def register_card_catalogue_callbacks(app):
                     p.payment_method, 
                     p.status 
                 FROM payments p 
-                LEFT JOIN apartments a ON p.apartment_id = a.id 
+                LEFT JOIN apartments a ON p.entity_id = a.id 
                 WHERE p.society_id = :sid 
                 ORDER BY p.paid_at DESC NULLS LAST 
                 LIMIT 50

@@ -524,14 +524,14 @@ BEGIN
         SELECT p.entity_id AS apartment_id,
                SUM(CASE WHEN status='verified' THEN amount ELSE 0 END) AS paid_amount,
                SUM(CASE WHEN status IN ('pending','confirmed') THEN amount ELSE 0 END) AS pending_amount
-        FROM payments  p WHERE society_id = p_society_id AND entity_type = 'apartment'
+        FROM payments  p WHERE p.society_id = p_society_id AND entity_type = 'apartment'
         GROUP BY p.entity_id
     ),
     late_fee_calc AS (
         SELECT p.entity_id AS apartment_id,
                SUM(CASE WHEN due_date < CURRENT_DATE THEN amount * 0.02 * GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, due_date)),0)/30 ELSE 0 END) AS late_fee
         FROM payments  p
-        WHERE society_id = p_society_id AND entity_type = 'apartment' AND status IN ('pending','confirmed')
+        WHERE p.society_id = p_society_id AND entity_type = 'apartment' AND status IN ('pending','confirmed')
         GROUP BY p.entity_id
     )
     SELECT 
@@ -632,11 +632,11 @@ RETURNS TABLE (id INT, email VARCHAR, society_id INT, business_name TEXT, servic
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
     PERFORM fn_auto_generate_vendor_receivables(p_society_id);
-    -- PERFORM fn_auto_process_vendor_payments(p_society_id);
+    PERFORM fn_auto_process_vendor_payments(p_society_id);
     RETURN QUERY
     WITH vendor_data AS (
-        SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) AS business_name,
-               COALESCE(v.service_type, '—') AS service_type, COALESCE(v.mobile, '—') AS mobile,
+        SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) :: TEXT AS business_name,
+               COALESCE(v.service_type, '—'):: TEXT AS service_type, COALESCE(v.mobile, '—'):: TEXT AS mobile,
                COALESCE(v.active, TRUE) AS active,
                (SELECT COUNT(*) FROM vendor_passes vp WHERE vp.society_id = u.society_id
                   AND vp.user_id = u.id AND vp.status = 'active' AND vp.valid_until >= CURRENT_DATE) AS active_passes
@@ -727,8 +727,8 @@ BEGIN
     PERFORM fn_auto_process_security_payments(p_society_id);
     RETURN QUERY
     WITH security_base AS (
-        SELECT u.id, u.email, u.society_id, COALESCE(s.name, u.email) AS name, COALESCE(s.shift, '—') AS shift,
-               COALESCE(s.mobile, '—') AS mobile, COALESCE(s.active, TRUE) AS active, s.salary_per_shift, s.joining_date,
+        SELECT u.id, u.email, u.society_id, COALESCE(s.name, u.email)::TEXT AS name, COALESCE(s.shift, '—') AS shift,
+               COALESCE(s.mobile, '—'):: TEXT AS mobile, COALESCE(s.active, TRUE) AS active, s.salary_per_shift, s.joining_date,
                EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE)))::BIGINT AS days_worked
         FROM users u LEFT JOIN security_staff s ON s.id = u.linked_id
         WHERE u.society_id = p_society_id AND u.role = 'security'
@@ -817,7 +817,7 @@ RETURNS TABLE (id INT, name TEXT, shift_type VARCHAR, mobile VARCHAR, status TEX
 LANGUAGE SQL STABLE AS $$
     SELECT s.id, s.name, r.shift_type, s.mobile,
            CASE WHEN g.time_out IS NULL AND g.time_in IS NOT NULL THEN 'ON DUTY'
-                WHEN g.time_in IS NOT NULL THEN 'COMPLETED' ELSE 'ABSENT' END AS status,
+                WHEN g.time_in IS NOT NULL THEN 'COMPLETED' ELSE 'ABSENT' END :: TEXT AS status,
            g.time_in, g.time_out
     FROM security_roster r JOIN security_staff s ON s.id = r.security_id
     LEFT JOIN gate_access g ON g.entity_id = (SELECT id FROM users WHERE linked_id = s.id AND role = 'security')
@@ -1067,7 +1067,7 @@ BEGIN
         SELECT r.id, CASE WHEN r.entity_type = 'apartment' THEN 'Flat ' || (SELECT flat_number FROM apartments WHERE id = r.entity_id)
                          WHEN r.entity_type = 'vendor' THEN (SELECT name FROM vendors WHERE id = r.entity_id)
                          WHEN r.entity_type = 'security' THEN (SELECT name FROM security_staff WHERE id = r.entity_id)
-                         ELSE 'Entity #' || r.entity_id END AS entity_name,
+                         ELSE 'Entity #' || r.entity_id END :: TEXT AS entity_name,
                r.entity_type, r.entity_id, r.charge_type, r.description, r.amount, r.due_date, r.status,
                EXTRACT(DAY FROM AGE(CURRENT_DATE, r.due_date))::INT AS days_overdue, r.created_at
         FROM receivables r WHERE r.society_id = p_society_id
