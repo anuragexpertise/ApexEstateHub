@@ -1,169 +1,77 @@
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager
-from flask_migrate import Migrate
-from flask_cors import CORS
-from dash import Dash, html
-import dash_bootstrap_components as dbc
+# app/__init__.py
+"""
+Flask + Dash application factory for EstateHub.
+"""
+
 import os
+import logging
+from pathlib import Path
 
-# ── Extensions (initialised without app, bound in create_app) ──────────────
-db           = SQLAlchemy()
+from flask import Flask
+from flask_login import LoginManager
+from flask_cors import CORS
+
+log = logging.getLogger(__name__)
+
 login_manager = LoginManager()
-migrate      = Migrate()
 
-def ensure_temp_folders():
-    """Create all necessary temp folders on startup."""
-    from pathlib import Path
-    
-    temp_folders = [
-        "app/assets/default/society",
-        "app/assets/default/apartment",
-        "app/assets/default/vendor",
-        "app/assets/default/security",
-        "app/assets/default/concern",
-        "app/assets/default/event",
-    ]
-    
-    for folder in temp_folders:
-        Path(folder).mkdir(parents=True, exist_ok=True)
-    
-    print("✅ Temp image folders created")
-# ══════════════════════════════════════════════════════════════════════════════
-# Flask application factory
-# ══════════════════════════════════════════════════════════════════════════════
-def create_app(config_name=None):
-    """Create and configure the Flask application."""
 
-    if config_name is None:
-        config_name = os.getenv('FLASK_CONFIG', 'development')
+def _ensure_asset_dirs(base: Path):
+    for sub in ("default/society", "default/apartment", "default/vendor",
+                "default/security", "default/concern", "default/event"):
+        (base / sub).mkdir(parents=True, exist_ok=True)
 
-    from app.config import config
+
+# ── Flask factory ─────────────────────────────────────────────────────────────
+
+def create_app(config_name: str | None = None) -> Flask:
+    config_name = config_name or os.getenv("FLASK_CONFIG", "development")
 
     app = Flask(
         __name__,
-        # Flask static files (login.html, sw.js, push.js, EH_logo.png …)
-        static_folder=os.path.join(os.path.dirname(__file__), 'static'),
-        static_url_path='/static',
+        static_folder=os.path.join(os.path.dirname(__file__), "static"),
+        static_url_path="/static",
     )
-    app.config.from_object(config[config_name])
 
-    # ── Bind extensions ────────────────────────────────────────────
-    db.init_app(app)
+    # Config
+    from app.config import config as config_map
+    app.config.from_object(config_map[config_name])
+
+    # Extensions
     login_manager.init_app(app)
-    migrate.init_app(app, db)
     CORS(app)
-    ensure_temp_folders()
+
+    # Asset dirs
+    assets_path = Path(__file__).parent / "assets"
+    _ensure_asset_dirs(assets_path)
+
+    # Flask-Login
+    login_manager.login_view = "auth.login"
 
     @login_manager.user_loader
     def load_user(user_id):
         from app.models.user import User
         return User.get(int(user_id))
-    
-    # ── Flask-Login config ─────────────────────────────────────────
-    login_manager.login_view       = 'auth.login'
-    login_manager.login_message    = 'Please log in to access this page.'
-    login_manager.session_protection = 'strong'
 
-    # ── Blueprints ─────────────────────────────────────────────────
+    # Blueprints
     try:
-        from app.routes.auth import auth_bp
-        from app.routes.api  import api_bp
-        from app.routes.web  import web_bp
-        from app.routes.scan import scan_bp
-        from app.routes.push_routes import push_bp
-
-        app.register_blueprint(auth_bp, url_prefix='/auth')
-        app.register_blueprint(api_bp,  url_prefix='/api')
+        from app.routes.auth  import auth_bp
+        from app.routes.api   import api_bp
+        from app.routes.web   import web_bp
+        from app.routes.scan  import scan_bp
+        app.register_blueprint(auth_bp, url_prefix="/auth")
+        app.register_blueprint(api_bp,  url_prefix="/api")
         app.register_blueprint(web_bp)
         app.register_blueprint(scan_bp)
-        app.register_blueprint(push_bp)
-        print("✓ Blueprints registered")
-    except Exception as e:
-        print(f"⚠️ Blueprint error: {e}")
+        log.info("Blueprints registered ✓")
+    except Exception as exc:
+        log.warning("Blueprint registration partial: %s", exc)
 
     return app
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Dash application factory
-# ══════════════════════════════════════════════════════════════════════════════
-def create_dash_app(flask_app):
-    """Mount the Dash SPA onto the Flask server.
+# ── Dash factory ──────────────────────────────────────────────────────────────
 
-    CSS / JS loading
-    ----------------
-    Dash automatically injects every file inside `assets_folder` into its
-    pages (no manual <link> or <script> tags required).
-
-    Correct folder  →  app/assets/          (resolved below via __file__)
-    Wrong folder    →  app/static/css/      (Flask serves it, Dash ignores it)
-
-    Keep app/static/ for Flask-only files:
-        • templates/login.html  (references /static/css/style.css)
-        • static/js/sw.js       (service-worker, registered at root scope)
-        • static/js/push.js
-        • static/assets/EH_logo.png
-    """
-
-    # Absolute path → app/assets/  (sibling of this __init__.py)
-    _here         = os.path.dirname(os.path.abspath(__file__))
-    assets_folder = os.path.join(_here, 'assets')
-    os.makedirs(assets_folder, exist_ok=True)   # create on first run
-
-    dash_app = Dash(
-        __name__,
-        server               = flask_app,
-        url_base_pathname    = '/dashboard/',
-        # ↓ KEY: Dash loads style.css (and any .js) from here automatically
-        assets_folder        = assets_folder,
-        assets_url_path      = '/dashboard/assets',
-        external_stylesheets = [
-            dbc.themes.BOOTSTRAP,
-            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
-        ],
-        suppress_callback_exceptions = True,
-        # Show a loading indicator while callbacks run
-        update_title         = 'Loading… | EsateHub',
-    )
-
-    # Expose the server for gunicorn / ApexWeave
-    # (entry point:  from app import create_dash_app; server = dash_app.server)
-    dash_app.title = 'EsateHub'
-
-    # ── Layout ────────────────────────────────────────────────────
-    try:
-        from app.dash_apps.layout import serve_layout
-        dash_app.layout = serve_layout()
-        print("✓ Dash layout loaded")
-    except ImportError as e:
-        print(f"⚠️ Layout import error: {e}")
-        dash_app.layout = _fallback_layout(str(e))
-
-    # ── Callbacks ─────────────────────────────────────────────────
-    try:
-        from app.dash_apps.callbacks import register_callbacks
-        register_callbacks(dash_app)
-        print("✓ Callbacks registered")
-    except ImportError as e:
-        print(f"⚠️ Callback import error: {e}")
-
-    return dash_app
-
-
-# ── Private helpers ────────────────────────────────────────────────────────
-def _fallback_layout(error_msg: str):
-    """Minimal layout shown when the real layout cannot be imported."""
-    return html.Div(
-        [
-            html.H1("EsateHub",
-                    style={"textAlign": "center", "marginTop": "60px", "color": "#2c3e50"}),
-            html.P("⚠️ Could not load dashboard layout.",
-                   style={"textAlign": "center", "color": "#e74c3c", "marginTop": "10px"}),
-            html.Pre(error_msg,
-                     style={"maxWidth": "700px", "margin": "20px auto",
-                            "background": "#f8f9fa", "padding": "15px",
-                            "borderRadius": "8px", "fontSize": "13px"}),
-        ],
-        style={"fontFamily": "sans-serif"}
-    )
+def create_dash_app(flask_app: Flask):
+    from app.dash_apps import create_dash_app as _make_dash
+    return _make_dash(flask_app)

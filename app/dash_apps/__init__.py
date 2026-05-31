@@ -1,74 +1,58 @@
 # app/dash_apps/__init__.py
-import sys
+"""
+Dash application factory.
+Called from app/__init__.py → create_dash_app(flask_app).
+"""
+
 import os
+import logging
 
 from dash import Dash, html
 import dash_bootstrap_components as dbc
 
-def create_dash_app(flask_app):
-    """Create and configure the Dash application"""
+log = logging.getLogger(__name__)
 
-    print("\n" + "="*60)
-    print("🔄 CREATING DASH APP - VERSION 2.0")
-    print("="*60)
+
+def create_dash_app(flask_app):
+    here         = os.path.dirname(os.path.abspath(__file__))
+    assets_folder = os.path.join(os.path.dirname(here), "assets")
+    os.makedirs(assets_folder, exist_ok=True)
 
     dash_app = Dash(
         __name__,
-        server=flask_app,
-        url_base_pathname='/dashboard/',
-        external_stylesheets=[
+        server               = flask_app,
+        url_base_pathname    = "/dashboard/",
+        assets_folder        = assets_folder,
+        assets_url_path      = "/dashboard/assets",
+        external_stylesheets = [
             dbc.themes.BOOTSTRAP,
-            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
+            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
         ],
-        suppress_callback_exceptions=True,
-        assets_folder='app/static/assets',
-        assets_url_path='/static'
+        suppress_callback_exceptions = True,
+        update_title         = "Loading… | EstateHub",
     )
+    dash_app.title = "EstateHub"
 
-    # CRITICAL: Explicitly load the layout
-    print("\n📦 Loading layout from app_shell.py...")
-
-    # Direct import with module reload
-    import importlib
-
-    # Force reload of app_shell module
-    if 'app.dash_apps.app_shell' in sys.modules:
-        del sys.modules['app.dash_apps.app_shell']
-        print("  → Removed cached app_shell module")
-
+    # Layout
     try:
-        from app.dash_apps import app_shell
-        importlib.reload(app_shell)
-        dash_app.layout = app_shell.shell_layout()
-        print("✅ SUCCESS: Full shell layout loaded!")
-        print(f"   Layout type: {type(dash_app.layout)}")
-        print(f"   Has children: {hasattr(dash_app.layout, 'children')}")
-    except Exception as e:
-        print(f"❌ ERROR loading layout: {e}")
-        import traceback
-        traceback.print_exc()
-        # Emergency fallback
-        dash_app.layout = html.Div(
-            [
-                html.H1("Layout Error", style={"color": "red", "textAlign": "center"}),
-                html.P(str(e)),
-                html.Pre(traceback.format_exc())
-            ]
-        )
+        from app.dash_apps.app_shell import shell_layout
+        dash_app.layout = shell_layout()
+        log.info("Dash layout loaded ✓")
+    except Exception as exc:
+        log.exception("Dash layout error")
+        dash_app.layout = html.Div([
+            html.H3("Layout Error", style={"color": "red", "textAlign": "center", "marginTop": "60px"}),
+            html.Pre(str(exc), style={"maxWidth": "700px", "margin": "20px auto",
+                                      "background": "#f8f9fa", "padding": "14px",
+                                      "borderRadius": "8px", "fontSize": "12px"}),
+        ])
 
-    # Register callbacks
-    print("\n📞 Registering callbacks...")
+    # Callbacks
     try:
-        from app.dash_apps.callbacks import register_all_callbacks
-        register_all_callbacks(dash_app)
-        print("✅ Callbacks registered")
-    except Exception as e:
-        print(f"❌ Error registering callbacks: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("\n" + "="*60)
-    print("✅ DASH APP CREATION COMPLETE")
-    print("="*60 + "\n")
+        from app.dash_apps.callbacks import register_callbacks
+        register_callbacks(dash_app)
+        log.info("Dash callbacks registered ✓")
+    except Exception as exc:
+        log.exception("Callback registration error")
 
     return dash_app
