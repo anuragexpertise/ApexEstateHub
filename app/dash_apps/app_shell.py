@@ -85,7 +85,7 @@ ROLE_CONFIG = {
 
 # ── Login Modal (NEW 2-STAGE SYSTEM) ──────────────────────────────────────
 def _login_modal():
-    from app.dash_apps.pages.login_system import society_select_layout
+    from app.dash_apps.pages.login_systemOLD import society_select_layout
 
     return dbc.Modal(
     [

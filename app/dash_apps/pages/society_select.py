@@ -6,7 +6,7 @@ Keep only for backwards compatibility, but it's not used.
 """
 
 from dash import html
-from app.dash_apps.pages.login_system import society_select_layout, LOGIN_STYLES
+from app.dash_apps.pages.login_systemOLD import society_select_layout, LOGIN_STYLES
 
 # This function is no longer called - login_system.py handles everything
 # Keeping it here only for reference or backwards compatibility
