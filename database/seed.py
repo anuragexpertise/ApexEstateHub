@@ -33,7 +33,7 @@ DUMMY_SOCIETY = {
     'secretary_name': 'Ramesh Kumar',
     'secretary_phone': '9876543211',
     'plan': 'Free',
-    'plan_validity': '2025-12-31',
+    'plan_validity': '2027-12-31',
     'arrear_start_date': '2024-04-01',
 }
 

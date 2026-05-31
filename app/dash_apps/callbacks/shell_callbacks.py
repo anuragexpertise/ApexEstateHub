@@ -21,219 +21,6 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.app_shell import ROLE_CONFIG
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _sid(auth):
-    """Extract society_id from auth data."""
-    return (auth or {}).get("society_id")
-
-
-def _redirect_for_role(role, society_id):
-    """Get default redirect path for a given role."""
-    if role == "admin" and society_id is None:
-        return "/dashboard/master"
-    if role == "admin":
-        return "/dashboard/admin-portal"
-    if role == "apartment":
-        return "/dashboard/owner-portal"
-    if role == "vendor":
-        return "/dashboard/vendor-portal"
-    if role == "security":
-        return "/dashboard/pass-evaluation"
-    return "/dashboard/"
-
-
-def _make_nav_items(role, society_id, pathname):
-    """Generate sidebar navigation items based on role."""
-    is_master = role == "admin" and society_id is None
-    key  = "master" if is_master else (role or "admin")
-    cfg  = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
-    color = cfg["color"]
-    items = []
-    for tab in cfg["tabs"]:
-        href      = tab["href"]
-        is_active = bool(pathname and href.rstrip("/") in pathname)
-        items.append(
-            html.Li(
-                dcc.Link(
-                    [
-                        html.I(
-                            className=f"fas {tab['icon']} me-2",
-                            style={
-                                "width": "18px",
-                                "color": color if is_active else "rgba(255,255,255,0.55)",
-                            },
-                        ),
-                        html.Span(tab["label"]),
-                    ],
-                    href=href,
-                    className="snav-link" + (" snav-link--active" if is_active else ""),
-                    refresh=False,
-                ),
-                className="snav-item",
-            )
-        )
-    return items
-
-
-def _breadcrumb(pathname):
-    """Generate breadcrumb navigation."""
-    path_map = {
-        "admin-portal":    "Dashboard",
-        "owner-portal":    "Dashboard",
-        "vendor-portal":   "Dashboard",
-        "master":          "Dashboard",
-        "pass-evaluation": "Pass Eval",
-        "cashbook":        "Cashbook",
-        "owner-cashbook":  "Cashbook",
-        "vendor-cashbook": "Cashbook",
-        "receipts":        "Receipts",
-        "expenses":        "Expenses",
-        "enroll":          "Enroll",
-        "users":           "Users",
-        "events":          "Events",
-        "owner-events":    "Events",
-        "vendor-events":   "Events",
-        "security-events": "Events",
-        "evaluate-pass":   "Evaluate Pass",
-        "customize":       "Customize",
-        "settings":        "Settings",
-        "owner-settings":  "Settings",
-        "vendor-settings": "Settings",
-        "security-settings": "Settings",
-        "payments":        "Payments",
-        "vendor-payments": "Payments",
-        "charges":         "Charges",
-        "vendor-charges":  "Charges",
-        "attendance":      "Attendance",
-        "security-receipt":"New Receipt",
-        "security-users":  "Users",
-    }
-
-    parts = [p for p in (pathname or "").strip("/").split("/") if p and p != "dashboard"]
-    items = [
-        html.Li(
-            html.Button(
-                [html.I(className="fas fa-home me-1"), "Home"],
-                id={"type": "breadcrumb-link", "level": -1},
-                n_clicks=0,
-                className="breadcrumb-btn",
-                style={
-                    "background": "none", "border": "none", "color": "#667eea",
-                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
-                }
-            ),
-            className="bc-item",
-        )
-    ]
-    for i, part in enumerate(parts):
-        name   = path_map.get(part, part.replace("-", " ").title())
-        active = i == len(parts) - 1
-        
-        if active:
-            elem = name
-        else:
-            elem = html.Button(
-                name,
-                id={"type": "breadcrumb-link", "level": i},
-                n_clicks=0,
-                className="breadcrumb-btn",
-                style={
-                    "background": "none", "border": "none", "color": "#667eea",
-                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
-                    "textDecoration": "underline",
-                }
-            )
-        
-        items.append(
-            html.Li(elem, className="bc-item" + (" bc-item--active" if active else ""))
-        )
-    return items
-
-
-def _portal_content(role, society_id, pathname):
-    """
-    Route pathname → portal page content.
-    Uses portal_pages.py — the single source for all portal layouts.
-    """
-    from app.dash_apps.pages.portal_pages import (
-        master_portal_page,
-        admin_portal_page,
-        owner_portal_page,
-        vendor_portal_page,
-        security_portal_page,
-    )
-
-    is_master = role == "admin" and society_id is None
-    p = pathname or ""
-
-    # ── Master admin ──────────────────────────────────────────────────────
-    if is_master:
-        return master_portal_page()
-
-    # ── Admin portal ──────────────────────────────────────────────────────
-    if role == "admin":
-        tab = (
-            "cashbook"      if "/cashbook"       in p else
-            "receipts"      if "/receipts"       in p else
-            "expenses"      if "/expenses"       in p else
-            "enroll"        if "/enroll"         in p else
-            "events"        if "/events"         in p else
-            "concerns"      if "/concerns"       in p else
-            "evaluate_pass" if "/evaluate-pass"  in p else
-            "customize"     if "/customize"      in p else
-            "settings"      if "/settings"       in p else
-            "dashboard"
-        )
-        if tab == "customize":
-            try:
-                from app.dash_apps.pages.customize_layout import customize_layout
-                return customize_layout()
-            except Exception as e:
-                print(f"Customize error: {e}")
-        return admin_portal_page(tab)
-
-    # ── Apartment owner ───────────────────────────────────────────────────
-    if role == "apartment":
-        tab = (
-            "cashbook"      if "/owner-cashbook" in p or ("/cashbook" in p) else
-            "payments"      if "/payments"       in p else
-            "charges"       if "/charges"        in p else
-            "events"        if "/owner-events"   in p or ("/events" in p) else
-            "concerns"      if "/concerns"       in p else
-            "settings"      if "/owner-settings" in p or ("/settings" in p) else
-            "dashboard"
-        )
-        return owner_portal_page(tab)
-
-    # ── Vendor ────────────────────────────────────────────────────────────
-    if role == "vendor":
-        tab = (
-            "cashbook"      if "/vendor-cashbook" in p or ("/cashbook" in p) else
-            "payments"      if "/vendor-payments" in p or ("/payments" in p) else
-            "charges"       if "/vendor-charges"  in p or ("/charges"  in p) else
-            "events"        if "/vendor-events"   in p or ("/events"   in p) else
-            "settings"      if "/vendor-settings" in p or ("/settings" in p) else
-            "dashboard"
-        )
-        return vendor_portal_page(tab)
-
-    # ── Security ──────────────────────────────────────────────────────────
-    if role == "security":
-        tab = (
-            "attendance"       if "/attendance"        in p else
-            "security_events"  if "/security-events"   in p else
-            "security_receipt" if "/security-receipt"  in p else
-            "security_users"   if "/security-users"    in p else
-            "settings"         if "/security-settings" in p or ("/settings" in p) else
-            "pass_evaluation"
-        )
-        return security_portal_page(tab)
-
-    return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
-
-
 # ── Register ──────────────────────────────────────────────────────────────────
 
 def register_shell_callbacks(app):
@@ -830,3 +617,217 @@ def register_shell_callbacks(app):
         )
 
     print("  ✓Shell callbacks registered successfully")
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _sid(auth):
+    """Extract society_id from auth data."""
+    return (auth or {}).get("society_id")
+
+
+def _redirect_for_role(role, society_id):
+    """Get default redirect path for a given role."""
+    if role == "admin" and society_id is None:
+        return "/dashboard/master"
+    if role == "admin":
+        return "/dashboard/admin-portal"
+    if role == "apartment":
+        return "/dashboard/owner-portal"
+    if role == "vendor":
+        return "/dashboard/vendor-portal"
+    if role == "security":
+        return "/dashboard/pass-evaluation"
+    return "/dashboard/"
+
+
+def _make_nav_items(role, society_id, pathname):
+    """Generate sidebar navigation items based on role."""
+    is_master = role == "admin" and society_id is None
+    key  = "master" if is_master else (role or "admin")
+    cfg  = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
+    color = cfg["color"]
+    items = []
+    for tab in cfg["tabs"]:
+        href      = tab["href"]
+        is_active = bool(pathname and href.rstrip("/") in pathname)
+        items.append(
+            html.Li(
+                dcc.Link(
+                    [
+                        html.I(
+                            className=f"fas {tab['icon']} me-2",
+                            style={
+                                "width": "18px",
+                                "color": color if is_active else "rgba(255,255,255,0.55)",
+                            },
+                        ),
+                        html.Span(tab["label"]),
+                    ],
+                    href=href,
+                    className="snav-link" + (" snav-link--active" if is_active else ""),
+                    refresh=False,
+                ),
+                className="snav-item",
+            )
+        )
+    return items
+
+
+def _breadcrumb(pathname):
+    """Generate breadcrumb navigation."""
+    path_map = {
+        "admin-portal":    "Dashboard",
+        "owner-portal":    "Dashboard",
+        "vendor-portal":   "Dashboard",
+        "master":          "Dashboard",
+        "pass-evaluation": "Pass Eval",
+        "cashbook":        "Cashbook",
+        "owner-cashbook":  "Cashbook",
+        "vendor-cashbook": "Cashbook",
+        "receipts":        "Receipts",
+        "expenses":        "Expenses",
+        "enroll":          "Enroll",
+        "users":           "Users",
+        "events":          "Events",
+        "owner-events":    "Events",
+        "vendor-events":   "Events",
+        "security-events": "Events",
+        "evaluate-pass":   "Evaluate Pass",
+        "customize":       "Customize",
+        "settings":        "Settings",
+        "owner-settings":  "Settings",
+        "vendor-settings": "Settings",
+        "security-settings": "Settings",
+        "payments":        "Payments",
+        "vendor-payments": "Payments",
+        "charges":         "Charges",
+        "vendor-charges":  "Charges",
+        "attendance":      "Attendance",
+        "security-receipt":"New Receipt",
+        "security-users":  "Users",
+    }
+
+    parts = [p for p in (pathname or "").strip("/").split("/") if p and p != "dashboard"]
+    items = [
+        html.Li(
+            html.Button(
+                [html.I(className="fas fa-home me-1"), "Home"],
+                id={"type": "breadcrumb-link", "level": -1},
+                n_clicks=0,
+                className="breadcrumb-btn",
+                style={
+                    "background": "none", "border": "none", "color": "#667eea",
+                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
+                }
+            ),
+            className="bc-item",
+        )
+    ]
+    for i, part in enumerate(parts):
+        name   = path_map.get(part, part.replace("-", " ").title())
+        active = i == len(parts) - 1
+        
+        if active:
+            elem = name
+        else:
+            elem = html.Button(
+                name,
+                id={"type": "breadcrumb-link", "level": i},
+                n_clicks=0,
+                className="breadcrumb-btn",
+                style={
+                    "background": "none", "border": "none", "color": "#667eea",
+                    "cursor": "pointer", "padding": "0", "fontSize": "12px",
+                    "textDecoration": "underline",
+                }
+            )
+        
+        items.append(
+            html.Li(elem, className="bc-item" + (" bc-item--active" if active else ""))
+        )
+    return items
+
+
+def _portal_content(role, society_id, pathname):
+    """
+    Route pathname → portal page content.
+    Uses portal_pages.py — the single source for all portal layouts.
+    """
+    from app.dash_apps.pages.portal_pages import (
+        master_portal_page,
+        admin_portal_page,
+        owner_portal_page,
+        vendor_portal_page,
+        security_portal_page,
+    )
+
+    is_master = role == "admin" and society_id is None
+    p = pathname or ""
+
+    # ── Master admin ──────────────────────────────────────────────────────
+    if is_master:
+        return master_portal_page()
+
+    # ── Admin portal ──────────────────────────────────────────────────────
+    if role == "admin":
+        tab = (
+            "cashbook"      if "/cashbook"       in p else
+            "receipts"      if "/receipts"       in p else
+            "expenses"      if "/expenses"       in p else
+            "enroll"        if "/enroll"         in p else
+            "events"        if "/events"         in p else
+            "concerns"      if "/concerns"       in p else
+            "evaluate_pass" if "/evaluate-pass"  in p else
+            "customize"     if "/customize"      in p else
+            "settings"      if "/settings"       in p else
+            "dashboard"
+        )
+        if tab == "customize":
+            try:
+                from app.dash_apps.pages.customize_layout import customize_layout
+                return customize_layout()
+            except Exception as e:
+                print(f"Customize error: {e}")
+        return admin_portal_page(tab)
+
+    # ── Apartment owner ───────────────────────────────────────────────────
+    if role == "apartment":
+        tab = (
+            "cashbook"      if "/owner-cashbook" in p or ("/cashbook" in p) else
+            "payments"      if "/payments"       in p else
+            "charges"       if "/charges"        in p else
+            "events"        if "/owner-events"   in p or ("/events" in p) else
+            "concerns"      if "/concerns"       in p else
+            "settings"      if "/owner-settings" in p or ("/settings" in p) else
+            "dashboard"
+        )
+        return owner_portal_page(tab)
+
+    # ── Vendor ────────────────────────────────────────────────────────────
+    if role == "vendor":
+        tab = (
+            "cashbook"      if "/vendor-cashbook" in p or ("/cashbook" in p) else
+            "payments"      if "/vendor-payments" in p or ("/payments" in p) else
+            "charges"       if "/vendor-charges"  in p or ("/charges"  in p) else
+            "events"        if "/vendor-events"   in p or ("/events"   in p) else
+            "settings"      if "/vendor-settings" in p or ("/settings" in p) else
+            "dashboard"
+        )
+        return vendor_portal_page(tab)
+
+    # ── Security ──────────────────────────────────────────────────────────
+    if role == "security":
+        tab = (
+            "attendance"       if "/attendance"        in p else
+            "security_events"  if "/security-events"   in p else
+            "security_receipt" if "/security-receipt"  in p else
+            "security_users"   if "/security-users"    in p else
+            "settings"         if "/security-settings" in p or ("/settings" in p) else
+            "pass_evaluation"
+        )
+        return security_portal_page(tab)
+
+    return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
+
+
