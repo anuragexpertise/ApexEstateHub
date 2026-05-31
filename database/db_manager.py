@@ -1,196 +1,191 @@
 # database/db_manager.py
 """
-Database Manager - Integrated with app/config.py
-Uses SQLAlchemy for connection pooling (Aiven-compatible)
+Database manager for Aiven PostgreSQL.
+
+Uses psycopg2 under the hood but accepts SQLAlchemy-style named
+parameters (:name) in all queries — they are converted to %(name)s
+before execution so every caller can use the same syntax.
+
+Usage:
+    from database.db_manager import db
+
+    row  = db.execute("SELECT * FROM societies WHERE id = :id",
+                       {"id": 1}, fetch_one=True)
+    rows = db.execute("SELECT * FROM societies", fetch_all=True)
+    db.execute("INSERT INTO societies (name) VALUES (:name)",
+               {"name": "Test"})
 """
 
 import os
+import re
+import time
 import logging
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 from contextlib import contextmanager
-from dotenv import load_dotenv
 
-# Load config AFTER dotenv loads
-from app.config import get_database_url, get_engine_options
+import psycopg2
+import psycopg2.extras
+from psycopg2 import pool
 
-load_dotenv()
+log = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
+
+# ── Named-param conversion ────────────────────────────────────────────────────
+
+_NAMED_RE = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
+
+
+def _to_pyformat(sql: str, params: dict | None) -> tuple[str, tuple | None]:
+    """
+    Convert :name → %(name)s so psycopg2 can handle SQLAlchemy-style params.
+    Positional %s queries with a tuple/list pass through unchanged.
+    """
+    if params is None:
+        return sql, None
+
+    if isinstance(params, dict):
+        converted = _NAMED_RE.sub(r"%(\1)s", sql)
+        return converted, params          # psycopg2 accepts dict with %(name)s
+
+    # Already a tuple/list — positional style, leave as-is
+    return sql, params
+
+
+# ── Connection pool wrapper ───────────────────────────────────────────────────
 
 class DatabaseManager:
-    """Aiven-compatible database manager using SQLAlchemy connection pooling."""
-    
+    """Thread-safe Aiven PostgreSQL connection pool."""
+
     def __init__(self):
-        self.engine = None
-        self.SessionLocal = None
-        self._connect()
-    
-    def _connect(self):
-        """Create engine with Aiven-optimized settings."""
+        self._pool: pool.ThreadedConnectionPool | None = None
+        self._init_pool()
+
+    # ── Pool init ─────────────────────────────────────────────────────────────
+
+    def _dsn(self) -> str:
+        raw = os.getenv("DATABASE_URL", "").strip()
+        if raw:
+            return raw.replace("postgres://", "postgresql://", 1)
+
+        host   = os.getenv("PGHOST",     "").strip()
+        port   = os.getenv("PGPORT",     "5432").strip() or "5432"
+        dbname = os.getenv("PGDATABASE", "").strip()
+        user   = os.getenv("PGUSER",     "").strip()
+        pw     = os.getenv("PGPASSWORD", "").strip()
+        ssl    = os.getenv("PGSSLMODE",  "require").strip()
+
+        if not all([host, dbname, user, pw]):
+            raise RuntimeError(
+                "Database env vars missing: PGHOST / PGDATABASE / PGUSER / PGPASSWORD"
+            )
+        return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}?sslmode={ssl}"
+
+    def _init_pool(self):
         try:
-            db_url = get_database_url()
-            opts = get_engine_options()
-            
-            logger.info(f"Connecting to database: {db_url[:50]}...")
-            
-            # Create engine
-            self.engine = create_engine(db_url, **opts)
-            self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-            
-            # Test connection
-            with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            
-            logger.info("✅ Database connection established")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
-            return False
-    
-    def test_connection(self):
-        """Test if database is reachable."""
-        try:
-            with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            return True
-        except Exception as e:
-            logger.error(f"Connection test failed: {e}")
-            return self._connect()  # Try reconnect
-    
+            dsn = self._dsn()
+            self._pool = pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=dsn,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=15,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+            )
+            log.info("✅ DB pool initialised (Aiven PostgreSQL)")
+        except Exception as exc:
+            log.error("❌ DB pool init failed: %s", exc)
+            self._pool = None
+
+    # ── Connection context manager ────────────────────────────────────────────
+
     @contextmanager
-    def get_session(self):
-        """Context manager for database sessions."""
-        session = self.SessionLocal()
+    def _conn(self):
+        if self._pool is None:
+            self._init_pool()
+        if self._pool is None:
+            raise RuntimeError("Database connection pool unavailable")
+
+        conn = self._pool.getconn()
         try:
-            yield session
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Session error: {e}")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
             raise
         finally:
-            session.close()
-    
-    def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
-        """
-        Execute raw SQL query.
-        Compatible with existing code using psycopg2-style interface.
-        """
-        try:
-            with self.engine.connect() as conn:
-                result = conn.execute(text(query), params or {})
+            self._pool.putconn(conn)
 
-                if fetch_one:
-                    row = result.fetchone()
-                    return dict(row._mapping) if row else None
+    # ── Public execute ────────────────────────────────────────────────────────
 
-                elif fetch_all:
-                    rows = result.fetchall()
-                    return [dict(row._mapping) for row in rows]
-
-                return None
-
-        except Exception as e:
-            logger.error(f"Query error: {str(e)[:200]}")
-            logger.error(f"Query: {query[:300]}")
-            logger.error(f"Params: {params}")
-            return None
-    
-    def execute_transaction(self, queries):
+    def execute(
+        self,
+        sql: str,
+        params=None,
+        fetch_one: bool = False,
+        fetch_all: bool = False,
+    ):
         """
-        Execute multiple queries in a transaction.
-        queries = [(sql, params), ...]
+        Execute a query and optionally return rows.
+
+        Args:
+            sql:       Query string with :name placeholders (or bare %s).
+            params:    dict for named params, tuple/list for positional, None for no params.
+            fetch_one: Return the first row as a dict (or None).
+            fetch_all: Return all rows as a list of dicts.
+
+        Returns:
+            dict | list[dict] | None depending on fetch_* flags.
         """
-        with self.get_session() as session:
+        converted_sql, converted_params = _to_pyformat(sql, params)
+
+        retries = 2
+        for attempt in range(retries + 1):
             try:
-                for query, params in queries:
-                    session.execute(text(query), params or {})
-                return True
-            except Exception as e:
-                logger.error(f"Transaction error: {e}")
-                raise
-    
-    def close(self):
-        """Dispose engine."""
-        if self.engine:
-            self.engine.dispose()
+                with self._conn() as conn:
+                    cur = conn.cursor()
+                    cur.execute(converted_sql, converted_params)
 
-    def _execute(self, query, params=None, fetch_one=False, fetch_all=False):
-        """
-        Execute query with automatic psycopg2 (%s) -> SQLAlchemy (:param_n)
-        parameter conversion.
-        """
+                    if fetch_one:
+                        row = cur.fetchone()
+                        return dict(row) if row else None
 
+                    if fetch_all:
+                        rows = cur.fetchall()
+                        return [dict(r) for r in rows] if rows else []
+
+                    return None          # DML with no fetch
+
+            except psycopg2.OperationalError as exc:
+                # Stale pooled connection — rebuild pool once
+                if attempt < retries:
+                    log.warning("DB operational error (attempt %d): %s", attempt + 1, exc)
+                    self._pool = None
+                    self._init_pool()
+                    time.sleep(0.5)
+                else:
+                    log.error("DB query failed after %d retries: %s", retries, exc)
+                    raise
+
+    # Alias so existing code that calls db._execute() still works
+    def _execute(self, sql, params=None, fetch_one=False, fetch_all=False):
+        return self.execute(sql, params, fetch_one=fetch_one, fetch_all=fetch_all)
+
+    # ── Health check ──────────────────────────────────────────────────────────
+
+    def is_healthy(self) -> bool:
         try:
-            # -----------------------------
-            # Normalize parameters
-            # -----------------------------
-            param_dict = {}
+            self.execute("SELECT 1", fetch_one=True)
+            return True
+        except Exception:
+            return False
 
-            if params is None:
-                param_dict = {}
-
-            elif isinstance(params, dict):
-                # Already SQLAlchemy-compatible
-                param_dict = params
-
-            elif isinstance(params, (tuple, list)):
-                # Convert positional params
-                param_dict = {
-                    f"param_{i}": value
-                    for i, value in enumerate(params)
-                }
-
-                # Replace %s placeholders one-by-one
-                for i in range(len(params)):
-                    query = query.replace("%s", f":param_{i}", 1)
-
-            else:
-                # Single scalar value
-                param_dict = {"param_0": params}
-                query = query.replace("%s", ":param_0", 1)
-
-            logger.debug(f"SQL Query: {query}")
-            logger.debug(f"SQL Params: {param_dict}")
-
-            # -----------------------------
-            # Execute query
-            # -----------------------------
-            with self.engine.connect() as conn:
-
-                result = conn.execute(text(query), param_dict)
-
-                # Auto-commit for INSERT/UPDATE/DELETE
-                if query.strip().lower().startswith(
-                    ("insert", "update", "delete", "create", "drop", "alter")
-                ):
-                    conn.commit()
-
-                if fetch_one:
-                    row = result.fetchone()
-                    return dict(row._mapping) if row else None
-
-                if fetch_all:
-                    rows = result.fetchall()
-                    return [dict(row._mapping) for row in rows]
-
-                return result
-
-        except Exception as e:
-            logger.error(f"❌ Query execution error: {e}")
-
-            if isinstance(query, str):
-                logger.error(f"Query: {query[:300]}")
-
-            logger.error(f"Params: {params}")
-
-            import traceback
-            traceback.print_exc()
-
-            return None
+    def close(self):
+        if self._pool:
+            self._pool.closeall()
+            self._pool = None
 
 
-# Global instance
+# ── Singleton ─────────────────────────────────────────────────────────────────
 db = DatabaseManager()
