@@ -114,7 +114,7 @@ def register_all_callbacks(app):
 
     try:
         from .customize_kpi_callbacks import register_customize_kpi_callbacks
-        register_customize_kpi_callbacks(app)
+        register_customize_kpi_callbacks(app)  
     except ImportError:
         print("customize kpi callbacks not found - skipping")
     except Exception as e:
