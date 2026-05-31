@@ -92,7 +92,7 @@ def _login_modal():
         dbc.ModalHeader(
             html.Div([
                 html.Img(
-                    id="login-society-logo",
+                    # id="login-society-logo",  # Dynamic logo
                     src='/static/assets/EH_logo.png',  # Default
                     style={'height': '36px', 'marginRight': '10px'}
                 ),
