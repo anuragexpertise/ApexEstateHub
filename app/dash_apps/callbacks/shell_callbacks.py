@@ -525,11 +525,11 @@ def register_shell_callbacks(app):
                     'borderRadius': '15px 15px 0 0',
                 },
                 {
-                    'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                    'backgroundImage': 'url(/static/assets/EH_bk.jpg)',
                     'backgroundSize': 'cover',
                     'backgroundPosition': 'center',
                 },
-                '/assets/EH_logo.png'
+                '/static/assets/EH_logo.png'
             )
         
         society_id = auth_data.get("society_id")
@@ -545,8 +545,8 @@ def register_shell_callbacks(app):
             )
             
             if society:
-                logo = society.get("logo") or "/assets/EH_logo.png"
-                background = society.get("login_background") or "/assets/EH_bk.jpg"
+                logo = society.get("logo") or "/static/assets/EH_logo.png"
+                background = society.get("login_background") or "/static/assets/EH_bk.jpg"
                 
                 header_style = {
                     'background': 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
@@ -560,7 +560,7 @@ def register_shell_callbacks(app):
                     'position': 'relative',
                 }
                 # Add overlay for better text readability
-                if background != "/assets/EH_bk.jpg":
+                if background != "/static/assets/EH_bk.jpg":
                     body_style['background'] = f'linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92)), url({background})'
                 
                 return header_style, body_style, logo
@@ -574,11 +574,11 @@ def register_shell_callbacks(app):
                 'borderRadius': '15px 15px 0 0',
             },
             {
-                'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                'backgroundImage': 'url(/static/assets/EH_bk.jpg)',
                 'backgroundSize': 'cover',
                 'backgroundPosition': 'center',
             },
-            '/assets/EH_logo.png'
+            '/static/assets/EH_logo.png'
         )
 
     # ══════════════════════════════════════════════════════════════════════════

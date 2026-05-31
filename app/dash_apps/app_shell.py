@@ -120,7 +120,7 @@ def _login_modal():
             ],
             id="login-modal-body",  # NEW: ID for dynamic background
             style={
-                'backgroundImage': 'url(/assets/EH_bk.jpg)',
+                'backgroundImage': 'url(/static/assets/EH_bk.jpg)',
                 'backgroundSize': 'cover',
                 'backgroundPosition': 'center',
                 'minHeight': '400px',
