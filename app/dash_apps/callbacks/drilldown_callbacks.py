@@ -828,7 +828,7 @@ def register_drilldown_callbacks(app):
             singular = to_singular(entity)
             record   = loaders.load_profile(singular, pk, sid)
             if not record:
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update
             target = f"form_{singular}_edit"
             store  = nav_state.navigate_to(
                 store, target,
@@ -1142,7 +1142,7 @@ def register_drilldown_callbacks(app):
 
         
     @app.callback(
-        Output("drilldown-store", "data"),
+        Output("drilldown-store", "data", allow_duplicate=True),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
