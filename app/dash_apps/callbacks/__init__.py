@@ -45,15 +45,15 @@ def register_all_callbacks(app):
         errors.append(f"login_callbacks: {e}")
 
     # ── 3. Drilldown callbacks ──────────────────────────────────────────
-    # try:
-    #     from app.dash_apps.callbacks.drilldown_callbacks import register_drilldown_callbacks
-    #     register_drilldown_callbacks(app)
-    #     print("  ✅ drilldown_callbacks registered")
-    # except ImportError:
-    #     print("  ⚠️  drilldown_callbacks not found — skipping")
-    # except Exception as e:
-    #     print(f"  ❌ drilldown_callbacks FAILED: {e}")
-    #     errors.append(f"drilldown_callbacks: {e}")
+    try:
+        from app.dash_apps.callbacks.drilldown_callbacks import register_drilldown_callbacks
+        register_drilldown_callbacks(app)
+        print("  ✅ drilldown_callbacks registered")
+    except ImportError:
+        print("  ⚠️  drilldown_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ drilldown_callbacks FAILED: {e}")
+        errors.append(f"drilldown_callbacks: {e}")
 
     # ── 4. Card catalogue callbacks ────────────────────────────────────
     try:
@@ -156,15 +156,15 @@ def register_all_callbacks(app):
     
 
     # ── 13. Debug callbacks (last) ───────────────────────────────────────
-    try:
-        from app.dash_apps.callbacks.debug_callbacks import register_debug_callbacks
-        register_debug_callbacks(app)
-        print("  ✅ debug_callbacks registered (error monitoring)")
-    except ImportError:
-        print("  ⚠️  debug_callbacks not found — skipping")
-    except Exception as e:
-        print(f"  ❌ debug_callbacks FAILED: {e}")
-        errors.append(f"debug_callbacks: {e}")
+    # try:
+    #     from app.dash_apps.callbacks.debug_callbacks import register_debug_callbacks
+    #     register_debug_callbacks(app)
+    #     print("  ✅ debug_callbacks registered (error monitoring)")
+    # except ImportError:
+    #     print("  ⚠️  debug_callbacks not found — skipping")
+    # except Exception as e:
+    #     print(f"  ❌ debug_callbacks FAILED: {e}")
+    #     errors.append(f"debug_callbacks: {e}")
 
     # ── Summary ─────────────────────────────────────────────────────────
     print("="*60)

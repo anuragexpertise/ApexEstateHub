@@ -265,7 +265,7 @@ def render_list_card(card_id: str, title: str, icon: str,
         dbc.CardBody([
             html.Div(
                 dbc.Table([
-                    html.Thead(id={"type": "list-sort", "entity": entity, "column": header_cells.__iter__}, children=html.Tr(header_cells)),
+                    html.Thead(html.Tr(header_cells)),
                     html.Tbody(body_rows),
                 ], hover=True, responsive=True, size="sm", style={"marginBottom": 0}),
                 style={"overflowX": "auto", "maxHeight": "420px", "overflowY": "auto"},
