@@ -79,9 +79,10 @@ def get_image_url(image_path: str | None, society_id: int | None = None,
 def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     color: str = "#1d74d8", subtitle: str = "",
                     clickable: bool = True) -> html.Div:
-    """Render a KPI card with optional click navigation."""
+    """Fixed KPI card with proper pattern-matching ID."""
     return html.Div(
-        [
+        id={"type": "kpi-card-div", "card_id": card_id},   # ← THIS WAS MISSING
+        children=[
             html.Button(
                 id={"type": "kpi-card", "card_id": card_id},
                 n_clicks=0,
@@ -115,10 +116,7 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                                 "fontSize": "10px", "color": "#aaa", "marginTop": "2px",
                             }) if subtitle else None,
                         ],
-                        style={
-                            "padding": "14px",
-                            "textAlign": "center",
-                        }
+                        style={"padding": "14px", "textAlign": "center"},
                     ),
                     html.Div(
                         style={
@@ -135,11 +133,12 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     "boxShadow": f"0 4px 12px {color}18",
                     "borderRadius": "12px",
                     "overflow": "hidden",
-                    "background": f"linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,251,255,0.9))",
+                    "background": "linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,251,255,0.9))",
                     "backdropFilter": "blur(10px)",
                 },
             ),
-        ]
+        ],
+        style={"padding": "6px"}  # Optional spacing
     )
 
 # ════════════════════════════════════════════════════════════════════════════
