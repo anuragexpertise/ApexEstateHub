@@ -81,287 +81,39 @@ def get_conn():
 # SCHEMA  (idempotent DDL)
 # ═════════════════════════════════════════════════════════════════════════════
 
-SCHEMA_SQL = """
--- ── societies ───────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS societies (
-    id                SERIAL PRIMARY KEY,
-    name              VARCHAR(100) NOT NULL UNIQUE,
-    logo              VARCHAR(200),
-    address           TEXT,
-    email             VARCHAR(100),
-    phone             VARCHAR(20),
-    secretary_name    VARCHAR(100),
-    secretary_phone   VARCHAR(20),
-    secretary_sign    VARCHAR(200),
-    plan              VARCHAR(20)  NOT NULL DEFAULT 'Free',
-    plan_validity     DATE         NOT NULL DEFAULT (CURRENT_DATE + INTERVAL '1 year'),
-    arrear_start_date DATE         NOT NULL DEFAULT CURRENT_DATE,
-    login_background  VARCHAR(200),
-    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-);
+from pathlib import Path
 
--- ── users ───────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS users (
-    id                   SERIAL PRIMARY KEY,
-    society_id           INTEGER REFERENCES societies(id) ON DELETE CASCADE,
-    email                VARCHAR(100) NOT NULL UNIQUE,
-    password_hash        VARCHAR(256),
-    pin_hash             VARCHAR(256),
-    pattern_hash         VARCHAR(256),
-    role                 VARCHAR(20)  NOT NULL DEFAULT 'apartment',
-    linked_id            INTEGER,
-    name                 VARCHAR(100),
-    phone                VARCHAR(20),
-    login_method         VARCHAR(20)  NOT NULL DEFAULT 'password',
-    is_master_admin      BOOLEAN      NOT NULL DEFAULT FALSE,
-    push_subscription    TEXT,
-    reset_token          VARCHAR(256),
-    reset_token_expiry   TIMESTAMPTZ,
-    last_login           TIMESTAMPTZ,
-    created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-);
+def load_schema_sql():
+    sql_file = Path(__file__).with_name("estatehub.sql")
 
-CREATE INDEX IF NOT EXISTS idx_users_society  ON users(society_id);
-CREATE INDEX IF NOT EXISTS idx_users_role     ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_email    ON users(email);
+    if not sql_file.exists():
+        raise FileNotFoundError(
+            f"Schema file not found: {sql_file}"
+        )
 
--- ── apartments ──────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS apartments (
-    id              SERIAL PRIMARY KEY,
-    society_id      INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    flat_number     VARCHAR(20) NOT NULL,
-    owner_name      VARCHAR(100),
-    mobile          VARCHAR(15),
-    apartment_size  INTEGER NOT NULL DEFAULT 0,
-    photo           VARCHAR(200),
-    owner_photo     VARCHAR(200),
-    id_proof        VARCHAR(200),
-    active          BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(society_id, flat_number)
-);
+    return sql_file.read_text(encoding="utf-8")
 
-CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments(society_id);
-
--- ── vendors ─────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS vendors (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name                VARCHAR(100) NOT NULL,
-    service_type        VARCHAR(50),
-    mobile              VARCHAR(15),
-    logo                VARCHAR(200),
-    license             VARCHAR(200),
-    photo               VARCHAR(200),
-    service_description TEXT,
-    active              BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_vendors_society ON vendors(society_id);
-
--- ── security_staff ──────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS security_staff (
-    id               SERIAL PRIMARY KEY,
-    society_id       INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name             VARCHAR(100) NOT NULL,
-    mobile           VARCHAR(15),
-    photo            VARCHAR(200),
-    id_proof         VARCHAR(200),
-    joining_date     DATE NOT NULL DEFAULT CURRENT_DATE,
-    shift            VARCHAR(20),
-    salary_per_shift NUMERIC(10,2) DEFAULT 0,
-    active           BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_security_society ON security_staff(society_id);
-
--- ── accounts ────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS accounts (
-    id                   INTEGER NOT NULL,
-    society_id           INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name                 VARCHAR(100) NOT NULL,
-    tab_name             VARCHAR(30),
-    header               VARCHAR(255),
-    parent_account_id    INTEGER,
-    drcr_account         VARCHAR(2),
-    has_bf               BOOLEAN NOT NULL DEFAULT FALSE,
-    drcr_bf              VARCHAR(2),
-    bf_amount            NUMERIC(12,2) NOT NULL DEFAULT 0,
-    depreciation_percent NUMERIC(5,2)  NOT NULL DEFAULT 100,
-    is_depreciable       BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY(id, society_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts(society_id);
-
--- ── transactions ────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS transactions (
-    id              SERIAL PRIMARY KEY,
-    society_id      INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    trx_date        DATE NOT NULL DEFAULT CURRENT_DATE,
-    acc_id          INTEGER,
-    entity_id       INTEGER,
-    acc_particulars VARCHAR(200),
-    amount          NUMERIC(12,2) NOT NULL DEFAULT 0,
-    mode            VARCHAR(20) DEFAULT 'cash',
-    status          VARCHAR(20) NOT NULL DEFAULT 'paid',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_trx_society_date ON transactions(society_id, trx_date);
-
--- ── payments ────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS payments (
-    id               SERIAL PRIMARY KEY,
-    society_id       INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    entity_id        INTEGER,
-    entity_type      VARCHAR(20),
-    user_id          INTEGER REFERENCES users(id),
-    apartment_id     INTEGER REFERENCES apartments(id),
-    amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
-    payment_type     VARCHAR(50),
-    payment_method   VARCHAR(50),
-    transaction_id   VARCHAR(255),
-    status           VARCHAR(20) NOT NULL DEFAULT 'pending',
-    due_date         DATE,
-    paid_at          TIMESTAMPTZ,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments(society_id, status);
-
--- ── gate_access ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS gate_access (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    role        VARCHAR(1),
-    entity_id   INTEGER NOT NULL,
-    time_in     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    time_out    TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_gate_society   ON gate_access(society_id);
-CREATE INDEX IF NOT EXISTS idx_gate_entity    ON gate_access(entity_id);
-CREATE INDEX IF NOT EXISTS idx_gate_time_in   ON gate_access(time_in);
-
--- ── events ──────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS events (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    title       VARCHAR(200) NOT NULL,
-    description TEXT,
-    event_date  DATE NOT NULL,
-    event_time  VARCHAR(20),
-    venue       VARCHAR(200),
-    open_to     VARCHAR(20) NOT NULL DEFAULT 'all',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_society ON events(society_id);
-
--- ── concerns ────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS concerns (
-    id             SERIAL PRIMARY KEY,
-    society_id     INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    flat_no        VARCHAR(20),
-    concern_type   VARCHAR(50),
-    description    TEXT,
-    preferred_time VARCHAR(30),
-    status         VARCHAR(20) NOT NULL DEFAULT 'open',
-    assigned_to    VARCHAR(100),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_concerns_society ON concerns(society_id);
-
--- ── attendance ──────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS attendance (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    entity_id   INTEGER NOT NULL,
-    entity_type VARCHAR(20),
-    time_in     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    time_out    TIMESTAMPTZ
-);
-
--- ── apt_charges_fines ───────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS apt_charges_fines (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name        VARCHAR(100),
-    amount      NUMERIC(10,2),
-    charge_type VARCHAR(30),
-    frequency   VARCHAR(20),
-    due_day     INTEGER,
-    apt_status  BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ── ven_charges_fines ───────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS ven_charges_fines (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name        VARCHAR(100),
-    amount      NUMERIC(10,2),
-    charge_type VARCHAR(30),
-    frequency   VARCHAR(20),
-    due_day     INTEGER,
-    ven_status  BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ── security_charges_fines ──────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS security_charges_fines (
-    id          SERIAL PRIMARY KEY,
-    society_id  INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    name        VARCHAR(100),
-    amount      NUMERIC(10,2),
-    charge_type VARCHAR(30),
-    frequency   VARCHAR(20),
-    due_day     INTEGER,
-    sec_status  BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ── receivables ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS receivables (
-    id           SERIAL PRIMARY KEY,
-    society_id   INTEGER NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    entity_id    INTEGER NOT NULL,
-    entity_type  VARCHAR(20) NOT NULL,
-    charge_type  VARCHAR(50) NOT NULL,
-    amount       NUMERIC(10,2) NOT NULL DEFAULT 0,
-    description  TEXT,
-    due_date     DATE,
-    status       VARCHAR(20) NOT NULL DEFAULT 'pending',
-    source_table VARCHAR(50),
-    source_id    INTEGER,
-    confirmed_by INTEGER,
-    confirmed_at TIMESTAMPTZ,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_recv_society ON receivables(society_id, status);
-"""
-
+SCHEMA_SQL = load_schema_sql()
 
 def run_schema(conn):
-    """Execute schema DDL statements one by one."""
-    stmts = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
-    ok = err = 0
+    import sqlparse
+    stmts = sqlparse.split(SCHEMA_SQL)
+    ok = 0
+    err = 0
     with conn.cursor() as cur:
         for stmt in stmts:
+            stmt = stmt.strip()
+            if not stmt:
+                continue
             try:
                 cur.execute(stmt)
                 conn.commit()
                 ok += 1
             except Exception as exc:
                 conn.rollback()
-                snippet = stmt[:80].replace("\n", " ")
-                log.warning("Skipped (%s): %s…", type(exc).__name__, snippet)
+                snippet = stmt[:120].replace("\n", " ")
+                print(f"\nFAILED:\n{snippet}")
+                print(exc)
                 err += 1
     return ok, err
 
@@ -372,7 +124,7 @@ def run_schema(conn):
 
 # (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, drcr_bf, bf_amt, dep_pct)
 ACCOUNTS = [
-    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",               1,  "Dr",  True,  "Dr", 0, 100),
+    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None,  "Dr",  True,  "Dr", 0, 100),
     (2,     "Capital Account",            "CapAc",      "Capital Account",             1,  "Cr",  True,  "Cr", 0, 100),
     (21,    "Income Other Source",        "IncOther",   "Income other source",         2,  "Cr",  True,  "Cr", 0, 100),
     (211,   "Interest Income",            "IncInt",     "Interest Income",            21,  "Cr",  True,  "Cr", 0, 100),
@@ -491,10 +243,10 @@ USERS = [
 
 EVENTS = [
     {"title": "Annual General Meeting", "date": "2026-07-15",
-     "time": "11:00 AM", "venue": "Community Hall", "open_to": "all",
+     "time": "11:00:00", "venue": "Community Hall", "open_to": "all",
      "description": "Yearly AGM for all residents to review society accounts and elect committee."},
     {"title": "Ganesh Chaturthi Celebration", "date": "2026-08-27",
-     "time": "06:00 PM", "venue": "Garden Area", "open_to": "all",
+     "time": "18:00:00", "venue": "Garden Area", "open_to": "all",
      "description": "Society-wide celebration with puja, prasad and cultural programme."},
 ]
 
@@ -552,8 +304,9 @@ def seed_demo(conn):
              SOCIETY["secretary_name"], SOCIETY["secretary_phone"],
              SOCIETY["plan"], SOCIETY["plan_validity"], SOCIETY["arrear_start_date"]),
         )
+        row = cur.fetchone()
         conn.commit()
-        society_id = cur.fetchone()["id"]
+        society_id = row["id"]
         print(f"  ✓ Society '{SOCIETY['name']}' created (id={society_id})")
 
     # ── 50 Chart-of-Accounts ────────────────────────────────────────────────
@@ -580,8 +333,9 @@ def seed_demo(conn):
                    RETURNING id""",
                 (society_id, u["flat"], u["name"], u.get("mobile",""), u.get("area",1000)),
             )
+            row = cur.fetchone()
             conn.commit()
-            apt_id = cur.fetchone()["id"]
+            apt_id = row["id"]
             cur.execute(
                 """INSERT INTO users
                    (society_id,email,password_hash,role,login_method,name,linked_id)
@@ -589,8 +343,9 @@ def seed_demo(conn):
                    ON CONFLICT (email) DO NOTHING RETURNING id""",
                 (society_id, u["email"], ph, u["name"], apt_id),
             )
+            row = cur.fetchone()
             conn.commit()
-            uid = cur.fetchone()
+            uid = row["id"] if row else None
             if uid:
                 print(f"  ✓ Owner    {u['email']}  /  {u['password']}  [{u['flat']}]")
 
@@ -601,8 +356,9 @@ def seed_demo(conn):
                    VALUES (%s,%s,%s,%s,TRUE) RETURNING id""",
                 (society_id, u["name"], u.get("service","General"), u.get("mobile","")),
             )
+            row= cur.fetchone()     
             conn.commit()
-            vid = cur.fetchone()["id"]
+            vid = row["id"] if row else None
             cur.execute(
                 """INSERT INTO users
                    (society_id,email,password_hash,role,login_method,name,linked_id)
@@ -610,8 +366,9 @@ def seed_demo(conn):
                    ON CONFLICT (email) DO NOTHING RETURNING id""",
                 (society_id, u["email"], ph, u["name"], vid),
             )
+            row = cur.fetchone()
             conn.commit()
-            uid = cur.fetchone()
+            uid = row["id"] if row else None
             if uid:
                 print(f"  ✓ Vendor   {u['email']}  /  {u['password']}")
 
@@ -623,8 +380,9 @@ def seed_demo(conn):
                 (society_id, u["name"], u.get("mobile",""),
                  u.get("shift","morning"), u.get("salary",10000)),
             )
+            row = cur.fetchone()    
             conn.commit()
-            sid = cur.fetchone()["id"]
+            sid = row["id"] if row else None
             cur.execute(
                 """INSERT INTO users
                    (society_id,email,password_hash,role,login_method,name,linked_id)
@@ -632,8 +390,9 @@ def seed_demo(conn):
                    ON CONFLICT (email) DO NOTHING RETURNING id""",
                 (society_id, u["email"], ph, u["name"], sid),
             )
+            row= cur.fetchone()
             conn.commit()
-            uid = cur.fetchone()
+            uid = row["id"] if row else None
             if uid:
                 print(f"  ✓ Security {u['email']}  /  {u['password']}")
 
@@ -645,8 +404,9 @@ def seed_demo(conn):
                    ON CONFLICT (email) DO NOTHING RETURNING id""",
                 (society_id, u["email"], ph, u["name"]),
             )
+            row = cur.fetchone()
             conn.commit()
-            uid = cur.fetchone()
+            uid = row["id"] if row else None
             if uid:
                 print(f"  ✓ Admin    {u['email']}  /  {u['password']}")
 

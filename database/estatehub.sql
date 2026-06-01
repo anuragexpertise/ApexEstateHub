@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     user_id INT REFERENCES users (id),
     entity_id INT,
     entity_type VARCHAR(20) CHECK (
-        entity_type IN ('vendor', 'security', 'other')
+        entity_type IN ('vendor', 'security', 'other','assets')
     ),
     expense_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
@@ -636,9 +636,9 @@ BEGIN
     RETURN QUERY
     WITH vendor_data AS (
         SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) :: TEXT AS business_name,
-               COALESCE(v.service_type, '—'):: TEXT AS service_type, COALESCE(v.mobile, '—'):: TEXT AS mobile,
+               COALESCE(v.service_type, '—'):: VARCHAR AS service_type, COALESCE(v.mobile, '—'):: VARCHAR AS mobile,
                COALESCE(v.active, TRUE) AS active,
-               (SELECT COUNT(*) FROM vendor_passes vp WHERE vp.society_id = u.society_id
+               (SELECT COUNT(*):: INT FROM vendor_passes vp WHERE vp.society_id = u.society_id
                   AND vp.user_id = u.id AND vp.status = 'active' AND vp.valid_until >= CURRENT_DATE) AS active_passes
         FROM users u LEFT JOIN vendors v ON v.id = u.linked_id
         WHERE u.society_id = p_society_id AND u.role = 'vendor'
@@ -727,8 +727,8 @@ BEGIN
     PERFORM fn_auto_process_security_payments(p_society_id);
     RETURN QUERY
     WITH security_base AS (
-        SELECT u.id, u.email, u.society_id, COALESCE(s.name, u.email)::TEXT AS name, COALESCE(s.shift, '—') AS shift,
-               COALESCE(s.mobile, '—'):: TEXT AS mobile, COALESCE(s.active, TRUE) AS active, s.salary_per_shift, s.joining_date,
+        SELECT u.id, u.email, u.society_id, COALESCE(s.name, u.email)::TEXT AS name, COALESCE(s.shift, '—') :: VARCHAR AS shift,
+               COALESCE(s.mobile, '—'):: VARCHAR AS mobile, COALESCE(s.active, TRUE) AS active, s.salary_per_shift, s.joining_date,
                EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(s.joining_date, CURRENT_DATE)))::BIGINT AS days_worked
         FROM users u LEFT JOIN security_staff s ON s.id = u.linked_id
         WHERE u.society_id = p_society_id AND u.role = 'security'
@@ -870,13 +870,13 @@ $$;
 
 CREATE OR REPLACE FUNCTION fn_asset_list(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (id INT, asset_name VARCHAR, purchase_value NUMERIC, purchase_date DATE, account_name VARCHAR,
-    depreciation_rate DECIMAL, expense_portion NUMERIC, asset_portion NUMERIC, current_book_value NUMERIC, status TEXT)
+    depreciation_rate NUMERIC, expense_portion NUMERIC, asset_portion NUMERIC, current_book_value NUMERIC, status TEXT)
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
     PERFORM fn_calculate_asset_depreciation(p_society_id);
     RETURN QUERY
     SELECT ar.id, ar.asset_name, ar.purchase_value, ar.purchase_date, COALESCE(acc.name, '—'),
-           COALESCE(ar.depreciation_rate, acc.depreciation_percent, 10.00),
+           COALESCE(ar.depreciation_rate, acc.depreciation_percent, 10.00)::NUMERIC,
            CASE WHEN COALESCE(ar.depreciation_rate, acc.depreciation_percent, 10) = 100 THEN ar.purchase_value
                 WHEN EXTRACT(MONTH FROM ar.purchase_date) >= 9 THEN ar.purchase_value * (COALESCE(ar.depreciation_rate, acc.depreciation_percent, 10) / 100) * 0.5
                 ELSE ar.purchase_value * (COALESCE(ar.depreciation_rate, acc.depreciation_percent, 10) / 100) END,
@@ -890,7 +890,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION fn_calculate_asset_depreciation(p_society_id INT) RETURNS VOID LANGUAGE plpgsql AS $$
-DECLARE rec RECORD; dep_rate DECIMAL; expense_amount NUMERIC;
+DECLARE rec RECORD; dep_rate NUMERIC; expense_amount NUMERIC;
 BEGIN
     FOR rec IN SELECT ar.*, COALESCE(acc.depreciation_percent, ar.depreciation_rate, 10) AS final_rate
         FROM asset_register ar LEFT JOIN accounts acc ON acc.id = ar.parent_account_id
@@ -991,7 +991,7 @@ BEGIN
     WITH account_balance AS (
         SELECT a.id, a.name, a.tab_name, a.header, a.drcr_account, a.bf_amount,
                COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0) + a.bf_amount,
-               COUNT(t.id), COALESCE(p.name, '—')
+               COUNT(t.id):: INT, COALESCE(p.name, '—'):: VARCHAR
         FROM accounts a LEFT JOIN accounts p ON p.id = a.parent_account_id
         LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
         WHERE a.society_id = p_society_id AND (p_tab_name IS NULL OR a.tab_name = p_tab_name)
@@ -1027,8 +1027,8 @@ BEGIN
     SELECT s.id, s.name, s.email, s.phone, s.plan,
            CASE WHEN s.plan = 'Free' THEN 'Free' WHEN s.plan_validity >= CURRENT_DATE THEN 'Active' ELSE 'Expired' END,
            s.plan_validity,
-           (SELECT COUNT(*) FROM apartments WHERE society_id = s.id AND active = TRUE),
-           (SELECT COUNT(*) FROM users WHERE society_id = s.id),
+           (SELECT COUNT(*):: INT FROM apartments WHERE society_id = s.id AND active = TRUE),
+           (SELECT COUNT(*):: INT FROM users WHERE society_id = s.id),
            (SELECT COALESCE(SUM(amount), 0) FROM receivables WHERE society_id = s.id AND status = 'pending'),
            s.created_at
     FROM societies s
@@ -1048,10 +1048,10 @@ LANGUAGE SQL STABLE AS $$
     SELECT s.id, s.name, s.logo, s.login_background, s.email, s.phone, s.address, s.plan,
            CASE WHEN s.plan = 'Free' THEN 'Free' WHEN s.plan_validity >= CURRENT_DATE THEN 'Active' ELSE 'Expired' END,
            s.plan_validity, s.arrear_start_date, s.secretary_name, s.secretary_phone, s.secretary_sign,
-           (SELECT COUNT(*) FROM apartments WHERE society_id = s.id),
-           (SELECT COUNT(*) FROM vendors WHERE society_id = s.id),
-           (SELECT COUNT(*) FROM security_staff WHERE society_id = s.id),
-           (SELECT COUNT(*) FROM users WHERE society_id = s.id),
+           (SELECT COUNT(*):: INT FROM apartments WHERE society_id = s.id),
+           (SELECT COUNT(*):: INT FROM vendors WHERE society_id = s.id),
+           (SELECT COUNT(*):: INT FROM security_staff WHERE society_id = s.id),
+           (SELECT COUNT(*):: INT FROM users WHERE society_id = s.id),
            (SELECT COALESCE(SUM(amount), 0) FROM receivables WHERE society_id = s.id AND status = 'pending'),
            s.created_at, s.id
     FROM societies s WHERE s.id = p_society_id;

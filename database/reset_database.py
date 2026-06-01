@@ -135,7 +135,7 @@ def main():
 
     parser.add_argument(
         "--sql",
-        default="estatehub.sql",
+        default="database/estatehub.sql",
         help="Schema file"
     )
 
@@ -202,7 +202,7 @@ def main():
 
         print("✓ Fresh schema created")
 
-        execute_sql_file(cur, sql_file)
+        # execute_sql_file(cur, sql_file)
 
         validate(cur)
 
