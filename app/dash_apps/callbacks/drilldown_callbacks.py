@@ -735,7 +735,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-prev",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-page-next",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-search",     "entity": ALL},               "value"),
-        Input({"type": "list-sort",       "entity": ALL, "column": ALL},"n_clicks"),  # NEW: Sorting
+        # Input({"type": "list-sort",       "entity": ALL, "column": ALL},"n_clicks"),  # NEW: Sorting
         Input({"type": "btn-new", "entity": ALL, "target": ALL},"n_clicks"),
 
         State("drilldown-store", "data"),
