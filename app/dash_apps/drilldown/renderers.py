@@ -254,7 +254,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                     ),
                     dbc.Button(
                         [html.I(className="fas fa-download me-1"), "CSV"],
-                        id={"type": "btn-csv", "entity": entity},
+                        id={"type": "btn-csv-download", "entity": entity},
                         size="sm", color="success", outline=True,
                         style={"fontSize": "11px", "borderRadius": "8px"},
                     ),
@@ -265,7 +265,7 @@ def render_list_card(card_id: str, title: str, icon: str,
         dbc.CardBody([
             html.Div(
                 dbc.Table([
-                    html.Thead(html.Tr(header_cells)),
+                    html.Thead(id={"type": "list-sort", "entity": entity, "column": header_cells.index()}, children=html.Tr(header_cells)),
                     html.Tbody(body_rows),
                 ], hover=True, responsive=True, size="sm", style={"marginBottom": 0}),
                 style={"overflowX": "auto", "maxHeight": "420px", "overflowY": "auto"},
@@ -275,14 +275,14 @@ def render_list_card(card_id: str, title: str, icon: str,
                 html.Div([
                     dbc.Button(
                         html.I(className="fas fa-chevron-left"),
-                        id={"type": "list-prev", "entity": entity},
+                        id={"type": "list-page-prev", "entity": entity},
                         size="sm", disabled=(page <= 1),
                         style={"fontSize": "11px"},
                     ),
                     html.Span(f"{page} / {total_pages}", style={"padding": "0 10px", "fontSize": "12px"}),
                     dbc.Button(
                         html.I(className="fas fa-chevron-right"),
-                        id={"type": "list-next", "entity": entity},
+                        id={"type": "list-page-next", "entity": entity},
                         size="sm", disabled=(page >= total_pages),
                         style={"fontSize": "11px"},
                     ),
