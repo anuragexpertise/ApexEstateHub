@@ -628,7 +628,7 @@ def register_drilldown_callbacks(app):
         
         try:
             society_id = (auth or {}).get("society_id")
-            entity = field_id.get("entity")
+            entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
             
             # ═══════════════════════════════════════════════════════════════
@@ -770,17 +770,21 @@ def register_drilldown_callbacks(app):
         hide_kpis = False  # Track KPI visibility
 
         # ── KPI click → list ───────────────────────────────────────────────
-        if trig_type == "kpi-card-div":
-            card_id  = id_dict.get("card_id", "")
+        if trig_type in ("kpi-card-div", "kpi-card"):
+            card_id = id_dict.get("card_id", "")
             nav_info = DRILLDOWN_MAP.get(card_id, {})
-            target   = nav_info.get("target")
+            target = nav_info.get("target")
+            
             if not target:
+                print(f"⚠️ No target for KPI: {card_id}")
                 return no_update, no_update, no_update, no_update, no_update
-            # Reset stack to clean Dashboard root, then navigate
+            
+            # Reset to root and navigate
             store = nav_state.initial_state(role, sid)
             store = nav_state.navigate_to(
-                store, target,
-                nav_info.get("label", target),
+                store, 
+                target,
+                nav_info.get("label", target.title()),
                 filters=nav_info.get("filter", {}),
             )
             hide_kpis = True
