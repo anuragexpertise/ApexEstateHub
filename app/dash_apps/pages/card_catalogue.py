@@ -629,20 +629,7 @@ KPI_CARDS = {
         "group": "platform",
     },
     
-    "kpi_societies_paid": {
-        "query": """
-            SELECT COUNT(*) AS v 
-            FROM societies 
-            WHERE plan != 'Free' 
-              AND plan_validity >= CURRENT_DATE
-        """,
-        "params": 0,
-        "format": "number",
-        "icon": "fa-star",
-        "color": "#17976e",
-        "title": "Paid Plans",
-        "group": "active",
-    },
+   
     
     "kpi_societies_free": {
         "query": "SELECT COUNT(*) AS v FROM societies WHERE plan = 'Free'",
@@ -653,12 +640,63 @@ KPI_CARDS = {
         "title": "Free Plans",
         "group": "total",
     },
-    
-    "kpi_societies_expired": {
+
+    "kpi_societies_9Apts": {
         "query": """
-            SELECT COUNT(*) AS v 
-            FROM societies 
-            WHERE plan != 'Free' 
+            SELECT COUNT(*) AS v FROM societies WHERE plan = '9Apts'
+              AND plan_validity >= CURRENT_DATE
+        """,
+        "params": 0,
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Paid Plans",
+        "group": "active",
+    },
+
+    "kpi_societies_99Apts": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies WHERE plan = '99Apts'
+              AND plan_validity >= CURRENT_DATE
+        """,
+        "params": 0,
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Paid Plans",
+        "group": "active",
+    },
+
+
+    "kpi_societies_9Apts": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies WHERE plan = '9Apts'
+              AND plan_validity >= CURRENT_DATE
+        """,
+        "params": 0,
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Paid Plans",
+        "group": "active",
+    },
+
+    "kpi_societies_999Apts": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies WHERE plan = '999Apts'
+              AND plan_validity >= CURRENT_DATE
+        """,
+        "params": 0,
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Paid Plans",
+        "group": "active",
+    },
+
+    "kpi_societies_Unlimited": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies WHERE plan = 'Unlimited'
               AND plan_validity < CURRENT_DATE
         """,
         "params": 0,
@@ -668,6 +706,37 @@ KPI_CARDS = {
         "title": "Expired Plans",
         "group": "needs renewal",
     },
+    
+    "kpi_master_apartments_total": {
+        "query": "SELECT COUNT(*) AS v FROM apartments WHERE active = TRUE",
+        "params": 0,
+        "format": "number",
+        "icon": "fa-home",
+        "color": "#1859b8",
+        "title": "Apartments",
+        "group": "active",
+    },
+    
+    "kpi_master_vendors_total": {
+        "query": "SELECT COUNT(*) AS v FROM vendors WHERE active = TRUE",
+        "params": 0,
+        "format": "number",
+        "icon": "fa-truck",
+        "color": "#b98a07",
+        "title": "Vendors",
+        "group": "registered",
+    },
+
+    "kpi_master_security_total": {
+        "query": "SELECT COUNT(*) AS v FROM security_staff WHERE active = TRUE",
+        "params": 0,
+        "format": "number",
+        "icon": "fa-user-shield",
+        "color": "#b63b3b",
+        "title": "Security Staff",
+        "group": "active",
+    },
+
 }
 
 # ================================================================
@@ -1089,8 +1158,11 @@ DEFAULT_LAYOUTS = {
     "master": [
         "kpi_societies_total",
         "kpi_societies_paid",
-        "kpi_receipts_month",
-        "kpi_balance",
+        "kpi_societies_free",
+        "kpi_societies_expired",
+        "kpi_master_apartments_total",
+        "kpi_master_vendors_total",
+        "kpi_master_security_total",
     ],
 }
 

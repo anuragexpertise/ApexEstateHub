@@ -95,9 +95,14 @@ DRILLDOWN_MAP: dict = {
     "kpi_expenses_month":     {"target": "list_expenses_tbl","label": "Expenses This Month"},
     "kpi_balance":            {"target": "list_cashbook",    "label": "Cashbook"},
     "kpi_societies_total":    {"target": "list_societies",   "label": "All Societies"},
-    "kpi_societies_paid":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "Paid"}},
+    "kpi_societies_9Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "9Apts"}},
+    "kpi_societies_99Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "99Apts"}},
+    "kpi_societies_999Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "999Apts"}},
+    "kpi_societies_Unlimited":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "Unlimited"}},
     "kpi_societies_free":     {"target": "list_societies",   "label": "Free Plan Societies",   "filter": {"plan": "Free"}},
+    "kpi_societies_expired":  {"target": "list_societies",   "label": "Expired Plan Societies","filter": {"plan": "Expired"}},
     "kpi_cash_in_hand":       {"target": "list_cashbook",    "label": "Cash in Hand"},
+
     
     # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
     "kpi_plan_validity":      {"target": "list_societies",   "label": "Society Plan Validity"},
