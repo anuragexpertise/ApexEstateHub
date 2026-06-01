@@ -398,6 +398,7 @@ def shell_layout() -> html.Div:
                       data={"stack": [], "active_card": "",
                              "filters": {}, "prefill": {},
                              "list_pages": {}, "list_search": {}}),
+            dcc.Store(id='profile-action-trigger', storage_type='memory', data={"action": None, "params": {}}),
             dcc.Store(id="qr-entity-store",        storage_type="memory", data={}),
             dcc.Store(id="qr-camera-store",        storage_type="memory",
                       data={"facing": "environment", "active": False,

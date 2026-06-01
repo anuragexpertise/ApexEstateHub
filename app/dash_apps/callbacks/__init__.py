@@ -11,6 +11,10 @@ Registration order matters:
 """
 
 
+from app.dash_apps.callbacks.admin_callbacks import register_admin_callbacks
+from app.dash_apps.callbacks.security_callbacks import register_security_callbacks
+
+
 def register_all_callbacks(app):
     """Register every callback module with the Dash app."""
 
@@ -41,15 +45,15 @@ def register_all_callbacks(app):
         errors.append(f"login_callbacks: {e}")
 
     # ── 3. Drilldown callbacks ──────────────────────────────────────────
-    # try:
-    #     from app.dash_apps.callbacks.drilldown_callbacks import register_drilldown_callbacks
-    #     register_drilldown_callbacks(app)
-    #     print("  ✅ drilldown_callbacks registered")
-    # except ImportError:
-    #     print("  ⚠️  drilldown_callbacks not found — skipping")
-    # except Exception as e:
-    #     print(f"  ❌ drilldown_callbacks FAILED: {e}")
-    #     errors.append(f"drilldown_callbacks: {e}")
+    try:
+        from app.dash_apps.callbacks.drilldown_callbacks import register_drilldown_callbacks
+        register_drilldown_callbacks(app)
+        print("  ✅ drilldown_callbacks registered")
+    except ImportError:
+        print("  ⚠️  drilldown_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ drilldown_callbacks FAILED: {e}")
+        errors.append(f"drilldown_callbacks: {e}")
 
     # ── 4. Card catalogue callbacks ────────────────────────────────────
     try:
@@ -73,7 +77,40 @@ def register_all_callbacks(app):
         print(f"  ❌ navigation_callbacks FAILED: {e}")
         errors.append(f"navigation_callbacks: {e}")
 
-    # ── 6. Customize callbacks ──────────────────────────────────────────
+        # ──6. Admin callbacks ────────────────────────────────────────
+    try:
+        from app.dash_apps.callbacks.admin_callbacks import register_admin_callbacks
+        register_admin_callbacks(app)
+        print("  ✅ admin_callbacks registered")
+    except ImportError:
+        print("  ⚠️  admin_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ admin_callbacks FAILED: {e}")
+        errors.append(f"admin_callbacks: {e}")
+
+        # ── 7. Owner callbacks ────────────────────────────────────────
+    try:
+        from app.dash_apps.callbacks.owner_callbacks import register_owner_callbacks
+        register_owner_callbacks(app)
+        print("  ✅ owner_callbacks registered")
+    except ImportError:
+        print("  ⚠️  owner_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ owner_callbacks FAILED: {e}")
+        errors.append(f"owner_callbacks: {e}")
+
+        # ── 8. Security callbacks ────────────────────────────────────────
+    try:
+        from app.dash_apps.callbacks.security_callbacks import register_security_callbacks
+        register_security_callbacks(app)
+        print("  ✅ security_callbacks registered")
+    except ImportError:
+        print("  ⚠️  security_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ security_callbacks FAILED: {e}")
+        errors.append(f"security_callbacks: {e}")
+
+        # ── 9. Customize callbacks ──────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_callbacks import register_customize_callbacks
         register_customize_callbacks(app)
@@ -84,7 +121,7 @@ def register_all_callbacks(app):
         print(f"  ❌ customize_callbacks FAILED: {e}")
         errors.append(f"customize_callbacks: {e}")
 
-    # ── 7. KPI customize callbacks ──────────────────────────────────────
+        # ── 10. KPI customize callbacks ──────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
@@ -95,7 +132,7 @@ def register_all_callbacks(app):
         print(f"  ❌ customize_kpi_callbacks FAILED: {e}")
         errors.append(f"customize_kpi_callbacks: {e}")
 
-    # ── 8. Camera / QR callbacks ────────────────────────────────────────
+    # ── 11. Camera / QR callbacks ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.camera_callbacks import register_camera_callbacks
         register_camera_callbacks(app)
@@ -106,7 +143,19 @@ def register_all_callbacks(app):
         print(f"  ❌ camera_callbacks FAILED: {e}")
         errors.append(f"camera_callbacks: {e}")
 
-    # ── 9. Debug callbacks (last) ───────────────────────────────────────
+    # ── 12. QR callbacks ────────────────────────────────────────
+    try:
+        from app.dash_apps.callbacks.qr_callbacks import register_qr_callbacks
+        register_qr_callbacks(app)
+        print("  ✅ qr_callbacks registered (QR scanner)")
+    except ImportError:
+        print("  ⚠️  qr_callbacks not found — skipping")
+    except Exception as e:
+        print(f"  ❌ qr_callbacks FAILED: {e}")
+        errors.append(f"qr_callbacks: {e}")
+    
+
+    # ── 13. Debug callbacks (last) ───────────────────────────────────────
     try:
         from app.dash_apps.callbacks.debug_callbacks import register_debug_callbacks
         register_debug_callbacks(app)

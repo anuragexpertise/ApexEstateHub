@@ -727,17 +727,16 @@ def register_drilldown_callbacks(app):
         Input({"type": "kpi-card-div",    "card_id": ALL},              "n_clicks"),
         Input({"type": "kpi-card",        "card_id": ALL},              "n_clicks"),
         Input({"type": "list-row",        "entity": ALL, "pk": ALL},    "n_clicks"),  # NEW: Row click
-        Input({"type": "list-row-view",   "entity": ALL, "pk": ALL},    "n_clicks"),
-        Input({"type": "list-row-edit",   "entity": ALL, "pk": ALL},    "n_clicks"),
-        Input({"type": "list-row-delete", "entity": ALL, "pk": ALL},    "n_clicks"),
-        Input({"type": "profile-action",  "entity": ALL, "pk": ALL,
-               "action": ALL, "target": ALL},                            "n_clicks"),
+        Input({"type": "list-view",   "entity": ALL, "pk": ALL},    "n_clicks"),
+        Input({"type": "list-edit",   "entity": ALL, "pk": ALL},    "n_clicks"),
+        Input({"type": "list-delete", "entity": ALL, "pk": ALL},    "n_clicks"),
+        Input({"type": "profile-action",  "entity": ALL, "pk": ALL,  "action": ALL, "target": ALL}, "n_clicks"),
         Input({"type": "breadcrumb-click","index": ALL},                 "n_clicks"),
         Input({"type": "list-page-prev",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-page-next",  "entity": ALL},               "n_clicks"),
         Input({"type": "list-search",     "entity": ALL},               "value"),
         Input({"type": "list-sort",       "entity": ALL, "column": ALL},"n_clicks"),  # NEW: Sorting
-        Input({"type": "btn-list-create", "entity": ALL, "target": ALL},"n_clicks"),
+        Input({"type": "btn-new", "entity": ALL, "target": ALL},"n_clicks"),
 
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
@@ -804,8 +803,8 @@ def register_drilldown_callbacks(app):
             )
             hide_kpis = True
 
-        # ── List row VIEW → profile ────────────────────────────────────────
-        elif trig_type == "list-row-view":
+        # ── List  VIEW → profile ────────────────────────────────────────
+        elif trig_type == "list-view":
             entity   = id_dict.get("entity")
             pk       = id_dict.get("pk")
             singular = to_singular(entity)
@@ -823,7 +822,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── List row EDIT → pre-filled form ───────────────────────────────
-        elif trig_type == "list-row-edit":
+        elif trig_type == "list-edit":
             entity   = id_dict.get("entity")
             pk       = id_dict.get("pk")
             singular = to_singular(entity)
@@ -839,7 +838,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── List row DELETE → delete + refresh ────────────────────────────
-        elif trig_type == "list-row-delete":
+        elif trig_type == "list-delete":
             entity = id_dict.get("entity")
             pk     = id_dict.get("pk")
             ok, msg = loaders.delete_entity(entity, pk, sid)
@@ -888,8 +887,7 @@ def register_drilldown_callbacks(app):
                     "society_id": sid,
                     "name": entity_name,
                 }
-                return (no_update, no_update, no_update, no_update,
-                        profile_action_data)  # Return to trigger QR modal
+                return (no_update, no_update, no_update, no_update, profile_action_data)  # Return to trigger QR modal
             
             # SPECIAL: Show Cashbook action
             elif action == "show_cashbook":
@@ -951,7 +949,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── Create NEW entity ──────────────────────────────────────────────
-        elif trig_type == "btn-list-create":
+        elif trig_type == "btn-new":
             entity  = id_dict.get("entity")
             target  = id_dict.get("target") or f"form_{to_singular(entity)}_new"
             store   = nav_state.navigate_to(store, target,
