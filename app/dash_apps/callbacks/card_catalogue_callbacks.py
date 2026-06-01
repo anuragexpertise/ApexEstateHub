@@ -241,7 +241,7 @@ def register_card_catalogue_callbacks(app):
                 print(f"    Params: {params}")
                 
                 # ═══ Execute query ═══
-                row = db().execute_query(query, params, fetch_one=True)
+                row = db()._execute(query, params, fetch_one=True)
                 
                 if row and "v" in row:
                     raw_value = row.get("v")
