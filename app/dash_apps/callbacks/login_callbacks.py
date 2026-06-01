@@ -2,8 +2,9 @@
 """
 Login callbacks — all authentication flows.
 
-Registered AFTER shell_callbacks (uses allow_duplicate=True on shared outputs).
-All DB calls use named params (:name).
+Must be registered AFTER shell_callbacks (which owns primary outputs).
+Uses allow_duplicate=True on shared outputs (auth-store, url, toast-store).
+All passwords verified via werkzeug.security through auth_service.
 """
 
 import logging
@@ -23,11 +24,39 @@ from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
+# Role → default redirect path
+_REDIRECTS = {
+    "admin":     "/dashboard/admin-portal",
+    "apartment": "/dashboard/owner-portal",
+    "vendor":    "/dashboard/vendor-portal",
+    "security":  "/dashboard/pass-evaluation",
+}
+
+
+def _login_response(user: dict) -> tuple:
+    """Build the 3-tuple returned by all login callbacks."""
+    role      = user["role"]
+    is_master = role == "admin" and user.get("society_id") is None
+    redirect  = "/dashboard/master" if is_master else _REDIRECTS.get(role, "/dashboard/")
+    name      = user["email"].split("@")[0]
+
+    auth_data = {
+        "user_id":           user["user_id"],
+        "email":             user["email"],
+        "role":              role,
+        "society_id":        user.get("society_id"),
+        "linked_id":         user.get("linked_id"),
+        "authenticated":     True,
+        "token":             user["token"],
+        "push_subscription": user.get("push_subscription"),
+    }
+    return auth_data, redirect, {"type": "success", "message": f"Welcome, {name}!"}
+
 
 def register_login_callbacks(app):
     log.info("Registering login callbacks…")
 
-    # ── Password login ────────────────────────────────────────────────────────
+    # ── Password ──────────────────────────────────────────────────────────────
 
     @app.callback(
         Output("auth-store",    "data",     allow_duplicate=True),
@@ -42,13 +71,15 @@ def register_login_callbacks(app):
     def handle_password_login(n, email, password, auth):
         if not n or not email or not password:
             raise PreventUpdate
-        sid  = (auth or {}).get("society_id")
-        user = authenticate_user(email, password, sid)
+        user = authenticate_user(email.strip(), password,
+                                 (auth or {}).get("society_id"))
         if not user:
-            return no_update, no_update, {"type": "error", "message": "Invalid email or password"}
+            return no_update, no_update, {
+                "type": "error", "message": "Invalid email or password."
+            }
         return _login_response(user)
 
-    # ── PIN login ─────────────────────────────────────────────────────────────
+    # ── PIN ───────────────────────────────────────────────────────────────────
 
     @app.callback(
         Output("auth-store",      "data",     allow_duplicate=True),
@@ -63,13 +94,13 @@ def register_login_callbacks(app):
     def handle_pin_login(n, email, pin, auth):
         if not n or not email or not pin:
             raise PreventUpdate
-        sid  = (auth or {}).get("society_id")
-        user = authenticate_pin(email, pin, sid)
+        user = authenticate_pin(email.strip(), pin,
+                                (auth or {}).get("society_id"))
         if not user:
-            return no_update, no_update, {"type": "error", "message": "Invalid PIN"}
+            return no_update, no_update, {"type": "error", "message": "Invalid PIN."}
         return _login_response(user)
 
-    # ── Pattern login ─────────────────────────────────────────────────────────
+    # ── Pattern ───────────────────────────────────────────────────────────────
 
     @app.callback(
         Output("auth-store",         "data",     allow_duplicate=True),
@@ -84,13 +115,13 @@ def register_login_callbacks(app):
     def handle_pattern_login(n, email, pattern, auth):
         if not n or not email or not pattern:
             raise PreventUpdate
-        sid  = (auth or {}).get("society_id")
-        user = authenticate_pattern(email, pattern, sid)
+        user = authenticate_pattern(email.strip(), pattern,
+                                    (auth or {}).get("society_id"))
         if not user:
-            return no_update, no_update, {"type": "error", "message": "Invalid pattern"}
+            return no_update, no_update, {"type": "error", "message": "Invalid pattern."}
         return _login_response(user)
 
-    # ── Master admin login ────────────────────────────────────────────────────
+    # ── Master admin ──────────────────────────────────────────────────────────
 
     @app.callback(
         Output("auth-store",            "data",     allow_duplicate=True),
@@ -104,26 +135,30 @@ def register_login_callbacks(app):
     def handle_master_login(n, email, password):
         if not n or not email or not password:
             raise PreventUpdate
-        # Verify master admin flag first
+        # Verify the is_master_admin flag exists first (cheap guard)
         try:
-            result = db.execute(
-                "SELECT id FROM users WHERE email = :email AND is_master_admin = TRUE",
-                {"email": email},
+            row = db.execute(
+                "SELECT id FROM users WHERE email = :e AND is_master_admin = TRUE",
+                {"e": email.strip()},
                 fetch_one=True,
             )
         except Exception as exc:
-            log.error("master admin DB check error: %s", exc)
-            return no_update, no_update, {"type": "error", "message": "Database error"}
+            log.error("master DB check: %s", exc)
+            return no_update, no_update, {"type": "error", "message": "Database error."}
 
-        if not result:
-            return no_update, no_update, {"type": "error", "message": "Not a master admin account"}
+        if not row:
+            return no_update, no_update, {
+                "type": "error", "message": "Not a master admin account."
+            }
 
-        user = authenticate_user(email, password, society_id=None)
+        user = authenticate_user(email.strip(), password, society_id=None)
         if not user:
-            return no_update, no_update, {"type": "error", "message": "Invalid credentials"}
+            return no_update, no_update, {
+                "type": "error", "message": "Invalid master admin credentials."
+            }
         return _login_response(user)
 
-    # ── Forgot password modal ─────────────────────────────────────────────────
+    # ── Forgot password modal toggle ──────────────────────────────────────────
 
     @app.callback(
         Output("forgot-password-modal", "is_open"),
@@ -155,46 +190,46 @@ def register_login_callbacks(app):
         State("auth-store",             "data"),
         prevent_initial_call=True,
     )
-    def handle_reset_flow(send_n, confirm_n, close_forgot, close_reset,
+    def handle_reset_flow(send_n, confirm_n, close_f, close_r,
                           email, token, new_pass, confirm_pass, auth):
         triggered = dash.callback_context.triggered
         if not triggered or not triggered[0]["value"]:
             raise PreventUpdate
-
         trigger = triggered[0]["prop_id"].split(".")[0]
 
         if trigger == "close-forgot-modal":
             return False, no_update, no_update
-
         if trigger == "close-reset-modal":
             return no_update, False, no_update
 
         if trigger == "send-reset-btn":
             if not email:
-                return True, no_update, {"type": "error", "message": "Enter your email address"}
+                return True, no_update, {"type": "error", "message": "Enter your email."}
             sid = (auth or {}).get("society_id")
-            ok, msg, _ = request_password_reset(email, sid)
-            toast = {"type": "success" if ok else "error", "message": msg}
-            return (False if ok else True), no_update, toast
+            ok, msg, _ = request_password_reset(email.strip(), sid)
+            return (False if ok else True), no_update, {
+                "type": "success" if ok else "error", "message": msg
+            }
 
         if trigger == "confirm-reset-btn":
             if not token:
-                return no_update, True, {"type": "error", "message": "Enter the reset token"}
+                return no_update, True, {"type": "error", "message": "Enter the reset token."}
             if not new_pass or not confirm_pass:
-                return no_update, True, {"type": "error", "message": "Fill in both password fields"}
+                return no_update, True, {"type": "error", "message": "Fill both password fields."}
             if new_pass != confirm_pass:
-                return no_update, True, {"type": "error", "message": "Passwords don't match"}
-            ok, msg = reset_password(token, new_pass)
-            toast = {"type": "success" if ok else "error", "message": msg}
-            return no_update, (False if ok else True), toast
+                return no_update, True, {"type": "error", "message": "Passwords don't match."}
+            ok, msg = reset_password(token.strip(), new_pass)
+            return no_update, (False if ok else True), {
+                "type": "success" if ok else "error", "message": msg
+            }
 
         raise PreventUpdate
 
     # ── Pattern clear ─────────────────────────────────────────────────────────
 
     @app.callback(
-        Output("login-pattern",       "value"),
-        Input("pattern-clear-btn",    "n_clicks"),
+        Output("login-pattern",    "value"),
+        Input("pattern-clear-btn", "n_clicks"),
         prevent_initial_call=True,
     )
     def clear_pattern(n):
@@ -203,33 +238,3 @@ def register_login_callbacks(app):
         return ""
 
     log.info("Login callbacks registered ✓")
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-_REDIRECTS = {
-    "admin":     "/dashboard/admin-portal",
-    "apartment": "/dashboard/owner-portal",
-    "vendor":    "/dashboard/vendor-portal",
-    "security":  "/dashboard/pass-evaluation",
-}
-
-
-def _login_response(user: dict) -> tuple:
-    role = user["role"]
-    is_master = role == "admin" and user.get("society_id") is None
-    redirect = "/dashboard/master" if is_master else _REDIRECTS.get(role, "/dashboard/")
-
-    auth_data = {
-        "user_id":           user["user_id"],
-        "email":             user["email"],
-        "role":              role,
-        "society_id":        user.get("society_id"),
-        "linked_id":         user.get("linked_id"),
-        "authenticated":     True,
-        "token":             user["token"],
-        "push_subscription": user.get("push_subscription"),
-    }
-    name = user["email"].split("@")[0]
-    toast = {"type": "success", "message": f"Welcome, {name}!"}
-    return auth_data, redirect, toast

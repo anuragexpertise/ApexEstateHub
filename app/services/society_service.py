@@ -1,119 +1,121 @@
 # app/services/society_service.py
+"""
+Society CRUD service.
+All DB calls use named params (:name).
+Password hashing uses werkzeug (consistent with auth_service + seed).
+"""
+
+import logging
+from werkzeug.security import generate_password_hash
 from database.db_manager import db
 
-def get_societies():
-    """Get all societies"""
+log = logging.getLogger(__name__)
+
+
+def get_societies() -> list:
     try:
-        query = "SELECT id, name, email, phone FROM societies ORDER BY name"
-        result = db._execute(query, fetch_all=True)
-        return result if result else []
-    except Exception as e:
-        print(f"Error getting societies: {e}")
+        return db.execute(
+            "SELECT id, name, email, phone, plan, plan_validity FROM societies ORDER BY name",
+            fetch_all=True,
+        ) or []
+    except Exception:
+        log.exception("get_societies error")
         return []
 
 
-def get_society_details(society_id):
-    """Get society details by ID"""
+def get_society_details(society_id: int) -> dict | None:
     try:
-        query = "SELECT * FROM societies WHERE id = :society_id"
-        return db._execute(query, {"society_id": society_id}, fetch_one=True)
-    except Exception as e:
-        print(f"Error getting society details: {e}")
+        return db.execute(
+            "SELECT * FROM societies WHERE id = :sid",
+            {"sid": society_id},
+            fetch_one=True,
+        )
+    except Exception:
+        log.exception("get_society_details error")
         return None
 
 
-def create_society(data):
-    """Create a new society"""
+def create_society(data: dict) -> int | None:
+    """Create society + admin user. Returns new society id or None."""
     try:
-        query = """
-            INSERT INTO societies (name, email, phone, address, secretary_name, 
-                                   secretary_phone, plan, plan_validity, arrear_start_date)
-            VALUES (:name, :email, :phone, :address, :sec_name, :sec_phone, :plan, :validity, :arrear)
-            RETURNING id
-        """
-        params = {
-            'name': data.get('name'),
-            'email': data.get('email'),
-            'phone': data.get('phone'),
-            'address': data.get('address'),
-            'sec_name': data.get('sec_name'),
-            'sec_phone': data.get('sec_phone'),
-            'plan': data.get('plan', 'Free'),
-            'validity': data.get('validity'),
-            'arrear': data.get('arrear')
-        }
-        result = db._execute(query, params, fetch_one=True)
-        
-        if result and result.get('id'):
-            society_id = result['id']
-            if data.get('admin_email') and data.get('admin_password'):
-                create_society_admin(society_id, data.get('admin_email'), data.get('admin_password'))
-            return society_id
+        result = db.execute(
+            """INSERT INTO societies
+               (name,email,phone,address,secretary_name,secretary_phone,
+                plan,plan_validity,arrear_start_date)
+               VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
+                       :plan,:validity,:arrear)
+               RETURNING id""",
+            {
+                "name":     data["name"],
+                "email":    data.get("email"),
+                "phone":    data.get("phone"),
+                "address":  data.get("address"),
+                "sec_name": data.get("sec_name"),
+                "sec_phone":data.get("sec_phone"),
+                "plan":     data.get("plan", "Free"),
+                "validity": data.get("validity"),
+                "arrear":   data.get("arrear"),
+            },
+            fetch_one=True,
+        )
+        if not result:
+            return None
+        sid = result["id"]
+
+        if data.get("admin_email") and data.get("admin_password"):
+            create_society_admin(sid, data["admin_email"], data["admin_password"])
+
+        return sid
+    except Exception:
+        log.exception("create_society error")
         return None
-    except Exception as e:
-        print(f"Error creating society: {e}")
-        return None
 
 
-def create_society_full(data):
-    """Create a new society with full details"""
-    return create_society(data)
-
-
-def create_society_admin(society_id, email, password):
-    """Create admin user for a society"""
+def create_society_admin(society_id: int, email: str, password: str) -> int | None:
     try:
-        from werkzeug.security import generate_password_hash
-        password_hash = generate_password_hash(password)
-        query = """
-            INSERT INTO users (society_id, email, password_hash, role, login_method)
-            VALUES (:society_id, :email, :password_hash, 'admin', 'password')
-            RETURNING id
-        """
-        params = {
-            'society_id': society_id,
-            'email': email,
-            'password_hash': password_hash
-        }
-        result = db._execute(query, params, fetch_one=True)
-        return result['id'] if result else None
-    except Exception as e:
-        print(f"Error creating society admin: {e}")
+        result = db.execute(
+            """INSERT INTO users
+               (society_id,email,password_hash,role,login_method)
+               VALUES (:sid,:email,:ph,'admin','password')
+               ON CONFLICT (email) DO NOTHING
+               RETURNING id""",
+            {"sid": society_id, "email": email,
+             "ph": generate_password_hash(password)},
+            fetch_one=True,
+        )
+        return result["id"] if result else None
+    except Exception:
+        log.exception("create_society_admin error")
         return None
 
 
-def update_society(society_id, data):
-    """Update society details"""
+def update_society(society_id: int, data: dict) -> bool:
     try:
-        query = """
-            UPDATE societies 
-            SET name = :name, email = :email, phone = :phone, address = :address,
-                secretary_name = :sec_name, secretary_phone = :sec_phone
-            WHERE id = :society_id
-            RETURNING id
-        """
-        params = {
-            'name': data.get('name'),
-            'email': data.get('email'),
-            'phone': data.get('phone'),
-            'address': data.get('address'),
-            'sec_name': data.get('sec_name'),
-            'sec_phone': data.get('sec_phone'),
-            'society_id': society_id
-        }
-        result = db._execute(query, params, fetch_one=True)
-        return result['id'] if result else None
-    except Exception as e:
-        print(f"Error updating society: {e}")
-        return None
+        db.execute(
+            """UPDATE societies
+               SET name=:name, email=:email, phone=:phone, address=:address,
+                   secretary_name=:sec_name, secretary_phone=:sec_phone
+               WHERE id=:sid""",
+            {
+                "name":     data.get("name"),
+                "email":    data.get("email"),
+                "phone":    data.get("phone"),
+                "address":  data.get("address"),
+                "sec_name": data.get("sec_name"),
+                "sec_phone":data.get("sec_phone"),
+                "sid":      society_id,
+            },
+        )
+        return True
+    except Exception:
+        log.exception("update_society error")
+        return False
 
 
-def delete_society(society_id):
-    """Delete a society"""
+def delete_society(society_id: int) -> bool:
     try:
-        query = "DELETE FROM societies WHERE id = :society_id RETURNING id"
-        result = db._execute(query, {"society_id": society_id}, fetch_one=True)
-        return result['id'] if result else None
-    except Exception as e:
-        print(f"Error deleting society: {e}")
-        return None
+        db.execute("DELETE FROM societies WHERE id = :sid", {"sid": society_id})
+        return True
+    except Exception:
+        log.exception("delete_society error")
+        return False
