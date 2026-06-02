@@ -237,8 +237,8 @@ def register_card_catalogue_callbacks(app):
                 for i in range(n_params):
                     query = query.replace("%s", f":param_{i}", 1)
                 
-                print(f"    Query: {query[:100]}...")
-                print(f"    Params: {params}")
+                # print(f"    Query: {query[:100]}...")
+                # print(f"    Params: {params}")
                 
                 # ═══ Execute query ═══
                 row = db()._execute(query, params, fetch_one=True)
@@ -249,7 +249,7 @@ def register_card_catalogue_callbacks(app):
                     # ═══ Format value based on type ═══
                     formatted = format_kpi_value(raw_value, format_type)
                     
-                    print(f"    ✓Raw: {raw_value} → Formatted: {formatted} (type: {format_type})")
+                    # print(f"    ✓Raw: {raw_value} → Formatted: {formatted} (type: {format_type})")
                     results.append(formatted)
                     
                 else:
