@@ -837,3 +837,35 @@ a {
     position: relative;
     z-index: 2;
 }
+.dnd-card {
+    transition: box-shadow .15s, transform .15s;
+}
+.dnd-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.13) !important;
+}
+.dnd-ghost {
+    opacity: 0.3;
+    border: 2px dashed #667eea !important;
+}
+.dnd-chosen {
+    box-shadow: 0 8px 28px rgba(0,0,0,.18) !important;
+    transform: scale(1.02) !important;
+    z-index: 999;
+}
+.dnd-drag {
+    opacity: 0;
+}
+#dnd-active-zone.dnd-over {
+    border-color: #667eea !important;
+    background: #f0f3ff !important;
+}
+.dnd-palette-zone.dnd-over {
+    border-color: #999 !important;
+    background: #f5f5f5 !important;
+}
+.dnd-handle:active {
+    cursor: grabbing;
+}
+.dnd-handle:hover {
+    color: #667eea !important;
+}

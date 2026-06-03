@@ -332,7 +332,12 @@ CREATE TABLE IF NOT EXISTS expenses (
     user_id INT REFERENCES users (id),
     entity_id INT,
     entity_type VARCHAR(20) CHECK (
-        entity_type IN ('vendor', 'security', 'other','assets')
+        entity_type IN (
+            'vendor',
+            'security',
+            'other',
+            'assets'
+        )
     ),
     expense_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
@@ -627,7 +632,7 @@ DROP FUNCTION IF EXISTS fn_auto_generate_vendor_receivables CASCADE;
 DROP FUNCTION IF EXISTS fn_auto_process_vendor_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendors_list(p_society_id INT, p_search TEXT DEFAULT NULL)
-RETURNS TABLE (id INT, email VARCHAR, society_id INT, business_name TEXT, service_type VARCHAR,
+RETURNS TABLE (id INT, email VARCHAR, society_id INT, name TEXT, service_type VARCHAR,
     mobile VARCHAR, active BOOLEAN, pending_dues NUMERIC, paid_amount NUMERIC, active_passes INT)
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -635,7 +640,7 @@ BEGIN
     PERFORM fn_auto_process_vendor_payments(p_society_id);
     RETURN QUERY
     WITH vendor_data AS (
-        SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) :: TEXT AS business_name,
+        SELECT u.id, u.email, u.society_id, COALESCE(v.name, u.email) :: TEXT AS name,
                COALESCE(v.service_type, '—'):: VARCHAR AS service_type, COALESCE(v.mobile, '—'):: VARCHAR AS mobile,
                COALESCE(v.active, TRUE) AS active,
                (SELECT COUNT(*):: INT FROM vendor_passes vp WHERE vp.society_id = u.society_id
@@ -650,9 +655,9 @@ BEGIN
                COALESCE(SUM(CASE WHEN p.status IN ('pending','confirmed') THEN p.amount ELSE 0 END), 0) AS pending_dues
         FROM payments p WHERE p.society_id = p_society_id AND p.entity_type = 'vendor' GROUP BY p.user_id
     )
-    SELECT vd.id, vd.email, vd.society_id, vd.business_name, vd.service_type, vd.mobile, vd.active,
+    SELECT vd.id, vd.email, vd.society_id, vd.name, vd.service_type, vd.mobile, vd.active,
            COALESCE(ps.pending_dues, 0), COALESCE(ps.paid_amount, 0), vd.active_passes
-    FROM vendor_data vd LEFT JOIN payment_summary ps ON ps.user_id = vd.id ORDER BY vd.business_name;
+    FROM vendor_data vd LEFT JOIN payment_summary ps ON ps.user_id = vd.id ORDER BY vd.name;
 END;
 $$;
 
@@ -1187,19 +1192,91 @@ BEGIN
     UNION ALL
     SELECT 'kpi_security_total', 'Security Staff', 'fa-shield', 'admin', 'overview', 'fn_security_list'
     UNION ALL
+    SELECT 'kpi_security_on_duty', 'On Duty Now', 'fa-user-shield', 'admin', 'overview', 'fn_security_list'
+    UNION ALL
     SELECT 'kpi_events_total', 'Upcoming Events', 'fa-calendar', 'admin', 'events', 'fn_events_list'
     UNION ALL
     SELECT 'kpi_concerns_open', 'Open Concerns', 'fa-exclamation-circle', 'admin', 'concerns', 'fn_concerns_list'
     UNION ALL
-    SELECT 'kpi_cash_in_hand', 'Cash in Hand', 'fa-money-bill', 'admin', 'accounts', 'fn_cashbook_list'
+    SELECT 'kpi_gate_logs', 'Gate Logs Today', 'fa-receipt', 'admin', 'overview', 'fn_gate_logs'
     UNION ALL
-    SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-receipt', 'admin', 'settings', 'fn_accounts_list'
+    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'admin', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_apt_charges', 'Apartment Charges', 'fa-home', 'admin', 'settings', 'fn_accounts_list'
+    SELECT 'kpi_expenses_month', 'Expenses (Month)', 'fa-wallet', 'admin', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_ven_charges', 'Vendor Charges', 'fa-briefcase', 'admin', 'settings', 'fn_accounts_list'
+    SELECT 'kpi_cash_in_hand', 'Cash in Hand', 'fa-money-bill', 'admin', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_accounts_list'
+    SELECT 'kpi_balance', 'Current Balance', 'fa-wallet', 'admin', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_receivables_total', 'Total Receivables', 'fa-hand-holding-usd', 'admin', 'cashbook', 'fn_receivables_list'
+    UNION ALL
+    SELECT 'kpi_payables_total', 'Total Payables', 'fa-wallet', 'admin', 'cashbook', 'fn_expenses_list'
+    UNION ALL
+    SELECT 'kpi_maintenance_due', 'Maintenance Due', 'fa-home', 'admin', 'cashbook', 'fn_apartments_list'
+    UNION ALL
+    SELECT 'kpi_late_fees_due', 'Late Fees Due', 'fa-clock', 'admin', 'cashbook', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_security_salaries_due', 'Security Salaries', 'fa-user-shield', 'admin', 'cashbook', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_vendor_payments_due', 'Vendor Payments', 'fa-truck', 'admin', 'cashbook', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-book-open', 'admin', 'settings', 'fn_accounts_list'
+    UNION ALL
+    SELECT 'kpi_apt_charges', 'Apartment Charges', 'fa-home', 'admin', 'settings', 'fn_apt_charges_fines'
+    UNION ALL
+    SELECT 'kpi_ven_charges', 'Vendor Charges', 'fa-briefcase', 'admin', 'settings', 'fn_ven_charges_fines'
+    UNION ALL
+    SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_security_charges_fines'
+    UNION ALL
+    SELECT 'kpi_attendance', 'Attendance (30d)', 'fa-clock', 'admin', 'settings', 'fn_attendance_list'
+    UNION ALL
+    SELECT 'kpi_plan_validity', 'Plan Validity', 'fa-calendar-times', 'admin', 'settings', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_total', 'Total Societies', 'fa-building', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_free', 'Free Plans', 'fa-circle', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_9Apts', '9Apts Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_99Apts', '99Apts Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_999Apts', '999Apts Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_unlimited', 'Unlimited Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_paid', 'Paid Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_societies_expired', 'Expired Plans', 'fa-exclamation-triangle', 'master', 'dashboard', 'fn_societies_list'
+    UNION ALL
+    SELECT 'kpi_master_apartments_total', 'All Apartments', 'fa-home', 'master', 'dashboard', 'fn_apartments_list'
+    UNION ALL
+    SELECT 'kpi_master_vendors_total', 'All Vendors', 'fa-truck', 'master', 'dashboard', 'fn_vendors_list'
+    UNION ALL
+    SELECT 'kpi_master_security_total', 'All Security', 'fa-user-shield', 'master', 'dashboard', 'fn_security_list'
+    UNION ALL
+    SELECT 'kpi_apartments_dues', 'Pending Dues', 'fa-rupee-sign', 'apartment', 'dashboard', 'fn_apartments_list'
+    UNION ALL
+    SELECT 'kpi_concerns_open', 'Open Concerns', 'fa-hand-point-up', 'apartment', 'dashboard', 'fn_concerns_list'
+    UNION ALL
+    SELECT 'kpi_events_total', 'Upcoming Events', 'fa-calendar-check', 'apartment', 'dashboard', 'fn_events_list'
+    UNION ALL
+    SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'apartment', 'dashboard', 'fn_gate_logs'
+    UNION ALL
+    SELECT 'kpi_receipts_month', 'Paid (Month)', 'fa-receipt', 'apartment', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_balance', 'Balance', 'fa-wallet', 'apartment', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_vendors_dues', 'Pending Dues', 'fa-rupee-sign', 'vendor', 'dashboard', 'fn_vendors_list'
+    UNION ALL
+    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'vendor', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_balance', 'Balance', 'fa-wallet', 'vendor', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'security', 'pass_evaluation', 'fn_gate_logs'
+    UNION ALL
+    SELECT 'kpi_events_total', 'Events', 'fa-calendar-check', 'security', 'events', 'fn_events_list'
+    UNION ALL
+    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'security', 'cashbook', 'fn_cashbook_list'
     WHERE (p_portal IS NULL OR portal = p_portal)
     ORDER BY portal, tab_name, kpi_label;
 END;
@@ -1228,3 +1305,58 @@ BEGIN
     SELECT 'delete', 'Delete', 'form_' || p_entity || '_edit', 'fa-trash';
 END;
 $$ LANGUAGE plpgsql;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Missing functions for KPI compatibility
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION fn_gate_logs(p_society_id INT)
+RETURNS TABLE (id INT, time_in TIMESTAMP, time_out TIMESTAMP, role VARCHAR, entity_id INT)
+LANGUAGE SQL STABLE AS $$
+    SELECT id, time_in, time_out, role, entity_id
+    FROM gate_access
+    WHERE society_id = p_society_id
+      AND time_in >= CURRENT_DATE
+    ORDER BY time_in DESC
+$$;
+
+CREATE OR REPLACE FUNCTION fn_payments_list(p_society_id INT, p_entity_type VARCHAR DEFAULT NULL)
+RETURNS TABLE (id INT, entity_id INT, entity_type VARCHAR, amount NUMERIC, status VARCHAR, payment_type VARCHAR, created_at TIMESTAMP)
+LANGUAGE SQL STABLE AS $$
+    SELECT id, entity_id, entity_type, amount, status, payment_type, created_at
+    FROM payments
+    WHERE society_id = p_society_id
+      AND (p_entity_type IS NULL OR entity_type = p_entity_type)
+    ORDER BY created_at DESC
+$$;
+
+CREATE OR REPLACE FUNCTION fn_expenses_list(p_society_id INT)
+RETURNS TABLE (id INT, acc_id INT, particulars TEXT, amount NUMERIC, mode VARCHAR, status VARCHAR, created_at TIMESTAMP)
+LANGUAGE SQL STABLE AS $$
+    SELECT id, acc_id, particulars, amount, mode, status, created_at
+    FROM expenses
+    WHERE society_id = p_society_id
+    ORDER BY created_at DESC
+$$;
+
+CREATE OR REPLACE FUNCTION fn_receivables_list(p_society_id INT, p_status VARCHAR DEFAULT 'pending')
+RETURNS TABLE (id INT, entity_type VARCHAR, entity_id INT, amount NUMERIC, due_date DATE, status VARCHAR, description TEXT)
+LANGUAGE SQL STABLE AS $$
+    SELECT id, entity_type, entity_id, amount, due_date, status, description
+    FROM receivables
+    WHERE society_id = p_society_id AND status = p_status
+    ORDER BY due_date ASC
+$$;
+
+CREATE OR REPLACE FUNCTION fn_attendance_list(p_society_id INT)
+RETURNS TABLE (id INT, security_id INT, time_in TIMESTAMP, time_out TIMESTAMP, status VARCHAR)
+LANGUAGE SQL STABLE AS $$
+    SELECT a.id, a.security_id, a.time_in, a.time_out,
+           CASE WHEN a.time_out IS NULL AND a.time_in IS NOT NULL THEN 'ON_DUTY'
+                WHEN a.time_in IS NOT NULL THEN 'COMPLETED'
+                ELSE 'ABSENT' END::VARCHAR AS status
+    FROM attendance a
+    WHERE a.society_id = p_society_id
+      AND a.time_in >= CURRENT_DATE - INTERVAL '30 days'
+    ORDER BY a.time_in DESC
+$$;

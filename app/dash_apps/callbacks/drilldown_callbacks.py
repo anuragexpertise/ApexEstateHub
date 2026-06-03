@@ -1341,7 +1341,7 @@ def _save_apartment(db, d, sid, is_edit, pk):
         result =db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,active=%s WHERE id=%s AND society_id=%s RETURNING id",
             (d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0, 
-             d.get("active", "true") == "true", pk, sid),
+             d.get("active", True), pk, sid),
         )
         return True, "Apartment updated", result["id"] if result else None
     flat = (d.get("flat_number") or "").strip()
@@ -1715,12 +1715,13 @@ def _save_society(db, d, sid, is_edit, pk):
             """UPDATE societies 
                SET name=%s, email=%s, phone=%s, address=%s, plan=%s,
                    logo=%s, login_background=%s, secretary_sign=%s,
-                   secretary_name=%s, secretary_phone=%s
+                   secretary_name=%s, secretary_phone=%s,
+                   plan_validity=%s, arrear_start_date=%s
                WHERE id=%s""",
             (d.get("name"), d.get("email"), d.get("phone"), d.get("address"), 
              d.get("plan", "Free"), d.get("logo"), d.get("login_background"),
              d.get("secretary_sign"), d.get("secretary_name"), 
-             d.get("secretary_phone"), pk),
+             d.get("secretary_phone"), d.get("plan_validity"), d.get("arrear_start_date"), pk),
         )
         
         print(f"✅ Society #{pk} updated, images moved to: {society_dir}")

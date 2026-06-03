@@ -95,12 +95,13 @@ DRILLDOWN_MAP: dict = {
     "kpi_expenses_month":     {"target": "list_expenses_tbl","label": "Expenses This Month"},
     "kpi_balance":            {"target": "list_cashbook",    "label": "Cashbook"},
     "kpi_societies_total":    {"target": "list_societies",   "label": "All Societies"},
-    "kpi_societies_9Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "9Apts"}},
-    "kpi_societies_99Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "99Apts"}},
-    "kpi_societies_999Apts":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "999Apts"}},
-    "kpi_societies_Unlimited":     {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "Unlimited"}},
+    "kpi_societies_9Apts":    {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "9Apts"}},
+    "kpi_societies_99Apts":   {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "99Apts"}},
+    "kpi_societies_999Apts":  {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "999Apts"}},
+    "kpi_societies_Unlimited":{"target": "list_societies",   "label": "Unlimited Plans",       "filter": {"plan": "unlimited"}},
     "kpi_societies_free":     {"target": "list_societies",   "label": "Free Plan Societies",   "filter": {"plan": "Free"}},
-    "kpi_societies_expired":  {"target": "list_societies",   "label": "Expired Plan Societies","filter": {"plan": "Expired"}},
+    "kpi_societies_paid":     {"target": "list_societies",   "label": "All Paid Plans",        "filter": {"plans": ["9Apts", "99Apts", "999Apts", "unlimited"]}},
+    "kpi_societies_expired":  {"target": "list_societies",   "label": "Expired Plans",         "filter": {"status": "expired"}},
     "kpi_cash_in_hand":       {"target": "list_cashbook",    "label": "Cash in Hand"},
 
     

@@ -171,8 +171,8 @@ def render_list_card(card_id: str, title: str, icon: str,
     # ── Data rows ──
     body_rows = []
     for row in rows:
-        row_dict = row.to_dict(include_calculated=True) if hasattr(row, 'to_dict') else row
-        pk_val = row_dict.get("id")
+        row_dict = row.to_dict(include_calculated=True) if hasattr(row, 'to_dict') else dict(row) if isinstance(row, dict) else {}
+        pk_val = row_dict.get("id") or row_dict.get("ID") or "0"
         
         cells = []
         for c in columns:
