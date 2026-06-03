@@ -189,15 +189,14 @@ class RBACManager:
             if denial:
                 return False
             
-            # 3. Fall back to defaults
-            permissions = RBACManager.DEFAULT_PERMISSIONS.get(user_role, {})
-            card_perms = permissions.get(card_id, set())
-            return permission in card_perms
-            
         except Exception as e:
-            print(f"RBAC check error: {e}")
-            # Fail secure - deny access if error
-            return False
+            # Database unavailable, fall back to defaults
+            pass
+        
+        # 3. Fall back to defaults (always executed)
+        permissions = RBACManager.DEFAULT_PERMISSIONS.get(user_role, {})
+        card_perms = permissions.get(card_id, set())
+        return permission in card_perms
 
     @staticmethod
     def get_accessible_cards(
