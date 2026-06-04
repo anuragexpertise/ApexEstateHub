@@ -2,9 +2,12 @@
 """
 COMPLETE RENDERERS - All Card Types for All 5 Portals
 ======================================================
-- Works with OOP models from loaders
-- Implements RBAC checks
-- Handles image upload/storage
+Portal-aware CRUD buttons:
+  admin     → New, View, Edit, Delete on every list
+  apartment → View only (own records filtered by apartment_id)
+  vendor    → View only (own records filtered by vendor_id / user_id)
+  security  → View on most lists + Create Receipt on cashbook/receipts
+  master    → View, Edit, Delete on societies list
 """
 
 from __future__ import annotations
@@ -26,13 +29,67 @@ from app.security.rbac import RBACManager, Permission
 # ════════════════════════════════════════════════════════════════════════════
 
 COLORS = {
-    "primary":    "#1d74d8",
-    "success":    "#17976e",
-    "warning":    "#e59620",
-    "danger":     "#de5c52",
-    "info":       "#0ea5a8",
-    "muted":      "#7d8ea3",
+    "primary":  "#1d74d8",
+    "success":  "#17976e",
+    "warning":  "#e59620",
+    "danger":   "#de5c52",
+    "info":     "#0ea5a8",
+    "muted":    "#7d8ea3",
 }
+
+# ════════════════════════════════════════════════════════════════════════════
+# PORTAL PERMISSION MATRIX
+# key = (role, entity)  →  set of allowed actions
+# ════════════════════════════════════════════════════════════════════════════
+
+_PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
+    # ── ADMIN: full CRUD on everything ───────────────────────────────────────
+    ("admin", "*"):            {"view", "edit", "delete", "new"},
+
+    # ── MASTER: societies only (view + edit + new), no delete ─────────────
+    ("master", "societies"):   {"view", "edit", "new"},
+    ("master", "*"):           {"view"},
+
+    # ── APARTMENT: view own data only, can raise concern / pay ────────────
+    ("apartment", "apartments"):  {"view"},
+    ("apartment", "concerns"):    {"view", "new"},
+    ("apartment", "events"):      {"view"},
+    ("apartment", "gate_logs"):   {"view"},
+    ("apartment", "receipts_tbl"):{"view"},
+    ("apartment", "cashbook"):    {"view"},
+    ("apartment", "*"):           set(),
+
+    # ── VENDOR: view own data + can see events/concerns ───────────────────
+    ("vendor", "vendors"):        {"view"},
+    ("vendor", "events"):         {"view"},
+    ("vendor", "concerns"):       {"view"},
+    ("vendor", "gate_logs"):      {"view"},
+    ("vendor", "receipts_tbl"):   {"view"},
+    ("vendor", "cashbook"):       {"view"},
+    ("vendor", "*"):              set(),
+
+    # ── SECURITY: view most lists + can create receipts ───────────────────
+    ("security", "apartments"):   {"view"},
+    ("security", "vendors"):      {"view"},
+    ("security", "security"):     {"view"},
+    ("security", "events"):       {"view"},
+    ("security", "concerns"):     {"view"},
+    ("security", "gate_logs"):    {"view"},
+    ("security", "receipts_tbl"): {"view", "new"},   # create receipt
+    ("security", "cashbook"):     {"view"},
+    ("security", "*"):            set(),
+}
+
+
+def _perms_for(role: str, entity: str) -> set[str]:
+    """Return allowed action set for role × entity."""
+    key_specific = (role, entity)
+    key_star     = (role, "*")
+    if key_specific in _PORTAL_PERMS:
+        return _PORTAL_PERMS[key_specific]
+    if key_star in _PORTAL_PERMS:
+        return _PORTAL_PERMS[key_star]
+    return set()
 
 # ════════════════════════════════════════════════════════════════════════════
 # IMAGE URL RESOLUTION
@@ -40,36 +97,23 @@ COLORS = {
 
 def get_image_url(image_path: str | None, society_id: int | None = None,
                   entity: str = None, pk: int | None = None) -> str | None:
-    """Convert stored filename to full asset URL."""
     if not image_path or str(image_path).strip() == "":
         return None
-    
     path = str(image_path).strip()
-    
-    # Already a full URL or data URI
     if path.startswith(('http://', 'https://', 'data:image', '/assets/')):
         return path
-    
-    # Just a filename - construct the correct path
     if '/' not in path and '\\' not in path:
-        # SPECIAL CASE: Societies use their own ID
         if entity == "society" and pk:
             return f"/assets/{pk}/{path}"
-        
-        # Entity with society + pk
         elif society_id and pk:
             if entity in ("apartment", "vendor", "security", "concern", "event"):
                 return f"/assets/{society_id}/{entity}/{pk}/{path}"
             else:
                 return f"/assets/{society_id}/{entity}_{pk}/{path}"
-        
-        # New record (temp folder)
         elif society_id or entity:
             return f"/assets/default/{entity or 'file'}/{path}"
-        
         else:
             return f"/assets/default/{path}"
-    
     return f"/assets/{path}"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -79,9 +123,8 @@ def get_image_url(image_path: str | None, society_id: int | None = None,
 def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     color: str = "#1d74d8", subtitle: str = "",
                     clickable: bool = True) -> html.Div:
-    """Fixed KPI card with proper pattern-matching ID."""
     return html.Div(
-        id={"type": "kpi-card-div", "card_id": card_id},   # ← THIS WAS MISSING
+        id={"type": "kpi-card-div", "card_id": card_id},
         children=[
             html.Button(
                 id={"type": "kpi-card", "card_id": card_id},
@@ -97,322 +140,399 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                                        style={"color": color, "fontSize": "22px"}),
                                 style={"marginBottom": "8px"},
                             ),
-                            html.Div(
-                                value,
-                                style={
-                                    "fontSize": "24px", "fontWeight": "800",
-                                    "color": "#15304f", "lineHeight": "1",
-                                },
-                            ),
-                            html.Div(
-                                title,
-                                style={
-                                    "fontSize": "11px", "fontWeight": "600",
-                                    "color": "#7d8ea3", "marginTop": "4px",
-                                    "textTransform": "uppercase",
-                                },
-                            ),
+                            html.Div(value, style={
+                                "fontSize": "24px", "fontWeight": "800",
+                                "color": "#15304f", "lineHeight": "1",
+                            }),
+                            html.Div(title, style={
+                                "fontSize": "11px", "fontWeight": "600",
+                                "color": "#7d8ea3", "marginTop": "4px",
+                                "textTransform": "uppercase",
+                            }),
                             html.Div(subtitle, style={
                                 "fontSize": "10px", "color": "#aaa", "marginTop": "2px",
                             }) if subtitle else None,
                         ],
                         style={"padding": "14px", "textAlign": "center"},
                     ),
-                    html.Div(
-                        style={
-                            "position": "absolute", "left": 0, "top": 0,
-                            "bottom": 0, "width": "4px", "background": color,
-                            "borderRadius": "4px 0 0 4px",
-                        }
-                    ),
+                    html.Div(style={
+                        "position": "absolute", "left": 0, "top": 0,
+                        "bottom": 0, "width": "4px", "background": color,
+                        "borderRadius": "4px 0 0 4px",
+                    }),
                 ],
                 style={
                     "position": "relative",
                     "cursor": "pointer" if clickable else "default",
                     "border": f"1px solid {color}22",
                     "boxShadow": f"0 4px 12px {color}18",
-                    "borderRadius": "12px",
-                    "overflow": "hidden",
+                    "borderRadius": "12px", "overflow": "hidden",
                     "background": "linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,251,255,0.9))",
                     "backdropFilter": "blur(10px)",
                 },
             ),
         ],
-        style={"padding": "6px"}  # Optional spacing
+        style={"padding": "6px"},
     )
 
 # ════════════════════════════════════════════════════════════════════════════
-# LIST CARD RENDERER
+# LIST CARD RENDERER  — portal-aware action buttons
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_list_card(card_id: str, title: str, icon: str,
                      columns: list[dict], rows: list[dict],
                      entity: str, page: int = 1, total_rows: int = 0,
                      page_size: int = 15, auth_data: dict | None = None) -> html.Div:
-    """Generic list card with pagination, search, and actions."""
-    auth_data = auth_data or {}
-    user_role = auth_data.get("role", "guest")
+
+    auth_data  = auth_data or {}
+    user_role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
-    
+
+    # ── Resolve permissions for this role × entity ─────────────────────────
+    allowed = _perms_for(user_role, entity)
+
     total_pages = max(1, -(-total_rows // page_size))
-    
-    # ── Header cells ──
-    # Handle flexible column format: {"label": "X", "field": "y"} or {"name": "X", "field": "y"}
+
+    # ── Header row ──────────────────────────────────────────────────────────
     header_cells = []
     for c in columns:
         col_label = c.get("label") or c.get("name") or c.get("field", "").title()
         header_cells.append(html.Th(col_label, style={
-            "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3"
+            "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
+            "padding": "10px 8px", "whiteSpace": "nowrap",
         }))
-    header_cells.append(html.Th("Actions", style={
-        "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3"
-    }))
-    
-    # ── Data rows ──
+    if allowed:                         # only show Actions col if ≥1 action
+        header_cells.append(html.Th("Actions", style={
+            "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
+            "padding": "10px 8px",
+        }))
+
+    # ── Data rows ────────────────────────────────────────────────────────────
     body_rows = []
     for row in rows:
-        row_dict = row.to_dict(include_calculated=True) if hasattr(row, 'to_dict') else dict(row) if isinstance(row, dict) else {}
-        pk_val = row_dict.get("id") or row_dict.get("ID") or "0"
-        
+        row_dict = (row.to_dict(include_calculated=True)
+                    if hasattr(row, "to_dict") else dict(row))
+        pk_val = str(row_dict.get("id") or row_dict.get("ID") or "0")
+
         cells = []
         for c in columns:
-            field_key = c.get("field") or c.get("name") or list(row_dict.keys())[0]
-            val = str(row_dict.get(field_key, "—") or "—")
-            cells.append(html.Td(
-                val,
-                style={"fontSize": "12px", "verticalAlign": "middle"},
-            ))
-        
-        # Action buttons
-        can_view = RBACManager.has_permission(user_role, f"profile_{entity}", Permission.VIEW, society_id)
-        can_edit = RBACManager.has_permission(user_role, f"form_{entity}_edit", Permission.EDIT, society_id)
-        can_delete = RBACManager.has_permission(user_role, f"form_{entity}_edit", Permission.DELETE, society_id)
-        
-        actions = []
-        if can_view:
-            actions.append(
-                dbc.Button(
+            field_key = c.get("field") or c.get("name") or ""
+            val = row_dict.get(field_key)
+            # Format booleans & dates nicely
+            if isinstance(val, bool):
+                val = html.Span(
+                    ["✓" if val else "✗"],
+                    style={"color": "#17976e" if val else "#de5c52",
+                           "fontWeight": "700"},
+                )
+            elif isinstance(val, (date, datetime)):
+                val = val.strftime("%d %b %Y") if val else "—"
+            elif val is None:
+                val = "—"
+            else:
+                val = str(val)
+            cells.append(html.Td(val, style={
+                "fontSize": "12px", "verticalAlign": "middle",
+                "padding": "8px 8px",
+            }))
+
+        # ── Action buttons scoped by portal permissions ──────────────────
+        if allowed:
+            action_btns = []
+
+            if "view" in allowed:
+                action_btns.append(dbc.Button(
                     html.I(className="fas fa-eye"),
-                    id={"type": "list-view", "entity": entity, "pk": str(pk_val)},
-                    size="sm", color="info", outline=True, style={"fontSize": "11px"},
-                )
-            )
-        if can_edit:
-            actions.append(
-                dbc.Button(
+                    id={"type": "list-view", "entity": entity, "pk": pk_val},
+                    size="sm", color="info", outline=True,
+                    title="View details",
+                    style={"fontSize": "11px", "padding": "3px 7px",
+                           "borderRadius": "7px"},
+                ))
+
+            if "edit" in allowed:
+                action_btns.append(dbc.Button(
                     html.I(className="fas fa-edit"),
-                    id={"type": "list-edit", "entity": entity, "pk": str(pk_val)},
-                    size="sm", color="primary", outline=True, style={"fontSize": "11px"},
-                )
-            )
-        if can_delete:
-            actions.append(
-                dbc.Button(
-                    html.I(className="fas fa-trash"),
-                    id={"type": "list-delete", "entity": entity, "pk": str(pk_val)},
-                    size="sm", color="danger", outline=True, style={"fontSize": "11px"},
-                )
-            )
-        
-        cells.append(html.Td(
-            html.Div(actions, style={"display": "flex", "gap": "4px"}),
-        ))
-        
-        body_rows.append(html.Tr(cells))
-    
+                    id={"type": "list-edit", "entity": entity, "pk": pk_val},
+                    size="sm", color="primary", outline=True,
+                    title="Edit record",
+                    style={"fontSize": "11px", "padding": "3px 7px",
+                           "borderRadius": "7px"},
+                ))
+
+            if "delete" in allowed:
+                action_btns.append(dbc.Button(
+                    html.I(className="fas fa-trash-alt"),
+                    id={"type": "list-delete", "entity": entity, "pk": pk_val},
+                    size="sm", color="danger", outline=True,
+                    title="Delete record",
+                    style={"fontSize": "11px", "padding": "3px 7px",
+                           "borderRadius": "7px"},
+                ))
+
+            cells.append(html.Td(
+                html.Div(action_btns, style={"display": "flex", "gap": "4px",
+                                             "flexWrap": "nowrap"}),
+                style={"padding": "6px 8px", "verticalAlign": "middle"},
+            ))
+
+        body_rows.append(html.Tr(cells, style={
+            "transition": "background 0.15s",
+        }))
+
     if not body_rows:
+        span = len(columns) + (1 if allowed else 0)
         body_rows = [html.Tr(html.Td(
             html.Div([
-                html.I(className="fas fa-inbox me-2", style={"color": "#ccc"}),
-                "No records found"
-            ]),
-            colSpan=len(columns) + 1,
-            className="text-center text-muted",
-            style={"padding": "32px"},
+                html.I(className="fas fa-inbox me-2",
+                       style={"color": "#ccc", "fontSize": "20px"}),
+                html.Div("No records found",
+                         style={"color": "#aaa", "fontSize": "13px",
+                                "marginTop": "4px"}),
+            ], className="text-center", style={"padding": "28px 0"}),
+            colSpan=span,
         ))]
-    
+
+    # ── Card header (title + New button + search) ────────────────────────
+    header_right = []
+
+    # "New" button — only when role has 'new' permission
+    if "new" in allowed:
+        new_target = f"form_{entity.rstrip('s') if not entity.endswith('_tbl') else entity.replace('_tbl','')}_new"
+        # Special cases
+        _new_target_map = {
+            "receipts_tbl": "form_receipt_new",
+            "expenses_tbl": "form_expense_new",
+            "cashbook":     "form_receipt_new",
+        }
+        new_target = _new_target_map.get(entity, new_target)
+
+        header_right.append(dbc.Button(
+            [html.I(className="fas fa-plus me-1"), "New"],
+            id={"type": "btn-new", "entity": entity,
+                "target": new_target},
+            size="sm", color="success", outline=True,
+            style={"fontSize": "11px", "borderRadius": "8px",
+                   "fontWeight": "600"},
+        ))
+
+    header_right += [
+        dbc.Input(
+            id={"type": "list-search", "entity": entity},
+            placeholder="Search…", size="sm", debounce=True,
+            style={"width": "130px", "fontSize": "12px",
+                   "borderRadius": "8px"},
+        ),
+        dbc.Button(
+            [html.I(className="fas fa-download me-1"), "CSV"],
+            id={"type": "btn-csv-download", "entity": entity},
+            size="sm", color="secondary", outline=True,
+            style={"fontSize": "11px", "borderRadius": "8px"},
+        ),
+        dcc.Download(id={"type": "csv-download-trigger", "entity": entity}),
+        dcc.Download(id={"type": "xls-download-trigger", "entity": entity}),
+    ]
+
     return dbc.Card([
         dbc.CardHeader(
             html.Div([
                 html.Div([
-                    html.I(className=f"fas {icon} me-2", style={"color": COLORS["primary"]}),
-                    html.Strong(title),
-                    dbc.Badge(str(total_rows), color="primary", className="ms-2"),
+                    html.I(className=f"fas {icon} me-2",
+                           style={"color": COLORS["primary"]}),
+                    html.Strong(title, style={"fontSize": "13px"}),
+                    dbc.Badge(str(total_rows), color="primary",
+                              className="ms-2",
+                              style={"fontSize": "10px"}),
                 ], style={"display": "flex", "alignItems": "center"}),
-                html.Div([
-                    dbc.Button(
-                        [html.I(className="fas fa-plus me-1"), "New"],
-                        id={"type": "btn-new", "entity": entity},
-                        size="sm", color="success", outline=True,
-                        style={"fontSize": "11px", "borderRadius": "8px"},
-                    ),
-                    dbc.Input(
-                        id={"type": "list-search", "entity": entity},
-                        placeholder="Search…", size="sm", debounce=True,
-                        style={"width": "140px", "fontSize": "12px", "borderRadius": "8px"},
-                    ),
-                    dbc.Button(
-                        [html.I(className="fas fa-download me-1"), "CSV"],
-                        id={"type": "btn-csv-download", "entity": entity},
-                        size="sm", color="success", outline=True,
-                        style={"fontSize": "11px", "borderRadius": "8px"},
-                    ),
-                ], style={"display": "flex", "alignItems": "center", "gap": "6px"}),
-            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
-            style={"padding": "10px 16px", "background": "linear-gradient(180deg, rgba(255,255,255,0.85), rgba(248,251,255,0.95))"},
+                html.Div(header_right,
+                         style={"display": "flex", "alignItems": "center",
+                                "gap": "6px", "flexWrap": "wrap"}),
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center", "flexWrap": "wrap", "gap": "8px"}),
+            style={"padding": "10px 16px",
+                   "background": "linear-gradient(180deg,rgba(255,255,255,0.85),rgba(248,251,255,0.95))"},
         ),
         dbc.CardBody([
             html.Div(
                 dbc.Table([
-                    html.Thead(html.Tr(header_cells)),
+                    html.Thead(html.Tr(header_cells),
+                               style={"position": "sticky", "top": 0,
+                                      "zIndex": 1,
+                                      "background": "rgba(248,251,255,0.97)"}),
                     html.Tbody(body_rows),
-                ], hover=True, responsive=True, size="sm", style={"marginBottom": 0}),
-                style={"overflowX": "auto", "maxHeight": "420px", "overflowY": "auto"},
+                ], hover=True, responsive=True, size="sm",
+                   style={"marginBottom": 0}),
+                style={"overflowX": "auto", "maxHeight": "420px",
+                       "overflowY": "auto"},
             ),
+            # ── Pagination ──────────────────────────────────────────────
             html.Div([
-                html.Small(f"Page {page} of {total_pages}", style={"color": "#aaa", "fontSize": "11px"}),
+                html.Small(
+                    f"Showing {min((page-1)*page_size+1, total_rows)}–"
+                    f"{min(page*page_size, total_rows)} of {total_rows}",
+                    style={"color": "#aaa", "fontSize": "11px"},
+                ),
                 html.Div([
                     dbc.Button(
                         html.I(className="fas fa-chevron-left"),
                         id={"type": "list-page-prev", "entity": entity},
                         size="sm", disabled=(page <= 1),
-                        style={"fontSize": "11px"},
+                        style={"fontSize": "11px", "borderRadius": "8px"},
                     ),
-                    html.Span(f"{page} / {total_pages}", style={"padding": "0 10px", "fontSize": "12px"}),
+                    html.Span(f"{page} / {total_pages}",
+                              style={"padding": "0 12px", "fontSize": "12px",
+                                     "fontWeight": "600", "color": "#15304f"}),
                     dbc.Button(
                         html.I(className="fas fa-chevron-right"),
                         id={"type": "list-page-next", "entity": entity},
                         size="sm", disabled=(page >= total_pages),
-                        style={"fontSize": "11px"},
+                        style={"fontSize": "11px", "borderRadius": "8px"},
                     ),
-                ], style={"display": "flex", "alignItems": "center", "gap": "4px"}),
-            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
-                     "padding": "8px 0 0", "borderTop": "1px solid rgba(120,148,181,0.1)", "marginTop": "8px"}),
+                ], style={"display": "flex", "alignItems": "center",
+                          "gap": "4px"}),
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center", "padding": "10px 0 0",
+                      "borderTop": "1px solid rgba(120,148,181,0.1)",
+                      "marginTop": "10px"}),
         ], style={"padding": "12px"}),
-    ], style={"borderRadius": "16px", "border": "1px solid rgba(255,255,255,0.65)",
-             "boxShadow": "0 10px 30px rgba(15,23,42,0.08)", "overflow": "hidden"})
+    ], style={
+        "borderRadius": "16px",
+        "border": "1px solid rgba(255,255,255,0.65)",
+        "boxShadow": "0 10px 30px rgba(15,23,42,0.08)",
+        "overflow": "hidden",
+    })
 
 # ════════════════════════════════════════════════════════════════════════════
 # PROFILE CARD RENDERER
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_profile_card(card_id: str, title: str, icon: str,
-                       entity: str, record,
-                       fields: list[dict], actions: list[dict] | None = None,
-                       color: str = "#1d74d8", auth_data: dict | None = None) -> html.Div:
-    """Render profile card with image support."""
-    auth_data = auth_data or {}
-    user_role = auth_data.get("role", "guest")
+                        entity: str, record,
+                        fields: list[dict], actions: list[dict] | None = None,
+                        color: str = "#1d74d8",
+                        auth_data: dict | None = None) -> html.Div:
+    auth_data  = auth_data or {}
+    user_role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
-    
-    record_dict = record.to_dict(include_calculated=True) if hasattr(record, 'to_dict') else record
+    allowed    = _perms_for(user_role, entity)
+
+    record_dict = (record.to_dict(include_calculated=True)
+                   if hasattr(record, "to_dict") else record)
     pk_val = record_dict.get("id", "")
-    
-    # Determine society_id for image resolution
+
     if entity == "society":
         img_society_id = pk_val
     else:
-        img_society_id = record_dict.get("_image_society_id") or record_dict.get("society_id")
-    
-    # Build field rows
+        img_society_id = (record_dict.get("_image_society_id")
+                          or record_dict.get("society_id"))
+
+    # ── Fields ──────────────────────────────────────────────────────────────
     field_rows = []
     for f in fields:
         field_type = f.get("type", "text")
-        
         if field_type == "image":
             image_path = record_dict.get(f["field"])
             if image_path:
-                full_url = get_image_url(image_path, img_society_id, entity, pk_val)
-                field_rows.append(
+                full_url = get_image_url(image_path, img_society_id,
+                                         entity, pk_val)
+                field_rows.append(html.Div([
                     html.Div([
-                        html.Div([
-                            html.I(className="fas fa-image me-2", style={"color": "#aaa", "width": "14px"}),
-                            html.Span(f["label"], style={"color": "#7d8ea3", "fontSize": "11px", "fontWeight": "600"}),
-                        ], style={"marginBottom": "8px"}),
-                        html.Img(
-                            src=full_url,
-                            style={
-                                "maxWidth": "300px", "maxHeight": "200px",
-                                "borderRadius": "8px", "border": "1px solid #ddd",
-                                "objectFit": "contain", "background": "#fff", "padding": "4px",
-                                "paddingLeft": "22px",
-                            },
-                        ),
-                    ], style={"marginBottom": "14px"})
-                )
+                        html.I(className="fas fa-image me-2",
+                               style={"color": "#aaa", "width": "14px"}),
+                        html.Span(f["label"], style={"color": "#7d8ea3",
+                                                     "fontSize": "11px",
+                                                     "fontWeight": "600"}),
+                    ], style={"marginBottom": "8px"}),
+                    html.Img(src=full_url, style={
+                        "maxWidth": "300px", "maxHeight": "200px",
+                        "borderRadius": "8px", "border": "1px solid #ddd",
+                        "objectFit": "contain", "background": "#fff",
+                        "padding": "4px", "paddingLeft": "22px",
+                    }),
+                ], style={"marginBottom": "14px"}))
             continue
-        
-        # Regular field
+
         val = record_dict.get(f["field"])
         if val is None:
             val = "—"
         elif isinstance(val, bool):
-            val = "✓ Yes" if val else "✗ No"
+            val = html.Span("✓ Active" if val else "✗ Inactive",
+                            style={"color": "#17976e" if val else "#de5c52",
+                                   "fontWeight": "600"})
         elif isinstance(val, (date, datetime)):
-            val = val.strftime("%d %b %Y") if hasattr(val, 'strftime') else str(val)
+            val = val.strftime("%d %b %Y")
         elif isinstance(val, Decimal):
             val = f"₹{val:,.2f}"
         else:
             val = str(val)
-        
+
         field_rows.append(html.Div([
             html.Div([
-                html.I(className=f.get("icon", "fas fa-circle-dot"), style={"color": "#aaa", "width": "14px"}),
-                html.Span(f["label"], style={"color": "#7d8ea3", "fontSize": "11px", "fontWeight": "600"}),
+                html.I(className=f.get("icon", "fas fa-circle-dot"),
+                       style={"color": color, "width": "14px",
+                              "fontSize": "10px"}),
+                html.Span(f["label"],
+                          style={"color": "#7d8ea3", "fontSize": "11px",
+                                 "fontWeight": "600", "marginLeft": "6px"}),
             ], style={"marginBottom": "2px"}),
-            html.Div(val, style={"fontSize": "14px", "fontWeight": "500", "color": "#15304f", "paddingLeft": "22px"}),
+            html.Div(val, style={"fontSize": "14px", "fontWeight": "500",
+                                 "color": "#15304f", "paddingLeft": "22px"}),
         ], style={"marginBottom": "14px"}))
-    
-    # Action buttons
+
+    # ── Action buttons filtered by role ─────────────────────────────────────
     action_btns = []
     for act in (actions or []):
-        can_do = RBACManager.has_permission(
-            user_role,
-            f"{act.get('target_card', '')}",
-            Permission.EDIT,
-            society_id
-        )
-        if can_do:
-            action_btns.append(
-                dbc.Button(
-                    [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"), act["label"]],
-                    id={"type": "profile-action", "entity": entity, "pk": str(pk_val), "action": act.get("action_id", "")},
-                    n_clicks=0, color=act.get("color", "primary"), size="sm",
-                    className="me-2 mb-2", style={"borderRadius": "10px", "fontWeight": "600"},
-                )
-            )
-    
+        # Skip edit/delete actions for roles that don't have that permission
+        act_id = act.get("action_id", "")
+        if act_id == "edit" and "edit" not in allowed:
+            continue
+        if act_id == "delete" and "delete" not in allowed:
+            continue
+        action_btns.append(dbc.Button(
+            [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
+             act["label"]],
+            id={"type": "profile-action", "entity": entity, "pk": str(pk_val),
+                "action": act_id, "target": act.get("target_card", "")},
+            n_clicks=0, color=act.get("color", "primary"), size="sm",
+            className="me-2 mb-2",
+            style={"borderRadius": "10px", "fontWeight": "600"},
+        ))
+
     return dbc.Card([
         dbc.CardHeader(
             html.Div([
                 html.Div([
                     html.Div(
-                        html.I(className=f"fas {icon}", style={"color": "#fff", "fontSize": "16px"}),
+                        html.I(className=f"fas {icon}",
+                               style={"color": "#fff", "fontSize": "16px"}),
                         style={
-                            "width": "38px", "height": "38px", "borderRadius": "10px",
+                            "width": "38px", "height": "38px",
+                            "borderRadius": "10px",
                             "background": f"linear-gradient(135deg,{color},{color}aa)",
-                            "display": "flex", "alignItems": "center", "justifyContent": "center",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center",
                             "marginRight": "12px", "flexShrink": "0",
                         },
                     ),
                     html.Div([
                         html.Strong(title, style={"fontSize": "14px"}),
-                        html.Div(record_dict.get("subtitle", f"ID: {pk_val}"), style={"fontSize": "11px", "color": "#999"}),
+                        html.Div(f"ID: {pk_val}",
+                                 style={"fontSize": "11px", "color": "#999"}),
                     ]),
                 ], style={"display": "flex", "alignItems": "center"}),
-                dbc.Button(
-                    html.I(className="fas fa-edit"),
-                    id={"type": "profile-edit", "entity": entity, "pk": str(pk_val)},
-                    size="sm", color="primary", outline=True,
-                ),
-            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
-            style={"padding": "12px 16px", "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         dbc.CardBody([
             html.Div(field_rows),
-            html.Hr(style={"margin": "8px 0", "opacity": "0.3"}) if action_btns else None,
-            html.Div(action_btns, style={"display": "flex", "flexWrap": "wrap"}),
-        ], style={"padding": "16px", "maxHeight": "600px", "overflowY": "auto"}),
+            html.Hr(style={"margin": "8px 0", "opacity": "0.3"})
+            if action_btns else None,
+            html.Div(action_btns,
+                     style={"display": "flex", "flexWrap": "wrap"}),
+        ], style={"padding": "16px", "maxHeight": "600px",
+                  "overflowY": "auto"}),
     ], style={
         "borderRadius": "16px", "border": f"1px solid {color}22",
         "boxShadow": f"0 10px 30px {color}18",
@@ -425,35 +545,37 @@ def render_profile_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_form_card(card_id: str, title: str, icon: str,
-                    entity: str, fields: list[dict],
-                    submit_label: str = "Save",
-                    prefill: dict | None = None,
-                    color: str = "#17976e",
-                    society_id: int | None = None) -> html.Div:
-    """Generic form card with dynamic field types."""
+                     entity: str, fields: list[dict],
+                     submit_label: str = "Save",
+                     prefill: dict | None = None,
+                     color: str = "#17976e",
+                     society_id: int | None = None) -> html.Div:
     prefill = prefill or {}
-    current_pk = prefill.get("id") or ""
     form_rows = []
-    
+
     for f in fields:
-        fid = f["id"]
-        pre_val = prefill.get(fid)
-        ftype = f.get("type", "text")
+        fid      = f["id"]
+        pre_val  = prefill.get(fid)
+        ftype    = f.get("type", "text")
         required = f.get("required", False)
         label_txt = f["label"] + (" *" if required else "")
-        
+
         if ftype == "select":
-            opts = [{"label": o.title(), "value": o} for o in f.get("options", [])]
+            opts = [{"label": o.title(), "value": o}
+                    for o in f.get("options", [])]
             ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
-                options=opts, value=pre_val, placeholder=f"Select {f['label']}…",
-                clearable=not required, style={"fontSize": "13px"},
+                options=opts, value=pre_val,
+                placeholder=f"Select {f['label']}…",
+                clearable=not required,
+                style={"fontSize": "13px"},
             )
         elif ftype == "textarea":
             ctrl = dbc.Textarea(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 value=str(pre_val) if pre_val is not None else "",
-                placeholder=f["label"], rows=3, style={"fontSize": "13px", "borderRadius": "10px"},
+                placeholder=f["label"], rows=3,
+                style={"fontSize": "13px", "borderRadius": "10px"},
             )
         elif ftype == "date":
             ctrl = dcc.DatePickerSingle(
@@ -461,68 +583,134 @@ def render_form_card(card_id: str, title: str, icon: str,
                 date=str(pre_val) if pre_val else None,
                 style={"width": "100%"},
             )
+        elif ftype == "readonly":
+            ctrl = dbc.Input(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                value=str(pre_val) if pre_val is not None else "",
+                disabled=True,
+                style={"fontSize": "13px", "borderRadius": "10px",
+                       "background": "#f5f7fa"},
+            )
         elif ftype == "image_upload":
             ctrl = html.Div([
                 dcc.Upload(
-                    id={"type": "form-upload", "entity": entity, "field": fid},
+                    id={"type": "form-field", "entity": entity, "field": fid},
                     children=html.Div([
                         html.I(className="fas fa-cloud-upload-alt me-2"),
-                        "Drag & Drop or Click"
+                        "Drag & Drop or Click",
                     ]),
                     style={
-                        "width": "100%", "height": "80px", "lineHeight": "80px",
-                        "borderWidth": "2px", "borderStyle": "dashed", "borderRadius": "10px",
+                        "width": "100%", "height": "72px",
+                        "lineHeight": "72px", "borderWidth": "2px",
+                        "borderStyle": "dashed", "borderRadius": "10px",
                         "textAlign": "center", "borderColor": "#667eea",
-                        "background": "rgba(102,126,234,0.05)", "cursor": "pointer",
-                        "fontSize": "13px", "color": "#667eea",
+                        "background": "rgba(102,126,234,0.04)",
+                        "cursor": "pointer", "fontSize": "13px",
+                        "color": "#667eea",
                     },
                     multiple=False, accept="image/*",
                 ),
                 dcc.Input(
-                    id={"type": "form-field-hidden", "entity": entity, "field": fid},
+                    id={"type": "form-field-hidden", "entity": entity,
+                        "field": fid},
                     type="hidden", value=pre_val or "",
+                ),
+                html.Div(
+                    id={"type": "image-preview", "entity": entity,
+                        "field": fid},
+                    style={"marginTop": "6px"},
+                ),
+            ])
+        elif ftype == "account_dropdown_receipt":
+            ctrl = html.Div([
+                dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity, "field": fid},
+                    options=[], value=pre_val,
+                    placeholder="Select income account…",
+                    style={"fontSize": "13px"},
+                ),
+                dcc.Store(
+                    id={"type": "account-filter-store", "entity": entity,
+                        "field": fid},
+                    data={"filter": "Cr", "society_id": society_id},
+                ),
+            ])
+        elif ftype == "account_dropdown_expense":
+            ctrl = html.Div([
+                dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity, "field": fid},
+                    options=[], value=pre_val,
+                    placeholder="Select expense account…",
+                    style={"fontSize": "13px"},
+                ),
+                dcc.Store(
+                    id={"type": "account-filter-store", "entity": entity,
+                        "field": fid},
+                    data={"filter": "Dr", "society_id": society_id},
                 ),
             ])
         else:
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
-                type=ftype, value=str(pre_val) if pre_val is not None else "",
-                placeholder=f["label"], style={"fontSize": "13px", "borderRadius": "10px"},
+                type=ftype,
+                value=str(pre_val) if pre_val is not None else "",
+                placeholder=f["label"],
+                style={"fontSize": "13px", "borderRadius": "10px"},
             )
-        
+
+        # Store entity PK for image uploads
+        form_rows.append(
+            dcc.Input(
+                id={"type": "form-entity-pk", "entity": entity},
+                type="hidden",
+                value=str(prefill.get("id", "")),
+            ) if not form_rows else None  # only add once
+        )
+
         form_rows.append(dbc.Row([
             dbc.Col(
-                dbc.Label(label_txt, style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                dbc.Label(label_txt,
+                          style={"fontSize": "12px", "fontWeight": "500",
+                                 "color": "#555"}),
                 width=4, style={"paddingTop": "6px"},
             ),
             dbc.Col(ctrl, width=8),
         ], className="mb-2"))
-    
+
+    # Filter out None (the PK input was only added once)
+    form_rows = [r for r in form_rows if r is not None]
+
     return dbc.Card([
         dbc.CardHeader(
             html.Div([
                 html.Div(
-                    html.I(className=f"fas {icon}", style={"color": "#fff", "fontSize": "15px"}),
+                    html.I(className=f"fas {icon}",
+                           style={"color": "#fff", "fontSize": "15px"}),
                     style={
-                        "width": "34px", "height": "34px", "borderRadius": "9px",
+                        "width": "34px", "height": "34px",
+                        "borderRadius": "9px",
                         "background": f"linear-gradient(135deg,{color},{color}aa)",
-                        "display": "flex", "alignItems": "center", "justifyContent": "center",
+                        "display": "flex", "alignItems": "center",
+                        "justifyContent": "center",
                         "marginRight": "10px", "flexShrink": "0",
                     },
                 ),
                 html.Strong(title, style={"fontSize": "13px"}),
             ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "10px 16px", "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+            style={"padding": "10px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         dbc.CardBody([
             html.Div(form_rows),
             dbc.Button(
                 [html.I(className="fas fa-check me-2"), submit_label],
-                id={"type": "form-submit", "entity": entity, "card_id": card_id},
+                id={"type": "form-submit", "entity": entity,
+                    "card_id": card_id},
                 n_clicks=0, color="success", className="mt-3 w-100",
                 style={"borderRadius": "12px", "fontWeight": "700"},
             ),
-        ], style={"padding": "16px", "maxHeight": "480px", "overflowY": "auto"}),
+        ], style={"padding": "16px", "maxHeight": "520px",
+                  "overflowY": "auto"}),
     ], style={
         "borderRadius": "16px", "border": f"1px solid {color}22",
         "boxShadow": f"0 10px 30px {color}18",
@@ -535,29 +723,33 @@ def render_form_card(card_id: str, title: str, icon: str,
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_breadcrumb(nav_stack: list[dict]) -> html.Nav:
-    """Render navigation breadcrumb."""
     items = []
     for i, entry in enumerate(nav_stack):
         is_last = i == len(nav_stack) - 1
         label = entry.get("entity_label") or entry.get("label", "?")
-        
         if is_last:
             items.append(html.Li([
-                html.I(className="fas fa-circle me-1", style={"fontSize": "6px", "color": COLORS["primary"]}),
+                html.I(className="fas fa-circle me-1",
+                       style={"fontSize": "6px", "color": COLORS["primary"]}),
                 html.Span(label, style={"fontWeight": "700"}),
             ], className="breadcrumb-item active"))
         else:
             items.append(html.Li(
-                html.A(label, href="#", style={"color": COLORS["primary"], "textDecoration": "none"},
-                       id={"type": "breadcrumb", "index": i}, n_clicks=0),
+                html.A(label, href="#",
+                       style={"color": COLORS["primary"],
+                              "textDecoration": "none"},
+                       id={"type": "breadcrumb-click", "index": i},
+                       n_clicks=0),
                 className="breadcrumb-item",
             ))
-    
     return html.Nav(
-        html.Ol(items, className="breadcrumb", style={"margin": 0, "padding": 0}),
+        html.Ol(items, className="breadcrumb",
+                style={"margin": 0, "padding": 0}),
         style={
-            "background": "rgba(255,255,255,0.7)", "backdropFilter": "blur(8px)",
-            "padding": "8px 16px", "borderRadius": "12px", "marginBottom": "16px",
+            "background": "rgba(255,255,255,0.7)",
+            "backdropFilter": "blur(8px)",
+            "padding": "8px 16px", "borderRadius": "12px",
+            "marginBottom": "16px",
             "border": "1px solid rgba(255,255,255,0.5)",
         },
     )
@@ -566,157 +758,7 @@ def render_breadcrumb(nav_stack: list[dict]) -> html.Nav:
 # UTILITY
 # ════════════════════════════════════════════════════════════════════════════
 
-def model_to_display(record: any) -> dict:
-    """Convert OOP model to display dict."""
-    if hasattr(record, 'to_dict'):
+def model_to_display(record) -> dict:
+    if hasattr(record, "to_dict"):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
-
-# ════════════════════════════════════════════════════════════════════════════
-# CUSTOMIZE TAB - KPI Configuration
-# ════════════════════════════════════════════════════════════════════════════
-
-def render_customize_kpi_config() -> html.Div:
-    """Render KPI customization panel for Admin Portal."""
-    from app.dash_apps.drilldown import registry, loaders
-    
-    # Get available portals and KPIs
-    available_portals = ["admin", "apartment", "vendor", "security", "master"]
-    
-    return dbc.Card([
-        dbc.CardHeader(
-            html.Div([
-                html.I(className="fas fa-cog me-2", style={"color": COLORS["primary"]}),
-                html.Strong("Customize KPI Layout"),
-            ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "12px 16px", "background": f"linear-gradient(135deg,{COLORS['primary']}18,rgba(255,255,255,0.95))"},
-        ),
-        dbc.CardBody([
-            dbc.Row([
-                # ── Portal Selector ──
-                dbc.Col([
-                    dbc.Label("Select Portal", style={"fontSize": "12px", "fontWeight": "600"}),
-                    dcc.Dropdown(
-                        id="customize-portal-select",
-                        options=[{"label": p.title(), "value": p} for p in available_portals],
-                        value="admin",
-                        clearable=False,
-                        style={"fontSize": "13px"},
-                    ),
-                ], width=4),
-                
-                # ── Tab Selector ──
-                dbc.Col([
-                    dbc.Label("Select Tab", style={"fontSize": "12px", "fontWeight": "600"}),
-                    dcc.Dropdown(
-                        id="customize-tab-select",
-                        options=[
-                            {"label": "Overview", "value": "overview"},
-                            {"label": "Accounts", "value": "accounts"},
-                            {"label": "Events", "value": "events"},
-                            {"label": "Concerns", "value": "concerns"},
-                            {"label": "Settings", "value": "settings"},
-                        ],
-                        value="overview",
-                        clearable=False,
-                        style={"fontSize": "13px"},
-                    ),
-                ], width=4),
-                
-                # ── KPI Selector ──
-                dbc.Col([
-                    dbc.Label("Select KPI", style={"fontSize": "12px", "fontWeight": "600"}),
-                    dcc.Dropdown(
-                        id="customize-kpi-select",
-                        options=[
-                            {"label": "Apartments Total", "value": "kpi_apartments_total"},
-                            {"label": "Apartments with Dues", "value": "kpi_apartments_dues"},
-                            {"label": "Vendors Total", "value": "kpi_vendors_total"},
-                            {"label": "Security Staff", "value": "kpi_security_total"},
-                            {"label": "Open Concerns", "value": "kpi_concerns_open"},
-                            {"label": "Events", "value": "kpi_events_total"},
-                            {"label": "Cash in Hand", "value": "kpi_cash_in_hand"},
-                        ],
-                        value="kpi_apartments_total",
-                        clearable=False,
-                        style={"fontSize": "13px"},
-                    ),
-                ], width=4),
-            ], className="mb-4"),
-            
-            # ── Selected KPI Details ──
-            html.Hr(style={"margin": "16px 0"}),
-            
-            dbc.Row([
-                dbc.Col([
-                    dbc.Label("KPI Function SQL", style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
-                    dcc.Loading(
-                        dbc.Textarea(
-                            id="customize-kpi-sql",
-                            placeholder="SQL definition will appear here...",
-                            rows=10,
-                            style={
-                                "fontSize": "11px",
-                                "fontFamily": "monospace",
-                                "backgroundColor": "#f5f7fa",
-                                "border": "1px solid #ddd",
-                                "borderRadius": "8px",
-                                "color": "#2c3e50",
-                            },
-                            readOnly=True,
-                        ),
-                        type="default",
-                    ),
-                ], width=6),
-                
-                dbc.Col([
-                    dbc.Label("Profile Card Actions", style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
-                    html.Div(
-                        id="customize-actions-display",
-                        style={
-                            "fontSize": "11px",
-                            "backgroundColor": "#f5f7fa",
-                            "border": "1px solid #ddd",
-                            "borderRadius": "8px",
-                            "padding": "12px",
-                            "maxHeight": "300px",
-                            "overflowY": "auto",
-                            "color": "#2c3e50",
-                        },
-                        children="Select a KPI to see its profile card actions",
-                    ),
-                ], width=6),
-            ]),
-            
-            html.Hr(style={"margin": "16px 0"}),
-            
-            # ── Action Buttons ──
-            dbc.Row([
-                dbc.Col([
-                    dbc.Button(
-                        [html.I(className="fas fa-save me-2"), "Save Configuration"],
-                        id="btn-save-kpi-config",
-                        color="success",
-                        className="w-100",
-                        style={"borderRadius": "8px", "fontWeight": "600"},
-                    ),
-                ], width=6),
-                dbc.Col([
-                    dbc.Button(
-                        [html.I(className="fas fa-undo me-2"), "Reset to Default"],
-                        id="btn-reset-kpi-config",
-                        color="warning",
-                        outline=True,
-                        className="w-100",
-                        style={"borderRadius": "8px", "fontWeight": "600"},
-                    ),
-                ], width=6),
-            ]),
-            
-        ], style={"padding": "16px"}),
-    ], style={
-        "borderRadius": "16px",
-        "border": f"1px solid {COLORS['primary']}22",
-        "boxShadow": f"0 10px 30px {COLORS['primary']}18",
-    })
-
