@@ -1218,7 +1218,7 @@ BEGIN
     UNION ALL
     SELECT 'kpi_security_salaries_due', 'Security Salaries', 'fa-user-shield', 'admin', 'cashbook', 'fn_payments_list'
     UNION ALL
-    SELECT 'kpi_vendor_payments_due', 'Vendor Payments', 'fa-truck', 'admin', 'cashbook', 'fn_payments_list'
+    SELECT 'kpi_vendor_payables_due', 'Vendor Payments', 'fa-truck', 'admin', 'cashbook', 'fn_payments_list'
     UNION ALL
     SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-book-open', 'admin', 'settings', 'fn_accounts_list'
     UNION ALL

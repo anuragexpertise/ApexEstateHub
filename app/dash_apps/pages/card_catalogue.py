@@ -291,7 +291,7 @@ KPI_CARDS = {
         "group": "unpaid wages",
     },
     
-    "kpi_vendor_payments_due": {
+    "kpi_vendor_payables_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payments
