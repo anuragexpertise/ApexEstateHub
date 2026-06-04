@@ -93,7 +93,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_gate_logs":          {"target": "list_gate_logs",   "label": "Gate Logs Today"},
     "kpi_receipts_month":     {"target": "list_receipts_tbl","label": "Receipts This Month"},
     "kpi_expenses_month":     {"target": "list_expenses_tbl","label": "Expenses This Month"},
-    "kpi_balance":            {"target": "list_cashbook",    "label": "Cashbook"},
+    "kpi_bank_balance":            {"target": "list_cashbook",    "label": "Cashbook"},
     "kpi_societies_total":    {"target": "list_societies",   "label": "All Societies"},
     "kpi_societies_9Apts":    {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "9Apts"}},
     "kpi_societies_99Apts":   {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "99Apts"}},

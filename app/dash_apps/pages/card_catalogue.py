@@ -347,7 +347,7 @@ KPI_CARDS = {
         "group": "debits",
     },
     
-    "kpi_balance": {
+    "kpi_bank_balance": {
         "query": """
             WITH receipts AS (
                 SELECT COALESCE(SUM(t.amount), 0) AS amount
@@ -1135,7 +1135,7 @@ DEFAULT_LAYOUTS = {
         "kpi_apartments_total",
         "kpi_apartments_dues",
         "kpi_receipts_month",
-        "kpi_balance",
+        "kpi_bank_balance",
     ],
     "apartment": [
         "kpi_apartments_no_dues",

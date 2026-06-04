@@ -22,7 +22,15 @@ CREATE TABLE IF NOT EXISTS societies (
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
     secretary_sign VARCHAR(100),
-    plan VARCHAR(20) NOT NULL DEFAULT 'Free' CHECK (plan IN ('Free', '9Apts', '99Apts', '999Apts', 'Unlimited')),
+    plan VARCHAR(20) NOT NULL DEFAULT 'Free' CHECK (
+        plan IN (
+            'Free',
+            '9Apts',
+            '99Apts',
+            '999Apts',
+            'Unlimited'
+        )
+    ),
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     arrear_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
@@ -37,7 +45,14 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     pattern_hash TEXT,
     name VARCHAR(100),
-    role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'apartment', 'vendor', 'security')),
+    role VARCHAR(20) NOT NULL CHECK (
+        role IN (
+            'admin',
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
     linked_id INT,
     login_method VARCHAR(20) DEFAULT 'password',
     push_subscription TEXT,
@@ -100,12 +115,27 @@ CREATE TABLE IF NOT EXISTS payments (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    entity_type VARCHAR(20) CHECK (entity_type IN ('apartment', 'vendor', 'security', 'other')),
+    entity_type VARCHAR(20) CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security',
+            'other'
+        )
+    ),
     amount NUMERIC(10, 2) NOT NULL,
     payment_type VARCHAR(50),
     payment_method VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'verified', 'failed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'verified',
+            'failed',
+            'cancelled'
+        )
+    ),
     due_date DATE,
     paid_at TIMESTAMP,
     source_table VARCHAR(50),
@@ -178,7 +208,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     tab_name VARCHAR(20),
     header VARCHAR(50),
     parent_account_id INT,
-    drcr_account VARCHAR(2) CHECK (drcr_account IN ('Dr', 'Cr', NULL)),
+    drcr_account VARCHAR(2) CHECK (
+        drcr_account IN ('Dr', 'Cr', NULL)
+    ),
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
     bf_amount NUMERIC(12, 2) DEFAULT 0.00,
@@ -197,7 +229,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     entity_id INTEGER,
     acc_particulars VARCHAR(100),
     amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(6) DEFAULT 'cash' CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')),
+    mode VARCHAR(6) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
     payment_gateway_ID VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'paid',
     created_by INTEGER REFERENCES users (id),
@@ -220,12 +261,24 @@ CREATE TABLE IF NOT EXISTS receivables (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT NOT NULL,
-    entity_type VARCHAR(20) NOT NULL CHECK (entity_type IN ('apartment', 'vendor', 'security')),
+    entity_type VARCHAR(20) NOT NULL CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
     charge_type VARCHAR(50) NOT NULL,
     description TEXT,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
     due_date DATE,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
     source_table VARCHAR(50),
     source_id INT,
     confirmed_by INT REFERENCES users (id),
@@ -280,7 +333,12 @@ CREATE TABLE IF NOT EXISTS expenses (
     user_id INT REFERENCES users (id),
     entity_id INT,
     entity_type VARCHAR(20) CHECK (
-        entity_type IN ('vendor', 'security', 'other','assets')
+        entity_type IN (
+            'vendor',
+            'security',
+            'other',
+            'assets'
+        )
     ),
     expense_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
@@ -394,13 +452,21 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 -- ════════════════════════════════════════════════════════════════
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
 CREATE INDEX IF NOT EXISTS idx_users_society_role ON users (society_id, role);
+
 CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_apartments_active ON apartments (society_id, active);
+
 CREATE INDEX IF NOT EXISTS idx_vendors_society ON vendors (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_security_society ON security_staff (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);
+
 CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments (society_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, status);
@@ -408,8 +474,11 @@ CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, 
 CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns (society_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access (society_id, time_in);
 
 CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster (society_id, roster_date);
@@ -1020,7 +1089,7 @@ LANGUAGE SQL STABLE AS $$
     UNION ALL SELECT 'kpi_concerns_open', 'Open Concerns', 'fa-hand-point-up', '#de5c52', 'number', 'Concerns', 'admin', 'concerns'
     UNION ALL SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', '#17976e', 'currency', 'Cashbook', 'admin', 'cashbook'
     UNION ALL SELECT 'kpi_expenses_month', 'Expenses (Month)', 'fa-wallet', '#de5c52', 'currency', 'Cashbook', 'admin', 'cashbook'
-    UNION ALL SELECT 'kpi_balance', 'Current Balance', 'fa-coins', '#2c3e50', 'currency', 'Cashbook', 'admin', 'cashbook'
+    UNION ALL SELECT 'kpi_bank_balance', 'Current Balance', 'fa-coins', '#2c3e50', 'currency', 'Cashbook', 'admin', 'cashbook'
     UNION ALL SELECT 'kpi_cash_in_hand', 'Cash in Hand', 'fa-money-bill-wave', '#27ae60', 'currency', 'Cashbook', 'admin', 'cashbook'
     UNION ALL SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-book-open', '#6c5ce7', 'number', 'Settings', 'admin', 'settings'
     UNION ALL SELECT 'kpi_apt_charges', 'Apartment Charges', 'fa-rupee-sign', '#1859b8', 'number', 'Settings', 'admin', 'settings'
@@ -1096,9 +1165,23 @@ VALUES (0, 'Master', 'Unlimited', '2099-12-31'::DATE, CURRENT_DATE)
 ON CONFLICT DO NOTHING;
 
 -- Master Admin User
-INSERT INTO users (society_id, email, password_hash, role, is_master_admin, login_method)
-VALUES (NULL, 'admin@estatehub.local', 'placeholder_hash', 'admin', TRUE, 'password')
-ON CONFLICT (email) DO NOTHING;
+INSERT INTO
+    users (
+        society_id,
+        email,
+        password_hash,
+        role,
+        is_master_admin,
+        login_method
+    )
+VALUES (
+        NULL,
+        'admin@estatehub.local',
+        'placeholder_hash',
+        'admin',
+        TRUE,
+        'password'
+    ) ON CONFLICT (email) DO NOTHING;
 
 -- ════════════════════════════════════════════════════════════════
 -- END OF FIXED SCHEMA

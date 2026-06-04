@@ -31,7 +31,7 @@ KPI_PORTAL_MAP = {
     # ADMIN PORTAL - Cashbook tab
     "kpi_receipts_month":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
     "kpi_expenses_month":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_balance":                 {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
+    "kpi_bank_balance":                 {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
     "kpi_cash_in_hand":            {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
     
     # ADMIN PORTAL - Settings tab

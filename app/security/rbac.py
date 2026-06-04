@@ -45,7 +45,7 @@ class RBACManager:
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
             "kpi_expenses_month": {Permission.VIEW},
-            "kpi_balance": {Permission.VIEW},
+            "kpi_bank_balance": {Permission.VIEW},
             "kpi_cash_in_hand": {Permission.VIEW},
             
             # Enroll Tab
@@ -95,7 +95,7 @@ class RBACManager:
             "kpi_events_total": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
-            "kpi_balance": {Permission.VIEW},
+            "kpi_bank_balance": {Permission.VIEW},
             
             # Owner Cashbook
             "list_cashbook": {Permission.VIEW},
@@ -117,7 +117,7 @@ class RBACManager:
             "kpi_concerns_open": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
-            "kpi_balance": {Permission.VIEW},
+            "kpi_bank_balance": {Permission.VIEW},
             
             # Vendor Cashbook
             "list_cashbook": {Permission.VIEW},

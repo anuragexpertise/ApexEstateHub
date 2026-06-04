@@ -1206,7 +1206,7 @@ BEGIN
     UNION ALL
     SELECT 'kpi_cash_in_hand', 'Cash in Hand', 'fa-money-bill', 'admin', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_balance', 'Current Balance', 'fa-wallet', 'admin', 'cashbook', 'fn_cashbook_list'
+    SELECT 'kpi_bank_balance', 'Current Balance', 'fa-wallet', 'admin', 'cashbook', 'fn_cashbook_list'
     UNION ALL
     SELECT 'kpi_receivables_total', 'Total Receivables', 'fa-hand-holding-usd', 'admin', 'cashbook', 'fn_receivables_list'
     UNION ALL
@@ -1264,13 +1264,13 @@ BEGIN
     UNION ALL
     SELECT 'kpi_receipts_month', 'Paid (Month)', 'fa-receipt', 'apartment', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_balance', 'Balance', 'fa-wallet', 'apartment', 'cashbook', 'fn_cashbook_list'
+    SELECT 'kpi_bank_balance', 'Balance', 'fa-wallet', 'apartment', 'cashbook', 'fn_cashbook_list'
     UNION ALL
     SELECT 'kpi_vendors_dues', 'Pending Dues', 'fa-rupee-sign', 'vendor', 'dashboard', 'fn_vendors_list'
     UNION ALL
     SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'vendor', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_balance', 'Balance', 'fa-wallet', 'vendor', 'cashbook', 'fn_cashbook_list'
+    SELECT 'kpi_bank_balance', 'Balance', 'fa-wallet', 'vendor', 'cashbook', 'fn_cashbook_list'
     UNION ALL
     SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'security', 'pass_evaluation', 'fn_gate_logs'
     UNION ALL
