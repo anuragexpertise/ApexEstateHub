@@ -55,24 +55,24 @@ class RBACManager:
             "kpi_sec_charges": {Permission.VIEW},
             
             # Lists
-            "list_apartments": {Permission.VIEW},
-            "list_vendors": {Permission.VIEW},
-            "list_security": {Permission.VIEW},
-            "list_events": {Permission.VIEW},
-            "list_concerns": {Permission.VIEW},
-            "list_accounts": {Permission.VIEW},
-            "list_gate_logs": {Permission.VIEW},
-            "list_receipts_tbl": {Permission.VIEW},
-            "list_expenses_tbl": {Permission.VIEW},
+            "list_apartments": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_vendors": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_security": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_events": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_concerns": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_accounts": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_gate_logs": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_receipts_tbl": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_expenses_tbl": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_cashbook": {Permission.VIEW},
             
             # Profiles
-            "profile_apartment": {Permission.VIEW, Permission.EDIT},
-            "profile_vendor": {Permission.VIEW, Permission.EDIT},
-            "profile_security": {Permission.VIEW, Permission.EDIT},
+            "profile_apartment": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "profile_vendor": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "profile_security": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "profile_event": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
-            "profile_concern": {Permission.VIEW, Permission.EDIT},
-            "profile_account": {Permission.VIEW, Permission.EDIT},
+            "profile_concern": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "profile_account": {Permission.VIEW},
             
             # Forms
             "form_apartment_new": {Permission.CREATE},
