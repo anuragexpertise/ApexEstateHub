@@ -181,6 +181,8 @@ def register_shell_callbacks(app):
         if not cookie or not cookie.get("society_id"):
             raise PreventUpdate
         sid = cookie["society_id"]
+        if options is None:
+            raise PreventUpdate
         if options and not any(o.get("value") == sid for o in options):
             raise PreventUpdate
         auth = {"society_id": sid, "authenticated": False}
@@ -203,6 +205,8 @@ def register_shell_callbacks(app):
         if not auth.get("society_id"):
             raise PreventUpdate
         if current_children:          # already injected
+            raise PreventUpdate
+        if options is None:
             raise PreventUpdate
 
         sid = auth["society_id"]
