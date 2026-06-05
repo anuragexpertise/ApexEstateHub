@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 def get_societies() -> list:
     try:
-        return db.execute(
+        return db._execute(
             "SELECT id, name, email, phone, plan, plan_validity FROM societies ORDER BY name",
             fetch_all=True,
         ) or []
@@ -25,7 +25,7 @@ def get_societies() -> list:
 
 def get_society_details(society_id: int) -> dict | None:
     try:
-        return db.execute(
+        return db._execute(
             "SELECT * FROM societies WHERE id = :sid",
             {"sid": society_id},
             fetch_one=True,
@@ -38,7 +38,7 @@ def get_society_details(society_id: int) -> dict | None:
 def create_society(data: dict) -> int | None:
     """Create society + admin user. Returns new society id or None."""
     try:
-        result = db.execute(
+        result = db._execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
                 plan,plan_validity,arrear_start_date)
@@ -73,7 +73,7 @@ def create_society(data: dict) -> int | None:
 
 def create_society_admin(society_id: int, email: str, password: str) -> int | None:
     try:
-        result = db.execute(
+        result = db._execute(
             """INSERT INTO users
                (society_id,email,password_hash,role,login_method)
                VALUES (:sid,:email,:ph,'admin','password')
@@ -91,7 +91,7 @@ def create_society_admin(society_id: int, email: str, password: str) -> int | No
 
 def update_society(society_id: int, data: dict) -> bool:
     try:
-        db.execute(
+        db._execute(
             """UPDATE societies
                SET name=:name, email=:email, phone=:phone, address=:address,
                    secretary_name=:sec_name, secretary_phone=:sec_phone
@@ -114,7 +114,7 @@ def update_society(society_id: int, data: dict) -> bool:
 
 def delete_society(society_id: int) -> bool:
     try:
-        db.execute("DELETE FROM societies WHERE id = :sid", {"sid": society_id})
+        db._execute("DELETE FROM societies WHERE id = :sid", {"sid": society_id})
         return True
     except Exception:
         log.exception("delete_society error")

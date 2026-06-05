@@ -137,7 +137,7 @@ def register_login_callbacks(app):
             raise PreventUpdate
         # Verify the is_master_admin flag exists first (cheap guard)
         try:
-            row = db.execute(
+            row = db._execute(
                 "SELECT id FROM users WHERE email = :e AND is_master_admin = TRUE",
                 {"e": email.strip()},
                 fetch_one=True,

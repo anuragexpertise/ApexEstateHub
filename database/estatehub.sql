@@ -1244,7 +1244,7 @@ BEGIN
     UNION ALL
     SELECT 'kpi_societies_999Apts', '999Apts Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
     UNION ALL
-    SELECT 'kpi_societies_unlimited', 'Unlimited Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
+    SELECT 'kpi_societies_unlimited', 'unlimited Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
     UNION ALL
     SELECT 'kpi_master_apartments_total', 'All Apartments', 'fa-home', 'master', 'dashboard', 'fn_apartments_list'
     UNION ALL
@@ -1385,14 +1385,14 @@ LANGUAGE SQL STABLE AS $$
     ORDER BY created_at DESC
 $$;
 
-CREATE OR REPLACE FUNCTION fn_receivables_list(p_society_id INT, p_status VARCHAR DEFAULT 'pending')
-RETURNS TABLE (id INT, entity_type VARCHAR, entity_id INT, amount NUMERIC, due_date DATE, status VARCHAR, description TEXT)
-LANGUAGE SQL STABLE AS $$
-    SELECT id, entity_type, entity_id, amount, due_date, status, description
-    FROM receivables
-    WHERE society_id = p_society_id AND status = p_status
-    ORDER BY due_date ASC
-$$;
+-- CREATE OR REPLACE FUNCTION fn_receivables_list(p_society_id INT, p_status VARCHAR DEFAULT 'pending')
+-- RETURNS TABLE (id INT, entity_type VARCHAR, entity_id INT, amount NUMERIC, due_date DATE, status VARCHAR, description TEXT)
+-- LANGUAGE SQL STABLE AS $$
+--     SELECT id, entity_type, entity_id, amount, due_date, status, description
+--     FROM receivables
+--     WHERE society_id = p_society_id AND status = p_status
+--     ORDER BY due_date ASC
+-- $$;
 
 CREATE OR REPLACE FUNCTION fn_attendance_list(p_society_id INT)
 RETURNS TABLE (id INT, security_id INT, time_in TIMESTAMP, time_out TIMESTAMP, status VARCHAR)

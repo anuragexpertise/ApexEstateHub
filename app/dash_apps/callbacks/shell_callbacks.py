@@ -57,10 +57,10 @@ def register_shell_callbacks(app):
         Output("society-dropdown", "disabled"),
         Output("login-db-error", "children"),
         Output("login-db-error", "style"),
-        Input("login-modal", "is_open"),
+        Input("url", "pathname"),
         prevent_initial_call=False,
     )
-    def load_societies(_is_open):
+    def load_societies(_pathname):
         log.info("load_societies fired")
         _err_style = {
             "display": "block", "padding": "8px",
@@ -68,7 +68,7 @@ def register_shell_callbacks(app):
             "fontSize": "12px",
         }
         try:
-            rows = db.execute(
+            rows = db._execute(
                 """
                 SELECT id, name, plan, plan_validity
                 FROM societies
@@ -303,7 +303,7 @@ def register_shell_callbacks(app):
         db_error = None
         if society_id:
             try:
-                soc = db.execute(
+                soc = db._execute(
                     "SELECT name, logo FROM societies WHERE id = :sid",
                     {"sid": society_id},
                     fetch_one=True,
@@ -430,7 +430,7 @@ def register_shell_callbacks(app):
             return no_update
         
         try:
-            db.execute("SELECT 1", fetch_one=True)
+            db._execute("SELECT 1", fetch_one=True)
             return no_update
         except Exception as e:
             error_str = str(e).lower()

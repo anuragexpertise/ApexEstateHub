@@ -41,7 +41,7 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
     """Fetch user row by email + society scope."""
     try:
         if society_id is None:
-            return db.execute(
+            return db._execute(
                 """SELECT id, email, role, society_id, linked_id,
                           password_hash, pin_hash, pattern_hash, push_subscription
                    FROM users
@@ -50,7 +50,7 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
                 {"email": email},
                 fetch_one=True,
             )
-        return db.execute(
+        return db._execute(
             """SELECT id, email, role, society_id, linked_id,
                       password_hash, pin_hash, pattern_hash, push_subscription
                FROM users
@@ -116,7 +116,7 @@ def request_password_reset(email: str,
             q += " AND society_id = :sid"
             p["sid"] = society_id
 
-        user = db.execute(q, p, fetch_one=True)
+        user = db._execute(q, p, fetch_one=True)
         if not user:
             return False, "No account found with that email.", None
 
@@ -124,7 +124,7 @@ def request_password_reset(email: str,
         hashed = generate_password_hash(plain)
         expiry = datetime.now() + timedelta(hours=1)
 
-        db.execute(
+        db._execute(
             """UPDATE users SET reset_token = :tok, reset_token_expiry = :exp
                WHERE id = :uid""",
             {"tok": hashed, "exp": expiry, "uid": user["id"]},
@@ -138,7 +138,7 @@ def request_password_reset(email: str,
 def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
     """Match plain_token against stored hashes, then update password."""
     try:
-        rows = db.execute(
+        rows = db._execute(
             """SELECT id, reset_token FROM users
                WHERE reset_token IS NOT NULL AND reset_token_expiry > NOW()""",
             fetch_all=True,
@@ -151,7 +151,7 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
         if not uid:
             return False, "Invalid or expired reset token."
 
-        db.execute(
+        db._execute(
             """UPDATE users
                SET password_hash = :ph, reset_token = NULL, reset_token_expiry = NULL
                WHERE id = :uid""",

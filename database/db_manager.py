@@ -9,10 +9,10 @@ before execution so every caller can use the same syntax.
 Usage:
     from database.db_manager import db
 
-    row  = db.execute("SELECT * FROM societies WHERE id = :id",
+    row  = db._execute("SELECT * FROM societies WHERE id = :id",
                        {"id": 1}, fetch_one=True)
-    rows = db.execute("SELECT * FROM societies", fetch_all=True)
-    db.execute("INSERT INTO societies (name) VALUES (:name)",
+    rows = db._execute("SELECT * FROM societies", fetch_all=True)
+    db._execute("INSERT INTO societies (name) VALUES (:name)",
                {"name": "Test"})
 """
 
