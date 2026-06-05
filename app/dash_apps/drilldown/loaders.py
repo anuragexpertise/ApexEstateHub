@@ -15,6 +15,13 @@ from app.models import (
 )
 
 PAGE_SIZE = 15
+
+DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operationalerror"]
+
+def _is_db_error(e: Exception) -> bool:
+    """Check if exception indicates a database connection or query error."""
+    error_str = str(e).lower()
+    return any(kw in error_str for kw in DB_ERROR_KEYWORDS)
  
 def _society(filters: dict):
     return filters.get("society_id")
@@ -38,13 +45,14 @@ def load_list(entity: str, filters: dict,
     """
     Return (rows, total_count) for the given entity + filters.
     Rows are plain dicts.
+    Returns ([], 0) on database error.
     """
     sid    = _society(filters)
     apt_id = _apt_id(filters)
     ven_id = _ven_id(filters)
     offset = (page - 1) * page_size
     s      = f"%{search}%" if search else None
- 
+  
     try:
         # ── APARTMENTS ──────────────────────────────────────────────────────
         if entity == "apartments":

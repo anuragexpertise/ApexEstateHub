@@ -63,6 +63,20 @@ from app.dash_apps.drilldown.registry import (
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 from app.security.rbac import RBACManager, Permission
 
+DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operationalerror"]
+
+def _is_db_error(msg: str) -> bool:
+    """Check if message indicates a database connection or query error."""
+    if not msg:
+        return False
+    msg_lower = str(msg).lower()
+    return (
+        "no database connection" in msg_lower
+        or "error in processing" in msg_lower
+        or "error in querying" in msg_lower
+        or "operationalerror" in msg_lower
+    )
+
 # ═══════════════════════════════════════════════════════════════════════════
 # ENTITY METADATA  ─ field specs for list, profile, and form cards (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -757,12 +771,13 @@ def register_drilldown_callbacks(app):
             pk     = id_dict.get("pk")
             loaders.delete_entity(entity, pk, sid)
             store["refresh"] = True
-            content, bc = _render_current(store, auth)
+            content, bc, db_err = _render_current(store, auth)
             store["refresh"] = False
             hide_kpis = len(store.get("stack", [])) > 1
+            toast_data = {"type": "error", "message": db_err} if db_err else no_update
             return store, content, bc, \
                    {"display": "none"} if hide_kpis else {"display": "grid"}, \
-                   no_update
+                   toast_data
  
         # ── Profile action ────────────────────────────────────────────────
         elif trig_type == "profile-action":
@@ -855,13 +870,14 @@ def register_drilldown_callbacks(app):
                 prefill={},
             )
             hide_kpis = True
- 
+  
         else:
             hide_kpis = len(store.get("stack", [])) > 1
- 
-        content, bc = _render_current(store, auth)
+  
+        content, bc, db_err = _render_current(store, auth)
         kpi_style   = {"display": "none"} if hide_kpis else {"display": "grid"}
-        return store, content, bc, kpi_style, no_update
+        toast_data = {"type": "error", "message": db_err} if db_err else no_update
+        return store, content, bc, kpi_style, toast_data
  
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
     @app.callback(
@@ -950,10 +966,11 @@ def register_drilldown_callbacks(app):
             store["refresh"] = True
             hide_kpis = len(store.get("stack", [])) > 1
  
-        content, bc = _render_current(store or {}, auth)
+        content, bc, db_err = _render_current(store or {}, auth)
         store["refresh"] = False
+        toast_msg = msg if msg else db_err
         return store, content, bc, \
-               {"type": "success", "message": msg}, \
+               {"type": "success", "message": toast_msg} if toast_msg else no_update, \
                {"display": "none"} if hide_kpis else {"display": "grid"}
  
     # ── 3. CSV DOWNLOAD ───────────────────────────────────────────────────────
@@ -1007,7 +1024,7 @@ def register_drilldown_callbacks(app):
 # ════════════════════════════════════════════════════════════════════════════
 # INTERNAL RENDER ENGINE  — now forwards auth to renderers
 # ════════════════════════════════════════════════════════════════════════════
- 
+
 def _render_current(store: dict, auth: dict) -> tuple:
     active  = store.get("active_card", "")
     filters = dict(nav_state.get_filters(store))
@@ -1015,13 +1032,19 @@ def _render_current(store: dict, auth: dict) -> tuple:
     sid     = (auth or {}).get("society_id")
     if sid:
         filters["society_id"] = sid
- 
+  
     # Portal-level data scoping
     filters = _apply_portal_filters(filters, auth or {})
- 
-    content    = _render_card(active, filters, prefill, store, auth)
-    breadcrumb = renderers.render_breadcrumb(store.get("stack", []))
-    return content, breadcrumb
+  
+    try:
+        content    = _render_card(active, filters, prefill, store, auth)
+        breadcrumb = renderers.render_breadcrumb(store.get("stack", []))
+        return content, breadcrumb, None
+    except Exception as e:
+        error_str = str(e).lower()
+        if any(kw in error_str for kw in DB_ERROR_KEYWORDS):
+            return _empty_state("Database connection error"), [], str(e)
+        return _empty_state(f"Error: {str(e)[:100]}"), [], None
  
  
 def _render_card(card_id: str, filters: dict, prefill: dict,
