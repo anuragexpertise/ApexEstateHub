@@ -125,7 +125,7 @@ def request_password_reset(email: str,
         expiry = datetime.now() + timedelta(hours=1)
 
         db._execute(
-            """UPDATE users SET reset_token = :tok, reset_token_expiry = :exp
+            """UPDATE users SET reset_token = :tok, reset_token_expires = :exp
                WHERE id = :uid""",
             {"tok": hashed, "exp": expiry, "uid": user["id"]},
         )
@@ -140,7 +140,7 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
     try:
         rows = db._execute(
             """SELECT id, reset_token FROM users
-               WHERE reset_token IS NOT NULL AND reset_token_expiry > NOW()""",
+               WHERE reset_token IS NOT NULL AND reset_token_expires > NOW()""",
             fetch_all=True,
         ) or []
 
@@ -153,7 +153,7 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
 
         db._execute(
             """UPDATE users
-               SET password_hash = :ph, reset_token = NULL, reset_token_expiry = NULL
+               SET password_hash = :ph, reset_token = NULL, reset_token_expires = NULL
                WHERE id = :uid""",
             {"ph": generate_password_hash(new_password), "uid": uid},
         )

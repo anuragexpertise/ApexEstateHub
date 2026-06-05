@@ -198,7 +198,7 @@ def test_query(all_societies):
         FROM societies 
         WHERE 
             plan = 'Free' 
-            OR (plan IN ('9Apts', '99Apts', '999Apts', 'Unlimited') 
+            OR (plan IN ('9Apts', '99Apts', '999Apts', 'unlimited') 
                 AND plan_validity >= CURRENT_DATE)
         ORDER BY name ASC
         """
@@ -213,7 +213,7 @@ def test_query(all_societies):
             print()
             print("   Expected criteria:")
             print("   • plan = 'Free'")
-            print("   • OR plan IN ('9Apts', '99Apts', '999Apts', 'Unlimited')")
+            print("   • OR plan IN ('9Apts', '99Apts', '999Apts', 'unlimited')")
             print("      AND plan_validity >= TODAY")
             print(f"\n   Today's date: {date.today()}")
             print("\n   Analysis of each society:")
@@ -228,7 +228,7 @@ def test_query(all_societies):
                 else:
                     date_ok = str(valid_date) >= str(date.today())
                 
-                paid_plan = plan_str in ['9Apts', '99Apts', '999Apts', 'Unlimited']
+                paid_plan = plan_str in ['9Apts', '99Apts', '999Apts', 'unlimited']
                 
                 if plan_match:
                     print_ok(f"   {s['name']:<35} - matches Free plan")
@@ -237,7 +237,7 @@ def test_query(all_societies):
                 else:
                     reasons = []
                     if not plan_match and plan_str != 'Free':
-                        reasons.append(f"plan='{plan_str}' (not 'Free' or 9Apts|99Apts|999Apts|Unlimited)")
+                        reasons.append(f"plan='{plan_str}' (not 'Free' or 9Apts|99Apts|999Apts|unlimited)")
                     if paid_plan and not date_ok:
                         reasons.append(f"plan expired ({valid_date})")
                     print_warning(f"   {s['name']:<35} - {', '.join(reasons)}")

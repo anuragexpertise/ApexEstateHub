@@ -74,7 +74,7 @@ def register_shell_callbacks(app):
                 FROM societies
                 WHERE plan = 'Free'
                    OR (
-                       plan IN ('9Apts', '99Apts', '999Apts', 'Unlimited')
+                       plan IN ('9Apts', '99Apts', '999Apts', 'unlimited')
                        AND plan_validity >= CURRENT_DATE
                    )
                 ORDER BY name

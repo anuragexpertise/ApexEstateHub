@@ -219,7 +219,7 @@ def master_portal_page() -> html.Div:
                 _kpi("kpi_societies_9Apts",   "fa-star",           "#17976e", "9Apts Plan",    "active subscriptions"),
                 _kpi("kpi_societies_99Apts",   "fa-star",           "#17976e", "99Apts Plan",    "active subscriptions"),
                 _kpi("kpi_societies_999Apts",   "fa-star",           "#17976e", "999Apts Plan",    "active subscriptions"),
-                _kpi("kpi_societies_unlimited",   "fa-star",           "#17976e", "Unlimited Plan",    "active subscriptions"),
+                _kpi("kpi_societies_unlimited",   "fa-star",           "#17976e", "unlimited Plan",    "active subscriptions"),
                 _kpi("kpi_master_apartments_total", "fa-home",           "#1859b8", "Apartments",   "across all societies"),
                 _kpi("kpi_master_vendors_total",    "fa-truck",          "#b98a07", "Vendors"),
                 _kpi("kpi_master_security_total",   "fa-user-shield",    "#b63b3b", "Security Staff"),

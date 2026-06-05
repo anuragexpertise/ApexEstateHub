@@ -62,17 +62,6 @@ def register_all_callbacks(app):
         print(f"  ❌ card_catalogue_callbacks FAILED: {e}")
         errors.append(f"card_catalogue_callbacks: {e}")
 
-    # ── 5. Navigation callbacks ─────────────────────────────────────────
-    try:
-        from app.dash_apps.callbacks.navigation_callbacks import register_navigation_callbacks
-        register_navigation_callbacks(app)
-        print("  ✅ navigation_callbacks registered (stack push/pop/reset)")
-    except ImportError:
-        print("  ⚠️  navigation_callbacks not found — skipping")
-    except Exception as e:
-        print(f"  ❌ navigation_callbacks FAILED: {e}")
-        errors.append(f"navigation_callbacks: {e}")
-
     # ── 6. Admin callbacks ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.admin_callbacks import register_admin_callbacks
