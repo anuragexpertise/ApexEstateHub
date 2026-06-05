@@ -190,7 +190,7 @@ def register_card_catalogue_callbacks(app):
         Input("url", "pathname"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def refresh_kpi_values(pathname, kpi_ids, auth_data):
         print(f"\n🔄 Refreshing {len(kpi_ids) if kpi_ids else 0} KPI values (ENHANCED)")
