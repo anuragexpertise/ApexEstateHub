@@ -21,12 +21,21 @@ import re
 import time
 import logging
 from contextlib import contextmanager
+from urllib.parse import quote
 
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool
 
 log = logging.getLogger(__name__)
+
+# Load .env early so this module can be imported directly in scripts
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except Exception:
+    # dotenv is optional at runtime; if unavailable, environment must be set externally
+    pass
 
 
 # ── Named-param conversion ────────────────────────────────────────────────────
@@ -73,11 +82,26 @@ class DatabaseManager:
         pw     = os.getenv("PGPASSWORD", "").strip()
         ssl    = os.getenv("PGSSLMODE",  "require").strip()
 
+        # Additional SSL CA env var names used across the codebase
+        ssl_ca_env = os.getenv('PGSSLROOTCERT') or os.getenv('PGSSL_CA') or os.getenv('PGSSLROOTCA')
+
         if not all([host, dbname, user, pw]):
             raise RuntimeError(
                 "Database env vars missing: PGHOST / PGDATABASE / PGUSER / PGPASSWORD"
             )
-        return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}?sslmode={ssl}"
+
+        dsn = f"postgresql://{user}:{quote(pw)}@{host}:{port}/{dbname}?sslmode={ssl}"
+
+        # If an SSL root cert is provided as a file path, expand and append it to the DSN
+        if ssl_ca_env:
+            ca_path = os.path.expanduser(ssl_ca_env)
+            ca_path = os.path.abspath(ca_path)
+            if os.path.isfile(ca_path):
+                # Only append if not already present
+                if 'sslrootcert=' not in dsn:
+                    dsn = dsn + f"&sslrootcert={ca_path}"
+
+        return dsn
 
     def _init_pool(self):
         try:
