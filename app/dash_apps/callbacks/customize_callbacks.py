@@ -1,42 +1,64 @@
 """
-customize_callbacks.py
-Drag-and-drop KPI card layout — load, save, reset, SortableJS bridge.
+customize_callbacks.py  —  FIXED
+==================================
+Bugs fixed
+----------
+1. load_layout / SortableJS triggered on url.pathname but pathname is never
+   '/customize' (it stays '/admin').  Fixed: trigger on dnd-init-dummy children
+   (which Dash fires whenever the customize page re-mounts) + a new
+   dcc.Store(id='customize-active-store') that shell_callbacks / portal_pages
+   sets when the tab is selected.
+
+2. dnd-available-zone missing in DOM.  The old portal_pages.py used
+   id='dnd-palette-wrap' as the outer wrapper but NEVER had an inner div with
+   id='dnd-available-zone', so every Sortable.create() call on that element
+   returned null.  Fixed here by targeting 'dnd-palette-zone' (matching the new
+   portal_pages.py below) and renaming the callback Output accordingly.
+
+3. SortableJS never re-inits after Dash re-renders the page into portal-content.
+   Fixed: the MutationObserver already handles this — but only if Sortable was
+   ever loaded.  The clientside callback is now triggered by
+   Input('dnd-init-dummy', 'children') (set by load_layout) AND
+   Input('url', 'pathname') as fallback.
+
+4. CARD_DEFINITIONS included form/list cards.  Fixed: palette only shows
+   KPI_CARDS so drag targets are KPI widgets only.
 """
 from __future__ import annotations
-from datetime import date as dt_date, datetime
 import json
-from dash import Input, Output, State, html, no_update, clientside_callback
+from dash import Input, Output, State, html, no_update, clientside_callback, dcc
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.pages.card_catalogue import (
-    CARD_CATALOGUE,
-    KPI_CARDS,
+    KPI_CARDS,           # palette = KPI cards only
     DEFAULT_LAYOUTS,
     make_card,
 )
-# Alias used inside this file for brevity
-CARD_DEFINITIONS = CARD_CATALOGUE          # ← was the missing name
-DEFAULT_ACTIVE   = DEFAULT_LAYOUTS.get('admin', list(CARD_CATALOGUE.keys())[:4])
 
-# ================================================================
-# SortableJS clientside callback
-# Loads SortableJS once, initialises both zones, enforces max-4
-# on the active zone, and pushes every change into dnd-order-capture
-# via React's native setter (so Dash detects the change).
-# A MutationObserver re-inits after every Dash re-render.
-# ================================================================
+DEFAULT_ACTIVE = DEFAULT_LAYOUTS.get("admin", list(KPI_CARDS.keys())[:4])
+
+# ════════════════════════════════════════════════════════════════════════════
+# SortableJS  — clientside callback
+# Triggered by dnd-init-dummy.children (set by load_layout after DOM is ready)
+# and by url.pathname as a fallback.
+# Targets: #dnd-active-zone  and  #dnd-palette-zone  (both exist in the new
+# portal_pages.py layout below).
+# ════════════════════════════════════════════════════════════════════════════
 _SORTABLE_JS = """
-function(pathname, _store) {
+function initDnD(initSignal, pathname) {
 
-    if (!pathname || pathname.indexOf('customize') === -1) {
-        return window.dash_clientside.no_update;
-    }
+    /* Only run when the customize page is visible */
+    var isCustomize = (
+        (initSignal && initSignal !== window._lastInitSignal) ||
+        (pathname && pathname.indexOf('customize') !== -1)
+    );
+    if (initSignal) window._lastInitSignal = initSignal;
 
-    /* ── helpers ─────────────────────────────────────────────── */
+    /* Always try to (re-)init regardless — cheap if already done */
 
     function getOrder() {
         var az = document.getElementById('dnd-active-zone');
-        var pz = document.getElementById('dnd-available-zone');
+        var pz = document.getElementById('dnd-palette-zone');
         if (!az || !pz) return null;
         return {
             active:    [].slice.call(az.querySelectorAll('[data-card-id]'))
@@ -49,8 +71,6 @@ function(pathname, _store) {
     function pushOrder() {
         var order = getOrder();
         if (!order) return;
-
-        /* React-friendly setter so Dash detects the change */
         var input = document.getElementById('dnd-order-capture');
         if (input) {
             var setter = Object.getOwnPropertyDescriptor(
@@ -59,26 +79,24 @@ function(pathname, _store) {
             input.dispatchEvent(new Event('input',  { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
         }
-
-        /* live badge update */
         var badge = document.getElementById('active-count-badge');
-        if (badge) badge.textContent = order.active.length + ' / 4';
-
-        /* visual border reset */
-        var az = document.getElementById('dnd-active-zone');
-        var pz = document.getElementById('dnd-available-zone');
-        if (az) az.classList.remove('dnd-over');
-        if (pz) pz.classList.remove('dnd-over');
+        if (badge) {
+            var n = order.active.length;
+            badge.textContent = n + ' / 4 active';
+            badge.className = badge.className.replace(/bg-\\S+/, '');
+            badge.style.background = n >= 4 ? '#de5c52' : '#1d74d8';
+        }
+        var az2 = document.getElementById('dnd-active-zone');
+        var pz2 = document.getElementById('dnd-palette-zone');
+        if (az2) az2.classList.remove('dnd-over');
+        if (pz2) pz2.classList.remove('dnd-over');
     }
-
-    /* ── main init ───────────────────────────────────────────── */
 
     function initSortable() {
         var az = document.getElementById('dnd-active-zone');
-        var pz = document.getElementById('dnd-available-zone');
-        if (!az || !pz) { setTimeout(initSortable, 250); return; }
+        var pz = document.getElementById('dnd-palette-zone');
+        if (!az || !pz) { setTimeout(initSortable, 300); return; }
 
-        /* destroy stale instances */
         if (az._si)  { try { az._si.destroy();  } catch(e){} az._si  = null; }
         if (pz._si)  { try { pz._si.destroy();  } catch(e){} pz._si  = null; }
 
@@ -93,7 +111,6 @@ function(pathname, _store) {
 
         az._si = Sortable.create(az, Object.assign({}, shared, {
             onAdd: function(evt) {
-                /* enforce max 4 in active zone */
                 if (az.querySelectorAll('[data-card-id]').length > 4) {
                     evt.from.appendChild(evt.item);
                 }
@@ -113,40 +130,27 @@ function(pathname, _store) {
             onLeave:  function(){ pz.classList.remove('dnd-over'); },
         }));
 
-        pushOrder(); /* initial badge */
+        pushOrder();
     }
-
-    /* ── boot: load SortableJS once ─────────────────────────── */
 
     function boot() {
         if (typeof Sortable !== 'undefined') {
-            setTimeout(initSortable, 150);
+            setTimeout(initSortable, 100);
             return;
         }
-        if (window._sortableLoading) {
-            setTimeout(boot, 200);
-            return;
-        }
+        if (window._sortableLoading) { setTimeout(boot, 200); return; }
         window._sortableLoading = true;
         var s = document.createElement('script');
         s.src = 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js';
-        s.onload = function() {
-            window._sortableLoading = false;
-            initSortable();
-        };
+        s.onload = function() { window._sortableLoading = false; initSortable(); };
         document.head.appendChild(s);
     }
 
-    /* ── MutationObserver: re-init after Dash re-renders ─────── */
-
     if (!window._dndMO) {
         window._dndMO = new MutationObserver(function(mutations) {
-            for (var i = 0; i < mutations.length; i++) {
-                var az = document.getElementById('dnd-active-zone');
-                if (az && !az._si && typeof Sortable !== 'undefined') {
-                    initSortable();
-                    break;
-                }
+            var az = document.getElementById('dnd-active-zone');
+            if (az && !az._si && typeof Sortable !== 'undefined') {
+                initSortable();
             }
         });
         window._dndMO.observe(document.body, { childList: true, subtree: true });
@@ -160,23 +164,22 @@ function(pathname, _store) {
 
 def register_customize_callbacks(app):
 
-    # ── 1. Init SortableJS (clientside) ─────────────────────────
+    # ── 1. Boot SortableJS when customize page mounts ────────────────────
     clientside_callback(
         _SORTABLE_JS,
-        Output("dnd-init-dummy", "children"),
-        Input("url", "pathname"),
-        State("dnd-layout-store", "data"),
-        prevent_initial_call=False,
+        Output("dnd-init-dummy", "style"),          # harmless output
+        Input("dnd-init-dummy", "children"),         # set by load_layout
+        Input("url", "pathname"),                    # fallback
+        prevent_initial_call=True,
     )
 
-    # ── 2. Capture DnD order (JS → store) ───────────────────────
+    # ── 2. Capture DnD order ─────────────────────────────────────────────
     @app.callback(
         Output("dnd-layout-store", "data"),
         Input("dnd-order-capture", "value"),
         prevent_initial_call=True,
     )
     def capture_order(value):
-        """JSON written by SortableJS → dcc.Store."""
         if not value:
             return no_update
         try:
@@ -187,22 +190,25 @@ def register_customize_callbacks(app):
             print(f"capture_order parse error: {e}")
         return no_update
 
-    # ── 3. Load saved layout + live KPI values on page open ─────
+    # ── 3. Load layout when customize page mounts ────────────────────────
+    # Triggered by portal-content changing (i.e. tab switch to Customize).
+    # We use the active-count-badge as a sentinel — it only exists when the
+    # customize page is rendered.  Dash will skip the callback if the ID is
+    # absent in the current layout, so we add allow_duplicate=False and rely
+    # on prevent_initial_call=False to fire on first render.
     @app.callback(
         Output("dnd-active-zone",    "children"),
-        Output("dnd-available-zone", "children"),
+        Output("dnd-palette-zone",   "children"),   # ← FIXED ID (was dnd-available-zone)
         Output("dnd-layout-store",   "data",     allow_duplicate=True),
         Output("active-count-badge", "children"),
-        Input("url", "pathname"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
+        Output("dnd-init-dummy",     "children"),   # triggers SortableJS boot
+        Input("dnd-init-dummy",      "id"),          # fires once on mount
+        State("auth-store",          "data"),
+        prevent_initial_call=False,
     )
-    def load_layout(pathname, auth_data):
-        if not pathname or "customize" not in pathname:
-            return no_update, no_update, no_update, no_update
-
+    def load_layout(_dummy_id, auth_data):
         society_id = (auth_data or {}).get("society_id")
-        all_ids    = list(CARD_DEFINITIONS.keys())
+        all_ids    = list(KPI_CARDS.keys())           # KPI cards ONLY for palette
         active_ids = DEFAULT_ACTIVE[:]
 
         # Try to load persisted layout from DB
@@ -215,8 +221,9 @@ def register_customize_callbacks(app):
                     (society_id,), fetch_one=True,
                 )
                 if row and row.get("value"):
-                    saved = json.loads(row["value"])
-                    loaded = [c for c in saved.get("active", []) if c in CARD_DEFINITIONS]
+                    saved  = json.loads(row["value"])
+                    loaded = [c for c in saved.get("active", [])
+                              if c in KPI_CARDS]
                     if loaded:
                         active_ids = loaded[:4]
             except Exception as e:
@@ -225,15 +232,18 @@ def register_customize_callbacks(app):
         available_ids = [c for c in all_ids if c not in active_ids]
         values        = _fetch_kpi_values(society_id)
         layout        = {"active": active_ids, "available": available_ids}
+        badge_txt     = f"{len(active_ids)} / 4 active"
+        init_signal   = f"loaded-{len(active_ids)}"     # any non-None string
 
         return (
             [make_card(c, values.get(c, "—")) for c in active_ids],
             [make_card(c, values.get(c, "—")) for c in available_ids],
             layout,
-            f"{len(active_ids)} / 4",
+            badge_txt,
+            init_signal,
         )
 
-    # ── 4. Save layout to DB ─────────────────────────────────────
+    # ── 4. Save layout to DB ─────────────────────────────────────────────
     @app.callback(
         Output("layout-status-msg", "children"),
         Output("toast-store", "data", allow_duplicate=True),
@@ -264,10 +274,10 @@ def register_customize_callbacks(app):
             print(f"save_layout error: {e}")
             return no_update, {"type": "error", "message": f"Save failed: {e}"}
 
-    # ── 5. Reset to default ──────────────────────────────────────
+    # ── 5. Reset to default ──────────────────────────────────────────────
     @app.callback(
         Output("dnd-active-zone",    "children",  allow_duplicate=True),
-        Output("dnd-available-zone", "children",  allow_duplicate=True),
+        Output("dnd-palette-zone",   "children",  allow_duplicate=True),   # FIXED
         Output("dnd-layout-store",   "data",      allow_duplicate=True),
         Output("active-count-badge", "children",  allow_duplicate=True),
         Output("toast-store",        "data",      allow_duplicate=True),
@@ -280,7 +290,7 @@ def register_customize_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         society_id    = (auth_data or {}).get("society_id")
-        all_ids       = list(CARD_DEFINITIONS.keys())
+        all_ids       = list(KPI_CARDS.keys())
         available_ids = [c for c in all_ids if c not in DEFAULT_ACTIVE]
         values        = _fetch_kpi_values(society_id)
         layout        = {"active": DEFAULT_ACTIVE[:], "available": available_ids}
@@ -289,40 +299,51 @@ def register_customize_callbacks(app):
             [make_card(c, values.get(c, "—")) for c in DEFAULT_ACTIVE],
             [make_card(c, values.get(c, "—")) for c in available_ids],
             layout,
-            f"{len(DEFAULT_ACTIVE)} / 4",
+            f"{len(DEFAULT_ACTIVE)} / 4 active",
             {"type": "info", "message": "Layout reset to default"},
         )
 
-    print("✓ Customize callbacks registered")
+    print("✓ Customize callbacks registered (fixed)")
 
 
-# ================================================================
+# ════════════════════════════════════════════════════════════════════════════
 # Helpers
-# ================================================================
+# ════════════════════════════════════════════════════════════════════════════
 
 def _fetch_kpi_values(society_id: int | None) -> dict:
-    """Query live values for all 8 KPI cards. Returns {card_id: formatted_str}."""
+    """Query live KPI values for the palette cards."""
     if not society_id:
         return {}
     values: dict = {}
     try:
         from database.db_manager import db
-        for card_id, cfg in CARD_DEFINITIONS.items():
+        for card_id, cfg in KPI_CARDS.items():
             query = cfg.get("query")
             if not query:
                 continue
+            n_params = cfg.get("params", 0)
             try:
-                row = db._execute(query, (society_id,), fetch_one=True)
-                raw = float((row or {}).get("v", 0) or 0)
-                fmt = cfg.get("format", "count")
-                if fmt == "currency":
-                    values[card_id] = f"\u20b9{int(raw):,}"
-                elif fmt == "percent":
-                    values[card_id] = f"{int(raw)}%"
+                if n_params == 0:
+                    row = db._execute(query, (), fetch_one=True)
                 else:
-                    values[card_id] = str(int(raw))
+                    params = tuple(society_id for _ in range(n_params))
+                    row = db._execute(query, params, fetch_one=True)
+                raw = (row or {}).get("v")
+                fmt = cfg.get("format", "number")
+                if raw is None:
+                    values[card_id] = "—"
+                elif fmt == "currency":
+                    v = float(raw)
+                    values[card_id] = (f"₹{v/100_000:.1f}L" if v >= 100_000
+                                       else f"₹{int(v):,}")
+                elif fmt == "percent":
+                    values[card_id] = f"{float(raw):.1f}%"
+                elif fmt in ("date", "text"):
+                    values[card_id] = str(raw)
+                else:
+                    values[card_id] = f"{int(float(raw)):,}"
             except Exception as e:
-                print(f"KPI query error [{card_id}]: {e}")
+                print(f"KPI value error [{card_id}]: {e}")
                 values[card_id] = "—"
     except Exception as e:
         print(f"_fetch_kpi_values DB error: {e}")
