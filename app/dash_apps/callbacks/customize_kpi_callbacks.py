@@ -22,33 +22,131 @@ from app.dash_apps.callbacks.drilldown_callbacks import ENTITY_META
 KPI_PORTAL_MAP = {
     # ADMIN PORTAL - Dashboard tab
     "kpi_apartments_total":        {"portal": "admin", "tab": "dashboard", "group": "Apartments"},
-    "kpi_apartments_dues":         {"portal": "admin", "tab": "dashboard", "group": "Apartments"},
-    "kpi_vendors_total":           {"portal": "admin", "tab": "dashboard", "group": "Vendors"},
-    "kpi_security_total":          {"portal": "admin", "tab": "dashboard", "group": "Security"},
-    "kpi_events_total":            {"portal": "admin", "tab": "events",    "group": "Events"},
-    "kpi_concerns_open":           {"portal": "admin", "tab": "concerns",  "group": "Concerns"},
+    "kpi_apartments_dues":       {"portal": "admin", "tab": "dashboard", "group": "Apartments"},
+    "kpi_vendors_total":         {"portal": "admin", "tab": "dashboard", "group": "Vendors"},
+    "kpi_security_total":        {"portal": "admin", "tab": "dashboard", "group": "Security"},
+    "kpi_security_on_duty":      {"portal": "admin", "tab": "dashboard", "group": "Security"},
+    "kpi_events_total":          {"portal": "admin", "tab": "events",    "group": "Events"},
+    "kpi_concerns_open":         {"portal": "admin", "tab": "concerns",  "group": "Concerns"},
+    "kpi_gate_logs":             {"portal": "admin", "tab": "dashboard", "group": "Gate"},
+    "kpi_receipts_month":        {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
+    "kpi_expenses_month":        {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
+    "kpi_cash_in_hand":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
+    "kpi_bank_balance":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
     
-    # ADMIN PORTAL - Cashbook tab
-    "kpi_receipts_month":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_expenses_month":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_bank_balance":                 {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_cash_in_hand":            {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
+    # ADMIN PORTAL - Enroll tab
+    "kpi_apartments_total":      {"portal": "admin", "tab": "enroll",    "group": "Entities"},
     
     # ADMIN PORTAL - Settings tab
-    "kpi_accounts_count":          {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_apt_charges":             {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_ven_charges":             {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_sec_charges":             {"portal": "admin", "tab": "settings",  "group": "Settings"},
+    "kpi_accounts_count":        {"portal": "admin", "tab": "settings",  "group": "Settings"},
+    "kpi_apt_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
+    "kpi_ven_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
+    "kpi_sec_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
+    "kpi_attendance":            {"portal": "admin", "tab": "settings",  "group": "Settings"},
     
     # MASTER PORTAL - Dashboard
-    "kpi_societies_total":         {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_free":          {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_9Apts":         {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_99Apts":        {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_999Apts":       {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_unlimited":     {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_paid":          {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_expired":       {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_total":       {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_free":        {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_9Apts":       {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_99Apts":      {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_999Apts":     {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_societies_unlimited":   {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_master_apartments_total": {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_master_vendors_total":  {"portal": "master", "tab": "dashboard", "group": "Master"},
+    "kpi_master_security_total": {"portal": "master", "tab": "dashboard", "group": "Master"},
+    
+    # OWNER PORTAL - Dashboard tab
+    "kpi_apartments_dues":       {"portal": "apartment", "tab": "dashboard", "group": "Account"},
+    "kpi_concerns_open":         {"portal": "apartment", "tab": "dashboard", "group": "Concerns"},
+    "kpi_events_total":          {"portal": "apartment", "tab": "dashboard", "group": "Events"},
+    "kpi_gate_logs":             {"portal": "apartment", "tab": "dashboard", "group": "Gate"},
+    "kpi_receipts_month":        {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
+    "kpi_receivables_total":     {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
+    
+    # OWNER PORTAL - Cashbook tab
+    "kpi_receipts_month":        {"portal": "apartment", "tab": "cashbook",  "group": "Cashbook"},
+    "kpi_receivables_total":     {"portal": "apartment", "tab": "cashbook",  "group": "Cashbook"},
+    
+    # OWNER PORTAL - Payments tab
+    "kpi_receivables_total":     {"portal": "apartment", "tab": "payments",  "group": "Dues"},
+    "kpi_apartments_dues":       {"portal": "apartment", "tab": "payments", "group": "Dues"},
+    
+    # OWNER PORTAL - Charges tab
+    "kpi_maintainence_charges":  {"portal": "apartment", "tab": "charges",  "group": "Charges"},
+    "kpi_apartment_fines":       {"portal": "apartment", "tab": "charges",  "group": "Charges"},
+    "kpi_apartment_other_charges": {"portal": "apartment", "tab": "charges", "group": "Charges"},
+    
+    # OWNER PORTAL - Events tab
+    "kpi_events_total":          {"portal": "apartment", "tab": "events",   "group": "Events"},
+    
+    # OWNER PORTAL - Concerns tab
+    "kpi_concerns_open":         {"portal": "apartment", "tab": "concerns",  "group": "Concerns"},
+    
+    # OWNER PORTAL - Settings tab
+    "kpi_apartment_date":        {"portal": "apartment", "tab": "settings", "group": "Profile"},
+    
+    # VENDOR PORTAL - Dashboard tab
+    "kpi_concerns_open":         {"portal": "vendor", "tab": "dashboard", "group": "Jobs"},
+    "kpi_events_total":          {"portal": "vendor", "tab": "dashboard", "group": "Events"},
+    "kpi_receivables_total":     {"portal": "vendor", "tab": "dashboard", "group": "Payments"},
+    "kpi_receipts_month":        {"portal": "vendor", "tab": "dashboard", "group": "Payments"},
+    "kpi_gate_logs":             {"portal": "vendor", "tab": "dashboard", "group": "Gate"},
+    
+    # VENDOR PORTAL - Cashbook tab
+    "kpi_receivables_total":     {"portal": "vendor", "tab": "cashbook",  "group": "Payments"},
+    "kpi_receipts_month":        {"portal": "vendor", "tab": "cashbook",  "group": "Payments"},
+    
+    # VENDOR PORTAL - Charges tab
+    "kpi_vendor_fines":          {"portal": "vendor", "tab": "charges",  "group": "Charges"},
+    "kpi_vendor_other_charges":  {"portal": "vendor", "tab": "charges",  "group": "Charges"},
+    
+    # VENDOR PORTAL - Events tab
+    "kpi_events_total":          {"portal": "vendor", "tab": "events",   "group": "Events"},
+    
+    # VENDOR PORTAL - Settings tab
+    "kpi_vendor_date":           {"portal": "vendor", "tab": "settings", "group": "Profile"},
+    
+    # SECURITY PORTAL - Dashboard tab
+    "kpi_apartments_total":      {"portal": "security", "tab": "dashboard", "group": "Users"},
+    "kpi_vendors_total":         {"portal": "security", "tab": "dashboard", "group": "Users"},
+    "kpi_security_total":        {"portal": "security", "tab": "dashboard", "group": "Users"},
+    "kpi_security_shift_count":  {"portal": "security", "tab": "dashboard", "group": "Users"},
+    "kpi_receivables_total":     {"portal": "security", "tab": "dashboard", "group": "Cash"},
+    "kpi_gate_logs":             {"portal": "security", "tab": "dashboard", "group": "Gate"},
+    
+    # SECURITY PORTAL - Cashbook tab
+    "kpi_receivables_total":     {"portal": "security", "tab": "cashbook",  "group": "Payments"},
+    "kpi_payables_total":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
+    "kpi_receipts_month":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
+    "kpi_expenses_month":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
+    
+    # SECURITY PORTAL - Charges tab
+    "kpi_security_fines":        {"portal": "security", "tab": "charges",  "group": "Charges"},
+    "kpi_security_other_charges": {"portal": "security", "tab": "charges", "group": "Charges"},
+    "kpi_receipts_in_hand_total": {"portal": "security", "tab": "charges", "group": "Cash"},
+    
+    # SECURITY PORTAL - Payments tab
+    "kpi_security_salary_due":   {"portal": "security", "tab": "payments", "group": "Salary"},
+    "kpi_security_bonus_due":    {"portal": "security", "tab": "payments", "group": "Bonus"},
+    
+    # SECURITY PORTAL - Events tab
+    "kpi_events_total":          {"portal": "security", "tab": "events",   "group": "Events"},
+    
+    # SECURITY PORTAL - Receipt tab
+    "kpi_receipts_month":        {"portal": "security", "tab": "receipt",  "group": "Cash"},
+    
+    # SECURITY PORTAL - Settings tab
+    "kpi_security_date":           {"portal": "security", "tab": "settings", "group": "Profile"},
+    "kpi_security_salary_per_shift": {"portal": "security", "tab": "settings", "group": "Profile"},
+    "kpi_security_shift":        {"portal": "security", "tab": "settings", "group": "Profile"},
+    
+    # ADDITIONAL MISSING KPIs
+    "kpi_plan_validity":         {"portal": "admin", "tab": "settings", "group": "Settings"},
+    "kpi_late_fees_due":         {"portal": "admin", "tab": "settings", "group": "Settings"},
+    "kpi_maintenance_due":       {"portal": "admin", "tab": "settings", "group": "Settings"},
+    "kpi_amc_due":               {"portal": "admin", "tab": "expenses", "group": "Expenses"},
+    "kpi_security_salaries_due": {"portal": "admin", "tab": "expenses", "group": "Expenses"},
+    "kpi_vendor_payables_due":   {"portal": "admin", "tab": "expenses", "group": "Expenses"},
 }
 
 # ════════════════════════════════════════════════════════════════
