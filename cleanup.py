@@ -15,7 +15,7 @@ from pathlib import Path
 # ── Files to delete unconditionally ──────────────────────────────────────────
 REDUNDANT_FILES = [
     # Old login system
-    "app/dash_apps/pages/login_systemOLD.py",
+    "app/dash_apps/pages/login_system.py",
     "app/dash_apps/pages/login_system_old.py",
     "app/dash_apps/pages/society_select.py",
     "app/dash_apps/pages/login_page.py",
