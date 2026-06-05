@@ -33,7 +33,7 @@ def register_debug_callbacks(app):
             print("   → Check:")
             print("      1. Database connectivity")
             print("      2. Societies table has records")
-            print("      3. Plan names match: 'Free', '9Apts', '99Apts', '999Apts', 'Unlimited'")
+            print("      3. Plan names match: 'Free', '9Apts', '99Apts', '999Apts', 'unlimited'")
             print("      4. plan_validity >= TODAY for paid plans")
             
             return {

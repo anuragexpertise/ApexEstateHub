@@ -587,7 +587,7 @@ KPI_CARDS = {
         "format": "number",
         "icon": "fa-star",
         "color": "#17976e",
-        "title": "Unlimited Plans",
+        "title": "unlimited Plans",
         "group": "active",
     },
 

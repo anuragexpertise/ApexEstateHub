@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
-
+from database.db_manager import db
 DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operationalerror"]
 
 
@@ -32,9 +32,7 @@ DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in 
 # Helpers
 # ════════════════════════════════════════════════════════════════════════════
 
-def db():
-    from database.db_manager import db
-    return db
+
 
 
 def _sid(auth_data):
@@ -245,7 +243,7 @@ def register_card_catalogue_callbacks(app):
                 # print(f"    Params: {params}")
                 
                 # ═══ Execute query ═══
-                row = db()._execute(query, params, fetch_one=True)
+                row = db._execute(query, params, fetch_one=True)
                 
                 if row and "v" in row:
                     raw_value = row.get("v")
