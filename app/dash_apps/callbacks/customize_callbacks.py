@@ -204,7 +204,7 @@ def register_customize_callbacks(app):
         Output("dnd-init-dummy",     "children"),   # triggers SortableJS boot
         Input("dnd-init-dummy",      "id"),          # fires once on mount
         State("auth-store",          "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_layout(_dummy_id, auth_data):
         society_id = (auth_data or {}).get("society_id")

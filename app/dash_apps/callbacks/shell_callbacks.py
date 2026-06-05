@@ -23,6 +23,28 @@ from app.dash_apps.app_shell import ROLE_CONFIG
 log = logging.getLogger(__name__)
 
 
+def _is_db_error(msg: str) -> bool:
+    """Check if message indicates a database connection or query error."""
+    if not msg:
+        return False
+    msg_lower = str(msg).lower()
+    return (
+        "no database connection" in msg_lower
+        or "error in processing" in msg_lower
+        or "error in querying the database" in msg_lower
+        or "connection" in msg_lower and "failed" in msg_lower
+        or "operationalerror" in msg_lower
+        or "database" in msg_lower and ("error" in msg_lower or "failed" in msg_lower)
+    )
+
+
+def _set_db_error_toast(toast_store: dict, error_msg: str) -> dict:
+    """Set a database error toast message."""
+    if _is_db_error(error_msg):
+        return {"type": "error", "message": error_msg}
+    return toast_store
+
+
 def register_shell_callbacks(app):
     log.info("Registering shell callbacks…")
 
@@ -237,7 +259,7 @@ def register_shell_callbacks(app):
             raise PreventUpdate
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}
 
-    # ══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
     # 9. MAIN ROUTER — URL → portal content + all shell outputs
     # ══════════════════════════════════════════════════════════════════════════
 
@@ -254,6 +276,7 @@ def register_shell_callbacks(app):
         Output("hdr-avatar",        "children"),
         Output("hdr-society-name",  "children"),
         Output("hdr-society-logo",  "src"),
+        Output("toast-store",       "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
         prevent_initial_call=False,
@@ -262,7 +285,7 @@ def register_shell_callbacks(app):
         if not auth or not auth.get("authenticated"):
             empty = html.Div("Please log in.", className="text-muted text-center mt-5")
             return (empty, [], [], "", {}, "—", "—", "?", "User", "?",
-                    "EstateHub", "/static/assets/EH_logo.png")
+                    "EstateHub", "/static/assets/EH_logo.png", no_update)
 
         role       = auth.get("role", "")
         society_id = auth.get("society_id")
@@ -273,6 +296,7 @@ def register_shell_callbacks(app):
         # Society branding
         soc_name = "EstateHub"
         soc_logo = "/static/assets/EH_logo.png"
+        db_error = None
         if society_id:
             try:
                 soc = db.execute(
@@ -284,9 +308,16 @@ def register_shell_callbacks(app):
                     soc_name = soc["name"]
                     if soc.get("logo"):
                         soc_logo = f"/assets/{society_id}/{soc['logo']}"
-            except Exception:
-                pass
-
+            except Exception as e:
+                db_error = str(e)
+                if _is_db_error(db_error):
+                    return (
+                        html.Div("Please log in.", className="text-muted text-center mt-5"),
+                        [], [], "", {}, "—", "—", "?", "User", "?",
+                        "EstateHub", "/static/assets/EH_logo.png",
+                        {"type": "error", "message": f"No Database Connection: {db_error}"}
+                    )
+        
         is_master = role == "admin" and society_id is None
         cfg_key   = "master" if is_master else (role or "admin")
         cfg       = ROLE_CONFIG.get(cfg_key, ROLE_CONFIG["admin"])
@@ -311,6 +342,7 @@ def register_shell_callbacks(app):
             avatar,
             soc_name,
             soc_logo,
+            no_update,
         )
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -373,6 +405,34 @@ def register_shell_callbacks(app):
             is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 12. DB ERROR TOAST ON PAGE LOAD
+    # ══════════════════════════════════════════════════════════════════════════
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("url", "pathname"),
+        State("auth-store", "data"),
+        prevent_initial_call=False,
+    )
+    def check_db_error_on_load(pathname, auth):
+        """Check for database errors on page load and show toast."""
+        if not auth or not auth.get("authenticated"):
+            return no_update
+        
+        society_id = auth.get("society_id")
+        if not society_id:
+            return no_update
+        
+        try:
+            db.execute("SELECT 1", fetch_one=True)
+            return no_update
+        except Exception as e:
+            error_str = str(e).lower()
+            if "no database connection" in error_str or "operationalerror" in error_str:
+                return {"type": "error", "message": "No Database Connection"}
+            return {"type": "error", "message": f"Database error: {str(e)[:50]}"}
 
     log.info("Shell callbacks registered ✓")
 

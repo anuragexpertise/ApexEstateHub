@@ -25,6 +25,8 @@ from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 
+DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operationalerror"]
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -184,6 +186,7 @@ def register_card_catalogue_callbacks(app):
     # ── 1. KPI REFRESH ────────────────────────────────────────────────────
     @app.callback(
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
         State("auth-store", "data"),
@@ -195,7 +198,7 @@ def register_card_catalogue_callbacks(app):
         
         if not auth_data or not auth_data.get("authenticated"):
             print("  ⚠️ Not authenticated")
-            return ["—"] * len(kpi_ids) if kpi_ids else []
+            return ["—"] * len(kpi_ids) if kpi_ids else [], no_update
         
         sid = _sid(auth_data)
         role = auth_data.get("role", "admin")
@@ -204,6 +207,7 @@ def register_card_catalogue_callbacks(app):
         print(f"  Society ID: {sid}, Role: {role}, Is Master: {is_master}")
         
         results = []
+        db_error = None
         
         for id_dict in kpi_ids:
             card_id = id_dict.get("card_id")
@@ -263,15 +267,21 @@ def register_card_catalogue_callbacks(app):
                         results.append("—")
                     else:
                         results.append("0")
-                    
+                
             except Exception as e:
                 print(f"    ❌ Error: {e}")
                 import traceback
                 traceback.print_exc()
                 results.append("—")
+                error_str = str(e).lower()
+                if any(kw in error_str for kw in DB_ERROR_KEYWORDS):
+                    db_error = str(e)
         
         print(f"  ✓Returning {len(results)} formatted results")
-        return results
+        
+        if db_error:
+            return results, {"type": "error", "message": f"Database error: {db_error}"}
+        return results, no_update
 
     # ── 2. SOCIETIES LIST ─────────────────────────────────────────────────
     @app.callback(
