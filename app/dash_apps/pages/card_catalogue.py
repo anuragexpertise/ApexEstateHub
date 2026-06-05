@@ -117,43 +117,6 @@ KPI_CARDS = {
         "group": "pending payments",
     },
     
-    "kpi_apartments_no_dues": {
-        "query": """
-            SELECT COUNT(*) AS v 
-            FROM apartments a
-            WHERE a.society_id = %s 
-              AND a.active = TRUE
-              AND NOT EXISTS (
-                  SELECT 1 FROM payments p 
-                  WHERE p.entity_id = a.id 
-                    AND p.entity_type = 'apartment'
-                    AND p.status = 'pending'
-              )
-        """,
-        "params": 1,
-        "format": "number",
-        "icon": "fa-check-circle",
-        "color": "#17976e",
-        "title": "Dues Clear",
-        "group": "up to date",
-    },
-
-    "kpi_apartments_total_dues": {
-        "query": """
-            SELECT COALESCE(SUM(p.amount), 0) AS v 
-            FROM payments p
-            WHERE p.society_id = %s 
-              AND p.entity_type = 'apartment'
-              AND p.status = 'pending'
-        """,
-        "params": 1,
-        "format": "currency",
-        "icon": "fa-rupee-sign",
-        "color": "#e59620",
-        "title": "Total Pending",
-        "group": "all apartments",
-    },
-    
     "kpi_maintenance_due": {
         "query": """
             WITH maintenance_calculation AS (
@@ -176,22 +139,6 @@ KPI_CARDS = {
         "color": "#1859b8",
         "title": "Maintenance Due",
         "group": "from arrear date",
-    },
-    
-    "kpi_maintenance_paid": {
-        "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
-            WHERE society_id = %s 
-              AND payment_type = 'maintenance' 
-              AND status = 'verified'
-        """,
-        "params": 1,
-        "format": "currency",
-        "icon": "fa-check-square",
-        "color": "#17976e",
-        "title": "Maintenance Paid",
-        "group": "collected",
     },
     
     "kpi_late_fees_due": {
@@ -540,16 +487,6 @@ KPI_CARDS = {
     # SETTINGS KPIs
     # ══════════════════════════════════════════════════════════════
     
-    "kpi_society_plan": {
-        "query": "SELECT plan AS v FROM societies WHERE id = %s",
-        "params": 1,
-        "format": "text",
-        "icon": "fa-award",
-        "color": "#8e44ad",
-        "title": "Current Plan",
-        "group": "subscription",
-    },
-    
     "kpi_plan_validity": {
         "query": "SELECT plan_validity AS v FROM societies WHERE id = %s",
         "params": 1,
@@ -641,7 +578,20 @@ KPI_CARDS = {
         "group": "total",
     },
 
-"kpi_societies_9Apts": {
+    "kpi_societies_unlimited": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies 
+            WHERE plan = 'unlimited' AND plan_validity >= CURRENT_DATE
+        """,
+        "params": 0,
+        "format": "number",
+        "icon": "fa-star",
+        "color": "#17976e",
+        "title": "Unlimited Plans",
+        "group": "active",
+    },
+
+    "kpi_societies_9Apts": {
         "query": """
             SELECT COUNT(*) AS v FROM societies WHERE plan = '9Apts'
               AND plan_validity >= CURRENT_DATE
@@ -679,21 +629,7 @@ KPI_CARDS = {
         "title": "Paid Plans",
         "group": "active",
     },
-    
-    "kpi_societies_paid": {
-        "query": """
-            SELECT COUNT(*) AS v FROM societies 
-            WHERE plan IN ('9Apts', '99Apts', '999Apts', 'unlimited')
-              AND plan_validity >= CURRENT_DATE
-        """,
-        "params": 0,
-        "format": "number",
-        "icon": "fa-star",
-        "color": "#17976e",
-        "title": "Paid Plans",
-        "group": "active",
-    },
-    
+
     "kpi_societies_expired": {
         "query": """
             SELECT COUNT(*) AS v FROM societies 
@@ -706,7 +642,7 @@ KPI_CARDS = {
         "title": "Expired Plans",
         "group": "needs renewal",
     },
-    
+
     "kpi_master_apartments_total": {
         "query": "SELECT COUNT(*) AS v FROM apartments WHERE active = TRUE",
         "params": 0,
@@ -737,11 +673,321 @@ KPI_CARDS = {
         "group": "active",
     },
 
-}
+    # ══════════════════════════════════════════════════════════════
+    # ADMIN PORTAL - EXPENSES & PAYMENTS
+    # ══════════════════════════════════════════════════════════════
+    "kpi_amc_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM expenses
+            WHERE society_id = %s
+              AND LOWER(description) LIKE '%amc%'
+              AND status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-building",
+        "color": "#8e44ad",
+        "title": "AMC Due",
+        "group": "expenses",
+    },
 
-# ================================================================
-# ── FORM / LIST CARD DEFINITIONS
-# ================================================================
+    "kpi_security_salaries_due": {
+        "query": """
+            WITH security_total_due AS (
+                SELECT COALESCE(SUM(ss.salary_per_shift * 
+                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)), 0) AS amount
+                FROM security_staff ss WHERE ss.society_id = %s AND ss.active = TRUE
+            ),
+            security_paid AS (
+                SELECT COALESCE(SUM(p.amount), 0) AS amount
+                FROM payments p WHERE p.society_id = %s AND p.payment_type = 'salary' AND p.status = 'verified'
+            )
+            SELECT COALESCE(std.amount - sp.amount, 0) AS v
+            FROM security_total_due std, security_paid sp
+        """,
+        "params": 2,
+        "format": "currency",
+        "icon": "fa-user-shield",
+        "color": "#b63b3b",
+        "title": "Security Salary Due",
+        "group": "unpaid wages",
+    },
+
+    "kpi_security_salary_due": {
+        "query": """
+            SELECT COALESCE(SUM(p.amount), 0) AS v
+            FROM payments p JOIN security_staff ss ON p.user_id = ss.user_id
+            WHERE ss.society_id = %s AND p.payment_type = 'salary' AND p.status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-rupee-sign",
+        "color": "#b63b3b",
+        "title": "Salary Due",
+        "group": "pending",
+    },
+
+    "kpi_security_bonus_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id = %s AND payment_type = 'bonus' AND status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-gift",
+        "color": "#e59620",
+        "title": "Bonus Due",
+        "group": "pending",
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # OWNER PORTAL KPIs
+    # ══════════════════════════════════════════════════════════════
+    "kpi_maintainence_charges": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM apt_charges_fines
+            WHERE society_id = %s AND apt_status = TRUE
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-file-invoice",
+        "color": "#e59620",
+        "title": "Maintenance Charge",
+        "group": "monthly",
+    },
+
+    "kpi_apartment_fines": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM apt_charges_fines
+            WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'fine'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-exclamation-triangle",
+        "color": "#de5c52",
+        "title": "Fines",
+        "group": "pending",
+    },
+
+    "kpi_apartment_other_charges": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM apt_charges_fines
+            WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'other'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-plus",
+        "color": "#3498db",
+        "title": "Other Charges",
+        "group": "miscellaneous",
+    },
+
+    "kpi_apartment_date": {
+        "query": "SELECT EXTRACT(EPOCH FROM AGE(CURRENT_DATE, created_at)) / 86400 AS v FROM apartments WHERE society_id = %s AND active = TRUE LIMIT 1",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-calendar-alt",
+        "color": "#de5c52",
+        "title": "Managed Since",
+        "group": "profile",
+    },
+
+    "kpi_receivables_total": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id = %s AND status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-wallet",
+        "color": "#2c3e50",
+        "title": "To Pay",
+        "group": "pending",
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # VENDOR PORTAL KPIs
+    # ══════════════════════════════════════════════════════════════
+    "kpi_vendor_fines": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM ven_charges_fines
+            WHERE society_id = %s AND ven_status = TRUE AND LOWER(charge_type) = 'fine'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-exclamation-triangle",
+        "color": "#de5c52",
+        "title": "Fines",
+        "group": "pending",
+    },
+
+    "kpi_vendor_other_charges": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM ven_charges_fines
+            WHERE society_id = %s AND ven_status = TRUE AND LOWER(charge_type) = 'other'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-plus",
+        "color": "#3498db",
+        "title": "Other Charges",
+        "group": "miscellaneous",
+    },
+
+    "kpi_vendor_date": {
+        "query": "SELECT EXTRACT(EPOCH FROM AGE(CURRENT_DATE, created_at)) / 86400 AS v FROM vendors WHERE society_id = %s AND active = TRUE LIMIT 1",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-calendar-alt",
+        "color": "#de5c52",
+        "title": "Managed Since",
+        "group": "profile",
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # SECURITY PORTAL KPIs
+    # ══════════════════════════════════════════════════════════════
+    "kpi_security_fines": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM sec_charges_fines
+            WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'fine'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-exclamation-triangle",
+        "color": "#de5c52",
+        "title": "Fines",
+        "group": "pending",
+    },
+
+    "kpi_security_other_charges": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM sec_charges_fines
+            WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'other'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-plus",
+        "color": "#3498db",
+        "title": "Other Charges",
+        "group": "miscellaneous",
+    },
+
+    "kpi_receipts_in_hand_total": {
+        "query": """
+            SELECT COALESCE(SUM(t.amount), 0) AS v
+            FROM transactions t JOIN accounts a ON t.acc_id = a.id
+            WHERE t.society_id = %s AND t.status = 'paid' AND a.drcr_account = 'Cr'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-money-bill-wave",
+        "color": "#27ae60",
+        "title": "Receipts-in-hand",
+        "group": "cash",
+    },
+
+    "kpi_security_date": {
+        "query": "SELECT EXTRACT(EPOCH FROM AGE(CURRENT_DATE, created_at)) / 86400 AS v FROM security_staff WHERE society_id = %s AND active = TRUE LIMIT 1",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-calendar-alt",
+        "color": "#de5c52",
+        "title": "Managed Since",
+        "group": "profile",
+    },
+
+    "kpi_security_salary_per_shift": {
+        "query": "SELECT salary_per_shift AS v FROM security_staff WHERE society_id = %s AND active = TRUE LIMIT 1",
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-rupee-sign",
+        "color": "#b63b3b",
+        "title": "Salary per Shift",
+        "group": "profile",
+    },
+
+    "kpi_security_shift": {
+        "query": "SELECT COUNT(*) AS v FROM gate_access WHERE society_id = %s AND role = 's' AND time_out IS NOT NULL",
+        "params": 1,
+        "format": "number",
+        "icon": "fa-clock",
+        "color": "#1abc9c",
+        "title": "Shifts Completed",
+        "group": "history",
+    },
+
+    "kpi_security_shift_count": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM gate_access
+            WHERE society_id = %s AND role = 's' AND time_out IS NULL
+        """,
+        "params": 1,
+        "format": "number",
+        "icon": "fa-hand-point-up",
+        "color": "#de5c52",
+        "title": "Shift Count",
+        "group": "active",
+    },
+
+    # ══════════════════════════════════════════════════════════════
+    # CASHBOOK & BALANCE
+    # ══════════════════════════════════════════════════════════════
+    "kpi_vendor_payables_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id = %s AND entity_type = 'vendor' AND status = 'pending'
+        """,
+        "params": 1,
+        "format": "currency",
+        "icon": "fa-truck",
+        "color": "#b98a07",
+        "title": "Vendor Payables Due",
+        "group": "pending",
+    },
+
+    "kpi_payables_total": {
+        "query": """
+            WITH security_salaries AS (
+                SELECT COALESCE(SUM(ss.salary_per_shift * 
+                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)), 0) AS amount
+                FROM security_staff ss WHERE ss.society_id = %s AND ss.active = TRUE
+            ),
+            security_paid AS (
+                SELECT COALESCE(SUM(p.amount), 0) AS amount
+                FROM payments p WHERE p.society_id = %s AND p.payment_type = 'salary' AND p.status = 'verified'
+            ),
+            vendor_payments AS (
+                SELECT COALESCE(SUM(amount), 0) AS amount
+                FROM payments WHERE society_id = %s AND entity_type = 'vendor' AND status = 'pending'
+            ),
+            pending_expenses AS (
+                SELECT COALESCE(SUM(amount), 0) AS amount
+                FROM expenses WHERE society_id = %s AND status = 'pending'
+            )
+            SELECT COALESCE(ss.amount - sp.amount + vp.amount + pe.amount, 0) AS v
+            FROM security_salaries ss, security_paid sp, vendor_payments vp, pending_expenses pe
+        """,
+        "params": 4,
+        "format": "currency",
+        "icon": "fa-wallet",
+        "color": "#de5c52",
+        "title": "Total Payables",
+        "group": "pending payments",
+    },
+}
 FORM_CARDS = {
     # ────────────────────── SOCIETY ──────────────────────────────
     "society_profile": {
@@ -1134,32 +1380,50 @@ DEFAULT_LAYOUTS = {
     "admin": [
         "kpi_apartments_total",
         "kpi_apartments_dues",
+        "kpi_vendors_total",
+        "kpi_security_total",
+        "kpi_security_on_duty",
+        "kpi_events_total",
+        "kpi_concerns_open",
+        "kpi_gate_logs",
         "kpi_receipts_month",
+        "kpi_expenses_month",
+        "kpi_cash_in_hand",
         "kpi_bank_balance",
     ],
     "apartment": [
-        "kpi_apartments_no_dues",
-        "kpi_gate_logs",
-        "kpi_events_total",
+        "kpi_apartments_dues",
         "kpi_concerns_open",
+        "kpi_events_total",
+        "kpi_gate_logs",
+        "kpi_receipts_month",
+        "kpi_receivables_total",
     ],
     "vendor": [
-        "kpi_vendors_total",
-        "kpi_gate_logs",
-        "kpi_events_total",
         "kpi_concerns_open",
+        "kpi_events_total",
+        "kpi_receivables_total",
+        "kpi_receipts_month",
+        "kpi_gate_logs",
     ],
     "security": [
-        "kpi_security_on_duty",
+        "kpi_apartments_total",
+        "kpi_vendors_total",
         "kpi_security_total",
+        "kpi_security_shift_count",
+        "kpi_receivables_total",
+        "kpi_payables_total",
+        "kpi_receipts_month",
+        "kpi_expenses_month",
         "kpi_gate_logs",
-        "kpi_concerns_open",
     ],
     "master": [
         "kpi_societies_total",
-        "kpi_societies_paid",
         "kpi_societies_free",
-        "kpi_societies_expired",
+        "kpi_societies_9Apts",
+        "kpi_societies_99Apts",
+        "kpi_societies_999Apts",
+        "kpi_societies_unlimited",
         "kpi_master_apartments_total",
         "kpi_master_vendors_total",
         "kpi_master_security_total",
