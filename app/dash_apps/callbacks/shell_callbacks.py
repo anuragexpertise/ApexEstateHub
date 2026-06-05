@@ -279,7 +279,7 @@ def register_shell_callbacks(app):
         Output("toast-store",       "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def route_page(pathname, auth):
         if not auth or not auth.get("authenticated"):
@@ -414,7 +414,7 @@ def register_shell_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def check_db_error_on_load(pathname, auth):
         """Check for database errors on page load and show toast."""
