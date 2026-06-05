@@ -1216,9 +1216,11 @@ BEGIN
     UNION ALL
     SELECT 'kpi_late_fees_due', 'Late Fees Due', 'fa-clock', 'admin', 'cashbook', 'fn_payments_list'
     UNION ALL
-    SELECT 'kpi_security_salaries_due', 'Security Salaries', 'fa-user-shield', 'admin', 'cashbook', 'fn_payments_list'
+    SELECT 'kpi_security_salaries_due', 'Security Salaries Due', 'fa-user-shield', 'admin', 'cashbook', 'fn_payments_list'
     UNION ALL
     SELECT 'kpi_vendor_payables_due', 'Vendor Payments', 'fa-truck', 'admin', 'cashbook', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_amc_due', 'AMC Due', 'fa-building', 'admin', 'expenses', 'fn_expenses_list'
     UNION ALL
     SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-book-open', 'admin', 'settings', 'fn_accounts_list'
     UNION ALL
@@ -1244,10 +1246,6 @@ BEGIN
     UNION ALL
     SELECT 'kpi_societies_unlimited', 'Unlimited Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
     UNION ALL
-    SELECT 'kpi_societies_paid', 'Paid Plans', 'fa-star', 'master', 'dashboard', 'fn_societies_list'
-    UNION ALL
-    SELECT 'kpi_societies_expired', 'Expired Plans', 'fa-exclamation-triangle', 'master', 'dashboard', 'fn_societies_list'
-    UNION ALL
     SELECT 'kpi_master_apartments_total', 'All Apartments', 'fa-home', 'master', 'dashboard', 'fn_apartments_list'
     UNION ALL
     SELECT 'kpi_master_vendors_total', 'All Vendors', 'fa-truck', 'master', 'dashboard', 'fn_vendors_list'
@@ -1266,17 +1264,65 @@ BEGIN
     UNION ALL
     SELECT 'kpi_bank_balance', 'Balance', 'fa-wallet', 'apartment', 'cashbook', 'fn_cashbook_list'
     UNION ALL
+    SELECT 'kpi_receivables_total', 'To Pay', 'fa-wallet', 'apartment', 'dashboard', 'fn_payments_list'
+    UNION ALL
     SELECT 'kpi_vendors_dues', 'Pending Dues', 'fa-rupee-sign', 'vendor', 'dashboard', 'fn_vendors_list'
     UNION ALL
     SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'vendor', 'cashbook', 'fn_cashbook_list'
     UNION ALL
     SELECT 'kpi_bank_balance', 'Balance', 'fa-wallet', 'vendor', 'cashbook', 'fn_cashbook_list'
     UNION ALL
-    SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'security', 'pass_evaluation', 'fn_gate_logs'
+    SELECT 'kpi_concerns_open', 'Jobs / Concerns', 'fa-hand-point-up', 'vendor', 'dashboard', 'fn_concerns_list'
+    UNION ALL
+    SELECT 'kpi_events_total', 'Events', 'fa-calendar-check', 'vendor', 'events', 'fn_events_list'
+    UNION ALL
+    SELECT 'kpi_receivables_total', 'Payable Due', 'fa-receipt', 'vendor', 'dashboard', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'vendor', 'dashboard', 'fn_gate_logs'
+    UNION ALL
+    SELECT 'kpi_vendor_fines', 'Vendor Fines', 'fa-exclamation-triangle', 'vendor', 'charges', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_vendor_other_charges', 'Other Charges', 'fa-plus', 'vendor', 'charges', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_vendor_date', 'Managed Since', 'fa-calendar-alt', 'vendor', 'settings', 'fn_vendors_list'
+    UNION ALL
+    SELECT 'kpi_apartments_total', 'Apartments', 'fa-home', 'security', 'dashboard', 'fn_apartments_list'
+    UNION ALL
+    SELECT 'kpi_vendors_total', 'Vendors', 'fa-truck', 'security', 'dashboard', 'fn_vendors_list'
+    UNION ALL
+    SELECT 'kpi_security_total', 'Security', 'fa-user-shield', 'security', 'dashboard', 'fn_security_list'
+    UNION ALL
+    SELECT 'kpi_security_shift_count', 'Shift Count', 'fa-hand-point-up', 'security', 'dashboard', 'fn_security_list'
+    UNION ALL
+    SELECT 'kpi_receivables_total', 'Receipts Due', 'fa-receipt', 'security', 'dashboard', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_payables_total', 'Expenses Due', 'fa-wallet', 'security', 'cashbook', 'fn_expenses_list'
+    UNION ALL
+    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'security', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_expenses_month', 'Expenses (Month)', 'fa-wallet', 'security', 'cashbook', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_gate_logs', 'Gate Logs', 'fa-receipt', 'security', 'dashboard', 'fn_gate_logs'
+    UNION ALL
+    SELECT 'kpi_security_fines', 'Security Fines', 'fa-exclamation-triangle', 'security', 'charges', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_security_other_charges', 'Other Charges', 'fa-plus', 'security', 'charges', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_receipts_in_hand_total', 'Receipts-in-hand', 'fa-money-bill-wave', 'security', 'charges', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_security_salary_due', 'Salary Due', 'fa-rupee-sign', 'security', 'payments', 'fn_payments_list'
+    UNION ALL
+    SELECT 'kpi_security_bonus_due', 'Bonus Due', 'fa-gift', 'security', 'payments', 'fn_payments_list'
     UNION ALL
     SELECT 'kpi_events_total', 'Events', 'fa-calendar-check', 'security', 'events', 'fn_events_list'
     UNION ALL
-    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'security', 'cashbook', 'fn_cashbook_list'
+    SELECT 'kpi_receipts_month', 'Receipts (Month)', 'fa-receipt', 'security', 'receipt', 'fn_cashbook_list'
+    UNION ALL
+    SELECT 'kpi_security_date', 'Managed Since', 'fa-calendar-alt', 'security', 'settings', 'fn_security_list'
+    UNION ALL
+    SELECT 'kpi_security_salary_per_shift', 'Salary per Shift', 'fa-rupee-sign', 'security', 'settings', 'fn_security_list'
+    UNION ALL
+    SELECT 'kpi_security_shift', 'Completed Shifts', 'fa-clock', 'security', 'settings', 'fn_gate_logs'
     WHERE (p_portal IS NULL OR portal = p_portal)
     ORDER BY portal, tab_name, kpi_label;
 END;
