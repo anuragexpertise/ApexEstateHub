@@ -11,10 +11,6 @@ Registration order matters:
 """
 
 
-from app.dash_apps.callbacks.admin_callbacks import register_admin_callbacks
-from app.dash_apps.callbacks.security_callbacks import register_security_callbacks
-
-
 def register_all_callbacks(app):
     """Register every callback module with the Dash app."""
 
@@ -77,7 +73,7 @@ def register_all_callbacks(app):
         print(f"  ❌ navigation_callbacks FAILED: {e}")
         errors.append(f"navigation_callbacks: {e}")
 
-        # ──6. Admin callbacks ────────────────────────────────────────
+    # ── 6. Admin callbacks ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.admin_callbacks import register_admin_callbacks
         register_admin_callbacks(app)
@@ -88,7 +84,7 @@ def register_all_callbacks(app):
         print(f"  ❌ admin_callbacks FAILED: {e}")
         errors.append(f"admin_callbacks: {e}")
 
-        # ── 7. Owner callbacks ────────────────────────────────────────
+    # ── 7. Owner callbacks ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.owner_callbacks import register_owner_callbacks
         register_owner_callbacks(app)
@@ -99,7 +95,7 @@ def register_all_callbacks(app):
         print(f"  ❌ owner_callbacks FAILED: {e}")
         errors.append(f"owner_callbacks: {e}")
 
-        # ── 8. Security callbacks ────────────────────────────────────────
+    # ── 8. Security callbacks ────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.security_callbacks import register_security_callbacks
         register_security_callbacks(app)
@@ -110,7 +106,7 @@ def register_all_callbacks(app):
         print(f"  ❌ security_callbacks FAILED: {e}")
         errors.append(f"security_callbacks: {e}")
 
-        # ── 9. Customize callbacks ──────────────────────────────────────────
+    # ── 9. Customize callbacks ──────────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_callbacks import register_customize_callbacks
         register_customize_callbacks(app)
@@ -121,7 +117,7 @@ def register_all_callbacks(app):
         print(f"  ❌ customize_callbacks FAILED: {e}")
         errors.append(f"customize_callbacks: {e}")
 
-        # ── 10. KPI customize callbacks ──────────────────────────────────────
+    # ── 10. KPI customize callbacks ──────────────────────────────────────
     try:
         from app.dash_apps.callbacks.customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
