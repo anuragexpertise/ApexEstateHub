@@ -1,28 +1,5 @@
 """
-customize_callbacks.py  —  FIXED
-==================================
-Bugs fixed
-----------
-1. load_layout / SortableJS triggered on url.pathname but pathname is never
-   '/customize' (it stays '/admin').  Fixed: trigger on dnd-init-dummy children
-   (which Dash fires whenever the customize page re-mounts) + a new
-   dcc.Store(id='customize-active-store') that shell_callbacks / portal_pages
-   sets when the tab is selected.
-
-2. dnd-available-zone missing in DOM.  The old portal_pages.py used
-   id='dnd-palette-wrap' as the outer wrapper but NEVER had an inner div with
-   id='dnd-available-zone', so every Sortable.create() call on that element
-   returned null.  Fixed here by targeting 'dnd-palette-zone' (matching the new
-   portal_pages.py below) and renaming the callback Output accordingly.
-
-3. SortableJS never re-inits after Dash re-renders the page into portal-content.
-   Fixed: the MutationObserver already handles this — but only if Sortable was
-   ever loaded.  The clientside callback is now triggered by
-   Input('dnd-init-dummy', 'children') (set by load_layout) AND
-   Input('url', 'pathname') as fallback.
-
-4. CARD_DEFINITIONS included form/list cards.  Fixed: palette only shows
-   KPI_CARDS so drag targets are KPI widgets only.
+customize_callbacks.py 
 """
 from __future__ import annotations
 import json

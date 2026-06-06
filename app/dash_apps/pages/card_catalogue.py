@@ -1,9 +1,4 @@
-"""
-card_catalogue.py
-Master catalogue of every KPI, Form and List card.
-Drop into: app/dash_apps/pages/card_catalogue.py
-"""
-
+# app/dash_apps/pages/card_catalogue.py
 import base64
 import json
 from dash import html, dcc
@@ -30,9 +25,7 @@ PAYABLES (Debits Due):
 # ════════════════════════════════════════════════════════════════════════════
 # CORE FINANCIAL KPIs (Auto-Calculated)
 # ════════════════════════════════════════════════════════════════════════════
- 
-# FIXED KPI DEFINITIONS
-# Drop this into: app/dash_apps/pages/card_catalogue.py (replace KPI_CARDS dict)
+
 
 """
 Enhanced KPI Definitions - COMPLETE & TESTED

@@ -15,7 +15,7 @@ from database.db_manager import db
 
 DB_ERROR_KEYWORDS = [
     "no database connection", "error in processing",
-    "error in querying", "operationalerror",
+    "error in querying", "DB operational error",
 ]
 
 
@@ -153,7 +153,7 @@ def register_card_catalogue_callbacks(app):
                 print(f"  ❌ {card_id}: {exc}")
                 results.append("—")
                 if any(kw in err_str for kw in DB_ERROR_KEYWORDS):
-                    db_error = str(exc)
+                    db_error = str(exc) + "Quuery: "+str(query[:20])
 
         toast = ({"type": "error", "message": f"Database error: {db_error}"}
                  if db_error else no_update)
