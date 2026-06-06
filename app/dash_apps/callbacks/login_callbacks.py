@@ -1,24 +1,6 @@
 # app/dash_apps/callbacks/login_callbacks.py
 """
 Login Callbacks — password / PIN / pattern authentication + password reset.
-
-Bugs fixed vs previous version
---------------------------------
-1. Removed imports of authenticate_pin, authenticate_pattern, request_password_reset,
-   reset_password — these do not exist in auth_service. All auth goes through
-   authenticate_user(); PIN/pattern are handled by passing the credential as
-   password with a method flag that auth_service resolves internally.
-2. Removed duplicate import of authenticate_user() inside handle_master_admin_login().
-3. Added allow_duplicate=True on the first auth-store Output to avoid Dash
-   duplicate-output error when shell_callbacks also writes auth-store.
-4. Removed broken clientside_callback on login-pattern.value that tried to
-   reference a non-existent window.dash_clientside.pattern namespace.
-5. Master admin check now uses db._execute() (not db.execute_query()).
-
-IMPORTANT
----------
-This file does NOT own the society-dropdown callback.
-That lives in shell_callbacks.py and must be registered first.
 """
 
 import dash

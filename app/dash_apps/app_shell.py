@@ -1,11 +1,13 @@
 # app/dash_apps/app_shell.py
 """
-Dash application shell — renders once at startup.
-All dynamic content is injected by callbacks.
+Dash application shell — renders ONCE at startup.
+All dynamic content injected by callbacks.
+
 """
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+
 
 # ── Role configuration ────────────────────────────────────────────────────────
 
@@ -81,7 +83,7 @@ ROLE_CONFIG = {
 
 # ── Login modal ───────────────────────────────────────────────────────────────
 
-def _login_modal() -> dbc.Modal:
+def _login_modal() -> html.Div:
     from app.dash_apps.pages.login_system import (
         society_select_layout,
         forgot_password_modal,
@@ -114,9 +116,7 @@ def _login_modal() -> dbc.Modal:
                 ),
                 dbc.ModalBody(
                     [
-                        # Stage 1: Society select (visible by default)
                         html.Div(id="login-stage-1", children=society_select_layout()),
-                        # Stage 2: Login form (filled and shown by callback)
                         html.Div(id="login-stage-2", style={"display": "none"}),
                     ],
                     id="login-modal-body",
@@ -136,7 +136,7 @@ def _login_modal() -> dbc.Modal:
                 ),
             ],
             id="login-modal",
-            is_open=True,
+            is_open=True,      # Starts open; guard_modal callback closes it if authenticated
             backdrop="static",
             keyboard=False,
             centered=True,
@@ -153,7 +153,6 @@ def _login_modal() -> dbc.Modal:
 def _sidebar() -> html.Aside:
     return html.Aside(
         [
-            # Brand
             html.Div(
                 [
                     html.Img(
@@ -184,8 +183,7 @@ def _sidebar() -> html.Aside:
                     "position": "relative",
                 },
             ),
-
-            # Nav — populated by router callback
+            # Nav populated by route_page → _make_nav_items() using dcc.Link
             html.Nav(
                 html.Ul(
                     id="sb-nav-list",
@@ -193,8 +191,6 @@ def _sidebar() -> html.Aside:
                     children=[],
                 )
             ),
-
-            # User panel (pinned bottom)
             html.Div(
                 [
                     html.Hr(style={"borderColor": "rgba(255,255,255,0.1)", "margin": "0 12px 8px"}),
@@ -215,11 +211,9 @@ def _sidebar() -> html.Aside:
                             html.Div(
                                 [
                                     html.Div(id="sb-user-name", children="—",
-                                             style={"fontSize": "12px", "fontWeight": "600",
-                                                    "color": "#fff"}),
+                                             style={"fontSize": "12px", "fontWeight": "600", "color": "#fff"}),
                                     html.Div(id="sb-user-role", children="—",
-                                             style={"fontSize": "10px",
-                                                    "color": "rgba(255,255,255,0.5)"}),
+                                             style={"fontSize": "10px", "color": "rgba(255,255,255,0.5)"}),
                                 ],
                                 style={"marginLeft": "8px", "overflow": "hidden"},
                             ),
@@ -258,16 +252,13 @@ def _header() -> html.Header:
                 n_clicks=0,
                 className="mobile-menu-btn",
             ),
-            # Left: society
             html.Div(
                 [
                     html.Img(
                         id="hdr-society-logo",
                         src="/static/assets/EH_logo.png",
-                        style={
-                            "width": "36px", "height": "36px",
-                            "borderRadius": "10px", "objectFit": "cover", "flexShrink": "0",
-                        },
+                        style={"width": "36px", "height": "36px",
+                               "borderRadius": "10px", "objectFit": "cover", "flexShrink": "0"},
                     ),
                     html.Div(
                         id="hdr-society-name",
@@ -277,29 +268,19 @@ def _header() -> html.Header:
                 ],
                 style={"display": "flex", "alignItems": "center", "flex": "1"},
             ),
-            # Centre: portal label
             html.Div(
                 id="hdr-portal-label",
                 children="",
-                style={
-                    "fontWeight": "700", "fontSize": "20px",
-                    "minWidth": "160px", "textAlign": "center",
-                },
+                style={"fontWeight": "700", "fontSize": "20px",
+                       "minWidth": "160px", "textAlign": "center"},
             ),
-            # Right: user
             html.Div(
                 [
+                    html.Div(id="hdr-entity-name", children="User",
+                             style={"fontWeight": "600", "fontSize": "13px", "marginRight": "8px"}),
                     html.Div(
-                        id="hdr-entity-name",
-                        children="User",
-                        style={"fontWeight": "600", "fontSize": "13px", "marginRight": "8px"},
-                    ),
-                    html.Div(
-                        id="hdr-avatar",
-                        children="?",
-                        n_clicks=0,
-                        title="Show my QR code",
-                        role="button",
+                        id="hdr-avatar", children="?", n_clicks=0,
+                        title="Show my QR code", role="button",
                         style={
                             "width": "34px", "height": "34px", "borderRadius": "50%",
                             "background": "linear-gradient(135deg,#667eea,#764ba2)",
@@ -309,7 +290,8 @@ def _header() -> html.Header:
                         },
                     ),
                 ],
-                style={"display": "flex", "alignItems": "center", "justifyContent": "flex-end", "flex": "1"},
+                style={"display": "flex", "alignItems": "center",
+                       "justifyContent": "flex-end", "flex": "1"},
             ),
         ],
         className="glass-header",
@@ -325,48 +307,28 @@ def _qr_modal() -> dbc.Modal:
         [
             dbc.ModalHeader(dbc.ModalTitle("Gate Pass QR Code"), close_button=True),
             dbc.ModalBody(
-                html.Div(
-                    [
-                        html.Img(
-                            id="qr-modal-img", src="",
-                            style={
-                                "width": "200px", "height": "200px",
-                                "margin": "0 auto", "display": "block",
-                                "border": "2px solid #667eea",
-                                "borderRadius": "10px", "padding": "8px",
-                            },
-                        ),
-                        html.Div(id="qr-modal-validity", className="mt-2 text-center"),
-                        html.Hr(),
-                        dbc.Textarea(
-                            id="qr-modal-text",
-                            readOnly=True,
-                            style={
-                                "marginTop": "10px", "minHeight": "54px",
-                                "fontSize": "22px", "fontFamily": "monospace",
-                                "resize": "none", "textAlign": "center",
-                            },
-                        ),
-                    ]
-                )
+                html.Div([
+                    html.Img(id="qr-modal-img", src="",
+                             style={"width": "200px", "height": "200px",
+                                    "margin": "0 auto", "display": "block",
+                                    "border": "2px solid #667eea",
+                                    "borderRadius": "10px", "padding": "8px"}),
+                    html.Div(id="qr-modal-validity", className="mt-2 text-center"),
+                    html.Hr(),
+                    dbc.Textarea(id="qr-modal-text", readOnly=True,
+                                 style={"marginTop": "10px", "minHeight": "54px",
+                                        "fontSize": "22px", "fontFamily": "monospace",
+                                        "resize": "none", "textAlign": "center"}),
+                ])
             ),
             dbc.ModalFooter(
                 html.Div(
                     [
-                        dbc.Button(
-                            html.I(className="fas fa-sign-out-alt"),
-                            id="qr-modal-logout-btn",
-                            n_clicks=0,
-                            color="link",
-                            style={"color": "#e74c3c", "fontSize": "18px"},
-                        ),
-                        dbc.Button(
-                            [html.I(className="fas fa-download me-2"), "Save PNG"],
-                            id="save-qr-png-btn",
-                            n_clicks=0,
-                            color="success",
-                            size="sm",
-                        ),
+                        dbc.Button(html.I(className="fas fa-sign-out-alt"),
+                                   id="qr-modal-logout-btn", n_clicks=0,
+                                   color="link", style={"color": "#e74c3c", "fontSize": "18px"}),
+                        dbc.Button([html.I(className="fas fa-download me-2"), "Save PNG"],
+                                   id="save-qr-png-btn", n_clicks=0, color="success", size="sm"),
                         dbc.Button("Close", id="close-qr-modal", n_clicks=0, color="secondary"),
                         html.A(id="qr-download-link", href="#",
                                download="qr_code.png", style={"display": "none"}),
@@ -387,98 +349,84 @@ def _qr_modal() -> dbc.Modal:
 def shell_layout() -> html.Div:
     return html.Div(
         [
-            # ── Routing & stores ───────────────────────────────────────────
+            # ── Routing ────────────────────────────────────────────────────────
+            # refresh=False is mandatory for SPA behaviour — tab clicks via dcc.Link
+            # update this pathname without triggering an HTTP request
             dcc.Location(id="url", refresh=False),
-            dcc.Store(id="auth-store",            storage_type="session"),
-            dcc.Store(id="cookie-store",           storage_type="local"),
-            dcc.Store(id="toast-store",            storage_type="memory"),
-            dcc.Store(id="sidebar-open-store",     storage_type="memory", data={"collapsed": False}),
-            dcc.Store(id="drilldown-store",        storage_type="session", data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
-            dcc.Store(id='profile-action-trigger', storage_type='memory', data={"action": None, "params": {}}),
-            dcc.Store(id="qr-entity-store",        storage_type="memory", data={}),
-            dcc.Store(id="qr-camera-store",        storage_type="memory", data={"facing": "environment", "active": False, "mode": None, "torch": False}),
-            dcc.Store(id="qr-scan-log",            storage_type="memory", data=[]),
-            dcc.Store(id="dnd-layout-store",       storage_type="session", data={"active": [], "available": []}),
-            dcc.Store(id="debug-kpi-log", storage_type="memory"),
-            dcc.Store(id="debug-list-log", storage_type="memory"),
-            dcc.Store(id="debug-sql-error", storage_type="memory"),
 
+            # ── Stores ─────────────────────────────────────────────────────────
+            # auth-store: localStorage — survives refresh + tab close + new tab
+            dcc.Store(id="auth-store",             storage_type="local"),
+            # cookie-store: localStorage — society selection cookie
+            dcc.Store(id="cookie-store",            storage_type="local"),
+            # ephemeral stores — memory (JS variable, reset on mount)
+            dcc.Store(id="toast-store",             storage_type="memory"),
+            dcc.Store(id="sidebar-open-store",      storage_type="memory",
+                      data={"collapsed": False}),
+            dcc.Store(id="profile-action-trigger",  storage_type="memory",
+                      data={"action": None, "params": {}}),
+            dcc.Store(id="qr-entity-store",         storage_type="memory", data={}),
+            dcc.Store(id="qr-camera-store",         storage_type="memory",
+                      data={"facing": "environment", "active": False,
+                            "mode": None, "torch": False}),
+            dcc.Store(id="qr-scan-log",             storage_type="memory", data=[]),
+            dcc.Store(id="debug-kpi-log",           storage_type="memory"),
+            dcc.Store(id="debug-list-log",          storage_type="memory"),
+            dcc.Store(id="debug-sql-error",         storage_type="memory"),
+            # session stores — survive page refresh but reset on tab close
+            dcc.Store(id="drilldown-store",         storage_type="session",
+                      data={"stack": [], "active_card": "", "filters": {},
+                            "prefill": {}, "list_pages": {}, "list_search": {}}),
+            dcc.Store(id="dnd-layout-store",        storage_type="session",
+                      data={"active": [], "available": []}),
 
-            # Hidden utility elements
-            html.Button(id="show-qr-btn",   n_clicks=0, style={"display": "none"}),
-            html.Div(id="dnd-init-dummy",           style={"display": "none"}),
+            # ── Hidden utility elements ────────────────────────────────────────
+            html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
+            html.Div(id="dnd-init-dummy",            style={"display": "none"}),
             dcc.Input(id="dnd-order-capture", value="",
-                      debounce=False,               style={"display": "none"}),
+                      debounce=False,                style={"display": "none"}),
 
-            # ── Login modals ───────────────────────────────────────────────
+            # ── Login modals ───────────────────────────────────────────────────
             _login_modal(),
 
-            # ── App shell ──────────────────────────────────────────────────
+            # ── App shell ──────────────────────────────────────────────────────
             html.Div(
                 [
                     _sidebar(),
-
-                    # Mobile overlay
-                    html.Div(
-                        id="sb-overlay",
-                        n_clicks=0,
-                        className="sidebar-overlay",
-                        style={"display": "none"},
-                    ),
-
-                    # Page wrapper
+                    html.Div(id="sb-overlay", n_clicks=0,
+                             className="sidebar-overlay", style={"display": "none"}),
                     html.Div(
                         [
                             _header(),
-
                             html.Main(
                                 [
-                                    # Back button for drill-down navigation
                                     dbc.Button(
                                         [html.I(className="fas fa-arrow-left me-2"), "Back"],
-                                        id="drill-back-btn",
-                                        n_clicks=0,
-                                        color="secondary",
-                                        size="sm",
-                                        outline=True,
-                                        className="mb-3",
-                                        style={"display": "none"},
+                                        id="drill-back-btn", n_clicks=0,
+                                        color="secondary", size="sm", outline=True,
+                                        className="mb-3", style={"display": "none"},
                                     ),
-
-                                    # Breadcrumb
                                     html.Div(
                                         html.Nav(
-                                            html.Ol(
-                                                id="breadcrumb-ol",
-                                                className="breadcrumb",
-                                                children=[],
-                                            ),
+                                            html.Ol(id="breadcrumb-ol",
+                                                    className="breadcrumb", children=[]),
                                             className="glass-breadcrumb",
                                         ),
                                         style={"padding": "5px 5px 0"},
                                     ),
-
-                                    # Main portal content
                                     html.Div(
                                         id="portal-content",
-                                        children=html.P(
-                                            "Loading…",
-                                            className="text-muted text-center mt-5",
-                                        ),
-                                        style={
-                                            "padding": "10px 20px",
-                                            "minHeight": "calc(100vh - 130px)",
-                                        },
+                                        children=html.P("Loading…",
+                                                        className="text-muted text-center mt-5"),
+                                        style={"padding": "10px 20px",
+                                               "minHeight": "calc(100vh - 130px)"},
                                     ),
                                 ],
                                 id="main-content",
                             ),
-
                             html.Footer(
-                                html.Small(
-                                    "© 2025 EstateHub — Aiven PostgreSQL",
-                                    style={"color": "#aaa", "fontSize": "10px"},
-                                ),
+                                html.Small("© 2025 EstateHub — Aiven PostgreSQL",
+                                           style={"color": "#aaa", "fontSize": "10px"}),
                                 className="glass-footer",
                                 style={"textAlign": "center", "padding": "10px"},
                             ),
@@ -491,16 +439,12 @@ def shell_layout() -> html.Div:
                 className="app-shell",
             ),
 
-            # ── Toast container ────────────────────────────────────────────
-            html.Div(
-                id="toast-container",
-                style={
-                    "position": "fixed", "top": "80px", "right": "16px",
-                    "zIndex": "9999", "minWidth": "280px",
-                },
-            ),
+            # ── Toast container ────────────────────────────────────────────────
+            html.Div(id="toast-container",
+                     style={"position": "fixed", "top": "80px", "right": "16px",
+                            "zIndex": "9999", "minWidth": "280px"}),
 
-            # ── QR modal ───────────────────────────────────────────────────
+            # ── QR modal ───────────────────────────────────────────────────────
             _qr_modal(),
         ]
     )
