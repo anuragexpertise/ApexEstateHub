@@ -2,25 +2,6 @@
 """
 Card Catalogue Callbacks — KPI refresh + all list/form CRUD callbacks.
 
-Bugs fixed vs previous version
---------------------------------
-1. KPI query param substitution was wrong:
-     Old: replaced %s with :param_N then passed a dict
-          → psycopg2 rejects named params for %s queries
-     Fix: build a positional TUPLE (society_id,) * n_params and pass
-          the original %s query directly to db._execute()
-
-2. db._execute() result is a list of dicts (psycopg2 RealDictRow).
-   Key access row["v"] works only if the query aliases the result column as v.
-   All KPI queries in card_catalogue.py already do SELECT ... AS v so this is fine.
-
-3. Trigger Input("url","pathname") fires on every tab click.
-   Now that nav uses dcc.Link (SPA, no reload), this is correct — 
-   pathname changes without a full reload so the callback fires with
-   valid auth-store data and KPIs populate correctly.
-
-4. Removed SQLAlchemy-style fetch (engine.connect / text()) — the project
-   uses psycopg2 directly through db._execute().
 """
 
 import base64
