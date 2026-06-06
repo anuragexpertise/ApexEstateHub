@@ -1030,14 +1030,18 @@ LANGUAGE plpgsql STABLE AS $$
 BEGIN
     RETURN QUERY
     SELECT s.id, s.name, s.email, s.phone, s.plan,
-           CASE WHEN s.plan = 'Free' THEN 'Free' WHEN s.plan_validity >= CURRENT_DATE THEN 'Active' ELSE 'Expired' END,
+           CASE 
+               WHEN s.plan = 'Free' THEN 'Free'::VARCHAR 
+               WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'::VARCHAR 
+               ELSE 'Expired'::VARCHAR 
+           END,
            s.plan_validity,
-           (SELECT COUNT(*):: INT FROM apartments WHERE society_id = s.id AND active = TRUE),
-           (SELECT COUNT(*):: INT FROM users WHERE society_id = s.id),
+           (SELECT COUNT(*)::INT FROM apartments WHERE society_id = s.id AND active = TRUE),
+           (SELECT COUNT(*)::INT FROM users WHERE society_id = s.id),
            (SELECT COALESCE(SUM(amount), 0) FROM receivables WHERE society_id = s.id AND status = 'pending'),
            s.created_at
     FROM societies s
-    WHERE (p_search IS NULL OR s.name ILIKE '%'||p_search||'%')
+    WHERE (p_search IS NULL OR s.name ILIKE '%' || p_search || '%')
       AND (p_plan IS NULL OR s.plan = p_plan)
     ORDER BY s.name;
 END;
