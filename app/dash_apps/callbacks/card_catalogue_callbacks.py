@@ -160,7 +160,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_societies_list(pathname, auth_data):
         try:
@@ -197,7 +197,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_entities_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -241,7 +241,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_accounts_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -282,7 +282,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_payments_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -328,7 +328,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_cashbook_full(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -381,7 +381,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_events_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -423,7 +423,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_gate_logs_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -466,7 +466,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_concerns_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
@@ -513,7 +513,7 @@ def register_card_catalogue_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_charges_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")

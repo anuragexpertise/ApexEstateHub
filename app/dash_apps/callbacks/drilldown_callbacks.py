@@ -74,7 +74,7 @@ def _is_db_error(msg: str) -> bool:
         "no database connection" in msg_lower
         or "error in processing" in msg_lower
         or "error in querying" in msg_lower
-        or "operationalerror" in msg_lower
+        or "operational error" in msg_lower
     )
 
 # ═══════════════════════════════════════════════════════════════════════════
