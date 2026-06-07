@@ -2,13 +2,18 @@
 """
 Card Catalogue Callbacks — KPI refresh + all list/form CRUD callbacks.
 
+Fixes in this version
+---------------------
+1. ALL exceptions now propagate to toast-store (was silently swallowed before).
+2. KPI refresh: every individual query failure is caught, logged, and a toast
+   fires with the card_id + error so the developer can pinpoint the problem.
+3. List callbacks: on DB error the toast fires (previously returned error <td>
+   only but toast-store was never written).
+4. format_kpi_value: ValueError on bad data now produces "—" gracefully.
 """
 
-import base64
-import json
-import os
-from datetime import date, datetime, timedelta
-from dash import Input, Output, State, html, dcc, no_update, ctx, ALL, MATCH
+from datetime import date, datetime
+from dash import Input, Output, State, html, dcc, no_update, ALL
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 from database.db_manager import db
@@ -19,36 +24,26 @@ DB_ERROR_KEYWORDS = [
 ]
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# FORMAT HELPER
-# ────────────────────────────────────────────────────────────────────────────
+# ── Format helper ─────────────────────────────────────────────────────────────
 
 def format_kpi_value(value, fmt: str) -> str:
-    """Format a raw DB value for display in a KPI card."""
     if value is None or value == "":
         return "—"
     try:
         if fmt == "number":
             return f"{int(float(value)):,}"
-
-        elif fmt == "currency":
+        if fmt == "currency":
             v = float(value)
             neg = v < 0
             v = abs(v)
-            if v >= 10_000_000:
-                s = f"₹{v/10_000_000:.2f}Cr"
-            elif v >= 100_000:
-                s = f"₹{v/100_000:.2f}L"
-            elif v >= 1_000:
-                s = f"₹{v/1_000:.1f}K"
-            else:
-                s = f"₹{int(v):,}"
+            if v >= 10_000_000: s = f"₹{v/10_000_000:.2f}Cr"
+            elif v >= 100_000:  s = f"₹{v/100_000:.2f}L"
+            elif v >= 1_000:    s = f"₹{v/1_000:.1f}K"
+            else:               s = f"₹{int(v):,}"
             return f"-{s}" if neg else s
-
-        elif fmt == "percent":
+        if fmt == "percent":
             return f"{float(value):.1f}%"
-
-        elif fmt == "date":
+        if fmt == "date":
             if isinstance(value, str):
                 for f in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
                     try:
@@ -66,20 +61,20 @@ def format_kpi_value(value, fmt: str) -> str:
                 if diff > 0:   return f"in {diff}d" if diff < 30 else value.strftime("%d %b %Y")
                 return f"{abs(diff)}d ago" if abs(diff) < 30 else value.strftime("%d %b %Y")
             return str(value)
-
-        elif fmt == "text":
+        if fmt == "text":
             return str(value).strip().title() or "—"
-
         return str(value)
-
     except (TypeError, ValueError) as exc:
         print(f"⚠️  format_kpi_value({value!r}, {fmt!r}): {exc}")
         return "—"
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# MAIN REGISTRATION
-# ────────────────────────────────────────────────────────────────────────────
+def _err_toast(msg: str) -> dict:
+    """Build a standard error toast payload."""
+    return {"type": "error", "message": str(msg)[:200]}
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
 
 def register_card_catalogue_callbacks(app):
     print("  → Registering card catalogue callbacks…")
@@ -116,8 +111,8 @@ def register_card_catalogue_callbacks(app):
 
         print(f"\n📊 KPI refresh — {len(kpi_ids)} cards, sid={sid}, role={role}")
 
-        results  = []
-        db_error = None
+        results   = []
+        first_err = None  # collect FIRST error for toast
 
         for id_dict in kpi_ids:
             card_id = id_dict.get("card_id")
@@ -146,37 +141,37 @@ def register_card_catalogue_callbacks(app):
             try:
                 row = db._execute(query, params, fetch_one=True)
                 raw = (row or {}).get("v")
-                results.append(format_kpi_value(raw, fmt))
-                print(f"  ✓ {card_id}: {raw} → {results[-1]}")
+                formatted = format_kpi_value(raw, fmt)
+                results.append(formatted)
+                print(f"  ✓ {card_id}: raw={raw!r} → {formatted}")
             except Exception as exc:
-                err_str = str(exc).lower()
-                print(f"  ❌ {card_id}: {exc}")
-                results.append("—")
-                if any(kw in err_str for kw in DB_ERROR_KEYWORDS):
-                    db_error = str(exc) + "Quuery: "+str(query[:20])
+                err_msg = f"KPI [{card_id}]: {str(exc)[:120]}"
+                print(f"  ❌ {err_msg}")
+                results.append("ERR")  # visible sentinel instead of —
+                if first_err is None:
+                    first_err = err_msg  # propagate first error to toast
 
-        toast = ({"type": "error", "message": f"Database error: {db_error}"}
-                 if db_error else no_update)
+        toast = _err_toast(first_err) if first_err else no_update
         return results, toast
 
     # ── 2. SOCIETIES LIST ─────────────────────────────────────────────────────
     @app.callback(
         Output("societies-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_societies_list(pathname, auth_data):
         try:
             rows = db._execute(
                 "SELECT id, name, email, phone, plan, plan_validity, created_at "
                 "FROM societies ORDER BY created_at DESC LIMIT 50",
-                (),
-                fetch_all=True,
+                (), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No societies found", colSpan=8,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             return [
                 html.Tr([
                     html.Td(r["id"]),
@@ -189,25 +184,26 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("Edit", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "edit",
                                            "entity": "society", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_societies_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=8,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 3. ENTITIES LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("entities-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_entities_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT u.id, a.flat_number, a.owner_name, u.role, u.email, "
@@ -215,12 +211,11 @@ def register_card_catalogue_callbacks(app):
                 "FROM users u "
                 "LEFT JOIN apartments a ON u.linked_id = a.id "
                 "WHERE u.society_id = %s ORDER BY u.created_at DESC LIMIT 50",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No entities found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             return [
                 html.Tr([
                     html.Td(r["id"]),
@@ -228,42 +223,41 @@ def register_card_catalogue_callbacks(app):
                     html.Td(r.get("owner_name") or r.get("email", "")[:20]),
                     html.Td(dbc.Badge(r.get("role", ""), color="secondary")),
                     html.Td(r.get("email", "")),
-                    html.Td(dbc.Badge(
-                        "Active" if r.get("active") else "Inactive",
-                        color="success" if r.get("active") else "danger")),
+                    html.Td(dbc.Badge("Active" if r.get("active") else "Inactive",
+                                      color="success" if r.get("active") else "danger")),
                     html.Td(dbc.Button("Edit", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "edit",
                                            "entity": "entity", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_entities_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 4. ACCOUNTS LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("accounts-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_accounts_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT id, name, tab_name, header, drcr_account, bf_amount, "
                 "       depreciation_percent "
                 "FROM accounts WHERE society_id = %s ORDER BY name",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No accounts found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             return [
                 html.Tr([
                     html.Td(r.get("name", "")),
@@ -275,25 +269,26 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("Edit", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "edit",
                                            "entity": "account", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_accounts_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 5. PAYMENTS LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("payments-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_payments_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT p.id, p.paid_at, a.flat_number, p.payment_type, "
@@ -302,12 +297,11 @@ def register_card_catalogue_callbacks(app):
                 "LEFT JOIN apartments a ON p.entity_id = a.id "
                 "WHERE p.society_id = %s "
                 "ORDER BY p.paid_at DESC NULLS LAST LIMIT 50",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No payments found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             smap = {"verified": "success", "pending": "warning", "failed": "danger"}
             return [
                 html.Tr([
@@ -321,25 +315,26 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("View", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "view",
                                            "entity": "payment", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_payments_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 6. CASHBOOK LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("cashbook-full-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_cashbook_full(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT t.id, t.trx_date, t.acc_particulars, a.name AS acc, "
@@ -348,14 +343,13 @@ def register_card_catalogue_callbacks(app):
                 "LEFT JOIN accounts a ON t.acc_id = a.id "
                 "WHERE t.society_id = %s "
                 "ORDER BY t.trx_date DESC, t.id DESC LIMIT 100",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No transactions found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             balance = 0.0
-            items   = []
+            items = []
             for r in reversed(rows):
                 amt   = float(r.get("amount", 0))
                 is_cr = r.get("drcr_account") == "Cr"
@@ -366,46 +360,44 @@ def register_card_catalogue_callbacks(app):
                     html.Td(str(r.get("trx_date", ""))[:10]),
                     html.Td(r.get("acc_particulars") or "—"),
                     html.Td(r.get("acc") or "—"),
-                    html.Td(f"₹{amt:,.2f}" if not is_cr else "—",
-                            style={"color": "#e74c3c"}),
-                    html.Td(f"₹{amt:,.2f}" if is_cr else "—",
-                            style={"color": "#27ae60"}),
+                    html.Td(f"₹{amt:,.2f}" if not is_cr else "—", style={"color": "#e74c3c"}),
+                    html.Td(f"₹{amt:,.2f}" if is_cr else "—", style={"color": "#27ae60"}),
                     html.Td(f"₹{bal:,.2f}",
                             style={"fontWeight": "500",
                                    "color": "#2c3e50" if bal >= 0 else "#e74c3c"}),
                     html.Td(dbc.Button("View", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "view",
                                            "entity": "transactions", "id": r["id"]})),
-                ])
-                for r, amt, is_cr, bal in reversed(items)
-            ]
+                ]) for r, amt, is_cr, bal in reversed(items)
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_cashbook_full: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 7. EVENTS LIST ────────────────────────────────────────────────────────
     @app.callback(
         Output("events-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_events_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=6,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT id, event_date, title, venue, open_to "
                 "FROM events WHERE society_id = %s "
                 "ORDER BY event_date DESC LIMIT 30",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No events found", colSpan=6,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             return [
                 html.Tr([
                     html.Td(str(r.get("event_date", ""))[:10]),
@@ -418,37 +410,37 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("View", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "view",
                                            "entity": "event", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_events_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=6,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 8. GATE LOGS LIST ─────────────────────────────────────────────────────
     @app.callback(
         Output("gate-logs-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_gate_logs_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=6,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT g.id, g.time_in, g.time_out, g.role, g.entity_id, "
                 "       EXTRACT(EPOCH FROM (COALESCE(g.time_out,NOW())-g.time_in))/3600 AS hrs "
                 "FROM gate_access g WHERE g.society_id = %s "
                 "ORDER BY g.time_in DESC LIMIT 50",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No gate logs found", colSpan=6,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             role_map = {"a": "Apartment", "v": "Vendor", "s": "Security", "g": "Guest"}
             return [
                 html.Tr([
@@ -461,36 +453,36 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("View", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "view",
                                            "entity": "gate_logs", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_gate_logs_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=6,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 9. CONCERNS LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("concerns-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_concerns_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             rows = db._execute(
                 "SELECT id, flat_no, concern_type, description, status, assigned_to "
                 "FROM concerns WHERE society_id = %s "
                 "ORDER BY created_at DESC LIMIT 50",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No concerns found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             smap = {"open": "danger", "in_progress": "warning",
                     "resolved": "success", "closed": "secondary"}
             return [
@@ -508,25 +500,26 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("View", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "view",
                                            "entity": "concerns", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_concerns_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     # ── 10. CHARGES LIST ──────────────────────────────────────────────────────
     @app.callback(
         Output("charges-list-table", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def load_charges_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
         if not sid:
             return [html.Tr([html.Td("No society selected", colSpan=7,
-                                      className="text-center text-muted")])]
+                                      className="text-center text-muted")])], no_update
         try:
             # apt_charges_fines is the actual charges table
             rows = db._execute(
@@ -536,12 +529,11 @@ def register_card_catalogue_callbacks(app):
                 "FROM apt_charges_fines acf "
                 "JOIN apartments a ON a.id = acf.apt_id "
                 "WHERE acf.society_id = %s ORDER BY a.flat_number",
-                (sid,),
-                fetch_all=True,
+                (sid,), fetch_all=True,
             ) or []
             if not rows:
                 return [html.Tr([html.Td("No charge rules found", colSpan=7,
-                                          className="text-center text-muted")])]
+                                          className="text-center text-muted")])], no_update
             return [
                 html.Tr([
                     html.Td(r.get("flat_number", "—")),
@@ -554,11 +546,11 @@ def register_card_catalogue_callbacks(app):
                     html.Td(dbc.Button("Edit", size="sm", color="link", n_clicks=0,
                                        id={"type": "list-action", "action": "edit",
                                            "entity": "charges", "id": r["id"]})),
-                ])
-                for r in rows
-            ]
+                ]) for r in rows
+            ], no_update
         except Exception as exc:
+            print(f"❌ load_charges_list: {exc}")
             return [html.Tr([html.Td(f"Error: {str(exc)[:100]}", colSpan=7,
-                                      className="text-danger")])]
+                                      className="text-danger")])], _err_toast(exc)
 
     print("  ✓ Card catalogue callbacks registered")
