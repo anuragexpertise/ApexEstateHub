@@ -1,4 +1,30 @@
 # app/dash_apps/callbacks/shell_callbacks.py
+"""
+Shell callbacks — owns auth-store, url, login-modal, society dropdown.
+Must be registered FIRST in callbacks/__init__.py.
+
+Dash allow_duplicate rules (definitive reference)
+--------------------------------------------------
+allow_duplicate=True  REQUIRES  prevent_initial_call != False
+  ✓  prevent_initial_call=True             fires only on user interactions
+  ✓  prevent_initial_call='initial_duplicate'  fires on load AND interactions
+  ✗  prevent_initial_call=False (default)  → DuplicateCallback CRASH
+
+Fixes in this version
+---------------------
+1. load_societies trigger changed from Input("login-modal","is_open") to
+   Input("url","pathname") with prevent_initial_call=False.
+   Reason: login-modal.is_open is written by guard_modal (allow_duplicate),
+   creating a race condition. pathname fires once on initial mount,
+   reliably and always, regardless of auth state.
+
+2. guard_modal uses prevent_initial_call='initial_duplicate' so it fires
+   on initial load to immediately close the modal for authenticated users.
+
+3. All other allow_duplicate outputs use prevent_initial_call=True (user
+   interactions only — buttons, logouts, etc.).
+"""
+
 import dash
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -27,9 +53,8 @@ def _db_ok() -> bool:
 
 def _make_nav_items(role, society_id, pathname):
     """
-    Build sidebar nav list.
-    Uses dcc.Link (History API) — no HTTP request, no page reload,
-    all stores survive, auth-store stays populated.
+    Build sidebar nav using dcc.Link — History API push, no page reload,
+    all stores survive tab clicks, auth-store stays populated.
     """
     is_master = role == "admin" and society_id is None
     key   = "master" if is_master else (role or "admin")
@@ -56,13 +81,11 @@ def _make_nav_items(role, society_id, pathname):
                         ),
                     ],
                     href=href,
-                    refresh=False,  # SPA — no page reload
+                    refresh=False,
                     className="snav-link" + (" snav-link--active" if is_active else ""),
                     style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "padding": "10px 14px",
-                        "borderRadius": "10px",
+                        "display": "flex", "alignItems": "center",
+                        "padding": "10px 14px", "borderRadius": "10px",
                         "textDecoration": "none",
                         "background": "rgba(255,255,255,0.12)" if is_active else "transparent",
                         "transition": "background 0.15s ease",
@@ -115,8 +138,7 @@ def _breadcrumb(pathname):
         html.Li(
             dcc.Link(
                 [html.I(className="fas fa-home me-1"), "Home"],
-                href="/dashboard/",
-                refresh=False,
+                href="/dashboard/", refresh=False,
                 style={"textDecoration": "none", "color": "#1d74d8"},
             ),
             className="bc-item",
@@ -125,33 +147,25 @@ def _breadcrumb(pathname):
     for i, part in enumerate(parts):
         name   = _PATH_LABELS.get(part, part.replace("-", " ").title())
         active = i == len(parts) - 1
-        items.append(
-            html.Li(
-                html.Span(name, style={"fontWeight": "600"}) if active
-                else dcc.Link(name, href=f"/dashboard/{part}", refresh=False,
-                              style={"textDecoration": "none", "color": "#1d74d8"}),
-                className="bc-item" + (" bc-item--active" if active else ""),
-            )
-        )
+        items.append(html.Li(
+            html.Span(name, style={"fontWeight": "600"}) if active
+            else dcc.Link(name, href=f"/dashboard/{part}", refresh=False,
+                          style={"textDecoration": "none", "color": "#1d74d8"}),
+            className="bc-item" + (" bc-item--active" if active else ""),
+        ))
     return items
 
 
-# ── Portal content router ─────────────────────────────────────────────────────
-
 def _portal_content(role, society_id, pathname):
     from app.dash_apps.pages.portal_pages import (
-        master_portal_page,
-        admin_portal_page,
-        owner_portal_page,
-        vendor_portal_page,
-        security_portal_page,
+        master_portal_page, admin_portal_page, owner_portal_page,
+        vendor_portal_page, security_portal_page,
     )
     is_master = role == "admin" and society_id is None
     p = pathname or ""
 
     if is_master:
         return master_portal_page()
-
     if role == "admin":
         tab = (
             "cashbook"      if "/cashbook"      in p else
@@ -166,7 +180,6 @@ def _portal_content(role, society_id, pathname):
             "dashboard"
         )
         return admin_portal_page(tab)
-
     if role == "apartment":
         tab = (
             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
@@ -178,7 +191,6 @@ def _portal_content(role, society_id, pathname):
             "dashboard"
         )
         return owner_portal_page(tab)
-
     if role == "vendor":
         tab = (
             "cashbook" if "/vendor-cashbook" in p or "/cashbook" in p else
@@ -189,7 +201,6 @@ def _portal_content(role, society_id, pathname):
             "dashboard"
         )
         return vendor_portal_page(tab)
-
     if role == "security":
         tab = (
             "attendance"       if "/attendance"        in p else
@@ -200,7 +211,6 @@ def _portal_content(role, society_id, pathname):
             "pass_evaluation"
         )
         return security_portal_page(tab)
-
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
 
@@ -212,18 +222,20 @@ def register_shell_callbacks(app):
     print("  → Registering shell callbacks…")
 
     # ── 0. SOCIETY DROPDOWN ───────────────────────────────────────────────────
-    # Triggered on initial load (prevent_initial_call=False).
+    # Trigger: url.pathname (fires on initial mount with prevent_initial_call=False)
     # No allow_duplicate outputs → no Dash validation issue.
+    # Using pathname instead of login-modal.is_open avoids a race condition
+    # with guard_modal which also writes login-modal.is_open.
     @app.callback(
         Output("society-dropdown", "options"),
         Output("society-dropdown", "disabled"),
         Output("login-db-error",   "children"),
         Output("login-db-error",   "style"),
-        Input("login-modal",       "is_open"),
-        prevent_initial_call=False,
+        Input("url", "pathname"),
+        prevent_initial_call=False,   # fires on initial page load — no allow_duplicate here
     )
-    def load_societies(is_open):
-        print(f"\n🔍 load_societies — is_open={is_open}")
+    def load_societies(pathname):
+        print(f"\n🔍 load_societies — pathname={pathname}")
         _ERR = {"display": "block", "marginBottom": "15px",
                 "padding": "8px", "borderRadius": "8px"}
 
@@ -240,11 +252,9 @@ def register_shell_callbacks(app):
             )
 
         try:
-            # societies table has NO active column
             rows = _db()._execute(
                 "SELECT id, name FROM societies ORDER BY name",
-                (),
-                fetch_all=True,
+                (), fetch_all=True,
             ) or []
         except Exception as exc:
             print(f"❌ societies query error: {exc}")
@@ -272,11 +282,26 @@ def register_shell_callbacks(app):
             )
 
         options = [{"label": r["name"], "value": r["id"]} for r in rows]
-        print(f"✅ {len(options)} societies: {[r['name'] for r in rows]}")
+        print(f"✅ {len(options)} societies loaded: {[r['name'] for r in rows]}")
         return options, False, "", {"display": "none"}
 
-    # ── 1. STAGE 1 → STAGE 2 ─────────────────────────────────────────────────
-    # prevent_initial_call=True  →  allow_duplicate=True is valid here
+    # ── 1. LOGIN MODAL GUARD ──────────────────────────────────────────────────
+    # 'initial_duplicate': fires on load AND on subsequent auth-store changes.
+    # Closes modal instantly when auth-store shows authenticated=True.
+    # allow_duplicate=True required because logout also writes login-modal.is_open.
+    @app.callback(
+        Output("login-modal", "is_open", allow_duplicate=True),
+        Input("auth-store",   "data"),
+        Input("url",          "pathname"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def guard_modal(auth, pathname):
+        authenticated = bool(auth and auth.get("authenticated"))
+        return not authenticated  # True = open (not logged in), False = closed (logged in)
+
+    # ── 2. STAGE 1 → STAGE 2 ─────────────────────────────────────────────────
+    # allow_duplicate=True on auth-store + cookie-store.
+    # prevent_initial_call=True: triggered by button click only.
     @app.callback(
         Output("login-stage-1", "style"),
         Output("login-stage-2", "style"),
@@ -297,7 +322,7 @@ def register_shell_callbacks(app):
         cookie = {"society_id": sid} if remember else no_update
         return {"display": "none"}, {"display": "block"}, auth, cookie
 
-    # ── 2. BACK TO STAGE 1 ────────────────────────────────────────────────────
+    # ── 3. BACK TO STAGE 1 ────────────────────────────────────────────────────
     @app.callback(
         Output("login-stage-1", "style", allow_duplicate=True),
         Output("login-stage-2", "style", allow_duplicate=True),
@@ -309,7 +334,7 @@ def register_shell_callbacks(app):
             raise PreventUpdate
         return {"display": "block"}, {"display": "none"}
 
-    # ── 3. COOKIE → AUTO-ADVANCE ──────────────────────────────────────────────
+    # ── 4. COOKIE → AUTO-ADVANCE ──────────────────────────────────────────────
     @app.callback(
         Output("society-dropdown", "value",      allow_duplicate=True),
         Output("login-stage-1",   "style",       allow_duplicate=True),
@@ -329,7 +354,7 @@ def register_shell_callbacks(app):
         return sid, {"display": "none"}, {"display": "block"}, \
                {"society_id": sid, "authenticated": False}
 
-    # ── 4. INJECT STAGE-2 CONTENT ─────────────────────────────────────────────
+    # ── 5. INJECT STAGE-2 CONTENT ─────────────────────────────────────────────
     @app.callback(
         Output("login-stage-2", "children"),
         Input("auth-store",     "data"),
@@ -351,7 +376,7 @@ def register_shell_callbacks(app):
         from app.dash_apps.pages.login_system import login_layout
         return login_layout(society_name)
 
-    # ── 5. MASTER LOGIN TOGGLE ────────────────────────────────────────────────
+    # ── 6. MASTER LOGIN TOGGLE ────────────────────────────────────────────────
     @app.callback(
         Output("master-login-collapse", "style"),
         Input("toggle-master-btn",      "n_clicks"),
@@ -362,7 +387,7 @@ def register_shell_callbacks(app):
             raise PreventUpdate
         return {"display": "block"} if n % 2 == 1 else {"display": "none"}
 
-    # ── 6. LOGOUT ─────────────────────────────────────────────────────────────
+    # ── 7. LOGOUT ─────────────────────────────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -383,33 +408,9 @@ def register_shell_callbacks(app):
             pass
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
 
-    # ── 7. LOGIN MODAL GUARD ──────────────────────────────────────────────────
-    # Dedicated callback that SOLELY controls login-modal.is_open.
-    # Separated from route_page so we can use prevent_initial_call='initial_duplicate'
-    # which satisfies the Dash rule: allow_duplicate requires prevent_initial_call != False.
-    #
-    # 'initial_duplicate' means: fire on initial load AND on subsequent changes,
-    # but allow other callbacks to also own this output (allow_duplicate).
-    # This lets logout (above) also write login-modal.is_open without conflict.
-    @app.callback(
-        Output("login-modal", "is_open", allow_duplicate=True),
-        Input("auth-store",   "data"),
-        Input("url",          "pathname"),
-        prevent_initial_call="initial_duplicate",
-    )
-    def guard_modal(auth, pathname):
-        """
-        Close the login modal immediately when auth-store shows authenticated=True.
-        Open it when auth-store is empty or authenticated=False.
-        Fires on both initial load and every subsequent auth-store / url change.
-        """
-        authenticated = bool(auth and auth.get("authenticated"))
-        # Close modal when logged in; open when not
-        return not authenticated
-
     # ── 8. MAIN PAGE ROUTER ───────────────────────────────────────────────────
-    # prevent_initial_call=False — no allow_duplicate outputs here.
-    # login-modal.is_open is controlled by guard_modal (callback 7) above.
+    # prevent_initial_call=False, NO allow_duplicate outputs.
+    # login-modal.is_open is owned exclusively by guard_modal (above).
     @app.callback(
         Output("portal-content",   "children"),
         Output("sb-nav-list",      "children"),
@@ -440,30 +441,22 @@ def register_shell_callbacks(app):
         society_id = auth.get("society_id")
         user_id    = auth.get("user_id")
         email      = auth.get("email", "")
-
         db = _db()
 
-        # User display name
         try:
             u_row = db._execute(
-                "SELECT name FROM users WHERE id = %s",
-                (user_id,),
-                fetch_one=True,
-            )
+                "SELECT name FROM users WHERE id = %s", (user_id,), fetch_one=True)
             user_name = (u_row or {}).get("name") or email.split("@")[0].title()
         except Exception:
             user_name = email.split("@")[0].title()
 
-        # Society name + logo
         society_name = "EstateHub"
         society_logo = "/static/assets/EH_logo.png"
         if society_id:
             try:
                 s_row = db._execute(
                     "SELECT name, logo FROM societies WHERE id = %s",
-                    (society_id,),
-                    fetch_one=True,
-                )
+                    (society_id,), fetch_one=True)
                 if s_row:
                     society_name = s_row.get("name", society_name)
                     if s_row.get("logo"):
@@ -484,15 +477,10 @@ def register_shell_callbacks(app):
             _portal_content(role, society_id, pathname),
             _make_nav_items(role, society_id, pathname),
             _breadcrumb(pathname),
-            cfg["label"],
-            portal_style,
-            user_name,
-            role.title(),
-            avatar,
-            user_name,
-            avatar,
-            society_name,
-            society_logo,
+            cfg["label"], portal_style,
+            user_name, role.title(), avatar,
+            user_name, avatar,
+            society_name, society_logo,
         )
 
     # ── 9. SIDEBAR TOGGLE ─────────────────────────────────────────────────────
@@ -523,8 +511,7 @@ def register_shell_callbacks(app):
             nc = not collapsed
             return (
                 "app-sidebar sidebar-collapsed" if nc else "app-sidebar",
-                {"display": "none"},
-                {"collapsed": nc},
+                {"display": "none"}, {"collapsed": nc},
             )
         raise PreventUpdate
 
@@ -547,14 +534,11 @@ def register_shell_callbacks(app):
             msg,
             id="toast",
             header=html.Div([
-                html.I(className=f"fas {icons.get(t, 'fa-info-circle')} me-2"),
+                html.I(className=f"fas {icons.get(t,'fa-info-circle')} me-2"),
                 t.title(),
             ]),
-            icon=t,
-            duration=4000,
-            is_open=True,
-            style={"borderLeft": f"4px solid {colors.get(t, '#3b82f6')}"},
+            icon=t, duration=4000, is_open=True,
+            style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
 
     print("  ✓ Shell callbacks registered")
-
