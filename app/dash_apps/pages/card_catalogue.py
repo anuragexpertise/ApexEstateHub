@@ -685,28 +685,7 @@ KPI_CARDS = {
         "group": "expenses",
     },
 
-    "kpi_security_salaries_due": {
-        "query": """
-            WITH security_total_due AS (
-                SELECT COALESCE(SUM(ss.salary_per_shift * 
-                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)), 0) AS amount
-                FROM security_staff ss WHERE ss.society_id = %s AND ss.active = TRUE
-            ),
-            security_paid AS (
-                SELECT COALESCE(SUM(p.amount), 0) AS amount
-                FROM payments p WHERE p.society_id = %s AND p.payment_type = 'salary' AND p.status = 'verified'
-            )
-            SELECT COALESCE(std.amount - sp.amount, 0) AS v
-            FROM security_total_due std, security_paid sp
-        """,
-        "params": 2,
-        "format": "currency",
-        "icon": "fa-user-shield",
-        "color": "#b63b3b",
-        "title": "Security Salary Due",
-        "group": "unpaid wages",
-    },
-
+    
     "kpi_security_salary_due": {
         "query": """
             SELECT COALESCE(SUM(p.amount), 0) AS v
@@ -790,19 +769,7 @@ KPI_CARDS = {
         "group": "profile",
     },
 
-    "kpi_receivables_total": {
-        "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
-            WHERE society_id = %s AND status = 'pending'
-        """,
-        "params": 1,
-        "format": "currency",
-        "icon": "fa-wallet",
-        "color": "#2c3e50",
-        "title": "To Pay",
-        "group": "pending",
-    },
+
 
     # ══════════════════════════════════════════════════════════════
     # VENDOR PORTAL KPIs
@@ -932,53 +899,6 @@ KPI_CARDS = {
         "color": "#de5c52",
         "title": "Shift Count",
         "group": "active",
-    },
-
-    # ══════════════════════════════════════════════════════════════
-    # CASHBOOK & BALANCE
-    # ══════════════════════════════════════════════════════════════
-    "kpi_vendor_payables_due": {
-        "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
-            WHERE society_id = %s AND entity_type = 'vendor' AND status = 'pending'
-        """,
-        "params": 1,
-        "format": "currency",
-        "icon": "fa-truck",
-        "color": "#b98a07",
-        "title": "Vendor Payables Due",
-        "group": "pending",
-    },
-
-    "kpi_payables_total": {
-        "query": """
-            WITH security_salaries AS (
-                SELECT COALESCE(SUM(ss.salary_per_shift * 
-                    GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, COALESCE(ss.joining_date, CURRENT_DATE))), 0)), 0) AS amount
-                FROM security_staff ss WHERE ss.society_id = %s AND ss.active = TRUE
-            ),
-            security_paid AS (
-                SELECT COALESCE(SUM(p.amount), 0) AS amount
-                FROM payments p WHERE p.society_id = %s AND p.payment_type = 'salary' AND p.status = 'verified'
-            ),
-            vendor_payments AS (
-                SELECT COALESCE(SUM(amount), 0) AS amount
-                FROM payments WHERE society_id = %s AND entity_type = 'vendor' AND status = 'pending'
-            ),
-            pending_expenses AS (
-                SELECT COALESCE(SUM(amount), 0) AS amount
-                FROM expenses WHERE society_id = %s AND status = 'pending'
-            )
-            SELECT COALESCE(ss.amount - sp.amount + vp.amount + pe.amount, 0) AS v
-            FROM security_salaries ss, security_paid sp, vendor_payments vp, pending_expenses pe
-        """,
-        "params": 4,
-        "format": "currency",
-        "icon": "fa-wallet",
-        "color": "#de5c52",
-        "title": "Total Payables",
-        "group": "pending payments",
     },
 }
 FORM_CARDS = {

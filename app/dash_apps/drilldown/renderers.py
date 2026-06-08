@@ -309,8 +309,7 @@ def render_list_card(card_id: str, title: str, icon: str,
 
         header_right.append(dbc.Button(
             [html.I(className="fas fa-plus me-1"), "New"],
-            id={"type": "btn-new", "entity": entity,
-                "target": new_target},
+            id={"type": "btn-new", "entity": entity},
             size="sm", color="success", outline=True,
             style={"fontSize": "11px", "borderRadius": "8px",
                    "fontWeight": "600"},

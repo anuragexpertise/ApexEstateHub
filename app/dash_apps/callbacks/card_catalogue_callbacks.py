@@ -99,7 +99,7 @@ def register_card_catalogue_callbacks(app):
     )
     def refresh_kpi_values(pathname, kpi_ids, auth_data):
         if not kpi_ids:
-            return [], no_update
+            raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):
             print("  ⚠️  KPI refresh: not authenticated")

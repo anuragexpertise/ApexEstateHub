@@ -356,29 +356,24 @@ def shell_layout() -> html.Div:
 
             # ── Stores ─────────────────────────────────────────────────────────
             # auth-store: localStorage — survives refresh + tab close + new tab
-            dcc.Store(id="auth-store",             storage_type="local"),
+            dcc.Store(id="auth-store",             storage_type="local", data=None),
             # cookie-store: localStorage — society selection cookie
-            dcc.Store(id="cookie-store",            storage_type="local"),
+            dcc.Store(id="cookie-store",            storage_type="local", data={}),
             # ephemeral stores — memory (JS variable, reset on mount)
-            dcc.Store(id="toast-store",             storage_type="memory"),
-            dcc.Store(id="sidebar-open-store",      storage_type="memory",
-                      data={"collapsed": False}),
-            dcc.Store(id="profile-action-trigger",  storage_type="memory",
-                      data={"action": None, "params": {}}),
+            dcc.Store(id="toast-store",             storage_type="memory", data =None),
+            dcc.Store(id="sidebar-open-store",      storage_type="memory", data={"collapsed": False}),
+            dcc.Store(id="profile-action-trigger",  storage_type="memory", data={"action": None, "params": {}}),
             dcc.Store(id="qr-entity-store",         storage_type="memory", data={}),
-            dcc.Store(id="qr-camera-store",         storage_type="memory",
-                      data={"facing": "environment", "active": False,
+            dcc.Store(id="qr-camera-store",         storage_type="memory", data={"facing": "environment", "active": False,
                             "mode": None, "torch": False}),
             dcc.Store(id="qr-scan-log",             storage_type="memory", data=[]),
             dcc.Store(id="debug-kpi-log",           storage_type="memory"),
             dcc.Store(id="debug-list-log",          storage_type="memory"),
             dcc.Store(id="debug-sql-error",         storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
-            dcc.Store(id="drilldown-store",         storage_type="session",
-                      data={"stack": [], "active_card": "", "filters": {},
-                            "prefill": {}, "list_pages": {}, "list_search": {}}),
-            dcc.Store(id="dnd-layout-store",        storage_type="session",
-                      data={"active": [], "available": []}),
+            dcc.Store(id="drilldown-store",         storage_type="session", 
+                       data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
+            dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),

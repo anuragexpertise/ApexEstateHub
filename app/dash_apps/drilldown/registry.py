@@ -147,30 +147,6 @@ DRILLDOWN_MAP: dict = {
     "kpi_late_fees_due":           {"target": "list_payments",    "label": "Late Fees Due"},
     "kpi_maintenance_due":         {"target": "list_payments",    "label": "Maintenance Due"},
     
-    # ── OWNER PORTAL KPIs → LIST ──────────────────────────────────────────────
-    "kpi_apartments_dues":       {"portal": "apartment", "tab": "dashboard", "group": "Account"},
-    "kpi_concerns_open":         {"portal": "apartment", "tab": "dashboard", "group": "Concerns"},
-    "kpi_events_total":          {"portal": "apartment", "tab": "dashboard", "group": "Events"},
-    "kpi_gate_logs":             {"portal": "apartment", "tab": "dashboard", "group": "Gate"},
-    "kpi_receipts_month":        {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
-    "kpi_receivables_total":     {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
-    
-    # ── VENDOR PORTAL KPIs → LIST ─────────────────────────────────────────────
-    "kpi_concerns_open":         {"target": "list_concerns",    "label": "Jobs / Concerns"},
-    "kpi_events_total":          {"target": "list_events",      "label": "Upcoming Events"},
-    "kpi_receivables_total":     {"target": "list_payments",    "label": "Payable Due"},
-    "kpi_receipts_month":        {"target": "list_receipts_tbl","label": "Receipts This Month"},
-    "kpi_gate_logs":             {"target": "list_gate_logs",   "label": "Gate Logs Today"},
-    
-    # ── SECURITY PORTAL KPIs → LIST ───────────────────────────────────────────
-    "kpi_apartments_total":      {"target": "list_apartments",  "label": "Apartments"},
-    "kpi_vendors_total":         {"target": "list_vendors",     "label": "Vendors"},
-    "kpi_security_total":        {"target": "list_security",    "label": "Security"},
-    "kpi_receivables_total":     {"target": "list_payments",    "label": "Receipts Due"},
-    "kpi_payables_total":        {"target": "list_payments",    "label": "Expenses Due"},
-    "kpi_receipts_month":        {"target": "list_receipts_tbl","label": "Receipts This Month"},
-    "kpi_expenses_month":        {"target": "list_expenses_tbl","label": "Expenses This Month"},
-    
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
     "list_apartments":    {"target": "profile_apartment",      "label": "Apartment Profile"},
     "list_vendors":       {"target": "profile_vendor",         "label": "Vendor Profile"},

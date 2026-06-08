@@ -20,16 +20,19 @@ def _db():
 
 
 def _build_auth_store(user: dict) -> dict:
-    """Build the auth-store payload from a successful authenticate_user() result."""
     return {
-        "user_id":          user.get("user_id") or user.get("id"),
-        "email":            user.get("email", ""),
-        "role":             user.get("role", "admin"),
-        "society_id":       user.get("society_id"),
-        "linked_id":        user.get("linked_id"),
-        "authenticated":    True,
-        "token":            user.get("token", ""),
-        "push_subscription": user.get("push_subscription"),
+        "user_id":       user.get("user_id") or user.get("id"),
+        "email":         user.get("email", ""),
+        "role":          user.get("role", "admin"),
+        "society_id":    user.get("society_id"),
+        "linked_id":     user.get("linked_id"),
+        # Portal-scoping fields — loaders use these to filter data
+        "apartment_id":  user.get("apartment_id") or (
+                             user.get("linked_id") if user.get("role") == "apartment" else None),
+        "vendor_id":     user.get("vendor_id") or (
+                             user.get("linked_id") if user.get("role") == "vendor" else None),
+        "authenticated": True,
+        "token":         user.get("token", ""),
     }
 
 
@@ -43,7 +46,7 @@ def _redirect(role: str, society_id) -> str:
         "vendor":    "/dashboard/vendor-portal",
         "security":  "/dashboard/pass-evaluation",
     }
-    return paths.get(role, "/dashboard/")
+    return paths.get(role, "/dashboard/admin-portal")
 
 
 def _login_response(user: dict):
