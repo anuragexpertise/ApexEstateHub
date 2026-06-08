@@ -235,120 +235,7 @@ def master_portal_page() -> html.Div:
 # ═══════════════════════════════════════════════════════════════════════════
 # ADMIN PORTAL — all tabs
 # ═══════════════════════════════════════════════════════════════════════════
-
-def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
-    c = _C["admin"]
-    from app.dash_apps.pages.portal_pages import _page_title
-    if active_tab == "dashboard":
-        
-        return html.Div([
-            _page_title("fa-user-shield", c, "Admin Dashboard"),
-            _sec_hdr("Society Overview", "click any KPI to drill down"),
-            _kpi_row(
-                _kpi("kpi_apartments_total",   "fa-home",          "#1859b8", "Apartments"),
-                _kpi("kpi_vendors_total",      "fa-truck",         "#b98a07", "Vendors"),
-                _kpi("kpi_security_total",     "fa-user-shield",   "#b63b3b", "Security Total"),
-                _kpi("kpi_security_on_duty",   "fa-user-shield",   "#691b1b", "Security On Duty"),
-                _kpi("kpi_events_total",       "fa-calendar-check","#8e44ad", "Upcoming Events"),
-                _kpi("kpi_concerns_open",      "fa-hand-point-up", "#de5c52", "Open Concerns"),
-                _kpi("kpi_gate_logs",          "fa-receipt",       "#1abc9c", "Gate Logs -24hrs"),
-                _kpi("kpi_receipts_month",     "fa-receipt",       "#17976e", "Receipts (Month)"),
-                _kpi("kpi_expenses_month",     "fa-exclamation-triangle",       "#aa241a", "Expenses (Month)"),
-                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
-                _kpi("kpi_bank_balance",            "fa-wallet",        "#2c3e50", "Bank Balance"),
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "enroll":
-        return html.Div([
-            _page_title("fa-user-plus", c, "Enroll Members",
-                        "apartments · vendors · security"),
-            _sec_hdr("Current Counts", "click to view full list"),
-            _kpi_row(
-                _kpi("kpi_apartments_total", "fa-home",          "#1859b8", "Apartments"),
-                _kpi("kpi_vendors_total",    "fa-truck","#b98a07", "Vendors"),
-                _kpi("kpi_security_total",   "fa-user-shield",   "#b63b3b", "Security Staff"),
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "cashbook":
-        return html.Div([
-            _page_title("fa-book", c, "Cashbook", "full transaction ledger"),
-            _kpi_row(
-                _kpi("kpi_receivables_total", "fa-receipt", "#331797", "Receipts Due"),
-                _kpi("kpi_payables_total", "fa-wallet",  "#6552de", "Expenses Due"),
-                _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
-                _kpi("kpi_expenses_month", "fa-wallet",  "#de5c52", "Expenses (Month)"),
-                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
-                _kpi("kpi_bank_balance",        "fa-coins",   "#2c3e50", "Bank Balance"),
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-                ),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "receipts":
-        return html.Div([
-            _page_title("fa-file-invoice-dollar", c, "Receipts", "all incoming payments"),
-            
-                _kpi_row(
-                _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
-                _kpi("kpi_receivables_total", "fa-receipt", "#17976e", "Receipts (Total))"),
-                _kpi("kpi_maintenance_due", "fa-receipt", "#7674e0", "Maintainence Due"),
-                _kpi("kpi_late_fees_due", "fa-wallet",  "#7674e0", "Late Fees Due"),
-                _kpi("kpi_vendor_payables_due",       "fa-wallet", "#2c3e50", "Vendor Payables Due"),
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-                ),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "expenses":
-        return html.Div([
-            _page_title("fa-wallet", c, "Expenses", "outgoing payments"),
-            _kpi_row(
-                _kpi("kpi_expenses_month", "fa-wallet", "#de5c52", "Expenses (Month)"),
-                _kpi("kpi_payables_total", "fa-wallet",  "#de5c52", "Expenses Due (Total))"),
-                _kpi("kpi_security_salaries_due", "fa-receipt", "#7674e0", "Securities Salaries Due"),
-                _kpi("kpi_amc_due", "fa-receipt", "#7674e0", "AMC Due"),
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-                ),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "events":
-        return html.Div([
-            _page_title("fa-calendar-alt", c, "Events", "upcoming society events"),
-            _kpi_row(_kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"),
-                     cols="1fr"),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "concerns":
-        return html.Div([
-            _page_title("fa-hand-point-up", c, "Concerns", "maintenance & issues"),
-            _kpi_row(_kpi("kpi_concerns_open", "fa-hand-point-up", "#de5c52", "Open Concerns"),
-                     cols="1fr"),
-            _divider(),
-            _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "evaluate_pass":
-        return _evaluate_pass_page()
-
-    if active_tab == "customize":
-        
-        return _customize_page(c)
-
-    def _customize_page(c: str):
+def _customize_page(c: str):
         from dash import html, dcc
         import dash_bootstrap_components as dbc
 
@@ -764,6 +651,119 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
 
         ], className="portal-page")
 
+def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
+    c = _C["admin"]
+    from app.dash_apps.pages.portal_pages import _page_title
+    if active_tab == "dashboard":
+        
+        return html.Div([
+            _page_title("fa-user-shield", c, "Admin Dashboard"),
+            _sec_hdr("Society Overview", "click any KPI to drill down"),
+            _kpi_row(
+                _kpi("kpi_apartments_total",   "fa-home",          "#1859b8", "Apartments"),
+                _kpi("kpi_vendors_total",      "fa-truck",         "#b98a07", "Vendors"),
+                _kpi("kpi_security_total",     "fa-user-shield",   "#b63b3b", "Security Total"),
+                _kpi("kpi_security_on_duty",   "fa-user-shield",   "#691b1b", "Security On Duty"),
+                _kpi("kpi_events_total",       "fa-calendar-check","#8e44ad", "Upcoming Events"),
+                _kpi("kpi_concerns_open",      "fa-hand-point-up", "#de5c52", "Open Concerns"),
+                _kpi("kpi_gate_logs",          "fa-receipt",       "#1abc9c", "Gate Logs -24hrs"),
+                _kpi("kpi_receipts_month",     "fa-receipt",       "#17976e", "Receipts (Month)"),
+                _kpi("kpi_expenses_month",     "fa-exclamation-triangle",       "#aa241a", "Expenses (Month)"),
+                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                _kpi("kpi_bank_balance",            "fa-wallet",        "#2c3e50", "Bank Balance"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "enroll":
+        return html.Div([
+            _page_title("fa-user-plus", c, "Enroll Members",
+                        "apartments · vendors · security"),
+            _sec_hdr("Current Counts", "click to view full list"),
+            _kpi_row(
+                _kpi("kpi_apartments_total", "fa-home",          "#1859b8", "Apartments"),
+                _kpi("kpi_vendors_total",    "fa-truck","#b98a07", "Vendors"),
+                _kpi("kpi_security_total",   "fa-user-shield",   "#b63b3b", "Security Staff"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "cashbook":
+        return html.Div([
+            _page_title("fa-book", c, "Cashbook", "full transaction ledger"),
+            _kpi_row(
+                _kpi("kpi_receivables_total", "fa-receipt", "#331797", "Receipts Due"),
+                _kpi("kpi_payables_total", "fa-wallet",  "#6552de", "Expenses Due"),
+                _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_expenses_month", "fa-wallet",  "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_cash_in_hand",       "fa-wallet",        "#2c3e50", "Cash in Hand"),
+                _kpi("kpi_bank_balance",        "fa-coins",   "#2c3e50", "Bank Balance"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+                ),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "receipts":
+        return html.Div([
+            _page_title("fa-file-invoice-dollar", c, "Receipts", "all incoming payments"),
+            
+                _kpi_row(
+                _kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"),
+                _kpi("kpi_receivables_total", "fa-receipt", "#17976e", "Receipts (Total))"),
+                _kpi("kpi_maintenance_due", "fa-receipt", "#7674e0", "Maintainence Due"),
+                _kpi("kpi_late_fees_due", "fa-wallet",  "#7674e0", "Late Fees Due"),
+                _kpi("kpi_vendor_payables_due",       "fa-wallet", "#2c3e50", "Vendor Payables Due"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+                ),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "expenses":
+        return html.Div([
+            _page_title("fa-wallet", c, "Expenses", "outgoing payments"),
+            _kpi_row(
+                _kpi("kpi_expenses_month", "fa-wallet", "#de5c52", "Expenses (Month)"),
+                _kpi("kpi_payables_total", "fa-wallet",  "#de5c52", "Expenses Due (Total))"),
+                _kpi("kpi_security_salaries_due", "fa-receipt", "#7674e0", "Securities Salaries Due"),
+                _kpi("kpi_amc_due", "fa-receipt", "#7674e0", "AMC Due"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+                ),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "events":
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events", "upcoming society events"),
+            _kpi_row(_kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"),
+                     cols="1fr"),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "Concerns", "maintenance & issues"),
+            _kpi_row(_kpi("kpi_concerns_open", "fa-hand-point-up", "#de5c52", "Open Concerns"),
+                     cols="1fr"),
+            _divider(),
+            _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "evaluate_pass":
+        return _evaluate_pass_page()
+
+    if active_tab == "customize":
+        
+        return _customize_page(c)
+
+    
     
     if active_tab == "settings":
         return html.Div([

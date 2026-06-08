@@ -671,7 +671,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-prev",  "entity": ALL},              "n_clicks"),
         Input({"type": "list-page-next",  "entity": ALL},              "n_clicks"),
         Input({"type": "list-search",     "entity": ALL},              "value"),
-        Input({"type": "btn-new",         "entity": ALL, "target": ALL},"n_clicks"),
+        Input({"type": "btn-new",         "entity": ALL},"n_clicks"),
  
         State("drilldown-store", "data"),
         State("auth-store",      "data"),
@@ -862,8 +862,12 @@ def register_drilldown_callbacks(app):
         # ── New button ────────────────────────────────────────────────────
         elif trig_type == "btn-new":
             entity = id_dict.get("entity")
-            target = (id_dict.get("target")
-                      or f"form_{to_singular(entity)}_new")
+            _new_map = {
+                "receipts_tbl": "form_receipt_new",
+                "expenses_tbl": "form_expense_new",
+                "cashbook":     "form_receipt_new",
+            }
+            target = _new_map.get(entity, f"form_{to_singular(entity)}_new")
             store  = nav_state.navigate_to(
                 store, target,
                 f"New {to_singular(entity).replace('_', ' ').title()}",
