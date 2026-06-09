@@ -163,12 +163,14 @@ def register_card_catalogue_callbacks(app):
         prevent_initial_call="initial_duplicate",
     )
     def load_societies_list(pathname, auth_data):
+        print(f"\n🔔 load_societies_list called — pathname={pathname} auth_ok={bool(auth_data)}")
         try:
             rows = db._execute(
                 "SELECT id, name, email, phone, plan, plan_validity, created_at "
                 "FROM societies ORDER BY created_at DESC LIMIT 50",
                 (), fetch_all=True,
             ) or []
+            print(f"🔍 load_societies_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No societies found", colSpan=8,
                                           className="text-center text-muted")])], no_update
@@ -201,7 +203,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_entities_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_entities_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_entities_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -213,6 +217,7 @@ def register_card_catalogue_callbacks(app):
                 "WHERE u.society_id = %s ORDER BY u.created_at DESC LIMIT 50",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_entities_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No entities found", colSpan=7,
                                           className="text-center text-muted")])], no_update
@@ -245,7 +250,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_accounts_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_accounts_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_accounts_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -255,6 +262,7 @@ def register_card_catalogue_callbacks(app):
                 "FROM accounts WHERE society_id = %s ORDER BY name",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_accounts_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No accounts found", colSpan=7,
                                           className="text-center text-muted")])], no_update
@@ -286,7 +294,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_payments_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_payments_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_payments_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -299,6 +309,7 @@ def register_card_catalogue_callbacks(app):
                 "ORDER BY p.paid_at DESC NULLS LAST LIMIT 50",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_payments_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No payments found", colSpan=7,
                                           className="text-center text-muted")])], no_update
@@ -332,7 +343,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_cashbook_full(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_cashbook_full called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_cashbook_full — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -345,6 +358,7 @@ def register_card_catalogue_callbacks(app):
                 "ORDER BY t.trx_date DESC, t.id DESC LIMIT 100",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_cashbook_full — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No transactions found", colSpan=7,
                                           className="text-center text-muted")])], no_update
@@ -385,7 +399,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_events_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_events_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_events_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=6,
                                       className="text-center text-muted")])], no_update
         try:
@@ -395,6 +411,7 @@ def register_card_catalogue_callbacks(app):
                 "ORDER BY event_date DESC LIMIT 30",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_events_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No events found", colSpan=6,
                                           className="text-center text-muted")])], no_update
@@ -427,7 +444,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_gate_logs_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_gate_logs_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_gate_logs_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=6,
                                       className="text-center text-muted")])], no_update
         try:
@@ -438,6 +457,7 @@ def register_card_catalogue_callbacks(app):
                 "ORDER BY g.time_in DESC LIMIT 50",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_gate_logs_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No gate logs found", colSpan=6,
                                           className="text-center text-muted")])], no_update
@@ -470,7 +490,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_concerns_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_concerns_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_concerns_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -480,6 +502,7 @@ def register_card_catalogue_callbacks(app):
                 "ORDER BY created_at DESC LIMIT 50",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_concerns_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No concerns found", colSpan=7,
                                           className="text-center text-muted")])], no_update
@@ -517,7 +540,9 @@ def register_card_catalogue_callbacks(app):
     )
     def load_charges_list(pathname, auth_data):
         sid = (auth_data or {}).get("society_id")
+        print(f"\n🔔 load_charges_list called — pathname={pathname} sid={sid}")
         if not sid:
+            print("🔍 load_charges_list — no society selected")
             return [html.Tr([html.Td("No society selected", colSpan=7,
                                       className="text-center text-muted")])], no_update
         try:
@@ -531,6 +556,7 @@ def register_card_catalogue_callbacks(app):
                 "WHERE acf.society_id = %s ORDER BY a.flat_number",
                 (sid,), fetch_all=True,
             ) or []
+            print(f"🔍 load_charges_list — rows={len(rows)}")
             if not rows:
                 return [html.Tr([html.Td("No charge rules found", colSpan=7,
                                           className="text-center text-muted")])], no_update

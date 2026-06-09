@@ -1,6 +1,12 @@
 # callbacks/__init__.py
 
 def register_callbacks(app):
+    # Avoid registering callbacks multiple times (development reloader can import twice)
+    if getattr(app, "_callbacks_registered", False):
+        print("📋 Callbacks already registered — skipping")
+        return
+    app._callbacks_registered = True
+
     print("📋 Registering callbacks...")
 
     # 1. Shell FIRST (owns society-dropdown, guard_modal, route_page)
