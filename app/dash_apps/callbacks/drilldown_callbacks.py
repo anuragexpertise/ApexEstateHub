@@ -550,30 +550,6 @@ ENTITY_META: dict = {
     },
 }
 
-
-def _apply_portal_filters(filters: dict, auth: dict) -> dict:
-    """
-    Augment DB filters so each portal only sees its own data.
- 
-    apartment portal  → apartments.id  == auth['apartment_id']
-    vendor portal     → vendors.id     == auth['vendor_id']   (linked_id)
-    security portal   → no extra filter (security can browse all entities)
-    admin / master    → society_id already in filters
-    """
-    role = auth.get("role", "admin")
-    f = dict(filters)
- 
-    if role == "apartment":
-        apt_id = auth.get("apartment_id")
-        if apt_id:
-            f["apartment_id"] = apt_id       # loaders must honour this
- 
-    elif role == "vendor":
-        vendor_id = auth.get("vendor_id") or auth.get("linked_id")
-        if vendor_id:
-            f["vendor_id"] = vendor_id        # loaders must honour this
- 
-    return f
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1477,4 +1453,3 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if vendor_id:
             f["vendor_id"] = vendor_id
     return f
-
