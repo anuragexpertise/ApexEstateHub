@@ -1079,7 +1079,9 @@ def _evaluate_pass_page() -> html.Div:
     return html.Div([
         _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
                     "Entry IN / Exit OUT scanning"),
-        
+        dcc.Store(id="qr-camera-store", data={}),
+        dcc.Store(id="qr-scan-log",     data=[]),
+        dcc.Store(id="qr-entity-store", data={}),
         # TWO-COLUMN LAYOUT
         html.Div([
             # ══════════════════════════════════════════════════════
@@ -1267,9 +1269,7 @@ def _evaluate_pass_page() -> html.Div:
             ),
         ], id="call-admin-modal", centered=True, size="sm"),
         
-        # Drill divs (required)
-        html.Div(id="drill-breadcrumb", style={"display": "none"}),
-        html.Div(id="drill-content", style={"display": "none"}),
+       html.Div(_drill_panel(), style={"display": "none"}),
         
     ], className="portal-page")
 
