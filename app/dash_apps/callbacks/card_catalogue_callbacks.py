@@ -156,7 +156,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 2. SOCIETIES LIST ─────────────────────────────────────────────────────
     @app.callback(
-        Output("societies-list-table", "children"),
+        Output("societies-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -195,7 +195,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 3. ENTITIES LIST ──────────────────────────────────────────────────────
     @app.callback(
-        Output("entities-list-table", "children"),
+        Output("entities-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -242,7 +242,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 4. ACCOUNTS LIST ──────────────────────────────────────────────────────
     @app.callback(
-        Output("accounts-list-table", "children"),
+        Output("accounts-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -286,7 +286,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 5. PAYMENTS LIST ──────────────────────────────────────────────────────
     @app.callback(
-        Output("payments-list-table", "children"),
+        Output("payments-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -335,7 +335,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 6. CASHBOOK LIST ──────────────────────────────────────────────────────
     @app.callback(
-        Output("cashbook-full-table", "children"),
+        Output("cashbook-full-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -391,7 +391,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 7. EVENTS LIST ────────────────────────────────────────────────────────
     @app.callback(
-        Output("events-list-table", "children"),
+        Output("events-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -436,7 +436,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 8. GATE LOGS LIST ─────────────────────────────────────────────────────
     @app.callback(
-        Output("gate-logs-list-table", "children"),
+        Output("gate-logs-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
@@ -482,7 +482,7 @@ def register_card_catalogue_callbacks(app):
 
     # ── 9. CONCERNS LIST ──────────────────────────────────────────────────────
     @app.callback(
-        Output("concerns-list-table", "children"),
+        Output("concerns-list-table", "children", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         State("auth-store", "data"),
