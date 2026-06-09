@@ -267,7 +267,7 @@ def register_qr_callbacks(app):
     # ── 1. Camera controller (clientside) ──────────────────────
     clientside_callback(
         _CAMERA_JS,
-        Output("qr-camera-store", "data"),
+        Output("qr-camera-store", "data", allow_duplicate=True),
         Input("qr-entry-start-btn", "n_clicks"),
         Input("qr-entry-stop-btn",  "n_clicks"),
         Input("qr-exit-start-btn",  "n_clicks"),
