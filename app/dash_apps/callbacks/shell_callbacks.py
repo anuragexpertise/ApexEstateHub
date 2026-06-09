@@ -336,7 +336,7 @@ def register_shell_callbacks(app):
 
     # ── 4. COOKIE → AUTO-ADVANCE ──────────────────────────────────────────────
     @app.callback(
-        Output("society-dropdown", "value",      allow_duplicate=True),
+        Output("society-dropdown", "value"), 
         Output("login-stage-1",   "style",       allow_duplicate=True),
         Output("login-stage-2",   "style",       allow_duplicate=True),
         Output("auth-store",      "data",        allow_duplicate=True),
