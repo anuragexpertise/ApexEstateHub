@@ -38,7 +38,19 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ customize_callbacks failed: {e}")
 
-    # 6. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
+    try:
+        from .qr_callbacks import register_qr_callbacks
+        register_qr_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ qr_callbacks failed: {e}")
+
+    try:
+        from .camera_callbacks import register_camera_callbacks
+        register_camera_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ camera_callbacks failed: {e}")
+
+    # 7. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
     try:
         from .debug_callbacks import register_debug_callbacks
         register_debug_callbacks(app)
