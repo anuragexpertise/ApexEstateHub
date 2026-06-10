@@ -676,7 +676,7 @@ def register_drilldown_callbacks(app):
  
         trig_type = id_dict.get("type", "")
         hide_kpis = False
- 
+        print (f"Triggered: {trig_type} with ID {id_dict}")
         # ── KPI click → list ──────────────────────────────────────────────
         if trig_type in ("kpi-card-div", "kpi-card"):
             card_id  = id_dict.get("card_id", "")

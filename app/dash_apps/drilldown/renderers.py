@@ -232,9 +232,10 @@ def render_list_card(card_id: str, title: str, icon: str,
             else:
                 val = str(val)
             cells.append(html.Td(val, style={
-                "fontSize": "12px", "verticalAlign": "middle",
-                "padding": "8px 8px",
-            }))
+                                     "fontSize": "12px", "verticalAlign": "middle",
+                                     "padding": "8px 8px",
+                                    }
+                ))
 
         # ── Action buttons scoped by portal permissions ──────────────────
         if allowed:
@@ -276,9 +277,16 @@ def render_list_card(card_id: str, title: str, icon: str,
                 style={"padding": "6px 8px", "verticalAlign": "middle"},
             ))
 
-        body_rows.append(html.Tr(cells, style={
-            "transition": "background 0.15s",
-        }))
+        body_rows.append(
+            html.Tr(
+                cells,
+                id={"type": "list-row", "entity": entity, "pk": str(pk_val)},
+                n_clicks=0,
+                style={"cursor": "pointer", "transition": "background 0.12s ease"},
+                title="Click to open profile",
+            )
+        )
+        
 
     if not body_rows:
         span = len(columns) + (1 if allowed else 0)

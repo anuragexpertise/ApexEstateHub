@@ -80,7 +80,7 @@ def customize_layout() -> html.Div:
             dbc.CardHeader([
                 html.I(className="fas fa-th-large me-2"),
                 html.Strong("Dashboard  "),
-                html.Small("(max 4 KPI + any forms/lists)",
+                html.Small("(max 12 KPI + any forms/lists)",
                            style={"color":"#999","fontSize":"11px"}),
                 dbc.Badge("0 active", id="active-count-badge",
                           color="primary", className="float-end",
