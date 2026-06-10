@@ -9,7 +9,7 @@ import dash_bootstrap_components as dbc
 
 from app.dash_apps.pages.card_catalogue import (
     CARD_CATALOGUE, KPI_CARDS, FORM_CARDS,
-    DEFAULT_LAYOUTS, make_card,
+    DEFAULT_LAYOUTS
 )
 
 GROUP_COLORS = {
@@ -36,14 +36,14 @@ def _palette_section(group: str, card_ids: list) -> html.Div:
                    "background":f"linear-gradient(90deg,{color}18,transparent)",
                    "borderLeft":f"3px solid {color}"},
         ),
-        html.Div(
-            [make_card(cid) for cid in card_ids],
-            id=f"{section_id}-zone",
-            className="dnd-palette-zone",
-            style={"display":"grid",
-                   "gridTemplateColumns":"repeat(auto-fill,minmax(130px,1fr))",
-                   "gap":"8px","padding":"6px 0","minHeight":"20px"},
-        ),
+        # html.Div(
+        #     [make_card(cid) for cid in card_ids],
+        #     id=f"{section_id}-zone",
+        #     className="dnd-palette-zone",
+        #     style={"display":"grid",
+        #            "gridTemplateColumns":"repeat(auto-fill,minmax(130px,1fr))",
+        #            "gap":"8px","padding":"6px 0","minHeight":"20px"},
+        # ),
     ], className="mb-2")
 
 

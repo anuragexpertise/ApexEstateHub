@@ -23,7 +23,6 @@ import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import (
     KPI_CARDS,
     DEFAULT_LAYOUTS,
-    make_card,
 )
 
 DEFAULT_ACTIVE = DEFAULT_LAYOUTS.get("admin", list(KPI_CARDS.keys())[:4])
