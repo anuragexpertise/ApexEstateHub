@@ -486,46 +486,99 @@ def _customize_page(c: str):
                                         style={"fontSize": "12px", "fontWeight": "700",
                                             "color": "#15304f"},
                                     ),
-                                    dcc.Loading(
-                                        dbc.Textarea(
-                                            id="customize-kpi-sql",
-                                            placeholder="SQL query appears here…",
-                                            rows=12,
-                                            readOnly=True,
-                                            style={"fontSize": "11px",
-                                                "fontFamily": "monospace",
-                                                "backgroundColor": "#f5f7fa",
-                                                "border": "1px solid #ddd",
-                                                "borderRadius": "8px",
-                                                "color": "#2c3e50"},
-                                        ), type="default",
+                                    dbc.Textarea(
+                                        id="customize-kpi-sql",
+                                        placeholder="SQL query appears here — editable for testing…",
+                                        rows=12,
+                                        readOnly=False,
+                                        style={"fontSize": "11px",
+                                               "fontFamily": "monospace",
+                                               "backgroundColor": "#f5f7fa",
+                                               "border": "1px solid #ddd",
+                                               "borderRadius": "8px",
+                                               "color": "#2c3e50"},
                                     ),
-                                    # ── TEST SQL BUTTON ───────────────────
                                     html.Div([
                                         dbc.Button(
                                             [html.I(className="fas fa-play me-2"),
-                                            "Test SQL Query"],
+                                             "Test SQL Query"],
                                             id="kpi-test-sql-btn",
-                                            color="success",
-                                            size="sm",
-                                            className="mt-2 w-100",
+                                            color="success", size="sm",
+                                            className="mt-2 me-2",
                                             style={"borderRadius": "8px",
-                                                "fontWeight": "600"},
+                                                   "fontWeight": "600"},
                                         ),
+                                        dbc.Button(
+                                            [html.I(className="fas fa-file-export me-2"),
+                                             "Export SQL"],
+                                            id="kpi-export-sql-btn",
+                                            color="secondary", size="sm",
+                                            className="mt-2",
+                                            style={"borderRadius": "8px",
+                                                   "fontWeight": "600"},
+                                        ),
+                                        dcc.Download(id="kpi-export-download"),
                                         html.Small(
-                                            "Runs against your actual DB with current society_id",
+                                            "Edit SQL above, then Test (runs on your DB) "
+                                            "or Export as .sql snippet",
                                             style={"fontSize": "10px", "color": "#999",
-                                                "display": "block", "marginTop": "4px",
-                                                "textAlign": "center"},
+                                                   "display": "block",
+                                                   "marginTop": "4px"},
                                         ),
-                                    ]),
-                                    # ── TEST RESULT AREA ──────────────────
+                                    ], style={"display": "flex", "alignItems": "center",
+                                              "flexWrap": "wrap", "gap": "4px"}),
                                     dcc.Loading(
                                         html.Div(id="kpi-test-result",
-                                                style={"marginTop": "10px"}),
+                                                 style={"marginTop": "10px"}),
                                         type="circle",
                                     ),
-                                ], width=6),
+                                    html.Div(id="kpi-export-result"),dbc.Textarea(
+                                        id="customize-kpi-sql",
+                                        placeholder="SQL query appears here — editable for testing…",
+                                        rows=12,
+                                        readOnly=False,
+                                        style={"fontSize": "11px",
+                                               "fontFamily": "monospace",
+                                               "backgroundColor": "#f5f7fa",
+                                               "border": "1px solid #ddd",
+                                               "borderRadius": "8px",
+                                               "color": "#2c3e50"},
+                                    ),
+                                    html.Div([
+                                        dbc.Button(
+                                            [html.I(className="fas fa-play me-2"),
+                                             "Test SQL Query"],
+                                            id="kpi-test-sql-btn",
+                                            color="success", size="sm",
+                                            className="mt-2 me-2",
+                                            style={"borderRadius": "8px",
+                                                   "fontWeight": "600"},
+                                        ),
+                                        dbc.Button(
+                                            [html.I(className="fas fa-file-export me-2"),
+                                             "Export SQL"],
+                                            id="kpi-export-sql-btn",
+                                            color="secondary", size="sm",
+                                            className="mt-2",
+                                            style={"borderRadius": "8px",
+                                                   "fontWeight": "600"},
+                                        ),
+                                        dcc.Download(id="kpi-export-download"),
+                                        html.Small(
+                                            "Edit SQL above, then Test (runs on your DB) "
+                                            "or Export as .sql snippet",
+                                            style={"fontSize": "10px", "color": "#999",
+                                                   "display": "block",
+                                                   "marginTop": "4px"},
+                                        ),
+                                    ], style={"display": "flex", "alignItems": "center",
+                                              "flexWrap": "wrap", "gap": "4px"}),
+                                    dcc.Loading(
+                                        html.Div(id="kpi-test-result",
+                                                 style={"marginTop": "10px"}),
+                                        type="circle",
+                                    ),
+                                    html.Div(id="kpi-export-result"),
 
                                 # Right: Metadata card
                                 dbc.Col([
@@ -558,7 +611,7 @@ def _customize_page(c: str):
 
                         ], style={"marginTop": "20px"})],
                     ),
-
+                        ]),
                     # ══════════════════════════════════════════════════════
                     # TAB C — KPI AUDIT REPORT
                     # ══════════════════════════════════════════════════════
@@ -649,8 +702,8 @@ def _customize_page(c: str):
                 style={"marginBottom": "20px"},
             ),
 
-        ], className="portal-page")
-
+                ], className="portal-page")
+    
 def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     c = _C["admin"]
     from app.dash_apps.pages.portal_pages import _page_title

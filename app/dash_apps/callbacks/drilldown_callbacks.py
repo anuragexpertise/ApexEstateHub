@@ -49,6 +49,7 @@ import csv
 import pandas as pd
 import base64
 import os
+import base64
 from pathlib import Path
 from PIL import Image
 import io
@@ -63,7 +64,7 @@ from app.dash_apps.drilldown.registry import (
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 from app.security.rbac import RBACManager, Permission
 
-DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operationalerror"]
+DB_ERROR_KEYWORDS = ["no database connection", "error in processing", "error in querying", "operational error"]
 
 def _is_db_error(msg: str) -> bool:
     """Check if message indicates a database connection or query error."""
@@ -238,7 +239,7 @@ ENTITY_META: dict = {
             {"label": "Venue",       "field": "venue",       "icon": "fa-location-dot"},
             {"label": "Open To",     "field": "open_to",     "icon": "fa-users"},
             {"label": "Description", "field": "description", "icon": "fa-align-left"},
-            {"label":"Image",        "field": "image",       "icon": "fa-image"},
+            {"label": "Image",       "field": "image",       "icon": "fa-image", "type": "image"},
         ],
         "profile_actions": [
             {"label": "Edit", "action_id": "edit", "target_card": "form_event_edit", "icon": "fa-edit", "color": "primary"},
@@ -284,7 +285,7 @@ ENTITY_META: dict = {
             {"label": "Status",      "field": "status",        "icon": "fa-circle-dot"},
             {"label": "Assigned To", "field": "assigned_to",   "icon": "fa-user-check"},
             {"label": "Raised On",   "field": "created_at",    "icon": "fa-calendar"},
-            {"label":"Image",        "field": "image",       "icon": "fa-image"},
+            {"label": "Image",       "field": "image",       "icon": "fa-image", "type": "image"},
         ],
         "profile_actions": [
             {"label": "Assign",  "action_id": "assign",  "target_card": "form_concern_edit", "icon": "fa-user-check", "color": "warning"},
@@ -790,13 +791,13 @@ def register_drilldown_callbacks(app):
                            .get("prefill", {}))
                 prefill = build_prefill(record, pmap) if pmap else dict(record)
                 if action == "pay_dues" and entity == "apartment":
-                    acc = _get_account_by_name(sid, "Maintenance")
+                    acc = _get_account_by_name(sid, "Society Maintenance Charge")
                     if acc:
                         prefill["acc_id"] = acc["id"]
                         prefill["acc_particulars"] = (
                             f"Maintenance - Flat {record.get('flat_number','')}")
                 elif action == "pay_dues" and entity == "vendor":
-                    acc = _get_account_by_name(sid, "Pass Fees")
+                    acc = _get_account_by_name(sid, "Society Charge")
                     if acc:
                         prefill["acc_id"] = acc["id"]
                         prefill["acc_particulars"] = (
@@ -893,6 +894,22 @@ def register_drilldown_callbacks(app):
  
         form_data: dict = {}
         for key, val in ctx.states.items():
+            if isinstance(val, str) and val.startswith("data:image"):
+                try:
+                    _header, _data = val.split(",", 1)
+                    _decoded = base64.b64decode(_data)
+                    _ent = entity_singular
+                    _dir = Path("app/assets/default") / _ent
+                    _dir.mkdir(parents=True, exist_ok=True)
+                    _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    _img = Image.open(io.BytesIO(_decoded))
+                    if _img.mode == "RGBA":
+                        _bg = Image.new("RGB", _img.size, (255, 255, 255))
+                        _bg.paste(_img, mask=_img.split()[3]); _img = _bg
+                    _img.save(_dir / _fname, "JPEG", quality=85)
+                    form_data[field] = _fname
+                except Exception as _e:
+                    print(f"Camera image save error: {_e}")
             try:
                 k_dict = json.loads(key.split(".")[0])
             except Exception:

@@ -1,384 +1,378 @@
 # app/dash_apps/callbacks/customize_kpi_callbacks.py
 """
 Callbacks for KPI Customization Tab in Admin Portal
-FIXED VERSION - Integrates with card_catalogue.py and portal_pages.py
-
-Handles:
-- Portal/Tab/KPI selection (with live dropdown updates)
-- Display KPI metadata and SQL definitions from card_catalogue.py
-- Show chart of accounts for context
-- Live KPI value fetch (optional)
+FIXED VERSION — duplicate-key-safe KPI_PORTAL_MAP using list-of-tuples.
 """
 
-from dash import callback, Input, Output, State, html, dcc, ctx
+from __future__ import annotations
+import time
+from dash import Input, Output, State, html, dcc, ctx, no_update
 import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import KPI_CARDS
 from app.dash_apps.callbacks.drilldown_callbacks import ENTITY_META
 
 # ════════════════════════════════════════════════════════════════
-# KPI METADATA - Maps KPI_ID to portal/tab/group info
+# KPI METADATA — list-of-tuples so duplicate card_ids are preserved
+# Each entry: (card_id, portal, tab, group)
 # ════════════════════════════════════════════════════════════════
 
-KPI_PORTAL_MAP = {
+_KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # ADMIN PORTAL - Dashboard tab
-    "kpi_apartments_total":        {"portal": "admin", "tab": "dashboard", "group": "Apartments"},
-    "kpi_apartments_dues":       {"portal": "admin", "tab": "dashboard", "group": "Apartments"},
-    "kpi_vendors_total":         {"portal": "admin", "tab": "dashboard", "group": "Vendors"},
-    "kpi_security_total":        {"portal": "admin", "tab": "dashboard", "group": "Security"},
-    "kpi_security_on_duty":      {"portal": "admin", "tab": "dashboard", "group": "Security"},
-    "kpi_events_total":          {"portal": "admin", "tab": "events",    "group": "Events"},
-    "kpi_concerns_open":         {"portal": "admin", "tab": "concerns",  "group": "Concerns"},
-    "kpi_gate_logs":             {"portal": "admin", "tab": "dashboard", "group": "Gate"},
-    "kpi_receipts_month":        {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_expenses_month":        {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_cash_in_hand":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_bank_balance":          {"portal": "admin", "tab": "cashbook",  "group": "Cashbook"},
-    
-    # ADMIN PORTAL - Enroll tab
-    "kpi_apartments_total":      {"portal": "admin", "tab": "enroll",    "group": "Entities"},
-    
-    # ADMIN PORTAL - Settings tab
-    "kpi_accounts_count":        {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_apt_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_ven_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_sec_charges":           {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    "kpi_attendance":            {"portal": "admin", "tab": "settings",  "group": "Settings"},
-    
+    ("kpi_apartments_total",           "admin",     "dashboard", "Apartments"),
+    ("kpi_apartments_dues",            "admin",     "dashboard", "Apartments"),
+    ("kpi_vendors_total",              "admin",     "dashboard", "Vendors"),
+    ("kpi_security_total",             "admin",     "dashboard", "Security"),
+    ("kpi_security_on_duty",           "admin",     "dashboard", "Security"),
+    ("kpi_gate_logs",                  "admin",     "dashboard", "Gate"),
+    ("kpi_receipts_month",             "admin",     "dashboard", "Cashbook"),
+    ("kpi_expenses_month",             "admin",     "dashboard", "Cashbook"),
+    ("kpi_cash_in_hand",               "admin",     "dashboard", "Cashbook"),
+    ("kpi_bank_balance",               "admin",     "dashboard", "Cashbook"),
+    # ADMIN - Enroll tab
+    ("kpi_apartments_total",           "admin",     "enroll",    "Entities"),
+    ("kpi_vendors_total",              "admin",     "enroll",    "Entities"),
+    ("kpi_security_total",             "admin",     "enroll",    "Entities"),
+    # ADMIN - Cashbook tab
+    ("kpi_receivables_total",          "admin",     "cashbook",  "Cashbook"),
+    ("kpi_payables_total",             "admin",     "cashbook",  "Cashbook"),
+    ("kpi_receipts_month",             "admin",     "cashbook",  "Cashbook"),
+    ("kpi_expenses_month",             "admin",     "cashbook",  "Cashbook"),
+    ("kpi_cash_in_hand",               "admin",     "cashbook",  "Cashbook"),
+    ("kpi_bank_balance",               "admin",     "cashbook",  "Cashbook"),
+    # ADMIN - Receipts tab
+    ("kpi_receipts_month",             "admin",     "receipts",  "Cashbook"),
+    ("kpi_receivables_total",          "admin",     "receipts",  "Cashbook"),
+    ("kpi_maintenance_due",            "admin",     "receipts",  "Cashbook"),
+    ("kpi_late_fees_due",              "admin",     "receipts",  "Cashbook"),
+    ("kpi_vendor_payables_due",        "admin",     "receipts",  "Cashbook"),
+    # ADMIN - Expenses tab
+    ("kpi_expenses_month",             "admin",     "expenses",  "Cashbook"),
+    ("kpi_payables_total",             "admin",     "expenses",  "Cashbook"),
+    ("kpi_security_salaries_due",      "admin",     "expenses",  "Expenses"),
+    ("kpi_amc_due",                    "admin",     "expenses",  "Expenses"),
+    # ADMIN - Events tab
+    ("kpi_events_total",               "admin",     "events",    "Events"),
+    # ADMIN - Concerns tab
+    ("kpi_concerns_open",              "admin",     "concerns",  "Concerns"),
+    # ADMIN - Settings tab
+    ("kpi_plan_validity",              "admin",     "settings",  "Settings"),
+    ("kpi_accounts_count",             "admin",     "settings",  "Settings"),
+    ("kpi_apt_charges",                "admin",     "settings",  "Settings"),
+    ("kpi_ven_charges",                "admin",     "settings",  "Settings"),
+    ("kpi_sec_charges",                "admin",     "settings",  "Settings"),
+    ("kpi_attendance",                 "admin",     "settings",  "Settings"),
     # MASTER PORTAL - Dashboard
-    "kpi_societies_total":       {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_free":        {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_9Apts":       {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_99Apts":      {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_999Apts":     {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_societies_unlimited":   {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_master_apartments_total": {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_master_vendors_total":  {"portal": "master", "tab": "dashboard", "group": "Master"},
-    "kpi_master_security_total": {"portal": "master", "tab": "dashboard", "group": "Master"},
-    
-    # OWNER PORTAL - Dashboard tab
-    "kpi_apartments_dues":       {"portal": "apartment", "tab": "dashboard", "group": "Account"},
-    "kpi_concerns_open":         {"portal": "apartment", "tab": "dashboard", "group": "Concerns"},
-    "kpi_events_total":          {"portal": "apartment", "tab": "dashboard", "group": "Events"},
-    "kpi_gate_logs":             {"portal": "apartment", "tab": "dashboard", "group": "Gate"},
-    "kpi_receipts_month":        {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
-    "kpi_receivables_total":     {"portal": "apartment", "tab": "dashboard", "group": "Payments"},
-    
-    # OWNER PORTAL - Cashbook tab
-    "kpi_receipts_month":        {"portal": "apartment", "tab": "cashbook",  "group": "Cashbook"},
-    "kpi_receivables_total":     {"portal": "apartment", "tab": "cashbook",  "group": "Cashbook"},
-    
-    # OWNER PORTAL - Payments tab
-    "kpi_receivables_total":     {"portal": "apartment", "tab": "payments",  "group": "Dues"},
-    "kpi_apartments_dues":       {"portal": "apartment", "tab": "payments", "group": "Dues"},
-    
-    # OWNER PORTAL - Charges tab
-    "kpi_maintainence_charges":  {"portal": "apartment", "tab": "charges",  "group": "Charges"},
-    "kpi_apartment_fines":       {"portal": "apartment", "tab": "charges",  "group": "Charges"},
-    "kpi_apartment_other_charges": {"portal": "apartment", "tab": "charges", "group": "Charges"},
-    
-    # OWNER PORTAL - Events tab
-    "kpi_events_total":          {"portal": "apartment", "tab": "events",   "group": "Events"},
-    
-    # OWNER PORTAL - Concerns tab
-    "kpi_concerns_open":         {"portal": "apartment", "tab": "concerns",  "group": "Concerns"},
-    
-    # OWNER PORTAL - Settings tab
-    "kpi_apartment_date":        {"portal": "apartment", "tab": "settings", "group": "Profile"},
-    
-    # VENDOR PORTAL - Dashboard tab
-    "kpi_concerns_open":         {"portal": "vendor", "tab": "dashboard", "group": "Jobs"},
-    "kpi_events_total":          {"portal": "vendor", "tab": "dashboard", "group": "Events"},
-    "kpi_receivables_total":     {"portal": "vendor", "tab": "dashboard", "group": "Payments"},
-    "kpi_receipts_month":        {"portal": "vendor", "tab": "dashboard", "group": "Payments"},
-    "kpi_gate_logs":             {"portal": "vendor", "tab": "dashboard", "group": "Gate"},
-    
-    # VENDOR PORTAL - Cashbook tab
-    "kpi_receivables_total":     {"portal": "vendor", "tab": "cashbook",  "group": "Payments"},
-    "kpi_receipts_month":        {"portal": "vendor", "tab": "cashbook",  "group": "Payments"},
-    
-    # VENDOR PORTAL - Charges tab
-    "kpi_vendor_fines":          {"portal": "vendor", "tab": "charges",  "group": "Charges"},
-    "kpi_vendor_other_charges":  {"portal": "vendor", "tab": "charges",  "group": "Charges"},
-    
-    # VENDOR PORTAL - Events tab
-    "kpi_events_total":          {"portal": "vendor", "tab": "events",   "group": "Events"},
-    
-    # VENDOR PORTAL - Settings tab
-    "kpi_vendor_date":           {"portal": "vendor", "tab": "settings", "group": "Profile"},
-    
-    # SECURITY PORTAL - Dashboard tab
-    "kpi_apartments_total":      {"portal": "security", "tab": "dashboard", "group": "Users"},
-    "kpi_vendors_total":         {"portal": "security", "tab": "dashboard", "group": "Users"},
-    "kpi_security_total":        {"portal": "security", "tab": "dashboard", "group": "Users"},
-    "kpi_security_shift_count":  {"portal": "security", "tab": "dashboard", "group": "Users"},
-    "kpi_receivables_total":     {"portal": "security", "tab": "dashboard", "group": "Cash"},
-    "kpi_gate_logs":             {"portal": "security", "tab": "dashboard", "group": "Gate"},
-    
-    # SECURITY PORTAL - Cashbook tab
-    "kpi_receivables_total":     {"portal": "security", "tab": "cashbook",  "group": "Payments"},
-    "kpi_payables_total":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
-    "kpi_receipts_month":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
-    "kpi_expenses_month":        {"portal": "security", "tab": "cashbook",  "group": "Payments"},
-    
-    # SECURITY PORTAL - Charges tab
-    "kpi_security_fines":        {"portal": "security", "tab": "charges",  "group": "Charges"},
-    "kpi_security_other_charges": {"portal": "security", "tab": "charges", "group": "Charges"},
-    "kpi_receipts_in_hand_total": {"portal": "security", "tab": "charges", "group": "Cash"},
-    
-    # SECURITY PORTAL - Payments tab
-    "kpi_security_salary_due":   {"portal": "security", "tab": "payments", "group": "Salary"},
-    "kpi_security_bonus_due":    {"portal": "security", "tab": "payments", "group": "Bonus"},
-    
-    # SECURITY PORTAL - Events tab
-    "kpi_events_total":          {"portal": "security", "tab": "events",   "group": "Events"},
-    
-    # SECURITY PORTAL - Receipt tab
-    "kpi_receipts_month":        {"portal": "security", "tab": "receipt",  "group": "Cash"},
-    
-    # SECURITY PORTAL - Settings tab
-    "kpi_security_date":           {"portal": "security", "tab": "settings", "group": "Profile"},
-    "kpi_security_salary_per_shift": {"portal": "security", "tab": "settings", "group": "Profile"},
-    "kpi_security_shift":        {"portal": "security", "tab": "settings", "group": "Profile"},
-    
-    # ADDITIONAL MISSING KPIs
-    "kpi_plan_validity":         {"portal": "admin", "tab": "settings", "group": "Settings"},
-    "kpi_late_fees_due":         {"portal": "admin", "tab": "settings", "group": "Settings"},
-    "kpi_maintenance_due":       {"portal": "admin", "tab": "settings", "group": "Settings"},
-    "kpi_amc_due":               {"portal": "admin", "tab": "expenses", "group": "Expenses"},
-    "kpi_security_salaries_due": {"portal": "admin", "tab": "expenses", "group": "Expenses"},
-    "kpi_vendor_payables_due":   {"portal": "admin", "tab": "expenses", "group": "Expenses"},
-}
+    ("kpi_societies_total",            "master",    "dashboard", "Master"),
+    ("kpi_societies_free",             "master",    "dashboard", "Master"),
+    ("kpi_societies_9Apts",            "master",    "dashboard", "Master"),
+    ("kpi_societies_99Apts",           "master",    "dashboard", "Master"),
+    ("kpi_societies_999Apts",          "master",    "dashboard", "Master"),
+    ("kpi_societies_unlimited",        "master",    "dashboard", "Master"),
+    ("kpi_master_apartments_total",    "master",    "dashboard", "Master"),
+    ("kpi_master_vendors_total",       "master",    "dashboard", "Master"),
+    ("kpi_master_security_total",      "master",    "dashboard", "Master"),
+    # APARTMENT PORTAL - Dashboard
+    ("kpi_apartments_dues",            "apartment", "dashboard", "Account"),
+    ("kpi_concerns_open",              "apartment", "dashboard", "Concerns"),
+    ("kpi_events_total",               "apartment", "dashboard", "Events"),
+    ("kpi_gate_logs",                  "apartment", "dashboard", "Gate"),
+    ("kpi_receipts_month",             "apartment", "dashboard", "Payments"),
+    ("kpi_receivables_total",          "apartment", "dashboard", "Payments"),
+    # APARTMENT - Cashbook
+    ("kpi_receipts_month",             "apartment", "cashbook",  "Cashbook"),
+    ("kpi_receivables_total",          "apartment", "cashbook",  "Cashbook"),
+    # APARTMENT - Payments
+    ("kpi_receivables_total",          "apartment", "payments",  "Dues"),
+    ("kpi_apartments_dues",            "apartment", "payments",  "Dues"),
+    # APARTMENT - Charges
+    ("kpi_maintainence_charges",       "apartment", "charges",   "Charges"),
+    ("kpi_apartment_fines",            "apartment", "charges",   "Charges"),
+    ("kpi_apartment_other_charges",    "apartment", "charges",   "Charges"),
+    # APARTMENT - Events / Concerns / Settings
+    ("kpi_events_total",               "apartment", "events",    "Events"),
+    ("kpi_concerns_open",              "apartment", "concerns",  "Concerns"),
+    ("kpi_apartment_date",             "apartment", "settings",  "Profile"),
+    # VENDOR PORTAL - Dashboard
+    ("kpi_concerns_open",              "vendor",    "dashboard", "Jobs"),
+    ("kpi_events_total",               "vendor",    "dashboard", "Events"),
+    ("kpi_receivables_total",          "vendor",    "dashboard", "Payments"),
+    ("kpi_receipts_month",             "vendor",    "dashboard", "Payments"),
+    ("kpi_gate_logs",                  "vendor",    "dashboard", "Gate"),
+    # VENDOR - Cashbook / Charges / Events / Settings
+    ("kpi_receivables_total",          "vendor",    "cashbook",  "Payments"),
+    ("kpi_receipts_month",             "vendor",    "cashbook",  "Payments"),
+    ("kpi_vendor_fines",               "vendor",    "charges",   "Charges"),
+    ("kpi_vendor_other_charges",       "vendor",    "charges",   "Charges"),
+    ("kpi_events_total",               "vendor",    "events",    "Events"),
+    ("kpi_vendor_date",                "vendor",    "settings",  "Profile"),
+    # SECURITY PORTAL - Dashboard
+    ("kpi_apartments_total",           "security",  "dashboard", "Users"),
+    ("kpi_vendors_total",              "security",  "dashboard", "Users"),
+    ("kpi_security_total",             "security",  "dashboard", "Users"),
+    ("kpi_security_shift_count",       "security",  "dashboard", "Users"),
+    ("kpi_receivables_total",          "security",  "dashboard", "Cash"),
+    ("kpi_gate_logs",                  "security",  "dashboard", "Gate"),
+    # SECURITY - Cashbook / Charges / Payments / Events / Receipt / Settings
+    ("kpi_receivables_total",          "security",  "cashbook",  "Payments"),
+    ("kpi_payables_total",             "security",  "cashbook",  "Payments"),
+    ("kpi_receipts_month",             "security",  "cashbook",  "Payments"),
+    ("kpi_expenses_month",             "security",  "cashbook",  "Payments"),
+    ("kpi_security_fines",             "security",  "charges",   "Charges"),
+    ("kpi_security_other_charges",     "security",  "charges",   "Charges"),
+    ("kpi_receipts_in_hand_total",     "security",  "charges",   "Cash"),
+    ("kpi_security_salary_due",        "security",  "payments",  "Salary"),
+    ("kpi_security_bonus_due",         "security",  "payments",  "Bonus"),
+    ("kpi_events_total",               "security",  "events",    "Events"),
+    ("kpi_receipts_month",             "security",  "receipt",   "Cash"),
+    ("kpi_security_date",              "security",  "settings",  "Profile"),
+    ("kpi_security_salary_per_shift",  "security",  "settings",  "Profile"),
+    ("kpi_security_shift",             "security",  "settings",  "Profile"),
+]
+
+# Legacy dict — last-assignment-wins per key (acceptable for single-portal lookups)
+KPI_PORTAL_MAP: dict[str, dict] = {}
+for _cid, _portal, _tab, _group in _KPI_PORTAL_ENTRIES:
+    KPI_PORTAL_MAP[_cid] = {"portal": _portal, "tab": _tab, "group": _group}
+
+
+def get_portals() -> list[str]:
+    return sorted({p for _, p, _, _ in _KPI_PORTAL_ENTRIES})
+
+
+def get_tabs_for_portal(portal: str) -> list[str]:
+    return sorted({t for _, p, t, _ in _KPI_PORTAL_ENTRIES if p == portal})
+
+
+def get_kpi_ids_for_portal_tab(portal: str, tab: str) -> list[str]:
+    """Return deduplicated card_ids for the given portal+tab."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for cid, p, t, _ in _KPI_PORTAL_ENTRIES:
+        if p == portal and t == tab and cid not in seen:
+            seen.add(cid)
+            result.append(cid)
+    return result
+
 
 # ════════════════════════════════════════════════════════════════
 # REGISTERED CALLBACKS
 # ════════════════════════════════════════════════════════════════
 
 def register_customize_kpi_callbacks(app):
-    """Register all customize tab callbacks."""
-    
     print("  → Registering customize KPI callbacks...")
 
-    # ──────────────────────────────────────────────────────────────
-    # 1. UPDATE TAB OPTIONS when Portal changes
-    # ──────────────────────────────────────────────────────────────
     @app.callback(
         Output("customize-tab-select", "options"),
         Input("customize-portal-select", "value"),
         prevent_initial_call=False,
     )
     def update_tab_options(selected_portal):
-        """
-        Return available tabs for the selected portal.
-        """
         if not selected_portal:
             return []
-        
-        # Get unique tabs for this portal
-        tabs_for_portal = set()
-        for kpi_id, meta in KPI_PORTAL_MAP.items():
-            if meta.get("portal") == selected_portal:
-                tabs_for_portal.add(meta.get("tab"))
-        
-        # Convert to options
-        tab_options = [
-            {"label": tab.replace("_", " ").title(), "value": tab}
-            for tab in sorted(tabs_for_portal)
-        ]
-        
-        return tab_options
+        return [{"label": t.replace("_", " ").title(), "value": t}
+                for t in get_tabs_for_portal(selected_portal)]
 
-    # ──────────────────────────────────────────────────────────────
-    # 2. UPDATE KPI OPTIONS when Portal/Tab changes
-    # ──────────────────────────────────────────────────────────────
     @app.callback(
         Output("customize-kpi-select", "options"),
         Input("customize-portal-select", "value"),
-        Input("customize-tab-select", "value"),
+        Input("customize-tab-select",   "value"),
         prevent_initial_call=False,
     )
     def update_kpi_options(selected_portal, selected_tab):
-        """
-        Return available KPIs for the selected portal/tab combination.
-        """
         if not selected_portal or not selected_tab:
             return []
-        
-        # Get KPIs for this portal/tab
-        kpis_for_combo = []
-        for kpi_id, meta in KPI_PORTAL_MAP.items():
-            if meta.get("portal") == selected_portal and meta.get("tab") == selected_tab:
-                kpis_for_combo.append(kpi_id)
-        
-        # Get labels from KPI_CARDS
-        kpi_options = []
-        for kpi_id in sorted(kpis_for_combo):
-            cfg = KPI_CARDS.get(kpi_id, {})
-            label = cfg.get("title", kpi_id)
-            kpi_options.append({
-                "label": label,
-                "value": kpi_id,
-            })
-        
-        return kpi_options
+        ids = get_kpi_ids_for_portal_tab(selected_portal, selected_tab)
+        return [{"label": KPI_CARDS.get(cid, {}).get("title", cid), "value": cid}
+                for cid in ids if cid in KPI_CARDS]
 
-    # ──────────────────────────────────────────────────────────────
-    # 3. DISPLAY KPI DETAILS when KPI is selected
-    # ──────────────────────────────────────────────────────────────
     @app.callback(
-        Output("customize-kpi-sql", "value"),
+        Output("customize-kpi-sql",      "value"),
         Output("customize-kpi-metadata", "children"),
-        Input("customize-kpi-select", "value"),
+        Input("customize-kpi-select",    "value"),
         prevent_initial_call=False,
     )
     def update_kpi_details(selected_kpi_id):
-        """
-        Fetch and display:
-        1. Raw SQL query from KPI_CARDS
-        2. Metadata (params, format, icon, color, group)
-        """
-        
         if not selected_kpi_id or selected_kpi_id not in KPI_CARDS:
-            return (
-                "No KPI selected",
-                html.Div("Select a KPI to view details", className="text-muted"),
-            )
-        
-        # Get KPI config from card_catalogue.py
-        cfg = KPI_CARDS.get(selected_kpi_id, {})
-        
-        # Extract components
-        query = cfg.get("query", "")
-        params = cfg.get("params", 0)
-        fmt = cfg.get("format", "number")
-        icon = cfg.get("icon", "fa-chart-bar")
-        color = cfg.get("color", "#3498db")
-        title = cfg.get("title", selected_kpi_id)
-        group = cfg.get("group", "")
+            return "-- No KPI selected", html.Div("Select a KPI to view details",
+                                                   className="text-muted")
+        cfg         = KPI_CARDS[selected_kpi_id]
+        query       = (cfg.get("query") or "").strip()
+        params      = cfg.get("params", 0)
+        fmt         = cfg.get("format", "number")
+        icon        = cfg.get("icon",  "fa-chart-bar")
+        color       = cfg.get("color", "#3498db")
+        title       = cfg.get("title", selected_kpi_id)
+        group       = cfg.get("group", "")
         portal_meta = KPI_PORTAL_MAP.get(selected_kpi_id, {})
-        # ═══ Build metadata card ═══
+
         metadata_card = dbc.Card([
             dbc.CardBody([
+                html.Div([
+                    html.I(className=f"fas {icon}",
+                           style={"color": color, "fontSize": "22px",
+                                  "marginRight": "8px"}),
+                    html.Span(title, style={"fontWeight": "700", "fontSize": "14px",
+                                           "color": "#15304f"}),
+                ], style={"display": "flex", "alignItems": "center",
+                          "marginBottom": "10px"}),
+                html.Hr(style={"margin": "8px 0"}),
                 dbc.Row([
                     dbc.Col([
-                        html.Div([
-                            html.I(className=f"fas {icon}",
-                                   style={"color": color, "fontSize": "22px", "marginRight": "8px"}),
-                            html.Span(title, style={"fontWeight": "700", "fontSize": "14px", "color": "#15304f"}),
-                        ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
-                        
-                        html.Hr(style={"margin": "8px 0"}),
-                        
-                        html.Div([
-                            html.Small("Parameters", style={"fontWeight": "600", "color": "#7d8ea3", "fontSize": "10px"}),
-                            html.Div(f"{params}", style={"fontSize": "13px", "color": "#15304f", "fontWeight": "500"}),
-                        ], style={"marginBottom": "8px"}),
-                        
-                        html.Div([
-                            html.Small("Format", style={"fontWeight": "600", "color": "#7d8ea3", "fontSize": "10px"}),
-                            html.Div(fmt, style={"fontSize": "13px", "color": "#15304f", "fontWeight": "500"}),
-                        ], style={"marginBottom": "8px"}),
-                        
-                        html.Div([
-                            html.Small("Group", style={"fontWeight": "600", "color": "#7d8ea3", "fontSize": "10px"}),
-                            html.Div(group or "—", style={"fontSize": "13px", "color": "#15304f", "fontWeight": "500"}),
-                        ]),
+                        _meta_row("Parameters", str(params)),
+                        _meta_row("Format",     fmt),
+                        _meta_row("Group",      group or "—"),
                     ], width=6),
-                    
                     dbc.Col([
-                        html.Div([
-                            html.Small("Portal/Tab", style={"fontWeight": "600", "color": "#7d8ea3", "fontSize": "10px"}),
-                        ]),
-                        
-                        
-                        
-                        html.Div([
-                            html.Small(f"{portal_meta.get('portal', '—').title()} / {portal_meta.get('tab', '—').replace('_', ' ').title()}",
-                                       style={"fontSize": "12px", "color": "#15304f", "fontWeight": "500"}),
-                        ], style={"marginBottom": "12px"}),
-                        
-                        dbc.Badge(
-                            [html.I(className="fas fa-database me-1"), "DB Function"],
-                            color="info",
-                            style={"fontSize": "10px"},
-                        ),
+                        _meta_row("Portal", portal_meta.get("portal", "—").title()),
+                        _meta_row("Tab",
+                                  portal_meta.get("tab", "—").replace("_", " ").title()),
+                        dbc.Badge([html.I(className="fas fa-database me-1"), "DB Query"],
+                                  color="info",
+                                  style={"fontSize": "10px", "marginTop": "8px"}),
                     ], width=6),
                 ]),
             ], style={"padding": "12px"}),
-        ], style={"borderRadius": "10px", "border": f"1px solid {color}22"})
-        
+        ], style={"borderRadius": "10px", "border": f"1px solid {color}33"})
         return query, metadata_card
 
-    # ──────────────────────────────────────────────────────────────
-    # 4. LOAD ENTITY METADATA (Optional — for reference in forms)
-    # ──────────────────────────────────────────────────────────────
+    # ── Test SQL ─────────────────────────────────────────────────
+    @app.callback(
+        Output("kpi-test-result", "children"),
+        Input("kpi-test-sql-btn",  "n_clicks"),
+        State("customize-kpi-sql",    "value"),
+        State("customize-kpi-select", "value"),
+        State("auth-store",           "data"),
+        prevent_initial_call=True,
+    )
+    def test_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
+        if not n_clicks or not sql_text:
+            return no_update
+        from database.db_manager import db
+        from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
+
+        sid      = (auth_data or {}).get("society_id")
+        cfg      = KPI_CARDS.get(kpi_id or "", {})
+        n_params = cfg.get("params", sql_text.count("%s"))
+        fmt      = cfg.get("format", "number")
+
+        if n_params == 0:
+            params: tuple = ()
+        elif sid:
+            params = tuple(sid for _ in range(n_params))
+        else:
+            return dbc.Alert("No society_id in session — cannot bind params.",
+                             color="warning", className="mt-2",
+                             style={"fontSize": "12px"})
+
+        t0 = time.perf_counter()
+        try:
+            row     = db._execute(sql_text.strip(), params, fetch_one=True)
+            elapsed = (time.perf_counter() - t0) * 1000
+            raw     = (row or {}).get("v") if row else None
+            fmt_val = format_kpi_value(raw, fmt) if raw is not None else "NULL"
+            color   = "success" if raw is not None else "warning"
+            return dbc.Alert([
+                html.Strong("Raw: "),
+                html.Code(str(raw),
+                          style={"fontSize": "13px", "marginRight": "12px"}),
+                html.Strong("Formatted: "),
+                html.Span(fmt_val,
+                          style={"fontSize": "14px", "fontWeight": "700",
+                                 "marginRight": "12px"}),
+                html.Small(f"({elapsed:.1f} ms)", style={"color": "#888"}),
+            ], color=color, className="mt-2 py-2", style={"fontSize": "12px"})
+        except Exception as e:
+            elapsed = (time.perf_counter() - t0) * 1000
+            return dbc.Alert([
+                html.Strong("ERROR: "),
+                html.Code(str(e),
+                          style={"fontSize": "11px", "whiteSpace": "pre-wrap"}),
+                html.Br(),
+                html.Small(f"({elapsed:.1f} ms)", style={"color": "#888"}),
+            ], color="danger", className="mt-2 py-2", style={"fontSize": "12px"})
+
+    # ── Export SQL ───────────────────────────────────────────────
+    @app.callback(
+        Output("kpi-export-result",   "children"),
+        Output("kpi-export-download", "data"),
+        Input("kpi-export-sql-btn",   "n_clicks"),
+        State("customize-kpi-sql",    "value"),
+        State("customize-kpi-select", "value"),
+        prevent_initial_call=True,
+    )
+    def export_kpi_sql(n_clicks, sql_text, kpi_id):
+        if not n_clicks or not sql_text:
+            return no_update, no_update
+        cfg   = KPI_CARDS.get(kpi_id or "", {})
+        title = cfg.get("title", kpi_id or "unknown")
+        block = (
+            f"\n-- ── KPI: {kpi_id}  ({title}) ─────────────────────────\n"
+            f"-- Format: {cfg.get('format','?')}  |  Params: {cfg.get('params',0)}\n"
+            + sql_text.strip() + ";\n"
+        )
+        msg = dbc.Alert([
+            html.I(className="fas fa-check-circle me-2"),
+            f"SQL block for '{title}' ready.",
+        ], color="success", className="mt-2 py-2", style={"fontSize": "12px"})
+        return msg, dcc.send_string(block, filename=f"kpi_{kpi_id}.sql")
+
+    # ── Entity reference ─────────────────────────────────────────
     @app.callback(
         Output("customize-entity-reference", "children"),
         Input("customize-kpi-select", "value"),
         prevent_initial_call=False,
     )
     def load_entity_reference(selected_kpi_id):
-        """
-        Show related entity metadata (list columns, profile fields, form fields).
-        """
         if not selected_kpi_id:
-            return html.Div("Select a KPI to view entity details", className="text-muted")
-        
-        # Try to infer entity from KPI ID
-        # e.g. "kpi_apartments_total" → "apartments"
+            return html.Div("Select a KPI to view entity details",
+                            className="text-muted")
         entity = None
-        for key in ENTITY_META.keys():
+        for key in ENTITY_META:
             if key in selected_kpi_id:
                 entity = key
                 break
-        
-        if not entity or entity not in ENTITY_META:
+        if not entity:
             return html.Div("No entity metadata available", className="text-muted")
-        
         meta = ENTITY_META[entity]
-        
-        # Build reference card
         return dbc.Card([
-            dbc.CardHeader(
-                html.Div([
-                    html.I(className=f"fas {meta.get('list_icon', 'fa-list')} me-2",
-                           style={"color": meta.get('profile_color', '#1d74d8')}),
-                    html.Strong(f"{entity.title()} Entity"),
-                ], style={"display": "flex", "alignItems": "center"}),
-                style={"padding": "10px 14px"}
-            ),
+            dbc.CardHeader(html.Div([
+                html.I(className=f"fas {meta.get('list_icon','fa-list')} me-2",
+                       style={"color": meta.get("profile_color", "#1d74d8")}),
+                html.Strong(f"{entity.title()} Entity"),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "10px 14px"}),
             dbc.CardBody([
-                # ─── List Columns ─────────────────────────────────────
-                html.Div([
-                    html.Small("List Card Columns", style={"fontWeight": "600", "color": "#15304f", "fontSize": "11px"}),
-                    html.Div(
-                        ", ".join([c.get("name", c.get("field", "")).title() for c in meta.get("list_columns", [])]),
-                        style={"fontSize": "11px", "color": "#666", "marginBottom": "10px", "fontFamily": "monospace"},
-                    ),
-                ]),
-                
-                html.Hr(style={"margin": "8px 0"}),
-                
-                # ─── Profile Fields ───────────────────────────────────
-                html.Div([
-                    html.Small("Profile Card Fields", style={"fontWeight": "600", "color": "#15304f", "fontSize": "11px"}),
-                    html.Div(
-                        ", ".join([f.get("label", f.get("field", "")).title() for f in meta.get("profile_fields", [])]),
-                        style={"fontSize": "11px", "color": "#666", "marginBottom": "10px", "fontFamily": "monospace"},
-                    ),
-                ]),
-                
-                html.Hr(style={"margin": "8px 0"}),
-                
-                # ─── Form Actions ─────────────────────────────────────
-                html.Div([
-                    html.Small("Profile Card Actions", style={"fontWeight": "600", "color": "#15304f", "fontSize": "11px"}),
-                    html.Div(
-                        ", ".join([a.get("label", a.get("action_id", "")) for a in meta.get("profile_actions", [])]),
-                        style={"fontSize": "11px", "color": "#666", "fontFamily": "monospace"},
-                    ),
-                ]),
+                _ref_row("List Columns",
+                         ", ".join(c.get("name", c.get("field","")).title()
+                                   for c in meta.get("list_columns", []))),
+                html.Hr(style={"margin": "6px 0"}),
+                _ref_row("Profile Fields",
+                         ", ".join(f.get("label", f.get("field","")).title()
+                                   for f in meta.get("profile_fields", []))),
+                html.Hr(style={"margin": "6px 0"}),
+                _ref_row("Profile Actions",
+                         ", ".join(a.get("label", a.get("action_id",""))
+                                   for a in meta.get("profile_actions", []))),
             ], style={"padding": "12px"}),
         ], style={"borderRadius": "10px", "marginTop": "10px"})
 
     print("  ✓ Customize KPI callbacks registered")
 
+
+def _meta_row(label: str, value: str) -> html.Div:
+    return html.Div([
+        html.Small(label, style={"fontWeight": "600", "color": "#7d8ea3",
+                                  "fontSize": "10px"}),
+        html.Div(value, style={"fontSize": "13px", "color": "#15304f",
+                                "fontWeight": "500", "marginBottom": "8px"}),
+    ])
+
+
+def _ref_row(label: str, value: str) -> html.Div:
+    return html.Div([
+        html.Small(label, style={"fontWeight": "600", "color": "#15304f",
+                                  "fontSize": "11px"}),
+        html.Div(value, style={"fontSize": "11px", "color": "#666",
+                                "fontFamily": "monospace",
+                                "marginBottom": "8px"}),
+    ])

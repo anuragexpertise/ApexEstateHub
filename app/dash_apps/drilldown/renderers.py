@@ -599,34 +599,114 @@ def render_form_card(card_id: str, title: str, icon: str,
                        "background": "#f5f7fa"},
             )
         elif ftype == "image_upload":
+            cam_vid_id  = f"cam-vid-{entity}-{fid}"
+            cam_cvs_id  = f"cam-cvs-{entity}-{fid}"
+            cam_snap_id = f"cam-snap-{entity}-{fid}"
+            cam_stop_id = f"cam-stop-{entity}-{fid}"
+            cam_btn_id  = f"cam-btn-{entity}-{fid}"
+            prev_img_id = f"cam-prev-{entity}-{fid}"
+            # marker used by snapCamCapture to locate the hidden input
+            hidden_marker = f'"entity": "{entity}", "field": "{fid}"'
             ctrl = html.Div([
-                dcc.Upload(
-                    id={"type": "form-field", "entity": entity, "field": fid},
-                    children=html.Div([
-                        html.I(className="fas fa-cloud-upload-alt me-2"),
-                        "Drag & Drop or Click",
-                    ]),
-                    style={
-                        "width": "100%", "height": "72px",
-                        "lineHeight": "72px", "borderWidth": "2px",
-                        "borderStyle": "dashed", "borderRadius": "10px",
-                        "textAlign": "center", "borderColor": "#667eea",
-                        "background": "rgba(102,126,234,0.04)",
-                        "cursor": "pointer", "fontSize": "13px",
-                        "color": "#667eea",
-                    },
-                    multiple=False, accept="image/*",
-                ),
+                # ── Row: Upload + Camera ──────────────────────────────────
+                html.Div([
+                    dcc.Upload(
+                        id={"type": "form-field", "entity": entity, "field": fid},
+                        children=html.Div([
+                            html.I(className="fas fa-cloud-upload-alt me-1"),
+                            "Upload / Drop",
+                        ], style={"fontSize": "12px"}),
+                        style={
+                            "flex": "1", "height": "42px", "lineHeight": "42px",
+                            "borderWidth": "2px", "borderStyle": "dashed",
+                            "borderRadius": "10px", "textAlign": "center",
+                            "borderColor": "#667eea",
+                            "background": "rgba(102,126,234,0.04)",
+                            "cursor": "pointer", "color": "#667eea",
+                            "minWidth": "120px",
+                        },
+                        multiple=False, accept="image/*",
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-camera me-1"), "Camera"],
+                        id=cam_btn_id,
+                        style={
+                            "flex": "0 0 auto", "height": "42px",
+                            "borderRadius": "10px",
+                            "border": "2px dashed #1abc9c",
+                            "background": "rgba(26,188,156,0.06)",
+                            "color": "#1abc9c", "cursor": "pointer",
+                            "fontSize": "12px", "fontWeight": "600",
+                            "padding": "0 14px",
+                        },
+                        **{
+                            "data-cam-video":  cam_vid_id,
+                            "data-cam-canvas": cam_cvs_id,
+                            "data-cam-snap":   cam_snap_id,
+                            "data-cam-stop":   cam_stop_id,
+                            "onclick": "toggleCamCapture(this)",
+                        },
+                    ),
+                ], style={"display": "flex", "gap": "8px", "marginBottom": "8px"}),
+
+                # ── Live viewfinder ───────────────────────────────────────
+                html.Video(id=cam_vid_id, autoPlay=True, muted=True,
+                           style={"width": "100%", "maxHeight": "200px",
+                                  "borderRadius": "10px", "display": "none",
+                                  "objectFit": "cover", "background": "#111"}),
+                html.Canvas(id=cam_cvs_id, style={"display": "none"}),
+
+                # ── Snap / Stop row ───────────────────────────────────────
+                html.Div([
+                    html.Button(
+                        [html.I(className="fas fa-circle me-1"), "Snap"],
+                        id=cam_snap_id,
+                        style={"borderRadius": "8px", "border": "none",
+                               "background": "#de5c52", "color": "#fff",
+                               "cursor": "pointer", "fontSize": "12px",
+                               "fontWeight": "700", "padding": "6px 16px",
+                               "display": "none"},
+                        **{
+                            "data-cam-video":   cam_vid_id,
+                            "data-cam-canvas":  cam_cvs_id,
+                            "data-cam-stop":    cam_stop_id,
+                            "data-preview-id":  prev_img_id,
+                            "data-hidden-marker": hidden_marker,
+                            "onclick": "snapCamCapture(this)",
+                        },
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-stop me-1"), "Stop"],
+                        id=cam_stop_id,
+                        style={"borderRadius": "8px", "border": "none",
+                               "background": "#7d8ea3", "color": "#fff",
+                               "cursor": "pointer", "fontSize": "12px",
+                               "padding": "6px 14px", "display": "none"},
+                        **{
+                            "data-cam-video": cam_vid_id,
+                            "data-cam-btn":   cam_btn_id,
+                            "data-cam-snap":  cam_snap_id,
+                            "onclick": "stopCamCapture(this)",
+                        },
+                    ),
+                ], style={"display": "flex", "gap": "6px", "marginTop": "6px",
+                          "justifyContent": "center"}),
+
+                # ── Hidden value (Upload path OR camera base64) ───────────
                 dcc.Input(
-                    id={"type": "form-field-hidden", "entity": entity,
-                        "field": fid},
+                    id={"type": "form-field-hidden", "entity": entity, "field": fid},
                     type="hidden", value=pre_val or "",
                 ),
+                # ── dcc.Upload preview (managed by handle_image_upload) ───
                 html.Div(
-                    id={"type": "image-preview", "entity": entity,
-                        "field": fid},
+                    id={"type": "image-preview", "entity": entity, "field": fid},
                     style={"marginTop": "6px"},
                 ),
+                # ── Camera snap preview ───────────────────────────────────
+                html.Img(id=prev_img_id,
+                         style={"display": "none", "maxWidth": "100%",
+                                "maxHeight": "160px", "borderRadius": "8px",
+                                "marginTop": "6px", "border": "1px solid #ddd"}),
             ])
         elif ftype == "account_dropdown_receipt":
             ctrl = html.Div([
