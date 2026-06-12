@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS attendance (
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    apt_id INT NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
+    apt_id INT REFERENCES apartments(id),
     start_date DATE NOT NULL,
     end_date DATE,
     apt_maintenance_rate NUMERIC(10,4) NOT NULL DEFAULT 3.0,
@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
 CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    ven_id INT NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    ven_id INT REFERENCES vendors(id),
     start_date DATE NOT NULL,
     end_date DATE,
     vendor_1day NUMERIC(10,2) DEFAULT 0,
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
 CREATE TABLE IF NOT EXISTS sec_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    sec_id INT NOT NULL REFERENCES security_staff(id) ON DELETE CASCADE,
+    sec_id INT REFERENCES security_staff(id),
     start_date DATE NOT NULL,
     end_date DATE,
     security_fine NUMERIC(10,2) DEFAULT 0,
