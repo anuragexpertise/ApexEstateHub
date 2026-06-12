@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     time_out TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS apt_charges_fines (
+CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     apt_id INT NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS ven_charges_fines (
+CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     ven_id INT NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS sec_charges_fines (
+CREATE TABLE IF NOT EXISTS sec_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     sec_id INT NOT NULL REFERENCES security_staff(id) ON DELETE CASCADE,
@@ -375,16 +375,16 @@ BEGIN
         (DATE_TRUNC('month', CURRENT_DATE)
             + (INTERVAL '1 day' * (COALESCE(acf.apt_due_day, 10) - 1)))::DATE,
         'pending'::VARCHAR(20),
-        'apt_charges_fines'::VARCHAR(50),
+        'apt_charges_fines_basis'::VARCHAR(50),
         acf.id::INT,
         NOW()::TIMESTAMP
-    FROM apt_charges_fines acf
+    FROM apt_charges_fines_basis acf
     JOIN apartments a ON a.id = acf.apt_id
     WHERE acf.society_id = p_society_id
       AND acf.apt_status = TRUE
       AND NOT EXISTS (
           SELECT 1 FROM receivables r
-          WHERE r.source_table = 'apt_charges_fines'
+          WHERE r.source_table = 'apt_charges_fines_basis'
             AND r.source_id = acf.id
       )
     ON CONFLICT DO NOTHING;
@@ -494,7 +494,7 @@ BEGIN
             COALESCE(acf.apt_maintenance_rate, 3.0)::NUMERIC(10,4) AS rate_per_sqft,
             acf.start_date::DATE
         FROM apartments a
-        LEFT JOIN apt_charges_fines acf
+        LEFT JOIN apt_charges_fines_basis acf
                ON acf.apt_id = a.id AND acf.apt_status = TRUE
         WHERE a.society_id = p_society_id
           AND (p_search IS NULL
@@ -748,10 +748,10 @@ BEGIN
         COALESCE(scf.security_fine, 0)::NUMERIC(10,2),
         CURRENT_DATE::DATE,
         'pending'::VARCHAR(20),
-        'security_charges_fines'::VARCHAR(50),
+        'sec_charges_fines_basis'::VARCHAR(50),
         scf.id::INT,
         NOW()::TIMESTAMP
-    FROM security_charges_fines scf
+    FROM sec_charges_fines_basis scf
     JOIN security_staff s ON s.id = scf.sec_id
     JOIN users u ON u.linked_id = s.id AND u.role = 'security'
     WHERE scf.society_id = p_society_id
@@ -759,7 +759,7 @@ BEGIN
       AND COALESCE(scf.security_fine, 0) > 0
       AND NOT EXISTS (
           SELECT 1 FROM receivables r
-          WHERE r.source_table = 'security_charges_fines' AND r.source_id = scf.id
+          WHERE r.source_table = 'sec_charges_fines_basis' AND r.source_id = scf.id
       )
     ON CONFLICT DO NOTHING;
 END;
@@ -892,7 +892,7 @@ BEGIN
             u.id::INT AS user_id,
             COALESCE(SUM(scf.security_fine), 0)::NUMERIC(15,2) AS active_fines
         FROM users u
-        LEFT JOIN security_charges_fines scf ON scf.sec_id = u.linked_id
+        LEFT JOIN sec_charges_fines_basis scf ON scf.sec_id = u.linked_id
         WHERE u.society_id = p_society_id AND u.role = 'security'
         GROUP BY u.id
     )
@@ -1016,7 +1016,7 @@ BEGIN
                LIMIT 1
            )
           AND g.time_in::DATE = r.roster_date
-    LEFT JOIN security_charges_fines scf ON scf.sec_id = s.id
+    LEFT JOIN sec_charges_fines_basis scf ON scf.sec_id = s.id
     WHERE s.society_id = p_society_id
     GROUP BY s.id, s.name, s.salary_per_shift
     ORDER BY attendance_rate DESC;
@@ -1750,11 +1750,11 @@ $$ LANGUAGE plpgsql;
 --     UNION ALL
 --     SELECT 'kpi_accounts_count', 'Chart of Accounts', 'fa-book-open', 'admin', 'settings', 'fn_accounts_list'
 --     UNION ALL
---     SELECT 'kpi_apt_charges', 'Apartment Charges', 'fa-home', 'admin', 'settings', 'fn_apt_charges_fines'
+--     SELECT 'kpi_apt_charges', 'Apartment Charges', 'fa-home', 'admin', 'settings', 'fn_apt_charges_fines_basis'
 --     UNION ALL
---     SELECT 'kpi_ven_charges', 'Vendor Charges', 'fa-briefcase', 'admin', 'settings', 'fn_ven_charges_fines'
+--     SELECT 'kpi_ven_charges', 'Vendor Charges', 'fa-briefcase', 'admin', 'settings', 'fn_ven_charges_fines_basis'
 --     UNION ALL
---     SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_sec_charges_fines'
+--     SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_sec_charges_fines_basis'
 --     UNION ALL
 --     SELECT 'kpi_attendance', 'Attendance (30d)', 'fa-clock', 'admin', 'settings', 'fn_attendance_list'
 --     UNION ALL

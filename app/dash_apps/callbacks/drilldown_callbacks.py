@@ -453,6 +453,123 @@ ENTITY_META: dict = {
         "form_fields": {"new": []},
     },
 
+    "apt_charges": {
+        "list_title":   "Apartment Charges",
+        "list_icon":    "fa-rupee-sign",
+        "list_columns": [
+            {"name": "Flat",      "field": "flat_number",  "sortable": True},
+            {"name": "Title",     "field": "title",        "sortable": True},
+            {"name": "Amount",    "field": "amount",       "sortable": True},
+            {"name": "Due Date",  "field": "due_date",     "sortable": True},
+            {"name": "Status",    "field": "status",       "sortable": True},
+        ],
+        "profile_title":  "Apartment Charge Details",
+        "profile_icon":   "fa-rupee-sign",
+        "profile_color":  "#de5c52",
+        "profile_fields": [
+            {"label": "Flat No",      "field": "flat_number", "icon": "fa-home"},
+            {"label": "Title",        "field": "title",       "icon": "fa-heading"},
+            {"label": "Amount",       "field": "amount",      "icon": "fa-rupee-sign"},
+            {"label": "Due Date",     "field": "due_date",    "icon": "fa-calendar"},
+            {"label": "Status",       "field": "status",      "icon": "fa-circle-dot"},
+        ],
+        "profile_actions": [],
+        "form_fields": {
+            "new": [
+                {"id": "flat_number",  "label": "Flat No",      "type": "text",  "required": True},
+                {"id": "title",        "label": "Title",        "type": "text",  "required": True},
+                {"id": "amount",      "label": "Amount (₹)",    "type": "number", "required": True},
+                {"id": "due_date",    "label": "Due Date",     "type": "date",   "required": True},
+                {"id": "status",      "label": "Status",       "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+            "edit": [
+                {"id": "flat_number",  "label": "Flat No",  "type": "readonly"},
+                {"id": "title",       "label": "Title",    "type": "text"},
+                {"id": "amount",      "label": "Amount",   "type": "number"},
+                {"id": "due_date",    "label": "Due Date", "type": "date"},
+                {"id": "status",     "label": "Status",   "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+        },
+    },
+
+    "ven_charges": {
+        "list_title":   "Vendor Charges",
+        "list_icon":    "fa-rupee-sign",
+        "list_columns": [
+            {"name": "Vendor",    "field": "vendor_name", "sortable": True},
+            {"name": "Title",     "field": "title",       "sortable": True},
+            {"name": "Amount",    "field": "amount",      "sortable": True},
+            {"name": "Due Date",  "field": "due_date",    "sortable": True},
+            {"name": "Status",    "field": "status",      "sortable": True},
+        ],
+        "profile_title":  "Vendor Charge Details",
+        "profile_icon":   "fa-rupee-sign",
+        "profile_color":  "#b98a07",
+        "profile_fields": [
+            {"label": "Vendor Name", "field": "vendor_name", "icon": "fa-user"},
+            {"label": "Title",     "field": "title",       "icon": "fa-heading"},
+            {"label": "Amount",    "field": "amount",      "icon": "fa-rupee-sign"},
+            {"label": "Due Date",  "field": "due_date",    "icon": "fa-calendar"},
+            {"label": "Status",    "field": "status",      "icon": "fa-circle-dot"},
+        ],
+        "profile_actions": [],
+        "form_fields": {
+            "new": [
+                {"id": "vendor_id",   "label": "Vendor",      "type": "select", "options_from": "vendors", "required": True},
+                {"id": "title",       "label": "Title",       "type": "text",   "required": True},
+                {"id": "amount",      "label": "Amount (₹)",  "type": "number", "required": True},
+                {"id": "due_date",    "label": "Due Date",    "type": "date",  "required": True},
+                {"id": "status",     "label": "Status",      "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+            "edit": [
+                {"id": "vendor_id",   "label": "Vendor",  "type": "readonly"},
+                {"id": "title",      "label": "Title",   "type": "text"},
+                {"id": "amount",     "label": "Amount",  "type": "number"},
+                {"id": "due_date",   "label": "Due Date","type": "date"},
+                {"id": "status",     "label": "Status",  "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+        },
+    },
+
+    "sec_charges": {
+        "list_title":   "Security Charges",
+        "list_icon":    "fa-rupee-sign",
+        "list_columns": [
+            {"name": "Staff",     "field": "security_name", "sortable": True},
+            {"name": "Title",     "field": "title",         "sortable": True},
+            {"name": "Amount",    "field": "amount",        "sortable": True},
+            {"name": "Due Date",  "field": "due_date",      "sortable": True},
+            {"name": "Status",    "field": "status",        "sortable": True},
+        ],
+        "profile_title":  "Security Charge Details",
+        "profile_icon":   "fa-rupee-sign",
+        "profile_color":  "#1d74d8",
+        "profile_fields": [
+            {"label": "Staff Name", "field": "security_name", "icon": "fa-user-shield"},
+            {"label": "Title",      "field": "title",         "icon": "fa-heading"},
+            {"label": "Amount",     "field": "amount",        "icon": "fa-rupee-sign"},
+            {"label": "Due Date",   "field": "due_date",      "icon": "fa-calendar"},
+            {"label": "Status",     "field": "status",        "icon": "fa-circle-dot"},
+        ],
+        "profile_actions": [],
+        "form_fields": {
+            "new": [
+                {"id": "security_id", "label": "Staff",     "type": "select", "options_from": "security", "required": True},
+                {"id": "title",       "label": "Title",     "type": "text",   "required": True},
+                {"id": "amount",      "label": "Amount (₹)", "type": "number", "required": True},
+                {"id": "due_date",    "label": "Due Date",  "type": "date",  "required": True},
+                {"id": "status",      "label": "Status",    "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+            "edit": [
+                {"id": "security_id", "label": "Staff",  "type": "readonly"},
+                {"id": "title",      "label": "Title",  "type": "text"},
+                {"id": "amount",     "label": "Amount","type": "number"},
+                {"id": "due_date",   "label": "Due Date","type": "date"},
+                {"id": "status",     "label": "Status", "type": "select", "options": ["pending", "paid", "overdue"]},
+            ],
+        },
+    },
+
     "societies": {
         "list_title":   "Societies",
         "list_icon":    "fa-building",
@@ -1336,6 +1453,12 @@ def _save_entity(entity, card_id, data):
             return _save_society(db, data, sid, is_edit, pk)
         if entity == "account":
             return _save_account(db, data, sid, is_edit, pk)
+        if entity == "apt_charge":
+            return _save_apt_charge(db, data, sid, is_edit, pk)
+        if entity == "ven_charge":
+            return _save_ven_charge(db, data, sid, is_edit, pk)
+        if entity == "sec_charge":
+            return _save_sec_charge(db, data, sid, is_edit, pk)
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
         return False, str(e), None
@@ -1556,8 +1679,95 @@ def _save_account(db, d, sid, is_edit, pk):
          d.get("drcr_account","Dr"), d.get("drcr_bf","Dr"),
          d.get("bf_amount") or 0, 100, False))
     return True, f"Account '{name}' created", next_id
- 
- 
+
+
+def _save_apt_charge(db, d, sid, is_edit, pk):
+    if is_edit:
+        db._execute(
+            "UPDATE apt_charges_fines_basis SET flat_number=%s,title=%s,amount=%s,"
+            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
+            (d.get("flat_number"), d.get("title"), d.get("amount"),
+             d.get("due_date"), d.get("status"), pk, sid))
+        return True, "Apartment charge updated", pk
+    flat = (d.get("flat_number") or "").strip()
+    if not flat:
+        return False, "Flat number required", None
+    title = (d.get("title") or "").strip()
+    if not title:
+        return False, "Title required", None
+    try:
+        amt = float(d.get("amount") or 0)
+    except ValueError:
+        return False, "Invalid amount", None
+    due_date = d.get("due_date") or dt_date.today().isoformat()
+    db._execute(
+        "INSERT INTO apt_charges_fines_basis(society_id,flat_number,title,amount,"
+        "due_date,status,apt_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
+        "RETURNING id",
+        (sid, flat, title, amt, due_date, d.get("status", "pending")))
+    return True, f"Charge '{title}' created for {flat}", db._execute(
+        "SELECT id FROM apt_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
+        (sid,), fetch_one=True).get("id")
+
+
+def _save_ven_charge(db, d, sid, is_edit, pk):
+    if is_edit:
+        db._execute(
+            "UPDATE ven_charges_fines_basis SET vendor_id=%s,title=%s,amount=%s,"
+            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
+            (d.get("vendor_id"), d.get("title"), d.get("amount"),
+             d.get("due_date"), d.get("status"), pk, sid))
+        return True, "Vendor charge updated", pk
+    vid = d.get("vendor_id")
+    if not vid:
+        return False, "Vendor required", None
+    title = (d.get("title") or "").strip()
+    if not title:
+        return False, "Title required", None
+    try:
+        amt = float(d.get("amount") or 0)
+    except ValueError:
+        return False, "Invalid amount", None
+    due_date = d.get("due_date") or dt_date.today().isoformat()
+    db._execute(
+        "INSERT INTO ven_charges_fines_basis(society_id,vendor_id,title,amount,"
+        "due_date,status,ven_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
+        "RETURNING id",
+        (sid, vid, title, amt, due_date, d.get("status", "pending")))
+    return True, f"Charge '{title}' created", db._execute(
+        "SELECT id FROM ven_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
+        (sid,), fetch_one=True).get("id")
+
+
+def _save_sec_charge(db, d, sid, is_edit, pk):
+    if is_edit:
+        db._execute(
+            "UPDATE sec_charges_fines_basis SET security_id=%s,title=%s,amount=%s,"
+            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
+            (d.get("security_id"), d.get("title"), d.get("amount"),
+             d.get("due_date"), d.get("status"), pk, sid))
+        return True, "Security charge updated", pk
+    sec_id = d.get("security_id")
+    if not sec_id:
+        return False, "Security staff required", None
+    title = (d.get("title") or "").strip()
+    if not title:
+        return False, "Title required", None
+    try:
+        amt = float(d.get("amount") or 0)
+    except ValueError:
+        return False, "Invalid amount", None
+    due_date = d.get("due_date") or dt_date.today().isoformat()
+    db._execute(
+        "INSERT INTO sec_charges_fines_basis(society_id,security_id,title,amount,"
+        "due_date,status,sec_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
+        "RETURNING id",
+        (sid, sec_id, title, amt, due_date, d.get("status", "pending")))
+    return True, f"Charge '{title}' created", db._execute(
+        "SELECT id FROM sec_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
+        (sid,), fetch_one=True).get("id")
+
+
 def _get_account_by_name(society_id, account_name):
     try:
         return db._execute(
