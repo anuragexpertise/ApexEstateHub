@@ -158,7 +158,7 @@ def register_customize_callbacks(app):
     )
     def layout_tab_options(portal):
         if not portal:
-            return []
+            portal = "admin"
         try:
             from app.dash_apps.callbacks.customize_kpi_callbacks import (
                 get_tabs_for_portal,
