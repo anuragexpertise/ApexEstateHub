@@ -373,6 +373,7 @@ def shell_layout() -> html.Div:
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
+            dcc.Store(id="portal-content-store",     storage_type="memory", data={"rendered": False}),
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
 
             # ── Hidden utility elements ────────────────────────────────────────

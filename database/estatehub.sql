@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS security_charges_fines (
+CREATE TABLE IF NOT EXISTS sec_charges_fines (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     sec_id INT NOT NULL REFERENCES security_staff(id) ON DELETE CASCADE,
@@ -1754,7 +1754,7 @@ $$ LANGUAGE plpgsql;
 --     UNION ALL
 --     SELECT 'kpi_ven_charges', 'Vendor Charges', 'fa-briefcase', 'admin', 'settings', 'fn_ven_charges_fines'
 --     UNION ALL
---     SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_security_charges_fines'
+--     SELECT 'kpi_sec_charges', 'Security Charges', 'fa-lock', 'admin', 'settings', 'fn_sec_charges_fines'
 --     UNION ALL
 --     SELECT 'kpi_attendance', 'Attendance (30d)', 'fa-clock', 'admin', 'settings', 'fn_attendance_list'
 --     UNION ALL

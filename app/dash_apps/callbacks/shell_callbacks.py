@@ -413,6 +413,7 @@ def register_shell_callbacks(app):
     # login-modal.is_open is owned exclusively by guard_modal (above).
     @app.callback(
         Output("portal-content",   "children"),
+        Output("portal-content-store", "data"),
         Output("sb-nav-list",      "children"),
         Output("breadcrumb-ol",    "children"),
         Output("hdr-portal-label", "children"),
@@ -431,6 +432,7 @@ def register_shell_callbacks(app):
     def route_page(pathname, auth):
         _BLANK = (
             html.Div("Please log in", className="text-muted text-center mt-5"),
+            {"rendered": False},
             [], [], "", {}, "—", "—", "?", "User", "?",
             "EstateHub", "/static/assets/EH_logo.png",
         )
@@ -475,6 +477,7 @@ def register_shell_callbacks(app):
 
         return (
             _portal_content(role, society_id, pathname),
+            {"rendered": True},
             _make_nav_items(role, society_id, pathname),
             _breadcrumb(pathname),
             cfg["label"], portal_style,

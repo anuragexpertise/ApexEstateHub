@@ -68,12 +68,16 @@ def register_card_catalogue_callbacks(app):
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
+        Input("auth-store", "data"),
+        Input("portal-content-store", "data"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
-        State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def refresh_kpi_values(pathname, kpi_ids, auth_data):
+    def refresh_kpi_values(pathname, auth_data, portal_data, kpi_ids):
         if not kpi_ids:
+            raise PreventUpdate
+
+        if not portal_data or not portal_data.get("rendered"):
             raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):
