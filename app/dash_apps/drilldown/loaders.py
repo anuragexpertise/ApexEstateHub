@@ -151,29 +151,28 @@ def load_list(entity: str, filters: dict,
         # ── CONCERNS ────────────────────────────────────────────────────────
         if entity == "concerns":
             extra = ""
-            params_c: list = [sid, "open"]
+            params_c: dict = {"society_id": sid, "status": "open"}
             if apt_id:
-                # apartment portal: only concerns from their flat
                 flat_r = db._execute(
-                    "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
-                    (apt_id, sid), fetch_one=True)
+                    "SELECT flat_number FROM apartments WHERE id=:apt_id AND society_id=:society_id",
+                    {"apt_id": apt_id, "society_id": sid}, fetch_one=True)
                 flat_no = (flat_r or {}).get("flat_number")
                 if flat_no:
-                    extra = " AND c.flat_no = %s"
-                    params_c.append(flat_no)
+                    extra = " AND c.flat_no = :flat_no"
+                    params_c["flat_no"] = flat_no
             rows = db._execute(
                 "SELECT c.* FROM concerns c "
-                "WHERE c.society_id=%s AND c.status IN (%s,'in_progress')"
+                "WHERE c.society_id=:society_id AND c.status IN (:status,'in_progress')"
                 + extra +
-                " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
-                params_c + [page_size, offset],
+                " ORDER BY c.created_at DESC LIMIT :page_size OFFSET :offset",
+                {**params_c, "page_size": page_size, "offset": offset},
                 fetch_all=True,
             ) or []
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM concerns c "
-                "WHERE c.society_id=%s AND c.status IN ('open','in_progress')"
+                "WHERE c.society_id=:society_id AND c.status IN ('open','in_progress')"
                 + extra,
-                params_c[:len(params_c)],
+                params_c,
                 fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
