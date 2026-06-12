@@ -298,10 +298,11 @@ def load_list(entity: str, filters: dict,
         # ── APT_CHARGES ─────────────────────────────────────────────────────
         if entity == "apt_charges":
             rows = db._execute(
-                "SELECT acf.*, a.flat_number FROM apt_charges_fines_basis acf "
-                "JOIN apartments a ON a.id=acf.apt_id "
+                "SELECT acf.*, COALESCE(a.flat_number, 'ALL') AS flat_number "
+                "FROM apt_charges_fines_basis acf "
+                "LEFT JOIN apartments a ON a.id = acf.apt_id "
                 "WHERE acf.society_id=%s AND acf.apt_status=TRUE "
-                "ORDER BY a.flat_number LIMIT %s OFFSET %s",
+                "ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
@@ -313,10 +314,10 @@ def load_list(entity: str, filters: dict,
 # ── VEN_CHARGES ─────────────────────────────────────────────────────
         if entity == "ven_charges":
             rows = db._execute(
-                "SELECT vcf.*, v.name AS vendor_name FROM ven_charges_fines_basis vcf "
-                "JOIN vendors v ON v.id=vcf.vendor_id "
+                "SELECT vcf.*, COALESCE(v.name, 'ALL') AS vendor_name FROM ven_charges_fines_basis vcf "
+                "LEFT JOIN vendors v ON v.id = vcf.ven_id "
                 "WHERE vcf.society_id=%s "
-                "ORDER BY vcf.due_date DESC LIMIT %s OFFSET %s",
+                "ORDER BY vcf.ven_id NULLS FIRST, vcf.start_date DESC LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
@@ -327,10 +328,10 @@ def load_list(entity: str, filters: dict,
         # ── SEC_CHARGES ─────────────────────────────────────────────────────
         if entity == "sec_charges":
             rows = db._execute(
-                "SELECT scf.*, s.name AS security_name FROM sec_charges_fines_basis scf "
-                "JOIN security_staff s ON s.id=scf.security_id "
+                "SELECT scf.*, COALESCE(s.name, 'ALL') AS security_name FROM sec_charges_fines_basis scf "
+                "LEFT JOIN security_staff s ON s.id = scf.sec_id "
                 "WHERE scf.society_id=%s "
-                "ORDER BY scf.due_date DESC LIMIT %s OFFSET %s",
+                "ORDER BY scf.sec_id NULLS FIRST, scf.start_date DESC LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(

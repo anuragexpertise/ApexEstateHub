@@ -345,10 +345,17 @@ CREATE INDEX IF NOT EXISTS idx_payments_society_status ON payments(society_id, s
 CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts(society_id, status);
 CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses(society_id, status);
 CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables(society_id, status);
+CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables(entity_id, entity_type);
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events(society_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns(society_id, status);
 CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access(society_id, time_in);
 CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster(society_id, roster_date);
+CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis(society_id, apt_id);
+CREATE INDEX IF NOT EXISTS idx_apt_charges_status ON apt_charges_fines_basis(society_id, apt_status);
+CREATE INDEX IF NOT EXISTS idx_ven_charges_society ON ven_charges_fines_basis(society_id, ven_id);
+CREATE INDEX IF NOT EXISTS idx_ven_charges_status ON ven_charges_fines_basis(society_id, ven_status);
+CREATE INDEX IF NOT EXISTS idx_sec_charges_society ON sec_charges_fines_basis(society_id, sec_id);
+CREATE INDEX IF NOT EXISTS idx_sec_charges_status ON sec_charges_fines_basis(society_id, sec_status);
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: BUSINESS LOGIC FUNCTIONS  (explicit typecasts)
@@ -358,7 +365,6 @@ CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster(society_i
 
 DROP FUNCTION IF EXISTS fn_apartments_list CASCADE;
 DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
-DROP FUNCTION IF EXISTS fn_auto_process_verified_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
@@ -367,7 +373,7 @@ BEGIN
                              amount, due_date, status, source_table, source_id, created_at)
     SELECT
         acf.society_id::INT,
-        acf.apt_id::INT,
+        a.id::INT,
         'apartment'::VARCHAR(20),
         'maintenance'::VARCHAR(50),
         ('Maintenance - ' || a.flat_number)::TEXT,
@@ -379,17 +385,88 @@ BEGIN
         acf.id::INT,
         NOW()::TIMESTAMP
     FROM apt_charges_fines_basis acf
-    JOIN apartments a ON a.id = acf.apt_id
+    CROSS JOIN apartments a
     WHERE acf.society_id = p_society_id
       AND acf.apt_status = TRUE
+      AND a.society_id = p_society_id
+      AND a.active = TRUE
+      AND (acf.apt_id IS NULL OR acf.apt_id = a.id)
       AND NOT EXISTS (
           SELECT 1 FROM receivables r
           WHERE r.source_table = 'apt_charges_fines_basis'
             AND r.source_id = acf.id
+            AND r.entity_id = a.id
       )
     ON CONFLICT DO NOTHING;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION fn_auto_process_verified_payments(p_society_id INT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+    rec_payment    RECORD;
+    remaining_amt  NUMERIC(15,2);
+    rec_receivable RECORD;
+BEGIN
+    FOR rec_payment IN
+        SELECT * FROM payments p
+        WHERE p.society_id = p_society_id
+          AND p.status = 'verified'
+          AND NOT EXISTS (
+              SELECT 1 FROM receipts r
+              WHERE r.transaction_id = p.transaction_id
+          )
+    LOOP
+        INSERT INTO receipts (society_id, user_id, entity_id, entity_type,
+            receipt_date, acc_id, particulars, amount, mode,
+            transaction_id, status, confirmed_by, confirmed_at, created_at)
+        VALUES (
+            rec_payment.society_id::INT,
+            rec_payment.confirmed_by::INT,
+            rec_payment.entity_id::INT,
+            rec_payment.entity_type::VARCHAR(20),
+            COALESCE(rec_payment.paid_at::DATE, CURRENT_DATE)::DATE,
+            1::INT,
+            'Payment Received'::TEXT,
+            rec_payment.amount::NUMERIC(10,2),
+            COALESCE(rec_payment.payment_method, 'cash')::VARCHAR(20),
+            rec_payment.transaction_id::VARCHAR(255),
+            'confirmed'::VARCHAR(20),
+            rec_payment.confirmed_by::INT,
+            rec_payment.confirmed_at::TIMESTAMP,
+            NOW()::TIMESTAMP
+        );
+
+        remaining_amt := rec_payment.amount::NUMERIC(15,2);
+
+        FOR rec_receivable IN
+            SELECT * FROM receivables r
+            WHERE r.society_id = p_society_id
+              AND r.entity_id   = rec_payment.entity_id
+              AND r.entity_type = rec_payment.entity_type
+              AND r.status = 'pending'
+            ORDER BY r.due_date ASC, r.id ASC
+        LOOP
+            IF remaining_amt <= 0 THEN EXIT; END IF;
+            IF rec_receivable.amount <= remaining_amt THEN
+                UPDATE receivables
+                SET status       = 'confirmed'::VARCHAR(20),
+                    confirmed_by = rec_payment.confirmed_by::INT,
+                    confirmed_at = rec_payment.confirmed_at::TIMESTAMP
+                WHERE id = rec_receivable.id;
+                remaining_amt := remaining_amt - rec_receivable.amount;
+            ELSE
+                UPDATE receivables
+                SET amount = (rec_receivable.amount - remaining_amt)::NUMERIC(10,2)
+                WHERE id = rec_receivable.id;
+                remaining_amt := 0;
+            END IF;
+        END LOOP;
+    END LOOP;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS fn_auto_process_verified_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_auto_process_verified_payments(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
@@ -564,7 +641,6 @@ $$;
 
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
 DROP FUNCTION IF EXISTS fn_auto_generate_vendor_receivables CASCADE;
-DROP FUNCTION IF EXISTS fn_auto_process_vendor_payments CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_auto_generate_vendor_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
@@ -572,11 +648,11 @@ BEGIN
     INSERT INTO receivables (society_id, entity_id, entity_type, charge_type, description,
                              amount, due_date, status, source_table, source_id, created_at)
     SELECT
-        vp.society_id::INT,
-        vp.user_id::INT,
+        vcb.society_id::INT,
+        u.id::INT,
         'vendor'::VARCHAR(20),
         'vendor_pass'::VARCHAR(50),
-        ('Vendor Pass - ' || v.name || ' (' || vp.pass_type || ')')::TEXT,
+        ('Vendor Pass - ' || COALESCE(v.name, 'ALL') || ' (' || vp.pass_type || ')')::TEXT,
         500.00::NUMERIC(10,2),
         vp.valid_until::DATE,
         'pending'::VARCHAR(20),
@@ -584,7 +660,12 @@ BEGIN
         vp.id::INT,
         NOW()::TIMESTAMP
     FROM vendor_passes vp
-    JOIN vendors v ON v.id = (SELECT linked_id FROM users WHERE id = vp.user_id)
+    JOIN users u ON u.id = vp.user_id
+    LEFT JOIN vendors v ON v.id = u.linked_id
+    LEFT JOIN ven_charges_fines_basis vcb ON vcb.society_id = vp.society_id
+        AND (vcb.ven_id IS NULL OR vcb.ven_id = u.linked_id)
+        AND vcb.start_date <= vp.issued_date
+        AND (vcb.end_date IS NULL OR vcb.end_date >= vp.issued_date)
     WHERE vp.society_id = p_society_id
       AND vp.status = 'active'
       AND vp.valid_until >= CURRENT_DATE
@@ -744,7 +825,7 @@ BEGIN
         u.id::INT,
         'security'::VARCHAR(20),
         'fine'::VARCHAR(50),
-        ('Security Fine - ' || s.name)::TEXT,
+        ('Security Fine - ' || COALESCE(s.name, 'ALL'))::TEXT,
         COALESCE(scf.security_fine, 0)::NUMERIC(10,2),
         CURRENT_DATE::DATE,
         'pending'::VARCHAR(20),
@@ -752,14 +833,18 @@ BEGIN
         scf.id::INT,
         NOW()::TIMESTAMP
     FROM sec_charges_fines_basis scf
-    JOIN security_staff s ON s.id = scf.sec_id
-    JOIN users u ON u.linked_id = s.id AND u.role = 'security'
+    CROSS JOIN users u
+    JOIN security_staff s ON s.id = u.linked_id
     WHERE scf.society_id = p_society_id
       AND scf.sec_status = TRUE
       AND COALESCE(scf.security_fine, 0) > 0
+      AND u.role = 'security'
+      AND (scf.sec_id IS NULL OR scf.sec_id = s.id)
       AND NOT EXISTS (
           SELECT 1 FROM receivables r
-          WHERE r.source_table = 'sec_charges_fines_basis' AND r.source_id = scf.id
+          WHERE r.source_table = 'sec_charges_fines_basis'
+            AND r.source_id = scf.id
+            AND r.entity_id = u.id
       )
     ON CONFLICT DO NOTHING;
 END;
@@ -1979,3 +2064,283 @@ LANGUAGE SQL STABLE AS $$
       AND a.time_in >= CURRENT_DATE - INTERVAL '30 days'
     ORDER BY a.time_in DESC;
 $$;
+
+-- ════════════════════════════════════════════════════════════════
+-- CHARGES & FINES FUNCTIONS
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_apt_charges_fines_basis CASCADE;
+DROP FUNCTION IF EXISTS fn_ven_charges_fines_basis CASCADE;
+DROP FUNCTION IF EXISTS fn_sec_charges_fines_basis CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_apt_status CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_ven_status CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_sec_status CASCADE;
+DROP FUNCTION IF EXISTS fn_create_default_charges CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_apt_charges_fines_basis(
+    p_society_id INT,
+    p_apt_id     INT DEFAULT NULL
+)
+RETURNS TABLE (
+    id                   INT,
+    society_id           INT,
+    apt_id               INT,
+    flat_number          VARCHAR(20),
+    start_date           DATE,
+    end_date             DATE,
+    apt_maintenance_rate NUMERIC(10,4),
+    apt_due_day          INTEGER,
+    apt_delay_fine       NUMERIC(10,2),
+    apt_fine             NUMERIC(10,2),
+    apt_status           BOOLEAN,
+    created_at           TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        acf.id::INT,
+        acf.society_id::INT,
+        acf.apt_id::INT,
+        COALESCE(a.flat_number, 'ALL')::VARCHAR(20),
+        acf.start_date::DATE,
+        acf.end_date::DATE,
+        acf.apt_maintenance_rate::NUMERIC(10,4),
+        acf.apt_due_day::INTEGER,
+        acf.apt_delay_fine::NUMERIC(10,2),
+        acf.apt_fine::NUMERIC(10,2),
+        acf.apt_status::BOOLEAN,
+        acf.created_at::TIMESTAMP
+    FROM apt_charges_fines_basis acf
+    LEFT JOIN apartments a ON a.id = acf.apt_id
+    WHERE acf.society_id = p_society_id
+      AND (p_apt_id IS NULL OR acf.apt_id = p_apt_id)
+    ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_ven_charges_fines_basis(
+    p_society_id INT,
+    p_ven_id     INT DEFAULT NULL
+)
+RETURNS TABLE (
+    id              INT,
+    society_id      INT,
+    ven_id          INT,
+    vendor_name     VARCHAR(100),
+    start_date      DATE,
+    end_date        DATE,
+    vendor_1day     NUMERIC(10,2),
+    vendor_7day     NUMERIC(10,2),
+    vendor_1mth     NUMERIC(10,2),
+    vendor_fine     NUMERIC(10,2),
+    ven_status      BOOLEAN,
+    created_at      TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        vcb.id::INT,
+        vcb.society_id::INT,
+        vcb.ven_id::INT,
+        COALESCE(v.name, 'ALL')::VARCHAR(100),
+        vcb.start_date::DATE,
+        vcb.end_date::DATE,
+        vcb.vendor_1day::NUMERIC(10,2),
+        vcb.vendor_7day::NUMERIC(10,2),
+        vcb.vendor_1mth::NUMERIC(10,2),
+        vcb.vendor_fine::NUMERIC(10,2),
+        vcb.ven_status::BOOLEAN,
+        vcb.created_at::TIMESTAMP
+    FROM ven_charges_fines_basis vcb
+    LEFT JOIN vendors v ON v.id = vcb.ven_id
+    WHERE vcb.society_id = p_society_id
+      AND (p_ven_id IS NULL OR vcb.ven_id = p_ven_id)
+    ORDER BY vcb.ven_id NULLS FIRST, vcb.start_date DESC;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_sec_charges_fines_basis(
+    p_society_id INT,
+    p_sec_id     INT DEFAULT NULL
+)
+RETURNS TABLE (
+    id         INT,
+    society_id INT,
+    sec_id     INT,
+    security_name VARCHAR(100),
+    start_date   DATE,
+    end_date     DATE,
+    security_fine NUMERIC(10,2),
+    sec_status   BOOLEAN,
+    created_at   TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        scf.id::INT,
+        scf.society_id::INT,
+        scf.sec_id::INT,
+        COALESCE(s.name, 'ALL')::VARCHAR(100),
+        scf.start_date::DATE,
+        scf.end_date::DATE,
+        scf.security_fine::NUMERIC(10,2),
+        scf.sec_status::BOOLEAN,
+        scf.created_at::TIMESTAMP
+    FROM sec_charges_fines_basis scf
+    LEFT JOIN security_staff s ON s.id = scf.sec_id
+    WHERE scf.society_id = p_society_id
+      AND (p_sec_id IS NULL OR scf.sec_id = p_sec_id)
+    ORDER BY scf.sec_id NULLS FIRST, scf.start_date DESC;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_compute_apt_status(
+    p_society_id INT,
+    p_apt_id     INT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_total_dues NUMERIC(15,2);
+BEGIN
+    SELECT COALESCE(SUM(amount), 0)
+    INTO v_total_dues
+    FROM receivables
+    WHERE entity_id = p_apt_id
+      AND entity_type = 'apartment'
+      AND status = 'pending';
+
+    RETURN v_total_dues <= 0;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_compute_ven_status(
+    p_society_id INT,
+    p_ven_id     INT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_total_dues NUMERIC(15,2);
+    v_end_date DATE;
+BEGIN
+    SELECT COALESCE(SUM(amount), 0)
+    INTO v_total_dues
+    FROM receivables
+    WHERE entity_id = p_ven_id
+      AND entity_type = 'vendor'
+      AND status = 'pending';
+
+    SELECT vcb.end_date
+    INTO v_end_date
+    FROM ven_charges_fines_basis vcb
+    WHERE vcb.society_id = p_society_id
+      AND vcb.ven_id = p_ven_id
+      AND vcb.end_date IS NOT NULL
+    ORDER BY vcb.start_date DESC
+    LIMIT 1;
+
+    IF v_total_dues <= 0 OR (v_end_date IS NOT NULL AND v_end_date < CURRENT_DATE) THEN
+        RETURN TRUE;
+    END IF;
+
+    RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_compute_sec_status(
+    p_society_id INT,
+    p_sec_id     INT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_total_dues NUMERIC(15,2);
+BEGIN
+    SELECT COALESCE(SUM(amount), 0)
+    INTO v_total_dues
+    FROM receivables
+    WHERE entity_id = p_sec_id
+      AND entity_type = 'security'
+      AND status = 'pending';
+
+    IF v_total_dues <= 0 THEN
+        RETURN TRUE;
+    END IF;
+
+    RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_create_default_charges(p_society_id INT)
+RETURNS VOID AS $$
+DECLARE
+    v_arrear_date DATE;
+BEGIN
+    SELECT arrear_start_date
+    INTO v_arrear_date
+    FROM societies
+    WHERE id = p_society_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Society with id % not found', p_society_id;
+    END IF;
+
+    INSERT INTO apt_charges_fines_basis (
+        society_id, apt_id, start_date, end_date,
+        apt_maintenance_rate, apt_due_day, apt_delay_fine, apt_fine, apt_status
+    ) VALUES (
+        p_society_id, NULL, v_arrear_date, NULL,
+        3.0, 5, 5, 0, TRUE
+    ) ON CONFLICT DO NOTHING;
+
+    INSERT INTO ven_charges_fines_basis (
+        society_id, ven_id, start_date, end_date,
+        vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status
+    ) VALUES (
+        p_society_id, NULL, v_arrear_date, NULL,
+        100.0, 500.0, 1500, 500, TRUE
+    ) ON CONFLICT DO NOTHING;
+
+    INSERT INTO sec_charges_fines_basis (
+        society_id, sec_id, start_date, end_date,
+        security_fine, sec_status
+    ) VALUES (
+        p_society_id, NULL, v_arrear_date, NULL,
+        500, TRUE
+    ) ON CONFLICT DO NOTHING;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update apt_charges_fines_basis status based on receivables
+CREATE OR REPLACE FUNCTION fn_update_apt_charges_status(p_society_id INT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE apt_charges_fines_basis acf
+    SET apt_status = fn_compute_apt_status(acf.society_id, acf.apt_id)
+    WHERE acf.society_id = p_society_id
+      AND acf.apt_id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update ven_charges_fines_basis status based on receivables
+CREATE OR REPLACE FUNCTION fn_update_ven_charges_status(p_society_id INT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE ven_charges_fines_basis vcb
+    SET ven_status = fn_compute_ven_status(vcb.society_id, vcb.ven_id)
+    WHERE vcb.society_id = p_society_id
+      AND vcb.ven_id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update sec_charges_fines_basis status based on receivables
+CREATE OR REPLACE FUNCTION fn_update_sec_charges_status(p_society_id INT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE sec_charges_fines_basis scf
+    SET sec_status = fn_compute_sec_status(scf.society_id, scf.sec_id)
+    WHERE scf.society_id = p_society_id
+      AND scf.sec_id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;

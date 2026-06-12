@@ -1684,28 +1684,29 @@ def _save_account(db, d, sid, is_edit, pk):
 def _save_apt_charge(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE apt_charges_fines_basis SET flat_number=%s,title=%s,amount=%s,"
-            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
-            (d.get("flat_number"), d.get("title"), d.get("amount"),
-             d.get("due_date"), d.get("status"), pk, sid))
-        return True, "Apartment charge updated", pk
-    flat = (d.get("flat_number") or "").strip()
-    if not flat:
-        return False, "Flat number required", None
-    title = (d.get("title") or "").strip()
-    if not title:
-        return False, "Title required", None
+            "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
+            " apt_maintenance_rate=%s, apt_due_day=%s, apt_delay_fine=%s, apt_fine=%s, apt_status=%s"
+            " WHERE id=%s AND society_id=%s",
+            (d.get("apt_id"), d.get("start_date"), d.get("end_date"),
+             d.get("apt_maintenance_rate"), d.get("apt_due_day"),
+             d.get("apt_delay_fine"), d.get("apt_fine"),
+             d.get("apt_status"), pk, sid))
+        return True, "Apartment charge rule updated", pk
+    apt_id = d.get("apt_id")
+    start_date = d.get("start_date") or dt_date.today().isoformat()
     try:
-        amt = float(d.get("amount") or 0)
+        rate = float(d.get("apt_maintenance_rate") or 3.0)
+        due_day = int(d.get("apt_due_day") or 5)
+        delay_fine = float(d.get("apt_delay_fine") or 0)
+        apt_fine = float(d.get("apt_fine") or 0)
     except ValueError:
-        return False, "Invalid amount", None
-    due_date = d.get("due_date") or dt_date.today().isoformat()
+        return False, "Invalid numeric value", None
     db._execute(
-        "INSERT INTO apt_charges_fines_basis(society_id,flat_number,title,amount,"
-        "due_date,status,apt_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
-        "RETURNING id",
-        (sid, flat, title, amt, due_date, d.get("status", "pending")))
-    return True, f"Charge '{title}' created for {flat}", db._execute(
+        "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
+        " apt_maintenance_rate, apt_due_day, apt_delay_fine, apt_fine, apt_status)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, apt_id, start_date, d.get("end_date"), rate, due_day, delay_fine, apt_fine))
+    return True, f"Charge rule created", db._execute(
         "SELECT id FROM apt_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
         (sid,), fetch_one=True).get("id")
 
@@ -1713,28 +1714,28 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
 def _save_ven_charge(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE ven_charges_fines_basis SET vendor_id=%s,title=%s,amount=%s,"
-            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
-            (d.get("vendor_id"), d.get("title"), d.get("amount"),
-             d.get("due_date"), d.get("status"), pk, sid))
-        return True, "Vendor charge updated", pk
-    vid = d.get("vendor_id")
-    if not vid:
-        return False, "Vendor required", None
-    title = (d.get("title") or "").strip()
-    if not title:
-        return False, "Title required", None
+            "UPDATE ven_charges_fines_basis SET ven_id=%s, start_date=%s, end_date=%s,"
+            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, vendor_fine=%s, ven_status=%s"
+            " WHERE id=%s AND society_id=%s",
+            (d.get("ven_id"), d.get("start_date"), d.get("end_date"),
+             d.get("vendor_1day"), d.get("vendor_7day"), d.get("vendor_1mth"),
+             d.get("vendor_fine"), d.get("ven_status"), pk, sid))
+        return True, "Vendor charge rule updated", pk
+    ven_id = d.get("ven_id")
+    start_date = d.get("start_date") or dt_date.today().isoformat()
     try:
-        amt = float(d.get("amount") or 0)
+        v1day = float(d.get("vendor_1day") or 0)
+        v7day = float(d.get("vendor_7day") or 0)
+        v1mth = float(d.get("vendor_1mth") or 0)
+        v_fine = float(d.get("vendor_fine") or 0)
     except ValueError:
-        return False, "Invalid amount", None
-    due_date = d.get("due_date") or dt_date.today().isoformat()
+        return False, "Invalid numeric value", None
     db._execute(
-        "INSERT INTO ven_charges_fines_basis(society_id,vendor_id,title,amount,"
-        "due_date,status,ven_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
-        "RETURNING id",
-        (sid, vid, title, amt, due_date, d.get("status", "pending")))
-    return True, f"Charge '{title}' created", db._execute(
+        "INSERT INTO ven_charges_fines_basis(society_id, ven_id, start_date, end_date,"
+        " vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, v_fine))
+    return True, f"Charge rule created", db._execute(
         "SELECT id FROM ven_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
         (sid,), fetch_one=True).get("id")
 
@@ -1742,28 +1743,23 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
 def _save_sec_charge(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE sec_charges_fines_basis SET security_id=%s,title=%s,amount=%s,"
-            "due_date=%s,status=%s WHERE id=%s AND society_id=%s",
-            (d.get("security_id"), d.get("title"), d.get("amount"),
-             d.get("due_date"), d.get("status"), pk, sid))
-        return True, "Security charge updated", pk
-    sec_id = d.get("security_id")
-    if not sec_id:
-        return False, "Security staff required", None
-    title = (d.get("title") or "").strip()
-    if not title:
-        return False, "Title required", None
+            "UPDATE sec_charges_fines_basis SET sec_id=%s, start_date=%s, end_date=%s,"
+            " security_fine=%s, sec_status=%s WHERE id=%s AND society_id=%s",
+            (d.get("sec_id"), d.get("start_date"), d.get("end_date"),
+             d.get("security_fine"), d.get("sec_status"), pk, sid))
+        return True, "Security charge rule updated", pk
+    sec_id = d.get("sec_id")
+    start_date = d.get("start_date") or dt_date.today().isoformat()
     try:
-        amt = float(d.get("amount") or 0)
+        sec_fine = float(d.get("security_fine") or 0)
     except ValueError:
-        return False, "Invalid amount", None
-    due_date = d.get("due_date") or dt_date.today().isoformat()
+        return False, "Invalid numeric value", None
     db._execute(
-        "INSERT INTO sec_charges_fines_basis(society_id,security_id,title,amount,"
-        "due_date,status,sec_status) VALUES(%s,%s,%s,%s,%s,%s,TRUE) "
-        "RETURNING id",
-        (sid, sec_id, title, amt, due_date, d.get("status", "pending")))
-    return True, f"Charge '{title}' created", db._execute(
+        "INSERT INTO sec_charges_fines_basis(society_id, sec_id, start_date, end_date,"
+        " security_fine, sec_status)"
+        " VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, sec_id, start_date, d.get("end_date"), sec_fine))
+    return True, f"Charge rule created", db._execute(
         "SELECT id FROM sec_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
         (sid,), fetch_one=True).get("id")
 

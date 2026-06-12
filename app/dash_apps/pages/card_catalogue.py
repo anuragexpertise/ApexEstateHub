@@ -521,7 +521,7 @@ KPI_CARDS = {
     },
     
     "kpi_sec_charges": {
-        "query": "SELECT COUNT(*) AS v FROM security_charges_fines WHERE society_id = %s AND sec_status = TRUE",
+        "query": "SELECT COUNT(*) AS v FROM sec_charges_fines_basis WHERE society_id = %s AND sec_status = TRUE",
         "params": 1,
         "format": "number",
         "icon": "fa-rupee-sign",
@@ -719,43 +719,43 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════
     "kpi_maintainence_charges": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM apt_charges_fines_basis
             WHERE society_id = %s AND apt_status = TRUE
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-file-invoice",
         "color": "#e59620",
-        "title": "Maintenance Charge",
+        "title": "Maintenance Charge Rules",
         "group": "monthly",
     },
 
     "kpi_apartment_fines": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM apt_charges_fines_basis
-            WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'fine'
+            WHERE society_id = %s AND apt_status = TRUE AND apt_delay_fine > 0
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-exclamation-triangle",
         "color": "#de5c52",
-        "title": "Fines",
+        "title": "Rules with Delay Fines",
         "group": "pending",
     },
 
     "kpi_apartment_other_charges": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM apt_charges_fines_basis
-            WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'other'
+            WHERE society_id = %s AND apt_status = TRUE AND apt_fine > 0
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-plus",
         "color": "#3498db",
-        "title": "Other Charges",
+        "title": "Rules with Other Fines",
         "group": "miscellaneous",
     },
 
@@ -774,18 +774,32 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════
     # VENDOR PORTAL KPIs
     # ══════════════════════════════════════════════════════════════
-    "kpi_vendor_fines": {
+"kpi_vendor_fines": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM ven_charges_fines_basis
-            WHERE society_id = %s AND ven_status = TRUE AND LOWER(charge_type) = 'fine'
+            WHERE society_id = %s AND ven_status = TRUE AND vendor_fine > 0
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-exclamation-triangle",
         "color": "#de5c52",
-        "title": "Fines",
+        "title": "Vendor Fine Rules",
         "group": "pending",
+    },
+
+    "kpi_vendor_other_charges": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM ven_charges_fines_basis
+            WHERE society_id = %s AND ven_status = TRUE AND (vendor_1day > 0 OR vendor_7day > 0 OR vendor_1mth > 0)
+        """,
+        "params": 1,
+        "format": "number",
+        "icon": "fa-plus",
+        "color": "#3498db",
+        "title": "Vendor Charge Rules",
+        "group": "miscellaneous",
     },
 
     "kpi_vendor_other_charges": {
@@ -817,29 +831,29 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════
     "kpi_security_fines": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM sec_charges_fines_basis
-            WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'fine'
+            WHERE society_id = %s AND sec_status = TRUE AND security_fine > 0
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-exclamation-triangle",
         "color": "#de5c52",
-        "title": "Fines",
+        "title": "Security Fine Rules",
         "group": "pending",
     },
 
     "kpi_security_other_charges": {
         "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
+            SELECT COUNT(*) AS v
             FROM sec_charges_fines_basis
-            WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'other'
+            WHERE society_id = %s AND sec_status = TRUE AND security_fine > 0
         """,
         "params": 1,
-        "format": "currency",
+        "format": "number",
         "icon": "fa-plus",
         "color": "#3498db",
-        "title": "Other Charges",
+        "title": "Security Charge Rules",
         "group": "miscellaneous",
     },
 
