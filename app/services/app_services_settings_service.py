@@ -373,7 +373,7 @@ def calculate_security_payment(society_id: int, security_id: int) -> tuple:
         # Get active charge config
         charges = db._execute(
             """
-            SELECT * FROM security_charges_fines
+            SELECT * FROM sec_charges_fines_basis
             WHERE society_id=%s AND sec_id=%s AND sec_status=TRUE
             ORDER BY start_date DESC LIMIT 1
             """,
