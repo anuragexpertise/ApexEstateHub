@@ -1843,7 +1843,7 @@ $$ LANGUAGE plpgsql;
 --     UNION ALL
 --     SELECT 'kpi_attendance', 'Attendance (30d)', 'fa-clock', 'admin', 'settings', 'fn_attendance_list'
 --     UNION ALL
---     SELECT 'kpi_plan_validity', 'Plan Validity', 'fa-calendar-times', 'admin', 'settings', 'fn_societies_list'
+--     SELECT 'kpi_societies_arrear_start_date', 'Arrear Start Date', 'fa-clock', 'admin', 'settings', 'fn_societies_list'
 --     UNION ALL
 --     SELECT 'kpi_societies_total', 'Total Societies', 'fa-building', 'master', 'dashboard', 'fn_societies_list'
 --     UNION ALL

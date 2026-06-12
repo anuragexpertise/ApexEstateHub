@@ -56,6 +56,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # ADMIN - Concerns tab
     ("kpi_concerns_open",              "admin",     "concerns",  "Concerns"),
     # ADMIN - Settings tab
+    ("kpi_societies_arrear_start_date", "admin",     "settings",  "Settings"),
     ("kpi_plan_validity",              "admin",     "settings",  "Settings"),
     ("kpi_accounts_count",             "admin",     "settings",  "Settings"),
     ("kpi_apt_charges",                "admin",     "settings",  "Settings"),

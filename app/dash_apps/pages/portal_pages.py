@@ -811,8 +811,10 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "events":
         return html.Div([
             _page_title("fa-calendar-alt", c, "Events", "upcoming society events"),
-            _kpi_row(_kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"),
-                     cols="1fr"),
+            _kpi_row(
+                _kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"),
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+                ),
             _divider(),
             _drill_panel(),
         ], className="portal-page")
@@ -833,12 +835,11 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         
         return _customize_page(c)
 
-    
-    
     if active_tab == "settings":
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts & charge rates"),
             _kpi_row(
+                _kpi("kpi_societies_arrear_start_date", "fa-clock", "#34ee45", "Arrear Start Date"),
                 _kpi("kpi_plan_validity", "fa-clock", "#34ee45", "Society Plan Validity"),
 
                 _kpi("kpi_accounts_count",       "fa-book-open",   "#6c5ce7", "Accounts"),
