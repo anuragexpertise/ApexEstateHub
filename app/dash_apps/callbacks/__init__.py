@@ -57,4 +57,11 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ debug_callbacks failed: {e}")
 
+    # KPI Inspector callbacks (Customize → KPI Inspector tab)
+    try:
+        from .customize_kpi_callbacks import register_customize_kpi_callbacks
+        register_customize_kpi_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ customize_kpi_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

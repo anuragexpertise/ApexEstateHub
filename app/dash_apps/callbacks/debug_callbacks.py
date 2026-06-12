@@ -19,9 +19,7 @@ Provides two features accessible via the Customize > KPI Inspector tab:
      Output at id="kpi-test-result"
 """
 import time
-import textwrap
-from datetime import datetime, date
-from dash import Input, Output, State, html, dcc, no_update
+from dash import Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -104,7 +102,6 @@ def register_debug_callbacks(app):
         print("  ⚠️  KPI_CARDS not available — debug callbacks skipped")
         return
 
-    # ── 1. KPI AUDIT REPORT ───────────────────────────────────────────────────
     @app.callback(
         Output("kpi-audit-table", "children"),
         Output("kpi-audit-summary", "children"),
@@ -165,9 +162,9 @@ def register_debug_callbacks(app):
                     html.Td(f"{ms} ms", style={"fontSize": "11px", "color": "#888"}),
                 ],
                 style={"background": "#fff3cd" if is_dup else
-                                     "#f8d7da" if err else
-                                     "#fff8e1" if raw is None else
-                                     "transparent"},
+                                         "#f8d7da" if err else
+                                         "#fff8e1" if raw is None else
+                                         "transparent"},
             ))
 
         summary = html.Div([
@@ -186,226 +183,6 @@ def register_debug_callbacks(app):
                      "message": f"KPI Audit: {n_err} errors, {n_dup} duplicate keys found"}
 
         return rows_out, summary, toast
-
-    # ── 2. SQL TEST BUTTON ────────────────────────────────────────────────────
-    @app.callback(
-        Output("kpi-test-result", "children"),
-        Input("kpi-test-sql-btn", "n_clicks"),
-        State("customize-kpi-select", "value"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
-    )
-    def test_kpi_sql(n_clicks, selected_kpi, auth_data):
-        if not n_clicks or not selected_kpi:
-            raise PreventUpdate
-
-        cfg      = KPI_CARDS.get(selected_kpi)
-        if not cfg:
-            return dbc.Alert("KPI not found in catalogue", color="warning")
-
-        query    = cfg.get("query", "")
-        n_params = cfg.get("params", 0)
-        fmt      = cfg.get("format", "number")
-        sid      = (auth_data or {}).get("society_id")
-
-        raw, ms, err = _run_kpi_query(query, n_params, sid)
-
-        if err:
-            return dbc.Alert([
-                html.Strong("SQL Error "), html.Code(f"{ms} ms"),
-                html.Hr(),
-                html.Pre(textwrap.fill(err, 80),
-                         style={"fontSize": "11px", "whiteSpace": "pre-wrap",
-                                "color": "#dc3545", "margin": "0"}),
-            ], color="danger", style={"fontSize": "12px"})
-
-        formatted = format_kpi_value(raw, fmt)
-        param_names = _PARAM_NAMES.get(n_params, [f"param_{i}" for i in range(n_params)])
-
-        return dbc.Card([
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.Small("Raw DB value", className="text-muted d-block",
-                                   style={"fontSize": "10px"}),
-                        html.H4(str(raw) if raw is not None else "NULL",
-                                style={"fontWeight": "700", "color": "#15304f",
-                                       "margin": "0"}),
-                    ], width=4),
-                    dbc.Col([
-                        html.Small("Formatted", className="text-muted d-block",
-                                   style={"fontSize": "10px"}),
-                        html.H4(formatted,
-                                style={"fontWeight": "700",
-                                       "color": "#17976e" if raw is not None else "#de5c52",
-                                       "margin": "0"}),
-                    ], width=4),
-                    dbc.Col([
-                        html.Small("Exec time", className="text-muted d-block",
-                                   style={"fontSize": "10px"}),
-                        html.H5(f"{ms} ms",
-                                style={"fontWeight": "600", "color": "#7d8ea3",
-                                       "margin": "0"}),
-                    ], width=4),
-                ], className="mb-3"),
-                html.Hr(style={"margin": "8px 0"}),
-                html.Div([
-                    html.Small("Parameters passed:", className="text-muted",
-                               style={"fontSize": "10px", "display": "block",
-                                      "marginBottom": "4px"}),
-                    *([
-                        dbc.Badge(f"[{i}] {name} = {sid or 1}",
-                                  color="secondary", className="me-1 mb-1",
-                                  style={"fontSize": "10px"})
-                        for i, name in enumerate(param_names)
-                    ] if param_names else [
-                        html.Span("None (0 params)", style={"fontSize": "11px",
-                                                             "color": "#888"})
-                    ]),
-                ]),
-                html.Div(
-                    html.Small(
-                        f"✓ society_id={sid or '(mock=1)'} — "
-                        f"run at {datetime.now().strftime('%H:%M:%S')}",
-                        style={"color": "#888", "fontSize": "10px"},
-                    ),
-                    className="mt-2",
-                ),
-            ], style={"padding": "14px"}),
-        ], style={"borderRadius": "10px", "border": "1px solid #d4edda",
-                  "background": "#f8fff9"})
-
-    # ── 3. KPI METADATA (enhanced — includes param names) ─────────────────────
-    @app.callback(
-        Output("customize-kpi-metadata", "children"),
-        Output("customize-kpi-sql", "value"),
-        Input("customize-kpi-select", "value"),
-        prevent_initial_call=False,
-    )
-    def update_kpi_metadata(selected_kpi):
-        if not selected_kpi or selected_kpi not in KPI_CARDS:
-            return (
-                html.Div("Select a KPI to view details",
-                         className="text-muted", style={"fontSize": "12px"}),
-                "-- No KPI selected",
-            )
-
-        cfg    = KPI_CARDS[selected_kpi]
-        query  = cfg.get("query", "")
-        params = cfg.get("params", 0)
-        fmt    = cfg.get("format", "number")
-        icon   = cfg.get("icon", "fa-chart-bar")
-        color  = cfg.get("color", "#3498db")
-        title  = cfg.get("title", selected_kpi)
-        group  = cfg.get("group", "—")
-
-        param_names = _PARAM_NAMES.get(params,
-                                       [f"param_{i}" for i in range(params)])
-
-        # Detect if this key is duplicated in source
-        dupes  = _detect_duplicate_keys()
-        is_dup = selected_kpi in dupes
-
-        metadata = dbc.Card([
-            dbc.CardBody([
-                # Icon + title
-                html.Div([
-                    html.I(className=f"fas {icon}",
-                           style={"color": color, "fontSize": "22px",
-                                  "marginRight": "10px"}),
-                    html.Span(title, style={"fontWeight": "700", "fontSize": "14px",
-                                           "color": "#15304f"}),
-                    dbc.Badge("DUPLICATE KEY", color="danger",
-                              className="ms-2") if is_dup else None,
-                ], style={"display": "flex", "alignItems": "center",
-                          "marginBottom": "14px"}),
-
-                html.Hr(style={"margin": "8px 0"}),
-
-                # Grid of metadata fields
-                dbc.Row([
-                    dbc.Col([
-                        _meta_row("Format",     fmt),
-                        _meta_row("Group",      group),
-                        _meta_row("Color",
-                                  html.Span(color,
-                                            style={"color": color,
-                                                   "fontWeight": "600"})),
-                    ], width=6),
-                    dbc.Col([
-                        _meta_row("Params",     str(params)),
-                        _meta_row("Card ID",
-                                  html.Code(selected_kpi,
-                                            style={"fontSize": "10px"})),
-                    ], width=6),
-                ]),
-
-                html.Hr(style={"margin": "8px 0"}),
-
-                # Parameter names
-                html.Div([
-                    html.Small("SQL Parameters",
-                               style={"fontWeight": "700", "fontSize": "11px",
-                                      "color": "#7d8ea3", "display": "block",
-                                      "marginBottom": "6px"}),
-                    *([
-                        html.Div([
-                            dbc.Badge(f"${i+1}", color="primary",
-                                      className="me-2",
-                                      style={"fontSize": "10px", "minWidth": "28px"}),
-                            html.Span(name,
-                                      style={"fontSize": "12px", "color": "#15304f"}),
-                        ], style={"display": "flex", "alignItems": "center",
-                                  "marginBottom": "4px"})
-                        for i, name in enumerate(param_names)
-                    ] if param_names else [
-                        html.Small("No parameters (platform-wide query)",
-                                   style={"color": "#888", "fontSize": "11px"})
-                    ]),
-                ]),
-
-                # KPI preview card thumbnail
-                html.Div([
-                    html.Hr(style={"margin": "10px 0"}),
-                    html.Small("Preview card:",
-                               style={"fontSize": "10px", "color": "#999",
-                                      "display": "block", "marginBottom": "6px"}),
-                    html.Div([
-                        html.Div(style={
-                            "position": "absolute", "left": 0, "top": 0,
-                            "bottom": 0, "width": "4px", "background": color,
-                            "borderRadius": "4px 0 0 4px",
-                        }),
-                        html.I(className=f"fas {icon}",
-                               style={"color": color, "fontSize": "18px",
-                                      "marginBottom": "6px", "display": "block"}),
-                        html.Div("— (live value —)",
-                                 style={"fontSize": "22px", "fontWeight": "800",
-                                        "color": "#15304f", "lineHeight": "1"}),
-                        html.Div(title, style={"fontSize": "10px", "color": "#7d8ea3",
-                                               "marginTop": "4px",
-                                               "textTransform": "uppercase"}),
-                        html.Div(group, style={"fontSize": "9px", "color": "#aaa"}),
-                    ], style={"position": "relative", "background": "rgba(248,251,255,0.9)",
-                              "borderRadius": "10px", "padding": "12px 14px",
-                              "border": f"1px solid {color}33",
-                              "maxWidth": "180px", "textAlign": "center"}),
-                ]),
-            ], style={"padding": "12px"}),
-        ], style={"borderRadius": "12px", "border": f"1px solid {color}33"})
-
-        return metadata, textwrap.dedent(query).strip()
-
-
-def _meta_row(label: str, value) -> html.Div:
-    return html.Div([
-        html.Small(label,
-                   style={"fontWeight": "600", "color": "#7d8ea3",
-                          "fontSize": "10px", "display": "block"}),
-        html.Div(value,
-                 style={"fontSize": "13px", "color": "#15304f",
-                        "fontWeight": "500", "marginBottom": "8px"}),
-    ])
 
     print("  ✓ Debug callbacks registered")
 

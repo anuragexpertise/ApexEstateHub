@@ -6,6 +6,7 @@ FIXED VERSION — duplicate-key-safe KPI_PORTAL_MAP using list-of-tuples.
 
 from __future__ import annotations
 import time
+import json
 from dash import Input, Output, State, html, dcc, ctx, no_update
 import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import KPI_CARDS
@@ -168,7 +169,7 @@ def register_customize_kpi_callbacks(app):
     )
     def update_tab_options(selected_portal):
         if not selected_portal:
-            return []
+            selected_portal = "admin"
         return [{"label": t.replace("_", " ").title(), "value": t}
                 for t in get_tabs_for_portal(selected_portal)]
 
@@ -179,7 +180,9 @@ def register_customize_kpi_callbacks(app):
         prevent_initial_call=False,
     )
     def update_kpi_options(selected_portal, selected_tab):
-        if not selected_portal or not selected_tab:
+        if not selected_portal:
+            selected_portal = "admin"
+        if not selected_tab:
             return []
         ids = get_kpi_ids_for_portal_tab(selected_portal, selected_tab)
         return [{"label": KPI_CARDS.get(cid, {}).get("title", cid), "value": cid}
