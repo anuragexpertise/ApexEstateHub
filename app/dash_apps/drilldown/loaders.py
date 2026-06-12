@@ -298,48 +298,46 @@ def load_list(entity: str, filters: dict,
         # ── APT_CHARGES ─────────────────────────────────────────────────────
         if entity == "apt_charges":
             rows = db._execute(
-                "SELECT acf.*, a.flat_number FROM apt_charges_fines acf "
+                "SELECT acf.*, a.flat_number FROM apt_charges_fines_basis acf "
                 "JOIN apartments a ON a.id=acf.apt_id "
                 "WHERE acf.society_id=%s AND acf.apt_status=TRUE "
                 "ORDER BY a.flat_number LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM apt_charges_fines "
+                "SELECT COUNT(*) AS n FROM apt_charges_fines_basis "
                 "WHERE society_id=%s AND apt_status=TRUE",
                 (sid,), fetch_one=True)
             return rows, int((cnt or {}).get("n", len(rows)))
  
-        # ── VEN_CHARGES ─────────────────────────────────────────────────────
+# ── VEN_CHARGES ─────────────────────────────────────────────────────
         if entity == "ven_charges":
             rows = db._execute(
-                "SELECT vcf.*, v.name FROM ven_charges_fines vcf "
-                "JOIN vendors v ON v.id=vcf.ven_id "
-                "WHERE vcf.society_id=%s AND vcf.ven_status=TRUE "
-                "ORDER BY v.name LIMIT %s OFFSET %s",
+                "SELECT vcf.*, v.name AS vendor_name FROM ven_charges_fines_basis vcf "
+                "JOIN vendors v ON v.id=vcf.vendor_id "
+                "WHERE vcf.society_id=%s "
+                "ORDER BY vcf.due_date DESC LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM ven_charges_fines "
-                "WHERE society_id=%s AND ven_status=TRUE",
+                "SELECT COUNT(*) AS n FROM ven_charges_fines_basis WHERE society_id=%s",
                 (sid,), fetch_one=True)
             return rows, int((cnt or {}).get("n", len(rows)))
- 
+
         # ── SEC_CHARGES ─────────────────────────────────────────────────────
         if entity == "sec_charges":
             rows = db._execute(
-                "SELECT scf.*, s.name FROM security_charges_fines scf "
-                "JOIN security_staff s ON s.id=scf.sec_id "
-                "WHERE scf.society_id=%s AND scf.sec_status=TRUE "
-                "ORDER BY s.name LIMIT %s OFFSET %s",
+                "SELECT scf.*, s.name AS security_name FROM sec_charges_fines_basis scf "
+                "JOIN security_staff s ON s.id=scf.security_id "
+                "WHERE scf.society_id=%s "
+                "ORDER BY scf.due_date DESC LIMIT %s OFFSET %s",
                 (sid, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM security_charges_fines "
-                "WHERE society_id=%s AND sec_status=TRUE",
+                "SELECT COUNT(*) AS n FROM sec_charges_fines_basis WHERE society_id=%s",
                 (sid,), fetch_one=True)
             return rows, int((cnt or {}).get("n", len(rows)))
- 
+
         # ── RECEIVABLES ─────────────────────────────────────────────────────
         if entity == "receivables":
             where = "r.society_id=%s AND r.status='pending'"

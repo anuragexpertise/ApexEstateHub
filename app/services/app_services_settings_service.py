@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def calculate_apartment_receivables(society_id: int, apartment_id: int) -> dict:
     """
-    Calculate pending receivables for an apartment based on apt_charges_fines.
+    Calculate pending receivables for an apartment based on apt_charges_fines_basis.
     
     Returns:
         {
@@ -46,7 +46,7 @@ def calculate_apartment_receivables(society_id: int, apartment_id: int) -> dict:
         # Get active charge configuration
         charges = db._execute(
             """
-            SELECT * FROM apt_charges_fines 
+            SELECT * FROM apt_charges_fines_basis 
             WHERE society_id=%s AND apt_id=%s AND apt_status=TRUE
             AND (end_date IS NULL OR end_date >= CURRENT_DATE)
             ORDER BY start_date DESC LIMIT 1
@@ -151,7 +151,7 @@ def generate_monthly_receivables(society_id: int) -> int:
                     society_id, apt['id'], 'apartment', 'maintenance',
                     'Monthly maintenance charge',
                     calc['maintenance'], due_date, 'pending',
-                    'apt_charges_fines', charges['id']
+                    'apt_charges_fines_basis', charges['id']
                 )
             )
             created_count += 1

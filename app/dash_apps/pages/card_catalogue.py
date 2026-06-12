@@ -501,7 +501,7 @@ KPI_CARDS = {
     },
     
     "kpi_apt_charges": {
-        "query": "SELECT COUNT(*) AS v FROM apt_charges_fines WHERE society_id = %s AND apt_status = TRUE",
+        "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id = %s AND apt_status = TRUE",
         "params": 1,
         "format": "number",
         "icon": "fa-rupee-sign",
@@ -511,7 +511,7 @@ KPI_CARDS = {
     },
     
     "kpi_ven_charges": {
-        "query": "SELECT COUNT(*) AS v FROM ven_charges_fines WHERE society_id = %s AND ven_status = TRUE",
+        "query": "SELECT COUNT(*) AS v FROM ven_charges_fines_basis WHERE society_id = %s AND ven_status = TRUE",
         "params": 1,
         "format": "number",
         "icon": "fa-rupee-sign",
@@ -720,7 +720,7 @@ KPI_CARDS = {
     "kpi_maintainence_charges": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM apt_charges_fines
+            FROM apt_charges_fines_basis
             WHERE society_id = %s AND apt_status = TRUE
         """,
         "params": 1,
@@ -734,7 +734,7 @@ KPI_CARDS = {
     "kpi_apartment_fines": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM apt_charges_fines
+            FROM apt_charges_fines_basis
             WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'fine'
         """,
         "params": 1,
@@ -748,7 +748,7 @@ KPI_CARDS = {
     "kpi_apartment_other_charges": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM apt_charges_fines
+            FROM apt_charges_fines_basis
             WHERE society_id = %s AND apt_status = TRUE AND LOWER(charge_type) = 'other'
         """,
         "params": 1,
@@ -777,7 +777,7 @@ KPI_CARDS = {
     "kpi_vendor_fines": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM ven_charges_fines
+            FROM ven_charges_fines_basis
             WHERE society_id = %s AND ven_status = TRUE AND LOWER(charge_type) = 'fine'
         """,
         "params": 1,
@@ -791,7 +791,7 @@ KPI_CARDS = {
     "kpi_vendor_other_charges": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM ven_charges_fines
+            FROM ven_charges_fines_basis
             WHERE society_id = %s AND ven_status = TRUE AND LOWER(charge_type) = 'other'
         """,
         "params": 1,
@@ -818,7 +818,7 @@ KPI_CARDS = {
     "kpi_security_fines": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM sec_charges_fines
+            FROM sec_charges_fines_basis
             WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'fine'
         """,
         "params": 1,
@@ -832,7 +832,7 @@ KPI_CARDS = {
     "kpi_security_other_charges": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM sec_charges_fines
+            FROM sec_charges_fines_basis
             WHERE society_id = %s AND sec_status = TRUE AND LOWER(charge_type) = 'other'
         """,
         "params": 1,
