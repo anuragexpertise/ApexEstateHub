@@ -235,475 +235,492 @@ def master_portal_page() -> html.Div:
 # ═══════════════════════════════════════════════════════════════════════════
 # ADMIN PORTAL — all tabs
 # ═══════════════════════════════════════════════════════════════════════════
-def _customize_page(c: str):
-        from dash import html, dcc
-        import dash_bootstrap_components as dbc
-
-        _PORTAL_OPTS = [
-            {"label": "Admin",      "value": "admin"},
-            {"label": "Master",     "value": "master"},
-            {"label": "Apartment",  "value": "apartment"},
-            {"label": "Vendor",     "value": "vendor"},
-            {"label": "Security",   "value": "security"},
-        ]
-
-        return html.Div([
-            # ── Page title ─────────────────────────────────────────────────
-            html.Div([
-                html.Div(
-                    html.I(className="fas fa-cog",
-                        style={"color": "#fff", "fontSize": "17px"}),
-                    style={"width": "42px", "height": "42px", "borderRadius": "12px",
-                        "background": f"linear-gradient(135deg,{c},{c}99)",
-                        "display": "flex", "alignItems": "center",
-                        "justifyContent": "center", "marginRight": "14px",
-                        "flexShrink": "0"},
-                ),
-                html.Div([
-                    html.H4("Customize Dashboard", className="mb-0",
-                            style={"fontWeight": "800", "color": "#15304f",
-                                "fontSize": "18px"}),
-                    html.Small("Layout Editor · KPI Inspector · Audit Report",
-                            style={"color": "#aaa", "fontSize": "12px"}),
-                ]),
-            ], style={"display": "flex", "alignItems": "center",
-                    "marginBottom": "22px"}),
-
-            # ── Sub-tabs ───────────────────────────────────────────────────
-            dbc.Tabs(
-                id="customize-sub-tabs",
-                active_tab="customize-layout",
-                children=[
-
-                    # ══════════════════════════════════════════════════════
-                    # TAB A — LAYOUT EDITOR
-                    # ══════════════════════════════════════════════════════
-                    dbc.Tab(
-                        tab_id="customize-layout",
-                        label="Layout Editor",
-                        label_class_name="fas fa-th-large me-2",
-                        children=[html.Div([
-
-                            # ── Stores & hidden inputs ────────────────────
-                            dcc.Store(id="dnd-layout-store", storage_type="session",
-                                    data={"active": [], "available": []}),
-                            dcc.Input(id="dnd-order-capture", value="",
-                                    debounce=False, style={"display": "none"}),
-                            html.Div(id="dnd-init-dummy", children="",
-                                    style={"display": "none"}),
-
-                            # ── Toolbar ───────────────────────────────────
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Button([html.I(className="fas fa-save me-1"),
-                                                "Save Layout"],
-                                            id="save-layout-btn",
-                                            color="primary", size="sm",
-                                            className="me-2"),
-                                    dbc.Button([html.I(className="fas fa-undo me-1"),
-                                                "Reset Default"],
-                                            id="reset-layout-btn",
-                                            color="light", size="sm"),
-                                ], width="auto"),
-                            ], className="mb-3"),
-                            html.Div(id="layout-status-msg", className="mb-2"),
-
-                            # ── Active zone ───────────────────────────────
-                            dbc.Card([
-                                dbc.CardHeader(html.Div([
-                                    html.Div([
-                                        html.I(className="fas fa-th-large me-2",
-                                            style={"color": c}),
-                                        html.Strong("Active Dashboard"),
-                                        html.Small(" — max 12 KPIs",
-                                                style={"color": "#999",
-                                                        "fontSize": "11px",
-                                                        "marginLeft": "6px"}),
-                                    ], style={"display": "flex", "alignItems": "center"}),
-                                    dbc.Badge("0 / 12 active", id="active-count-badge",
-                                            style={"fontSize": "11px",
-                                                    "background": "#1d74d8",
-                                                    "borderRadius": "20px",
-                                                    "padding": "4px 10px"}),
-                                ], style={"display": "flex", "justifyContent": "space-between",
-                                        "alignItems": "center"}),
-                                style={"padding": "10px 14px"}),
-
-                                dbc.CardBody(
-                                    html.Div(id="dnd-active-zone", children=[],
-                                            style={"display": "grid",
-                                                    "gridTemplateColumns": "repeat(auto-fill,minmax(200px,1fr))",
-                                                    "gap": "12px", "minHeight": "130px",
-                                                    "padding": "10px",
-                                                    "border": "2px dashed #dee2e6",
-                                                    "borderRadius": "10px",
-                                                    "transition": "border-color .2s,background .2s",
-                                                    "background": "rgba(248,251,255,0.6)"}),
-                                    style={"padding": "14px"}),
-                            ], className="mb-3 shadow-sm",
-                            style={"borderRadius": "15px", "overflow": "hidden"}),
-
-                            # ── Palette filter dropdowns ──────────────────
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Label("Portal",
-                                            style={"fontSize": "12px", "fontWeight": "600"}),
-                                    dcc.Dropdown(
-                                        id="layout-portal-select",
-                                        options=_PORTAL_OPTS,
-                                        value=None,
-                                        placeholder="All portals…",
-                                        clearable=True,
-                                        style={"fontSize": "13px"},
-                                    ),
-                                ], width=4),
-                                dbc.Col([
-                                    dbc.Label("Tab",
-                                            style={"fontSize": "12px", "fontWeight": "600"}),
-                                    dcc.Dropdown(
-                                        id="layout-tab-select",
-                                        options=[],
-                                        value=None,
-                                        placeholder="All tabs…",
-                                        clearable=True,
-                                        style={"fontSize": "13px"},
-                                    ),
-                                ], width=4),
-                                dbc.Col(
-                                    html.Small(
-                                        "Filter the palette below to show only relevant KPIs",
-                                        style={"color": "#999", "fontSize": "11px",
-                                            "display": "block", "marginTop": "28px"}
-                                    ), width=4
-                                ),
-                            ], className="mb-3"),
-
-                            # ── Palette zone ──────────────────────────────
-                            dbc.Card([
-                                dbc.CardHeader(html.Div([
-                                    html.I(className="fas fa-grip-horizontal me-2",
-                                        style={"color": "#7d8ea3"}),
-                                    html.Strong("KPI Palette"),
-                                    html.Small(" — drag to active dashboard above",
-                                            style={"color": "#999", "fontSize": "11px",
-                                                    "marginLeft": "6px"}),
-                                ], style={"display": "flex", "alignItems": "center"}),
-                                style={"padding": "10px 14px"}),
-
-                                dbc.CardBody(
-                                    html.Div(
-                                        id="dnd-palette-wrap",
-                                        style={"maxHeight": "58vh", "overflowY": "auto",
-                                            "padding": "4px 0"},
-                                        children=[
-                                            html.Div(id="dnd-palette-zone", children=[],
-                                                    style={"display": "grid",
-                                                            "gridTemplateColumns":
-                                                                "repeat(auto-fill,minmax(200px,1fr))",
-                                                            "gap": "12px", "padding": "6px",
-                                                            "minHeight": "80px",
-                                                            "border": "2px dashed transparent",
-                                                            "borderRadius": "10px",
-                                                            "transition": "border-color .2s,background .2s"}),
-                                        ],
-                                    ),
-                                    style={"padding": "8px"},
-                                ),
-                            ], className="shadow-sm",
-                            style={"borderRadius": "15px", "overflow": "hidden"}),
-
-                            # ── DnD styles ────────────────────────────────
-                            # html.Style("""
-                            # .dnd-card{transition:box-shadow .15s,transform .15s}
-                            # .dnd-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.13)!important}
-                            # .dnd-ghost{opacity:.3;border:2px dashed #667eea!important}
-                            # .dnd-chosen{box-shadow:0 8px 28px rgba(0,0,0,.18)!important;
-                            #             transform:scale(1.02)!important;z-index:999}
-                            # .dnd-drag{opacity:0}
-                            # #dnd-active-zone.dnd-over{border-color:#667eea!important;
-                            #                            background:#f0f3ff!important}
-                            # .dnd-palette-zone.dnd-over{border-color:#999!important;
-                            #                             background:#f5f5f5!important}
-                            # .dnd-handle:active{cursor:grabbing}
-                            # .dnd-handle:hover{color:#667eea!important}
-                            # """),
-
-                        ], style={"marginTop": "20px"})],
-                    ),
-
-                    # ══════════════════════════════════════════════════════
-                    # TAB B — KPI INSPECTOR
-                    # ══════════════════════════════════════════════════════
-                    dbc.Tab(
-                        tab_id="customize-kpi",
-                        label="KPI Inspector",
-                        label_class_name="fas fa-database me-2",
-                        children=[html.Div([
-
-                            # ── Selectors row ─────────────────────────────
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Label("Portal",
-                                            style={"fontSize": "12px", "fontWeight": "600"}),
-                                    dcc.Dropdown(
-                                        id="customize-portal-select",
-                                        options=_PORTAL_OPTS,
-                                        value="admin", clearable=False,
-                                        style={"fontSize": "13px"},
-                                    ),
-                                ], width=4),
-                                dbc.Col([
-                                    dbc.Label("Tab",
-                                            style={"fontSize": "12px", "fontWeight": "600"}),
-                                    dcc.Dropdown(
-                                        id="customize-tab-select",
-                                        options=[], placeholder="Select tab…",
-                                        clearable=True,
-                                        style={"fontSize": "13px"},
-                                    ),
-                                ], width=4),
-                                dbc.Col([
-                                    dbc.Label("KPI",
-                                            style={"fontSize": "12px", "fontWeight": "600"}),
-                                    dcc.Dropdown(
-                                        id="customize-kpi-select",
-                                        options=[], placeholder="Select KPI…",
-                                        clearable=True,
-                                        style={"fontSize": "13px"},
-                                    ),
-                                ], width=4),
-                            ], className="mb-3"),
-
-                            html.Hr(style={"margin": "12px 0"}),
-
-                            # ── Main content row ──────────────────────────
-                            dbc.Row([
-                                # Left: SQL + Test button
-                                dbc.Col([
-                                    dbc.Label(
-                                        [html.I(className="fas fa-code me-1"),
-                                        "SQL Query"],
-                                        style={"fontSize": "12px", "fontWeight": "700",
-                                            "color": "#15304f"},
-                                    ),
-                                    dbc.Textarea(
-                                        id="customize-kpi-sql",
-                                        placeholder="SQL query appears here — editable for testing…",
-                                        rows=12,
-                                        readOnly=False,
-                                        style={"fontSize": "11px",
-                                               "fontFamily": "monospace",
-                                               "backgroundColor": "#f5f7fa",
-                                               "border": "1px solid #ddd",
-                                               "borderRadius": "8px",
-                                               "color": "#2c3e50"},
-                                    ),
-                                    html.Div([
-                                        dbc.Button(
-                                            [html.I(className="fas fa-play me-2"),
-                                             "Test SQL Query"],
-                                            id="kpi-test-sql-btn",
-                                            color="success", size="sm",
-                                            className="mt-2 me-2",
-                                            style={"borderRadius": "8px",
-                                                   "fontWeight": "600"},
-                                        ),
-                                        dbc.Button(
-                                            [html.I(className="fas fa-file-export me-2"),
-                                             "Export SQL"],
-                                            id="kpi-export-sql-btn",
-                                            color="secondary", size="sm",
-                                            className="mt-2",
-                                            style={"borderRadius": "8px",
-                                                   "fontWeight": "600"},
-                                        ),
-                                        dcc.Download(id="kpi-export-download"),
-                                        html.Small(
-                                            "Edit SQL above, then Test (runs on your DB) "
-                                            "or Export as .sql snippet",
-                                            style={"fontSize": "10px", "color": "#999",
-                                                   "display": "block",
-                                                   "marginTop": "4px"},
-                                        ),
-                                    ], style={"display": "flex", "alignItems": "center",
-                                              "flexWrap": "wrap", "gap": "4px"}),
-                                    dcc.Loading(
-                                        html.Div(id="kpi-test-result",
-                                                 style={"marginTop": "10px"}),
-                                        type="circle",
-                                    ),
-                                    html.Div(id="kpi-export-result"),dbc.Textarea(
-                                        id="customize-kpi-sql",
-                                        placeholder="SQL query appears here — editable for testing…",
-                                        rows=12,
-                                        readOnly=False,
-                                        style={"fontSize": "11px",
-                                               "fontFamily": "monospace",
-                                               "backgroundColor": "#f5f7fa",
-                                               "border": "1px solid #ddd",
-                                               "borderRadius": "8px",
-                                               "color": "#2c3e50"},
-                                    ),
-                                    html.Div([
-                                        dbc.Button(
-                                            [html.I(className="fas fa-play me-2"),
-                                             "Test SQL Query"],
-                                            id="kpi-test-sql-btn",
-                                            color="success", size="sm",
-                                            className="mt-2 me-2",
-                                            style={"borderRadius": "8px",
-                                                   "fontWeight": "600"},
-                                        ),
-                                        dbc.Button(
-                                            [html.I(className="fas fa-file-export me-2"),
-                                             "Export SQL"],
-                                            id="kpi-export-sql-btn",
-                                            color="secondary", size="sm",
-                                            className="mt-2",
-                                            style={"borderRadius": "8px",
-                                                   "fontWeight": "600"},
-                                        ),
-                                        dcc.Download(id="kpi-export-download"),
-                                        html.Small(
-                                            "Edit SQL above, then Test (runs on your DB) "
-                                            "or Export as .sql snippet",
-                                            style={"fontSize": "10px", "color": "#999",
-                                                   "display": "block",
-                                                   "marginTop": "4px"},
-                                        ),
-                                    ], style={"display": "flex", "alignItems": "center",
-                                              "flexWrap": "wrap", "gap": "4px"}),
-                                    dcc.Loading(
-                                        html.Div(id="kpi-test-result",
-                                                 style={"marginTop": "10px"}),
-                                        type="circle",
-                                    ),
-                                    html.Div(id="kpi-export-result"),
-
-                                # Right: Metadata card
-                                dbc.Col([
-                                    dbc.Label(
-                                        [html.I(className="fas fa-info-circle me-1"),
-                                        "KPI Metadata"],
-                                        style={"fontSize": "12px", "fontWeight": "700",
-                                            "color": "#15304f"},
-                                    ),
-                                    dcc.Loading(
-                                        html.Div(id="customize-kpi-metadata",
-                                                style={"fontSize": "11px",
-                                                        "backgroundColor": "#f5f7fa",
-                                                        "border": "1px solid #ddd",
-                                                        "borderRadius": "8px",
-                                                        "padding": "12px",
-                                                        "minHeight": "340px",
-                                                        "maxHeight": "500px",
-                                                        "overflowY": "auto",
-                                                        "color": "#2c3e50"},
-                                                children="Select a KPI to view metadata"),
-                                        type="default",
-                                    ),
-                                ], width=6),
-                            ], className="mb-3"),
-
-                            # ── Entity reference ──────────────────────────
-                            html.Div(id="customize-entity-reference",
-                                    children="Entity reference appears here"),
-
-                        ], style={"marginTop": "20px"})],
-                    ),
-                        ]),
-                    # ══════════════════════════════════════════════════════
-                    # TAB C — KPI AUDIT REPORT
-                    # ══════════════════════════════════════════════════════
-                    dbc.Tab(
-                        tab_id="customize-audit",
-                        label="KPI Audit",
-                        label_class_name="fas fa-stethoscope me-2",
-                        children=[html.Div([
-
-                            dbc.Row([
-                                dbc.Col(html.H6(
-                                    [html.I(className="fas fa-stethoscope me-2"),
-                                    "KPI Health Check"],
-                                    style={"color": "#15304f", "fontWeight": "700"}
-                                ), width="auto"),
-                                dbc.Col([
-                                    dbc.Button(
-                                        [html.I(className="fas fa-play me-2"),
-                                        "Run Full Audit"],
-                                        id="run-kpi-audit-btn",
-                                        color="primary", size="sm",
-                                        style={"borderRadius": "8px",
-                                            "fontWeight": "600"},
-                                    ),
-                                ], width="auto", className="ms-auto"),
-                            ], align="center", className="mb-3"),
-
-                            # Summary badges
-                            html.Div(id="kpi-audit-summary",
-                                    children=html.Small(
-                                        "Click 'Run Full Audit' to test all KPI queries.",
-                                        className="text-muted",
-                                    ),
-                                    className="mb-3"),
-
-                            html.Small([
-                                html.Strong("Legend: "),
-                                dbc.Badge("OK", color="success", className="me-1"),
-                                "query ran and returned a value  · ",
-                                dbc.Badge("NULL", color="warning", className="me-1"),
-                                "query ran but returned NULL  · ",
-                                dbc.Badge("ERROR", color="danger", className="me-1"),
-                                "query threw an exception  · ",
-                                dbc.Badge("DUP", color="dark", className="me-1"),
-                                "duplicate key in KPI_CARDS dict (value overwritten)",
-                            ], className="d-block mb-3",
-                            style={"fontSize": "11px", "color": "#666"}),
-
-                            # Audit table
-                            dcc.Loading(
-                                html.Div(
-                                    dbc.Table([
-                                        html.Thead(html.Tr([
-                                            html.Th("", style={"width": "40px"}),
-                                            html.Th("Card ID", style={"fontSize": "11px"}),
-                                            html.Th("Title",   style={"fontSize": "11px"}),
-                                            html.Th("Params",  style={"fontSize": "11px",
-                                                                        "textAlign": "center"}),
-                                            html.Th("Format",  style={"fontSize": "11px"}),
-                                            html.Th("Status",  style={"fontSize": "11px"}),
-                                            html.Th("Raw value", style={"fontSize": "11px"}),
-                                            html.Th("Formatted", style={"fontSize": "11px"}),
-                                            html.Th("Time",    style={"fontSize": "11px"}),
-                                        ])),
-                                        html.Tbody(
-                                            id="kpi-audit-table",
-                                            children=[html.Tr(html.Td(
-                                                "Click Run Full Audit",
-                                                colSpan=9,
-                                                className="text-center text-muted",
-                                                style={"fontSize": "12px",
-                                                    "padding": "20px"},
-                                            ))],
-                                        ),
-                                    ], bordered=True, hover=True,
-                                    responsive=True, size="sm",
-                                    style={"fontSize": "12px"}),
-                                    style={"overflowX": "auto",
-                                        "maxHeight": "60vh",
-                                        "overflowY": "auto"},
-                                ),
-                                type="circle",
-                            ),
-
-                        ], style={"marginTop": "20px"})],
-                    ),
-                ],
-                style={"marginBottom": "20px"},
+def _customize_page(c: str) -> html.Div:
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+ 
+    _PORTAL_OPTS = [
+        {"label": "Admin",     "value": "admin"},
+        {"label": "Master",    "value": "master"},
+        {"label": "Apartment", "value": "apartment"},
+        {"label": "Vendor",    "value": "vendor"},
+        {"label": "Security",  "value": "security"},
+    ]
+ 
+    return html.Div([
+ 
+        # ── Page title ─────────────────────────────────────────────────────
+        html.Div([
+            html.Div(
+                html.I(className="fas fa-cog",
+                       style={"color": "#fff", "fontSize": "17px"}),
+                style={"width": "42px", "height": "42px", "borderRadius": "12px",
+                       "background": f"linear-gradient(135deg,{c},{c}99)",
+                       "display": "flex", "alignItems": "center",
+                       "justifyContent": "center", "marginRight": "14px",
+                       "flexShrink": "0"},
             ),
+            html.Div([
+                html.H4("Customize Dashboard", className="mb-0",
+                        style={"fontWeight": "800", "color": "#15304f",
+                               "fontSize": "18px"}),
+                html.Small("Layout Editor · KPI Inspector · KPI Audit",
+                           style={"color": "#aaa", "fontSize": "12px"}),
+            ]),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"}),
+ 
+        # ── Sub-tabs ───────────────────────────────────────────────────────
+        dbc.Tabs(
+            id="customize-sub-tabs",
+            active_tab="customize-layout",
+            children=[
+ 
+                # ══════════════════════════════════════════════════════════
+                # TAB A — LAYOUT EDITOR
+                # ══════════════════════════════════════════════════════════
+                dbc.Tab(
+                    tab_id="customize-layout",
+                    label="Layout Editor",
+                    children=[html.Div([
+ 
+                        # ── Hidden stores / inputs ─────────────────────────
+                        dcc.Store(id="dnd-layout-store", storage_type="session",
+                                  data={"active": [], "available": []}),
+                        dcc.Input(id="dnd-order-capture", value="",
+                                  debounce=False, style={"display": "none"}),
+                        html.Div(id="dnd-init-dummy", children="",
+                                 style={"display": "none"}),
+ 
+                        # ══ ROW 1: Portal + Tab selectors (top) ════════════
+                        dbc.Card([
+                            dbc.CardHeader(html.Div([
+                                html.I(className="fas fa-filter me-2",
+                                       style={"color": c}),
+                                html.Strong("Select Dashboard to Edit"),
+                            ], style={"display": "flex", "alignItems": "center"}),
+                            style={"padding": "10px 14px"}),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Portal",
+                                                  style={"fontSize": "12px",
+                                                         "fontWeight": "600"}),
+                                        dcc.Dropdown(
+                                            id="layout-portal-select",
+                                            options=_PORTAL_OPTS,
+                                            value="admin",
+                                            clearable=False,
+                                            style={"fontSize": "13px"},
+                                        ),
+                                    ], width=4),
+                                    dbc.Col([
+                                        dbc.Label("Tab",
+                                                  style={"fontSize": "12px",
+                                                         "fontWeight": "600"}),
+                                        dcc.Dropdown(
+                                            id="layout-tab-select",
+                                            options=[],
+                                            value=None,
+                                            placeholder="Select tab…",
+                                            clearable=True,
+                                            style={"fontSize": "13px"},
+                                        ),
+                                    ], width=4),
+                                    dbc.Col([
+                                        dbc.Label("Actions",
+                                                  style={"fontSize": "12px",
+                                                         "fontWeight": "600"}),
+                                        html.Div([
+                                            dbc.Button(
+                                                [html.I(className="fas fa-save me-1"),
+                                                 "Save"],
+                                                id="save-layout-btn",
+                                                color="primary", size="sm",
+                                                className="me-2",
+                                                style={"borderRadius": "8px",
+                                                       "fontWeight": "600"},
+                                            ),
+                                            dbc.Button(
+                                                [html.I(className="fas fa-undo me-1"),
+                                                 "Reset"],
+                                                id="reset-layout-btn",
+                                                color="light", size="sm",
+                                                style={"borderRadius": "8px"},
+                                            ),
+                                        ], style={"display": "flex",
+                                                  "gap": "6px",
+                                                  "marginTop": "4px"}),
+                                    ], width=4),
+                                ]),
+                                html.Div(id="layout-status-msg",
+                                         className="mt-2"),
+                            ], style={"padding": "12px 14px"}),
+                        ], className="mb-3 shadow-sm",
+                        style={"borderRadius": "14px", "overflow": "hidden"}),
+ 
+                        # ══ ROW 2: Active Dashboard zone ═══════════════════
+                        dbc.Card([
+                            dbc.CardHeader(html.Div([
+                                html.Div([
+                                    html.I(className="fas fa-th-large me-2",
+                                           style={"color": c}),
+                                    html.Strong("Active Dashboard"),
+                                    html.Small(" — drag KPIs here from the palette below",
+                                               style={"color": "#999",
+                                                      "fontSize": "11px",
+                                                      "marginLeft": "6px"}),
+                                ], style={"display": "flex", "alignItems": "center"}),
+                                dbc.Badge("0 / 12 active",
+                                          id="active-count-badge",
+                                          style={"fontSize": "11px",
+                                                 "background": "#1d74d8",
+                                                 "borderRadius": "20px",
+                                                 "padding": "4px 10px"}),
+                            ], style={"display": "flex",
+                                      "justifyContent": "space-between",
+                                      "alignItems": "center"}),
+                            style={"padding": "10px 14px"}),
+                            dbc.CardBody(
+                                html.Div(
+                                    id="dnd-active-zone",
+                                    children=[
+                                        html.Div(
+                                            [html.I(className="fas fa-arrow-down me-2"),
+                                             "Drag KPI cards here from the palette below"],
+                                            style={"color": "#ccc",
+                                                   "fontSize": "13px",
+                                                   "textAlign": "center",
+                                                   "padding": "30px"},
+                                        )
+                                    ],
+                                    style={
+                                        "display": "grid",
+                                        "gridTemplateColumns":
+                                            "repeat(auto-fill,minmax(200px,1fr))",
+                                        "gap": "12px",
+                                        "minHeight": "120px",
+                                        "padding": "10px",
+                                        "border": "2px dashed #dee2e6",
+                                        "borderRadius": "10px",
+                                        "transition":
+                                            "border-color .2s, background .2s",
+                                        "background": "rgba(248,251,255,0.6)",
+                                    },
+                                ),
+                                style={"padding": "14px"},
+                            ),
+                        ], className="mb-3 shadow-sm",
+                        style={"borderRadius": "14px", "overflow": "hidden"}),
+ 
+                        # ══ ROW 3: KPI Palette ═════════════════════════════
+                        dbc.Card([
+                            dbc.CardHeader(html.Div([
+                                html.I(className="fas fa-grip-horizontal me-2",
+                                       style={"color": "#7d8ea3"}),
+                                html.Strong("KPI Palette"),
+                                html.Small(
+                                    " — all KPIs for the selected portal/tab",
+                                    style={"color": "#999", "fontSize": "11px",
+                                           "marginLeft": "6px"}),
+                            ], style={"display": "flex", "alignItems": "center"}),
+                            style={"padding": "10px 14px"}),
+                            dbc.CardBody(
+                                html.Div(
+                                    style={"maxHeight": "52vh",
+                                           "overflowY": "auto",
+                                           "padding": "4px 0"},
+                                    children=[
+                                        html.Div(
+                                            id="dnd-palette-zone",
+                                            children=[
+                                                html.Div(
+                                                    "Select a portal and tab above to load KPIs",
+                                                    style={"color": "#ccc",
+                                                           "fontSize": "13px",
+                                                           "textAlign": "center",
+                                                           "padding": "30px"},
+                                                )
+                                            ],
+                                            style={
+                                                "display": "grid",
+                                                "gridTemplateColumns":
+                                                    "repeat(auto-fill,"
+                                                    "minmax(200px,1fr))",
+                                                "gap": "12px",
+                                                "padding": "6px",
+                                                "minHeight": "80px",
+                                                "border":
+                                                    "2px dashed transparent",
+                                                "borderRadius": "10px",
+                                                "transition":
+                                                    "border-color .2s,"
+                                                    "background .2s",
+                                            },
+                                        ),
+                                    ],
+                                ),
+                                style={"padding": "8px"},
+                            ),
+                        ], className="shadow-sm",
+                        style={"borderRadius": "14px", "overflow": "hidden"}),
+ 
+                    ], style={"marginTop": "20px"})],
+                ),
+ 
+                # ══════════════════════════════════════════════════════════
+                # TAB B — KPI INSPECTOR
+                # ══════════════════════════════════════════════════════════
+                dbc.Tab(
+                    tab_id="customize-kpi",
+                    label="KPI Inspector",
+                    children=[html.Div([
+ 
+                        # ── Selector row ───────────────────────────────────
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Portal",
+                                          style={"fontSize": "12px",
+                                                 "fontWeight": "600"}),
+                                dcc.Dropdown(
+                                    id="customize-portal-select",
+                                    options=_PORTAL_OPTS,
+                                    value="admin",
+                                    clearable=False,
+                                    style={"fontSize": "13px"},
+                                ),
+                            ], width=4),
+                            dbc.Col([
+                                dbc.Label("Tab",
+                                          style={"fontSize": "12px",
+                                                 "fontWeight": "600"}),
+                                dcc.Dropdown(
+                                    id="customize-tab-select",
+                                    options=[],
+                                    placeholder="Select tab…",
+                                    clearable=True,
+                                    style={"fontSize": "13px"},
+                                ),
+                            ], width=4),
+                            dbc.Col([
+                                dbc.Label("KPI",
+                                          style={"fontSize": "12px",
+                                                 "fontWeight": "600"}),
+                                dcc.Dropdown(
+                                    id="customize-kpi-select",
+                                    options=[],
+                                    placeholder="Select KPI…",
+                                    clearable=True,
+                                    style={"fontSize": "13px"},
+                                ),
+                            ], width=4),
+                        ], className="mb-3"),
+ 
+                        html.Hr(style={"margin": "12px 0"}),
+ 
+                        # ── Two-column: SQL  |  Metadata ───────────────────
+                        dbc.Row([
+ 
+                            # Left — editable SQL + action buttons
+                            dbc.Col([
+                                dbc.Label(
+                                    [html.I(className="fas fa-code me-1"),
+                                     "SQL Query  (editable)"],
+                                    style={"fontSize": "12px",
+                                           "fontWeight": "700",
+                                           "color": "#15304f"},
+                                ),
+                                dbc.Textarea(
+                                    id="customize-kpi-sql",
+                                    placeholder="Select a KPI to load its SQL…",
+                                    rows=13,
+                                    # readOnly intentionally omitted → editable
+                                    style={"fontSize": "11px",
+                                           "fontFamily": "monospace",
+                                           "backgroundColor": "#f5f7fa",
+                                           "border": "1px solid #cdd5df",
+                                           "borderRadius": "8px",
+                                           "color": "#2c3e50",
+                                           "resize": "vertical"},
+                                ),
+ 
+                                # Action buttons row
+                                html.Div([
+                                    dbc.Button(
+                                        [html.I(className="fas fa-play me-1"),
+                                         "Test SQL"],
+                                        id="kpi-test-sql-btn",
+                                        color="success", size="sm",
+                                        style={"borderRadius": "8px",
+                                               "fontWeight": "600"},
+                                    ),
+                                    dbc.Button(
+                                        [html.I(className="fas fa-file-export me-1"),
+                                         "Export .sql"],
+                                        id="kpi-export-sql-btn",
+                                        color="secondary", size="sm",
+                                        style={"borderRadius": "8px"},
+                                    ),
+                                    dbc.Button(
+                                        [html.I(className="fas fa-database me-1"),
+                                         "Integrate to DB"],
+                                        id="kpi-integrate-sql-btn",
+                                        color="warning", size="sm",
+                                        style={"borderRadius": "8px",
+                                               "fontWeight": "600"},
+                                    ),
+                                    dcc.Download(id="kpi-export-download"),
+                                ], style={"display": "flex", "gap": "6px",
+                                          "marginTop": "8px",
+                                          "flexWrap": "wrap"}),
+ 
+                                html.Small(
+                                    "Edit SQL freely. Test runs it against your DB "
+                                    "with current society_id. Integrate executes it "
+                                    "directly (use for CREATE/REPLACE functions).",
+                                    style={"fontSize": "10px", "color": "#999",
+                                           "display": "block", "marginTop": "4px"},
+                                ),
+ 
+                                # Results
+                                dcc.Loading(
+                                    html.Div(id="kpi-test-result",
+                                             style={"marginTop": "8px"}),
+                                    type="circle",
+                                ),
+                                html.Div(id="kpi-export-result"),
+                                html.Div(id="kpi-integrate-result"),
+ 
+                            ], width=6),
+ 
+                            # Right — metadata card
+                            dbc.Col([
+                                dbc.Label(
+                                    [html.I(className="fas fa-info-circle me-1"),
+                                     "KPI Metadata"],
+                                    style={"fontSize": "12px",
+                                           "fontWeight": "700",
+                                           "color": "#15304f"},
+                                ),
+                                dcc.Loading(
+                                    html.Div(
+                                        id="customize-kpi-metadata",
+                                        children="Select a KPI to view metadata",
+                                        style={"fontSize": "11px",
+                                               "backgroundColor": "#f5f7fa",
+                                               "border": "1px solid #cdd5df",
+                                               "borderRadius": "8px",
+                                               "padding": "12px",
+                                               "minHeight": "340px",
+                                               "maxHeight": "500px",
+                                               "overflowY": "auto",
+                                               "color": "#2c3e50"},
+                                    ),
+                                    type="default",
+                                ),
+                                # Entity reference below metadata
+                                html.Div(
+                                    id="customize-entity-reference",
+                                    style={"marginTop": "10px"},
+                                ),
+                            ], width=6),
+                        ], className="mb-3"),
+ 
+                    ], style={"marginTop": "20px"})],
+                ),
+ 
+                # ══════════════════════════════════════════════════════════
+                # TAB C — KPI AUDIT
+                # ══════════════════════════════════════════════════════════
+                dbc.Tab(
+                    tab_id="customize-audit",
+                    label="KPI Audit",
+                    children=[html.Div([
+ 
+                        dbc.Row([
+                            dbc.Col(
+                                html.H6(
+                                    [html.I(className="fas fa-stethoscope me-2"),
+                                     "KPI Health Check"],
+                                    style={"color": "#15304f",
+                                           "fontWeight": "700"},
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col([
+                                dbc.Button(
+                                    [html.I(className="fas fa-play me-2"),
+                                     "Run Full Audit"],
+                                    id="run-kpi-audit-btn",
+                                    color="primary", size="sm",
+                                    style={"borderRadius": "8px",
+                                           "fontWeight": "600"},
+                                ),
+                            ], width="auto", className="ms-auto"),
+                        ], align="center", className="mb-3"),
+ 
+                        html.Div(
+                            id="kpi-audit-summary",
+                            children=html.Small(
+                                "Click 'Run Full Audit' to test all KPI queries.",
+                                className="text-muted",
+                            ),
+                            className="mb-3",
+                        ),
+ 
+                        html.Small([
+                            html.Strong("Legend: "),
+                            dbc.Badge("OK",    color="success",  className="me-1"),
+                            "returned a value  · ",
+                            dbc.Badge("NULL",  color="warning",  className="me-1"),
+                            "returned NULL  · ",
+                            dbc.Badge("ERROR", color="danger",   className="me-1"),
+                            "threw an exception",
+                        ], className="d-block mb-3",
+                        style={"fontSize": "11px", "color": "#666"}),
+ 
+                        dcc.Loading(
+                            html.Div(
+                                dbc.Table([
+                                    html.Thead(html.Tr([
+                                        html.Th("",           style={"width": "34px"}),
+                                        html.Th("Card ID",    style={"fontSize": "11px"}),
+                                        html.Th("Title",      style={"fontSize": "11px"}),
+                                        html.Th("Params",     style={"fontSize": "11px",
+                                                                      "textAlign": "center"}),
+                                        html.Th("Format",     style={"fontSize": "11px"}),
+                                        html.Th("Status",     style={"fontSize": "11px"}),
+                                        html.Th("Raw value",  style={"fontSize": "11px"}),
+                                        html.Th("Formatted",  style={"fontSize": "11px"}),
+                                        html.Th("ms",         style={"fontSize": "11px"}),
+                                    ])),
+                                    html.Tbody(
+                                        id="kpi-audit-table",
+                                        children=[html.Tr(html.Td(
+                                            "Click Run Full Audit",
+                                            colSpan=9,
+                                            className="text-center text-muted",
+                                            style={"fontSize": "12px",
+                                                   "padding": "20px"},
+                                        ))],
+                                    ),
+                                ], bordered=True, hover=True,
+                                responsive=True, size="sm",
+                                style={"fontSize": "12px"}),
+                                style={"overflowX": "auto",
+                                       "maxHeight": "60vh",
+                                       "overflowY": "auto"},
+                            ),
+                            type="circle",
+                        ),
+ 
+                    ], style={"marginTop": "20px"})],
+                ),
+            ],
+            style={"marginBottom": "20px"},
+        ),
+ 
+    ], className="portal-page")
 
-                ], className="portal-page")
-    
 def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     c = _C["admin"]
     from app.dash_apps.pages.portal_pages import _page_title

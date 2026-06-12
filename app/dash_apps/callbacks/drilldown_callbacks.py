@@ -790,24 +790,20 @@ def register_drilldown_callbacks(app):
                            .get(action, {})
                            .get("prefill", {}))
                 prefill = build_prefill(record, pmap) if pmap else dict(record)
-                if action == "pay_dues" and entity == "apartment":
-                    acc = _get_account_by_name(sid, "Society Maintenance Charge")
-                    if acc:
-                        prefill["acc_id"] = acc["id"]
-                        prefill["acc_particulars"] = (
-                            f"Maintenance - Flat {record.get('flat_number','')}")
-                elif action == "pay_dues" and entity == "vendor":
-                    acc = _get_account_by_name(sid, "Society Charge")
-                    if acc:
-                        prefill["acc_id"] = acc["id"]
-                        prefill["acc_particulars"] = (
-                            f"Pass Fee - {record.get('name','')}")
+ 
+                # ── Smart receipt pre-fill ────────────────────────────────────
+                if action == "pay_dues":
+                    prefill = _build_receipt_prefill(
+                        prefill, record, entity, sid
+                    )
+ 
                 store = nav_state.navigate_to(
                     store, target,
                     action.replace("_", " ").title(),
                     prefill=prefill, entity_pk=pk,
                 )
                 hide_kpis = True
+ 
             else:
                 return no_update, no_update, no_update, no_update, no_update
  
@@ -876,6 +872,7 @@ def register_drilldown_callbacks(app):
         prevent_initial_call=True,
     )
     def handle_form_submit(n_clicks_list, _fv, _hv, store, auth):
+        # ── Guard: nothing triggered or all zero-clicks ──────────────────────
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
  
@@ -885,91 +882,156 @@ def register_drilldown_callbacks(app):
         except Exception:
             return no_update, no_update, no_update, no_update, no_update
  
-        entity_singular = to_singular(id_dict.get("entity"))
+        entity_singular = to_singular(id_dict.get("entity", ""))
         card_id         = id_dict.get("card_id", "")
         sid             = (auth or {}).get("society_id")
         store           = store or {}
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
  
+        # ── 1. Collect form-field values for THIS entity only ────────────────
         form_data: dict = {}
+ 
         for key, val in ctx.states.items():
+            try:
+                k_dict = json.loads(key.split(".")[0])
+            except Exception:
+                continue
+            if k_dict.get("type") != "form-field":
+                continue
+            if to_singular(k_dict.get("entity", "")) != entity_singular:
+                continue
+            if val not in (None, ""):
+                form_data[k_dict.get("field")] = val
+ 
+        # ── 2. Overlay form-field-hidden values (images / camera b64) ────────
+        for key, val in ctx.states.items():
+            try:
+                k_dict = json.loads(key.split(".")[0])
+            except Exception:
+                continue
+            if k_dict.get("type") != "form-field-hidden":
+                continue
+            if to_singular(k_dict.get("entity", "")) != entity_singular:
+                continue
+            if val:
+                form_data[k_dict.get("field")] = val
+ 
+        # ── 3. Normalise asset paths coming from dcc.Upload hidden fields ─────
+        #       Upload stores full web path; we only want the filename.
+        for field, val in list(form_data.items()):
+            if isinstance(val, str) and "/assets/" in val and not val.startswith("data:"):
+                form_data[field] = val.split("/")[-1]
+ 
+        # ── 4. Save camera-captured base64 images to disk ─────────────────────
+        #       The camera snap puts "data:image/jpeg;base64,..." into hidden
+        #       inputs.  We decode, resize, and save them before _save_entity.
+        for field, val in list(form_data.items()):
             if isinstance(val, str) and val.startswith("data:image"):
                 try:
-                    _header, _data = val.split(",", 1)
-                    _decoded = base64.b64decode(_data)
-                    _ent = entity_singular
-                    _dir = Path("app/assets/default") / _ent
+                    _header, _b64data = val.split(",", 1)
+                    _decoded = __import__("base64").b64decode(_b64data)
+                    from PIL import Image as _PIL
+                    import io as _io
+                    _img = _PIL.open(_io.BytesIO(_decoded))
+                    # Downsize if very large
+                    if _img.width > 1920:
+                        _ratio = 1920 / _img.width
+                        _img = _img.resize(
+                            (1920, int(_img.height * _ratio)),
+                            _PIL.Resampling.LANCZOS,
+                        )
+                    if _img.mode == "RGBA":
+                        _bg = _PIL.new("RGB", _img.size, (255, 255, 255))
+                        _bg.paste(_img, mask=_img.split()[3])
+                        _img = _bg
+                    from pathlib import Path as _Path
+                    _dir = _Path("app/assets/default") / entity_singular
                     _dir.mkdir(parents=True, exist_ok=True)
                     _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                    _img = Image.open(io.BytesIO(_decoded))
-                    if _img.mode == "RGBA":
-                        _bg = Image.new("RGB", _img.size, (255, 255, 255))
-                        _bg.paste(_img, mask=_img.split()[3]); _img = _bg
                     _img.save(_dir / _fname, "JPEG", quality=85)
-                    form_data[field] = _fname
-                except Exception as _e:
-                    print(f"Camera image save error: {_e}")
-            try:
-                k_dict = json.loads(key.split(".")[0])
-            except Exception:
-                continue
-            if k_dict.get("type") == "form-field":
-                if to_singular(k_dict.get("entity")) != entity_singular:
-                    continue
-                if val not in (None, ""):
-                    form_data[k_dict.get("field")] = val
-        for key, val in ctx.states.items():
-            try:
-                k_dict = json.loads(key.split(".")[0])
-            except Exception:
-                continue
-            if k_dict.get("type") == "form-field-hidden":
-                if to_singular(k_dict.get("entity")) != entity_singular:
-                    continue
-                if val:
-                    form_data[k_dict.get("field")] = val
+                    form_data[field] = _fname          # replace b64 with filename
+                except Exception as _cam_err:
+                    print(f"  ⚠️  Camera image save error [{field}]: {_cam_err}")
+                    del form_data[field]               # drop bad value rather than crash
  
-        for field, val in list(form_data.items()):
-            if isinstance(val, str) and "/assets/" in val:
-                filename = val.split("/")[-1]
-                if filename:
-                    form_data[field] = filename
- 
-        prefill = nav_state.get_prefill(store or {})
-        for field, val in prefill.items():
+        # ── 5. Merge with prefill from store ──────────────────────────────────
+        #       prefill supplies defaults (entity pk, context ids, etc.)
+        #       form_data (user input) wins on conflict.
+        prefill = nav_state.get_prefill(store)
+        # Normalise any asset paths that crept into prefill
+        for field, val in list(prefill.items()):
             if isinstance(val, str) and "/assets/" in val:
                 prefill[field] = val.split("/")[-1]
-        form_data = {**prefill, **form_data}
-        form_data["society_id"] = sid
  
-        ok, msg, new_id = _save_entity(entity_singular, card_id, form_data)
+        merged = {**prefill, **form_data}
+        merged["society_id"] = sid
+ 
+        # ── 6. Smart receipt defaults (date + account) ────────────────────────
+        #       Applied only when submitting a new receipt/expense form and the
+        #       user left the date or account blank.
+        if entity_singular in ("receipt", "expense") and "edit" not in card_id:
+            # Default date = today
+            if not merged.get("trx_date"):
+                merged["trx_date"] = datetime.today().strftime("%Y-%m-%d")
+ 
+            # Default account = first Cr/Dr account named 'Society Charges'
+            if not merged.get("acc_id") and sid:
+                _drcr = "Cr" if entity_singular == "receipt" else "Dr"
+                _acc  = _get_account_by_name(sid, "Society Charges")
+                if not _acc:          # fall back to any Cr/Dr account
+                    try:
+                        _acc = db._execute(
+                            "SELECT id, name FROM accounts "
+                            "WHERE society_id=%s AND drcr_account=%s LIMIT 1",
+                            (sid, _drcr), fetch_one=True,
+                        )
+                    except Exception:
+                        _acc = None
+                if _acc:
+                    merged["acc_id"] = _acc["id"]
+ 
+        # ── 7. Call the appropriate save handler ──────────────────────────────
+        ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
+ 
         if not ok:
-            store["prefill"] = form_data
+            # Persist what the user typed so the form re-fills on re-render
+            store["prefill"] = merged
             if store.get("stack"):
-                store["stack"][-1]["prefill"] = form_data
-            return store, no_update, no_update, \
-                   {"type": "error", "message": msg}, no_update
+                store["stack"][-1]["prefill"] = merged
+            return (
+                store,
+                no_update,
+                no_update,
+                {"type": "error", "message": msg or "Save failed"},
+                no_update,
+            )
  
-        if ok and new_id and "edit" not in card_id and sid:
-            _move_temp_images(entity_singular, new_id, sid, form_data)
+        # ── 8. Move temp images to their permanent entity folder ──────────────
+        if new_id and "edit" not in card_id and sid:
+            _move_temp_images(entity_singular, new_id, sid, merged)
  
+        # ── 9. Navigate back one level and trigger list refresh ───────────────
         hide_kpis = False
-        if ok and store and len(store.get("stack", [])) > 1:
-            store = nav_state.navigate_back(store,
-                                            len(store["stack"]) - 2)
+        if store.get("stack") and len(store["stack"]) > 1:
+            store = nav_state.navigate_back(store, len(store["stack"]) - 2)
             if new_id and store.get("stack"):
                 store["stack"][-1]["entity_pk"] = new_id
             store["refresh"] = True
             hide_kpis = len(store.get("stack", [])) > 1
  
-        content, bc, db_err = _render_current(store or {}, auth)
+        content, bc, db_err = _render_current(store, auth)
         store["refresh"] = False
-        toast_msg = msg if msg else db_err
-        return store, content, bc, \
-               {"type": "success", "message": toast_msg} if toast_msg else no_update, \
-               {"display": "none"} if hide_kpis else {"display": "grid"}
  
+        # Prefer the save message; fall back to any DB render error
+        toast_msg = msg or db_err
+        return (
+            store,
+            content,
+            bc,
+            {"type": "success", "message": toast_msg} if toast_msg else no_update,
+            {"display": "none"} if hide_kpis else {"display": "grid"},
+        )
     # ── 3. CSV DOWNLOAD ───────────────────────────────────────────────────────
     @app.callback(
         Output({"type": "csv-download-trigger", "entity": MATCH}, "data"),
@@ -1183,6 +1245,73 @@ def _move_temp_images(entity, new_id, society_id, form_data):
                     dst.unlink()
                 src.rename(dst)
  
+def _build_receipt_prefill(
+    prefill: dict,
+    record:  dict,
+    entity:  str,
+    society_id,
+) -> dict:
+    """
+    Enrich a receipt pre-fill dict with smart defaults:
+      - trx_date      → today
+      - acc_id        → the 'Society Charges' Cr account (fallback: first Cr)
+      - acc_particulars → context-dependent label
+    Called only when action == "pay_dues".
+    """
+    from datetime import date as _date
+ 
+    p = dict(prefill)
+ 
+    # ── Date default ─────────────────────────────────────────────────────────
+    p.setdefault("trx_date", _date.today().isoformat())
+ 
+    # ── Find the right income account ────────────────────────────────────────
+    acc = None
+    if society_id:
+        # 1st priority: account literally named 'Society Charges'
+        acc = _get_account_by_name(society_id, "Society Charges")
+        if not acc:
+            # 2nd priority: any Cr (income) account
+            try:
+                acc = db._execute(
+                    "SELECT id, name FROM accounts "
+                    "WHERE society_id=%s AND drcr_account='Cr' "
+                    "ORDER BY id LIMIT 1",
+                    (society_id,), fetch_one=True,
+                )
+            except Exception:
+                acc = None
+ 
+    if acc:
+        p["acc_id"] = acc["id"]
+ 
+    # ── Particulars and entity link ───────────────────────────────────────────
+    if entity == "apartment":
+        flat = record.get("flat_number", "")
+        owner = record.get("owner_name", "")
+        p.setdefault("acc_particulars",
+                     f"Maintenance - Flat {flat}" + (f" ({owner})" if owner else ""))
+        p.setdefault("entity_id", record.get("id"))
+        p.setdefault("mode", "cash")
+ 
+    elif entity == "vendor":
+        name = record.get("name", "")
+        stype = record.get("service_type", "")
+        p.setdefault("acc_particulars",
+                     f"Pass Fees - {name}" + (f" [{stype}]" if stype else ""))
+        p.setdefault("entity_id", record.get("id"))
+        p.setdefault("mode", "cash")
+ 
+    elif entity == "security":
+        name = record.get("name", "")
+        p.setdefault("acc_particulars", f"Others - {name}")
+        p.setdefault("entity_id", record.get("id"))
+        p.setdefault("mode", "cash")
+ 
+    else:
+        p.setdefault("acc_particulars", "Receipt")
+ 
+    return p
  
 def _save_entity(entity, card_id, data):
     sid     = data.get("society_id")
