@@ -99,11 +99,11 @@ DRILLDOWN_MAP: dict = {
     "kpi_societies_9Apts":         {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "9Apts"}},
     "kpi_societies_99Apts":        {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "99Apts"}},
     "kpi_societies_999Apts":       {"target": "list_societies",   "label": "Paid Plan Societies",   "filter": {"plan": "999Apts"}},
-    "kpi_societies_Unlimited":     {"target": "list_societies",   "label": "unlimited Plans",       "filter": {"plan": "unlimited"}},
-    "kpi_societies_unlimited":     {"target": "list_societies",   "label": "unlimited Plans",       "filter": {"plan": "unlimited"}},
+    "kpi_societies_unlimited":     {"target": "list_societies",   "label": "Unlimited Plans",       "filter": {"plan": "unlimited"}},
     "kpi_societies_free":          {"target": "list_societies",   "label": "Free Plan Societies",   "filter": {"plan": "Free"}},
     "kpi_societies_paid":          {"target": "list_societies",   "label": "All Paid Plans",        "filter": {"plans": ["9Apts", "99Apts", "999Apts", "unlimited"]}},
     "kpi_societies_expired":       {"target": "list_societies",   "label": "Expired Plans",         "filter": {"status": "expired"}},
+    "kpi_societies_arrear_start_date":       {"target": "list_societies",   "label": "Arrear Start Date"},
     "kpi_receivables_total":       {"target": "list_receipts_tbl","label": "Receipts Due"},
     "kpi_payables_total":          {"target": "list_expenses_tbl","label": "Expenses Due"},
     "kpi_vendor_payables_due":     {"target": "list_payments",    "label": "Vendor Payables"},
@@ -138,6 +138,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_security_shift":          {"target": "list_gate_logs",   "label": "Completed Shifts"},
     
     # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
+    "kpi_societies_arrear_start_date": {"target": "list_societies",   "label": "Arrear Start Date"},
     "kpi_plan_validity":           {"target": "list_societies",   "label": "Society Plan Validity"},
     "kpi_accounts_count":          {"target": "list_accounts",    "label": "Chart of Accounts"},
     "kpi_apt_charges":             {"target": "list_apt_charges", "label": "Apartment Charges"},

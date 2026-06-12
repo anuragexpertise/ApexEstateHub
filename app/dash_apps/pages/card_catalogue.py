@@ -479,7 +479,17 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════
     # SETTINGS KPIs
     # ══════════════════════════════════════════════════════════════
-    
+    "kpi_societies_arrear_start_date": {
+        "query": "SELECT arrear_start_date AS v FROM societies WHERE id = %s",
+        "params": 1,
+        "format": "date",
+        "icon": "fa-clock",
+        "color": "#34ee45",
+        "title": "Arrear Start Date",
+        "group": "Arrears",
+    },    
+
+
     "kpi_plan_validity": {
         "query": "SELECT plan_validity AS v FROM societies WHERE id = %s",
         "params": 1,
