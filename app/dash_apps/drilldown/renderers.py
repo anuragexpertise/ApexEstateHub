@@ -605,11 +605,8 @@ def render_form_card(card_id: str, title: str, icon: str,
             cam_stop_id  = f"cam-stop-{entity}-{fid}"
             cam_btn_id   = f"cam-btn-{entity}-{fid}"
             prev_img_id  = f"cam-prev-{entity}-{fid}"
-            # Marker used by snapCamCapture() to locate the Dash hidden input
-            # by scanning id attributes that contain this JSON substring.
             hidden_marker = f'"entity": "{entity}", "field": "{fid}"'
- 
-            # ── Shared button style (applied to html.Div acting as button) ──
+  
             _btn_base = {
                 "display":       "inline-flex",
                 "alignItems":    "center",
@@ -622,10 +619,8 @@ def render_form_card(card_id: str, title: str, icon: str,
                 "padding":       "6px 14px",
                 "border":        "none",
             }
- 
-            ctrl = html.Div([
- 
-                # ── Row 1: Upload pill + Camera toggle ──────────────────────
+  
+            ctrl = [
                 html.Div([
                     dcc.Upload(
                         id={"type": "form-field", "entity": entity,
@@ -650,8 +645,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                         },
                         multiple=False, accept="image/*",
                     ),
- 
-                    # Camera toggle — html.Div avoids Dash prop validation
+  
                     html.Div(
                         [html.I(className="fas fa-camera me-1"), "Camera"],
                         id=cam_btn_id,
@@ -660,7 +654,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                             "data-cam-canvas": cam_cvs_id,
                             "data-cam-snap":   cam_snap_id,
                             "data-cam-stop":   cam_stop_id,
-                            "onclick":         "toggleCamCapture(this)",
                         },
                         style={
                             **_btn_base,
@@ -674,8 +667,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                     ),
                 ], style={"display": "flex", "gap": "8px",
                           "marginBottom": "8px"}),
- 
-                # ── Row 2: Live viewfinder (hidden until camera starts) ──────
+  
                 html.Video(
                     id=cam_vid_id,
                     autoPlay=True, muted=True,
@@ -690,8 +682,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                     },
                 ),
                 html.Canvas(id=cam_cvs_id, style={"display": "none"}),
- 
-                # ── Row 3: Snap + Stop (html.Div, not html.Button) ───────────
+  
                 html.Div([
                     html.Div(
                         [html.I(className="fas fa-circle me-1"), "Snap"],
@@ -702,7 +693,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                             "data-cam-stop":      cam_stop_id,
                             "data-preview-id":    prev_img_id,
                             "data-hidden-marker": hidden_marker,
-                            "onclick":            "snapCamCapture(this)",
                         },
                         style={
                             **_btn_base,
@@ -718,7 +708,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                             "data-cam-video": cam_vid_id,
                             "data-cam-btn":   cam_btn_id,
                             "data-cam-snap":  cam_snap_id,
-                            "onclick":        "stopCamCapture(this)",
                         },
                         style={
                             **_btn_base,
@@ -730,22 +719,19 @@ def render_form_card(card_id: str, title: str, icon: str,
                 ], style={"display": "flex", "gap": "6px",
                           "justifyContent": "center",
                           "marginBottom":   "6px"}),
- 
-                # ── Hidden value: receives Upload path OR camera filename ─────
+  
                 dcc.Input(
                     id={"type": "form-field-hidden", "entity": entity,
                         "field": fid},
                     type="hidden", value=pre_val or "",
                 ),
- 
-                # ── dcc.Upload preview (populated by handle_image_upload) ─────
+  
                 html.Div(
                     id={"type": "image-preview", "entity": entity,
                         "field": fid},
                     style={"marginTop": "4px"},
                 ),
- 
-                # ── Camera snap inline preview ────────────────────────────────
+  
                 html.Img(
                     id=prev_img_id,
                     style={
@@ -757,22 +743,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                         "border":       "1px solid #ddd",
                     },
                 ),
- 
-            ])  # end html.Div (ctrl)
-        elif ftype == "account_dropdown_receipt":
-            ctrl = html.Div([
-                dcc.Dropdown(
-                    id={"type": "form-field", "entity": entity, "field": fid},
-                    options=[], value=pre_val,
-                    placeholder="Select income account…",
-                    style={"fontSize": "13px"},
-                ),
-                dcc.Store(
-                    id={"type": "account-filter-store", "entity": entity,
-                        "field": fid},
-                    data={"filter": "Cr", "society_id": society_id},
-                ),
-            ])
+            ]
         elif ftype == "account_dropdown_expense":
             ctrl = html.Div([
                 dcc.Dropdown(
