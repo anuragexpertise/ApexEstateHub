@@ -281,6 +281,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_time VARCHAR(20),
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
+    image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -293,6 +294,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     preferred_time VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'open',
     assigned_to VARCHAR(100),
+    image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

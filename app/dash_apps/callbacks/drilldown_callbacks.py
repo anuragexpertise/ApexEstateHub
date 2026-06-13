@@ -1544,39 +1544,48 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
 def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE events SET title=%s,description=%s,event_date=%s,"
-            "event_time=%s,venue=%s,open_to=%s WHERE id=%s AND society_id=%s",
+            "UPDATE events SET title=%s, description=%s, event_date=%s, "
+            "event_time=%s, venue=%s, open_to=%s, image=%s "
+            "WHERE id=%s AND society_id=%s",
             (d.get("title"), d.get("description"), d.get("event_date"),
-             d.get("event_time"), d.get("venue"), d.get("open_to","all"),
-             pk, sid))
+             d.get("event_time"), d.get("venue"), d.get("open_to", "all"),
+             d.get("image") or None, pk, sid))
         return True, "Event updated", pk
     title = (d.get("title") or "").strip()
     if not title:
         return False, "Title is required", None
-    db._execute(
-        "INSERT INTO events(society_id,title,description,event_date,"
-        "event_time,venue,open_to,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,NOW())",
+    r = db._execute(
+        "INSERT INTO events(society_id, title, description, event_date, "
+        "event_time, venue, open_to, image, created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
         (sid, title, d.get("description"), d.get("event_date"),
-         d.get("event_time"), d.get("venue"), d.get("open_to","all")))
-    return True, f"Event '{title}' created", None
+         d.get("event_time"), d.get("venue"), d.get("open_to", "all"),
+         d.get("image") or None),
+        fetch_one=True)
+    new_id = (r or {}).get("id")
+    return True, f"Event '{title}' created", new_id
  
  
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE concerns SET status=%s,assigned_to=%s "
+            "UPDATE concerns SET status=%s, assigned_to=%s, image=%s "
             "WHERE id=%s AND society_id=%s",
-            (d.get("status","open"), d.get("assigned_to"), pk, sid))
+            (d.get("status", "open"), d.get("assigned_to"),
+             d.get("image") or None, pk, sid))
         return True, "Concern updated", pk
     desc = (d.get("description") or "").strip()
     if not desc:
         return False, "Description is required", None
-    db._execute(
-        "INSERT INTO concerns(society_id,flat_no,concern_type,description,"
-        "preferred_time,status,created_at) VALUES(%s,%s,%s,%s,%s,'open',NOW())",
-        (sid, d.get("flat_no"), d.get("concern_type","other"), desc,
-         d.get("preferred_time","anytime")))
-    return True, "Concern submitted", None
+    r = db._execute(
+        "INSERT INTO concerns(society_id, flat_no, concern_type, description, "
+        "preferred_time, status, image, created_at) "
+        "VALUES(%s,%s,%s,%s,%s,'open',%s,NOW()) RETURNING id",
+        (sid, d.get("flat_no"), d.get("concern_type", "other"), desc,
+         d.get("preferred_time", "anytime"), d.get("image") or None),
+        fetch_one=True)
+    new_id = (r or {}).get("id")
+    return True, "Concern submitted", new_id
  
  
 def _save_transaction(db, d, sid, transaction_type):
