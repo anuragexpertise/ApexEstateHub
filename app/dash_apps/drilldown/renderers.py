@@ -420,18 +420,24 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         auth_data: dict | None = None) -> html.Div:
     auth_data  = auth_data or {}
     user_role  = auth_data.get("role", "guest")
-    society_id = auth_data.get("society_id")
+    society_id = auth_data.get("society_id")   # ← already exists, just use it below
     allowed    = _perms_for(user_role, entity)
 
     record_dict = (record.to_dict(include_calculated=True)
                    if hasattr(record, "to_dict") else record)
     pk_val = record_dict.get("id", "")
 
+    # ── Resolve the society_id used for asset URL construction ───────────
     if entity == "society":
         img_society_id = pk_val
+        img_entity_pk  = pk_val
     else:
-        img_society_id = (record_dict.get("_image_society_id")
-                          or record_dict.get("society_id"))
+        img_society_id = (
+            record_dict.get("society_id")
+            or record_dict.get("_image_society_id")
+            or society_id                        # ← key fix: use auth society_id
+        )
+        img_entity_pk = pk_val
 
     # ── Split fields into image fields and text fields ───────────────────
     image_fields = [f for f in fields if f.get("type") == "image"]
@@ -441,9 +447,17 @@ def render_profile_card(card_id: str, title: str, icon: str,
     image_section = []
     for f in image_fields:
         image_path = record_dict.get(f["field"])
-        if not image_path:
+        print(f"[IMG DEBUG] field={f['field']} value={image_path!r} "
+              f"entity={entity} pk={img_entity_pk} sid={img_society_id}")  # remove after fix confirmed
+        if not image_path or str(image_path).strip() in ("", "None"):
             continue
-        full_url = get_image_url(image_path, img_society_id, entity, pk_val)
+        full_url = get_image_url(
+            str(image_path).strip(),
+            img_society_id,
+            entity,
+            img_entity_pk,          # ← was pk_val but now named consistently
+        )
+        print(f"[IMG DEBUG] resolved URL={full_url!r}")  # remove after fix confirmed
         if not full_url:
             continue
         size = f.get("size", "medium")

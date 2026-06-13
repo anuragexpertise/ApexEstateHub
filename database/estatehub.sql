@@ -1280,6 +1280,7 @@ RETURNS TABLE (
     venue       VARCHAR(200),
     open_to     VARCHAR(20),
     created_at  TIMESTAMP,
+    image       TEXT,
     subtitle    TEXT
 )
 LANGUAGE SQL STABLE AS $$
@@ -1293,6 +1294,7 @@ LANGUAGE SQL STABLE AS $$
         venue::VARCHAR(200),
         open_to::VARCHAR(20),
         created_at::TIMESTAMP,
+        image::TEXT,
         (event_date::TEXT || ' ' || COALESCE(event_time, ''))::TEXT AS subtitle
     FROM events
     WHERE id = p_event_id;
@@ -1346,17 +1348,18 @@ $$;
 
 CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT)
 RETURNS TABLE (
-    id            INT,
-    society_id    INT,
-    flat_no       VARCHAR(20),
-    concern_type  VARCHAR(50),
-    description   TEXT,
-    status        VARCHAR(20),
-    assigned_to   VARCHAR(100),
+    id             INT,
+    society_id     INT,
+    flat_no        VARCHAR(20),
+    concern_type   VARCHAR(50),
+    description    TEXT,
+    status         VARCHAR(20),
+    assigned_to    VARCHAR(100),
     preferred_time VARCHAR(20),
-    days_open     BIGINT,
-    created_at    TIMESTAMP,
-    subtitle      TEXT
+    days_open      BIGINT,
+    created_at     TIMESTAMP,
+    image          TEXT,
+    subtitle       TEXT
 )
 LANGUAGE SQL STABLE AS $$
     SELECT
@@ -1368,8 +1371,9 @@ LANGUAGE SQL STABLE AS $$
         status::VARCHAR(20),
         assigned_to::VARCHAR(100),
         preferred_time::VARCHAR(20),
-        EXTRACT(DAY FROM AGE(CURRENT_DATE, created_at))::BIGINT,
+        EXTRACT(DAY FROM AGE(CURRENT_DATE, created_at))::BIGINT AS days_open,
         created_at::TIMESTAMP,
+        image::TEXT,
         ('Flat ' || flat_no || ' - ' || concern_type)::TEXT AS subtitle
     FROM concerns
     WHERE id = p_concern_id;
