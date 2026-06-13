@@ -433,32 +433,56 @@ def render_profile_card(card_id: str, title: str, icon: str,
         img_society_id = (record_dict.get("_image_society_id")
                           or record_dict.get("society_id"))
 
-    # ── Fields ──────────────────────────────────────────────────────────────
-    field_rows = []
-    for f in fields:
-        field_type = f.get("type", "text")
-        if field_type == "image":
-            image_path = record_dict.get(f["field"])
-            if image_path:
-                full_url = get_image_url(image_path, img_society_id,
-                                         entity, pk_val)
-                field_rows.append(html.Div([
-                    html.Div([
-                        html.I(className="fas fa-image me-2",
-                               style={"color": "#aaa", "width": "14px"}),
-                        html.Span(f["label"], style={"color": "#7d8ea3",
-                                                     "fontSize": "11px",
-                                                     "fontWeight": "600"}),
-                    ], style={"marginBottom": "8px"}),
-                    html.Img(src=full_url, style={
-                        "maxWidth": "300px", "maxHeight": "200px",
-                        "borderRadius": "8px", "border": "1px solid #ddd",
-                        "objectFit": "contain", "background": "#fff",
-                        "padding": "4px", "paddingLeft": "22px",
-                    }),
-                ], style={"marginBottom": "14px"}))
-            continue
+    # ── Split fields into image fields and text fields ───────────────────
+    image_fields = [f for f in fields if f.get("type") == "image"]
+    text_fields  = [f for f in fields if f.get("type") != "image"]
 
+    # ── Image gallery (full-width, above the 2-col grid) ────────────────
+    image_section = []
+    for f in image_fields:
+        image_path = record_dict.get(f["field"])
+        if not image_path:
+            continue
+        full_url = get_image_url(image_path, img_society_id, entity, pk_val)
+        if not full_url:
+            continue
+        size = f.get("size", "medium")
+        max_h = {"small": "80px", "medium": "160px", "large": "260px"}.get(size, "160px")
+        image_section.append(
+            html.Div([
+                html.Div([
+                    html.I(className=f.get("icon", "fas fa-image"),
+                           style={"color": "#aaa", "fontSize": "10px",
+                                  "marginRight": "5px"}),
+                    html.Span(f["label"],
+                              style={"color": "#7d8ea3", "fontSize": "10px",
+                                     "fontWeight": "600",
+                                     "textTransform": "uppercase"}),
+                ], style={"marginBottom": "5px"}),
+                html.Img(
+                    src=full_url,
+                    style={
+                        "maxWidth": "100%",
+                        "maxHeight": max_h,
+                        "borderRadius": "8px",
+                        "border": "1px solid rgba(0,0,0,0.08)",
+                        "objectFit": "contain",
+                        "background": "#f8f9fa",
+                        "padding": "4px",
+                        "display": "block",
+                    },
+                ),
+            ], style={
+                "marginBottom": "12px",
+                "padding": "10px",
+                "background": "rgba(248,251,255,0.7)",
+                "borderRadius": "10px",
+                "border": "1px solid rgba(200,215,235,0.4)",
+            })
+        )
+
+    # ── Text fields rendered as 2-column grid cells ──────────────────────
+    def _field_cell(f: dict) -> html.Div:
         val = record_dict.get(f["field"])
         if val is None:
             val = "—"
@@ -473,28 +497,35 @@ def render_profile_card(card_id: str, title: str, icon: str,
         else:
             val = str(val)
 
-        field_rows.append(html.Div([
+        return html.Div([
             html.Div([
                 html.I(className=f.get("icon", "fas fa-circle-dot"),
-                       style={"color": color, "width": "14px",
-                              "fontSize": "10px"}),
+                       style={"color": color, "fontSize": "9px",
+                              "marginRight": "5px"}),
                 html.Span(f["label"],
-                          style={"color": "#7d8ea3", "fontSize": "11px",
-                                 "fontWeight": "600", "marginLeft": "6px"}),
-            ], style={"marginBottom": "2px"}),
-            html.Div(val, style={"fontSize": "14px", "fontWeight": "500",
-                                 "color": "#15304f", "paddingLeft": "22px"}),
-        ], style={"marginBottom": "14px"}))
+                          style={"color": "#7d8ea3", "fontSize": "10px",
+                                 "fontWeight": "600",
+                                 "textTransform": "uppercase"}),
+            ], style={"marginBottom": "3px"}),
+            html.Div(val, style={
+                "fontSize": "13px", "fontWeight": "500", "color": "#15304f",
+                "wordBreak": "break-word",
+            }),
+        ], style={
+            "padding": "10px 12px",
+            "background": "rgba(248,251,255,0.6)",
+            "borderRadius": "10px",
+            "border": "1px solid rgba(200,215,235,0.35)",
+        })
 
-    # ── Action buttons filtered by role ─────────────────────────────────────
+    text_cells = [_field_cell(f) for f in text_fields]
+
+    # ── Action buttons filtered by role ─────────────────────────────────
     action_btns = []
     for act in (actions or []):
-        # Skip edit/delete actions for roles that don't have that permission
         act_id = act.get("action_id", "")
-        if act_id == "edit" and "edit" not in allowed:
-            continue
-        if act_id == "delete" and "delete" not in allowed:
-            continue
+        if act_id == "edit"   and "edit"   not in allowed: continue
+        if act_id == "delete" and "delete" not in allowed: continue
         action_btns.append(dbc.Button(
             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
              act["label"]],
@@ -533,12 +564,30 @@ def render_profile_card(card_id: str, title: str, icon: str,
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         dbc.CardBody([
-            html.Div(field_rows),
-            html.Hr(style={"margin": "8px 0", "opacity": "0.3"})
-            if action_btns else None,
-            html.Div(action_btns,
-                     style={"display": "flex", "flexWrap": "wrap"}),
-        ], style={"padding": "16px", "maxHeight": "600px",
+
+            # ── Images (full-width, stacked) ─────────────────────────
+            html.Div(image_section) if image_section else None,
+
+            # ── Text fields in 2-column responsive grid ──────────────
+            html.Div(
+                text_cells,
+                style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(2, 1fr)",
+                    "gap": "10px",
+                    "marginBottom": "14px",
+                },
+            ) if text_cells else None,
+
+            # ── Action buttons ────────────────────────────────────────
+            html.Div([
+                html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+                html.Div(action_btns,
+                         style={"display": "flex", "flexWrap": "wrap",
+                                "gap": "6px"}),
+            ]) if action_btns else None,
+
+        ], style={"padding": "16px", "maxHeight": "620px",
                   "overflowY": "auto"}),
     ], style={
         "borderRadius": "16px", "border": f"1px solid {color}22",
@@ -546,7 +595,6 @@ def render_profile_card(card_id: str, title: str, icon: str,
         "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
         "backdropFilter": "blur(12px)", "overflow": "hidden",
     })
-
 # ════════════════════════════════════════════════════════════════════════════
 # FORM CARD RENDERER
 # ════════════════════════════════════════════════════════════════════════════
