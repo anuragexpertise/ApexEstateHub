@@ -1125,8 +1125,10 @@ def register_drilldown_callbacks(app):
             )
  
         # ── 8. Move temp images to their permanent entity folder ──────────────
-        if new_id and "edit" not in card_id and sid:
-            _move_temp_images(entity_singular, new_id, sid, merged)
+        if sid and merged.get("image"):
+            entity_id = new_id if new_id else merged.get("id")
+            if entity_id:
+                _move_temp_images(entity_singular, entity_id, sid, merged)
  
         # ── 9. Navigate back one level and trigger list refresh ───────────────
         hide_kpis = False
