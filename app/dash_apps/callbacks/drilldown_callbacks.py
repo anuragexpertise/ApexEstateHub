@@ -248,7 +248,7 @@ ENTITY_META: dict = {
             "new": [
                 {"id": "title",       "label": "Title",       "type": "text",     "required": True},
                 {"id": "event_date",  "label": "Event Date",  "type": "date",     "required": True},
-                {"id": "event_time",  "label": "Time",        "type": "text"},
+                {"id": "event_time",  "label": "Time",        "type": "time"},
                 {"id": "venue",       "label": "Venue",       "type": "text"},
                 {"id": "open_to",     "label": "Open To",     "type": "select",   "options": ["all", "apartment", "vendor", "security"]},
                 {"id": "description", "label": "Description", "type": "textarea"},
@@ -257,7 +257,7 @@ ENTITY_META: dict = {
             "edit": [
                 {"id": "title",       "label": "Title",       "type": "text"},
                 {"id": "event_date",  "label": "Event Date",  "type": "date"},
-                {"id": "event_time",  "label": "Time",        "type": "text"},
+                {"id": "event_time",  "label": "Time",        "type": "time"},
                 {"id": "venue",       "label": "Venue",       "type": "text"},
                 {"id": "open_to",     "label": "Open To",     "type": "select",   "options": ["all", "apartment", "vendor", "security"]},
                 {"id": "description", "label": "Description", "type": "textarea"},

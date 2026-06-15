@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
+from database.db_manager import db
 
 from app.models import (
     Apartment, Vendor, SecurityStaff, Society, Account,
@@ -647,11 +648,22 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
         elif ftype == "date":
-            ctrl = dcc.DatePickerSingle(
+            from datetime import datetime as _dt
+            ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
-                date=str(pre_val) if pre_val else None,
-                style={"width": "100%"},
+                type="date",
+                value=str(pre_val) if pre_val else _dt.today().strftime("%Y-%m-%d"),
+                style={"fontSize": "13px", "borderRadius": "10px"},
             )
+
+        elif ftype == "time":
+            ctrl = dbc.Input(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                type="time",
+                value=str(pre_val) if pre_val else "",
+                style={"fontSize": "13px", "borderRadius": "10px"},
+            )
+
         elif ftype == "readonly":
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
@@ -806,20 +818,41 @@ def render_form_card(card_id: str, title: str, icon: str,
                     },
                 ),
             ]
-        elif ftype == "account_dropdown_expense":
-            ctrl = html.Div([
-                dcc.Dropdown(
-                    id={"type": "form-field", "entity": entity, "field": fid},
-                    options=[], value=pre_val,
-                    placeholder="Select expense account…",
-                    style={"fontSize": "13px"},
-                ),
-                dcc.Store(
-                    id={"type": "account-filter-store", "entity": entity,
-                        "field": fid},
-                    data={"filter": "Dr", "society_id": society_id},
-                ),
-            ])
+        elif ftype in ("account_dropdown_receipt", "account_dropdown_expense"):
+            # Cr accounts for receipts, Dr accounts for expenses
+            _drcr = "Cr" if ftype == "account_dropdown_receipt" else "Dr"
+            _ph   = "Select income account…" if _drcr == "Cr" else "Select expense account…"
+            _acc_opts = []
+            if society_id:
+                try:
+                    _rows = db._execute(
+                        "SELECT id, COALESCE(tab_name,'') AS tab_name, name "
+                        "FROM accounts "
+                        "WHERE society_id=%s AND (drcr_account=%s OR drcr_account IS NULL) "
+                        "ORDER BY tab_name, name",
+                        (society_id, _drcr),
+                        fetch_all=True,
+                    ) or []
+                    _acc_opts = [
+                        {
+                            "label": f"{r['id']} — {r['tab_name']} — {r['name']}",
+                            "value": r["id"],
+                        }
+                        for r in _rows
+                    ]
+                except Exception as _e:
+                    print(f"⚠️  account dropdown load error: {_e}")
+            # Resolve pre_val: could be an int id already, or None
+            _pre_acc = int(pre_val) if pre_val not in (None, "", "None") else None
+            ctrl = dcc.Dropdown(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                options=_acc_opts,
+                value=_pre_acc,
+                placeholder=_ph,
+                clearable=False,
+                style={"fontSize": "13px"},
+                optionHeight=40,
+            )
         else:
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
