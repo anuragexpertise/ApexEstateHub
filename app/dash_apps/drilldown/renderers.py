@@ -697,7 +697,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             ctrl = [
                 html.Div([
                     dcc.Upload(
-                        id={"type": "form-field", "entity": entity,
+                        id={"type": "form-upload", "entity": entity,
                             "field": fid},
                         children=html.Div([
                             html.I(className="fas fa-cloud-upload-alt me-1"),

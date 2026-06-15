@@ -678,10 +678,10 @@ def register_drilldown_callbacks(app):
     @app.callback(
         Output({"type": "image-preview",      "entity": MATCH, "field": MATCH}, "children"),
         Output({"type": "form-field-hidden",   "entity": MATCH, "field": MATCH}, "value"),
-        Input( {"type": "form-field",          "entity": MATCH, "field": MATCH}, "contents"),
-        State( {"type": "form-field",          "entity": MATCH, "field": MATCH}, "filename"),
+        Input( {"type": "form-upload",         "entity": MATCH, "field": MATCH}, "contents"),
+        State( {"type": "form-upload",         "entity": MATCH, "field": MATCH}, "filename"),
         State("auth-store", "data"),
-        State({"type": "form-field",           "entity": MATCH, "field": MATCH}, "id"),
+        State({"type": "form-upload",          "entity": MATCH, "field": MATCH}, "id"),
         State({"type": "form-entity-pk",       "entity": MATCH},               "value"),
         prevent_initial_call=True,
     )
@@ -1545,13 +1545,18 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
  
 def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
+        _img = d.get("image") or None
+        _img_clause = ", image=%s" if _img else ""
+        _img_param  = (d.get("title"), d.get("description"), d.get("event_date"),
+                       d.get("event_time"), d.get("venue"), d.get("open_to", "all"))
+        if _img:
+            _img_param += (_img,)
+        _img_param += (pk, sid)
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
-            "event_time=%s, venue=%s, open_to=%s, image=%s "
+            f"event_time=%s, venue=%s, open_to=%s{_img_clause} "
             "WHERE id=%s AND society_id=%s",
-            (d.get("title"), d.get("description"), d.get("event_date"),
-             d.get("event_time"), d.get("venue"), d.get("open_to", "all"),
-             d.get("image") or None, pk, sid))
+            _img_param)
         return True, "Event updated", pk
     title = (d.get("title") or "").strip()
     if not title:
@@ -1571,10 +1576,13 @@ def _save_event(db, d, sid, is_edit, pk):
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
-            "UPDATE concerns SET status=%s, assigned_to=%s, image=%s "
-            "WHERE id=%s AND society_id=%s",
-            (d.get("status", "open"), d.get("assigned_to"),
-             d.get("image") or None, pk, sid))
+            "UPDATE concerns SET status=%s, assigned_to=%s"
+            + (", image=%s" if d.get("image") else "") +
+            " WHERE id=%s AND society_id=%s",
+            ((d.get("status", "open"), d.get("assigned_to"), d.get("image"), pk, sid)
+             if d.get("image") else
+             (d.get("status", "open"), d.get("assigned_to"), pk, sid)),
+        )
         return True, "Concern updated", pk
     desc = (d.get("description") or "").strip()
     if not desc:
