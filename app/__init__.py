@@ -44,6 +44,11 @@ def create_app(config_name: str | None = None) -> Flask:
     # Asset dirs
     assets_path = Path(__file__).parent / "assets"
     _ensure_asset_dirs(assets_path)
+    from flask import send_from_directory
+
+    @app.route("/assets/<path:filename>")
+    def serve_asset(filename):
+        return send_from_directory(str(assets_path), filename)
 
     # Flask-Login
     login_manager.login_view = "auth.login"
