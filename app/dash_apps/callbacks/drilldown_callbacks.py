@@ -346,7 +346,7 @@ ENTITY_META: dict = {
         "list_columns": [
             {"name": "Date",        "field": "trx_date", "sortable": True},
             {"name": "Account",      "field": "account_id", "sortable": True},
-            {"name": "Flat/Vendor",  "field": "entity_name", "sortable": True},
+            {"name": "Flat/Vendor",  "field": "entity_id", "sortable": True},
             {"name": "Particulars", "field": "acc_particulars", "sortable": True},
             {"name": "Amount (₹)",  "field": "amount", "sortable": True},
             {"name": "Mode",        "field": "mode", "sortable": True},
@@ -358,7 +358,7 @@ ENTITY_META: dict = {
         "profile_fields": [
             {"label": "Date",        "field": "trx_date",        "icon": "fa-calendar"},
             {"label": "Account",     "field": "account_id",     "icon": "fa-book"},
-            {"labe" : "Flat/Vendor", "field": "entity_name",    "icon": "fa-users"},
+            {"labe" : "Flat/Vendor", "field": "entity_id",      "icon": "fa-users"},
             {"label": "Particulars", "field": "acc_particulars", "icon": "fa-align-left"},
             {"label": "Amount (₹)", "field": "amount",          "icon": "fa-rupee-sign"},
             {"label": "Mode",       "field": "mode",            "icon": "fa-credit-card"},
@@ -1387,23 +1387,11 @@ def _build_receipt_prefill(
     # ── Find the right income account ────────────────────────────────────────
     acc = None
     if society_id:
-        # 1st priority: account literally named 'Society Charges'
-        acc = _get_account_by_name(society_id, "Society Charges")
-        if not acc:
-            # 2nd priority: any Cr (income) account
-            try:
-                acc = db._execute(
-                    "SELECT id, name FROM accounts "
-                    "WHERE society_id=%s AND drcr_account='Cr' "
-                    "ORDER BY id LIMIT 1",
-                    (society_id,), fetch_one=True,
-                )
-            except Exception:
-                acc = None
- 
+        acc = _get_account_by_name(society_id, "Society Charge")
+
     if acc:
         p["acc_id"] = acc["id"]
- 
+    
     # ── Particulars and entity link ───────────────────────────────────────────
     if entity == "apartment":
         flat = record.get("flat_number", "")
