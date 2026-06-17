@@ -49,12 +49,12 @@ echo "✅ Schema imported successfully"
 # ─────────────────────────────────────────────
 # STEP 4 — Verify schema + tables
 # ─────────────────────────────────────────────
-echo "🔍 Verifying tables in schema 'myapp'..."
+echo "🔍 Verifying tables in schema 'public'..."
 
 psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
 SELECT table_schema, table_name
 FROM information_schema.tables
-WHERE table_schema = 'myapp'
+WHERE table_schema = 'public'
 ORDER BY table_name;
 "
 
@@ -77,7 +77,7 @@ EOF
 )
 
     psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
-    UPDATE myapp.users
+    UPDATE public.users
     SET password_hash = '$HASH'
     WHERE email = 'master@estatehub.com';
     "

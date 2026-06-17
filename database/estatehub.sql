@@ -2350,3 +2350,712 @@ BEGIN
       AND scf.sec_id IS NOT NULL;
 END;
 $$ LANGUAGE plpgsql;
+-- ============================================================
+-- ESTATEHUB — ADDITIONS & REPLACEMENTS
+-- Run after estatehub.sql
+-- ============================================================
+
+-- ════════════════════════════════════════════════════════════════
+-- 1. fn_cashbook_paired
+--    Two-sided ledger: receipts (Cr) left, expenses (Dr) right.
+--    Rows are paired positionally within each date.
+--    Odd-side rows show blanks (empty string) on the missing side.
+--    date / totals / running balance always present on every row.
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_cashbook_paired CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_cashbook_paired(
+    p_society_id  INT,
+    p_start_date  DATE    DEFAULT NULL,
+    p_end_date    DATE    DEFAULT NULL,
+    p_search      TEXT    DEFAULT NULL
+)
+RETURNS TABLE (
+    row_date          DATE,
+    -- RECEIPT side (Cr)
+    rc_id             INT,
+    rc_trx_date       DATE,
+    rc_account_name   TEXT,
+    rc_account_group  TEXT,
+    rc_entity_name    TEXT,
+    rc_particulars    TEXT,
+    rc_mode           TEXT,
+    rc_cheque_no      TEXT,
+    rc_amount         NUMERIC(15,2),
+    -- PAYMENT side (Dr)
+    pc_id             INT,
+    pc_trx_date       DATE,
+    pc_account_name   TEXT,
+    pc_account_group  TEXT,
+    pc_entity_name    TEXT,
+    pc_particulars    TEXT,
+    pc_mode           TEXT,
+    pc_cheque_no      TEXT,
+    pc_amount         NUMERIC(15,2),
+    -- Totals & balance (always filled)
+    day_rc_total      NUMERIC(15,2),
+    day_pc_total      NUMERIC(15,2),
+    running_balance   NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_opening_balance NUMERIC(15,2);
+BEGIN
+    -- Opening balance from all accounts BF
+    SELECT COALESCE(SUM(
+        CASE WHEN drcr_bf = 'Cr' THEN bf_amount ELSE -bf_amount END
+    ), 0)
+    INTO v_opening_balance
+    FROM accounts
+    WHERE society_id = p_society_id;
+
+    RETURN QUERY
+    WITH
+    -- All credit (receipt) transactions
+    cr_rows AS (
+        SELECT
+            t.id::INT                                        AS rc_id,
+            t.trx_date::DATE                                 AS rc_date,
+            a.name::TEXT                                     AS rc_account_name,
+            COALESCE(a.tab_name, '')::TEXT                   AS rc_account_group,
+            -- resolve entity name via acc drcr_account hint
+            COALESCE(
+                ap.flat_number || COALESCE(' (' || ap.owner_name || ')', ''),
+                v.name,
+                s.name,
+                ''
+            )::TEXT                                          AS rc_entity_name,
+            COALESCE(t.acc_particulars, '')::TEXT            AS rc_particulars,
+            COALESCE(t.mode, '')::TEXT                       AS rc_mode,
+            COALESCE(t.payment_gateway_ID, '')::TEXT         AS rc_cheque_no,
+            t.amount::NUMERIC(15,2)                          AS rc_amount,
+            ROW_NUMBER() OVER (
+                PARTITION BY t.trx_date ORDER BY t.id
+            )                                                AS rn
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Cr'
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
+        LEFT JOIN vendors    v  ON v.id  = t.entity_id AND v.society_id  = p_society_id
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        WHERE t.society_id  = p_society_id
+          AND t.status      = 'paid'
+          AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
+          AND (p_end_date   IS NULL OR t.trx_date <= p_end_date)
+          AND (p_search IS NULL
+               OR a.name           ILIKE '%' || p_search || '%'
+               OR t.acc_particulars ILIKE '%' || p_search || '%')
+    ),
+    -- All debit (payment) transactions
+    dr_rows AS (
+        SELECT
+            t.id::INT                                        AS pc_id,
+            t.trx_date::DATE                                 AS pc_date,
+            a.name::TEXT                                     AS pc_account_name,
+            COALESCE(a.tab_name, '')::TEXT                   AS pc_account_group,
+            COALESCE(
+                v.name,
+                s.name,
+                ap.flat_number,
+                ''
+            )::TEXT                                          AS pc_entity_name,
+            COALESCE(t.acc_particulars, '')::TEXT            AS pc_particulars,
+            COALESCE(t.mode, '')::TEXT                       AS pc_mode,
+            COALESCE(t.payment_gateway_ID, '')::TEXT         AS pc_cheque_no,
+            t.amount::NUMERIC(15,2)                          AS pc_amount,
+            ROW_NUMBER() OVER (
+                PARTITION BY t.trx_date ORDER BY t.id
+            )                                                AS rn
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Dr'
+        LEFT JOIN vendors    v  ON v.id  = t.entity_id AND v.society_id  = p_society_id
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        LEFT JOIN apartments ap ON ap.id  = t.entity_id AND ap.society_id = p_society_id
+        WHERE t.society_id  = p_society_id
+          AND t.status      = 'paid'
+          AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
+          AND (p_end_date   IS NULL OR t.trx_date <= p_end_date)
+          AND (p_search IS NULL
+               OR a.name           ILIKE '%' || p_search || '%'
+               OR t.acc_particulars ILIKE '%' || p_search || '%')
+    ),
+    -- Date-level totals
+    date_totals AS (
+        SELECT
+            d::DATE                                          AS dt,
+            COALESCE(SUM(cr.rc_amount), 0)::NUMERIC(15,2)   AS day_rc_total,
+            COALESCE(SUM(dr.pc_amount), 0)::NUMERIC(15,2)   AS day_pc_total
+        FROM (
+            SELECT DISTINCT rc_date AS d FROM cr_rows
+            UNION
+            SELECT DISTINCT pc_date FROM dr_rows
+        ) dates
+        LEFT JOIN cr_rows cr ON cr.rc_date = d::DATE
+        LEFT JOIN dr_rows dr ON dr.pc_date = d::DATE
+        GROUP BY d
+    ),
+    -- All distinct dates in order
+    all_dates AS (
+        SELECT dt, day_rc_total, day_pc_total,
+               SUM(day_rc_total - day_pc_total) OVER (
+                   ORDER BY dt ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+               ) + v_opening_balance AS running_balance
+        FROM date_totals
+        ORDER BY dt
+    ),
+    -- Max row number per date (determines how many paired rows per date)
+    max_rn AS (
+        SELECT
+            COALESCE(cr.rc_date, dr.pc_date) AS dt,
+            GREATEST(
+                MAX(cr.rn),
+                MAX(dr.rn)
+            ) AS max_rows
+        FROM cr_rows cr
+        FULL OUTER JOIN dr_rows dr ON dr.pc_date = cr.rc_date AND dr.rn = cr.rn
+        GROUP BY COALESCE(cr.rc_date, dr.pc_date)
+    ),
+    -- Generate one row per date × row_number pair
+    row_slots AS (
+        SELECT m.dt, gs.rn
+        FROM max_rn m
+        CROSS JOIN LATERAL generate_series(1, m.max_rows) AS gs(rn)
+    )
+    SELECT
+        rs.dt::DATE                                          AS row_date,
+        -- Receipt side
+        cr.rc_id::INT,
+        cr.rc_date::DATE,
+        COALESCE(cr.rc_account_name, '')::TEXT,
+        COALESCE(cr.rc_account_group, '')::TEXT,
+        COALESCE(cr.rc_entity_name,  '')::TEXT,
+        COALESCE(cr.rc_particulars,  '')::TEXT,
+        COALESCE(cr.rc_mode,         '')::TEXT,
+        COALESCE(cr.rc_cheque_no,    '')::TEXT,
+        COALESCE(cr.rc_amount, 0)::NUMERIC(15,2),
+        -- Payment side
+        dr.pc_id::INT,
+        dr.pc_date::DATE,
+        COALESCE(dr.pc_account_name, '')::TEXT,
+        COALESCE(dr.pc_account_group,'')::TEXT,
+        COALESCE(dr.pc_entity_name,  '')::TEXT,
+        COALESCE(dr.pc_particulars,  '')::TEXT,
+        COALESCE(dr.pc_mode,         '')::TEXT,
+        COALESCE(dr.pc_cheque_no,    '')::TEXT,
+        COALESCE(dr.pc_amount, 0)::NUMERIC(15,2),
+        -- Totals & balance
+        ad.day_rc_total::NUMERIC(15,2),
+        ad.day_pc_total::NUMERIC(15,2),
+        ad.running_balance::NUMERIC(15,2)
+    FROM row_slots rs
+    JOIN all_dates ad ON ad.dt = rs.dt
+    LEFT JOIN cr_rows cr ON cr.rc_date = rs.dt AND cr.rn = rs.rn
+    LEFT JOIN dr_rows dr ON dr.pc_date = rs.dt AND dr.rn = rs.rn
+    ORDER BY rs.dt, rs.rn;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 2. fn_gate_logs_named
+--    Gate access with human-readable entity name
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_gate_logs_named CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_gate_logs_named(
+    p_society_id  INT,
+    p_search      TEXT DEFAULT NULL,
+    p_date        DATE DEFAULT NULL
+)
+RETURNS TABLE (
+    id           INT,
+    society_id   INT,
+    role         VARCHAR(1),
+    entity_id    INT,
+    entity_name  TEXT,
+    time_in      TIMESTAMP,
+    time_out     TIMESTAMP,
+    duration_min INT
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        g.id::INT,
+        g.society_id::INT,
+        g.role::VARCHAR(1),
+        g.entity_id::INT,
+        CASE
+            WHEN g.role = 'a' THEN
+                COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
+            WHEN g.role = 'v' THEN
+                COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), 'Vendor #'||g.entity_id::TEXT)
+            WHEN g.role = 's' THEN
+                COALESCE(s.name || COALESCE(' (' || s.shift || ')',''), 'Security #'||g.entity_id::TEXT)
+            ELSE 'Unknown #'||g.entity_id::TEXT
+        END::TEXT                                               AS entity_name,
+        g.time_in::TIMESTAMP,
+        g.time_out::TIMESTAMP,
+        CASE
+            WHEN g.time_out IS NOT NULL
+            THEN EXTRACT(EPOCH FROM (g.time_out - g.time_in))::INT / 60
+            ELSE NULL
+        END::INT                                                AS duration_min
+    FROM gate_access g
+    LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'a'
+    LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'v'
+    LEFT JOIN security_staff s ON s.id = g.entity_id AND g.role = 's'
+    WHERE g.society_id = p_society_id
+      AND (p_date   IS NULL OR g.time_in::DATE = p_date)
+      AND (p_search IS NULL
+           OR CASE
+                WHEN g.role = 'a' THEN ap.flat_number || ' ' || COALESCE(ap.owner_name,'')
+                WHEN g.role = 'v' THEN v.name
+                WHEN g.role = 's' THEN s.name
+                ELSE ''
+              END ILIKE '%' || p_search || '%')
+    ORDER BY g.time_in DESC;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 3. fn_receipts_list  (queries receipts table, not transactions)
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_receipts_list CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_receipts_list(
+    p_society_id  INT,
+    p_search      TEXT    DEFAULT NULL,
+    p_entity_id   INT     DEFAULT NULL,
+    p_entity_type TEXT    DEFAULT NULL
+)
+RETURNS TABLE (
+    id            INT,
+    society_id    INT,
+    user_id       INT,
+    entity_id     INT,
+    entity_type   VARCHAR(20),
+    entity_name   TEXT,
+    receipt_date  DATE,
+    acc_id        INT,
+    account_name  TEXT,
+    account_group TEXT,
+    particulars   TEXT,
+    amount        NUMERIC(10,2),
+    mode          VARCHAR(20),
+    cheque_no     VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status        VARCHAR(20),
+    confirmed_by  INT,
+    confirmed_at  TIMESTAMP,
+    created_at    TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        r.id::INT,
+        r.society_id::INT,
+        r.user_id::INT,
+        r.entity_id::INT,
+        r.entity_type::VARCHAR(20),
+        CASE
+            WHEN r.entity_type = 'apartment'
+                THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
+            WHEN r.entity_type = 'vendor'
+                THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
+            WHEN r.entity_type = 'security'
+                THEN COALESCE(s.name, '')
+            ELSE COALESCE('Other #' || r.entity_id::TEXT, '')
+        END::TEXT                                   AS entity_name,
+        r.receipt_date::DATE,
+        r.acc_id::INT,
+        COALESCE(a.name, '')::TEXT                  AS account_name,
+        COALESCE(a.tab_name, '')::TEXT              AS account_group,
+        r.particulars::TEXT,
+        r.amount::NUMERIC(10,2),
+        r.mode::VARCHAR(20),
+        COALESCE(r.cheque_no, '')::VARCHAR(50),
+        COALESCE(r.transaction_id, '')::VARCHAR(255),
+        r.status::VARCHAR(20),
+        r.confirmed_by::INT,
+        r.confirmed_at::TIMESTAMP,
+        r.created_at::TIMESTAMP
+    FROM receipts r
+    LEFT JOIN accounts      a  ON a.id  = r.acc_id
+    LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.entity_type = 'apartment'
+    LEFT JOIN vendors       v  ON  v.id = r.entity_id AND r.entity_type = 'vendor'
+    LEFT JOIN security_staff s ON  s.id = r.entity_id AND r.entity_type = 'security'
+    WHERE r.society_id = p_society_id
+      AND (p_entity_id   IS NULL OR r.entity_id   = p_entity_id)
+      AND (p_entity_type IS NULL OR r.entity_type = p_entity_type)
+      AND (p_search IS NULL
+           OR r.particulars ILIKE '%' || p_search || '%'
+           OR a.name        ILIKE '%' || p_search || '%')
+    ORDER BY r.receipt_date DESC, r.id DESC;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 4. fn_expenses_list  (queries expenses table, not transactions)
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_expenses_list CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_expenses_list(
+    p_society_id  INT,
+    p_search      TEXT    DEFAULT NULL,
+    p_entity_id   INT     DEFAULT NULL,
+    p_entity_type TEXT    DEFAULT NULL
+)
+RETURNS TABLE (
+    id            INT,
+    society_id    INT,
+    user_id       INT,
+    entity_id     INT,
+    entity_type   VARCHAR(20),
+    entity_name   TEXT,
+    expense_date  DATE,
+    acc_id        INT,
+    account_name  TEXT,
+    account_group TEXT,
+    particulars   TEXT,
+    amount        NUMERIC(10,2),
+    mode          VARCHAR(20),
+    cheque_no     VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status        VARCHAR(20),
+    confirmed_by  INT,
+    confirmed_at  TIMESTAMP,
+    created_at    TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        e.id::INT,
+        e.society_id::INT,
+        e.user_id::INT,
+        e.entity_id::INT,
+        e.entity_type::VARCHAR(20),
+        CASE
+            WHEN e.entity_type = 'vendor'
+                THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
+            WHEN e.entity_type = 'security'
+                THEN COALESCE(s.name || COALESCE(' (' || s.shift || ')',''), '')
+            WHEN e.entity_type = 'assets'
+                THEN COALESCE('Asset #' || e.entity_id::TEXT, '')
+            ELSE COALESCE('Other', '')
+        END::TEXT                                   AS entity_name,
+        e.expense_date::DATE,
+        e.acc_id::INT,
+        COALESCE(a.name, '')::TEXT                  AS account_name,
+        COALESCE(a.tab_name, '')::TEXT              AS account_group,
+        e.particulars::TEXT,
+        e.amount::NUMERIC(10,2),
+        e.mode::VARCHAR(20),
+        COALESCE(e.cheque_no, '')::VARCHAR(50),
+        COALESCE(e.transaction_id, '')::VARCHAR(255),
+        e.status::VARCHAR(20),
+        e.confirmed_by::INT,
+        e.confirmed_at::TIMESTAMP,
+        e.created_at::TIMESTAMP
+    FROM expenses e
+    LEFT JOIN accounts      a ON a.id = e.acc_id
+    LEFT JOIN vendors       v ON v.id = e.entity_id AND e.entity_type = 'vendor'
+    LEFT JOIN security_staff s ON s.id = e.entity_id AND e.entity_type = 'security'
+    WHERE e.society_id = p_society_id
+      AND (p_entity_id   IS NULL OR e.entity_id   = p_entity_id)
+      AND (p_entity_type IS NULL OR e.entity_type = p_entity_type)
+      AND (p_search IS NULL
+           OR e.particulars ILIKE '%' || p_search || '%'
+           OR a.name        ILIKE '%' || p_search || '%')
+    ORDER BY e.expense_date DESC, e.id DESC;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 5. fn_receivables_list_named  (human-readable entity names)
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_receivables_named CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_receivables_named(
+    p_society_id  INT,
+    p_search      TEXT    DEFAULT NULL,
+    p_status      TEXT    DEFAULT NULL,
+    p_entity_id   INT     DEFAULT NULL,
+    p_entity_type TEXT    DEFAULT NULL
+)
+RETURNS TABLE (
+    id            INT,
+    society_id    INT,
+    user_id       INT,
+    entity_id     INT,
+    entity_type   VARCHAR(20),
+    entity_name   TEXT,
+    charge_type   VARCHAR(50),
+    description   TEXT,
+    amount        NUMERIC(10,2),
+    due_date      DATE,
+    status        VARCHAR(20),
+    days_overdue  INT,
+    source_table  VARCHAR(50),
+    source_id     INT,
+    confirmed_by  INT,
+    confirmed_at  TIMESTAMP,
+    created_at    TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        r.id::INT,
+        r.society_id::INT,
+        r.user_id::INT,
+        r.entity_id::INT,
+        r.entity_type::VARCHAR(20),
+        CASE
+            WHEN r.entity_type = 'apartment'
+                THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
+            WHEN r.entity_type = 'vendor'
+                THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
+            WHEN r.entity_type = 'security'
+                THEN COALESCE(s.name, '')
+            ELSE 'Entity #' || r.entity_id::TEXT
+        END::TEXT                                    AS entity_name,
+        r.charge_type::VARCHAR(50),
+        r.description::TEXT,
+        r.amount::NUMERIC(10,2),
+        r.due_date::DATE,
+        r.status::VARCHAR(20),
+        GREATEST(
+            EXTRACT(DAY FROM AGE(CURRENT_DATE, r.due_date)),
+            0
+        )::INT                                       AS days_overdue,
+        r.source_table::VARCHAR(50),
+        r.source_id::INT,
+        r.confirmed_by::INT,
+        r.confirmed_at::TIMESTAMP,
+        r.created_at::TIMESTAMP
+    FROM receivables r
+    LEFT JOIN apartments   ap ON ap.id = r.entity_id AND r.entity_type = 'apartment'
+    LEFT JOIN vendors       v ON  v.id = r.entity_id AND r.entity_type = 'vendor'
+    LEFT JOIN security_staff s ON s.id = r.entity_id AND r.entity_type = 'security'
+    WHERE r.society_id = p_society_id
+      AND (p_status      IS NULL OR r.status      = p_status)
+      AND (p_entity_id   IS NULL OR r.entity_id   = p_entity_id)
+      AND (p_entity_type IS NULL OR r.entity_type = p_entity_type)
+      AND (p_search IS NULL
+           OR r.description ILIKE '%' || p_search || '%'
+           OR r.charge_type ILIKE '%' || p_search || '%')
+    ORDER BY r.due_date ASC, r.created_at DESC;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 6. fn_payments_named  (auto-calculated debits with names)
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_payments_named CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_payments_named(
+    p_society_id  INT,
+    p_search      TEXT    DEFAULT NULL,
+    p_status      TEXT    DEFAULT NULL,
+    p_entity_type TEXT    DEFAULT NULL
+)
+RETURNS TABLE (
+    id             INT,
+    society_id     INT,
+    user_id        INT,
+    entity_id      INT,
+    entity_type    VARCHAR(20),
+    entity_name    TEXT,
+    amount         NUMERIC(10,2),
+    payment_type   VARCHAR(50),
+    payment_method VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status         VARCHAR(20),
+    due_date       DATE,
+    days_overdue   INT,
+    paid_at        TIMESTAMP,
+    confirmed_by   INT,
+    confirmed_at   TIMESTAMP,
+    created_at     TIMESTAMP
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        p.id::INT,
+        p.society_id::INT,
+        p.user_id::INT,
+        p.entity_id::INT,
+        p.entity_type::VARCHAR(20),
+        CASE
+            WHEN p.entity_type = 'apartment'
+                THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
+            WHEN p.entity_type = 'vendor'
+                THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
+            WHEN p.entity_type = 'security'
+                THEN COALESCE(s.name, '')
+            ELSE 'Entity #' || COALESCE(p.entity_id::TEXT,'—')
+        END::TEXT                                    AS entity_name,
+        p.amount::NUMERIC(10,2),
+        p.payment_type::VARCHAR(50),
+        COALESCE(p.payment_method,'')::VARCHAR(50),
+        COALESCE(p.transaction_id,'')::VARCHAR(255),
+        p.status::VARCHAR(20),
+        p.due_date::DATE,
+        GREATEST(
+            EXTRACT(DAY FROM AGE(CURRENT_DATE, p.due_date)),
+            0
+        )::INT                                       AS days_overdue,
+        p.paid_at::TIMESTAMP,
+        p.confirmed_by::INT,
+        p.confirmed_at::TIMESTAMP,
+        p.created_at::TIMESTAMP
+    FROM payments p
+    LEFT JOIN apartments   ap ON ap.id = p.entity_id AND p.entity_type = 'apartment'
+    LEFT JOIN vendors       v ON  v.id = p.entity_id AND p.entity_type = 'vendor'
+    LEFT JOIN security_staff s ON s.id = p.entity_id AND p.entity_type = 'security'
+    WHERE p.society_id = p_society_id
+      AND (p_status      IS NULL OR p.status      = p_status)
+      AND (p_entity_type IS NULL OR p.entity_type = p_entity_type)
+      AND (p_search IS NULL
+           OR p.payment_type ILIKE '%' || p_search || '%')
+    ORDER BY p.due_date ASC, p.created_at DESC;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 7. fn_verify_receivable
+--    Verify a receivable: insert into transactions + update status
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_verify_receivable CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_verify_receivable(
+    p_receivable_id INT,
+    p_confirmed_by  INT,
+    p_mode          VARCHAR DEFAULT 'cash',
+    p_acc_id        INT     DEFAULT NULL   -- NULL = auto-pick from account name
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec    receivables%ROWTYPE;
+    v_acc_id INT;
+    v_trx_id INT;
+BEGIN
+    SELECT * INTO v_rec FROM receivables WHERE id = p_receivable_id;
+    IF NOT FOUND THEN RETURN 'Error: Receivable not found'; END IF;
+    IF v_rec.status = 'confirmed' THEN RETURN 'Already confirmed'; END IF;
+
+    -- Resolve account: prefer passed acc_id, else find 'Society Charge' Cr account
+    IF p_acc_id IS NOT NULL THEN
+        v_acc_id := p_acc_id;
+    ELSE
+        SELECT id INTO v_acc_id
+        FROM accounts
+        WHERE society_id = v_rec.society_id
+          AND drcr_account = 'Cr'
+          AND name ILIKE '%Society Charge%'
+        LIMIT 1;
+
+        IF v_acc_id IS NULL THEN
+            SELECT id INTO v_acc_id
+            FROM accounts
+            WHERE society_id = v_rec.society_id AND drcr_account = 'Cr'
+            LIMIT 1;
+        END IF;
+    END IF;
+
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at
+    ) VALUES (
+        v_rec.society_id, CURRENT_DATE, v_acc_id, v_rec.entity_id,
+        COALESCE(v_rec.description, v_rec.charge_type),
+        v_rec.amount, p_mode, 'paid', p_confirmed_by, NOW()
+    ) RETURNING id INTO v_trx_id;
+
+    UPDATE receivables
+    SET status       = 'confirmed',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW()
+    WHERE id = p_receivable_id;
+
+    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- 8. fn_verify_payment
+--    Verify a payment (debit): insert into transactions + update
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_verify_payment CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_verify_payment(
+    p_payment_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_acc_id       INT     DEFAULT NULL
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_pay    payments%ROWTYPE;
+    v_acc_id INT;
+    v_trx_id INT;
+BEGIN
+    SELECT * INTO v_pay FROM payments WHERE id = p_payment_id;
+    IF NOT FOUND THEN RETURN 'Error: Payment not found'; END IF;
+    IF v_pay.status = 'verified' THEN RETURN 'Already verified'; END IF;
+
+    IF p_acc_id IS NOT NULL THEN
+        v_acc_id := p_acc_id;
+    ELSE
+        -- Auto-pick first Dr account named 'Society Charge' or any Dr
+        SELECT id INTO v_acc_id
+        FROM accounts
+        WHERE society_id = v_pay.society_id
+          AND drcr_account = 'Dr'
+          AND name ILIKE '%Society Charge%'
+        LIMIT 1;
+
+        IF v_acc_id IS NULL THEN
+            SELECT id INTO v_acc_id
+            FROM accounts
+            WHERE society_id = v_pay.society_id AND drcr_account = 'Dr'
+            LIMIT 1;
+        END IF;
+    END IF;
+
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at
+    ) VALUES (
+        v_pay.society_id, CURRENT_DATE, v_acc_id, v_pay.entity_id,
+        COALESCE(v_pay.payment_type, 'Payment'),
+        v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW()
+    ) RETURNING id INTO v_trx_id;
+
+    UPDATE payments
+    SET status       = 'verified',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW(),
+        paid_at      = NOW()
+    WHERE id = p_payment_id;
+
+    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+END;
+$$;
