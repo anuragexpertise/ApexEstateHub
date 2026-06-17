@@ -2290,7 +2290,7 @@ def _save_transaction(db, d, sid, transaction_type):
     trx_date = d.get("trx_date") or dt_date.today().isoformat()
     mode = d.get("mode", "cash")
     entity_id = d.get("entity_id")
-    db._execute(
+    r=db._execute(
         "INSERT INTO transactions(society_id,trx_date,acc_id,entity_id,"
         "acc_particulars,amount,mode,status,created_at) "
         "VALUES(%s,%s,%s,%s,%s,%s,%s,'paid',NOW())",
@@ -2304,7 +2304,7 @@ def _save_gate_log(db, d, sid):
     eid = d.get("entity_id")
     if not eid:
         return False, "Entity ID required", None
-    db._execute(
+    r=db._execute(
         "INSERT INTO gate_access(society_id,role,entity_id,time_in) "
         "VALUES(%s,%s,%s,NOW())",
         (sid, d.get("role", "v"), eid),
@@ -2429,7 +2429,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
         apt_fine = float(d.get("apt_fine") or 0)
     except ValueError:
         return False, "Invalid numeric value", None
-    db._execute(
+    r=db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
         " apt_maintenance_rate, apt_due_day, apt_delay_fine, apt_fine, apt_status)"
         " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
@@ -2443,15 +2443,12 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             delay_fine,
             apt_fine,
         ),
+        fetch_one=True,
     )
     return (
         True,
         f"Charge rule created",
-        db._execute(
-            "SELECT id FROM apt_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
-            (sid,),
-            fetch_one=True,
-        ).get("id"),
+        (r or {}).get("id"),
     )
 
 
@@ -2484,21 +2481,18 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         v_fine = float(d.get("vendor_fine") or 0)
     except ValueError:
         return False, "Invalid numeric value", None
-    db._execute(
+    r=db._execute(
         "INSERT INTO ven_charges_fines_basis(society_id, ven_id, start_date, end_date,"
         " vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status)"
         " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, v_fine),
+        fetch_one=True, 
     )
     return (
         True,
         f"Charge rule created",
-        db._execute(
-            "SELECT id FROM ven_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
-            (sid,),
-            fetch_one=True,
-        ).get("id"),
-    )
+        (r or {}).get("id"),
+        )
 
 
 def _save_sec_charge(db, d, sid, is_edit, pk):
@@ -2523,20 +2517,17 @@ def _save_sec_charge(db, d, sid, is_edit, pk):
         sec_fine = float(d.get("security_fine") or 0)
     except ValueError:
         return False, "Invalid numeric value", None
-    db._execute(
+    r=db._execute(
         "INSERT INTO sec_charges_fines_basis(society_id, sec_id, start_date, end_date,"
         " security_fine, sec_status)"
         " VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, sec_id, start_date, d.get("end_date"), sec_fine),
+        fetch_one=True,
     )
     return (
         True,
         f"Charge rule created",
-        db._execute(
-            "SELECT id FROM sec_charges_fines_basis WHERE society_id=%s ORDER BY id DESC LIMIT 1",
-            (sid,),
-            fetch_one=True,
-        ).get("id"),
+        (r or {}).get("id"),
     )
 
 
