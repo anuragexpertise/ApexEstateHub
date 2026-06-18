@@ -776,7 +776,8 @@ def _render_card(
             entity=entity,
             page=page,
             total_rows=total,
-            auth_data=auth,  # ← portal-aware buttons
+            auth_data=auth,
+            filters= filters,  
         )
 
     # ── profile ───────────────────────────────────────────────────────────────
@@ -797,7 +798,8 @@ def _render_card(
             fields=meta.get("profile_fields", []),
             actions=meta.get("profile_actions", []),
             color=meta.get("profile_color", "#1d74d8"),
-            auth_data=auth,  # ← role-filtered action buttons
+            auth_data=auth,
+            filters=filters,
         )
 
     # ── form ──────────────────────────────────────────────────────────────────
@@ -825,6 +827,7 @@ def _render_card(
             prefill=prefill,
             color=meta.get("profile_color", "#1d74d8"),
             society_id=filters.get("society_id"),
+            user_role=(auth or {}).get("role", "admin"),
         )
 
     return _empty_state(f"No content for: {card_id}")
@@ -1463,4 +1466,8 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         vendor_id = auth.get("vendor_id") or auth.get("linked_id")
         if vendor_id:
             f["vendor_id"] = vendor_id
+    elif role == "security":
+        security_id = auth.get("security_id") or auth.get("linked_id")
+        if security_id:
+            f["security_id"] = security_id
     return f
