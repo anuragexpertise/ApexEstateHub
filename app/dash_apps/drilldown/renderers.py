@@ -92,6 +92,47 @@ def _perms_for(role: str, entity: str) -> set[str]:
         return _PORTAL_PERMS[key_star]
     return set()
 
+# ── Human-readable FK resolution ────────────────────────────────────────
+# Prefer a joined alias from the row (e.g. fn_apt_charges returns
+# 'flat_number' next to apt_id) over the raw foreign key value. Falls back
+# to the raw id if the loader hasn't been enriched with that alias yet.
+_FK_HUMAN_ALIASES = {
+    "apt_id": "flat_number", "ven_id": "vendor_name", "sec_id": "security_name",
+    "acc_id": "account_name", "vendor_id": "vendor_name",
+    "security_id": "security_name", "apartment_id": "flat_number",
+    "entity_id": "entity_name", "account_id": "account_name",
+}
+
+
+def _display_value(field_key: str, row_dict: dict):
+    alt_key = _FK_HUMAN_ALIASES.get(field_key)
+    if alt_key:
+        alt_val = row_dict.get(alt_key)
+        if alt_val not in (None, ""):
+            return alt_val
+    return row_dict.get(field_key)
+
+
+# ── Fields hidden because the current view is already scoped to them ──────
+def _context_hidden_fields(filters: dict | None) -> set[str]:
+    filters = filters or {}
+    hidden = {"society_id"}
+    if filters.get("apartment_id"):
+        hidden |= {"apartment_id", "apt_id", "entity_id", "entity_type"}
+    if filters.get("vendor_id"):
+        hidden |= {"vendor_id", "ven_id", "entity_id", "entity_type"}
+    if filters.get("security_id"):
+        hidden |= {"security_id", "sec_id", "entity_id", "entity_type"}
+    return hidden
+
+
+def _field_visible(entity_plural: str, field: str, role: str) -> bool:
+    from app.dash_apps.drilldown.profile_actions import FIELD_VISIBILITY
+    restriction = FIELD_VISIBILITY.get(entity_plural, {}).get(field)
+    return True if restriction is None else role in restriction
+
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # IMAGE URL RESOLUTION
 # ════════════════════════════════════════════════════════════════════════════
@@ -183,7 +224,8 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
 def render_list_card(card_id: str, title: str, icon: str,
                      columns: list[dict], rows: list[dict],
                      entity: str, page: int = 1, total_rows: int = 0,
-                     page_size: int = 15, auth_data: dict | None = None) -> html.Div:
+                     page_size: int = 15, auth_data: dict | None = None,
+                     filters: dict | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     user_role  = auth_data.get("role", "guest")
@@ -191,7 +233,12 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     # ── Resolve permissions for this role × entity ─────────────────────────
     allowed = _perms_for(user_role, entity)
-
+    hidden = _context_hidden_fields(filters)
+    visible_columns = [
+        c for c in columns
+        if (c.get("field") or c.get("name") or "") not in hidden
+        and _field_visible(entity, c.get("field") or c.get("name") or "", user_role)
+    ]
     total_pages = max(1, -(-total_rows // page_size))
 
     # ── Header row ──────────────────────────────────────────────────────────
@@ -418,11 +465,16 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record,
                         fields: list[dict], actions: list[dict] | None = None,
                         color: str = "#1d74d8",
-                        auth_data: dict | None = None) -> html.Div:
+                        auth_data: dict | None = None,
+                        filters: dict | None = None) -> html.Div:
+    from app.dash_apps.drilldown.registry import to_plural
+
     auth_data  = auth_data or {}
     user_role  = auth_data.get("role", "guest")
-    society_id = auth_data.get("society_id")   # ← already exists, just use it below
+    society_id = auth_data.get("society_id")
     allowed    = _perms_for(user_role, entity)
+    entity_plural = to_plural(entity)
+    hidden = _context_hidden_fields(filters)
 
     record_dict = (record.to_dict(include_calculated=True)
                    if hasattr(record, "to_dict") else record)
@@ -441,8 +493,13 @@ def render_profile_card(card_id: str, title: str, icon: str,
         img_entity_pk = pk_val
 
     # ── Split fields into image fields and text fields ───────────────────
-    image_fields = [f for f in fields if f.get("type") == "image"]
-    text_fields  = [f for f in fields if f.get("type") != "image"]
+    visible_fields = [
+        f for f in fields
+        if f.get("field") not in hidden
+        and _field_visible(entity_plural, f.get("field"), user_role)
+    ]
+    image_fields = [f for f in visible_fields if f.get("type") == "image"]
+    text_fields  = [f for f in visible_fields if f.get("type") != "image"]
 
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
     image_section = []
@@ -498,13 +555,12 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
     # ── Text fields rendered as 2-column grid cells ──────────────────────
     def _field_cell(f: dict) -> html.Div:
-        val = record_dict.get(f["field"])
+        val = _display_value(f["field"], record_dict)
         if val is None:
             val = "—"
         elif isinstance(val, bool):
             val = html.Span("✓ Active" if val else "✗ Inactive",
-                            style={"color": "#17976e" if val else "#de5c52",
-                                   "fontWeight": "600"})
+                            style={"color": "#17976e" if val else "#de5c52", "fontWeight": "600"})
         elif isinstance(val, (date, datetime)):
             val = val.strftime("%d %b %Y")
         elif isinstance(val, Decimal):
@@ -619,8 +675,12 @@ def render_form_card(card_id: str, title: str, icon: str,
                      submit_label: str = "Save",
                      prefill: dict | None = None,
                      color: str = "#17976e",
-                     society_id: int | None = None) -> html.Div:
+                     society_id: int | None = None,
+                     user_role: str | None = None) -> html.Div:
+    from app.dash_apps.drilldown.registry import to_plural
     prefill = prefill or {}
+    entity_plural = to_plural(entity)
+    fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), user_role or "admin")]
     form_rows = []
 
     for f in fields:

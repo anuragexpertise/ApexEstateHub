@@ -35,3 +35,19 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {"label": "Show Transactions", "action_id": "show_transactions", "target_card": "list_cashbook", "icon": "fa-book", "color": "info"},
     ],
 }
+# Per-field RBAC, keyed by PLURAL entity name (matches list/loader keys).
+# Most fields inherit visibility from the list/profile permission matrix in
+# renderers.py — only add an entry here for a field that's more sensitive
+# than the rest of its row. Empty/missing entry = visible to anyone who can
+# already see the list or profile.
+FIELD_VISIBILITY: dict[str, dict[str, set[str]]] = {
+    "security": {
+        "salary_per_shift": {"admin", "master"},
+    },
+    "vendors": {
+        "mobile": {"admin", "master", "vendor"},
+    },
+    "apartments": {
+        "mobile": {"admin", "master", "apartment"},
+    },
+}

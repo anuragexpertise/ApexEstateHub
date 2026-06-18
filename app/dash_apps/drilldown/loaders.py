@@ -61,6 +61,10 @@ def _eid(filters: dict):
     return filters.get("entity_id")
 
 
+def _sec_id(filters: dict):
+    return filters.get("security_id")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # LOAD LIST
 # ════════════════════════════════════════════════════════════════════════════
@@ -79,6 +83,7 @@ def load_list(
     sid    = _sid(filters)
     apt_id = _apt_id(filters)
     ven_id = _ven_id(filters)
+    sec_id= _sec_id(filters)
     eid    = _eid(filters)
     offset = (page - 1) * page_size
     s      = search or None
@@ -185,10 +190,11 @@ def load_list(
 
         # ── RECEIPTS  (receipts table) ───────────────────────────────────────
         if entity == "receipts":
-            p_eid  = eid or apt_id or ven_id
+            p_eid  = eid or apt_id or ven_id or sec_id
             p_etype = (
                 "apartment" if apt_id else
                 "vendor"    if ven_id else
+                "security"  if sec_id else
                 None
             ) if not eid else None
             rows = db._execute(
@@ -204,8 +210,13 @@ def load_list(
 
         # ── EXPENSES  (expenses table) ───────────────────────────────────────
         if entity == "expenses":
-            p_eid   = eid or ven_id
-            p_etype = "vendor" if ven_id and not eid else None
+            p_eid   = eid or ven_id or sec_id or apt_id
+            p_etype = (
+                "vendor"    if ven_id and not eid else
+                "security"  if sec_id and not eid else
+                "apartment" if apt_id and not eid else
+                None
+            )
             rows = db._execute(
                 "SELECT * FROM fn_expenses_list(%s, %s, %s, %s) LIMIT %s OFFSET %s",
                 (sid, s, p_eid, p_etype, page_size, offset),
@@ -219,18 +230,23 @@ def load_list(
 
         # ── CASHBOOK  (transactions table, paired) ───────────────────────────
         if entity == "cashbook":
+            p_eid  = eid or apt_id or ven_id or sec_id
+            p_etype = (
+                "apartment" if apt_id else
+                "vendor"    if ven_id else
+                "security"  if sec_id else
+                None
+            ) if not eid else None
             rows = db._execute(
-                "SELECT * FROM fn_cashbook_paired(%s, NULL, NULL, %s) "
-                "LIMIT %s OFFSET %s",
-                (sid, s, page_size, offset),
+                "SELECT * FROM fn_cashbook_paired(%s, %s, %s, %s) LIMIT %s OFFSET %s",
+                (sid, p_eid, p_etype, s, page_size, offset),
                 fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_cashbook_paired(%s, NULL, NULL, NULL)",
-                (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_cashbook_paired(%s, %s, %s, NULL)",
+                (sid, p_eid, p_etype), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
-
         # ── RECEIVABLES ──────────────────────────────────────────────────────
         if entity == "receivables":
             p_status = filters.get("status")        # None = all statuses
@@ -294,53 +310,64 @@ def load_list(
 
         # ── APT_CHARGES ──────────────────────────────────────────────────────
         if entity == "apt_charges":
+            extra, params = "", [sid]
+            if apt_id:
+                extra = " AND (acf.apt_id=%s OR acf.apt_id IS NULL)"
+                params.append(apt_id)
             rows = db._execute(
                 "SELECT acf.*, COALESCE(a.flat_number,'ALL') AS flat_number "
                 "FROM apt_charges_fines_basis acf "
                 "LEFT JOIN apartments a ON a.id=acf.apt_id "
-                "WHERE acf.society_id=%s AND acf.apt_status=TRUE "
-                "ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC "
-                "LIMIT %s OFFSET %s",
-                (sid, page_size, offset), fetch_all=True,
+                "WHERE acf.society_id=%s AND acf.apt_status=TRUE" + extra +
+                " ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM apt_charges_fines_basis "
-                "WHERE society_id=%s AND apt_status=TRUE",
-                (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM apt_charges_fines_basis acf "
+                "WHERE acf.society_id=%s AND acf.apt_status=TRUE" + extra,
+                params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── VEN_CHARGES ──────────────────────────────────────────────────────
         if entity == "ven_charges":
+            extra, params = "", [sid]
+            if ven_id:
+                extra = " AND (vcf.ven_id=%s OR vcf.ven_id IS NULL)"
+                params.append(ven_id)
             rows = db._execute(
                 "SELECT vcf.*, COALESCE(v.name,'ALL') AS vendor_name "
                 "FROM ven_charges_fines_basis vcf "
                 "LEFT JOIN vendors v ON v.id=vcf.ven_id "
-                "WHERE vcf.society_id=%s "
-                "ORDER BY vcf.ven_id NULLS FIRST, vcf.start_date DESC "
-                "LIMIT %s OFFSET %s",
-                (sid, page_size, offset), fetch_all=True,
+                "WHERE vcf.society_id=%s" + extra +
+                " ORDER BY vcf.ven_id NULLS FIRST, vcf.start_date DESC LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM ven_charges_fines_basis WHERE society_id=%s",
-                (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM ven_charges_fines_basis vcf "
+                "WHERE vcf.society_id=%s" + extra,
+                params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── SEC_CHARGES ──────────────────────────────────────────────────────
         if entity == "sec_charges":
+            extra, params = "", [sid]
+            if sec_id:
+                extra = " AND (scf.sec_id=%s OR scf.sec_id IS NULL)"
+                params.append(sec_id)
             rows = db._execute(
                 "SELECT scf.*, COALESCE(s.name,'ALL') AS security_name "
                 "FROM sec_charges_fines_basis scf "
                 "LEFT JOIN security_staff s ON s.id=scf.sec_id "
-                "WHERE scf.society_id=%s "
-                "ORDER BY scf.sec_id NULLS FIRST, scf.start_date DESC "
-                "LIMIT %s OFFSET %s",
-                (sid, page_size, offset), fetch_all=True,
+                "WHERE scf.society_id=%s" + extra +
+                " ORDER BY scf.sec_id NULLS FIRST, scf.start_date DESC LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM sec_charges_fines_basis WHERE society_id=%s",
-                (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM sec_charges_fines_basis scf "
+                "WHERE scf.society_id=%s" + extra,
+                params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 

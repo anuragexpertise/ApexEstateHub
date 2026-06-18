@@ -220,27 +220,39 @@ def build_entity_meta() -> dict:
             continue
 
         list_columns, profile_fields, new_fields, edit_fields = [], [], [], []
+        _FK_LABEL_OVERRIDES = {
+            "apt_id": "Apartment", "ven_id": "Vendor", "sec_id": "Security",
+            "acc_id": "Account", "entity_id": "Linked Record",
+            "vendor_id": "Vendor", "security_id": "Security",
+            "apartment_id": "Apartment", "assigned_to": "Assigned To",
+        }
 
         for col in columns:
             name = col["name"]
             ftype = _map_type(col["pg_type"], name)
-            label = _labelize(name)
+            label = _FK_LABEL_OVERRIDES.get(name, _labelize(name))
 
-            if name not in ("created_at", "updated_at") and ftype != "image_upload":
+            # id/society_id/etc. are never *displayed* — id already lives in the
+            # profile card subtitle, the rest is filter/auth plumbing.
+            is_system = name in _SYSTEM_COLUMNS or col["is_pk"]
+
+            if not is_system and name not in ("created_at", "updated_at") and ftype != "image_upload":
                 list_columns.append({"name": label, "field": name, "sortable": True})
 
-            profile_fields.append({
-                "label": label, "field": name,
-                "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
-                **({"type": "image"} if ftype == "image_upload" else {}),
-            })
+            if not is_system:
+                profile_fields.append({
+                    "label": label, "field": name,
+                    "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
+                    **({"type": "image"} if ftype == "image_upload" else {}),
+                })
 
-            if name in _SYSTEM_COLUMNS or col["is_pk"]:
-                continue  # system-managed — never user-editable
+            if is_system:
+                continue  # system-managed — never editable, never displayed
 
             field_def = _build_field(col)
             new_fields.append(field_def)
             edit_fields.append(dict(field_def))
+
 
         actions = list(PROFILE_ACTIONS.get(ekey, []))
         if ekey not in NO_EDIT_ACTION:
