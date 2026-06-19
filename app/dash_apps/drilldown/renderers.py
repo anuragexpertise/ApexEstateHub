@@ -243,19 +243,18 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     # ── Header row ──────────────────────────────────────────────────────────
     header_cells = []
-    for c in columns:
+    for c in visible_columns:
         col_label = c.get("label") or c.get("name") or c.get("field", "").title()
         header_cells.append(html.Th(col_label, style={
             "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
             "padding": "10px 8px", "whiteSpace": "nowrap",
         }))
-    if allowed:                         # only show Actions col if ≥1 action
+    if allowed:
         header_cells.append(html.Th("Actions", style={
             "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
             "padding": "10px 8px",
         }))
 
-    # ── Data rows ────────────────────────────────────────────────────────────
     body_rows = []
     for row in rows:
         row_dict = (row.to_dict(include_calculated=True)
@@ -263,15 +262,13 @@ def render_list_card(card_id: str, title: str, icon: str,
         pk_val = str(row_dict.get("id") or row_dict.get("ID") or "0")
 
         cells = []
-        for c in columns:
+        for c in visible_columns:
             field_key = c.get("field") or c.get("name") or ""
-            val = row_dict.get(field_key)
-            # Format booleans & dates nicely
+            val = _display_value(field_key, row_dict)
             if isinstance(val, bool):
                 val = html.Span(
                     ["✓" if val else "✗"],
-                    style={"color": "#17976e" if val else "#de5c52",
-                           "fontWeight": "700"},
+                    style={"color": "#17976e" if val else "#de5c52", "fontWeight": "700"},
                 )
             elif isinstance(val, (date, datetime)):
                 val = val.strftime("%d %b %Y") if val else "—"
@@ -280,10 +277,8 @@ def render_list_card(card_id: str, title: str, icon: str,
             else:
                 val = str(val)
             cells.append(html.Td(val, style={
-                                     "fontSize": "12px", "verticalAlign": "middle",
-                                     "padding": "8px 8px",
-                                    }
-                ))
+                "fontSize": "12px", "verticalAlign": "middle", "padding": "8px 8px",
+            }))
 
         # ── Action buttons scoped by portal permissions ──────────────────
         if allowed:
