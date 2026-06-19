@@ -119,21 +119,13 @@ def register_drilldown_callbacks(app):
                 if entity == "society":
                     target_dir = Path("app/assets") / str(society_id)
                 elif entity in ("apartment", "vendor", "security", "concern", "event"):
-                    target_dir = (
-                        Path("app/assets") / str(society_id) / entity / str(entity_pk)
-                    )
+                    target_dir = Path("app/assets") / str(society_id) / entity / str(entity_pk)
                 else:
-                    target_dir = (
-                        Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
-                    )
+                    target_dir = Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
             else:
                 target_dir = Path("app/assets/default") / entity
 
             target_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_ext = os.path.splitext(filename)[1] if filename else ".png"
-            safe_filename = f"{field_name}_{timestamp}{file_ext}"
-            file_path = target_dir / safe_filename
 
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
@@ -141,48 +133,30 @@ def register_drilldown_callbacks(app):
             from app.dash_apps.drilldown.image_utils import compress_to_webp
             webp_bytes = compress_to_webp(decoded)
             if webp_bytes is None:
-                return html.Small("✗ Could not compress image below 25KB",
-                                   style={"color": "red"}), no_update
+                return (html.Small("✗ Could not compress image below 25KB",
+                                    style={"color": "red"}), no_update)
 
-            file_path = file_path.with_suffix(".webp")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_filename = f"{field_name}_{timestamp}.webp"   # built AFTER compression, always webp
+            file_path = target_dir / safe_filename
             with open(file_path, "wb") as f:
                 f.write(webp_bytes)
 
             if entity_pk and str(entity_pk).strip() and society_id:
-                if entity == "society":
-                    web_path = f"/assets/{society_id}/{safe_filename}"
-                else:
-                    web_path = (
-                        f"/assets/{society_id}/{entity}/{entity_pk}/{safe_filename}"
-                    )
+                web_path = (f"/assets/{society_id}/{safe_filename}" if entity == "society"
+                            else f"/assets/{society_id}/{entity}/{entity_pk}/{safe_filename}")
             else:
                 web_path = f"/assets/default/{entity}/{safe_filename}"
 
-            preview = html.Div(
-                [
-                    html.Img(
-                        src=web_path,
-                        style={
-                            "maxWidth": "200px",
-                            "maxHeight": "150px",
-                            "borderRadius": "8px",
-                            "border": "1px solid #ddd",
-                        },
-                    ),
-                    html.Small(
-                        f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
-                        style={
-                            "color": "#17976e",
-                            "marginTop": "5px",
-                            "display": "block",
-                        },
-                    ),
-                ]
-            )
+            preview = html.Div([
+                html.Img(src=web_path, style={"maxWidth": "200px", "maxHeight": "150px",
+                                            "borderRadius": "8px", "border": "1px solid #ddd"}),
+                html.Small(f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
+                        style={"color": "#17976e", "marginTop": "5px", "display": "block"}),
+            ])
             return preview, safe_filename
         except Exception as e:
             return html.Small(f"✗ {e}", style={"color": "red"}), no_update
-
     # ── 1. MAIN ROUTER ────────────────────────────────────────────────────────
     @app.callback(
         Output("drilldown-store", "data"),
@@ -1002,15 +976,17 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         )
         if role == "security":
             db._execute(
-                "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s "
+                "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s,photo=%s,id_proof=%s "
                 "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
-                (d.get("name"), d.get("mobile"), d.get("shift"), pk),
+                (d.get("name"), d.get("mobile"), d.get("shift"),
+                 d.get("photo"), d.get("id_proof"), pk),
             )
         elif role == "vendor":
             db._execute(
-                "UPDATE vendors v SET name=%s,service_type=%s,mobile=%s "
+                "UPDATE vendors v SET name=%s,service_type=%s,mobile=%s,photo=%s,logo=%s,license=%s "
                 "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
-                (d.get("name"), d.get("service_type"), d.get("mobile"), pk),
+                (d.get("name"), d.get("service_type"), d.get("mobile"),
+                 d.get("photo"), d.get("logo"), d.get("license"), pk),
             )
         pw = (d.get("password") or "").strip()
         if pw:
@@ -1019,6 +995,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 (generate_password_hash(pw), pk, sid),
             )
         return True, f"{role.title()} updated", pk
+
     email = (d.get("email") or "").strip()
     if not email:
         return False, "Email is required", None
@@ -1028,31 +1005,29 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     ur = db._execute(
         "INSERT INTO users(society_id,email,password_hash,role,login_method) "
         "VALUES(%s,%s,%s,%s,'password') RETURNING id",
-        (sid, email, generate_password_hash(pw), role),
-        fetch_one=True,
+        (sid, email, generate_password_hash(pw), role), fetch_one=True,
     )
     user_id = ur["id"]
     if role == "vendor":
         vr = db._execute(
-            "INSERT INTO vendors(society_id,name,service_type,mobile,active) "
-            "VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
-            (sid, d.get("name"), d.get("service_type"), d.get("mobile")),
-            fetch_one=True,
+            "INSERT INTO vendors(society_id,name,service_type,mobile,photo,logo,license,active) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            (sid, d.get("name"), d.get("service_type"), d.get("mobile"),
+             d.get("photo"), d.get("logo"), d.get("license")), fetch_one=True,
         )
         db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (vr["id"], user_id))
         linked_id = vr["id"]
     else:
         sr = db._execute(
-            "INSERT INTO security_staff(society_id,name,mobile,shift,active) "
-            "VALUES(%s,%s,%s,%s,TRUE) RETURNING id",
-            (sid, d.get("name"), d.get("mobile"), d.get("shift")),
-            fetch_one=True,
+            "INSERT INTO security_staff(society_id,name,mobile,shift,photo,id_proof,active) "
+            "VALUES(%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            (sid, d.get("name"), d.get("mobile"), d.get("shift"),
+             d.get("photo"), d.get("id_proof")), fetch_one=True,
         )
         db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (sr["id"], user_id))
         linked_id = sr["id"]
     _move_temp_images(role, linked_id, sid, d)
     return True, f"{role.title()} '{email}' created", linked_id
-
 
 def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
