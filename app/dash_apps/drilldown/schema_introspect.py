@@ -103,6 +103,18 @@ _PREFER_AS_DISPLAY_COLUMN = (
     "email",
 )
 
+# Auth fields live on `users`, not on vendors/security_staff — introspection
+# can't see them via ENTITY_TABLE_MAP, so they're injected by hand.
+_AUTH_FIELDS: dict[str, list[dict]] = {
+    "vendors": [
+        {"id": "email", "label": "Login Email", "type": "email", "required": True},
+        {"id": "password", "label": "Password", "type": "password", "required": True},
+    ],
+    "security": [
+        {"id": "email", "label": "Login Email", "type": "email", "required": True},
+        {"id": "password", "label": "Password", "type": "password", "required": True},
+    ],
+}
 
 def _labelize(col: str) -> str:
     return col.replace("_", " ").title()
@@ -311,7 +323,19 @@ def build_entity_meta() -> dict:
             field_def = _build_field(col)
             new_fields.append(field_def)
             edit_fields.append(dict(field_def))
+            
+        if ekey in _AUTH_FIELDS:
+            new_auth = [dict(f) for f in _AUTH_FIELDS[ekey]]
+            edit_auth = [dict(f, required=False) if f["id"] == "password" else dict(f)
+                         for f in _AUTH_FIELDS[ekey]]
+            new_fields = new_auth + new_fields
+            edit_fields = edit_auth + edit_fields
 
+            # show email on the profile card too — load_profile already
+            # selects u.email for both vendor and security
+            profile_fields = [{"label": "Login Email", "field": "email",
+                                "icon": "fa-envelope"}] + profile_fields
+            
         actions = list(PROFILE_ACTIONS.get(ekey, []))
         if ekey not in NO_EDIT_ACTION:
             actions.append(
