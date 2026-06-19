@@ -944,27 +944,38 @@ def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
         r = db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
-            "active=%s WHERE id=%s AND society_id=%s RETURNING id",
+            "active=%s,owner_photo=%s,id_proof=%s,photo=%s "
+            "WHERE id=%s AND society_id=%s RETURNING id",
             (
                 d.get("owner_name"),
                 d.get("mobile"),
                 d.get("apartment_size") or 0,
                 d.get("active", True),
+                d.get("owner_photo"),
+                d.get("id_proof"),
+                d.get("photo"),
                 pk,
                 sid,
             ),
+            fetch_one=True,
         )
         return True, "Apartment updated", r["id"] if r else None
+
     flat = (d.get("flat_number") or "").strip()
     if not flat:
         return False, "Flat number is required", None
     r = db._execute(
         "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-        "apartment_size,active) VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
-        (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0),
+        "apartment_size,owner_photo,id_proof,photo,active) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
+         d.get("owner_photo"), d.get("id_proof"), d.get("photo")),
+        fetch_one=True,
     )
-    return True, f"Apartment '{flat}' created", r["id"] if r else None
-
+    new_id = r["id"] if r else None
+    if new_id:
+        _move_temp_images("apartment", new_id, sid, d)
+    return True, f"Apartment '{flat}' created", new_id
 
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
