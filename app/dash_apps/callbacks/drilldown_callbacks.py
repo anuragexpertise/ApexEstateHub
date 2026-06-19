@@ -1145,15 +1145,34 @@ def _save_transaction(db, d, sid, transaction_type):
     trx_date = d.get("trx_date") or dt_date.today().isoformat()
     mode = d.get("mode", "cash")
     entity_id = d.get("entity_id")
-    r = db._execute(
+    entity_type = d.get("entity_type")
+
+    table = "receipts" if transaction_type == "receipt" else "expenses"
+    cols = ["society_id", "trx_date", "acc_id", "entity_id", "entity_type",
+            "acc_particulars", "amount", "mode"]
+    params = [sid, trx_date, acc_id, entity_id, entity_type, particulars, amt, mode]
+    if transaction_type == "receipt":
+        cols.append("end_date")
+        params.append(d.get("end_date"))
+
+    placeholders = ",".join(["%s"] * len(params))
+    src_r = db._execute(
+        f"INSERT INTO {table}({','.join(cols)},status) "
+        f"VALUES({placeholders},'paid') RETURNING id",
+        tuple(params),
+        fetch_one=True,
+    )
+    src_id = (src_r or {}).get("id")
+
+    db._execute(
         "INSERT INTO transactions(society_id,trx_date,acc_id,entity_id,"
         "acc_particulars,amount,mode,status,created_at) "
         "VALUES(%s,%s,%s,%s,%s,%s,%s,'paid',NOW())",
         (sid, trx_date, acc_id, entity_id, particulars, amt, mode),
     )
-    label = "Receipt" if transaction_type == "receipt" else "Expense"
-    return True, f"{label} of ₹{amt:,.2f} recorded", None
 
+    label = "Receipt" if transaction_type == "receipt" else "Expense"
+    return True, f"{label} of ₹{amt:,.2f} recorded", src_id
 
 def _save_gate_log(db, d, sid):
     eid = d.get("entity_id")
