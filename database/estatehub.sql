@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     entity_id INT,
     entity_type VARCHAR(20) CHECK (entity_type IN ('apartment','vendor','security','other')),
     receipt_date DATE NOT NULL,
+    end_date DATE,
     acc_id INT REFERENCES accounts(id),
     particulars TEXT NOT NULL,
     amount NUMERIC(10,2) NOT NULL CHECK (amount > 0),
@@ -3059,3 +3060,34 @@ BEGIN
     RETURN 'Verified: transaction #' || v_trx_id::TEXT;
 END;
 $$;
+CREATE OR REPLACE VIEW v_apartment_gate_pass AS
+SELECT
+    a.id AS apartment_id,
+    a.society_id,
+    COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'pending'), 0) AS unpaid_dues,
+    COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'pending'), 0) <= 0 AS gate_pass
+FROM apartments a
+LEFT JOIN receivables r ON r.entity_id = a.id AND r.entity_type = 'apartment'
+GROUP BY a.id, a.society_id;
+CREATE OR REPLACE VIEW v_vendor_gate_pass AS
+SELECT
+    v.id AS vendor_id,
+    v.society_id,
+    EXISTS (
+        SELECT 1 FROM receipts r
+        WHERE r.entity_id = v.id
+          AND r.entity_type = 'vendor'
+          AND r.end_date IS NOT NULL
+          AND r.end_date > CURRENT_DATE
+    ) AS gate_pass
+FROM vendors v;
+
+CREATE OR REPLACE VIEW v_security_gate_pass AS
+SELECT
+    s.id AS security_id,
+    s.society_id,
+    COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'verified'), 0) AS verified_dues,
+    COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'verified'), 0) <= 0 AS gate_pass
+FROM security_staff s
+LEFT JOIN receivables r ON r.entity_id = s.id AND r.entity_type = 'security'
+GROUP BY s.id, s.society_id;
