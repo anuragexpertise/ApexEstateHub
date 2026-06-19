@@ -13,7 +13,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {"label": "Pay Dues", "action_id": "pay_dues", "target_card": "form_receipt_new", "icon": "fa-rupee-sign", "color": "success"},
         {"label": "Show Cashbook", "action_id": "show_cashbook", "target_card": "list_cashbook", "icon": "fa-book", "color": "info"},
         {"label": "Gate Pass", "action_id": "show_qr", "target_card": "modal_qr", "icon": "fa-qrcode", "color": "primary"},
-        {"label": "Raise Issue", "action_id": "new_concern", "target_card": "form_concern_new", "icon": "fa-comment-alt", "color": "warning"},
+        {"label": "Raise Concern", "action_id": "new_concern", "target_card": "form_concern_new", "icon": "fa-comment-alt", "color": "warning"},
     ],
     "vendors": [
         {"label": "Pay Dues", "action_id": "pay_dues", "target_card": "form_receipt_new", "icon": "fa-rupee-sign", "color": "success"},

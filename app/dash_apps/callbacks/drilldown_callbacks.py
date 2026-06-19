@@ -42,32 +42,23 @@ Store schema (id="drilldown-store"):
 """
 
 from __future__ import annotations
-from datetime import date as dt_date, datetime, timedelta
+from datetime import date as dt_date, datetime
 import json
 import io
-import csv
 import pandas as pd
 import base64
 import os
-import base64
 from pathlib import Path
 from PIL import Image
-import io
-import dash
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
-import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
-    ENTITY_MAP,
-    PK_MAP,
-    get_pk,
     to_singular,
     to_plural,
     build_prefill,
 )
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
-from app.security.rbac import RBACManager, Permission
 
 DB_ERROR_KEYWORDS = [
     "no database connection",
@@ -96,7 +87,6 @@ def _is_db_error(msg: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════
 from app.dash_apps.drilldown.schema_introspect import (
     get_entity_meta,
-    refresh_entity_meta,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -147,17 +137,16 @@ def register_drilldown_callbacks(app):
 
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
-            img = Image.open(io.BytesIO(decoded))
-            if img.width > 1920:
-                ratio = 1920 / img.width
-                img = img.resize(
-                    (1920, int(img.height * ratio)), Image.Resampling.LANCZOS
-                )
-            if img.mode == "RGBA":
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[3])
-                img = bg
-            img.save(file_path, "JPEG", quality=85, optimize=True)
+
+            from app.dash_apps.drilldown.image_utils import compress_to_webp
+            webp_bytes = compress_to_webp(decoded)
+            if webp_bytes is None:
+                return html.Small("✗ Could not compress image below 25KB",
+                                   style={"color": "red"}), no_update
+
+            file_path = file_path.with_suffix(".webp")
+            with open(file_path, "wb") as f:
+                f.write(webp_bytes)
 
             if entity_pk and str(entity_pk).strip() and society_id:
                 if entity == "society":
@@ -562,34 +551,22 @@ def register_drilldown_callbacks(app):
                 try:
                     _header, _b64data = val.split(",", 1)
                     _decoded = __import__("base64").b64decode(_b64data)
-                    from PIL import Image as _PIL
-                    import io as _io
+                    from app.dash_apps.drilldown.image_utils import compress_to_webp
 
-                    _img = _PIL.open(_io.BytesIO(_decoded))
-                    # Downsize if very large
-                    if _img.width > 1920:
-                        _ratio = 1920 / _img.width
-                        _img = _img.resize(
-                            (1920, int(_img.height * _ratio)),
-                            _PIL.Resampling.LANCZOS,
-                        )
-                    if _img.mode == "RGBA":
-                        _bg = _PIL.new("RGB", _img.size, (255, 255, 255))
-                        _bg.paste(_img, mask=_img.split()[3])
-                        _img = _bg
+                    _webp_bytes = compress_to_webp(_decoded)
+                    if _webp_bytes is None:
+                        raise ValueError("Could not compress image below 25KB")
+
                     from pathlib import Path as _Path
-
                     _dir = _Path("app/assets/default") / entity_singular
                     _dir.mkdir(parents=True, exist_ok=True)
-                    _fname = (
-                        f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                    )
-                    _img.save(_dir / _fname, "JPEG", quality=85)
-                    form_data[field] = _fname  # replace b64 with filename
+                    _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webp"
+                    with open(_dir / _fname, "wb") as _f:
+                        _f.write(_webp_bytes)
+                    form_data[field] = _fname
                 except Exception as _cam_err:
                     print(f"  ⚠️  Camera image save error [{field}]: {_cam_err}")
-                    del form_data[field]  # drop bad value rather than crash
-
+                    del form_data[field]
         # ── 5. Merge with prefill from store ──────────────────────────────────
         #       prefill supplies defaults (entity pk, context ids, etc.)
         #       form_data (user input) wins on conflict.
