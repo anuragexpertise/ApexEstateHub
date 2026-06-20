@@ -219,7 +219,7 @@ SOCIETY = {
     "secretary_phone":  "9876543211",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
-    "arrear_start_date":"2024-04-01",
+    "calc_start_date":"2024-04-01",
 }
 
 MASTER = {"email": "master@estatehub.com",   "password": "Master@2024"}
@@ -298,11 +298,11 @@ def seed_demo(conn):
         cur.execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
-                plan,plan_validity,arrear_start_date)
+                plan,plan_validity,calc_start_date)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (SOCIETY["name"], SOCIETY["email"], SOCIETY["phone"], SOCIETY["address"],
              SOCIETY["secretary_name"], SOCIETY["secretary_phone"],
-             SOCIETY["plan"], SOCIETY["plan_validity"], SOCIETY["arrear_start_date"]),
+             SOCIETY["plan"], SOCIETY["plan_validity"], SOCIETY["calc_start_date"]),
         )
         row = cur.fetchone()
         conn.commit()

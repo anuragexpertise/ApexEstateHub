@@ -41,7 +41,7 @@ def create_society(data: dict) -> int | None:
         result = db._execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
-                plan,plan_validity,arrear_start_date)
+                plan,plan_validity,calc_start_date)
                VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
                        :plan,:validity,:arrear)
                RETURNING id""",

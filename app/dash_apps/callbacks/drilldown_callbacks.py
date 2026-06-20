@@ -1232,7 +1232,7 @@ def _save_society(db, d, sid, is_edit, pk):
             "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
             "logo=%s,login_background=%s,secretary_sign=%s,"
             "secretary_name=%s,secretary_phone=%s,"
-            "plan_validity=%s,arrear_start_date=%s WHERE id=%s",
+            "plan_validity=%s,calc_start_date=%s WHERE id=%s",
             (
                 d.get("name"),
                 d.get("email"),
@@ -1245,7 +1245,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 d.get("secretary_name"),
                 d.get("secretary_phone"),
                 d.get("plan_validity"),
-                d.get("arrear_start_date"),
+                d.get("calc_start_date"),
                 pk,
             ),
         )

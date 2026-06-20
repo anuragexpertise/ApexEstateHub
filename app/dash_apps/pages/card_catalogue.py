@@ -10,7 +10,7 @@ Enhanced KPI Definitions for EsateHub
 All KPIs with auto-calculated receivables (credits) and payables (debits).
  
 RECEIVABLES (Credits Due):
-- Maintenance charges (from arrear_start_date to current)
+- Maintenance charges (from calc_start_date to current)
 - Late fees on overdue payments
 - Vendor pass fees
 - Pending fines
@@ -44,9 +44,9 @@ KPI_CARDS = {
                 SELECT 
                     a.id,
                     a.apartment_size,
-                    s.arrear_start_date,
-                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
-                    EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.arrear_start_date)) AS months_due,
+                    s.calc_start_date,
+                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.calc_start_date)) * 12 + 
+                    EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.calc_start_date)) AS months_due,
                     3.0 AS rate_per_sqft
                 FROM apartments a
                 JOIN societies s ON a.society_id = s.id
@@ -115,9 +115,9 @@ KPI_CARDS = {
             WITH maintenance_calculation AS (
                 SELECT 
                     a.apartment_size,
-                    s.arrear_start_date,
-                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.arrear_start_date)) * 12 + 
-                    EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.arrear_start_date)) AS months_due,
+                    s.calc_start_date,
+                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.calc_start_date)) * 12 + 
+                    EXTRACT(MONTH FROM AGE(CURRENT_DATE, s.calc_start_date)) AS months_due,
                     3.0 AS rate_per_sqft
                 FROM apartments a
                 JOIN societies s ON a.society_id = s.id
@@ -479,8 +479,8 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════
     # SETTINGS KPIs
     # ══════════════════════════════════════════════════════════════
-    "kpi_societies_arrear_start_date": {
-        "query": "SELECT arrear_start_date AS v FROM societies WHERE id = %s",
+    "kpi_societies_calc_start_date": {
+        "query": "SELECT calc_start_date AS v FROM societies WHERE id = %s",
         "params": 1,
         "format": "date",
         "icon": "fa-clock",

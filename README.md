@@ -313,11 +313,11 @@ Opening Balance (bf_amount, drcr_bf)
 
 ### Receivables Calculation
 
-Maintenance due is auto-calculated from `societies.arrear_start_date`:
+Maintenance due is auto-calculated from `societies.calc_start_date`:
 
 ```sql
-months_due = EXTRACT(YEAR FROM AGE(CURRENT_DATE, arrear_start_date)) * 12
-           + EXTRACT(MONTH FROM AGE(CURRENT_DATE, arrear_start_date))
+months_due = EXTRACT(YEAR FROM AGE(CURRENT_DATE, calc_start_date)) * 12
+           + EXTRACT(MONTH FROM AGE(CURRENT_DATE, calc_start_date))
 
 maintenance_due = apartment_size × rate_per_sqft × GREATEST(months_due, 0)
 ```
