@@ -66,7 +66,35 @@ DB_ERROR_KEYWORDS = [
     "error in querying",
     "operational error",
 ]
+# app/dash_apps/callbacks/drilldown_callbacks.py
 
+_RECEIPT_PARTICULARS_TEMPLATES = {
+    "apartment": lambda r: f"Maintenance - Flat {r.get('flat_number', '')}"
+        + (f" ({r['owner_name']})" if r.get('owner_name') else ""),
+    "vendor": lambda r: f"Pass Fees - {r.get('name', '')}"
+        + (f" [{r['service_type']}]" if r.get('service_type') else ""),
+    "security": lambda r: f"Others - {r.get('name', '')}",
+}
+
+
+def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
+    """Smart defaults for the 'Pay Dues' receipt form — single source of
+    truth, shared across apartments/vendors/security."""
+    p: dict = {}
+    p["trx_date"] = dt_date.today().isoformat()
+    p["entity_id"] = record.get("id")
+    p["entity_type"] = entity
+    p["amount"] = record.get("pending_dues")
+    p["mode"] = "cash"
+
+    template = _RECEIPT_PARTICULARS_TEMPLATES.get(entity)
+    p["acc_particulars"] = template(record) if template else "Receipt"
+
+    acc = _get_account_by_name(society_id, "Society Charge") if society_id else None
+    if acc:
+        p["acc_id"] = acc["id"]
+
+    return p
 
 def _is_db_error(msg: str) -> bool:
     """Check if message indicates a database connection or query error."""
@@ -339,24 +367,21 @@ def register_drilldown_callbacks(app):
 
             elif target:
                 record = loaders.load_profile(entity, pk, sid) or {}
-                pmap = (
-                    DRILLDOWN_MAP.get(f"profile_{entity}", {})
-                    .get("actions", {})
-                    .get(action, {})
-                    .get("prefill", {})
-                )
-                prefill = build_prefill(record, pmap) if pmap else dict(record)
 
-                # ── Smart receipt pre-fill ────────────────────────────────────
                 if action == "pay_dues":
-                    prefill = _build_receipt_prefill(prefill, record, entity, sid)
+                    prefill = _build_receipt_prefill(record, entity, sid)
+                else:
+                    pmap = (
+                        DRILLDOWN_MAP.get(f"profile_{entity}", {})
+                        .get("actions", {})
+                        .get(action, {})
+                        .get("prefill", {})
+                    )
+                    prefill = build_prefill(record, pmap) if pmap else dict(record)
 
                 store = nav_state.navigate_to(
-                    store,
-                    target,
-                    action.replace("_", " ").title(),
-                    prefill=prefill,
-                    entity_pk=pk,
+                    store, target, action.replace("_", " ").title(),
+                    prefill=prefill, entity_pk=pk,
                 )
                 hide_kpis = True
 
