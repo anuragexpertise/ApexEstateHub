@@ -129,11 +129,11 @@ def _context_hidden_fields(filters: dict | None) -> set[str]:
     filters = filters or {}
     hidden = {"society_id"}
     if filters.get("apartment_id"):
-        hidden |= {"apartment_id", "apt_id", "entity_id", "entity_type"}
+        hidden |= {"apartment_id", "apt_id", "entity_id", "entity_role"}
     if filters.get("vendor_id"):
-        hidden |= {"vendor_id", "ven_id", "entity_id", "entity_type"}
+        hidden |= {"vendor_id", "ven_id", "entity_id", "entity_role"}
     if filters.get("security_id"):
-        hidden |= {"security_id", "sec_id", "entity_id", "entity_type"}
+        hidden |= {"security_id", "sec_id", "entity_id", "entity_role"}
     return hidden
 
 

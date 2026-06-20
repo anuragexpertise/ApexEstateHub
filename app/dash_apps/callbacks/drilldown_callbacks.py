@@ -81,7 +81,7 @@ def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
     p: dict = {}
     p["trx_date"] = _date.today().isoformat()
     p["entity_id"] = record.get("id")
-    p["entity_type"] = entity
+    p["entity_role"] = entity
     if entity == "apartment":
         p["amount"] = record.get("pending_dues")
     p["mode"] = "cash"
@@ -434,7 +434,7 @@ def register_drilldown_callbacks(app):
 
             # Special handling: for receipts/expenses/cashbook forms, if a
             # specific entity id filter exists (apartment_id/vendor_id/security_id)
-            # map it to entity_id + entity_type expected by transaction forms.
+            # map it to entity_id + entity_role expected by transaction forms.
             if target and (
                 "receipt" in target
                 or "expense" in target
@@ -449,7 +449,7 @@ def register_drilldown_callbacks(app):
                     ):
                         if cur_filters.get(fk):
                             prefill["entity_id"] = cur_filters.get(fk)
-                            prefill["entity_type"] = etype
+                            prefill["entity_role"] = etype
                             break
 
             store = nav_state.navigate_to(
@@ -1166,12 +1166,12 @@ def _save_transaction(db, d, sid, transaction_type):
     trx_date = d.get("trx_date") or dt_date.today().isoformat()
     mode = d.get("mode", "cash")
     entity_id = d.get("entity_id")
-    entity_type = d.get("entity_type")
+    entity_role = d.get("entity_role")
 
     table = "receipts" if transaction_type == "receipt" else "expenses"
-    cols = ["society_id", "trx_date", "acc_id", "entity_id", "entity_type",
+    cols = ["society_id", "trx_date", "acc_id", "entity_id", "entity_role",
             "acc_particulars", "amount", "mode"]
-    params = [sid, trx_date, acc_id, entity_id, entity_type, particulars, amt, mode]
+    params = [sid, trx_date, acc_id, entity_id, entity_role, particulars, amt, mode]
     if transaction_type == "receipt":
         cols.append("end_date")
         params.append(d.get("end_date"))
