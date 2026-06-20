@@ -276,14 +276,6 @@ DRILLDOWN_MAP: dict = {
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
         "actions": {
-            "pay_dues": {
-                "target": "form_receipt_entry_new",
-                "prefill": {
-                    "entity_id": "id",
-                    "entity_type": "_const_apartment",
-                    "amount": "pending_dues",
-                },
-            },
             "gate_pass": {
                 "target": "modal_qr",
                 "prefill": {"entity_id": "id", "role": "_const_a"},
@@ -297,14 +289,6 @@ DRILLDOWN_MAP: dict = {
     },
     "profile_vendor": {
         "actions": {
-            "pay": {
-                "target": "form_receipt_entry_new",
-                "prefill": {
-                    "entity_id": "id",
-                    "entity_type": "_const_vendor",
-                    "amount": "pending_dues",
-                },
-            },
             "gate_pass": {
                 "target": "modal_qr",
                 "prefill": {"entity_id": "id", "role": "_const_v"},
