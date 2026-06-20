@@ -269,7 +269,7 @@ class Receivable:
     id: int
     society_id: int
     entity_id: int
-    entity_role: str  # 'apartment', 'vendor', 'security'
+    role: str  # 'apartment', 'vendor', 'security'
     charge_type: str  # 'maintenance', 'fine', 'vendor_pass', etc.
     amount: Decimal
     description: Optional[str] = None
@@ -298,7 +298,7 @@ class Payment:
     id: int
     society_id: int
     entity_id: int
-    entity_role: str
+    role: str
     amount: Decimal
     status: PaymentStatus = PaymentStatus.PENDING
     user_id: Optional[int] = None
