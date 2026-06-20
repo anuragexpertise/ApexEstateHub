@@ -66,6 +66,26 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    tab_name VARCHAR(20),
+    header VARCHAR(50),
+    parent_account_id INT,
+    drcr_account VARCHAR(2) CHECK (
+        drcr_account IN ('Dr', 'Cr', NULL)
+    ),
+    has_bf BOOLEAN DEFAULT FALSE,
+    drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
+    bf_amount NUMERIC(12, 2) DEFAULT 0.00,
+    depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
+    is_depreciable BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
+    CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
+);
+
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -73,7 +93,6 @@ CREATE TABLE IF NOT EXISTS apartments (
     owner_name VARCHAR(100),
     owner_photo VARCHAR(255),
     id_proof VARCHAR(255),
-    photo VARCHAR(255),
     mobile VARCHAR(15),
     apartment_size INT NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -84,9 +103,10 @@ CREATE TABLE IF NOT EXISTS apartments (
 CREATE TABLE IF NOT EXISTS vendors (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
+    business_name VARCHAR(100) NOT NULL,
     logo VARCHAR(255),
     license VARCHAR(255),
+    name VARCHAR(100),
     photo VARCHAR(255),
     service_type VARCHAR(100),
     mobile VARCHAR(15),
@@ -109,13 +129,166 @@ CREATE TABLE IF NOT EXISTS security_staff (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS asset_register (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    company_name VARCHAR(100),
+    asset_name VARCHAR(100) NOT NULL,
+    asset_type VARCHAR(50),
+    purchase_date DATE,
+    purchase_value NUMERIC(12, 2),
+    parent_account_id INT REFERENCES accounts (id),
+    depreciation_rate NUMERIC(5, 2),
+    last_depreciation_date DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    event_date DATE NOT NULL,
+    event_time TIME),
+    venue VARCHAR(200),
+    open_to VARCHAR(20) DEFAULT 'all',
+    parent_account_id INT REFERENCES accounts (id),
+    image TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS concerns (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    flat_no VARCHAR(20),
+    concern_type VARCHAR(50),
+    description TEXT,
+    preferred_time VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'open',
+    assigned_to VARCHAR(100),
+    image TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS receivables (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),
+    entity_id INT NOT NULL,
+    entity_role VARCHAR(20) NOT NULL CHECK (
+        entity_role IN (
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
+    charge_type VARCHAR(50) NOT NULL,
+    description TEXT,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    due_date DATE,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
+    source_table VARCHAR(50),
+    source_id INT,
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS receipts (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),
+    entity_id INT,
+    entity_role VARCHAR(20) CHECK (
+        entity_role IN (
+            'apartment',
+            'vendor',
+            'security',
+            'other'
+        )
+    ),
+    receipt_date DATE NOT NULL,
+    acc_id INT REFERENCES accounts (id),
+    particulars TEXT NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
+    cheque_no VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id),
+    entity_id INT,
+    entity_role VARCHAR(20) CHECK (
+        entity_role IN (
+            'vendor',
+            'security',
+            'other',
+            'assets'
+        )
+    ),
+    expense_date DATE NOT NULL,
+    acc_id INT REFERENCES accounts (id),
+    particulars TEXT NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    mode VARCHAR(20) DEFAULT 'cash' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'crypto'
+        )
+    ),
+    cheque_no VARCHAR(50),
+    transaction_id VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
+    ),
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    entity_type VARCHAR(20) CHECK (
-        entity_type IN (
+    entity_role VARCHAR(20) CHECK (
+        entity_role IN (
             'apartment',
             'vendor',
             'security',
@@ -194,30 +367,10 @@ CREATE TABLE IF NOT EXISTS sec_charges_fines_basis (
 CREATE TABLE IF NOT EXISTS gate_access (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    role VARCHAR(1),
     entity_id INTEGER NOT NULL,
+    entity_role VARCHAR(1),
     time_in TIMESTAMP NOT NULL DEFAULT NOW(),
     time_out TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS accounts (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
-    tab_name VARCHAR(20),
-    header VARCHAR(50),
-    parent_account_id INT,
-    drcr_account VARCHAR(2) CHECK (
-        drcr_account IN ('Dr', 'Cr', NULL)
-    ),
-    has_bf BOOLEAN DEFAULT FALSE,
-    drcr_bf VARCHAR(2) CHECK (drcr_bf IN ('Dr', 'Cr')) NOT NULL,
-    bf_amount NUMERIC(12, 2) DEFAULT 0.00,
-    depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
-    is_depreciable BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -241,156 +394,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     payment_gateway_ID VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'paid',
     created_by INTEGER REFERENCES users (id),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS asset_register (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    asset_name VARCHAR(100),
-    purchase_value NUMERIC(12, 2),
-    purchase_date DATE,
-    parent_account_id INT REFERENCES accounts (id),
-    depreciation_rate NUMERIC(5, 2),
-    last_depreciation_date DATE
-);
-
-CREATE TABLE IF NOT EXISTS receivables (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    user_id INT REFERENCES users (id),
-    entity_id INT NOT NULL,
-    entity_type VARCHAR(20) NOT NULL CHECK (
-        entity_type IN (
-            'apartment',
-            'vendor',
-            'security'
-        )
-    ),
-    charge_type VARCHAR(50) NOT NULL,
-    description TEXT,
-    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
-    due_date DATE,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
-        status IN (
-            'pending',
-            'confirmed',
-            'cancelled'
-        )
-    ),
-    source_table VARCHAR(50),
-    source_id INT,
-    confirmed_by INT REFERENCES users (id),
-    confirmed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS receipts (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    user_id INT REFERENCES users (id),
-    entity_id INT,
-    entity_type VARCHAR(20) CHECK (
-        entity_type IN (
-            'apartment',
-            'vendor',
-            'security',
-            'other'
-        )
-    ),
-    receipt_date DATE NOT NULL,
-    end_date DATE,
-    acc_id INT REFERENCES accounts (id),
-    particulars TEXT NOT NULL,
-    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(20) DEFAULT 'cash' CHECK (
-        mode IN (
-            'cash',
-            'cheque',
-            'upi',
-            'card',
-            'bank',
-            'crypto'
-        )
-    ),
-    cheque_no VARCHAR(50),
-    transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
-        status IN (
-            'pending',
-            'confirmed',
-            'cancelled'
-        )
-    ),
-    confirmed_by INT REFERENCES users (id),
-    confirmed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS expenses (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    user_id INT REFERENCES users (id),
-    entity_id INT,
-    entity_type VARCHAR(20) CHECK (
-        entity_type IN (
-            'vendor',
-            'security',
-            'other',
-            'assets'
-        )
-    ),
-    expense_date DATE NOT NULL,
-    acc_id INT REFERENCES accounts (id),
-    particulars TEXT NOT NULL,
-    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
-    mode VARCHAR(20) DEFAULT 'cash' CHECK (
-        mode IN (
-            'cash',
-            'cheque',
-            'upi',
-            'card',
-            'bank',
-            'crypto'
-        )
-    ),
-    cheque_no VARCHAR(50),
-    transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
-        status IN (
-            'pending',
-            'confirmed',
-            'cancelled'
-        )
-    ),
-    confirmed_by INT REFERENCES users (id),
-    confirmed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    title VARCHAR(200) NOT NULL,
-    description TEXT,
-    event_date DATE NOT NULL,
-    event_time VARCHAR(20),
-    venue VARCHAR(200),
-    open_to VARCHAR(20) DEFAULT 'all',
-    image TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS concerns (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    flat_no VARCHAR(20),
-    concern_type VARCHAR(50),
-    description TEXT,
-    preferred_time VARCHAR(20),
-    status VARCHAR(20) NOT NULL DEFAULT 'open',
-    assigned_to VARCHAR(100),
-    image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -477,7 +480,7 @@ CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, 
 
 CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_id, entity_role);
 
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
 
@@ -512,7 +515,7 @@ DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
-    INSERT INTO receivables (society_id, entity_id, entity_type, charge_type, description,
+    INSERT INTO receivables (society_id, entity_id, entity_role, charge_type, description,
                              amount, due_date, status, source_table, source_id, created_at)
     SELECT
         acf.society_id::INT,
@@ -560,14 +563,14 @@ BEGIN
               WHERE r.transaction_id = p.transaction_id
           )
     LOOP
-        INSERT INTO receipts (society_id, user_id, entity_id, entity_type,
+        INSERT INTO receipts (society_id, user_id, entity_id, entity_role,
             receipt_date, acc_id, particulars, amount, mode,
             transaction_id, status, confirmed_by, confirmed_at, created_at)
         VALUES (
             rec_payment.society_id::INT,
             rec_payment.confirmed_by::INT,
             rec_payment.entity_id::INT,
-            rec_payment.entity_type::VARCHAR(20),
+            rec_payment.entity_role::VARCHAR(20),
             COALESCE(rec_payment.paid_at::DATE, CURRENT_DATE)::DATE,
             1::INT,
             'Payment Received'::TEXT,
@@ -586,7 +589,7 @@ BEGIN
             SELECT * FROM receivables r
             WHERE r.society_id = p_society_id
               AND r.entity_id   = rec_payment.entity_id
-              AND r.entity_type = rec_payment.entity_type
+              AND r.entity_role = rec_payment.entity_role
               AND r.status = 'pending'
             ORDER BY r.due_date ASC, r.id ASC
         LOOP
@@ -627,14 +630,14 @@ BEGIN
               WHERE r.transaction_id = p.transaction_id
           )
     LOOP
-        INSERT INTO receipts (society_id, user_id, entity_id, entity_type,
+        INSERT INTO receipts (society_id, user_id, entity_id, entity_role,
             receipt_date, acc_id, particulars, amount, mode,
             transaction_id, status, confirmed_by, confirmed_at, created_at)
         VALUES (
             rec_payment.society_id::INT,
             rec_payment.confirmed_by::INT,
             rec_payment.entity_id::INT,
-            rec_payment.entity_type::VARCHAR(20),
+            rec_payment.entity_role::VARCHAR(20),
             COALESCE(rec_payment.paid_at::DATE, CURRENT_DATE)::DATE,
             1::INT,
             'Payment Received'::TEXT,
@@ -653,7 +656,7 @@ BEGIN
             SELECT * FROM receivables r
             WHERE r.society_id = p_society_id
               AND r.entity_id   = rec_payment.entity_id
-              AND r.entity_type = rec_payment.entity_type
+              AND r.entity_role = rec_payment.entity_role
               AND r.status = 'pending'
             ORDER BY r.due_date ASC, r.id ASC
         LOOP
@@ -736,7 +739,7 @@ BEGIN
             COALESCE(SUM(CASE WHEN p.status = 'verified'              THEN p.amount ELSE 0 END), 0)::NUMERIC(15,2) AS paid_amount,
             COALESCE(SUM(CASE WHEN p.status IN ('pending','confirmed') THEN p.amount ELSE 0 END), 0)::NUMERIC(15,2) AS pending_amount
         FROM payments p
-        WHERE p.society_id = p_society_id AND p.entity_type = 'apartment'
+        WHERE p.society_id = p_society_id AND p.entity_role = 'apartment'
         GROUP BY p.entity_id
     ),
     late_fee_calc AS (
@@ -750,7 +753,7 @@ BEGIN
             ), 0)::NUMERIC(15,2) AS late_fee
         FROM payments p
         WHERE p.society_id = p_society_id
-          AND p.entity_type = 'apartment'
+          AND p.entity_role = 'apartment'
           AND p.status IN ('pending','confirmed')
         GROUP BY p.entity_id
     )
@@ -789,7 +792,7 @@ DROP FUNCTION IF EXISTS fn_auto_generate_vendor_receivables CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_vendor_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
-    INSERT INTO receivables (society_id, entity_id, entity_type, charge_type, description,
+    INSERT INTO receivables (society_id, entity_id, entity_role, charge_type, description,
                              amount, due_date, status, source_table, source_id, created_at)
     SELECT
         vcb.society_id::INT,
@@ -831,18 +834,18 @@ BEGIN
     FOR rec_payment IN
         SELECT * FROM payments p
         WHERE p.society_id = p_society_id
-          AND p.entity_type = 'vendor'
+          AND p.entity_role = 'vendor'
           AND p.status = 'verified'
           AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.transaction_id = p.transaction_id)
     LOOP
-        INSERT INTO receipts (society_id, user_id, entity_id, entity_type,
+        INSERT INTO receipts (society_id, user_id, entity_id, entity_role,
             receipt_date, acc_id, particulars, amount, mode,
             transaction_id, status, confirmed_by, confirmed_at, created_at)
         VALUES (
             rec_payment.society_id::INT,
             rec_payment.confirmed_by::INT,
             rec_payment.entity_id::INT,
-            rec_payment.entity_type::VARCHAR(20),
+            rec_payment.entity_role::VARCHAR(20),
             COALESCE(rec_payment.paid_at::DATE, CURRENT_DATE)::DATE,
             1::INT,
             'Vendor Payment'::TEXT,
@@ -861,7 +864,7 @@ BEGIN
             SELECT * FROM receivables r
             WHERE r.society_id = p_society_id
               AND r.entity_id   = rec_payment.entity_id
-              AND r.entity_type = 'vendor'
+              AND r.entity_role = 'vendor'
               AND r.status = 'pending'
             ORDER BY r.due_date ASC, r.id ASC
         LOOP
@@ -936,7 +939,7 @@ BEGIN
             COALESCE(SUM(CASE WHEN p.status IN ('pending','confirmed') THEN p.amount ELSE 0 END), 0)::NUMERIC(15,2) AS pending_dues
         FROM payments p
         WHERE p.society_id  = p_society_id
-          AND p.entity_type = 'vendor'
+          AND p.entity_role = 'vendor'
         GROUP BY p.user_id
     )
     SELECT
@@ -967,7 +970,7 @@ DROP FUNCTION IF EXISTS fn_security_roster_report CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_security_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
-    INSERT INTO receivables (society_id, entity_id, entity_type, charge_type, description,
+    INSERT INTO receivables (society_id, entity_id, entity_role, charge_type, description,
                              amount, due_date, status, source_table, source_id, created_at)
     SELECT
         scf.society_id::INT,
@@ -1009,18 +1012,18 @@ BEGIN
     FOR rec_payment IN
         SELECT * FROM payments p
         WHERE p.society_id  = p_society_id
-          AND p.entity_type = 'security'
+          AND p.entity_role = 'security'
           AND p.status      = 'verified'
           AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.transaction_id = p.transaction_id)
     LOOP
-        INSERT INTO receipts (society_id, user_id, entity_id, entity_type,
+        INSERT INTO receipts (society_id, user_id, entity_id, entity_role,
             receipt_date, acc_id, particulars, amount, mode,
             transaction_id, status, confirmed_by, confirmed_at, created_at)
         VALUES (
             rec_payment.society_id::INT,
             rec_payment.confirmed_by::INT,
             rec_payment.entity_id::INT,
-            rec_payment.entity_type::VARCHAR(20),
+            rec_payment.entity_role::VARCHAR(20),
             COALESCE(rec_payment.paid_at::DATE, CURRENT_DATE)::DATE,
             1::INT,
             'Security Payment'::TEXT,
@@ -1039,7 +1042,7 @@ BEGIN
             SELECT * FROM receivables r
             WHERE r.society_id  = p_society_id
               AND r.entity_id   = rec_payment.entity_id
-              AND r.entity_type = 'security'
+              AND r.entity_role = 'security'
               AND r.status = 'pending'
             ORDER BY r.due_date ASC, r.id ASC
         LOOP
@@ -1118,7 +1121,7 @@ BEGIN
             COALESCE(SUM(CASE WHEN p.status IN ('pending','confirmed') THEN p.amount ELSE 0 END), 0)::NUMERIC(15,2) AS total_pending
         FROM payments p
         WHERE p.society_id  = p_society_id
-          AND p.entity_type = 'security'
+          AND p.entity_role = 'security'
         GROUP BY p.user_id
     ),
     fine_summary AS (
@@ -1306,7 +1309,7 @@ BEGIN
             expense_amount := (rec.purchase_value * (dep_rate / 100))::NUMERIC(15,2);
         END IF;
 
-        INSERT INTO expenses (society_id, user_id, entity_id, entity_type,
+        INSERT INTO expenses (society_id, user_id, entity_id, entity_role,
             expense_date, acc_id, particulars, amount, mode, status, created_at)
         VALUES (
             p_society_id::INT,
@@ -1744,7 +1747,7 @@ CREATE OR REPLACE FUNCTION fn_receivables_list(
 )
 RETURNS TABLE (
     id           INT,
-    entity_type  VARCHAR(20),
+    entity_role  VARCHAR(20),
     entity_id    INT,
     entity_name  TEXT,
     charge_type  VARCHAR(50),
@@ -1760,14 +1763,14 @@ BEGIN
     RETURN QUERY
     SELECT
         r.id::INT,
-        r.entity_type::VARCHAR(20),
+        r.entity_role::VARCHAR(20),
         r.entity_id::INT,
         CASE
-            WHEN r.entity_type = 'apartment'
+            WHEN r.entity_role = 'apartment'
                 THEN ('Flat ' || (SELECT flat_number FROM apartments WHERE id = r.entity_id))::TEXT
-            WHEN r.entity_type = 'vendor'
+            WHEN r.entity_role = 'vendor'
                 THEN (SELECT name::TEXT FROM vendors WHERE id = r.entity_id)
-            WHEN r.entity_type = 'security'
+            WHEN r.entity_role = 'security'
                 THEN (SELECT name::TEXT FROM security_staff WHERE id = r.entity_id)
             ELSE ('Entity #' || r.entity_id)::TEXT
         END AS entity_name,
@@ -1790,7 +1793,7 @@ CREATE OR REPLACE FUNCTION fn_receivable_profile(p_receivable_id INT)
 RETURNS TABLE (
     id           INT,
     society_id   INT,
-    entity_type  VARCHAR(20),
+    entity_role  VARCHAR(20),
     entity_id    INT,
     charge_type  VARCHAR(50),
     description  TEXT,
@@ -1808,7 +1811,7 @@ LANGUAGE SQL STABLE AS $$
     SELECT
         id::INT,
         society_id::INT,
-        entity_type::VARCHAR(20),
+        entity_role::VARCHAR(20),
         entity_id::INT,
         charge_type::VARCHAR(50),
         description::TEXT,
@@ -2150,12 +2153,12 @@ $$;
 
 CREATE OR REPLACE FUNCTION fn_payments_list(
     p_society_id  INT,
-    p_entity_type VARCHAR DEFAULT NULL
+    p_entity_role VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     id           INT,
     entity_id    INT,
-    entity_type  VARCHAR(20),
+    entity_role  VARCHAR(20),
     amount       NUMERIC(10,2),
     status       VARCHAR(20),
     payment_type VARCHAR(50),
@@ -2165,14 +2168,14 @@ LANGUAGE SQL STABLE AS $$
     SELECT
         id::INT,
         entity_id::INT,
-        entity_type::VARCHAR(20),
+        entity_role::VARCHAR(20),
         amount::NUMERIC(10,2),
         status::VARCHAR(20),
         payment_type::VARCHAR(50),
         created_at::TIMESTAMP
     FROM payments
     WHERE society_id  = p_society_id
-      AND (p_entity_type IS NULL OR entity_type = p_entity_type)
+      AND (p_entity_role IS NULL OR entity_role = p_entity_role)
     ORDER BY created_at DESC;
 $$;
 
@@ -2375,7 +2378,7 @@ BEGIN
     INTO v_total_dues
     FROM receivables
     WHERE entity_id = p_apt_id
-      AND entity_type = 'apartment'
+      AND entity_role = 'apartment'
       AND status = 'pending';
 
     RETURN v_total_dues <= 0;
@@ -2395,7 +2398,7 @@ BEGIN
     INTO v_total_dues
     FROM receivables
     WHERE entity_id = p_ven_id
-      AND entity_type = 'vendor'
+      AND entity_role = 'vendor'
       AND status = 'pending';
 
     SELECT vcb.end_date
@@ -2427,7 +2430,7 @@ BEGIN
     INTO v_total_dues
     FROM receivables
     WHERE entity_id = p_sec_id
-      AND entity_type = 'security'
+      AND entity_role = 'security'
       AND status = 'pending';
 
     IF v_total_dues <= 0 THEN
@@ -2788,14 +2791,14 @@ CREATE OR REPLACE FUNCTION fn_receipts_list(
     p_society_id  INT,
     p_search      TEXT    DEFAULT NULL,
     p_entity_id   INT     DEFAULT NULL,
-    p_entity_type TEXT    DEFAULT NULL
+    p_entity_role TEXT    DEFAULT NULL
 )
 RETURNS TABLE (
     id            INT,
     society_id    INT,
     user_id       INT,
     entity_id     INT,
-    entity_type   VARCHAR(20),
+    entity_role   VARCHAR(20),
     entity_name   TEXT,
     receipt_date  DATE,
     acc_id        INT,
@@ -2819,13 +2822,13 @@ BEGIN
         r.society_id::INT,
         r.user_id::INT,
         r.entity_id::INT,
-        r.entity_type::VARCHAR(20),
+        r.entity_role::VARCHAR(20),
         CASE
-            WHEN r.entity_type = 'apartment'
+            WHEN r.entity_role = 'apartment'
                 THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
-            WHEN r.entity_type = 'vendor'
+            WHEN r.entity_role = 'vendor'
                 THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
-            WHEN r.entity_type = 'security'
+            WHEN r.entity_role = 'security'
                 THEN COALESCE(s.name, '')
             ELSE COALESCE('Other #' || r.entity_id::TEXT, '')
         END::TEXT                                   AS entity_name,
@@ -2844,12 +2847,12 @@ BEGIN
         r.created_at::TIMESTAMP
     FROM receipts r
     LEFT JOIN accounts      a  ON a.id  = r.acc_id
-    LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.entity_type = 'apartment'
-    LEFT JOIN vendors       v  ON  v.id = r.entity_id AND r.entity_type = 'vendor'
-    LEFT JOIN security_staff s ON  s.id = r.entity_id AND r.entity_type = 'security'
+    LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.entity_role = 'apartment'
+    LEFT JOIN vendors       v  ON  v.id = r.entity_id AND r.entity_role = 'vendor'
+    LEFT JOIN security_staff s ON  s.id = r.entity_id AND r.entity_role = 'security'
     WHERE r.society_id = p_society_id
       AND (p_entity_id   IS NULL OR r.entity_id   = p_entity_id)
-      AND (p_entity_type IS NULL OR r.entity_type = p_entity_type)
+      AND (p_entity_role IS NULL OR r.entity_role = p_entity_role)
       AND (p_search IS NULL
            OR r.particulars ILIKE '%' || p_search || '%'
            OR a.name        ILIKE '%' || p_search || '%')
@@ -2867,14 +2870,14 @@ CREATE OR REPLACE FUNCTION fn_expenses_list(
     p_society_id  INT,
     p_search      TEXT    DEFAULT NULL,
     p_entity_id   INT     DEFAULT NULL,
-    p_entity_type TEXT    DEFAULT NULL
+    p_entity_role TEXT    DEFAULT NULL
 )
 RETURNS TABLE (
     id            INT,
     society_id    INT,
     user_id       INT,
     entity_id     INT,
-    entity_type   VARCHAR(20),
+    entity_role   VARCHAR(20),
     entity_name   TEXT,
     expense_date  DATE,
     acc_id        INT,
@@ -2898,13 +2901,13 @@ BEGIN
         e.society_id::INT,
         e.user_id::INT,
         e.entity_id::INT,
-        e.entity_type::VARCHAR(20),
+        e.entity_role::VARCHAR(20),
         CASE
-            WHEN e.entity_type = 'vendor'
+            WHEN e.entity_role = 'vendor'
                 THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
-            WHEN e.entity_type = 'security'
+            WHEN e.entity_role = 'security'
                 THEN COALESCE(s.name || COALESCE(' (' || s.shift || ')',''), '')
-            WHEN e.entity_type = 'assets'
+            WHEN e.entity_role = 'assets'
                 THEN COALESCE('Asset #' || e.entity_id::TEXT, '')
             ELSE COALESCE('Other', '')
         END::TEXT                                   AS entity_name,
@@ -2923,11 +2926,11 @@ BEGIN
         e.created_at::TIMESTAMP
     FROM expenses e
     LEFT JOIN accounts      a ON a.id = e.acc_id
-    LEFT JOIN vendors       v ON v.id = e.entity_id AND e.entity_type = 'vendor'
-    LEFT JOIN security_staff s ON s.id = e.entity_id AND e.entity_type = 'security'
+    LEFT JOIN vendors       v ON v.id = e.entity_id AND e.entity_role = 'vendor'
+    LEFT JOIN security_staff s ON s.id = e.entity_id AND e.entity_role = 'security'
     WHERE e.society_id = p_society_id
       AND (p_entity_id   IS NULL OR e.entity_id   = p_entity_id)
-      AND (p_entity_type IS NULL OR e.entity_type = p_entity_type)
+      AND (p_entity_role IS NULL OR e.entity_role = p_entity_role)
       AND (p_search IS NULL
            OR e.particulars ILIKE '%' || p_search || '%'
            OR a.name        ILIKE '%' || p_search || '%')
@@ -2946,14 +2949,14 @@ CREATE OR REPLACE FUNCTION fn_receivables_named(
     p_search      TEXT    DEFAULT NULL,
     p_status      TEXT    DEFAULT NULL,
     p_entity_id   INT     DEFAULT NULL,
-    p_entity_type TEXT    DEFAULT NULL
+    p_entity_role TEXT    DEFAULT NULL
 )
 RETURNS TABLE (
     id            INT,
     society_id    INT,
     user_id       INT,
     entity_id     INT,
-    entity_type   VARCHAR(20),
+    entity_role   VARCHAR(20),
     entity_name   TEXT,
     charge_type   VARCHAR(50),
     description   TEXT,
@@ -2975,13 +2978,13 @@ BEGIN
         r.society_id::INT,
         r.user_id::INT,
         r.entity_id::INT,
-        r.entity_type::VARCHAR(20),
+        r.entity_role::VARCHAR(20),
         CASE
-            WHEN r.entity_type = 'apartment'
+            WHEN r.entity_role = 'apartment'
                 THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
-            WHEN r.entity_type = 'vendor'
+            WHEN r.entity_role = 'vendor'
                 THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
-            WHEN r.entity_type = 'security'
+            WHEN r.entity_role = 'security'
                 THEN COALESCE(s.name, '')
             ELSE 'Entity #' || r.entity_id::TEXT
         END::TEXT                                    AS entity_name,
@@ -3000,13 +3003,13 @@ BEGIN
         r.confirmed_at::TIMESTAMP,
         r.created_at::TIMESTAMP
     FROM receivables r
-    LEFT JOIN apartments   ap ON ap.id = r.entity_id AND r.entity_type = 'apartment'
-    LEFT JOIN vendors       v ON  v.id = r.entity_id AND r.entity_type = 'vendor'
-    LEFT JOIN security_staff s ON s.id = r.entity_id AND r.entity_type = 'security'
+    LEFT JOIN apartments   ap ON ap.id = r.entity_id AND r.entity_role = 'apartment'
+    LEFT JOIN vendors       v ON  v.id = r.entity_id AND r.entity_role = 'vendor'
+    LEFT JOIN security_staff s ON s.id = r.entity_id AND r.entity_role = 'security'
     WHERE r.society_id = p_society_id
       AND (p_status      IS NULL OR r.status      = p_status)
       AND (p_entity_id   IS NULL OR r.entity_id   = p_entity_id)
-      AND (p_entity_type IS NULL OR r.entity_type = p_entity_type)
+      AND (p_entity_role IS NULL OR r.entity_role = p_entity_role)
       AND (p_search IS NULL
            OR r.description ILIKE '%' || p_search || '%'
            OR r.charge_type ILIKE '%' || p_search || '%')
@@ -3024,14 +3027,14 @@ CREATE OR REPLACE FUNCTION fn_payments_named(
     p_society_id  INT,
     p_search      TEXT    DEFAULT NULL,
     p_status      TEXT    DEFAULT NULL,
-    p_entity_type TEXT    DEFAULT NULL
+    p_entity_role TEXT    DEFAULT NULL
 )
 RETURNS TABLE (
     id             INT,
     society_id     INT,
     user_id        INT,
     entity_id      INT,
-    entity_type    VARCHAR(20),
+    entity_role    VARCHAR(20),
     entity_name    TEXT,
     amount         NUMERIC(10,2),
     payment_type   VARCHAR(50),
@@ -3053,13 +3056,13 @@ BEGIN
         p.society_id::INT,
         p.user_id::INT,
         p.entity_id::INT,
-        p.entity_type::VARCHAR(20),
+        p.entity_role::VARCHAR(20),
         CASE
-            WHEN p.entity_type = 'apartment'
+            WHEN p.entity_role = 'apartment'
                 THEN COALESCE(ap.flat_number || ' — ' || COALESCE(ap.owner_name,''), '')
-            WHEN p.entity_type = 'vendor'
+            WHEN p.entity_role = 'vendor'
                 THEN COALESCE(v.name || COALESCE(' (' || v.service_type || ')',''), '')
-            WHEN p.entity_type = 'security'
+            WHEN p.entity_role = 'security'
                 THEN COALESCE(s.name, '')
             ELSE 'Entity #' || COALESCE(p.entity_id::TEXT,'—')
         END::TEXT                                    AS entity_name,
@@ -3078,12 +3081,12 @@ BEGIN
         p.confirmed_at::TIMESTAMP,
         p.created_at::TIMESTAMP
     FROM payments p
-    LEFT JOIN apartments   ap ON ap.id = p.entity_id AND p.entity_type = 'apartment'
-    LEFT JOIN vendors       v ON  v.id = p.entity_id AND p.entity_type = 'vendor'
-    LEFT JOIN security_staff s ON s.id = p.entity_id AND p.entity_type = 'security'
+    LEFT JOIN apartments   ap ON ap.id = p.entity_id AND p.entity_role = 'apartment'
+    LEFT JOIN vendors       v ON  v.id = p.entity_id AND p.entity_role = 'vendor'
+    LEFT JOIN security_staff s ON s.id = p.entity_id AND p.entity_role = 'security'
     WHERE p.society_id = p_society_id
       AND (p_status      IS NULL OR p.status      = p_status)
-      AND (p_entity_type IS NULL OR p.entity_type = p_entity_type)
+      AND (p_entity_role IS NULL OR p.entity_role = p_entity_role)
       AND (p_search IS NULL
            OR p.payment_type ILIKE '%' || p_search || '%')
     ORDER BY p.due_date ASC, p.created_at DESC;
@@ -3234,7 +3237,7 @@ SELECT
 FROM
     apartments a
     LEFT JOIN receivables r ON r.entity_id = a.id
-    AND r.entity_type = 'apartment'
+    AND r.entity_role = 'apartment'
 GROUP BY
     a.id,
     a.society_id;

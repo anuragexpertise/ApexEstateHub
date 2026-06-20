@@ -99,7 +99,7 @@ KPI_CARDS = {
             SELECT COUNT(DISTINCT p.entity_id) AS v 
             FROM payments p
             WHERE p.society_id = %s 
-              AND p.entity_type = 'apartment'
+              AND p.entity_role = 'apartment'
               AND p.status = 'pending'
         """,
         "params": 1,
@@ -182,7 +182,7 @@ KPI_CARDS = {
                 SELECT COALESCE(SUM(amount), 0) AS amount
                 FROM payments
                 WHERE society_id = %s 
-                  AND entity_type = 'vendor'
+                  AND entity_role = 'vendor'
                   AND status = 'pending'
             ),
             pending_expenses AS (
@@ -236,7 +236,7 @@ KPI_CARDS = {
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payments
             WHERE society_id = %s 
-              AND entity_type = 'vendor'
+              AND entity_role = 'vendor'
               AND status = 'pending'
         """,
         "params": 1,
@@ -386,7 +386,7 @@ KPI_CARDS = {
             SELECT COUNT(DISTINCT entity_id) AS v
             FROM payments
             WHERE society_id = %s 
-              AND entity_type = 'vendor'
+              AND entity_role = 'vendor'
               AND status = 'pending'
         """,
         "params": 1,

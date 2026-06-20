@@ -271,7 +271,7 @@ def load_list(
         # ── PAYMENTS  (auto-calculated debits) ──────────────────────────────
         if entity == "payments":
             p_status = filters.get("status")
-            p_etype  = filters.get("entity_type")
+            p_etype  = filters.get("entity_role")
             rows = db._execute(
                 "SELECT * FROM fn_payments_named(%s, %s, %s, %s) LIMIT %s OFFSET %s",
                 (sid, s, p_status, p_etype, page_size, offset),
@@ -475,17 +475,17 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 "       COALESCE(a.name,'') AS account_name, "
                 "       COALESCE(a.tab_name,'') AS account_group, "
                 "       CASE "
-                "         WHEN r.entity_type='apartment' "
+                "         WHEN r.entity_role='apartment' "
                 "           THEN ap.flat_number || ' — ' || COALESCE(ap.owner_name,'') "
-                "         WHEN r.entity_type='vendor' THEN v.name "
-                "         WHEN r.entity_type='security' THEN s.name "
+                "         WHEN r.entity_role='vendor' THEN v.name "
+                "         WHEN r.entity_role='security' THEN s.name "
                 "         ELSE 'Other' "
                 "       END AS entity_name "
                 "FROM receipts r "
                 "LEFT JOIN accounts a ON a.id=r.acc_id "
-                "LEFT JOIN apartments ap ON ap.id=r.entity_id AND r.entity_type='apartment' "
-                "LEFT JOIN vendors v ON v.id=r.entity_id AND r.entity_type='vendor' "
-                "LEFT JOIN security_staff s ON s.id=r.entity_id AND r.entity_type='security' "
+                "LEFT JOIN apartments ap ON ap.id=r.entity_id AND r.entity_role='apartment' "
+                "LEFT JOIN vendors v ON v.id=r.entity_id AND r.entity_role='vendor' "
+                "LEFT JOIN security_staff s ON s.id=r.entity_id AND r.entity_role='security' "
                 "WHERE r.id=%s AND r.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
@@ -498,15 +498,15 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 "       COALESCE(a.name,'') AS account_name, "
                 "       COALESCE(a.tab_name,'') AS account_group, "
                 "       CASE "
-                "         WHEN e.entity_type='vendor' THEN v.name "
-                "         WHEN e.entity_type='security' THEN s.name "
-                "         WHEN e.entity_type='assets' THEN 'Asset #'||e.entity_id::TEXT "
+                "         WHEN e.entity_role='vendor' THEN v.name "
+                "         WHEN e.entity_role='security' THEN s.name "
+                "         WHEN e.entity_role='assets' THEN 'Asset #'||e.entity_id::TEXT "
                 "         ELSE 'Other' "
                 "       END AS entity_name "
                 "FROM expenses e "
                 "LEFT JOIN accounts a ON a.id=e.acc_id "
-                "LEFT JOIN vendors v ON v.id=e.entity_id AND e.entity_type='vendor' "
-                "LEFT JOIN security_staff s ON s.id=e.entity_id AND e.entity_type='security' "
+                "LEFT JOIN vendors v ON v.id=e.entity_id AND e.entity_role='vendor' "
+                "LEFT JOIN security_staff s ON s.id=e.entity_id AND e.entity_role='security' "
                 "WHERE e.id=%s AND e.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
@@ -733,13 +733,13 @@ def verify_payment(
 # HELPER — entity dropdown options (for form selects)
 # ════════════════════════════════════════════════════════════════════════════
 
-def load_entity_options(entity_type: str, society_id: int) -> list[dict]:
+def load_entity_options(entity_role: str, society_id: int) -> list[dict]:
     """
     Return [{label, value}] for dropdowns in New/Edit forms.
-    entity_type: 'apartments' | 'vendors' | 'security' | 'accounts_cr' | 'accounts_dr'
+    entity_role: 'apartments' | 'vendors' | 'security' | 'accounts_cr' | 'accounts_dr'
     """
     try:
-        if entity_type == "apartments":
+        if entity_role == "apartments":
             rows = db._execute(
                 "SELECT id, flat_number, owner_name FROM apartments "
                 "WHERE society_id=%s AND active=TRUE ORDER BY flat_number",
@@ -749,7 +749,7 @@ def load_entity_options(entity_type: str, society_id: int) -> list[dict]:
                 {"label": f"{r['flat_number']} — {r.get('owner_name','')}", "value": r["id"]}
                 for r in rows
             ]
-        if entity_type == "vendors":
+        if entity_role == "vendors":
             rows = db._execute(
                 "SELECT u.id, v.name, v.service_type FROM users u "
                 "JOIN vendors v ON v.id=u.linked_id "
@@ -761,7 +761,7 @@ def load_entity_options(entity_type: str, society_id: int) -> list[dict]:
                 {"label": f"{r['name']} ({r.get('service_type','')}) — id:{r['id']}", "value": r["id"]}
                 for r in rows
             ]
-        if entity_type == "security":
+        if entity_role == "security":
             rows = db._execute(
                 "SELECT u.id, s.name, s.shift FROM users u "
                 "JOIN security_staff s ON s.id=u.linked_id "
@@ -773,8 +773,8 @@ def load_entity_options(entity_type: str, society_id: int) -> list[dict]:
                 {"label": f"{r['name']} ({r.get('shift','')}) — id:{r['id']}", "value": r["id"]}
                 for r in rows
             ]
-        if entity_type in ("accounts_cr", "accounts_dr"):
-            drcr = "Cr" if entity_type == "accounts_cr" else "Dr"
+        if entity_role in ("accounts_cr", "accounts_dr"):
+            drcr = "Cr" if entity_role == "accounts_cr" else "Dr"
             rows = db._execute(
                 "SELECT id, tab_name, name FROM accounts "
                 "WHERE society_id=%s AND (drcr_account=%s OR drcr_account IS NULL) "
@@ -790,7 +790,7 @@ def load_entity_options(entity_type: str, society_id: int) -> list[dict]:
             ]
         return []
     except Exception as e:
-        print(f"❌ load_entity_options({entity_type}): {e}")
+        print(f"❌ load_entity_options({entity_role}): {e}")
         return []
 
 

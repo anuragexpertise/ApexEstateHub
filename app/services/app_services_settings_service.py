@@ -119,7 +119,7 @@ def generate_monthly_receivables(society_id: int) -> int:
             existing = db._execute(
                 """
                 SELECT id FROM receivables 
-                WHERE society_id=%s AND entity_id=%s AND entity_type='apartment'
+                WHERE society_id=%s AND entity_id=%s AND entity_role='apartment'
                 AND charge_type='maintenance' AND created_at >= %s
                 """,
                 (society_id, apt['id'], current_month),
@@ -142,7 +142,7 @@ def generate_monthly_receivables(society_id: int) -> int:
             db._execute(
                 """
                 INSERT INTO receivables (
-                    society_id, entity_id, entity_type, charge_type,
+                    society_id, entity_id, entity_role, charge_type,
                     description, amount, due_date, status,
                     source_table, source_id, created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -235,7 +235,7 @@ def create_receipt(data: dict, created_by_user_id: int, society_id: int) -> tupl
             'amount': float,
             'mode': str,
             'entity_id': int (optional),
-            'entity_type': str (optional),
+            'entity_role': str (optional),
             'cheque_no': str (optional),
         }
     
@@ -246,7 +246,7 @@ def create_receipt(data: dict, created_by_user_id: int, society_id: int) -> tupl
         result = db._execute(
             """
             INSERT INTO receipts (
-                society_id, user_id, entity_id, entity_type,
+                society_id, user_id, entity_id, entity_role,
                 receipt_date, acc_id, particulars, amount,
                 mode, cheque_no, status, created_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
@@ -254,7 +254,7 @@ def create_receipt(data: dict, created_by_user_id: int, society_id: int) -> tupl
             """,
             (
                 society_id, created_by_user_id,
-                data.get('entity_id'), data.get('entity_type'),
+                data.get('entity_id'), data.get('entity_role'),
                 data.get('receipt_date', date.today()),
                 data['acc_id'], data['particulars'], data['amount'],
                 data.get('mode', 'cash'), data.get('cheque_no')
@@ -416,7 +416,7 @@ def generate_monthly_payments(society_id: int) -> int:
             existing = db._execute(
                 """
                 SELECT id FROM payments 
-                WHERE society_id=%s AND entity_id=%s AND entity_type='security'
+                WHERE society_id=%s AND entity_id=%s AND entity_role='security'
                 AND payment_type='salary' AND created_at >= %s
                 """,
                 (society_id, staff['id'], current_month),
@@ -435,7 +435,7 @@ def generate_monthly_payments(society_id: int) -> int:
             db._execute(
                 """
                 INSERT INTO payments (
-                    society_id, entity_id, entity_type, amount,
+                    society_id, entity_id, entity_role, amount,
                     payment_type, status, due_date,
                     source_table, source_id, created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -526,7 +526,7 @@ def create_expense(data: dict, created_by_user_id: int, society_id: int) -> tupl
         result = db._execute(
             """
             INSERT INTO expenses (
-                society_id, user_id, entity_id, entity_type,
+                society_id, user_id, entity_id, entity_role,
                 expense_date, acc_id, particulars, amount,
                 mode, cheque_no, status, created_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
@@ -534,7 +534,7 @@ def create_expense(data: dict, created_by_user_id: int, society_id: int) -> tupl
             """,
             (
                 society_id, created_by_user_id,
-                data.get('entity_id'), data.get('entity_type'),
+                data.get('entity_id'), data.get('entity_role'),
                 data.get('expense_date', date.today()),
                 data['acc_id'], data['particulars'], data['amount'],
                 data.get('mode', 'cash'), data.get('cheque_no')
