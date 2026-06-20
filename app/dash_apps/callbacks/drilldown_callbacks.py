@@ -78,22 +78,18 @@ _RECEIPT_PARTICULARS_TEMPLATES = {
 
 
 def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
-    """Smart defaults for the 'Pay Dues' receipt form — single source of
-    truth, shared across apartments/vendors/security."""
     p: dict = {}
-    p["trx_date"] = dt_date.today().isoformat()
+    p["trx_date"] = _date.today().isoformat()
     p["entity_id"] = record.get("id")
     p["entity_type"] = entity
-    p["amount"] = record.get("pending_dues")
+    if entity == "apartment":
+        p["amount"] = record.get("pending_dues")
     p["mode"] = "cash"
-
     template = _RECEIPT_PARTICULARS_TEMPLATES.get(entity)
     p["acc_particulars"] = template(record) if template else "Receipt"
-
     acc = _get_account_by_name(society_id, "Society Charge") if society_id else None
     if acc:
         p["acc_id"] = acc["id"]
-
     return p
 
 def _is_db_error(msg: str) -> bool:

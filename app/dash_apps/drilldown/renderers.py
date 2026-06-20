@@ -103,6 +103,17 @@ _FK_HUMAN_ALIASES = {
     "entity_id": "entity_name", "account_id": "account_name",
 }
 
+_FIELD_FORMATTERS = {
+    "shift_count": lambda v: f"{int(v)} shift{'s' if int(v) != 1 else ''}",
+    "gate_pass": lambda v: html.Span(
+        "✓ Pass" if v else "✗ Fail",
+        style={"color": "#17976e" if v else "#de5c52", "fontWeight": "600"},
+    ),
+    "duty_status": lambda v: html.Span(
+        "✓ On Duty" if v else "✗ Off Duty",
+        style={"color": "#17976e" if v else "#de5c52", "fontWeight": "600"},
+    ),
+}
 
 def _display_value(field_key: str, row_dict: dict):
     alt_key = _FK_HUMAN_ALIASES.get(field_key)
@@ -265,6 +276,9 @@ def render_list_card(card_id: str, title: str, icon: str,
         for c in visible_columns:
             field_key = c.get("field") or c.get("name") or ""
             val = _display_value(field_key, row_dict)
+            fmt = f.get("format")  # or c.get("format") in the list loop
+            if fmt in _FIELD_FORMATTERS and val is not None:
+                val = _FIELD_FORMATTERS[fmt](val)
             if isinstance(val, bool):
                 val = html.Span(
                     ["✓" if val else "✗"],
@@ -272,6 +286,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                 )
             elif isinstance(val, (date, datetime)):
                 val = val.strftime("%d %b %Y") if val else "—"
+            
             elif val is None:
                 val = "—"
             else:
