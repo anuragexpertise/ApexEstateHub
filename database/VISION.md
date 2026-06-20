@@ -199,7 +199,7 @@ Monthly Maintenance Calculation:
 ├─ Base Rate × Apartment Size
 ├─ Fixed Charges (parking, water, etc.)
 ├─ Variable Charges (electricity consumption)
-├─ Previous Month Arrears
+├─ Previous Month Calcs
 ├─ Late Payment Penalties
 └─ Final Amount Due
 ```

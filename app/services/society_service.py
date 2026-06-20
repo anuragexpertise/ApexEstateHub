@@ -43,7 +43,7 @@ def create_society(data: dict) -> int | None:
                (name,email,phone,address,secretary_name,secretary_phone,
                 plan,plan_validity,calc_start_date)
                VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
-                       :plan,:validity,:arrear)
+                       :plan,:validity,:Calc)
                RETURNING id""",
             {
                 "name":     data["name"],
@@ -54,7 +54,7 @@ def create_society(data: dict) -> int | None:
                 "sec_phone":data.get("sec_phone"),
                 "plan":     data.get("plan", "Free"),
                 "validity": data.get("validity"),
-                "arrear":   data.get("arrear"),
+                "Calc":   data.get("Calc"),
             },
             fetch_one=True,
         )

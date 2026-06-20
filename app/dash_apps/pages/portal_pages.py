@@ -839,7 +839,7 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts & charge rates"),
             _kpi_row(
-                _kpi("kpi_societies_calc_start_date", "fa-clock", "#34ee45", "Arrear Start Date"),
+                _kpi("kpi_societies_calc_start_date", "fa-clock", "#34ee45", "Calc Start Date"),
                 _kpi("kpi_plan_validity", "fa-clock", "#34ee45", "Society Plan Validity"),
 
                 _kpi("kpi_accounts_count",       "fa-book-open",   "#6c5ce7", "Accounts"),

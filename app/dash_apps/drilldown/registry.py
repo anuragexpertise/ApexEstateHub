@@ -117,7 +117,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"},
     "kpi_societies_calc_start_date": {
         "target": "list_societies",
-        "label": "Arrear Start Date",
+        "label": "Calc Start Date",
     },
     "kpi_receivables_total": {
         "target": "list_receipts_tbl",
@@ -216,7 +216,7 @@ DRILLDOWN_MAP: dict = {
     # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
     "kpi_societies_calc_start_date": {
         "target": "list_societies",
-        "label": "Arrear Start Date",
+        "label": "Calc Start Date",
     },
     "kpi_plan_validity": {"target": "list_societies", "label": "Society Plan Validity"},
     "kpi_accounts_count": {"target": "list_accounts", "label": "Chart of Accounts"},

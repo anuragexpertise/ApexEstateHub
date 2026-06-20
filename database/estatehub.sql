@@ -2003,7 +2003,7 @@ $$ LANGUAGE plpgsql;
 --     UNION ALL
 --     SELECT 'kpi_attendance', 'Attendance (30d)', 'fa-clock', 'admin', 'settings', 'fn_attendance_list'
 --     UNION ALL
---     SELECT 'kpi_societies_calc_start_date', 'Arrear Start Date', 'fa-clock', 'admin', 'settings', 'fn_societies_list'
+--     SELECT 'kpi_societies_calc_start_date', 'Calc Start Date', 'fa-clock', 'admin', 'settings', 'fn_societies_list'
 --     UNION ALL
 --     SELECT 'kpi_societies_total', 'Total Societies', 'fa-building', 'master', 'dashboard', 'fn_societies_list'
 --     UNION ALL
@@ -2441,10 +2441,10 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION fn_create_default_charges(p_society_id INT)
 RETURNS VOID AS $$
 DECLARE
-    v_arrear_date DATE;
+    v_Calc_date DATE;
 BEGIN
     SELECT calc_start_date
-    INTO v_arrear_date
+    INTO v_Calc_date
     FROM societies
     WHERE id = p_society_id;
 
@@ -2456,7 +2456,7 @@ BEGIN
         society_id, apt_id, start_date, end_date,
         apt_maintenance_rate, apt_due_day, apt_delay_fine, apt_fine, apt_status
     ) VALUES (
-        p_society_id, NULL, v_arrear_date, NULL,
+        p_society_id, NULL, v_Calc_date, NULL,
         3.0, 5, 5, 0, TRUE
     ) ON CONFLICT DO NOTHING;
 
@@ -2464,7 +2464,7 @@ BEGIN
         society_id, ven_id, start_date, end_date,
         vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status
     ) VALUES (
-        p_society_id, NULL, v_arrear_date, NULL,
+        p_society_id, NULL, v_Calc_date, NULL,
         100.0, 500.0, 1500, 500, TRUE
     ) ON CONFLICT DO NOTHING;
 
@@ -2472,7 +2472,7 @@ BEGIN
         society_id, sec_id, start_date, end_date,
         security_fine, sec_status
     ) VALUES (
-        p_society_id, NULL, v_arrear_date, NULL,
+        p_society_id, NULL, v_Calc_date, NULL,
         500, TRUE
     ) ON CONFLICT DO NOTHING;
 END;
