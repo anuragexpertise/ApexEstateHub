@@ -85,8 +85,8 @@ def role_required(allowed_roles):
         @wraps(f)
         @token_required
         def decorated(*args, **kwargs):
-            user_role = request.user_payload.get('role')
-            if user_role not in allowed_roles:
+            role = request.user_payload.get('role')
+            if role not in allowed_roles:
                 return jsonify({'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated

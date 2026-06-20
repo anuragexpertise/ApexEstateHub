@@ -129,11 +129,11 @@ def _context_hidden_fields(filters: dict | None) -> set[str]:
     filters = filters or {}
     hidden = {"society_id"}
     if filters.get("apartment_id"):
-        hidden |= {"apartment_id", "apt_id", "entity_id", "entity_role"}
+        hidden |= {"apartment_id", "apt_id", "entity_id", "role"}
     if filters.get("vendor_id"):
-        hidden |= {"vendor_id", "ven_id", "entity_id", "entity_role"}
+        hidden |= {"vendor_id", "ven_id", "entity_id", "role"}
     if filters.get("security_id"):
-        hidden |= {"security_id", "sec_id", "entity_id", "entity_role"}
+        hidden |= {"security_id", "sec_id", "entity_id", "role"}
     return hidden
 
 
@@ -239,16 +239,16 @@ def render_list_card(card_id: str, title: str, icon: str,
                      filters: dict | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
-    user_role  = auth_data.get("role", "guest")
+    role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
 
     # ── Resolve permissions for this role × entity ─────────────────────────
-    allowed = _perms_for(user_role, entity)
+    allowed = _perms_for(role, entity)
     hidden = _context_hidden_fields(filters)
     visible_columns = [
         c for c in columns
         if (c.get("field") or c.get("name") or "") not in hidden
-        and _field_visible(entity, c.get("field") or c.get("name") or "", user_role)
+        and _field_visible(entity, c.get("field") or c.get("name") or "", role)
     ]
     total_pages = max(1, -(-total_rows // page_size))
 
@@ -480,9 +480,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
     from app.dash_apps.drilldown.registry import to_plural
 
     auth_data  = auth_data or {}
-    user_role  = auth_data.get("role", "guest")
+    role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
-    allowed    = _perms_for(user_role, entity)
+    allowed    = _perms_for(role, entity)
     entity_plural = to_plural(entity)
     hidden = _context_hidden_fields(filters)
 
@@ -506,7 +506,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     visible_fields = [
         f for f in fields
         if f.get("field") not in hidden
-        and _field_visible(entity_plural, f.get("field"), user_role)
+        and _field_visible(entity_plural, f.get("field"), role)
     ]
     image_fields = [f for f in visible_fields if f.get("type") == "image"]
     text_fields  = [f for f in visible_fields if f.get("type") != "image"]
@@ -686,11 +686,11 @@ def render_form_card(card_id: str, title: str, icon: str,
                      prefill: dict | None = None,
                      color: str = "#17976e",
                      society_id: int | None = None,
-                     user_role: str | None = None) -> html.Div:
+                     role: str | None = None) -> html.Div:
     from app.dash_apps.drilldown.registry import to_plural
     prefill = prefill or {}
     entity_plural = to_plural(entity)
-    fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), user_role or "admin")]
+    fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
     form_rows = []
 
     for f in fields:

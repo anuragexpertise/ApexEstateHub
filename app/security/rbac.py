@@ -148,7 +148,7 @@ class RBACManager:
 
     @staticmethod
     def has_permission(
-        user_role: str,
+        role: str,
         card_id: str,
         permission: Permission,
         society_id: Optional[int] = None
@@ -165,7 +165,7 @@ class RBACManager:
                    WHERE (society_id = %s OR society_id IS NULL)
                    AND role = %s AND card_id = %s AND permission = %s
                    ORDER BY society_id DESC LIMIT 1""",
-                (society_id, user_role, card_id, permission.value),
+                (society_id, role, card_id, permission.value),
                 fetch_one=True
             )
             
@@ -182,7 +182,7 @@ class RBACManager:
                        WHERE role = %s AND permission = %s
                    )
                    ORDER BY society_id DESC LIMIT 1""",
-                (society_id, user_role, card_id, permission.value, user_role, permission.value),
+                (society_id, role, card_id, permission.value, role, permission.value),
                 fetch_one=True
             )
             
@@ -194,13 +194,13 @@ class RBACManager:
             pass
         
         # 3. Fall back to defaults (always executed)
-        permissions = RBACManager.DEFAULT_PERMISSIONS.get(user_role, {})
+        permissions = RBACManager.DEFAULT_PERMISSIONS.get(role, {})
         card_perms = permissions.get(card_id, set())
         return permission in card_perms
 
     @staticmethod
     def get_accessible_cards(
-        user_role: str,
+        role: str,
         permission: Permission,
         society_id: Optional[int] = None
     ) -> Set[str]:
@@ -208,7 +208,7 @@ class RBACManager:
         accessible = set()
         
         # Get defaults for role
-        defaults = RBACManager.DEFAULT_PERMISSIONS.get(user_role, {})
+        defaults = RBACManager.DEFAULT_PERMISSIONS.get(role, {})
         
         for card_id, card_perms in defaults.items():
             if permission in card_perms:
@@ -220,7 +220,7 @@ class RBACManager:
                 """SELECT DISTINCT card_id FROM role_permissions
                    WHERE (society_id = %s OR society_id IS NULL)
                    AND role = %s AND permission = %s""",
-                (society_id, user_role, permission.value),
+                (society_id, role, permission.value),
                 fetch_all=True
             ) or []
             
@@ -288,12 +288,12 @@ def require_permission(card_id: str, permission: Permission = Permission.VIEW):
             
             # This would be passed from your auth system
             auth_data = kwargs.get('auth_data') or {}
-            user_role = auth_data.get('role', 'guest')
+            role = auth_data.get('role', 'guest')
             society_id = auth_data.get('society_id')
             
-            if not RBACManager.has_permission(user_role, card_id, permission, society_id):
+            if not RBACManager.has_permission(role, card_id, permission, society_id):
                 from dash import no_update
-                print(f"❌ Access denied: {user_role} cannot {permission.value} {card_id}")
+                print(f"❌ Access denied: {role} cannot {permission.value} {card_id}")
                 return no_update
             
             return func(*args, **kwargs)
@@ -322,11 +322,11 @@ def route_drilldown(nav_state, auth_data):
         return no_update
     
     card_id = nav_state.get("active_card")
-    user_role = auth_data.get("role")
+    role = auth_data.get("role")
     society_id = auth_data.get("society_id")
     
     # Check VIEW permission
-    if not RBACManager.has_permission(user_role, card_id, Permission.VIEW, society_id):
+    if not RBACManager.has_permission(role, card_id, Permission.VIEW, society_id):
         return html.Div([
             html.I(className="fas fa-lock fa-3x mb-3", style={"color": "#de5c52"}),
             html.H4("Access Denied", className="text-danger"),
