@@ -65,7 +65,7 @@ class Society:
     login_background: Optional[str] = None
     plan: SocietyPlan = SocietyPlan.FREE
     plan_validity: date = field(default_factory=date.today)
-    arrear_start_date: date = field(default_factory=date.today)
+    calc_start_date: date = field(default_factory=date.today)
     secretary_name: Optional[str] = None
     secretary_phone: Optional[str] = None
     secretary_sign: Optional[str] = None

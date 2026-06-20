@@ -15,7 +15,7 @@ class Society(db.Model):
     secretary_sign = db.Column(db.String(100), nullable=True)
     plan = db.Column(db.String(4), default='Free')
     plan_validity = db.Column(db.Date, nullable=False)
-    arrear_start_date = db.Column(db.Date, default=datetime.now().date)
+    calc_start_date = db.Column(db.Date, default=datetime.now().date)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     login_background = db.Column(db.String(100), nullable=True)
     

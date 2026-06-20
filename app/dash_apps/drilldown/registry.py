@@ -115,7 +115,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"},
     "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"},
-    "kpi_societies_arrear_start_date": {
+    "kpi_societies_calc_start_date": {
         "target": "list_societies",
         "label": "Arrear Start Date",
     },
@@ -214,7 +214,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_security_shift": {"target": "list_gate_logs", "label": "Completed Shifts"},
     # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
-    "kpi_societies_arrear_start_date": {
+    "kpi_societies_calc_start_date": {
         "target": "list_societies",
         "label": "Arrear Start Date",
     },
