@@ -116,6 +116,21 @@ _AUTH_FIELDS: dict[str, list[dict]] = {
     ],
 }
 
+_COMPUTED_FIELDS: dict[str, list[dict]] = {
+    "apartments": [
+        {"label": "Pending Dues", "field": "pending_dues", "icon": "fa-rupee-sign"},
+        {"label": "Gate Pass", "field": "gate_pass", "icon": "fa-qrcode", "format": "gate_pass"},
+    ],
+    "vendors": [
+        {"label": "Pass Expiry", "field": "pass_expiry", "icon": "fa-calendar-alt"},
+        {"label": "Gate Pass", "field": "gate_pass", "icon": "fa-qrcode", "format": "gate_pass"},
+    ],
+    "security": [
+        {"label": "Shifts Completed", "field": "shift_count", "icon": "fa-clock", "format": "shift_count"},
+        {"label": "Duty Status", "field": "gate_pass", "icon": "fa-shield-alt", "format": "duty_status"},
+    ],
+}
+
 def _labelize(col: str) -> str:
     return col.replace("_", " ").title()
 
@@ -335,7 +350,16 @@ def build_entity_meta() -> dict:
             # selects u.email for both vendor and security
             profile_fields = [{"label": "Login Email", "field": "email",
                                 "icon": "fa-envelope"}] + profile_fields
-            
+
+        if ekey in _COMPUTED_FIELDS:
+            extra = _COMPUTED_FIELDS[ekey]
+            profile_fields = profile_fields + [dict(f) for f in extra]
+            list_columns = list_columns + [
+                {"name": f["label"], "field": f["field"], "sortable": False,
+                **({"format": f["format"]} if "format" in f else {})}
+                for f in extra
+            ]
+
         actions = list(PROFILE_ACTIONS.get(ekey, []))
         if ekey not in NO_EDIT_ACTION:
             actions.append(

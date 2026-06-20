@@ -388,54 +388,43 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── APARTMENT ────────────────────────────────────────────────────────
         if entity_singular == "apartment":
             r = db._execute(
-                "SELECT a.*, "
-                "  COALESCE(("
-                "    SELECT SUM(p.amount) FROM payments p "
-                "    WHERE p.entity_id=a.id AND p.entity_type='apartment' "
-                "          AND p.status='pending'"
-                "  ),0) AS pending_dues "
+                "SELECT a.*, d.pending_dues, d.gate_pass "
                 "FROM apartments a "
+                "JOIN v_apartment_dues d ON d.apartment_id = a.id "
                 "WHERE a.id=%s AND a.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None
 
-        # ── VENDOR ───────────────────────────────────────────────────────────
         if entity_singular == "vendor":
             r = db._execute(
                 "SELECT u.id, u.email, u.society_id, "
                 "       v.id AS vendor_id, v.name, v.service_type, v.mobile, "
                 "       v.active, v.logo, v.license, v.photo, "
                 "       v.service_description, v.created_at, "
-                "       COALESCE(("
-                "         SELECT SUM(p.amount) FROM payments p "
-                "         WHERE p.user_id=u.id AND p.entity_type='vendor' "
-                "               AND p.status='pending'"
-                "       ),0) AS pending_dues "
-                "FROM users u JOIN vendors v ON v.id=u.linked_id "
+                "       vp.pass_expiry, vp.gate_pass "
+                "FROM users u "
+                "JOIN vendors v ON v.id=u.linked_id "
+                "JOIN v_vendor_pass_status vp ON vp.vendor_id = v.id "
                 "WHERE u.id=%s AND u.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None
 
-        # ── SECURITY ─────────────────────────────────────────────────────────
         if entity_singular == "security":
             r = db._execute(
                 "SELECT u.id, u.email, u.society_id, "
                 "       s.id AS staff_id, s.name, s.mobile, s.shift, "
                 "       s.active, s.joining_date, s.salary_per_shift, "
                 "       s.photo, s.id_proof, s.created_at, "
-                "       COALESCE(("
-                "         SELECT SUM(sr.salary_per_shift) "
-                "         FROM security_roster r "
-                "         JOIN security_staff sr ON sr.id=r.security_id "
-                "         WHERE r.security_id=s.id AND r.roster_date<=CURRENT_DATE"
-                "       ),0) AS total_shifts "
-                "FROM users u JOIN security_staff s ON s.id=u.linked_id "
+                "       vs.shift_count, vs.gate_pass "
+                "FROM users u "
+                "JOIN security_staff s ON s.id=u.linked_id "
+                "JOIN v_security_status vs ON vs.security_id = s.id "
                 "WHERE u.id=%s AND u.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
-            return dict(r) if r else None
+    return dict(r) if r else None
 
         # ── EVENT ─────────────────────────────────────────────────────────────
         if entity_singular == "event":
