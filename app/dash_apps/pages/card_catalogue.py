@@ -131,7 +131,7 @@ KPI_CARDS = {
         "icon": "fa-home",
         "color": "#1859b8",
         "title": "Maintenance Due",
-        "group": "from arrear date",
+        "group": "from Calc date",
     },
     
     "kpi_late_fees_due": {
@@ -485,8 +485,8 @@ KPI_CARDS = {
         "format": "date",
         "icon": "fa-clock",
         "color": "#34ee45",
-        "title": "Arrear Start Date",
-        "group": "Arrears",
+        "title": "Calc Start Date",
+        "group": "Calcs",
     },    
 
 
@@ -941,13 +941,13 @@ KPI_CARDS = {
 #             {"id": "soc-sec-sign",  "label": "Secretary Sign", "type": "upload", "accept": "image/*", "preview": True},
 #             {"id": "soc-plan",      "label": "Plan",           "type": "select", "options": ["Free","9Apts","99Apts","999Apts","unlimited"]},
 #             {"id": "soc-validity",  "label": "Plan Validity",  "type": "date"},
-#             {"id": "arrear-start",   "label": "Arrear Start Date","type": "date"},
+#             {"id": "Calc-start",   "label": "Calc Start Date","type": "date"},
 #             {"id": "soc-bg",        "label": "Login Background", "type": "upload", "accept": "image/*", "preview": True},
 #         ],
 #         "save_btn": "save-society-profile-btn",
 #         "load_output": ["soc-logo","soc-name","soc-email","soc-phone","soc-address",
 #                         "soc-sec-name","soc-sec-phone","soc-sec-sign","soc-plan",
-#                         "soc-validity","arrear-start","soc-bg"],
+#                         "soc-validity","Calc-start","soc-bg"],
 #     },
 #     "society_create": {
 #         "group": "Society", "title": "Create Society", "icon": "fa-plus-circle",
@@ -963,7 +963,7 @@ KPI_CARDS = {
 #             {"id": "soc-sec-sign",  "label": "Secretary Sign", "type": "upload", "accept": "image/*", "preview": True},
 #             {"id": "soc-plan",      "label": "Plan",           "type": "select", "options": ["Free","9Apts","99Apts","999Apts","unlimited"]},
 #             {"id": "soc-validity",  "label": "Plan Validity",  "type": "date"},
-#             {"id": "arrear-start",   "label": "Arrear Start Date","type": "date"},
+#             {"id": "Calc-start",   "label": "Calc Start Date","type": "date"},
 #             {"id": "soc-bg",        "label": "Login Background", "type": "upload", "accept": "image/*", "preview": True},
         
 #             {"id": "new-admin-email",   "label": "Admin Email *",  "type": "email"},
@@ -1287,7 +1287,7 @@ KPI_CARDS = {
 #             {"id": "rate-late-max",  "label": "Max Late Fee (%)",           "type": "number"},
 #             {"id": "rate-vendor",    "label": "Vendor Monthly Fee (₹)",     "type": "number"},
 #             {"id": "rate-security",  "label": "Security Monthly (₹)",       "type": "number"},
-#             {"id": "rate-arrear-dt", "label": "Arrear Start Date",          "type": "date"},
+#             {"id": "rate-Calc-dt", "label": "Calc Start Date",          "type": "date"},
 #         ],
 #         "save_btn": "save-rates-fines-btn",
 #     },
