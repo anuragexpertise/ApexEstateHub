@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS events (
     title VARCHAR(200) NOT NULL,
     description TEXT,
     event_date DATE NOT NULL,
-    event_time TIME),
+    event_time TIME,
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
     parent_account_id INT REFERENCES accounts (id),
