@@ -472,6 +472,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION fn_trg_apartment_active_guard()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE v_outstanding NUMERIC(15,2);
 BEGIN
     IF NEW.active IS DISTINCT FROM OLD.active THEN
@@ -579,6 +581,8 @@ $$;
 DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_calc_start DATE;
     v_month      DATE;
@@ -650,6 +654,8 @@ $$;
 DROP FUNCTION IF EXISTS fn_apply_receivable_interest CASCADE;
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     rec              RECORD;
     v_rate           NUMERIC(5,2);
@@ -697,18 +703,18 @@ BEGIN
         END LOOP;
 
         UPDATE receivables
-             SET interest_amount         = rec.interest_amount + v_total_increment,
-                 amount                  = rec.amount + v_total_increment,
-                 interest_months_applied = rec.interest_months_applied + v_months_new,
-                 interest_acc_id         = COALESCE(rec.interest_acc_id, v_int_acc_id),
-                 -- Append ' + Interest' to description once, so the admin can see it clearly
-                 description = CASE
-                     WHEN rec.description NOT LIKE '% + Interest' THEN rec.description || ' + Interest'
-                     ELSE rec.description
-                 END
-             WHERE id = rec.id;
-        END LOOP;
-    END;
+        SET interest_amount         = interest_amount + v_total_increment,
+            amount                  = amount + v_total_increment,
+            interest_months_applied = rec.interest_months_applied + v_months_new,
+            interest_acc_id         = COALESCE(rec.interest_acc_id, v_int_acc_id),
+            -- Append ' + Interest' to description once, so the admin can see it clearly
+            description = CASE
+                WHEN rec.description NOT LIKE '% + Interest' THEN rec.description || ' + Interest'
+                ELSE rec.description
+            END
+        WHERE id = rec.id;
+    END LOOP;
+END;
 $$;
 
 -- Single-row verify (the Verify button on a specific receivable row).
@@ -723,6 +729,8 @@ CREATE OR REPLACE FUNCTION fn_verify_receivable(
     p_mode          VARCHAR DEFAULT 'cash'
 )
 RETURNS TEXT LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_rec         receivables%ROWTYPE;
     v_residual    NUMERIC(15,2);
@@ -777,11 +785,11 @@ BEGIN
     END IF;
 
     UPDATE receivables
-         SET paid_amount  = v_rec.amount,
-             status       = 'paid',
-             confirmed_by = p_confirmed_by,
-             confirmed_at = NOW()
-         WHERE id = p_receivable_id;
+    SET paid_amount  = amount,
+        status       = 'paid',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW()
+    WHERE id = p_receivable_id;
 
     RETURN 'Verified: transaction #' || v_trx_id::TEXT;
 END;
@@ -802,6 +810,8 @@ CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
 )
 RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_society_id INT;
     v_acc_id     INT;
@@ -849,16 +859,16 @@ BEGIN
           AND status IN ('pending','partial')
         ORDER BY due_date ASC NULLS LAST, id ASC
         FOR UPDATE
-LOOP
+    LOOP
         EXIT WHEN v_remaining <= 0;
         v_take := LEAST(v_remaining, rec.amount - rec.paid_amount);
 
         UPDATE receivables
-             SET paid_amount   = rec.paid_amount + v_take,
-                 status        = CASE WHEN rec.paid_amount + v_take >= rec.amount THEN 'paid' ELSE 'partial' END,
-                 confirmed_by  = COALESCE(p_confirmed_by, rec.confirmed_by),
-                 confirmed_at  = NOW()
-             WHERE id = rec.id;
+        SET paid_amount   = paid_amount + v_take,
+            status        = CASE WHEN paid_amount + v_take >= amount THEN 'paid' ELSE 'partial' END,
+            confirmed_by  = COALESCE(p_confirmed_by, confirmed_by),
+            confirmed_at  = NOW()
+        WHERE id = rec.id;
 
         v_remaining := v_remaining - v_take;
     END LOOP;
@@ -881,6 +891,8 @@ $$;
 DROP FUNCTION IF EXISTS fn_auto_generate_payments CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_payments(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     rec          RECORD;
     v_user_id    INT;
@@ -931,6 +943,8 @@ CREATE OR REPLACE FUNCTION fn_verify_payment(
     p_mode         VARCHAR DEFAULT 'cash'
 )
 RETURNS TEXT LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_pay    payments%ROWTYPE;
     v_trx_id INT;
@@ -976,6 +990,8 @@ CREATE OR REPLACE FUNCTION fn_sell_vendor_pass(
 )
 RETURNS TABLE(receipt_id INT, pass_id INT, valid_until DATE)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_society_id  INT;
     v_vendor_id   INT;
@@ -1088,6 +1104,8 @@ CREATE OR REPLACE FUNCTION fn_buy_asset(
 )
 RETURNS TABLE(asset_id INT, expense_id INT)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_asset_id   INT;
     v_expense_id INT;
@@ -1154,6 +1172,8 @@ CREATE OR REPLACE FUNCTION fn_dispose_asset(
 )
 RETURNS TABLE(receipt_id INT)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_asset      asset_register%ROWTYPE;
     v_acc_id     INT;
@@ -1230,6 +1250,8 @@ CREATE OR REPLACE FUNCTION fn_save_receipt(
 )
 RETURNS TABLE(receipt_id INT, transaction_id INT)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_receipt_id INT;
     v_trx_id     INT;
@@ -1282,6 +1304,8 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
 )
 RETURNS TABLE(expense_id INT, transaction_id INT)
 LANGUAGE plpgsql AS $$
+
+#variable_conflict use_column
 DECLARE
     v_expense_id INT;
     v_trx_id     INT;

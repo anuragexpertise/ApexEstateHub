@@ -335,7 +335,7 @@ def seed_demo(conn):
             )
             row = cur.fetchone()
             conn.commit()
-            apt_id = row["id"]
+            apt_id = row["id"] if row else None
             cur.execute(
                 """INSERT INTO users
                    (society_id,email,password_hash,role,login_method,name,linked_id)
@@ -352,9 +352,9 @@ def seed_demo(conn):
         elif u["role"] == "vendor":
             cur.execute(
                 """INSERT INTO vendors
-                   (society_id,name,service_type,mobile,active)
-                   VALUES (%s,%s,%s,%s,TRUE) RETURNING id""",
-                (society_id, u["name"], u.get("service","General"), u.get("mobile","")),
+                   (society_id,business_name,name,service_type,mobile,active)
+                   VALUES (%s,%s,%s,%s,%s,TRUE) RETURNING id""",
+                (society_id, u["name"], u["name"], u.get("service","General"), u.get("mobile","")),
             )
             row= cur.fetchone()     
             conn.commit()
