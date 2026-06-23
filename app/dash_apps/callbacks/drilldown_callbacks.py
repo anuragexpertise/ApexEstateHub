@@ -332,58 +332,114 @@ def register_drilldown_callbacks(app):
             target = id_dict.get("target")
 
             if action == "show_qr":
-                record = loaders.load_profile(entity, pk, sid) or {}
-                role_map = {
-                    "apartment": "apartment",
-                    "vendor": "vendor",
-                    "security": "security",
-                }
+                record = _loaders.load_profile(entity, pk, sid) or {}
                 entity_name = record.get("owner_name") or record.get("name", entity)
-                return (
-                    no_update,
-                    no_update,
-                    no_update,
-                    no_update,
-                    {
-                        "entity_id": pk,
-                        "role": role_map.get(entity, entity),
-                        "society_id": sid,
-                        "name": entity_name,
-                    },
-                )
+                return store, True, {
+                    "entity_id": pk,
+                    "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity, entity),
+                    "society_id": sid,
+                    "name": entity_name,
+                }
 
-            elif action == "show_cashbook":
+            # ── Cashbook view ─────────────────────────────────────────────────────
+            if action == "show_cashbook":
                 store = nav_state.navigate_to(
-                    store,
-                    "list_cashbook",
-                    f"{entity.title()} Cashbook",
+                    store, "list_cashbook", f"{entity.title()} Cashbook",
                     filters={"entity_id": pk},
                 )
-                hide_kpis = True
+                return store, True, None
 
-            elif target:
-                record = loaders.load_profile(entity, pk, sid) or {}
+            # ── Pay Dues (apartment) — FIFO bulk payment form ─────────────────────
+            if action == "pay_dues":
+                record = _loaders.load_profile(entity, pk, sid) or {}
+                prefill = {
+                    "entity_id": pk,
+                    "role": entity,
+                    "amount": record.get("pending_dues") or record.get("overdue_dues"),
+                    "mode": "cash",
+                    "particulars": f"Maintenance Payment — {record.get('flat_number','Flat')}",
+                }
+                store = nav_state.navigate_to(
+                    store, "form_pay_dues_new",
+                    "Pay Dues",
+                    prefill=prefill, entity_pk=pk,
+                )
+                return store, True, None
 
-                if action == "pay_dues":
-                    prefill = _build_receipt_prefill(record, entity, sid)
-                else:
-                    pmap = (
-                        DRILLDOWN_MAP.get(f"profile_{entity}", {})
-                        .get("actions", {})
-                        .get(action, {})
-                        .get("prefill", {})
-                    )
-                    prefill = build_prefill(record, pmap) if pmap else dict(record)
+            # ── Verify receivable (admin only, from receivables list) ─────────────
+            if action == "verify_receivable":
+                user_id = (auth or {}).get("user_id")
+                ok, msg = _loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
+                store["refresh"] = True
+                return store, True, {"_toast": {"type": "success" if ok else "error", "message": msg}}
 
+            # ── Verify payment (admin only, from payments list) ───────────────────
+            if action == "verify_payment":
+                user_id = (auth or {}).get("user_id")
+                ok, msg = _loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
+                store["refresh"] = True
+                return store, True, {"_toast": {"type": "success" if ok else "error", "message": msg}}
+
+            # ── NOC Issue (apartment profile — admin only) ────────────────────────
+            if action == "issue_noc":
+                noc = _loaders.check_noc_eligibility(int(pk))
+                if not noc.get("eligible"):
+                    return store, True, {
+                        "_toast": {"type": "error", "message": noc.get("reason", "Not eligible for NOC")}
+                    }
+                # Navigate to NOC print form (PDF generation — future phase)
+                store = nav_state.navigate_to(
+                    store, "form_noc_print", "Issue NOC",
+                    prefill={"apartment_id": pk}, entity_pk=pk,
+                )
+                return store, True, None
+
+            # ── Dispose asset (admin only, from asset profile) ────────────────────
+            if action == "dispose_asset":
+                store = nav_state.navigate_to(
+                    store, "form_asset_dispose_new", "Sell / Dispose Asset",
+                    prefill={"asset_id": pk, "role": "assets"},
+                    entity_pk=pk,
+                )
+                return store, True, None
+
+            # ── Sell vendor pass (from vendor profile) ────────────────────────────
+            if action == "sell_vendor_pass":
+                record = _loaders.load_profile(entity, pk, sid) or {}
+                store = nav_state.navigate_to(
+                    store, "form_vendor_pass_new", "Sell Vendor Pass",
+                    prefill={"user_id": pk, "entity_id": record.get("vendor_id", pk), "role": "vendor"},
+                    entity_pk=pk,
+                )
+                return store, True, None
+
+            # ── Raise concern (apartment profile) ────────────────────────────────
+            if action == "new_concern":
+                record = _loaders.load_profile(entity, pk, sid) or {}
+                pmap   = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
+                        .get(action, {}).get("prefill", {}))
+                prefill = build_prefill(record, pmap) if pmap else {"flat_no": record.get("flat_number")}
+                store = nav_state.navigate_to(
+                    store, "form_concern_new", "Raise Concern",
+                    prefill=prefill, entity_pk=pk,
+                )
+                return store, True, None
+
+            # ── Generic edit / other action ───────────────────────────────────────
+            target = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
+                    .get(action, {}).get("target"))
+            if target:
+                record = _loaders.load_profile(entity, pk, sid) or {}
+                pmap   = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
+                        .get(action, {}).get("prefill", {}))
+                prefill = build_prefill(record, pmap) if pmap else dict(record)
                 store = nav_state.navigate_to(
                     store, target, action.replace("_", " ").title(),
                     prefill=prefill, entity_pk=pk,
                 )
-                hide_kpis = True
+                return store, True, None
 
-            else:
-                return no_update, no_update, no_update, no_update, no_update
-
+            return store, False, None
         # ── Breadcrumb back ───────────────────────────────────────────────
         elif trig_type == "breadcrumb-click":
             index = id_dict.get("index", 0)
@@ -927,39 +983,311 @@ def _build_receipt_prefill(
     return p
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# 1.  _save_entity  — complete replacement (drop this into drilldown_callbacks.py)
+# ════════════════════════════════════════════════════════════════════════════
+
 def _save_entity(entity, card_id, data):
-    sid = data.get("society_id")
+    """Route to the correct save handler based on entity type."""
+    sid    = data.get("society_id")
     is_edit = "edit" in card_id
-    pk = data.get("id")
+    pk     = data.get("id")
     try:
-        if entity == "apartment":
-            return _save_apartment(db, data, sid, is_edit, pk)
-        if entity == "vendor":
-            return _save_user_entity(db, data, sid, "vendor", is_edit, pk)
-        if entity == "security":
-            return _save_user_entity(db, data, sid, "security", is_edit, pk)
-        if entity == "event":
-            return _save_event(db, data, sid, is_edit, pk)
-        if entity == "concern":
-            return _save_concern(db, data, sid, is_edit, pk)
-        if entity in ("receipt", "expense"):
-            return _save_transaction(db, data, sid, entity)
-        if entity == "gate_log":
-            return _save_gate_log(db, data, sid)
-        if entity == "society":
-            return _save_society(db, data, sid, is_edit, pk)
-        if entity == "account":
-            return _save_account(db, data, sid, is_edit, pk)
-        if entity == "apt_charge":
-            return _save_apt_charge(db, data, sid, is_edit, pk)
-        if entity == "ven_charge":
-            return _save_ven_charge(db, data, sid, is_edit, pk)
-        if entity == "sec_charge":
-            return _save_sec_charge(db, data, sid, is_edit, pk)
+        if entity == "apartment":     return _save_apartment(db, data, sid, is_edit, pk)
+        if entity == "vendor":        return _save_user_entity(db, data, sid, "vendor", is_edit, pk)
+        if entity == "security":      return _save_user_entity(db, data, sid, "security", is_edit, pk)
+        if entity == "event":         return _save_event(db, data, sid, is_edit, pk)
+        if entity == "concern":       return _save_concern(db, data, sid, is_edit, pk)
+        if entity == "receipt":       return _save_receipt_v3(db, data, sid)
+        if entity == "expense":       return _save_expense_v3(db, data, sid)
+        if entity == "asset":         return _save_asset(db, data, sid, is_edit, pk)
+        if entity == "gate_log":      return _save_gate_log(db, data, sid)
+        if entity == "society":       return _save_society(db, data, sid, is_edit, pk)
+        if entity == "account":       return _save_account(db, data, sid, is_edit, pk)
+        if entity == "apt_charge":    return _save_apt_charge(db, data, sid, is_edit, pk)
+        if entity == "ven_charge":    return _save_ven_charge(db, data, sid, is_edit, pk)
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
         return False, str(e), None
 
+# ════════════════════════════════════════════════════════════════════════════
+# 2.  NEW: Receipt save using fn_save_receipt
+# ════════════════════════════════════════════════════════════════════════════
+
+def _save_receipt_v3(db, d, sid):
+    """
+    Save a manual receipt via fn_save_receipt.
+    acc_id IS the category — chosen by the user from the account dropdown.
+    particulars is typed by the user (pre-filled from PARTICULARS_TEMPLATES in Python).
+    """
+    amt = d.get("amount")
+    if not amt:
+        return False, "Amount is required", None
+    try:
+        amt = float(amt)
+        if amt <= 0:
+            return False, "Amount must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid amount", None
+
+    acc_id = d.get("acc_id")
+    if not acc_id:
+        return False, "Account is required", None
+    try:
+        acc_id = int(acc_id)
+    except (ValueError, TypeError):
+        return False, "Invalid account ID", None
+
+    particulars = (d.get("particulars") or d.get("acc_particulars") or "").strip()
+    if not particulars:
+        return False, "Particulars are required", None
+
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                sid,
+                d.get("entity_id"),
+                d.get("role", "other"),
+                acc_id,
+                particulars,
+                amt,
+                d.get("mode", "cash"),
+                d.get("receipt_date") or dt_date.today().isoformat(),
+                d.get("user_id"),
+                d.get("cheque_no"),
+                d.get("transaction_id"),
+            ),
+            fetch_one=True,
+        )
+        receipt_id = (r or {}).get("receipt_id")
+        return True, f"Receipt of ₹{amt:,.2f} recorded", receipt_id
+    except Exception as e:
+        return False, str(e), None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3.  NEW: Expense save using fn_save_expense
+# ════════════════════════════════════════════════════════════════════════════
+
+def _save_expense_v3(db, d, sid):
+    """
+    Save a manual expense via fn_save_expense.
+    acc_id IS the category — chosen by the user from the account dropdown.
+    """
+    amt = d.get("amount")
+    if not amt:
+        return False, "Amount is required", None
+    try:
+        amt = float(amt)
+        if amt <= 0:
+            return False, "Amount must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid amount", None
+
+    acc_id = d.get("acc_id")
+    if not acc_id:
+        return False, "Account is required", None
+    try:
+        acc_id = int(acc_id)
+    except (ValueError, TypeError):
+        return False, "Invalid account ID", None
+
+    particulars = (d.get("particulars") or d.get("acc_particulars") or "").strip()
+    if not particulars:
+        return False, "Particulars are required", None
+
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                sid,
+                d.get("entity_id"),
+                d.get("role", "other"),
+                acc_id,
+                particulars,
+                amt,
+                d.get("mode", "cash"),
+                d.get("expense_date") or dt_date.today().isoformat(),
+                d.get("user_id"),
+                d.get("cheque_no"),
+                d.get("transaction_id"),
+            ),
+            fetch_one=True,
+        )
+        expense_id = (r or {}).get("expense_id")
+        return True, f"Expense of ₹{amt:,.2f} recorded", expense_id
+    except Exception as e:
+        return False, str(e), None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4.  NEW: Asset save (buy = fn_buy_asset, edit = UPDATE asset_register)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6.  Pay Dues form submit handler
+#     Add this branch to _save_entity (entity == "pay_dues")
+# ════════════════════════════════════════════════════════════════════════════
+
+def _save_pay_dues(db, d, sid):
+    """Handle form submission from the Pay Dues form → fn_pay_apartment_dues_fifo."""
+    apt_id = d.get("entity_id")
+    if not apt_id:
+        return False, "Apartment ID is required", None
+    try:
+        apt_id = int(apt_id)
+    except (ValueError, TypeError):
+        return False, "Invalid apartment ID", None
+
+    amt = d.get("amount")
+    if not amt:
+        return False, "Amount is required", None
+    try:
+        amt = float(amt)
+        if amt <= 0:
+            return False, "Amount must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid amount", None
+
+    ok, msg, result = loaders.pay_apartment_dues_fifo(
+        apartment_id=apt_id,
+        amount=amt,
+        mode=d.get("mode", "cash"),
+        confirmed_by=d.get("user_id"),
+        particulars=d.get("particulars"),
+    )
+    trx_id = result.get("transaction_id") if ok else None
+    return ok, msg, trx_id
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7.  Asset Dispose form submit handler
+#     Add entity == "asset_dispose" to _save_entity
+# ════════════════════════════════════════════════════════════════════════════
+
+def _save_asset_dispose(db, d, sid):
+    asset_id = d.get("asset_id") or d.get("id")
+    if not asset_id:
+        return False, "Asset ID is required", None
+    try:
+        asset_id = int(asset_id)
+    except (ValueError, TypeError):
+        return False, "Invalid asset ID", None
+
+    sale_value = d.get("sale_value") or d.get("amount")
+    if not sale_value:
+        return False, "Sale value is required", None
+    try:
+        sale_value = float(sale_value)
+        if sale_value <= 0:
+            return False, "Sale value must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid sale value", None
+
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_dispose_asset(%s,%s,%s,%s,%s,%s)",
+            (
+                asset_id,
+                sale_value,
+                d.get("mode", "cash"),
+                d.get("user_id"),
+                d.get("sale_date") or dt_date.today().isoformat(),
+                d.get("particulars"),
+            ),
+            fetch_one=True,
+        )
+        receipt_id = (r or {}).get("receipt_id")
+        return True, f"Asset disposed — receipt #{receipt_id}", receipt_id
+    except Exception as e:
+        return False, str(e), None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8.  Vendor Pass form submit handler
+# ════════════════════════════════════════════════════════════════════════════
+
+def _save_vendor_pass(db, d, sid):
+    user_id   = d.get("user_id") or d.get("entity_id")
+    pass_type = d.get("pass_type")
+    if not user_id:
+        return False, "Vendor user ID is required", None
+    if pass_type not in ("1day", "7day", "1mth"):
+        return False, "Invalid pass type — must be 1day, 7day, or 1mth", None
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_sell_vendor_pass(%s,%s,%s,%s,%s,%s,%s)",
+            (
+                int(user_id),
+                pass_type,
+                d.get("acc_id"),
+                d.get("mode", "cash"),
+                d.get("created_by") or d.get("user_id"),
+                d.get("issued_date") or dt_date.today().isoformat(),
+                d.get("particulars"),
+            ),
+            fetch_one=True,
+        )
+        receipt_id   = (r or {}).get("receipt_id")
+        valid_until  = (r or {}).get("valid_until")
+        return True, f"Pass sold — valid until {valid_until}", receipt_id
+    except Exception as e:
+        return False, str(e), None
+
+def _save_asset(db, d, sid, is_edit, pk):
+    if is_edit:
+        # Editing an asset record (name, type, company — not purchase price)
+        db._execute(
+            "UPDATE asset_register SET asset_name=%s, asset_type=%s, company_name=%s "
+            "WHERE id=%s AND society_id=%s",
+            (d.get("asset_name"), d.get("asset_type"), d.get("company_name"), pk, sid),
+        )
+        return True, "Asset updated", pk
+
+    # New asset purchase — calls fn_buy_asset which also creates an expense + transaction
+    asset_name = (d.get("asset_name") or "").strip()
+    if not asset_name:
+        return False, "Asset name is required", None
+
+    purchase_value = d.get("purchase_value")
+    if not purchase_value:
+        return False, "Purchase value is required", None
+    try:
+        purchase_value = float(purchase_value)
+        if purchase_value <= 0:
+            return False, "Purchase value must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid purchase value", None
+
+    acc_id = d.get("acc_id")
+    if not acc_id:
+        return False, "Asset account (acc_id) is required — select from Movable/Immovable Assets", None
+    try:
+        acc_id = int(acc_id)
+    except (ValueError, TypeError):
+        return False, "Invalid account ID", None
+
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                sid,
+                asset_name,
+                d.get("asset_type"),
+                purchase_value,
+                acc_id,
+                d.get("purchase_date") or dt_date.today().isoformat(),
+                d.get("mode", "cash"),
+                d.get("user_id"),
+                d.get("particulars") or f"Asset Purchase — {asset_name}",
+            ),
+            fetch_one=True,
+        )
+        asset_id = (r or {}).get("asset_id")
+        return True, f"Asset '{asset_name}' purchased (₹{purchase_value:,.2f})", asset_id
+    except Exception as e:
+        return False, str(e), None
 
 def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
@@ -1436,27 +1764,41 @@ def _get_account_by_name(society_id, account_name):
     except Exception:
         return None
 
+# ════════════════════════════════════════════════════════════════════════════
+# 9.  _validate_transaction_account — v3 replacement
+#     Handles drcr_account = '' (empty string) identically to NULL.
+# ════════════════════════════════════════════════════════════════════════════
 
 def _validate_transaction_account(db, acc_id, society_id, transaction_type):
+    """
+    Validate account for receipt/expense.
+    drcr_account = 'Cr'   → income  → allowed for receipts, blocked for expenses
+    drcr_account = 'Dr'   → expense → allowed for expenses, blocked for receipts
+    drcr_account = NULL or '' → balance-sheet / asset → allowed for BOTH
+    """
     try:
         acc = db._execute(
-            "SELECT id,name,drcr_account FROM accounts "
-            "WHERE id=%s AND society_id=%s",
-            (acc_id, society_id),
-            fetch_one=True,
+            "SELECT id, name, drcr_account FROM accounts WHERE id=%s AND society_id=%s",
+            (acc_id, society_id), fetch_one=True,
         )
         if not acc:
             return False, "Invalid account for this society"
-        drcr = acc.get("drcr_account")
+
+        drcr = acc.get("drcr_account") or ""   # '' and None both mean "both sides ok"
         name = acc.get("name")
+
         if transaction_type == "receipt" and drcr == "Dr":
-            return False, (f"Cannot use Expense account '{name}' for receipts.")
+            return False, f"Cannot use Expense account '{name}' for receipts."
         if transaction_type == "expense" and drcr == "Cr":
-            return False, (f"Cannot use Income account '{name}' for expenses.")
+            return False, f"Cannot use Income account '{name}' for expenses."
         return True, ""
     except Exception as e:
         return False, f"Validation error: {e}"
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10. _apply_portal_filters — updated to include security portal
+# ════════════════════════════════════════════════════════════════════════════
 
 def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     role = auth.get("role", "admin")
