@@ -276,7 +276,7 @@ def render_list_card(card_id: str, title: str, icon: str,
         for c in visible_columns:
             field_key = c.get("field") or c.get("name") or ""
             val = _display_value(field_key, row_dict)
-            fmt = f.get("format")  # or c.get("format") in the list loop
+            fmt = c.get("format")
             if fmt in _FIELD_FORMATTERS and val is not None:
                 val = _FIELD_FORMATTERS[fmt](val)
             if isinstance(val, bool):
