@@ -79,7 +79,7 @@ _RECEIPT_PARTICULARS_TEMPLATES = {
 
 def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
     p: dict = {}
-    p["trx_date"] = _date.today().isoformat()
+    p["trx_date"] = dt_date.today().isoformat()
     p["entity_id"] = record.get("id")
     p["role"] = entity
     if entity == "apartment":
@@ -343,7 +343,7 @@ def register_drilldown_callbacks(app):
                 return no_update, no_update, no_update, no_update, trigger_data
 
             # ── Verify receivable — server action only, no navigation ─────────────
-            if action == "verify_receivable":
+            elif action == "verify_receivable":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -353,7 +353,7 @@ def register_drilldown_callbacks(app):
                 return store, content, bc, kpi_style, toast
 
             # ── Verify payment (admin only, from payments list) ───────────────────
-            if action == "verify_payment":
+            elif action == "verify_payment":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -363,7 +363,7 @@ def register_drilldown_callbacks(app):
                 return store, content, bc, kpi_style, toast
 
             # ── NOC Issue (apartment profile — admin only) ────────────────────────
-            if action == "issue_noc":
+            elif action == "issue_noc":
                 noc = loaders.check_noc_eligibility(int(pk))
                 if not noc.get("eligible"):
                     toast = {"_toast": {"type": "error", "message": noc.get("reason", "Not eligible for NOC")}}
