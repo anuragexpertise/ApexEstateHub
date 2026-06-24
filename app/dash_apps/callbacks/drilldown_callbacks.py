@@ -329,29 +329,62 @@ def register_drilldown_callbacks(app):
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
             action = id_dict.get("action")
-            target = id_dict.get("target")
 
+            # ── QR / Gate Pass modal — does NOT navigate, fires trigger ──────────
             if action == "show_qr":
-                record = _loaders.load_profile(entity, pk, sid) or {}
+                record = loaders.load_profile(entity, pk, sid) or {}
                 entity_name = record.get("owner_name") or record.get("name", entity)
-                return store, True, {
+                trigger_data = {
                     "entity_id": pk,
                     "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity, entity),
                     "society_id": sid,
                     "name": entity_name,
                 }
+                return no_update, no_update, no_update, no_update, trigger_data
+
+            # ── Verify receivable — server action only, no navigation ─────────────
+            if action == "verify_receivable":
+                user_id = (auth or {}).get("user_id")
+                ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Verify payment (admin only, from payments list) ───────────────────
+            if action == "verify_payment":
+                user_id = (auth or {}).get("user_id")
+                ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── NOC Issue (apartment profile — admin only) ────────────────────────
+            if action == "issue_noc":
+                noc = loaders.check_noc_eligibility(int(pk))
+                if not noc.get("eligible"):
+                    toast = {"_toast": {"type": "error", "message": noc.get("reason", "Not eligible for NOC")}}
+                    return no_update, no_update, no_update, no_update, toast
+                store = nav_state.navigate_to(
+                    store, "form_noc_print", "Issue NOC",
+                    prefill={"apartment_id": pk}, entity_pk=pk,
+                )
+                hide_kpis = True
 
             # ── Cashbook view ─────────────────────────────────────────────────────
-            if action == "show_cashbook":
+            elif action == "show_cashbook":
                 store = nav_state.navigate_to(
                     store, "list_cashbook", f"{entity.title()} Cashbook",
                     filters={"entity_id": pk},
                 )
-                return store, True, None
+                hide_kpis = True
 
             # ── Pay Dues (apartment) — FIFO bulk payment form ─────────────────────
-            if action == "pay_dues":
-                record = _loaders.load_profile(entity, pk, sid) or {}
+            elif action == "pay_dues":
+                record = loaders.load_profile(entity, pk, sid) or {}
                 prefill = {
                     "entity_id": pk,
                     "role": entity,
@@ -360,62 +393,33 @@ def register_drilldown_callbacks(app):
                     "particulars": f"Maintenance Payment — {record.get('flat_number','Flat')}",
                 }
                 store = nav_state.navigate_to(
-                    store, "form_pay_dues_new",
-                    "Pay Dues",
+                    store, "form_pay_dues_new", "Pay Dues",
                     prefill=prefill, entity_pk=pk,
                 )
-                return store, True, None
-
-            # ── Verify receivable (admin only, from receivables list) ─────────────
-            if action == "verify_receivable":
-                user_id = (auth or {}).get("user_id")
-                ok, msg = _loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
-                store["refresh"] = True
-                return store, True, {"_toast": {"type": "success" if ok else "error", "message": msg}}
-
-            # ── Verify payment (admin only, from payments list) ───────────────────
-            if action == "verify_payment":
-                user_id = (auth or {}).get("user_id")
-                ok, msg = _loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
-                store["refresh"] = True
-                return store, True, {"_toast": {"type": "success" if ok else "error", "message": msg}}
-
-            # ── NOC Issue (apartment profile — admin only) ────────────────────────
-            if action == "issue_noc":
-                noc = _loaders.check_noc_eligibility(int(pk))
-                if not noc.get("eligible"):
-                    return store, True, {
-                        "_toast": {"type": "error", "message": noc.get("reason", "Not eligible for NOC")}
-                    }
-                # Navigate to NOC print form (PDF generation — future phase)
-                store = nav_state.navigate_to(
-                    store, "form_noc_print", "Issue NOC",
-                    prefill={"apartment_id": pk}, entity_pk=pk,
-                )
-                return store, True, None
+                hide_kpis = True
 
             # ── Dispose asset (admin only, from asset profile) ────────────────────
-            if action == "dispose_asset":
+            elif action == "dispose_asset":
                 store = nav_state.navigate_to(
                     store, "form_asset_dispose_new", "Sell / Dispose Asset",
                     prefill={"asset_id": pk, "role": "assets"},
                     entity_pk=pk,
                 )
-                return store, True, None
+                hide_kpis = True
 
             # ── Sell vendor pass (from vendor profile) ────────────────────────────
-            if action == "sell_vendor_pass":
-                record = _loaders.load_profile(entity, pk, sid) or {}
+            elif action == "sell_vendor_pass":
+                record = loaders.load_profile(entity, pk, sid) or {}
                 store = nav_state.navigate_to(
                     store, "form_vendor_pass_new", "Sell Vendor Pass",
                     prefill={"user_id": pk, "entity_id": record.get("vendor_id", pk), "role": "vendor"},
                     entity_pk=pk,
                 )
-                return store, True, None
+                hide_kpis = True
 
             # ── Raise concern (apartment profile) ────────────────────────────────
-            if action == "new_concern":
-                record = _loaders.load_profile(entity, pk, sid) or {}
+            elif action == "new_concern":
+                record = loaders.load_profile(entity, pk, sid) or {}
                 pmap   = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
                         .get(action, {}).get("prefill", {}))
                 prefill = build_prefill(record, pmap) if pmap else {"flat_no": record.get("flat_number")}
@@ -423,23 +427,24 @@ def register_drilldown_callbacks(app):
                     store, "form_concern_new", "Raise Concern",
                     prefill=prefill, entity_pk=pk,
                 )
-                return store, True, None
+                hide_kpis = True
 
-            # ── Generic edit / other action ───────────────────────────────────────
-            target = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
-                    .get(action, {}).get("target"))
-            if target:
-                record = _loaders.load_profile(entity, pk, sid) or {}
-                pmap   = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
-                        .get(action, {}).get("prefill", {}))
-                prefill = build_prefill(record, pmap) if pmap else dict(record)
-                store = nav_state.navigate_to(
-                    store, target, action.replace("_", " ").title(),
-                    prefill=prefill, entity_pk=pk,
-                )
-                return store, True, None
-
-            return store, False, None
+            else:
+                # ── Generic edit / other action ───────────────────────────────────
+                nav_target = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
+                        .get(action, {}).get("target"))
+                if nav_target:
+                    record = loaders.load_profile(entity, pk, sid) or {}
+                    pmap   = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
+                            .get(action, {}).get("prefill", {}))
+                    prefill = build_prefill(record, pmap) if pmap else dict(record)
+                    store = nav_state.navigate_to(
+                        store, nav_target, action.replace("_", " ").title(),
+                        prefill=prefill, entity_pk=pk,
+                    )
+                    hide_kpis = True
+                else:
+                    hide_kpis = len(store.get("stack", [])) > 1
         # ── Breadcrumb back ───────────────────────────────────────────────
         elif trig_type == "breadcrumb-click":
             index = id_dict.get("index", 0)
@@ -832,6 +837,43 @@ def _render_card(
 
     # ── form ──────────────────────────────────────────────────────────────────
     if card_id.startswith("form_"):
+        # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
+        if card_id == "form_pay_dues_new":
+            apt_id  = prefill.get("entity_id") or prefill.get("apartment_id")
+            amount  = prefill.get("amount") or prefill.get("pending_dues") or ""
+            mode    = prefill.get("mode", "cash")
+            parts   = prefill.get("particulars", "")
+            sid_val = filters.get("society_id")
+            # Load apartment record to display dues summary
+            apt = {}
+            if apt_id and sid_val:
+                apt = loaders.load_profile("apartment", apt_id, sid_val) or {}
+            pending  = apt.get("pending_dues", 0) or 0
+            overdue  = apt.get("overdue_dues", 0) or 0
+            flat_no  = apt.get("flat_number", "")
+            owner    = apt.get("owner_name", "")
+            return renderers.render_pay_dues_card(
+                entity_id=apt_id,
+                flat_number=flat_no,
+                owner_name=owner,
+                pending_dues=float(pending),
+                overdue_dues=float(overdue),
+                prefill_amount=float(amount) if amount else float(pending),
+                prefill_mode=mode,
+                prefill_particulars=parts or f"Maintenance Payment — {flat_no}",
+                society_id=sid_val,
+            )
+
+        # ── NOC Print — rich-text editor card ─────────────────────────────────
+        if card_id == "form_noc_print":
+            apt_id  = prefill.get("apartment_id") or prefill.get("entity_id")
+            sid_val = filters.get("society_id")
+            apt, society = {}, {}
+            if apt_id and sid_val:
+                apt     = loaders.load_profile("apartment", apt_id, sid_val) or {}
+                society = loaders.load_profile("society", sid_val, None) or {}
+            return renderers.render_noc_card(apt=apt, society=society)
+
         rest = card_id[5:]
         parts = rest.rsplit("_", 1)
         entity_raw = to_singular(parts[0])
@@ -998,6 +1040,9 @@ def _save_entity(entity, card_id, data):
         if entity == "security":      return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":         return _save_event(db, data, sid, is_edit, pk)
         if entity == "concern":       return _save_concern(db, data, sid, is_edit, pk)
+        if entity == "pay_due":       return _save_pay_dues(db, data, sid)
+        if entity == "asset_dispose": return _save_asset_dispose(db, data, sid)
+        if entity == "vendor_pass":   return _save_vendor_pass(db, data, sid)
         if entity == "receipt":       return _save_receipt_v3(db, data, sid)
         if entity == "expense":       return _save_expense_v3(db, data, sid)
         if entity == "asset":         return _save_asset(db, data, sid, is_edit, pk)
