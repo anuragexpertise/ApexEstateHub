@@ -707,8 +707,8 @@ BEGIN
                      ELSE rec.description
                  END
              WHERE id = rec.id;
-        END LOOP;  -- inner FOR i IN 1..v_months_new
-    END LOOP;      -- outer FOR rec IN ...
+    END LOOP;
+END;
 $$;
 
 -- Single-row verify (the Verify button on a specific receivable row).
