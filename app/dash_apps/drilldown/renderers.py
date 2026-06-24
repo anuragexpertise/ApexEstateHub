@@ -1002,319 +1002,6 @@ def render_form_card(card_id: str, title: str, icon: str,
     })
 
 # ════════════════════════════════════════════════════════════════════════════
-# PAY DUES CARD  — FIFO payment form prefilled from apartment dues
-# ════════════════════════════════════════════════════════════════════════════
-
-def render_pay_dues_card(
-    entity_id,
-    flat_number: str,
-    owner_name: str,
-    pending_dues: float,
-    overdue_dues: float,
-    prefill_amount: float,
-    prefill_mode: str = "cash",
-    prefill_particulars: str = "",
-    society_id=None,
-) -> html.Div:
-    color = "#17976e"
-    overdue_color = "#de5c52" if overdue_dues > 0 else "#17976e"
-
-    dues_summary = dbc.Row([
-        dbc.Col(dbc.Card([
-            html.Div("Pending Dues", style={"fontSize": "10px", "color": "#7d8ea3",
-                                            "fontWeight": "600", "textTransform": "uppercase"}),
-            html.Div(f"₹{pending_dues:,.2f}", style={"fontSize": "20px", "fontWeight": "800",
-                                                      "color": "#15304f"}),
-        ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
-                              "textAlign": "center", "padding": "10px"}), width=6),
-        dbc.Col(dbc.Card([
-            html.Div("Overdue Dues", style={"fontSize": "10px", "color": "#7d8ea3",
-                                            "fontWeight": "600", "textTransform": "uppercase"}),
-            html.Div(f"₹{overdue_dues:,.2f}", style={"fontSize": "20px", "fontWeight": "800",
-                                                       "color": overdue_color}),
-        ], body=True, style={"borderRadius": "10px", "border": f"1px solid {overdue_color}33",
-                              "textAlign": "center", "padding": "10px"}), width=6),
-    ], className="mb-3")
-
-    form_fields = html.Div([
-        # Hidden entity_id
-        dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "entity_id"},
-                  type="hidden", value=str(entity_id or "")),
-        dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "role"},
-                  type="hidden", value="apartment"),
-        dcc.Input(id={"type": "form-entity-pk", "entity": "pay_due"},
-                  type="hidden", value=str(entity_id or "")),
-
-        # Amount
-        dbc.Row([
-            dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500",
-                                                       "color": "#555"}), width=4,
-                    style={"paddingTop": "6px"}),
-            dbc.Col(dbc.Input(id={"type": "form-field", "entity": "pay_due", "field": "amount"},
-                              type="number", value=str(prefill_amount) if prefill_amount else "",
-                              min=1, step=0.01,
-                              style={"fontSize": "13px", "borderRadius": "10px"}), width=8),
-        ], className="mb-2"),
-
-        # Mode
-        dbc.Row([
-            dbc.Col(dbc.Label("Payment Mode *", style={"fontSize": "12px", "fontWeight": "500",
-                                                        "color": "#555"}), width=4,
-                    style={"paddingTop": "6px"}),
-            dbc.Col(dcc.Dropdown(
-                id={"type": "form-field", "entity": "pay_due", "field": "mode"},
-                options=[
-                    {"label": "Cash",          "value": "cash"},
-                    {"label": "Bank Transfer",  "value": "bank_transfer"},
-                    {"label": "UPI",            "value": "upi"},
-                    {"label": "Cheque",         "value": "cheque"},
-                    {"label": "Other",          "value": "other"},
-                ],
-                value=prefill_mode,
-                clearable=False,
-                style={"fontSize": "13px"},
-            ), width=8),
-        ], className="mb-2"),
-
-        # Particulars
-        dbc.Row([
-            dbc.Col(dbc.Label("Particulars *", style={"fontSize": "12px", "fontWeight": "500",
-                                                       "color": "#555"}), width=4,
-                    style={"paddingTop": "6px"}),
-            dbc.Col(dbc.Textarea(
-                id={"type": "form-field", "entity": "pay_due", "field": "particulars"},
-                value=prefill_particulars,
-                rows=2,
-                style={"fontSize": "13px", "borderRadius": "10px"},
-            ), width=8),
-        ], className="mb-2"),
-    ])
-
-    info_badge = dbc.Alert([
-        html.I(className="fas fa-info-circle me-2"),
-        f"Payment will be applied using FIFO — oldest dues settled first. "
-        f"Any excess beyond ₹{pending_dues:,.2f} will be credited as advance.",
-    ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
-                             "borderRadius": "10px", "marginBottom": "12px"})
-
-    return dbc.Card([
-        dbc.CardHeader(
-            html.Div([
-                html.Div(
-                    html.I(className="fas fa-rupee-sign",
-                           style={"color": "#fff", "fontSize": "16px"}),
-                    style={"width": "38px", "height": "38px", "borderRadius": "10px",
-                           "background": f"linear-gradient(135deg,{color},{color}aa)",
-                           "display": "flex", "alignItems": "center",
-                           "justifyContent": "center", "marginRight": "12px"},
-                ),
-                html.Div([
-                    html.Strong("Pay Dues", style={"fontSize": "14px"}),
-                    html.Div(f"Flat {flat_number}" + (f" — {owner_name}" if owner_name else ""),
-                             style={"fontSize": "11px", "color": "#999"}),
-                ]),
-            ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "12px 16px",
-                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
-        ),
-        dbc.CardBody([
-            dues_summary,
-            info_badge,
-            form_fields,
-            dbc.Button(
-                [html.I(className="fas fa-check me-2"), "Apply Payment (FIFO)"],
-                id={"type": "form-submit", "entity": "pay_due", "card_id": "form_pay_dues_new"},
-                n_clicks=0, color="success", className="mt-3 w-100",
-                style={"borderRadius": "12px", "fontWeight": "700"},
-            ),
-        ], style={"padding": "16px"}),
-    ], style={
-        "borderRadius": "16px", f"border": f"1px solid {color}22",
-        "boxShadow": f"0 10px 30px {color}18",
-        "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
-        "overflow": "hidden",
-    })
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# NOC CARD  — rich-text editor with Print / Save PDF / Email
-# ════════════════════════════════════════════════════════════════════════════
-
-def render_noc_card(apt: dict, society: dict) -> html.Div:
-    from datetime import date as _date
-    color = "#15304f"
-
-    flat_no   = apt.get("flat_number", "____")
-    owner     = apt.get("owner_name", "____")
-    society_nm = society.get("name", "____")
-    sec_name   = society.get("secretary_name") or society.get("contact_person", "____")
-    today      = _date.today().strftime("%d %B %Y")
-
-    noc_body = (
-        f"<p style='text-align:center'><strong>NO OBJECTION CERTIFICATE</strong></p>"
-        f"<p style='text-align:center'><em>{society_nm}</em></p>"
-        f"<p style='text-align:right'>Date: {today}</p>"
-        f"<p>To Whom It May Concern,</p>"
-        f"<p>This is to certify that <strong>{owner}</strong>, resident of Flat No. "
-        f"<strong>{flat_no}</strong>, {society_nm}, has cleared all outstanding dues "
-        f"and has no pending liabilities towards the Society as of the date of this certificate.</p>"
-        f"<p>The Society has no objection to the above-named member undertaking any legal, "
-        f"financial, or administrative transactions related to the said property.</p>"
-        f"<p>This certificate is issued upon request and is valid for 30 days from the date "
-        f"of issue.</p>"
-        f"<br>"
-        f"<p>Authorised Signatory</p>"
-        f"<p><strong>{sec_name}</strong><br>Secretary / Authorised Representative<br>"
-        f"{society_nm}</p>"
-    )
-
-    return dbc.Card([
-        dbc.CardHeader(
-            html.Div([
-                html.Div(
-                    html.I(className="fas fa-certificate",
-                           style={"color": "#fff", "fontSize": "16px"}),
-                    style={"width": "38px", "height": "38px", "borderRadius": "10px",
-                           "background": f"linear-gradient(135deg,{color},{color}aa)",
-                           "display": "flex", "alignItems": "center",
-                           "justifyContent": "center", "marginRight": "12px"},
-                ),
-                html.Div([
-                    html.Strong("No Objection Certificate", style={"fontSize": "14px"}),
-                    html.Div(f"Flat {flat_no} — {owner}",
-                             style={"fontSize": "11px", "color": "#999"}),
-                ]),
-            ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "12px 16px",
-                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
-        ),
-        dbc.CardBody([
-
-            # ── Toolbar ───────────────────────────────────────────────────────
-            html.Div([
-                dbc.ButtonGroup([
-                    dbc.Button([html.I(className="fas fa-bold")], id="noc-fmt-bold",
-                               size="sm", outline=True, color="secondary", title="Bold"),
-                    dbc.Button([html.I(className="fas fa-italic")], id="noc-fmt-italic",
-                               size="sm", outline=True, color="secondary", title="Italic"),
-                    dbc.Button([html.I(className="fas fa-underline")], id="noc-fmt-underline",
-                               size="sm", outline=True, color="secondary", title="Underline"),
-                    dbc.Button([html.I(className="fas fa-align-left")], id="noc-fmt-left",
-                               size="sm", outline=True, color="secondary", title="Align Left"),
-                    dbc.Button([html.I(className="fas fa-align-center")], id="noc-fmt-center",
-                               size="sm", outline=True, color="secondary", title="Center"),
-                    dbc.Button([html.I(className="fas fa-align-right")], id="noc-fmt-right",
-                               size="sm", outline=True, color="secondary", title="Align Right"),
-                ]),
-            ], style={"marginBottom": "8px"}),
-
-            # ── Editable NOC body ─────────────────────────────────────────────
-            html.Div(
-                id="noc-editor",
-                contentEditable=True,
-                dangerouslySetInnerHTML={"__html": noc_body},
-                style={
-                    "minHeight": "420px",
-                    "border": "1px solid #d0dae8",
-                    "borderRadius": "10px",
-                    "padding": "24px 32px",
-                    "fontSize": "13px",
-                    "lineHeight": "1.8",
-                    "background": "#fff",
-                    "fontFamily": "Georgia, 'Times New Roman', serif",
-                    "outline": "none",
-                    "boxShadow": "inset 0 1px 4px rgba(0,0,0,0.04)",
-                },
-            ),
-
-            # ── Hidden store for edited HTML ──────────────────────────────────
-            dcc.Store(id="noc-html-store"),
-
-            # ── Action buttons ─────────────────────────────────────────────────
-            html.Div([
-                dbc.Button(
-                    [html.I(className="fas fa-print me-2"), "Print"],
-                    id="noc-btn-print", n_clicks=0,
-                    color="primary", outline=True,
-                    style={"borderRadius": "10px", "fontWeight": "600"},
-                ),
-                dbc.Button(
-                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
-                    id="noc-btn-pdf", n_clicks=0,
-                    color="danger", outline=True,
-                    style={"borderRadius": "10px", "fontWeight": "600"},
-                ),
-                dbc.Button(
-                    [html.I(className="fas fa-envelope me-2"), "Email NOC"],
-                    id="noc-btn-email", n_clicks=0,
-                    color="info", outline=True,
-                    style={"borderRadius": "10px", "fontWeight": "600"},
-                ),
-                dcc.Download(id="noc-pdf-download"),
-            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
-                      "marginTop": "16px", "paddingTop": "14px",
-                      "borderTop": "1px solid rgba(120,148,181,0.15)"}),
-
-        ], style={"padding": "16px"}),
-
-        # ── Client-side JS for toolbar + print + PDF ──────────────────────────
-        html.Script("""
-(function(){
-  function fmt(cmd){ document.execCommand(cmd, false, null); }
-  function alignDoc(a){ document.execCommand('justify'+a[0].toUpperCase()+a.slice(1), false, null); }
-
-  function bind(id, fn){
-    var el = document.getElementById(id);
-    if(el) el.addEventListener('click', fn);
-  }
-
-  bind('noc-fmt-bold',      function(){ fmt('bold'); });
-  bind('noc-fmt-italic',    function(){ fmt('italic'); });
-  bind('noc-fmt-underline', function(){ fmt('underline'); });
-  bind('noc-fmt-left',      function(){ alignDoc('left'); });
-  bind('noc-fmt-center',    function(){ alignDoc('center'); });
-  bind('noc-fmt-right',     function(){ alignDoc('right'); });
-
-  bind('noc-btn-print', function(){
-    var ed = document.getElementById('noc-editor');
-    var w = window.open('','_blank');
-    w.document.write('<html><head><title>NOC</title>');
-    w.document.write('<style>body{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9}');
-    w.document.write('@media print{button,#noc-toolbar{display:none}}</style></head><body>');
-    w.document.write(ed ? ed.innerHTML : '');
-    w.document.write('</body></html>');
-    w.document.close();
-    w.focus();
-    setTimeout(function(){ w.print(); }, 400);
-  });
-
-  bind('noc-btn-pdf', function(){
-    var ed = document.getElementById('noc-editor');
-    var html = ed ? ed.innerHTML : '';
-    var blob = new Blob(['<html><head><style>body{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9}</style></head><body>'+html+'</body></html>'], {type:'text/html'});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'NOC_""" + flat_no.replace(" ", "_") + r"""' + '.html';
-    a.click();
-  });
-
-  bind('noc-btn-email', function(){
-    var ed = document.getElementById('noc-editor');
-    var txt = ed ? ed.innerText : '';
-    window.location.href = 'mailto:?subject=No+Objection+Certificate&body='+encodeURIComponent(txt);
-  });
-})();
-"""),
-
-    ], style={
-        "borderRadius": "16px", "border": f"1px solid {color}22",
-        "boxShadow": f"0 10px 30px {color}18",
-        "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
-        "overflow": "hidden",
-    })
-
-
-# ════════════════════════════════════════════════════════════════════════════
 # BREADCRUMB RENDERER
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -1358,3 +1045,276 @@ def model_to_display(record) -> dict:
     if hasattr(record, "to_dict"):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PAY DUES CARD  — FIFO payment form prefilled from apartment dues
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_pay_dues_card(
+    entity_id,
+    flat_number: str,
+    owner_name: str,
+    pending_dues: float,
+    overdue_dues: float,
+    prefill_amount: float,
+    prefill_mode: str = "cash",
+    prefill_particulars: str = "",
+    society_id=None,
+) -> html.Div:
+    color = "#17976e"
+    overdue_color = "#de5c52" if overdue_dues > 0 else "#17976e"
+
+    dues_summary = dbc.Row([
+        dbc.Col(dbc.Card([
+            html.Div("Pending Dues", style={"fontSize": "10px", "color": "#7d8ea3",
+                                            "fontWeight": "600", "textTransform": "uppercase"}),
+            html.Div(f"₹{pending_dues:,.2f}", style={"fontSize": "20px", "fontWeight": "800",
+                                                      "color": "#15304f"}),
+        ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
+                              "textAlign": "center", "padding": "10px"}), width=6),
+        dbc.Col(dbc.Card([
+            html.Div("Overdue Dues", style={"fontSize": "10px", "color": "#7d8ea3",
+                                            "fontWeight": "600", "textTransform": "uppercase"}),
+            html.Div(f"₹{overdue_dues:,.2f}", style={"fontSize": "20px", "fontWeight": "800",
+                                                       "color": overdue_color}),
+        ], body=True, style={"borderRadius": "10px", "border": f"1px solid {overdue_color}33",
+                              "textAlign": "center", "padding": "10px"}), width=6),
+    ], className="mb-3")
+
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Div([
+                html.Div(html.I(className="fas fa-rupee-sign",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong("Pay Dues", style={"fontSize": "14px"}),
+                    html.Div(f"Flat {flat_number}" + (f" — {owner_name}" if owner_name else ""),
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            dues_summary,
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                f"Payment applied FIFO — oldest dues first. "
+                f"Excess beyond ₹{pending_dues:,.2f} credited as advance.",
+            ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
+                                    "borderRadius": "10px", "marginBottom": "12px"}),
+            # Hidden fields
+            dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "entity_id"},
+                      type="hidden", value=str(entity_id or "")),
+            dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "role"},
+                      type="hidden", value="apartment"),
+            dcc.Input(id={"type": "form-entity-pk", "entity": "pay_due"},
+                      type="hidden", value=str(entity_id or "")),
+            # Amount
+            dbc.Row([
+                dbc.Col(dbc.Label("Amount (₹) *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due", "field": "amount"},
+                    type="number", value=str(prefill_amount) if prefill_amount else "",
+                    min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            # Mode
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "pay_due", "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ],
+                    value=prefill_mode, clearable=False,
+                    style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            # Particulars
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": "pay_due", "field": "particulars"},
+                    value=prefill_particulars, rows=2,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Apply Payment (FIFO)"],
+                id={"type": "form-submit", "entity": "pay_due", "card_id": "form_pay_dues_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# NOC CARD  — rich-text editor with eligibility banner + Print/PDF/Email
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_noc_card(apt: dict, society: dict,
+                    eligible: bool = True, reason: str = "",
+                    outstanding: float = 0) -> html.Div:
+    from datetime import date as _date
+    color     = "#15304f"
+    flat_no   = apt.get("flat_number", "____")
+    owner     = apt.get("owner_name", "____")
+    society_nm = society.get("name", "____")
+    sec_name  = society.get("secretary_name") or society.get("contact_person", "____")
+    today     = _date.today().strftime("%d %B %Y")
+
+    noc_text = (
+        f"NO OBJECTION CERTIFICATE\n"
+        f"{society_nm}\n\n"
+        f"Date: {today}\n\n"
+        f"To Whom It May Concern,\n\n"
+        f"This is to certify that {owner}, resident of Flat No. {flat_no}, "
+        f"{society_nm}, has cleared all outstanding dues and has no pending "
+        f"liabilities towards the Society as of the date of this certificate.\n\n"
+        f"The Society has no objection to the above-named member undertaking any "
+        f"legal, financial, or administrative transactions related to the said property.\n\n"
+        f"This certificate is issued upon request and is valid for 30 days from "
+        f"the date of issue.\n\n\n"
+        f"Authorised Signatory\n\n"
+        f"{sec_name}\n"
+        f"Secretary / Authorised Representative\n"
+        f"{society_nm}"
+    )
+
+    # Eligibility banner
+    if not eligible:
+        elig_banner = dbc.Alert([
+            html.I(className="fas fa-exclamation-triangle me-2"),
+            html.Strong("Outstanding dues detected. "),
+            f"₹{float(outstanding):,.2f} pending — {reason}. ",
+            "NOC issued below is for preview only. Clear dues before printing.",
+        ], color="warning", style={"fontSize": "12px", "borderRadius": "10px",
+                                   "padding": "8px 14px", "marginBottom": "12px"})
+    else:
+        elig_banner = dbc.Alert([
+            html.I(className="fas fa-check-circle me-2"),
+            "All dues cleared — this apartment is eligible for NOC.",
+        ], color="success", style={"fontSize": "12px", "borderRadius": "10px",
+                                   "padding": "8px 14px", "marginBottom": "12px"})
+
+    flat_no_safe = flat_no.replace(" ", "_")
+
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Div([
+                html.Div(html.I(className="fas fa-certificate",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong("No Objection Certificate", style={"fontSize": "14px"}),
+                    html.Div(f"Flat {flat_no} — {owner}",
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            elig_banner,
+            # Editable NOC textarea — no Dash ID, driven purely by JS
+            dbc.Label("Edit NOC text below before printing:",
+                      style={"fontSize": "11px", "color": "#7d8ea3",
+                             "fontWeight": "600", "marginBottom": "4px"}),
+            html.Textarea(
+                noc_text,
+                className="noc-editor-ta",
+                style={
+                    "width": "100%",
+                    "minHeight": "400px",
+                    "border": "1px solid #d0dae8",
+                    "borderRadius": "10px",
+                    "padding": "24px",
+                    "fontSize": "13px",
+                    "lineHeight": "1.9",
+                    "fontFamily": "Georgia, 'Times New Roman', serif",
+                    "background": "#fff",
+                    "resize": "vertical",
+                    "boxShadow": "inset 0 1px 4px rgba(0,0,0,0.04)",
+                },
+            ),
+            # Action buttons — onclick JS, no Dash IDs needed
+            html.Div([
+                html.Button(
+                    [html.I(className="fas fa-print me-2"), "Print"],
+                    className="btn btn-outline-primary noc-btn-print",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                    className="btn btn-outline-danger noc-btn-pdf",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-envelope me-2"), "Email NOC"],
+                    className="btn btn-outline-info noc-btn-email",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                      "marginTop": "16px", "paddingTop": "14px",
+                      "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+        ], style={"padding": "16px"}),
+
+        # Inline script — uses class selectors so no Dash ID conflicts
+        html.Script(f"""
+(function(){{
+  var card = document.currentScript.parentElement;
+  var ta   = card.querySelector('.noc-editor-ta');
+  function getText(){{ return ta ? ta.value : ''; }}
+  function toHtml(txt){{
+    return txt.split('\\n').map(function(l){{
+      return '<p style="margin:4px 0">'+(l||'&nbsp;')+'</p>';
+    }}).join('');
+  }}
+  var btnPrint = card.querySelector('.noc-btn-print');
+  var btnPdf   = card.querySelector('.noc-btn-pdf');
+  var btnEmail = card.querySelector('.noc-btn-email');
+  if(btnPrint) btnPrint.addEventListener('click', function(){{
+    var w = window.open('','_blank');
+    w.document.write('<html><head><title>NOC</title><style>body{{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9;max-width:700px;margin:auto}}</style></head><body>');
+    w.document.write(toHtml(getText()));
+    w.document.write('</body></html>');
+    w.document.close(); w.focus();
+    setTimeout(function(){{ w.print(); }}, 400);
+  }});
+  if(btnPdf) btnPdf.addEventListener('click', function(){{
+    var blob = new Blob([
+      '<html><head><style>body{{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9;max-width:700px;margin:auto}}</style></head><body>'+toHtml(getText())+'</body></html>'
+    ],{{type:'text/html'}});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'NOC_{flat_no_safe}.html';
+    a.click();
+  }});
+  if(btnEmail) btnEmail.addEventListener('click', function(){{
+    window.location.href = 'mailto:?subject=No+Objection+Certificate&body='+encodeURIComponent(getText());
+  }});
+}})();
+"""),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})

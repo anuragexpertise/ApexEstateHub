@@ -79,7 +79,7 @@ _RECEIPT_PARTICULARS_TEMPLATES = {
 
 def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
     p: dict = {}
-    p["trx_date"] = dt_date.today().isoformat()
+    p["trx_date"] = _date.today().isoformat()
     p["entity_id"] = record.get("id")
     p["role"] = entity
     if entity == "apartment":
@@ -315,7 +315,7 @@ def register_drilldown_callbacks(app):
             content, bc, db_err = _render_current(store, auth)
             store["refresh"] = False
             hide_kpis = len(store.get("stack", [])) > 1
-            toast_data = {"type": "error", "message": db_err} if db_err else None
+            toast_data = {"type": "error", "message": db_err} if db_err else no_update
             return (
                 store,
                 content,
@@ -343,7 +343,7 @@ def register_drilldown_callbacks(app):
                 return no_update, no_update, no_update, no_update, trigger_data
 
             # ── Verify receivable — server action only, no navigation ─────────────
-            elif action == "verify_receivable":
+            if action == "verify_receivable":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -353,7 +353,7 @@ def register_drilldown_callbacks(app):
                 return store, content, bc, kpi_style, toast
 
             # ── Verify payment (admin only, from payments list) ───────────────────
-            elif action == "verify_payment":
+            if action == "verify_payment":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -364,13 +364,17 @@ def register_drilldown_callbacks(app):
 
             # ── NOC Issue (apartment profile — admin only) ────────────────────────
             elif action == "issue_noc":
-                noc = loaders.check_noc_eligibility(int(pk))
-                if not noc.get("eligible"):
-                    toast = {"_toast": {"type": "error", "message": noc.get("reason", "Not eligible for NOC")}}
-                    return no_update, no_update, no_update, no_update, toast
-                store = nav_state.navigate_to(
+                noc      = loaders.check_noc_eligibility(int(pk))
+                eligible = noc.get("eligible", False)
+                store    = nav_state.navigate_to(
                     store, "form_noc_print", "Issue NOC",
-                    prefill={"apartment_id": pk}, entity_pk=pk,
+                    prefill={
+                        "apartment_id": pk,
+                        "eligible":     eligible,
+                        "reason":       noc.get("reason", ""),
+                        "outstanding":  noc.get("outstanding", 0),
+                    },
+                    entity_pk=pk,
                 )
                 hide_kpis = True
 
@@ -526,7 +530,7 @@ def register_drilldown_callbacks(app):
 
         content, bc, db_err = _render_current(store, auth)
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
-        toast_data = {"type": "error", "message": db_err} if db_err else None
+        toast_data = {"type": "error", "message": db_err} if db_err else no_update
         return store, content, bc, kpi_style, toast_data
 
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
@@ -837,42 +841,39 @@ def _render_card(
 
     # ── form ──────────────────────────────────────────────────────────────────
     if card_id.startswith("form_"):
+
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
         if card_id == "form_pay_dues_new":
             apt_id  = prefill.get("entity_id") or prefill.get("apartment_id")
-            amount  = prefill.get("amount") or prefill.get("pending_dues") or ""
-            mode    = prefill.get("mode", "cash")
-            parts   = prefill.get("particulars", "")
             sid_val = filters.get("society_id")
-            # Load apartment record to display dues summary
-            apt = {}
-            if apt_id and sid_val:
-                apt = loaders.load_profile("apartment", apt_id, sid_val) or {}
-            pending  = apt.get("pending_dues", 0) or 0
-            overdue  = apt.get("overdue_dues", 0) or 0
-            flat_no  = apt.get("flat_number", "")
-            owner    = apt.get("owner_name", "")
+            apt = loaders.load_profile("apartment", apt_id, sid_val) or {} if apt_id and sid_val else {}
+            pending = float(apt.get("pending_dues") or 0)
+            overdue = float(apt.get("overdue_dues") or 0)
             return renderers.render_pay_dues_card(
                 entity_id=apt_id,
-                flat_number=flat_no,
-                owner_name=owner,
-                pending_dues=float(pending),
-                overdue_dues=float(overdue),
-                prefill_amount=float(amount) if amount else float(pending),
-                prefill_mode=mode,
-                prefill_particulars=parts or f"Maintenance Payment — {flat_no}",
+                flat_number=apt.get("flat_number", ""),
+                owner_name=apt.get("owner_name", ""),
+                pending_dues=pending,
+                overdue_dues=overdue,
+                prefill_amount=float(prefill.get("amount") or pending),
+                prefill_mode=prefill.get("mode", "cash"),
+                prefill_particulars=prefill.get("particulars", f"Maintenance Payment — {apt.get('flat_number','')}"),
                 society_id=sid_val,
             )
 
-        # ── NOC Print — rich-text editor card ─────────────────────────────────
+        # ── NOC Print — rich-text editor with eligibility banner ──────────────
         if card_id == "form_noc_print":
             apt_id  = prefill.get("apartment_id") or prefill.get("entity_id")
             sid_val = filters.get("society_id")
-            apt, society = {}, {}
-            if apt_id and sid_val:
-                apt     = loaders.load_profile("apartment", apt_id, sid_val) or {}
-                society = loaders.load_profile("society", sid_val, None) or {}
-            return renderers.render_noc_card(apt=apt, society=society)
+            apt     = loaders.load_profile("apartment", apt_id, sid_val) or {} if apt_id and sid_val else {}
+            society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
+            return renderers.render_noc_card(
+                apt=apt,
+                society=society,
+                eligible=prefill.get("eligible", True),
+                reason=prefill.get("reason", ""),
+                outstanding=float(prefill.get("outstanding") or 0),
+            )
 
         rest = card_id[5:]
         parts = rest.rsplit("_", 1)
@@ -1040,9 +1041,6 @@ def _save_entity(entity, card_id, data):
         if entity == "security":      return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":         return _save_event(db, data, sid, is_edit, pk)
         if entity == "concern":       return _save_concern(db, data, sid, is_edit, pk)
-        if entity == "pay_due":       return _save_pay_dues(db, data, sid)
-        if entity == "asset_dispose": return _save_asset_dispose(db, data, sid)
-        if entity == "vendor_pass":   return _save_vendor_pass(db, data, sid)
         if entity == "receipt":       return _save_receipt_v3(db, data, sid)
         if entity == "expense":       return _save_expense_v3(db, data, sid)
         if entity == "asset":         return _save_asset(db, data, sid, is_edit, pk)
