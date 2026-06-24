@@ -315,7 +315,7 @@ def register_drilldown_callbacks(app):
             content, bc, db_err = _render_current(store, auth)
             store["refresh"] = False
             hide_kpis = len(store.get("stack", [])) > 1
-            toast_data = {"type": "error", "message": db_err} if db_err else no_update
+            toast_data = {"type": "error", "message": db_err} if db_err else None
             return (
                 store,
                 content,
@@ -526,7 +526,7 @@ def register_drilldown_callbacks(app):
 
         content, bc, db_err = _render_current(store, auth)
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
-        toast_data = {"type": "error", "message": db_err} if db_err else no_update
+        toast_data = {"type": "error", "message": db_err} if db_err else None
         return store, content, bc, kpi_style, toast_data
 
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
