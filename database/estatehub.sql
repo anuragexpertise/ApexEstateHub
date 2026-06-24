@@ -707,8 +707,8 @@ BEGIN
                      ELSE rec.description
                  END
              WHERE id = rec.id;
-        END LOOP;
-    END;
+        END LOOP;  -- inner FOR i IN 1..v_months_new
+    END LOOP;      -- outer FOR rec IN ...
 $$;
 
 -- Single-row verify (the Verify button on a specific receivable row).
@@ -1374,7 +1374,7 @@ BEGIN
         COALESCE(v.mobile,'—')::VARCHAR(15),
         COALESCE(v.active,TRUE)::BOOLEAN,
         (SELECT MAX(valid_until) FROM vendor_passes WHERE user_id=u.id AND status='active')::DATE,
-        (SELECT MAX(valid_until) FROM vendor_passes WHERE user_id=u.id AND status='active') >= CURRENT_DATE,
+        COALESCE((SELECT MAX(valid_until) FROM vendor_passes WHERE user_id=u.id AND status='active') >= CURRENT_DATE, FALSE),
         (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE)
     FROM users u
     LEFT JOIN vendors v ON v.id = u.linked_id
@@ -1589,7 +1589,7 @@ BEGIN
             WHEN e.role = 'vendor'   THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), '')
             WHEN e.role = 'security' THEN COALESCE(s.name||COALESCE(' ('||s.shift||')',''), '')
             WHEN e.role = 'assets'   THEN COALESCE(
-                (SELECT asset_name FROM asset_register WHERE id = e.entity_id),
+                (SELECT asset_name FROM asset_register WHERE asset_register.id = e.entity_id),
                 'Asset #'||e.entity_id::TEXT)
             ELSE 'Other'
         END::TEXT,
