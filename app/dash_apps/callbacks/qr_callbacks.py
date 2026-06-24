@@ -323,7 +323,9 @@ def register_qr_callbacks(app):
                 'society_id': auth_data.get('society_id'),
                 'name': auth_data.get('name', 'User'),
             }
-        elif ctx.triggered_id == 'profile-action-trigger' and profile_action:
+        elif ctx.triggered_id == 'profile-action-trigger' \
+                and profile_action \
+                and profile_action.get('entity_id'):
             # Profile action "Gate Pass" clicked with entity data
             entity_id = profile_action.get('entity_id')
             role = profile_action.get('role')
