@@ -549,6 +549,7 @@ def register_drilldown_callbacks(app):
         store = store or {}
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
+        card_id=id_dict.get("card_id","")
 
         # ── 1. Collect form-field values for THIS entity only ────────────────
         form_data: dict = {}
