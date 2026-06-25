@@ -545,7 +545,6 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         entity_singular = _resolve_entity_singular(id_dict)
-        card_id = id_dict.get("card_id", "")   # used at lines 630, 653 for edit-vs-new and _save_entity
         sid = (auth or {}).get("society_id")
         store = store or {}
         store.setdefault("prefill", {})
@@ -624,6 +623,11 @@ def register_drilldown_callbacks(app):
 
         merged = {**prefill, **form_data}
         merged["society_id"] = sid
+        # Always stamp user_id from auth — form fields never collect it,
+        # but _save_pay_dues / _save_vendor_pass / _save_asset_dispose need it
+        # as confirmed_by / created_by.
+        if not merged.get("user_id"):
+            merged["user_id"] = (auth or {}).get("user_id")
 
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
         #       Applied only when submitting a new receipt/expense form and the
@@ -1169,7 +1173,28 @@ def _save_expense_v3(db, d, sid):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_pay_dues(db, d, sid):
-    """Handle form submission from the Pay Dues form → fn_pay_apartment_dues_fifo."""
+    """
+    Handle form submission from the Pay Dues form.
+
+    Flow:
+      1. Calls fn_pay_apartment_dues_fifo(apartment_id, amount, mode,
+         confirmed_by, particulars) in PostgreSQL.
+      2. That function:
+         a. Iterates pending receivables FIFO (oldest due_date first).
+         b. Marks each receivable paid/partial, sets confirmed_by/confirmed_at.
+         c. Creates one receipt row + one transaction row per receivable cleared.
+         d. Any overpayment creates an advance-credit receivable row.
+      3. Returns (ok, message, {transaction_id, allocated, unallocated}).
+
+    Prerequisites — receivables table MUST have these columns:
+        confirmed_by   INTEGER  (FK → users.id, nullable)
+        confirmed_at   TIMESTAMPTZ nullable
+
+    Migration (run once if missing):
+        ALTER TABLE receivables
+            ADD COLUMN IF NOT EXISTS confirmed_by  INTEGER REFERENCES users(id),
+            ADD COLUMN IF NOT EXISTS confirmed_at  TIMESTAMPTZ;
+    """
     apt_id = d.get("entity_id")
     if not apt_id:
         return False, "Apartment ID is required", None
@@ -1188,14 +1213,22 @@ def _save_pay_dues(db, d, sid):
     except (ValueError, TypeError):
         return False, "Invalid amount", None
 
+    # confirmed_by comes from merged["user_id"] which is stamped from auth-store
+    # in handle_form_submit before _save_entity is called.
+    confirmed_by = d.get("user_id")
+    try:
+        confirmed_by = int(confirmed_by) if confirmed_by else None
+    except (ValueError, TypeError):
+        confirmed_by = None
+
     ok, msg, result = loaders.pay_apartment_dues_fifo(
         apartment_id=apt_id,
         amount=amt,
         mode=d.get("mode", "cash"),
-        confirmed_by=d.get("user_id"),
+        confirmed_by=confirmed_by,
         particulars=d.get("particulars"),
     )
-    trx_id = result.get("transaction_id") if ok else None
+    trx_id = result.get("transaction_id") if ok and result else None
     return ok, msg, trx_id
 
 
