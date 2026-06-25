@@ -26,7 +26,9 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "concerns":     "concerns",
     "gate_logs":    "gate_access",
     "receipts":     "receipts",
+    "receipts_tbl": "receipts",         # ← alias added
     "expenses":     "expenses",
+    "expenses_tbl": "expenses",         # ← alias added
     "cashbook":     "transactions",
     "receivables":  "receivables",
     "payments":     "payments",
@@ -35,6 +37,8 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "accounts":     "accounts",
     "apt_charges":  "apt_charges_fines_basis",
     "ven_charges":  "ven_charges_fines_basis",
+    "sec_charges":  "sec_charges_fines_basis",   # ← added
+    "attendance":   "gate_access",               # ← added (security shifts)
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.

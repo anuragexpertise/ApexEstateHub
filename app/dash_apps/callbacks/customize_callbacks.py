@@ -404,15 +404,6 @@ def _fetch_kpi_values(society_id) -> dict:
  
 def _upsert_layout(db, society_id: int, key: str, value_json: str) -> None:
     db._execute(
-        """CREATE TABLE IF NOT EXISTS society_settings (
-               id         SERIAL PRIMARY KEY,
-               society_id INTEGER NOT NULL,
-               key        VARCHAR(80) NOT NULL,
-               value      TEXT,
-               UNIQUE(society_id, key)
-           )"""
-    )
-    db._execute(
         """INSERT INTO society_settings (society_id, key, value)
            VALUES (%s, %s, %s)
            ON CONFLICT (society_id, key)

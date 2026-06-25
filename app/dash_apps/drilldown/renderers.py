@@ -19,12 +19,6 @@ from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 
-from app.models import (
-    Apartment, Vendor, SecurityStaff, Society, Account,
-    Event, Concern, Receivable, Transaction
-)
-from app.security.rbac import RBACManager, Permission
-
 # ════════════════════════════════════════════════════════════════════════════
 # COLORS & STYLES
 # ════════════════════════════════════════════════════════════════════════════
@@ -178,12 +172,8 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     clickable: bool = True) -> html.Div:
     return html.Div(
         id={"type": "kpi-card-div", "card_id": card_id},
+        n_click=0,
         children=[
-            html.Button(
-                id={"type": "kpi-card", "card_id": card_id},
-                n_clicks=0,
-                style={"display": "none"},
-            ),
             dbc.Card(
                 [
                     html.Div(
@@ -691,7 +681,10 @@ def render_form_card(card_id: str, title: str, icon: str,
     prefill = prefill or {}
     entity_plural = to_plural(entity)
     fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
-    form_rows = []
+    form_rows = [
+          dcc.Input(id={"type":"form-entity-pk","entity":entity},
+                    type="hidden", value=str(prefill.get("id",""))),
+      ]
 
     for f in fields:
         fid      = f["id"]
@@ -940,15 +933,6 @@ def render_form_card(card_id: str, title: str, icon: str,
                 placeholder=f["label"],
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
-
-        # Store entity PK for image uploads
-        form_rows.append(
-            dcc.Input(
-                id={"type": "form-entity-pk", "entity": entity},
-                type="hidden",
-                value=str(prefill.get("id", "")),
-            ) if not form_rows else None  # only add once
-        )
 
         form_rows.append(dbc.Row([
             dbc.Col(
