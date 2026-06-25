@@ -545,6 +545,7 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         entity_singular = _resolve_entity_singular(id_dict)
+        card_id = id_dict.get("card_id", "")   # used at lines 630, 653 for edit-vs-new and _save_entity
         sid = (auth or {}).get("society_id")
         store = store or {}
         store.setdefault("prefill", {})
