@@ -64,20 +64,21 @@ def register_card_catalogue_callbacks(app):
         KPI_CARDS = {}
 
     # ── KPI REFRESH ───────────────────────────────────────────────
+    # Fires on:
+    #   - url.pathname change (tab navigation)
+    #   - auth-store change  (login / logout)
+    # Uses 'initial_duplicate' so it also fires on the initial page load
+    # even though shell_callbacks also writes auth-store.
     @app.callback(
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
         Output("toast-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         Input("auth-store", "data"),
-        Input("portal-content-store", "data"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
-    def refresh_kpi_values(pathname, auth_data, portal_data, kpi_ids):
+    def refresh_kpi_values(pathname, auth_data, kpi_ids):
         if not kpi_ids:
-            raise PreventUpdate
-
-        if not portal_data or not portal_data.get("rendered"):
             raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):

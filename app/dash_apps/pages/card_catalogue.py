@@ -496,8 +496,204 @@ KPI_CARDS = {
         "icon": "fa-id-card", "color": "#b98a07",
         "title": "Pass Expiry", "group": "gate-pass",
     },
+    
+    "kpi_apt_charges_count": {
+        "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-file-invoice", "color": "#1859b8",
+        "title": "Apt Charge Rules", "group": "active",
+    },
+ 
+    "kpi_ven_charges_count": {
+        "query": "SELECT COUNT(*) AS v FROM ven_charges_fines_basis WHERE society_id=%s AND ven_status=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-file-invoice", "color": "#b98a07",
+        "title": "Vendor Charge Rules", "group": "active",
+    },
+ 
+    "kpi_sec_charges_count": {
+        "query": "SELECT COUNT(*) AS v FROM sec_charges_fines_basis WHERE society_id=%s AND sec_status=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-file-invoice", "color": "#b63b3b",
+        "title": "Security Charge Rules", "group": "active",
+    },
+ 
+    "kpi_attendance_count": {
+        "query": """
+            SELECT COUNT(*) AS v FROM gate_access
+            WHERE society_id=%s AND role='s'
+              AND time_in >= DATE_TRUNC('month', CURRENT_DATE)
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-clock", "color": "#b63b3b",
+        "title": "Shifts (Month)", "group": "attendance",
+    },
+ 
+    "kpi_maintenance_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount - paid_amount), 0) AS v
+            FROM receivables
+            WHERE society_id=%s AND role='apartment'
+              AND status IN ('pending','partial')
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-home", "color": "#de5c52",
+        "title": "Maintenance Due", "group": "apartment dues",
+    },
+ 
+    "kpi_late_fees_due": {
+        "query": """
+            SELECT COALESCE(SUM(interest_amount), 0) AS v
+            FROM receivables
+            WHERE society_id=%s AND role='apartment'
+              AND status IN ('pending','partial')
+              AND interest_amount > 0
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-exclamation-circle", "color": "#de5c52",
+        "title": "Late Fees Due", "group": "interest",
+    },
+ 
+    "kpi_vendor_payables_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id=%s AND role='vendor' AND status='pending'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-truck", "color": "#b98a07",
+        "title": "Vendor Payables", "group": "pending",
+    },
+ 
+    "kpi_amc_due": {
+        "query": """
+            SELECT COALESCE(SUM(e.amount), 0) AS v
+            FROM expenses e
+            JOIN accounts a ON a.id=e.acc_id
+            WHERE e.society_id=%s AND e.status='confirmed'
+              AND a.name ILIKE '%AMC%'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-tools", "color": "#6c5ce7",
+        "title": "AMC Expenses", "group": "maintenance",
+    },
+ 
+    "kpi_apartment_fines": {
+        "query": """
+            SELECT COALESCE(SUM(apt_fine), 0) AS v
+            FROM apt_charges_fines_basis
+            WHERE society_id=%s AND apt_status=TRUE AND apt_fine > 0
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-gavel", "color": "#de5c52",
+        "title": "Apt Fine Rules", "group": "fines",
+    },
+ 
+    "kpi_apartment_other_charges": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM apt_charges_fines_basis
+            WHERE society_id=%s AND apt_status=TRUE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-list-alt", "color": "#e59620",
+        "title": "Apt Other Charges", "group": "all rules",
+    },
+ 
+    "kpi_vendor_fines": {
+        "query": """
+            SELECT COALESCE(SUM(vendor_fine), 0) AS v
+            FROM ven_charges_fines_basis
+            WHERE society_id=%s AND ven_status=TRUE AND vendor_fine > 0
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-gavel", "color": "#b98a07",
+        "title": "Vendor Fine Rules", "group": "fines",
+    },
+ 
+    "kpi_vendor_other_charges": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM ven_charges_fines_basis
+            WHERE society_id=%s AND ven_status=TRUE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-list-alt", "color": "#b98a07",
+        "title": "Vendor Other Charges", "group": "all rules",
+    },
+ 
+    "kpi_security_fines": {
+        "query": """
+            SELECT COALESCE(SUM(security_fine), 0) AS v
+            FROM sec_charges_fines_basis
+            WHERE society_id=%s AND sec_status=TRUE AND security_fine > 0
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-gavel", "color": "#b63b3b",
+        "title": "Security Fine Rules", "group": "fines",
+    },
+ 
+    "kpi_security_other_charges": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM sec_charges_fines_basis
+            WHERE society_id=%s AND sec_status=TRUE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-list-alt", "color": "#b63b3b",
+        "title": "Security Other Charges", "group": "all rules",
+    },
+ 
+    "kpi_security_salary_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id=%s AND role='security' AND status='pending'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-rupee-sign", "color": "#b63b3b",
+        "title": "Security Salary Due", "group": "pending",
+    },
+ 
+    "kpi_security_bonus_due": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id=%s AND role='security' AND status='pending'
+              AND type='bonus'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-gift", "color": "#17976e",
+        "title": "Security Bonus Due", "group": "pending",
+    },
+ 
+    "kpi_security_shift": {
+        "query": """
+            SELECT COUNT(*) AS v FROM gate_access
+            WHERE society_id=%s AND role='s' AND time_out IS NOT NULL
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-check-circle", "color": "#17976e",
+        "title": "Completed Shifts", "group": "done",
+    },
+ 
+    "kpi_apartment_date": {
+        "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND active=TRUE",
+        "params": 1, "format": "date",
+        "icon": "fa-calendar-alt", "color": "#18794e",
+        "title": "First Apt Added", "group": "profile",
+    },
+ 
+    "kpi_receipts_total": {
+        "query": """
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM receipts WHERE society_id=%s AND status='confirmed'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-receipt", "color": "#17976e",
+        "title": "Receipts (All)", "group": "all time",
+    },
 }
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # DEFAULT LAYOUTS  — which KPIs appear on each portal's default dashboard

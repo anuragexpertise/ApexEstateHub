@@ -66,45 +66,17 @@ DB_ERROR_KEYWORDS = [
     "error in querying",
     "operational error",
 ]
-# app/dash_apps/callbacks/drilldown_callbacks.py
-
-_RECEIPT_PARTICULARS_TEMPLATES = {
-    "apartment": lambda r: f"Maintenance - Flat {r.get('flat_number', '')}"
-        + (f" ({r['owner_name']})" if r.get('owner_name') else ""),
-    "vendor": lambda r: f"Pass Fees - {r.get('name', '')}"
-        + (f" [{r['service_type']}]" if r.get('service_type') else ""),
-    "security": lambda r: f"Others - {r.get('name', '')}",
+_IMAGE_FIELDS = {
+    "image", "owner_photo", "photo", "logo",
+    "id_proof", "license", "secretary_sign", "login_background",
 }
-
-
-def _build_receipt_prefill(record: dict, entity: str, society_id) -> dict:
-    p: dict = {}
-    p["trx_date"] = _date.today().isoformat()
-    p["entity_id"] = record.get("id")
-    p["role"] = entity
-    if entity == "apartment":
-        p["amount"] = record.get("pending_dues")
-    p["mode"] = "cash"
-    template = _RECEIPT_PARTICULARS_TEMPLATES.get(entity)
-    p["acc_particulars"] = template(record) if template else "Receipt"
-    acc = _get_account_by_name(society_id, "Society Charge") if society_id else None
-    if acc:
-        p["acc_id"] = acc["id"]
-    return p
-
-def _is_db_error(msg: str) -> bool:
-    """Check if message indicates a database connection or query error."""
-    if not msg:
-        return False
-    msg_lower = str(msg).lower()
-    return (
-        "no database connection" in msg_lower
-        or "error in processing" in msg_lower
-        or "error in querying" in msg_lower
-        or "operational error" in msg_lower
+ 
+def _has_any_image(form_data: dict) -> bool:
+    return any(
+        isinstance(v, str) and v and "." in v and "/" not in v
+        for k, v in form_data.items()
+        if k in _IMAGE_FIELDS
     )
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # ENTITY METADATA — generated live from the database schema, see
 # app/dash_apps/drilldown/schema_introspect.py
@@ -116,7 +88,32 @@ from app.dash_apps.drilldown.schema_introspect import (
 # ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
+def _resolve_entity_singular(id_dict):
+    raw = id_dict.get("entity", "")
+    # pay_due / pay_dues must stay as-is — to_singular("pay_dues") → "pay_du"
+    if raw in ("pay_due", "pay_dues"):
+        return "pay_due"
+    return to_singular(raw)
 
+def _handle_list_delete(entity, pk, sid, store, auth):
+    ok, msg = loaders.delete_entity(entity, pk, sid)
+    store["refresh"] = True
+    content, bc, db_err = _render_current(store, auth)
+    store["refresh"] = False
+    hide_kpis = len(store.get("stack", [])) > 1
+    if db_err:
+        toast_data = {"type": "error",   "message": db_err}
+    elif ok:
+        toast_data = {"type": "success", "message": msg}
+    else:
+        toast_data = {"type": "error",   "message": msg}
+    return (
+        store,
+        content,
+        bc,
+        {"display": "none"} if hide_kpis else {"display": "grid"},
+        toast_data,
+    )
 
 def register_drilldown_callbacks(app):
 
@@ -310,19 +307,7 @@ def register_drilldown_callbacks(app):
         elif trig_type == "list-delete":
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
-            loaders.delete_entity(entity, pk, sid)
-            store["refresh"] = True
-            content, bc, db_err = _render_current(store, auth)
-            store["refresh"] = False
-            hide_kpis = len(store.get("stack", [])) > 1
-            toast_data = {"type": "error", "message": db_err} if db_err else no_update
-            return (
-                store,
-                content,
-                bc,
-                {"display": "none"} if hide_kpis else {"display": "grid"},
-                toast_data,
-            )
+            return _handle_list_delete(entity, pk, sid, store, auth)
 
         # ── Profile action ────────────────────────────────────────────────
         elif trig_type == "profile-action":
@@ -534,6 +519,7 @@ def register_drilldown_callbacks(app):
         return store, content, bc, kpi_style, toast_data
 
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
+    
     @app.callback(
         Output("drilldown-store", "data", allow_duplicate=True),
         Output("drill-content", "children", allow_duplicate=True),
@@ -558,8 +544,7 @@ def register_drilldown_callbacks(app):
         except Exception:
             return no_update, no_update, no_update, no_update, no_update
 
-        entity_singular = to_singular(id_dict.get("entity", ""))
-        card_id = id_dict.get("card_id", "")
+        entity_singular = _resolve_entity_singular(id_dict)
         sid = (auth or {}).get("society_id")
         store = store or {}
         store.setdefault("prefill", {})
@@ -681,7 +666,7 @@ def register_drilldown_callbacks(app):
             )
 
         # ── 8. Move temp images to their permanent entity folder ──────────────
-        if sid and merged.get("image"):
+        if sid and _has_any_image(merged):
             entity_id = new_id if new_id else merged.get("id")
             if entity_id:
                 _move_temp_images(entity_singular, entity_id, sid, merged)
@@ -1032,23 +1017,32 @@ def _build_receipt_prefill(
 
 def _save_entity(entity, card_id, data):
     """Route to the correct save handler based on entity type."""
-    sid    = data.get("society_id")
+    sid     = data.get("society_id")
     is_edit = "edit" in card_id
-    pk     = data.get("id")
+    pk      = data.get("id")
     try:
-        if entity == "apartment":     return _save_apartment(db, data, sid, is_edit, pk)
-        if entity == "vendor":        return _save_user_entity(db, data, sid, "vendor", is_edit, pk)
-        if entity == "security":      return _save_user_entity(db, data, sid, "security", is_edit, pk)
-        if entity == "event":         return _save_event(db, data, sid, is_edit, pk)
-        if entity == "concern":       return _save_concern(db, data, sid, is_edit, pk)
-        if entity == "receipt":       return _save_receipt_v3(db, data, sid)
-        if entity == "expense":       return _save_expense_v3(db, data, sid)
-        if entity == "asset":         return _save_asset(db, data, sid, is_edit, pk)
-        if entity == "gate_log":      return _save_gate_log(db, data, sid)
-        if entity == "society":       return _save_society(db, data, sid, is_edit, pk)
-        if entity == "account":       return _save_account(db, data, sid, is_edit, pk)
-        if entity == "apt_charge":    return _save_apt_charge(db, data, sid, is_edit, pk)
-        if entity == "ven_charge":    return _save_ven_charge(db, data, sid, is_edit, pk)
+        if entity == "apartment":       return _save_apartment(db, data, sid, is_edit, pk)
+        if entity == "vendor":          return _save_user_entity(db, data, sid, "vendor",   is_edit, pk)
+        if entity == "security":        return _save_user_entity(db, data, sid, "security", is_edit, pk)
+        if entity == "event":           return _save_event(db, data, sid, is_edit, pk)
+        if entity == "concern":         return _save_concern(db, data, sid, is_edit, pk)
+        if entity == "receipt":         return _save_receipt_v3(db, data, sid)
+        if entity == "expense":         return _save_expense_v3(db, data, sid)
+        if entity == "asset":           return _save_asset(db, data, sid, is_edit, pk)
+        if entity == "gate_log":        return _save_gate_log(db, data, sid)
+        if entity == "society":         return _save_society(db, data, sid, is_edit, pk)
+        if entity == "account":         return _save_account(db, data, sid, is_edit, pk)
+        if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
+        if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
+        if entity == "sec_charge":      return _save_sec_charge(db, data, sid, is_edit, pk)
+        # ── PATCH: previously missing branches ──────────────────────────
+        if entity in ("pay_due", "pay_dues"):
+            return _save_pay_dues(db, data, sid)
+        if entity in ("asset_dispose", "asset_dispose_new"):
+            return _save_asset_dispose(db, data, sid)
+        if entity in ("vendor_pass", "vendor_pass_new"):
+            return _save_vendor_pass(db, data, sid)
+        # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
         return False, str(e), None
@@ -1510,61 +1504,6 @@ def _save_concern(db, d, sid, is_edit, pk):
     new_id = (r or {}).get("id")
     return True, "Concern submitted", new_id
 
-
-def _save_transaction(db, d, sid, transaction_type):
-    amt = d.get("amount")
-    if not amt:
-        return False, "Amount is required", None
-    try:
-        amt = float(amt)
-        if amt <= 0:
-            return False, "Amount must be > 0", None
-    except (ValueError, TypeError):
-        return False, "Invalid amount", None
-    acc_id = d.get("acc_id")
-    if not acc_id:
-        return False, "Account is required", None
-    try:
-        acc_id = int(acc_id)
-    except (ValueError, TypeError):
-        return False, "Invalid account ID", None
-    is_valid, err = _validate_transaction_account(db, acc_id, sid, transaction_type)
-    if not is_valid:
-        return False, err, None
-    particulars = (d.get("acc_particulars") or "").strip()
-    if not particulars:
-        return False, "Particulars required", None
-    trx_date = d.get("trx_date") or dt_date.today().isoformat()
-    mode = d.get("mode", "cash")
-    entity_id = d.get("entity_id")
-    role = d.get("role")
-
-    table = "receipts" if transaction_type == "receipt" else "expenses"
-    cols = ["society_id", "trx_date", "acc_id", "entity_id", "role",
-            "acc_particulars", "amount", "mode"]
-    params = [sid, trx_date, acc_id, entity_id, role, particulars, amt, mode]
-    if transaction_type == "receipt":
-        cols.append("end_date")
-        params.append(d.get("end_date"))
-
-    placeholders = ",".join(["%s"] * len(params))
-    src_r = db._execute(
-        f"INSERT INTO {table}({','.join(cols)},status) "
-        f"VALUES({placeholders},'paid') RETURNING id",
-        tuple(params),
-        fetch_one=True,
-    )
-    src_id = (src_r or {}).get("id")
-
-    db._execute(
-        "INSERT INTO transactions(society_id,trx_date,acc_id,entity_id,"
-        "acc_particulars,amount,mode,status,created_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,'paid',NOW())",
-        (sid, trx_date, acc_id, entity_id, particulars, amt, mode),
-    )
-
-    label = "Receipt" if transaction_type == "receipt" else "Expense"
-    return True, f"{label} of ₹{amt:,.2f} recorded", src_id
 
 def _save_gate_log(db, d, sid):
     eid = d.get("entity_id")

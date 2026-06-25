@@ -292,6 +292,79 @@ def load_list(
                 (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
+         # ── RECEIPTS_TBL alias ─────────────────────────────────────────
+        if entity == "receipts_tbl":
+            entity = "receipts"   # redirect to existing branch below
+            # fall through — Python won't re-evaluate elif, so call directly:
+            p_eid   = eid or apt_id or ven_id or sec_id
+            p_etype = (
+                "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
+            ) if not eid else None
+            rows = db._execute(
+                "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM fn_receipts_list(%s,NULL,%s,%s)",
+                (sid, p_eid, p_etype), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+ 
+        # ── EXPENSES_TBL alias ─────────────────────────────────────────
+        if entity == "expenses_tbl":
+            p_eid   = eid or ven_id or sec_id or apt_id
+            p_etype = (
+                "vendor"   if ven_id and not eid else
+                "security" if sec_id and not eid else
+                "apartment" if apt_id and not eid else None
+            )
+            rows = db._execute(
+                "SELECT * FROM fn_expenses_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM fn_expenses_list(%s,NULL,%s,%s)",
+                (sid, p_eid, p_etype), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+ 
+        # ── SEC_CHARGES ────────────────────────────────────────────────
+        if entity == "sec_charges":
+            rows = db._execute(
+                "SELECT scf.*, COALESCE(s.name, 'ALL') AS security_name "
+                "FROM sec_charges_fines_basis scf "
+                "LEFT JOIN security_staff s ON s.id=scf.sec_id "
+                "WHERE scf.society_id=%s AND scf.sec_status=TRUE "
+                "LIMIT %s OFFSET %s",
+                (sid, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM sec_charges_fines_basis "
+                "WHERE society_id=%s AND sec_status=TRUE",
+                (sid,), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+ 
+        # ── ATTENDANCE ─────────────────────────────────────────────────
+        if entity == "attendance":
+            extra_sql, extra_params = "", []
+            if sec_id:
+                extra_sql = " AND g.entity_id=%s"
+                extra_params.append(sec_id)
+            rows = db._execute(
+                "SELECT g.*, COALESCE(s.name,'') AS staff_name "
+                "FROM gate_access g "
+                "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='s' "
+                "WHERE g.society_id=%s AND g.role='s'" + extra_sql +
+                " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
+                [sid] + extra_params + [page_size, offset], fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM gate_access "
+                "WHERE society_id=%s AND role='s'" + extra_sql,
+                [sid] + extra_params, fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
 
         return [], 0
 
@@ -306,46 +379,79 @@ def load_list(
 
 def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
     try:
-        # ── APARTMENT ────────────────────────────────────────────────────────
+        # ── APARTMENT ───────────────────────────────────────────────────
         if entity_singular == "apartment":
-            r = db._execute(
-                "SELECT a.*, d.pending_dues, d.overdue_dues, d.gate_pass, d.noc_eligible "
-                "FROM apartments a "
-                "JOIN v_apartment_dues d ON d.apartment_id=a.id "
-                "WHERE a.id=%s AND a.society_id=%s",
-                (pk, society_id), fetch_one=True,
-            )
+            try:
+                r = db._execute(
+                    "SELECT a.*, d.pending_dues, d.overdue_dues, d.gate_pass, d.noc_eligible "
+                    "FROM apartments a "
+                    "JOIN v_apartment_dues d ON d.apartment_id=a.id "
+                    "WHERE a.id=%s AND a.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
+            except Exception:
+                r = db._execute(
+                    "SELECT a.*, 0 AS pending_dues, 0 AS overdue_dues, "
+                    "FALSE AS gate_pass, FALSE AS noc_eligible "
+                    "FROM apartments a WHERE a.id=%s AND a.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
             return dict(r) if r else None
-
-        # ── VENDOR ───────────────────────────────────────────────────────────
+ 
+        # ── VENDOR ─────────────────────────────────────────────────────
         if entity_singular == "vendor":
-            r = db._execute(
-                "SELECT u.id, u.email, u.society_id, "
-                "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
-                "  v.active, v.logo, v.license, v.photo, v.service_description, v.created_at, "
-                "  vp.pass_expiry, vp.gate_pass "
-                "FROM users u "
-                "JOIN vendors v ON v.id=u.linked_id "
-                "JOIN v_vendor_pass_status vp ON vp.user_id=u.id "
-                "WHERE u.id=%s AND u.society_id=%s",
-                (pk, society_id), fetch_one=True,
-            )
+            try:
+                r = db._execute(
+                    "SELECT u.id, u.email, u.society_id, "
+                    "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
+                    "  v.active, v.logo, v.license, v.photo, v.service_description, v.created_at, "
+                    "  vp.pass_expiry, vp.gate_pass "
+                    "FROM users u "
+                    "JOIN vendors v ON v.id=u.linked_id "
+                    "JOIN v_vendor_pass_status vp ON vp.user_id=u.id "
+                    "WHERE u.id=%s AND u.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
+            except Exception:
+                r = db._execute(
+                    "SELECT u.id, u.email, u.society_id, "
+                    "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
+                    "  v.active, v.logo, v.license, v.photo, v.created_at, "
+                    "  NULL AS pass_expiry, FALSE AS gate_pass "
+                    "FROM users u "
+                    "JOIN vendors v ON v.id=u.linked_id "
+                    "WHERE u.id=%s AND u.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
             return dict(r) if r else None
-
-        # ── SECURITY ─────────────────────────────────────────────────────────
+ 
+        # ── SECURITY ───────────────────────────────────────────────────
         if entity_singular == "security":
-            r = db._execute(
-                "SELECT u.id, u.email, u.society_id, "
-                "  s.id AS staff_id, s.name, s.mobile, s.shift, "
-                "  s.active, s.joining_date, s.salary_per_shift, "
-                "  s.photo, s.id_proof, s.created_at, "
-                "  vs.shift_count, vs.gate_pass "
-                "FROM users u "
-                "JOIN security_staff s ON s.id=u.linked_id "
-                "JOIN v_security_status vs ON vs.user_id=u.id "
-                "WHERE u.id=%s AND u.society_id=%s",
-                (pk, society_id), fetch_one=True,
-            )
+            try:
+                r = db._execute(
+                    "SELECT u.id, u.email, u.society_id, "
+                    "  s.id AS staff_id, s.name, s.mobile, s.shift, "
+                    "  s.active, s.joining_date, s.salary_per_shift, "
+                    "  s.photo, s.id_proof, s.created_at, "
+                    "  vs.shift_count, vs.gate_pass "
+                    "FROM users u "
+                    "JOIN security_staff s ON s.id=u.linked_id "
+                    "JOIN v_security_status vs ON vs.user_id=u.id "
+                    "WHERE u.id=%s AND u.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
+            except Exception:
+                r = db._execute(
+                    "SELECT u.id, u.email, u.society_id, "
+                    "  s.id AS staff_id, s.name, s.mobile, s.shift, "
+                    "  s.active, s.joining_date, s.salary_per_shift, "
+                    "  s.photo, s.id_proof, s.created_at, "
+                    "  0 AS shift_count, FALSE AS gate_pass "
+                    "FROM users u "
+                    "JOIN security_staff s ON s.id=u.linked_id "
+                    "WHERE u.id=%s AND u.society_id=%s",
+                    (pk, society_id), fetch_one=True,
+                )
             return dict(r) if r else None
 
         # ── EVENT ─────────────────────────────────────────────────────────────
