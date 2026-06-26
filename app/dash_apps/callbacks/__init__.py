@@ -76,6 +76,13 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ customize_kpi_callbacks failed: {e}")
 
+    # 10. NOC Print/PDF/Email callbacks
+    try:
+        from .noc_callbacks import register_noc_callbacks
+        register_noc_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ noc_callbacks failed: {e}")
+
     # NOTE: security_callbacks.py and owner_callbacks.py have been REMOVED.
     # Both files registered callbacks for component IDs (security-scan-result,
     # clock-in-btn, payment-amount, etc.) that do not exist in any portal
