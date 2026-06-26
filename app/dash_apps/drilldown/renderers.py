@@ -1225,9 +1225,9 @@ def render_noc_card(apt: dict, society: dict,
             dbc.Label("Edit NOC text below before printing:",
                       style={"fontSize": "11px", "color": "#7d8ea3",
                              "fontWeight": "600", "marginBottom": "4px"}),
-            html.Textarea(
-                noc_text,
+            dbc.Textarea(
                 id="noc-textarea",
+                value=noc_text,
                 className="noc-editor-ta",
                 style={
                     "width": "100%",
@@ -1248,18 +1248,21 @@ def render_noc_card(apt: dict, society: dict,
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
                     id="noc-btn-print",
+                    n_clicks=0,
                     className="btn btn-outline-primary",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
                     [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
                     id="noc-btn-pdf",
+                    n_clicks=0,
                     className="btn btn-outline-danger",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
                     [html.I(className="fas fa-envelope me-2"), "Email NOC"],
                     id="noc-btn-email",
+                    n_clicks=0,
                     className="btn btn-outline-info",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),

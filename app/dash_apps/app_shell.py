@@ -371,6 +371,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="debug-kpi-log",           storage_type="memory"),
             dcc.Store(id="debug-list-log",          storage_type="memory"),
             dcc.Store(id="debug-sql-error",         storage_type="memory"),
+            dcc.Store(id="noc-action-store",        storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
