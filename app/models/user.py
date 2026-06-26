@@ -54,10 +54,10 @@ class User(UserMixin):
         """Create a new user"""
         try:
             result = db._execute(
-                """INSERT INTO users (email, password_hash, role, society_id, name, phone, login_method)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'password')
+                """INSERT INTO users (email, password_hash, role, society_id, name, login_method)
+                   VALUES (%s, %s, %s, %s, %s, 'password')
                    RETURNING id""",
-                (email, password_hash, role, society_id, name, phone), fetch_one=True
+                (email, password_hash, role, society_id, name), fetch_one=True
             )
             if result:
                 return User.get(result['id'])

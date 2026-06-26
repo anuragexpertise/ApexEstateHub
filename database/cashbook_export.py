@@ -135,11 +135,11 @@ def generate_cashbook_excel(
 
     # ── 1. Load society meta ──────────────────────────────────────────────
     soc = db._execute(
-        "SELECT name, PAN, calc_start_date FROM societies WHERE id=%s",
+        "SELECT name, pan_number, calc_start_date FROM societies WHERE id=%s",
         (society_id,), fetch_one=True,
     ) or {}
     society_name = soc.get("name", "Society")
-    pan          = soc.get("PAN", "")
+    pan          = soc.get("pan_number", "")
     calc_start   = soc.get("calc_start_date", date(year, 4, 1))
     asst_year    = f"{year}-{year+1}"
 

@@ -1040,7 +1040,8 @@ def _save_entity(entity, card_id, data):
         if entity == "account":         return _save_account(db, data, sid, is_edit, pk)
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
-        if entity == "sec_charge":      return _save_sec_charge(db, data, sid, is_edit, pk)
+        if entity == "sec_charge":
+            return False, "Security charge rules have been removed. Use manual expenses for security payments.", None
         # ── PATCH: previously missing branches ──────────────────────────
         if entity in ("pay_due", "pay_dues"):
             return _save_pay_dues(db, data, sid)
@@ -1725,42 +1726,6 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         " vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status)"
         " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, v_fine),
-        fetch_one=True,
-    )
-    return (
-        True,
-        f"Charge rule created",
-        (r or {}).get("id"),
-    )
-
-
-def _save_sec_charge(db, d, sid, is_edit, pk):
-    if is_edit:
-        db._execute(
-            "UPDATE sec_charges_fines_basis SET sec_id=%s, start_date=%s, end_date=%s,"
-            " security_fine=%s, sec_status=%s WHERE id=%s AND society_id=%s",
-            (
-                d.get("sec_id"),
-                d.get("start_date"),
-                d.get("end_date"),
-                d.get("security_fine"),
-                d.get("sec_status"),
-                pk,
-                sid,
-            ),
-        )
-        return True, "Security charge rule updated", pk
-    sec_id = d.get("sec_id")
-    start_date = d.get("start_date") or dt_date.today().isoformat()
-    try:
-        sec_fine = float(d.get("security_fine") or 0)
-    except ValueError:
-        return False, "Invalid numeric value", None
-    r = db._execute(
-        "INSERT INTO sec_charges_fines_basis(society_id, sec_id, start_date, end_date,"
-        " security_fine, sec_status)"
-        " VALUES(%s,%s,%s,%s,%s,TRUE) RETURNING id",
-        (sid, sec_id, start_date, d.get("end_date"), sec_fine),
         fetch_one=True,
     )
     return (

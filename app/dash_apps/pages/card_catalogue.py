@@ -512,10 +512,10 @@ KPI_CARDS = {
     },
  
     "kpi_sec_charges_count": {
-        "query": "SELECT COUNT(*) AS v FROM sec_charges_fines_basis WHERE society_id=%s AND sec_status=TRUE",
+        "query": "SELECT COUNT(*) AS v FROM payments WHERE society_id=%s AND role='security' AND status='pending'",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#b63b3b",
-        "title": "Security Charge Rules", "group": "active",
+        "title": "Security Pending Pays", "group": "active",
     },
  
     "kpi_attendance_count": {
@@ -567,26 +567,30 @@ KPI_CARDS = {
  
     "kpi_amc_due": {
         "query": """
-            SELECT COALESCE(SUM(e.amount), 0) AS v
-            FROM expenses e
-            JOIN accounts a ON a.id=e.acc_id
-            WHERE e.society_id=%s AND e.status='confirmed'
-              AND a.name ILIKE '%AMC%'
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM expenses
+            WHERE society_id=%s AND status='confirmed'
+              AND acc_id IN (
+                  SELECT id FROM accounts
+                  WHERE society_id=%s AND name ILIKE '%%AMC%%'
+              )
         """,
-        "params": 1, "format": "currency",
+        "params": 2, "format": "currency",
         "icon": "fa-tools", "color": "#6c5ce7",
         "title": "AMC Expenses", "group": "maintenance",
     },
  
     "kpi_apartment_fines": {
         "query": """
-            SELECT COALESCE(SUM(apt_fine), 0) AS v
-            FROM apt_charges_fines_basis
-            WHERE society_id=%s AND apt_status=TRUE AND apt_fine > 0
+            SELECT COALESCE(SUM(interest_amount), 0) AS v
+            FROM receivables
+            WHERE society_id=%s AND role='apartment'
+              AND status IN ('pending','partial')
+              AND interest_amount > 0
         """,
         "params": 1, "format": "currency",
         "icon": "fa-gavel", "color": "#de5c52",
-        "title": "Apt Fine Rules", "group": "fines",
+        "title": "Interest Accrued", "group": "fines",
     },
  
     "kpi_apartment_other_charges": {
@@ -602,13 +606,15 @@ KPI_CARDS = {
  
     "kpi_vendor_fines": {
         "query": """
-            SELECT COALESCE(SUM(vendor_fine), 0) AS v
-            FROM ven_charges_fines_basis
-            WHERE society_id=%s AND ven_status=TRUE AND vendor_fine > 0
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM receipts
+            WHERE society_id=%s AND role='vendor'
+              AND status='confirmed'
+              AND receipt_date >= DATE_TRUNC('month', CURRENT_DATE)
         """,
         "params": 1, "format": "currency",
-        "icon": "fa-gavel", "color": "#b98a07",
-        "title": "Vendor Fine Rules", "group": "fines",
+        "icon": "fa-id-badge", "color": "#b98a07",
+        "title": "Vendor Pass Income", "group": "fines",
     },
  
     "kpi_vendor_other_charges": {
@@ -624,24 +630,24 @@ KPI_CARDS = {
  
     "kpi_security_fines": {
         "query": """
-            SELECT COALESCE(SUM(security_fine), 0) AS v
-            FROM sec_charges_fines_basis
-            WHERE society_id=%s AND sec_status=TRUE AND security_fine > 0
+            SELECT COALESCE(SUM(amount), 0) AS v
+            FROM payments
+            WHERE society_id=%s AND role='security' AND status='pending'
         """,
         "params": 1, "format": "currency",
         "icon": "fa-gavel", "color": "#b63b3b",
-        "title": "Security Fine Rules", "group": "fines",
+        "title": "Security Salary Pending", "group": "fines",
     },
  
     "kpi_security_other_charges": {
         "query": """
             SELECT COUNT(*) AS v
-            FROM sec_charges_fines_basis
-            WHERE society_id=%s AND sec_status=TRUE
+            FROM payments
+            WHERE society_id=%s AND role='security'
         """,
         "params": 1, "format": "number",
         "icon": "fa-list-alt", "color": "#b63b3b",
-        "title": "Security Other Charges", "group": "all rules",
+        "title": "Security Pay Records", "group": "all rules",
     },
  
     "kpi_security_salary_due": {
@@ -659,12 +665,12 @@ KPI_CARDS = {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payments
-            WHERE society_id=%s AND role='security' AND status='pending'
-              AND type='bonus'
+            WHERE society_id=%s AND role='security' AND status='verified'
+              AND shift_date >= DATE_TRUNC('month', CURRENT_DATE)
         """,
         "params": 1, "format": "currency",
-        "icon": "fa-gift", "color": "#17976e",
-        "title": "Security Bonus Due", "group": "pending",
+        "icon": "fa-check-circle", "color": "#17976e",
+        "title": "Salary Paid (Month)", "group": "pending",
     },
  
     "kpi_security_shift": {
