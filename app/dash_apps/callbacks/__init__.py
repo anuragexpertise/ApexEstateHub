@@ -1,16 +1,12 @@
 # ============================================================
-# REPLACEMENT FILE for
 # app/dash_apps/callbacks/__init__.py
 # ============================================================
-# Changes:
-#   - Removed registration of security_callbacks and owner_callbacks
-#     (both reference component IDs that don't exist in any layout,
-#      causing NonExistentIdException at startup)
-#   - All other registrations unchanged
+# Changes vs previous version:
+#   - Added registration of noc_callbacks (NOC Print/PDF/Email)
+#     as step 10, before debug callbacks.
 # ============================================================
 
 def register_callbacks(app):
-    # Avoid registering callbacks multiple times (development reloader can import twice)
     if getattr(app, "_callbacks_registered", False):
         print("📋 Callbacks already registered — skipping")
         return
@@ -62,32 +58,32 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ camera_callbacks failed: {e}")
 
-    # 8. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
-    try:
-        from .debug_callbacks import register_debug_callbacks
-        register_debug_callbacks(app)
-    except Exception as e:
-        print(f"  ⚠️ debug_callbacks failed: {e}")
-
-    # 9. KPI Inspector callbacks (Customize → KPI Inspector tab)
+    # 8. KPI Inspector callbacks (Customize → KPI Inspector tab)
     try:
         from .customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
     except Exception as e:
         print(f"  ⚠️ customize_kpi_callbacks failed: {e}")
 
-    # 10. NOC Print/PDF/Email callbacks
+    # 9. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
+    try:
+        from .debug_callbacks import register_debug_callbacks
+        register_debug_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ debug_callbacks failed: {e}")
+
+    # 10. NOC card buttons (Print / PDF / Email — clientside JS)
+    #     Requires dcc.Store(id='noc-action-store') in app_shell.py layout.
     try:
         from .noc_callbacks import register_noc_callbacks
         register_noc_callbacks(app)
     except Exception as e:
         print(f"  ⚠️ noc_callbacks failed: {e}")
 
-    # NOTE: security_callbacks.py and owner_callbacks.py have been REMOVED.
-    # Both files registered callbacks for component IDs (security-scan-result,
-    # clock-in-btn, payment-amount, etc.) that do not exist in any portal
-    # layout, which caused NonExistentIdException at startup.
-    # Their functionality is fully covered by qr_callbacks.py (gate scanning)
-    # and the drilldown form system (payment processing).
+    # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
+    # NOT registered — they reference component IDs that don't exist in any
+    # portal layout and caused NonExistentIdException at startup.
+    # Gate scanning is covered by qr_callbacks.py; payment processing by
+    # the drilldown form system.
 
     print("✅ All callbacks registered")
