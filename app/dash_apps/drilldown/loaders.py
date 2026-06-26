@@ -328,23 +328,6 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
  
-        # ── SEC_CHARGES ────────────────────────────────────────────────
-        if entity == "sec_charges":
-            rows = db._execute(
-                "SELECT scf.*, COALESCE(s.name, 'ALL') AS security_name "
-                "FROM sec_charges_fines_basis scf "
-                "LEFT JOIN security_staff s ON s.id=scf.sec_id "
-                "WHERE scf.society_id=%s AND scf.sec_status=TRUE "
-                "LIMIT %s OFFSET %s",
-                (sid, page_size, offset), fetch_all=True,
-            ) or []
-            cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM sec_charges_fines_basis "
-                "WHERE society_id=%s AND sec_status=TRUE",
-                (sid,), fetch_one=True,
-            )
-            return rows, int((cnt or {}).get("n", len(rows)))
- 
         # ── ATTENDANCE ─────────────────────────────────────────────────
         if entity == "attendance":
             extra_sql, extra_params = "", []

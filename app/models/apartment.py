@@ -20,9 +20,8 @@ class Apartment(db.Model):
     
     @property
     def maintenance_rate(self):
-        """Get current maintenance rate for this apartment"""
-        from app.services.maintenance_service import get_current_maintenance_rate
-        return get_current_maintenance_rate(self.society_id)
+        """Get current maintenance rate per sq ft (default 3.0 — live rate via apt_charges_fines_basis)"""
+        return 3.0
     
     @property
     def monthly_maintenance(self):
