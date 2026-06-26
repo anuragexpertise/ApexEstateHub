@@ -1202,6 +1202,7 @@ def render_noc_card(apt: dict, society: dict,
     flat_no_safe = flat_no.replace(" ", "_")
 
     return dbc.Card([
+        dcc.Store(id="noc-flat-store", data=flat_no_safe, storage_type="memory"),
         dbc.CardHeader(
             html.Div([
                 html.Div(html.I(className="fas fa-certificate",
@@ -1221,12 +1222,12 @@ def render_noc_card(apt: dict, society: dict,
         ),
         dbc.CardBody([
             elig_banner,
-            # Editable NOC textarea — no Dash ID, driven purely by JS
             dbc.Label("Edit NOC text below before printing:",
                       style={"fontSize": "11px", "color": "#7d8ea3",
                              "fontWeight": "600", "marginBottom": "4px"}),
             html.Textarea(
                 noc_text,
+                id="noc-textarea",
                 className="noc-editor-ta",
                 style={
                     "width": "100%",
@@ -1242,63 +1243,29 @@ def render_noc_card(apt: dict, society: dict,
                     "boxShadow": "inset 0 1px 4px rgba(0,0,0,0.04)",
                 },
             ),
-            # Action buttons — onclick JS, no Dash IDs needed
+            # Action buttons — clientside callbacks
             html.Div([
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
-                    className="btn btn-outline-primary noc-btn-print",
+                    id="noc-btn-print",
+                    className="btn btn-outline-primary",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
                     [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
-                    className="btn btn-outline-danger noc-btn-pdf",
+                    id="noc-btn-pdf",
+                    className="btn btn-outline-danger",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
                     [html.I(className="fas fa-envelope me-2"), "Email NOC"],
-                    className="btn btn-outline-info noc-btn-email",
+                    id="noc-btn-email",
+                    className="btn btn-outline-info",
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "16px", "paddingTop": "14px",
                       "borderTop": "1px solid rgba(120,148,181,0.15)"}),
         ], style={"padding": "16px"}),
-
-        # Inline script — uses class selectors so no Dash ID conflicts
-        html.Script(f"""
-(function(){{
-  var card = document.currentScript.parentElement;
-  var ta   = card.querySelector('.noc-editor-ta');
-  function getText(){{ return ta ? ta.value : ''; }}
-  function toHtml(txt){{
-    return txt.split('\\n').map(function(l){{
-      return '<p style="margin:4px 0">'+(l||'&nbsp;')+'</p>';
-    }}).join('');
-  }}
-  var btnPrint = card.querySelector('.noc-btn-print');
-  var btnPdf   = card.querySelector('.noc-btn-pdf');
-  var btnEmail = card.querySelector('.noc-btn-email');
-  if(btnPrint) btnPrint.addEventListener('click', function(){{
-    var w = window.open('','_blank');
-    w.document.write('<html><head><title>NOC</title><style>body{{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9;max-width:700px;margin:auto}}</style></head><body>');
-    w.document.write(toHtml(getText()));
-    w.document.write('</body></html>');
-    w.document.close(); w.focus();
-    setTimeout(function(){{ w.print(); }}, 400);
-  }});
-  if(btnPdf) btnPdf.addEventListener('click', function(){{
-    var blob = new Blob([
-      '<html><head><style>body{{font-family:Georgia,serif;padding:60px;font-size:13pt;line-height:1.9;max-width:700px;margin:auto}}</style></head><body>'+toHtml(getText())+'</body></html>'
-    ],{{type:'text/html'}});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'NOC_{flat_no_safe}.html';
-    a.click();
-  }});
-  if(btnEmail) btnEmail.addEventListener('click', function(){{
-    window.location.href = 'mailto:?subject=No+Objection+Certificate&body='+encodeURIComponent(getText());
-  }});
-}})();
-"""),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
