@@ -580,22 +580,37 @@ DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
-    v_calc_start DATE;
-    v_month      DATE;
-    apt          RECORD;
-    charge       RECORD;
-    v_base       NUMERIC(10,2);
-    v_due_date   DATE;
-    v_desc       TEXT;
+    v_calc_start  DATE;
+    v_month       DATE;
+    apt           RECORD;
+    charge        RECORD;
+    v_base        NUMERIC(10,2);
+    v_due_date    DATE;
+    v_desc        TEXT;
+    -- fallback account IDs resolved once per society call
+    v_fallback_maint_acc  INT;
+    v_fallback_int_acc    INT;
 BEGIN
     SELECT calc_start_date INTO v_calc_start FROM societies WHERE id = p_society_id;
     IF v_calc_start IS NULL THEN RETURN; END IF;
+
+    -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
+    SELECT id INTO v_fallback_maint_acc FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%Society Maintenance%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    SELECT id INTO v_fallback_int_acc FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%Interest Due%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
 
     FOR apt IN
         SELECT id, apartment_size FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
-        -- Find the most specific active charge rule for this apartment
         SELECT apt_maintenance_rate, apt_due_day, apt_interest_pct,
                apt_maintenance_acc_id, apt_interest_acc_id
         INTO charge
@@ -607,14 +622,23 @@ BEGIN
         ORDER BY apt_id NULLS LAST, start_date DESC
         LIMIT 1;
 
-        -- Safe defaults if no charge rule configured yet
+        -- FIXED: fallback now resolves accounts by name instead of NULL
         IF charge.apt_maintenance_rate IS NULL THEN
-            charge.apt_maintenance_rate := 3.0;
-            charge.apt_due_day          := 5;
-            charge.apt_interest_pct     := 2.0;
-            charge.apt_maintenance_acc_id := NULL;
-            charge.apt_interest_acc_id    := NULL;
+            charge.apt_maintenance_rate   := 3.0;
+            charge.apt_due_day            := 5;
+            charge.apt_interest_pct       := 2.0;
+            charge.apt_maintenance_acc_id := v_fallback_maint_acc;  -- was NULL
+            charge.apt_interest_acc_id    := v_fallback_int_acc;    -- was NULL
         END IF;
+
+        -- Also patch existing NULL rows for this apartment while we are here
+        UPDATE receivables
+        SET acc_id          = COALESCE(acc_id, v_fallback_maint_acc),
+            interest_acc_id = COALESCE(interest_acc_id, v_fallback_int_acc)
+        WHERE society_id = p_society_id
+          AND entity_id  = apt.id
+          AND role       = 'apartment'
+          AND (acc_id IS NULL OR interest_acc_id IS NULL);
 
         v_month := DATE_TRUNC('month', v_calc_start)::DATE;
         WHILE v_month <= DATE_TRUNC('month', CURRENT_DATE)::DATE LOOP
@@ -642,11 +666,88 @@ BEGIN
     END LOOP;
 END;
 $$;
-
 -- Compounds apt_interest_pct monthly on the OVERDUE RESIDUAL of each row.
 -- interest_months_applied prevents double-application across multiple calls.
 -- On each application the `description` gains ' + Interest' so the verifying
 -- admin can see at a glance that this row carries an interest component.
+CREATE OR REPLACE FUNCTION fn_save_receipt_pending(
+    p_society_id   INT,
+    p_acc_id       INT,
+    p_particulars  TEXT,
+    p_amount       NUMERIC,
+    p_entity_id    INT     DEFAULT NULL,
+    p_role         VARCHAR DEFAULT 'other',
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_receipt_date DATE    DEFAULT CURRENT_DATE,
+    p_created_by   INT     DEFAULT NULL,
+    p_cheque_no    VARCHAR DEFAULT NULL,
+    p_trx_id       VARCHAR DEFAULT NULL
+)
+RETURNS TABLE(receipt_id INT)  -- NO transaction_id: transaction posted only on admin verify
+LANGUAGE plpgsql AS $$
+DECLARE v_receipt_id INT; v_drcr VARCHAR(2);
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+    IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
+    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
+
+    SELECT drcr_account INTO v_drcr FROM accounts
+    WHERE id = p_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found', p_acc_id; END IF;
+    IF v_drcr = 'Dr' THEN
+        RAISE EXCEPTION 'Account % is a Dr account — use fn_save_expense', p_acc_id;
+    END IF;
+
+    INSERT INTO receipts(
+        society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
+        amount, mode, cheque_no, transaction_id, status, created_at
+        -- confirmed_by / confirmed_at intentionally NULL until admin verifies
+    ) VALUES (
+        p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
+        p_amount, p_mode, p_cheque_no, p_trx_id, 'pending', NOW()
+    ) RETURNING id INTO v_receipt_id;
+
+    RETURN QUERY SELECT v_receipt_id;
+END;
+$$;
+
+-- Admin verify: post pending receipt to transactions and mark confirmed
+CREATE OR REPLACE FUNCTION fn_verify_receipt(
+    p_receipt_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT NULL   -- NULL = use receipt's own mode
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec    receipts%ROWTYPE;
+    v_trx_id INT;
+BEGIN
+    SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
+    IF NOT FOUND    THEN RETURN 'Error: Receipt not found'; END IF;
+    IF v_rec.status = 'confirmed'  THEN RETURN 'Already confirmed'; END IF;
+    IF v_rec.status = 'cancelled'  THEN RETURN 'Error: Receipt is cancelled'; END IF;
+    IF v_rec.acc_id IS NULL        THEN RETURN 'Error: No income account on this receipt'; END IF;
+
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id
+    ) VALUES (
+        v_rec.society_id, v_rec.receipt_date, v_rec.acc_id, v_rec.entity_id,
+        v_rec.particulars,
+        v_rec.amount, COALESCE(p_mode, v_rec.mode), 'paid',
+        p_confirmed_by, NOW(), 'receipts', v_rec.id
+    ) RETURNING id INTO v_trx_id;
+
+    UPDATE receipts
+    SET status       = 'confirmed',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW()
+    WHERE id = p_receipt_id;
+
+    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+END;
+$$;
+
 DROP FUNCTION IF EXISTS fn_apply_receivable_interest CASCADE;
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$

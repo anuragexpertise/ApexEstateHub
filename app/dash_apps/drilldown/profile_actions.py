@@ -128,6 +128,14 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "success",
             "roles": ["admin"],          # admin-only; enforced in renderers.py
         },
+        {
+            "label": "Pay Due",
+            "action_id": "pay_due_receivable",
+            "target_card": "form_pay_dues_new",
+            "icon": "fa-rupee-sign",
+            "color": "primary",
+            "roles": ["admin"],
+        },
     ],
 
     # ── PAYMENTS  (read-only tab — Verify is the only action) ───────────────
@@ -141,7 +149,17 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "roles": ["admin"],
         },
     ],
-
+    # ── RECEIPTS ─────────────────────────────────────────────────────────────
+    "receipts_tbl": [
+        {
+            "label": "Verify & Post",
+            "action_id": "verify_receipt",
+            "target_card": None,        # server-side only
+            "icon": "fa-check-double",
+            "color": "success",
+            "roles": ["admin"],
+        },
+    ],
     # ── ASSETS ───────────────────────────────────────────────────────────────
     "assets": [
         {

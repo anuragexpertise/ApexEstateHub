@@ -799,7 +799,22 @@ def pay_apartment_dues_fifo(
     except Exception as e:
         return False, str(e), {}
 
+# ════════════════════════════════════════════════════════════════════════════
+# VERIFY RECEIPT
+# ════════════════════════════════════════════════════════════════════════════
 
+def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
+    """Admin verifies a pending receipt (created by security) → posts to transactions."""
+    try:
+        r = db._execute(
+            "SELECT fn_verify_receipt(%s,%s,%s) AS msg",
+            (receipt_id, confirmed_by, mode),
+            fetch_one=True,
+        )
+        msg = (r or {}).get("msg", "Done")
+        return not str(msg).lower().startswith("error"), msg
+    except Exception as e:
+        return False, str(e)
 # ════════════════════════════════════════════════════════════════════════════
 # ACCOUNT DROPDOWN OPTIONS
 # ════════════════════════════════════════════════════════════════════════════
