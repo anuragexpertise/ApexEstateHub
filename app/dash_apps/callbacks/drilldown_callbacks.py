@@ -1840,15 +1840,20 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     role = auth.get("role", "admin")
     f = dict(filters)
     if role == "apartment":
-        apt_id = auth.get("apartment_id")
+        apt_id = auth.get("apartment_id") or auth.get("linked_id")
         if apt_id:
             f["apartment_id"] = apt_id
     elif role == "vendor":
-        vendor_id = auth.get("vendor_id") or auth.get("linked_id")
-        if vendor_id:
-            f["vendor_id"] = vendor_id
+        # linked_id for vendor = vendors.id (NOT users.id)
+        # load_list "vendors" uses users.id — so vendor_id filter = users.id
+        vendor_user_id = auth.get("user_id")
+        if vendor_user_id:
+            f["vendor_id"] = vendor_user_id
     elif role == "security":
-        security_id = auth.get("security_id") or auth.get("linked_id")
-        if security_id:
-            f["security_id"] = security_id
+        # linked_id for security = security_staff.id
+        # fn_security_list returns users.id as `id`
+        # but attendance/payments use security_staff.id = linked_id
+        sec_staff_id = auth.get("linked_id")
+        if sec_staff_id:
+            f["security_id"] = sec_staff_id
     return f

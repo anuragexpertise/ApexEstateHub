@@ -543,5 +543,145 @@ def register_shell_callbacks(app):
             icon=t, duration=4000, is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
+    # ── DEFAULT PROFILE on page load (no KPI clicked) ────────────────────────
+    @app.callback(
+        Output("drill-content",    "children",  allow_duplicate=True),
+        Output("drill-breadcrumb", "children",  allow_duplicate=True),
+        Output("drilldown-store",  "data",      allow_duplicate=True),
+        Input("auth-store", "data"),
+        Input("url",        "pathname"),
+        State("drilldown-store", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def render_default_profile(auth_data, pathname, store):
+        """
+        When no KPI has been clicked (stack depth == 1 / initial state),
+        render the logged-in user's own profile card below the KPIs.
+        """
+        if not auth_data or not auth_data.get("authenticated"):
+            return no_update, no_update, no_update
+
+        # Only render default when drilldown is at home (not mid-navigation)
+        stack = (store or {}).get("stack", [])
+        if len(stack) > 1:
+            return no_update, no_update, no_update
+
+        role    = auth_data.get("role", "admin")
+        sid     = auth_data.get("society_id")
+        user_id = auth_data.get("user_id")
+
+        try:
+            if role == "apartment":
+                apt_id = auth_data.get("apartment_id") or auth_data.get("linked_id")
+                if not apt_id:
+                    return no_update, no_update, no_update
+                record = loaders.load_profile("apartment", apt_id, sid)
+                if not record:
+                    return no_update, no_update, no_update
+                meta = get_entity_meta().get("apartments", {})
+                content = renderers.render_profile_card(
+                    card_id="profile_apartment",
+                    title=f"My Flat — {record.get('flat_number','')}",
+                    icon=meta.get("profile_icon", "fa-home"),
+                    entity="apartment",
+                    record=record,
+                    fields=meta.get("profile_fields", []),
+                    actions=meta.get("profile_actions", []),
+                    color="#1d74d8",
+                    auth_data=auth_data,
+                    filters={"society_id": sid},
+                )
+
+            elif role == "vendor":
+                vendor_id = auth_data.get("vendor_id") or auth_data.get("linked_id")
+                if not vendor_id:
+                    return no_update, no_update, no_update
+                # vendor profile is keyed by users.id
+                record = loaders.load_profile("vendor", user_id, sid)
+                if not record:
+                    return no_update, no_update, no_update
+                meta = get_entity_meta().get("vendors", {})
+                content = renderers.render_profile_card(
+                    card_id="profile_vendor",
+                    title=f"My Profile — {record.get('name', '')}",
+                    icon=meta.get("profile_icon", "fa-truck"),
+                    entity="vendor",
+                    record=record,
+                    fields=meta.get("profile_fields", []),
+                    actions=meta.get("profile_actions", []),
+                    color="#17976e",
+                    auth_data=auth_data,
+                    filters={"society_id": sid},
+                )
+
+            elif role == "security":
+                sec_id = auth_data.get("security_id") or auth_data.get("linked_id")
+                if not sec_id:
+                    return no_update, no_update, no_update
+                record = loaders.load_profile("security", user_id, sid)
+                if not record:
+                    return no_update, no_update, no_update
+                meta = get_entity_meta().get("security", {})
+                content = renderers.render_profile_card(
+                    card_id="profile_security",
+                    title=f"My Profile — {record.get('name', '')}",
+                    icon=meta.get("profile_icon", "fa-shield-alt"),
+                    entity="security",
+                    record=record,
+                    fields=meta.get("profile_fields", []),
+                    actions=meta.get("profile_actions", []),
+                    color="#e59620",
+                    auth_data=auth_data,
+                    filters={"society_id": sid},
+                )
+
+            elif role == "admin" and sid:
+                # Admin default: show society profile
+                record = loaders.load_profile("society", sid, None)
+                if not record:
+                    return no_update, no_update, no_update
+                meta = get_entity_meta().get("societies", {})
+                content = renderers.render_profile_card(
+                    card_id="profile_society",
+                    title=record.get("name", "Society"),
+                    icon="fa-building",
+                    entity="society",
+                    record=record,
+                    fields=meta.get("profile_fields", []),
+                    actions=[],   # no edit actions on default view
+                    color="#15304f",
+                    auth_data=auth_data,
+                    filters={"society_id": sid},
+                )
+            else:
+                return no_update, no_update, no_update
+
+        except Exception as e:
+            print(f"  ⚠️  render_default_profile: {e}")
+            return no_update, no_update, no_update
+
+        # Add a visual divider before the profile
+        wrapped = html.Div([
+            html.Hr(style={
+                "margin": "20px 0 16px",
+                "border": "none",
+                "borderTop": "1px solid rgba(29,116,216,0.12)",
+            }),
+            html.Div([
+                html.I(className="fas fa-id-card me-2",
+                    style={"color": "rgba(29,116,216,0.4)", "fontSize": "11px"}),
+                html.Span("Your Profile",
+                        style={"fontSize": "11px", "color": "#aaa",
+                                "fontWeight": "600", "textTransform": "uppercase",
+                                "letterSpacing": "0.5px"}),
+            ], style={"marginBottom": "12px"}),
+            content,
+        ])
+
+        # Reset store to initial so breadcrumb stays clean
+        new_store = nav_state.initial_state(role, sid)
+        bc = renderers.render_breadcrumb(new_store.get("stack", []))
+
+        return wrapped, bc, new_store
 
     print("  ✓ Shell callbacks registered")

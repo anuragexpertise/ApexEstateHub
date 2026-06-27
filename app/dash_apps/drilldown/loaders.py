@@ -70,6 +70,14 @@ def load_list(
     try:
         # ── APARTMENTS ──────────────────────────────────────────────────────
         if entity == "apartments":
+            # Portal scoping: apartment portal sees only their own flat
+            p_apt_id = _apt_id(filters)
+            if p_apt_id:
+                rows = db._execute(
+                    "SELECT * FROM fn_apartments_list(%s,%s,NULL) WHERE id=%s",
+                    (sid, s, p_apt_id), fetch_all=True,
+                ) or []
+                return rows, len(rows)
             rows = db._execute(
                 "SELECT * FROM fn_apartments_list(%s,%s,NULL) LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
@@ -81,6 +89,14 @@ def load_list(
 
         # ── VENDORS ─────────────────────────────────────────────────────────
         if entity == "vendors":
+            p_ven_id = _ven_id(filters)
+            if p_ven_id:
+                # vendor portal: return only this vendor's user row
+                rows = db._execute(
+                    "SELECT * FROM fn_vendors_list(%s,%s) WHERE id=%s",
+                    (sid, s, p_ven_id), fetch_all=True,
+                ) or []
+                return rows, len(rows)
             rows = db._execute(
                 "SELECT * FROM fn_vendors_list(%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
@@ -92,6 +108,13 @@ def load_list(
 
         # ── SECURITY ────────────────────────────────────────────────────────
         if entity == "security":
+            p_sec_id = _sec_id(filters)
+            if p_sec_id:
+                rows = db._execute(
+                    "SELECT * FROM fn_security_list(%s,%s) WHERE id=%s",
+                    (sid, s, p_sec_id), fetch_all=True,
+                ) or []
+                return rows, len(rows)
             rows = db._execute(
                 "SELECT * FROM fn_security_list(%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
