@@ -206,9 +206,10 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-next", "entity": ALL}, "n_clicks"),
         Input({"type": "list-search", "entity": ALL}, "value"),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
+        Input("portal-content-store", "data"),   # ← fires on page load / tab change
         State("drilldown-store", "data"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def route_drilldown(*args):
         store = args[-2] or {}
@@ -220,6 +221,23 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
+
+        # ── Page-load trigger from portal-content-store ───────────────────
+        # When this fires, render the default profile (stack at home level).
+        # Any actual n_clicks value of 0 or None from interaction inputs
+        # still gets blocked below.
+        is_page_load = "portal-content-store" in trig["prop_id"]
+        if is_page_load:
+            if not auth.get("authenticated"):
+                return no_update, no_update, no_update, no_update, no_update
+            if not store.get("stack"):
+                store = nav_state.initial_state(role, sid)
+            # Only render default if still on home card (no active drilldown)
+            if len(store.get("stack", [])) <= 1:
+                content, bc, db_err = _render_current(store, auth)
+                return store, content, bc, {"display": "grid"}, no_update
+            return no_update, no_update, no_update, no_update, no_update
+
         if not trig["value"]:
             return no_update, no_update, no_update, no_update, no_update
 
@@ -925,7 +943,124 @@ def _render_card(
             role=(auth or {}).get("role", "admin"),
         )
 
+    # ── dashboard (default — no KPI clicked yet) ─────────────────────────────
+    if card_id.startswith("dashboard_"):
+        sid = (auth or {}).get("society_id")
+        return _render_default_profile(card_id, auth, sid)
+
     return _empty_state(f"No content for: {card_id}")
+
+
+def _render_default_profile(card_id: str, auth: dict, sid) -> html.Div:
+    """
+    Render the logged-in user's own profile card when no KPI has been clicked.
+    Called when active_card is dashboard_admin / dashboard_apartment / etc.
+    """
+    role = (auth or {}).get("role", "admin")
+    user_id = (auth or {}).get("user_id")
+
+    _ROLE_CFG = {
+        "apartment": {
+            "entity":      "apartment",
+            "entity_key":  "apartments",
+            "pk_from":     lambda a: a.get("apartment_id") or a.get("linked_id"),
+            "profile_pk":  lambda a, _: a.get("apartment_id") or a.get("linked_id"),
+            "title_field": "flat_number",
+            "title_prefix": "My Flat — ",
+            "icon":        "fa-home",
+            "color":       "#1d74d8",
+        },
+        "vendor": {
+            "entity":      "vendor",
+            "entity_key":  "vendors",
+            # vendor profile is loaded by users.id (fn_vendors_list returns users.id)
+            "pk_from":     lambda a: a.get("user_id"),
+            "profile_pk":  lambda a, uid: uid,
+            "title_field": "name",
+            "title_prefix": "My Profile — ",
+            "icon":        "fa-truck",
+            "color":       "#17976e",
+        },
+        "security": {
+            "entity":      "security",
+            "entity_key":  "security",
+            # security profile is loaded by users.id
+            "pk_from":     lambda a: a.get("user_id"),
+            "profile_pk":  lambda a, uid: uid,
+            "title_field": "name",
+            "title_prefix": "My Profile — ",
+            "icon":        "fa-shield-alt",
+            "color":       "#e59620",
+        },
+        "admin": {
+            "entity":      "society",
+            "entity_key":  "societies",
+            "pk_from":     lambda a: a.get("society_id"),
+            "profile_pk":  lambda a, _: a.get("society_id"),
+            "title_field": "name",
+            "title_prefix": "",
+            "icon":        "fa-building",
+            "color":       "#15304f",
+        },
+    }
+
+    cfg = _ROLE_CFG.get(role)
+    if not cfg:
+        return _empty_state("Select a KPI above to explore data")
+
+    try:
+        pk = cfg["profile_pk"](auth or {}, user_id)
+        if not pk:
+            return _empty_state("Select a KPI above to explore data")
+
+        record = loaders.load_profile(cfg["entity"], pk, sid)
+        if not record:
+            return _empty_state("Select a KPI above to explore data")
+
+        meta    = get_entity_meta().get(cfg["entity_key"], {})
+        title   = cfg["title_prefix"] + str(record.get(cfg["title_field"], ""))
+        # Admin sees society profile with no edit actions on default view
+        actions = [] if role == "admin" else meta.get("profile_actions", [])
+
+        profile_card = renderers.render_profile_card(
+            card_id=f"profile_{cfg['entity']}",
+            title=title,
+            icon=cfg["icon"],
+            entity=cfg["entity"],
+            record=record,
+            fields=meta.get("profile_fields", []),
+            actions=actions,
+            color=cfg["color"],
+            auth_data=auth,
+            filters={"society_id": sid},
+        )
+
+        return html.Div([
+            html.Hr(style={
+                "margin":     "20px 0 14px",
+                "border":     "none",
+                "borderTop":  "1px solid rgba(29,116,216,0.12)",
+            }),
+            html.Div([
+                html.I(className="fas fa-id-card me-2",
+                       style={"color": "rgba(29,116,216,0.35)", "fontSize": "11px"}),
+                html.Span(
+                    "Your Profile" if role != "admin" else "Society Overview",
+                    style={
+                        "fontSize":      "11px",
+                        "color":         "#aaa",
+                        "fontWeight":    "600",
+                        "textTransform": "uppercase",
+                        "letterSpacing": "0.5px",
+                    },
+                ),
+            ], style={"marginBottom": "10px"}),
+            profile_card,
+        ])
+
+    except Exception as e:
+        print(f"  ⚠️  _render_default_profile: {e}")
+        return _empty_state("Select a KPI above to explore data")
 
 
 def _empty_state(msg: str) -> html.Div:
