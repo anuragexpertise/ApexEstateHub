@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     paid_amount             NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
     due_date                DATE,
     status                  VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','partial','paid','cancelled')),
+        CHECK (status IN ('pending','partial','unverified','paid','cancelled')),
     confirmed_by            INT REFERENCES users(id),
     confirmed_at            TIMESTAMP,
     created_at              TIMESTAMP NOT NULL DEFAULT NOW()

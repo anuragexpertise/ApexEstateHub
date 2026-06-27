@@ -51,6 +51,7 @@ def create_default_accounts(db, society_id: int):
         (21111, 'Saving Interest',           'IntSav',      'Saving Interest',          2111,    'Cr',  True,  'Cr',  0,   100),
         (2112,  'Exempt Income',             'IncExmpt',    'Exempt Income',             211,    'Cr',  True,  'Cr',  0,   100),
         (21112, 'FD Interest',               'IntFD',       'FD Interest',              2111,    'Cr',  True,  'Cr',  0,   100),
+        (21113, 'Due Interest',              'IntDue',      'Due Interest',             2111,    'Cr',  True,  'Cr',  0,   100),
         (212,   'Selling Asset',             'SellAs',      'Selling Asset',              21,    'Cr',  True,  'Cr',  0,   100),
         (213,   'Property Income',           'PropInc',     'Property Income',            21,    'Cr',  True,  'Cr',  0,   100),
         (22,    'Gifts Received',            'Gifts',       'Gifts Received',              2,    'Cr',  True,  'Cr',  0,   100),
