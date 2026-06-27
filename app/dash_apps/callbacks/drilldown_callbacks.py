@@ -328,7 +328,7 @@ def register_drilldown_callbacks(app):
                 return no_update, no_update, no_update, no_update, trigger_data
 
             # ── Verify receivable — server action only, no navigation ─────────────
-            if action == "verify_receivable":
+            elif action == "verify_receivable":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -337,8 +337,39 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
+            elif action == "pay_due_receivable":
+                rec = loaders.load_profile("receivable", pk, sid) or {}
+                apt_id = rec.get("apt_id") or rec.get("apartment_id") or rec.get("entity_id")
+                apt = loaders.load_profile("apartment", apt_id, sid) or {} if apt_id else {}
+                pending = float(apt.get("pending_dues") or 0)
+                prefill = {
+                    "entity_id":   apt_id,
+                    "role":        "apartment",
+                    "amount":      float(rec.get("amount_due") or rec.get("amount") or pending),
+                    "mode":        "cash",
+                    "particulars": (
+                        f"Payment — {apt.get('flat_number','Flat')} — "
+                        f"{rec.get('description', 'Dues')} (Rcv #{pk})"
+                    ),
+                }
+                store = nav_state.navigate_to(
+                    store, "form_pay_dues_new", "Pay Due",
+                    prefill=prefill, entity_pk=apt_id,
+                )
+                hide_kpis = True
+            # ── Verify receipt — 
+            elif action == "verify_receipt":
+                user_id = (auth or {}).get("user_id")
+                ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                store["refresh"] = False
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast   
+
             # ── Verify payment (admin only, from payments list) ───────────────────
-            if action == "verify_payment":
+            elif action == "verify_payment":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -550,6 +581,7 @@ def register_drilldown_callbacks(app):
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
         card_id=id_dict.get("card_id","")
+        
 
         # ── 1. Collect form-field values for THIS entity only ────────────────
         form_data: dict = {}
@@ -624,6 +656,7 @@ def register_drilldown_callbacks(app):
 
         merged = {**prefill, **form_data}
         merged["society_id"] = sid
+        merged['caller_role']= (auth or {}).get("role", "admin")
         # Always stamp user_id from auth — form fields never collect it,
         # but _save_pay_dues / _save_vendor_pass / _save_asset_dispose need it
         # as confirmed_by / created_by.
@@ -1059,11 +1092,6 @@ def _save_entity(entity, card_id, data):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_receipt_v3(db, d, sid):
-    """
-    Save a manual receipt via fn_save_receipt.
-    acc_id IS the category — chosen by the user from the account dropdown.
-    particulars is typed by the user (pre-filled from PARTICULARS_TEMPLATES in Python).
-    """
     amt = d.get("amount")
     if not amt:
         return False, "Amount is required", None
@@ -1086,29 +1114,56 @@ def _save_receipt_v3(db, d, sid):
     if not particulars:
         return False, "Particulars are required", None
 
+    # Path 2: security portal creates pending receipt (no immediate transaction)
+    caller_role = d.get("caller_role", "admin")
+    use_pending = caller_role == "security"
+
+    fn_name = "fn_save_receipt_pending" if use_pending else "fn_save_receipt"
+    n_params = 11 if not use_pending else 11
+
     try:
-        r = db._execute(
-            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                sid,
-                d.get("entity_id"),
-                d.get("role", "other"),
-                acc_id,
-                particulars,
-                amt,
-                d.get("mode", "cash"),
-                d.get("receipt_date") or dt_date.today().isoformat(),
-                d.get("user_id"),
-                d.get("cheque_no"),
-                d.get("transaction_id"),
-            ),
-            fetch_one=True,
-        )
-        receipt_id = (r or {}).get("receipt_id")
-        return True, f"Receipt of ₹{amt:,.2f} recorded", receipt_id
+        if use_pending:
+            r = db._execute(
+                "SELECT * FROM fn_save_receipt_pending(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    sid,            # p_society_id
+                    acc_id,         # p_acc_id        ← FIXED ORDER
+                    particulars,    # p_particulars   ← FIXED ORDER
+                    amt,            # p_amount        ← FIXED ORDER
+                    d.get("entity_id"),
+                    d.get("role", "other"),
+                    d.get("mode", "cash"),
+                    d.get("receipt_date") or dt_date.today().isoformat(),
+                    d.get("user_id"),
+                    d.get("cheque_no"),
+                    d.get("transaction_id"),
+                ),
+                fetch_one=True,
+            )
+            receipt_id = (r or {}).get("receipt_id")
+            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
+        else:
+            r = db._execute(
+                "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    sid,            # p_society_id
+                    acc_id,         # p_acc_id        ← FIXED ORDER
+                    particulars,    # p_particulars   ← FIXED ORDER
+                    amt,            # p_amount        ← FIXED ORDER
+                    d.get("entity_id"),
+                    d.get("role", "other"),
+                    d.get("mode", "cash"),
+                    d.get("receipt_date") or dt_date.today().isoformat(),
+                    d.get("user_id"),
+                    d.get("cheque_no"),
+                    d.get("transaction_id"),
+                ),
+                fetch_one=True,
+            )
+            receipt_id = (r or {}).get("receipt_id")
+            return True, f"Receipt of ₹{amt:,.2f} recorded", receipt_id
     except Exception as e:
         return False, str(e), None
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3.  NEW: Expense save using fn_save_expense
@@ -1146,11 +1201,11 @@ def _save_expense_v3(db, d, sid):
             "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
-                d.get("entity_id"),
-                d.get("role", "other"),
                 acc_id,
                 particulars,
                 amt,
+                d.get("entity_id"),
+                d.get("role", "other"),
                 d.get("mode", "cash"),
                 d.get("expense_date") or dt_date.today().isoformat(),
                 d.get("user_id"),

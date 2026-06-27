@@ -120,8 +120,13 @@ DRILLDOWN_MAP: dict = {
         "label": "Calc Start Date",
     },
     "kpi_receivables_total": {
-        "target": "list_receipts_tbl",
+        "target": "list_receivables",
         "label": "Receivables Total",
+    },
+    "kpi_receivables_overdue": {
+        "target": "list_receivables",
+        "label": "Overdue Receivables",
+        "filter": {"status": "overdue"},
     },
     "kpi_payables_total": {"target": "list_expenses_tbl", "label": "Payables Total"},
     "kpi_vendor_payables_due": {
