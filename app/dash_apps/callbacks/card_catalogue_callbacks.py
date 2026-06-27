@@ -63,12 +63,6 @@ def register_card_catalogue_callbacks(app):
         print("  ⚠️  Cannot import KPI_CARDS — KPI refresh skipped")
         KPI_CARDS = {}
 
-    # ── KPI REFRESH ───────────────────────────────────────────────
-    # Fires on:
-    #   - url.pathname change (tab navigation)
-    #   - auth-store change  (login / logout)
-    # Uses 'initial_duplicate' so it also fires on the initial page load
-    # even though shell_callbacks also writes auth-store.
     @app.callback(
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
         Output("toast-store", "data", allow_duplicate=True),
@@ -84,9 +78,110 @@ def register_card_catalogue_callbacks(app):
         if not auth_data or not auth_data.get("authenticated"):
             return ["—"] * len(kpi_ids), no_update
 
-        sid  = auth_data.get("society_id")
-        role = auth_data.get("role", "admin")
+        sid       = auth_data.get("society_id")
+        role      = auth_data.get("role", "admin")
+        apt_id    = auth_data.get("apartment_id")   # set for 'apartment' portal
+        vendor_id = auth_data.get("vendor_id")       # set for 'vendor' portal
+        sec_id    = auth_data.get("security_id") or (
+            auth_data.get("linked_id") if role == "security" else None
+        )
         is_master = role == "admin" and sid is None
+
+        # ── Build portal-specific param resolver ──────────────────────────────
+        # KPI queries always bind (society_id,) * n_params.
+        # For scoped portals we need to substitute with the entity's own filtered
+        # count/sum — but most KPI SQL only accepts society_id.
+        # Strategy: for apartment/vendor/security portals, replace multi-param
+        # KPIs with entity-scoped SQL where it makes sense; skip irrelevant KPIs.
+        #
+        # Scoped KPI overrides: return (override_sql, params) or None to use default.
+        def _scoped_override(card_id: str):
+            """Return (sql, params) scoped to the portal entity, or None for default."""
+            if role == "apartment" and apt_id:
+                overrides = {
+                    # dues / receivables scoped to this apartment
+                    "kpi_apartments_dues": (
+                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        "FROM receivables WHERE entity_id=%s AND role='apartment' "
+                        "AND status IN ('pending','partial')",
+                        (apt_id,),
+                    ),
+                    "kpi_receivables_total": (
+                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        "FROM receivables WHERE entity_id=%s AND role='apartment' "
+                        "AND status IN ('pending','partial')",
+                        (apt_id,),
+                    ),
+                    "kpi_receipts_month": (
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        "WHERE entity_id=%s AND role='apartment' AND status='confirmed' "
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        (apt_id,),
+                    ),
+                    "kpi_concerns_open": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns c "
+                        "JOIN apartments a ON a.flat_number=c.flat_no "
+                        "WHERE a.id=%s AND c.status IN ('open','in_progress')",
+                        (apt_id,),
+                    ),
+                    "kpi_gate_logs": (
+                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='a' AND time_in::DATE=CURRENT_DATE",
+                        (apt_id,),
+                    ),
+                }
+                return overrides.get(card_id)
+
+            if role == "vendor" and vendor_id:
+                overrides = {
+                    "kpi_receipts_month": (
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        "WHERE entity_id=%s AND role='vendor' AND status='confirmed' "
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        (vendor_id,),
+                    ),
+                    "kpi_receivables_total": (
+                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        "FROM receivables WHERE entity_id=%s AND role='vendor' "
+                        "AND status IN ('pending','partial')",
+                        (vendor_id,),
+                    ),
+                    "kpi_gate_logs": (
+                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='v' AND time_in::DATE=CURRENT_DATE",
+                        (vendor_id,),
+                    ),
+                }
+                return overrides.get(card_id)
+
+            if role == "security" and sec_id:
+                overrides = {
+                    "kpi_security_shift_count": (
+                        "SELECT COUNT(*)::INT AS v FROM attendance "
+                        "WHERE security_id=%s AND time_out IS NOT NULL",
+                        (sec_id,),
+                    ),
+                    "kpi_security_salary_due": (
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payments "
+                        "WHERE entity_id=%s AND role='security' AND status='pending'",
+                        (sec_id,),
+                    ),
+                    "kpi_receipts_month": (
+                        # Security sees society-wide receipts for this month (they collect cash)
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        "WHERE society_id=%s AND status='confirmed' "
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        (sid,),
+                    ),
+                    "kpi_gate_logs": (
+                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE",
+                        (sid,),
+                    ),
+                }
+                return overrides.get(card_id)
+
+            return None
 
         results   = []
         first_err = None
@@ -99,10 +194,27 @@ def register_card_catalogue_callbacks(app):
                 results.append("—")
                 continue
 
-            n_params = cfg.get("params", 0)
-            fmt      = cfg.get("format", "number")
-            query    = cfg.get("query", "")
+            fmt   = cfg.get("format", "number")
+            query = cfg.get("query", "")
 
+            # Try portal-scoped override first
+            override = _scoped_override(card_id)
+            if override:
+                ov_query, ov_params = override
+                try:
+                    row = db._execute(ov_query, ov_params, fetch_one=True)
+                    raw = (row or {}).get("v")
+                    results.append(format_kpi_value(raw, fmt))
+                except Exception as exc:
+                    err_msg = f"KPI [{card_id}] scoped: {str(exc)[:120]}"
+                    print(f"  ❌ {err_msg}")
+                    results.append("ERR")
+                    if first_err is None:
+                        first_err = err_msg
+                continue
+
+            # Default: use the KPI's own SQL with society_id params
+            n_params = cfg.get("params", 0)
             if n_params == 0 or is_master:
                 params = ()
             else:
@@ -114,8 +226,7 @@ def register_card_catalogue_callbacks(app):
             try:
                 row = db._execute(query, params, fetch_one=True)
                 raw = (row or {}).get("v")
-                formatted = format_kpi_value(raw, fmt)
-                results.append(formatted)
+                results.append(format_kpi_value(raw, fmt))
             except Exception as exc:
                 err_msg = f"KPI [{card_id}]: {str(exc)[:120]}"
                 print(f"  ❌ {err_msg}")
@@ -125,5 +236,3 @@ def register_card_catalogue_callbacks(app):
 
         toast = _err_toast(first_err) if first_err else no_update
         return results, toast
-
-    print("  ✓ Card catalogue callbacks registered")
