@@ -823,6 +823,35 @@ def pay_apartment_dues_fifo(
         return False, str(e), {}
 
 # ════════════════════════════════════════════════════════════════════════════
+# LOAD VENDOR PASS RATES
+# ════════════════════════════════════════════════════════════════════════════
+def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
+    """Return {"1day": rate, "7day": rate, "1mth": rate} from ven_charges_fines_basis."""
+    try:
+        # Get vendors.id from users.linked_id
+        u = db._execute(
+            "SELECT linked_id FROM users WHERE id=%s AND society_id=%s",
+            (vendor_user_id, society_id), fetch_one=True,
+        )
+        vendor_id = (u or {}).get("linked_id")
+
+        row = db._execute(
+            "SELECT vendor_1day, vendor_7day, vendor_1mth FROM ven_charges_fines_basis "
+            "WHERE society_id=%s AND ven_status=TRUE "
+            "AND (ven_id=%s OR ven_id IS NULL) "
+            "ORDER BY ven_id NULLS LAST, start_date DESC LIMIT 1",
+            (society_id, vendor_id), fetch_one=True,
+        ) or {}
+        return {
+            "1day": float(row.get("vendor_1day") or 0),
+            "7day": float(row.get("vendor_7day") or 0),
+            "1mth": float(row.get("vendor_1mth") or 0),
+        }
+    except Exception as e:
+        print(f"❌ load_vendor_pass_rates: {e}")
+        return {"1day": 0, "7day": 0, "1mth": 0}
+
+# ════════════════════════════════════════════════════════════════════════════
 # VERIFY RECEIPT
 # ════════════════════════════════════════════════════════════════════════════
 

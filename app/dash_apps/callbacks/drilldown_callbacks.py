@@ -90,9 +90,11 @@ from app.dash_apps.drilldown.schema_introspect import (
 # ═══════════════════════════════════════════════════════════════════════════
 def _resolve_entity_singular(id_dict):
     raw = id_dict.get("entity", "")
-    # pay_due / pay_dues must stay as-is — to_singular("pay_dues") → "pay_du"
+    # Entities whose names get mangled by to_singular() must be guarded explicitly
     if raw in ("pay_due", "pay_dues"):
         return "pay_due"
+    if raw in ("vendor_pass", "vendor_pass_new", "vendor_pas"):
+        return "vendor_pass"
     return to_singular(raw)
 
 def _handle_list_delete(entity, pk, sid, store, auth):
@@ -206,10 +208,9 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-next", "entity": ALL}, "n_clicks"),
         Input({"type": "list-search", "entity": ALL}, "value"),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
-        Input("portal-content-store", "data"),   # ← fires on page load / tab change
         State("drilldown-store", "data"),
         State("auth-store", "data"),
-        prevent_initial_call="initial_duplicate",
+        prevent_initial_call=True,
     )
     def route_drilldown(*args):
         store = args[-2] or {}
@@ -221,23 +222,6 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
-
-        # ── Page-load trigger from portal-content-store ───────────────────
-        # When this fires, render the default profile (stack at home level).
-        # Any actual n_clicks value of 0 or None from interaction inputs
-        # still gets blocked below.
-        is_page_load = "portal-content-store" in trig["prop_id"]
-        if is_page_load:
-            if not auth.get("authenticated"):
-                return no_update, no_update, no_update, no_update, no_update
-            if not store.get("stack"):
-                store = nav_state.initial_state(role, sid)
-            # Only render default if still on home card (no active drilldown)
-            if len(store.get("stack", [])) <= 1:
-                content, bc, db_err = _render_current(store, auth)
-                return store, content, bc, {"display": "grid"}, no_update
-            return no_update, no_update, no_update, no_update, no_update
-
         if not trig["value"]:
             return no_update, no_update, no_update, no_update, no_update
 
@@ -450,7 +434,27 @@ def register_drilldown_callbacks(app):
                 record = loaders.load_profile(entity, pk, sid) or {}
                 store = nav_state.navigate_to(
                     store, "form_vendor_pass_new", "Sell Vendor Pass",
-                    prefill={"user_id": pk, "entity_id": record.get("vendor_id", pk), "role": "vendor"},
+                    prefill={
+                        "vendor_user_id": pk,           # vendor's users.id — kept separate
+                        "entity_id":      record.get("vendor_id", pk),
+                        "role":           "vendor",
+                        # user_id deliberately NOT set here — handle_form_submit
+                        # stamps admin's user_id from auth-store into merged["user_id"]
+                    },
+                    entity_pk=pk,
+                )
+                hide_kpis = True
+
+            # ── Buy vendor pass (from vendor portal profile) ──────────────────────
+            elif action == "buy_vendor_pass":
+                record = loaders.load_profile(entity, pk, sid) or {}
+                store = nav_state.navigate_to(
+                    store, "form_vendor_pass_new", "Buy Vendor Pass",
+                    prefill={
+                        "vendor_user_id": pk,
+                        "entity_id":      record.get("vendor_id", pk),
+                        "role":           "vendor",
+                    },
                     entity_pk=pk,
                 )
                 hide_kpis = True
@@ -903,6 +907,49 @@ def _render_card(
                 society_id=sid_val,
             )
 
+        # ── Vendor Pass — dedicated card (bypasses to_singular mangling) ────────
+        if card_id == "form_vendor_pass_new":
+            vendor_user_id = prefill.get("vendor_user_id") or prefill.get("user_id")
+            sid_val        = filters.get("society_id")
+            caller_role    = (auth or {}).get("role", "admin")
+            record         = loaders.load_profile("vendor", vendor_user_id, sid_val) or {} \
+                             if vendor_user_id else {}
+            # Load rates from ven_charges_fines_basis
+            rates = {"1day": 0, "7day": 0, "1mth": 0}
+            if vendor_user_id and sid_val:
+                try:
+                    # get vendors.id via linked_id
+                    u = db._execute(
+                        "SELECT linked_id FROM users WHERE id=%s AND society_id=%s",
+                        (vendor_user_id, sid_val), fetch_one=True,
+                    )
+                    ven_id = (u or {}).get("linked_id")
+                    row = db._execute(
+                        "SELECT vendor_1day, vendor_7day, vendor_1mth "
+                        "FROM ven_charges_fines_basis "
+                        "WHERE society_id=%s AND ven_status=TRUE "
+                        "AND (ven_id=%s OR ven_id IS NULL) "
+                        "ORDER BY ven_id NULLS LAST, start_date DESC LIMIT 1",
+                        (sid_val, ven_id), fetch_one=True,
+                    ) or {}
+                    rates = {
+                        "1day": float(row.get("vendor_1day") or 0),
+                        "7day": float(row.get("vendor_7day") or 0),
+                        "1mth": float(row.get("vendor_1mth") or 0),
+                    }
+                except Exception as _e:
+                    print(f"  ⚠️  vendor pass rates: {_e}")
+            return renderers.render_vendor_pass_card(
+                user_id=vendor_user_id,
+                vendor_name=record.get("name", "Vendor"),
+                service_type=record.get("service_type", ""),
+                pass_expiry=record.get("pass_expiry"),
+                active_passes=int(record.get("active_passes") or 0),
+                rates=rates,
+                society_id=sid_val,
+                caller_role=caller_role,
+            )
+
         # ── NOC Print — rich-text editor with eligibility banner ──────────────
         if card_id == "form_noc_print":
             apt_id  = prefill.get("apartment_id") or prefill.get("entity_id")
@@ -943,124 +990,7 @@ def _render_card(
             role=(auth or {}).get("role", "admin"),
         )
 
-    # ── dashboard (default — no KPI clicked yet) ─────────────────────────────
-    if card_id.startswith("dashboard_"):
-        sid = (auth or {}).get("society_id")
-        return _render_default_profile(card_id, auth, sid)
-
     return _empty_state(f"No content for: {card_id}")
-
-
-def _render_default_profile(card_id: str, auth: dict, sid) -> html.Div:
-    """
-    Render the logged-in user's own profile card when no KPI has been clicked.
-    Called when active_card is dashboard_admin / dashboard_apartment / etc.
-    """
-    role = (auth or {}).get("role", "admin")
-    user_id = (auth or {}).get("user_id")
-
-    _ROLE_CFG = {
-        "apartment": {
-            "entity":      "apartment",
-            "entity_key":  "apartments",
-            "pk_from":     lambda a: a.get("apartment_id") or a.get("linked_id"),
-            "profile_pk":  lambda a, _: a.get("apartment_id") or a.get("linked_id"),
-            "title_field": "flat_number",
-            "title_prefix": "My Flat — ",
-            "icon":        "fa-home",
-            "color":       "#1d74d8",
-        },
-        "vendor": {
-            "entity":      "vendor",
-            "entity_key":  "vendors",
-            # vendor profile is loaded by users.id (fn_vendors_list returns users.id)
-            "pk_from":     lambda a: a.get("user_id"),
-            "profile_pk":  lambda a, uid: uid,
-            "title_field": "name",
-            "title_prefix": "My Profile — ",
-            "icon":        "fa-truck",
-            "color":       "#17976e",
-        },
-        "security": {
-            "entity":      "security",
-            "entity_key":  "security",
-            # security profile is loaded by users.id
-            "pk_from":     lambda a: a.get("user_id"),
-            "profile_pk":  lambda a, uid: uid,
-            "title_field": "name",
-            "title_prefix": "My Profile — ",
-            "icon":        "fa-shield-alt",
-            "color":       "#e59620",
-        },
-        "admin": {
-            "entity":      "society",
-            "entity_key":  "societies",
-            "pk_from":     lambda a: a.get("society_id"),
-            "profile_pk":  lambda a, _: a.get("society_id"),
-            "title_field": "name",
-            "title_prefix": "",
-            "icon":        "fa-building",
-            "color":       "#15304f",
-        },
-    }
-
-    cfg = _ROLE_CFG.get(role)
-    if not cfg:
-        return _empty_state("Select a KPI above to explore data")
-
-    try:
-        pk = cfg["profile_pk"](auth or {}, user_id)
-        if not pk:
-            return _empty_state("Select a KPI above to explore data")
-
-        record = loaders.load_profile(cfg["entity"], pk, sid)
-        if not record:
-            return _empty_state("Select a KPI above to explore data")
-
-        meta    = get_entity_meta().get(cfg["entity_key"], {})
-        title   = cfg["title_prefix"] + str(record.get(cfg["title_field"], ""))
-        # Admin sees society profile with no edit actions on default view
-        actions = [] if role == "admin" else meta.get("profile_actions", [])
-
-        profile_card = renderers.render_profile_card(
-            card_id=f"profile_{cfg['entity']}",
-            title=title,
-            icon=cfg["icon"],
-            entity=cfg["entity"],
-            record=record,
-            fields=meta.get("profile_fields", []),
-            actions=actions,
-            color=cfg["color"],
-            auth_data=auth,
-            filters={"society_id": sid},
-        )
-
-        return html.Div([
-            html.Hr(style={
-                "margin":     "20px 0 14px",
-                "border":     "none",
-                "borderTop":  "1px solid rgba(29,116,216,0.12)",
-            }),
-            html.Div([
-                html.I(className="fas fa-id-card me-2",
-                       style={"color": "rgba(29,116,216,0.35)", "fontSize": "11px"}),
-                html.Span(
-                    "Your Profile" if role != "admin" else "Society Overview",
-                    style={
-                        "fontSize":      "11px",
-                        "color":         "#aaa",
-                        "fontWeight":    "600",
-                        "textTransform": "uppercase",
-                        "letterSpacing": "0.5px",
-                    },
-                ),
-            ], style={"marginBottom": "10px"}),
-            profile_card,
-        ])
-
-    except Exception as e:
-        print(f"  ⚠️  _render_default_profile: {e}")
-        return _empty_state("Select a KPI above to explore data")
 
 
 def _empty_state(msg: str) -> html.Div:
@@ -1472,29 +1402,34 @@ def _save_asset_dispose(db, d, sid):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_vendor_pass(db, d, sid):
-    user_id   = d.get("user_id") or d.get("entity_id")
-    pass_type = d.get("pass_type")
-    if not user_id:
+    # vendor_user_id: the vendor's users.id (passed to fn_sell_vendor_pass)
+    # user_id:        the admin/caller's users.id (stamped from auth in handle_form_submit)
+    vendor_user_id = d.get("vendor_user_id") or d.get("entity_id")
+    created_by     = d.get("user_id")      # always admin's id — stamped by handle_form_submit
+
+    if not vendor_user_id:
         return False, "Vendor user ID is required", None
-    if pass_type not in ("1day", "7day", "1mth"):
-        return False, "Invalid pass type — must be 1day, 7day, or 1mth", None
+
+    pass_type = d.get("pass_type")
+    if not pass_type or pass_type not in ("1day", "7day", "1mth"):
+        return False, "Please select a pass type (1-Day / 7-Day / Monthly)", None
+
     try:
         r = db._execute(
             "SELECT * FROM fn_sell_vendor_pass(%s,%s,%s,%s,%s,%s,%s)",
             (
-                int(user_id),
-                pass_type,
-                d.get("acc_id"),
-                d.get("mode", "cash"),
-                d.get("created_by") or d.get("user_id"),
+                int(vendor_user_id),                              # p_user_id
+                pass_type,                                        # p_pass_type
+                d.get("acc_id"),                                  # p_acc_id (NULL → fn resolves)
+                d.get("mode", "cash"),                            # p_mode
+                created_by,                                       # p_created_by (admin's id)
                 d.get("issued_date") or dt_date.today().isoformat(),
                 d.get("particulars"),
             ),
             fetch_one=True,
         )
-        receipt_id   = (r or {}).get("receipt_id")
-        valid_until  = (r or {}).get("valid_until")
-        return True, f"Pass sold — valid until {valid_until}", receipt_id
+        valid_until = (r or {}).get("valid_until")
+        return True, f"Pass sold — valid until {valid_until}", (r or {}).get("receipt_id")
     except Exception as e:
         return False, str(e), None
 

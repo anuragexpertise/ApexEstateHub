@@ -59,12 +59,20 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
     # ── VENDORS ─────────────────────────────────────────────────────────────
     "vendors": [
         {
-            "label": "Sell Pass",
+            "label": "Sell Pass", # admin sells
             "action_id": "sell_vendor_pass",
             "target_card": "form_vendor_pass_new",
             "icon": "fa-id-card",
             "color": "success",
-            "roles": ["admin"],
+            "roles": ["admin"],  #admin portal 
+        },
+        {
+            "label": "Buy Pass",         # NEW — vendor buys their own pass
+            "action_id": "buy_vendor_pass",
+            "target_card": "form_vendor_pass_new",
+            "icon": "fa-id-card",
+            "color": "primary",
+            "roles": ["vendor"],         # vendor portal only
         },
         {
             "label": "Show Cashbook",
