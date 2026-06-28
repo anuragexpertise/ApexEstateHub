@@ -1151,6 +1151,176 @@ def render_pay_dues_card(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# VENDOR PASS CARD — Sell Pass (admin) / Buy Pass (vendor)
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_vendor_pass_card(
+    user_id,
+    vendor_name: str,
+    service_type: str,
+    pass_expiry,
+    active_passes: int,
+    rates: dict,          # {"1day": float, "7day": float, "1mth": float}
+    society_id=None,
+    prefill_mode: str = "cash",
+    caller_role: str = "admin",
+) -> html.Div:
+    from datetime import date as _date
+    color        = "#17976e"
+    today        = _date.today().strftime("%Y-%m-%d")
+    action_label = "Sell Pass" if caller_role == "admin" else "Buy Pass"
+    entity_name  = "vendor_pass"   # MUST match _resolve_entity_singular guard
+
+    # ── Pass status banner ────────────────────────────────────────────────
+    if active_passes and int(active_passes) > 0:
+        expiry_str = (
+            pass_expiry.strftime("%d %b %Y")
+            if hasattr(pass_expiry, "strftime")
+            else str(pass_expiry or "")
+        )
+        banner = dbc.Alert([
+            html.I(className="fas fa-id-card me-2"),
+            f"Active pass — valid until {expiry_str}",
+        ], color="success", style={"fontSize": "12px", "borderRadius": "10px",
+                                    "padding": "8px 14px", "marginBottom": "12px"})
+    else:
+        banner = dbc.Alert([
+            html.I(className="fas fa-exclamation-triangle me-2"),
+            "No active pass — entry will be denied at gate.",
+        ], color="warning", style={"fontSize": "12px", "borderRadius": "10px",
+                                    "padding": "8px 14px", "marginBottom": "12px"})
+
+    # ── Rates summary cards ───────────────────────────────────────────────
+    rate_items = [
+        ("1day", "1-Day"),
+        ("7day", "7-Day"),
+        ("1mth", "Monthly"),
+    ]
+    rate_cols = []
+    for pt, label in rate_items:
+        rate = rates.get(pt, 0)
+        rate_cols.append(dbc.Col(dbc.Card([
+            html.Div(f"{label} Pass",
+                     style={"fontSize": "10px", "color": "#7d8ea3",
+                            "fontWeight": "600", "textTransform": "uppercase"}),
+            html.Div(
+                f"₹{float(rate):,.0f}" if rate else "—",
+                style={"fontSize": "18px", "fontWeight": "800",
+                       "color": "#15304f" if rate else "#bbb"},
+            ),
+        ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
+                              "textAlign": "center", "padding": "10px"}), width=4))
+
+    # ── Pass type dropdown with rates inline ──────────────────────────────
+    pass_options = []
+    for pt, label in rate_items:
+        rate = rates.get(pt, 0)
+        rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (no rate set)"
+        pass_options.append({"label": f"{label} Pass {rate_str}", "value": pt})
+
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Div([
+                html.Div(
+                    html.I(className="fas fa-id-card",
+                           style={"color": "#fff", "fontSize": "16px"}),
+                    style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                           "background": f"linear-gradient(135deg,{color},{color}aa)",
+                           "display": "flex", "alignItems": "center",
+                           "justifyContent": "center", "marginRight": "12px"},
+                ),
+                html.Div([
+                    html.Strong(f"{action_label} — {vendor_name}",
+                                style={"fontSize": "14px"}),
+                    html.Div(service_type or "",
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            banner,
+            dbc.Row(rate_cols, className="mb-3"),
+
+            # ── Hidden identity fields ────────────────────────────────────
+            dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "vendor_user_id"},
+                type="hidden", value=str(user_id or ""),
+            ),
+            dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "role"},
+                type="hidden", value="vendor",
+            ),
+            dcc.Input(
+                id={"type": "form-entity-pk", "entity": entity_name},
+                type="hidden", value=str(user_id or ""),
+            ),
+
+            # ── Pass type ─────────────────────────────────────────────────
+            dbc.Row([
+                dbc.Col(dbc.Label("Pass Type *",
+                                  style={"fontSize": "12px", "fontWeight": "500",
+                                         "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity_name, "field": "pass_type"},
+                    options=pass_options,
+                    value=None,
+                    placeholder="Select pass type…",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+
+            # ── Payment mode ──────────────────────────────────────────────
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *",
+                                  style={"fontSize": "12px", "fontWeight": "500",
+                                         "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity_name, "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Cheque",        "value": "cheque"},
+                    ],
+                    value=prefill_mode,
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+
+            # ── Issue date ────────────────────────────────────────────────
+            dbc.Row([
+                dbc.Col(dbc.Label("Issue Date",
+                                  style={"fontSize": "12px", "fontWeight": "500",
+                                         "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
+                    type="date", value=today,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+
+            dbc.Button(
+                [html.I(className="fas fa-id-card me-2"), action_label],
+                id={"type": "form-submit", "entity": entity_name,
+                    "card_id": "form_vendor_pass_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"padding": "16px"}),
+    ], style={
+        "borderRadius": "16px",
+        "border":       f"1px solid {color}22",
+        "boxShadow":    f"0 10px 30px {color}18",
+        "overflow":     "hidden",
+    })
+# ════════════════════════════════════════════════════════════════════════════
 # NOC CARD  — rich-text editor with eligibility banner + Print/PDF/Email
 # ════════════════════════════════════════════════════════════════════════════
 
