@@ -936,7 +936,7 @@ BEGIN
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
         WHERE society_id = v_society_id
-          AND name ILIKE '%Society Maintenance%'
+          AND name ILIKE '%Society Maintenance Charge%'
           AND drcr_account = 'Cr'
         LIMIT 1;
     END IF;
@@ -951,12 +951,12 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     FOR rec IN
-        SELECT id, amount, paid_amount FROM receivables
+        SELECT id, amount, paid_amount, confirmed_by FROM receivables
         WHERE entity_id = p_apartment_id AND role = 'apartment'
           AND status IN ('pending','partial')
         ORDER BY due_date ASC NULLS LAST, id ASC
         FOR UPDATE
-LOOP
+    LOOP
         EXIT WHEN v_remaining <= 0;
         v_take := LEAST(v_remaining, rec.amount - rec.paid_amount);
 
