@@ -90,7 +90,7 @@ from app.dash_apps.drilldown.schema_introspect import (
 # ═══════════════════════════════════════════════════════════════════════════
 def _resolve_entity_singular(id_dict):
     raw = id_dict.get("entity", "")
-    # Entities whose names get mangled by to_singular() must be guarded explicitly
+    # Guard entities whose names are mangled by to_singular()
     if raw in ("pay_due", "pay_dues"):
         return "pay_due"
     if raw in ("vendor_pass", "vendor_pass_new", "vendor_pas"):
@@ -429,23 +429,22 @@ def register_drilldown_callbacks(app):
                 )
                 hide_kpis = True
 
-            # ── Sell vendor pass (from vendor profile) ────────────────────────────
+            # ── Sell vendor pass (admin portal — from vendor profile) ─────────────
             elif action == "sell_vendor_pass":
                 record = loaders.load_profile(entity, pk, sid) or {}
                 store = nav_state.navigate_to(
                     store, "form_vendor_pass_new", "Sell Vendor Pass",
                     prefill={
-                        "vendor_user_id": pk,           # vendor's users.id — kept separate
+                        "vendor_user_id": pk,          # vendor's users.id — separate from admin's user_id
                         "entity_id":      record.get("vendor_id", pk),
                         "role":           "vendor",
-                        # user_id deliberately NOT set here — handle_form_submit
-                        # stamps admin's user_id from auth-store into merged["user_id"]
+                        # user_id NOT set here — handle_form_submit stamps admin's user_id from auth
                     },
                     entity_pk=pk,
                 )
                 hide_kpis = True
 
-            # ── Buy vendor pass (from vendor portal profile) ──────────────────────
+            # ── Buy vendor pass (vendor portal — vendor buys own pass) ────────────
             elif action == "buy_vendor_pass":
                 record = loaders.load_profile(entity, pk, sid) or {}
                 store = nav_state.navigate_to(
@@ -907,18 +906,17 @@ def _render_card(
                 society_id=sid_val,
             )
 
-        # ── Vendor Pass — dedicated card (bypasses to_singular mangling) ────────
+        # ── Vendor Pass form — dedicated renderer (bypasses to_singular mangling) ──
         if card_id == "form_vendor_pass_new":
             vendor_user_id = prefill.get("vendor_user_id") or prefill.get("user_id")
             sid_val        = filters.get("society_id")
             caller_role    = (auth or {}).get("role", "admin")
-            record         = loaders.load_profile("vendor", vendor_user_id, sid_val) or {} \
-                             if vendor_user_id else {}
-            # Load rates from ven_charges_fines_basis
-            rates = {"1day": 0, "7day": 0, "1mth": 0}
+            record = loaders.load_profile("vendor", vendor_user_id, sid_val) or {} \
+                     if vendor_user_id else {}
+            # Load pass rates from ven_charges_fines_basis
+            rates = {"1day": 0.0, "7day": 0.0, "1mth": 0.0}
             if vendor_user_id and sid_val:
                 try:
-                    # get vendors.id via linked_id
                     u = db._execute(
                         "SELECT linked_id FROM users WHERE id=%s AND society_id=%s",
                         (vendor_user_id, sid_val), fetch_one=True,
@@ -1402,34 +1400,35 @@ def _save_asset_dispose(db, d, sid):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_vendor_pass(db, d, sid):
-    # vendor_user_id: the vendor's users.id (passed to fn_sell_vendor_pass)
-    # user_id:        the admin/caller's users.id (stamped from auth in handle_form_submit)
+    # vendor_user_id: the vendor's users.id (FK for fn_sell_vendor_pass p_user_id)
+    # user_id:        the admin/caller's users.id (stamped from auth → created_by)
     vendor_user_id = d.get("vendor_user_id") or d.get("entity_id")
-    created_by     = d.get("user_id")      # always admin's id — stamped by handle_form_submit
+    created_by     = d.get("user_id")   # stamped from auth-store in handle_form_submit
 
     if not vendor_user_id:
         return False, "Vendor user ID is required", None
 
-    pass_type = d.get("pass_type")
-    if not pass_type or pass_type not in ("1day", "7day", "1mth"):
+    pass_type = (d.get("pass_type") or "").strip()
+    if pass_type not in ("1day", "7day", "1mth"):
         return False, "Please select a pass type (1-Day / 7-Day / Monthly)", None
 
     try:
         r = db._execute(
             "SELECT * FROM fn_sell_vendor_pass(%s,%s,%s,%s,%s,%s,%s)",
             (
-                int(vendor_user_id),                              # p_user_id
-                pass_type,                                        # p_pass_type
-                d.get("acc_id"),                                  # p_acc_id (NULL → fn resolves)
-                d.get("mode", "cash"),                            # p_mode
-                created_by,                                       # p_created_by (admin's id)
-                d.get("issued_date") or dt_date.today().isoformat(),
-                d.get("particulars"),
+                int(vendor_user_id),                                    # p_user_id
+                pass_type,                                              # p_pass_type
+                d.get("acc_id"),                                        # p_acc_id (NULL → fn resolves)
+                d.get("mode", "cash"),                                  # p_mode
+                created_by,                                             # p_created_by (admin id)
+                d.get("issued_date") or dt_date.today().isoformat(),    # p_issued_date
+                d.get("particulars"),                                   # p_particulars
             ),
             fetch_one=True,
         )
         valid_until = (r or {}).get("valid_until")
-        return True, f"Pass sold — valid until {valid_until}", (r or {}).get("receipt_id")
+        receipt_id  = (r or {}).get("receipt_id")
+        return True, f"Pass sold — valid until {valid_until}", receipt_id
     except Exception as e:
         return False, str(e), None
 
@@ -1725,41 +1724,64 @@ def _save_society(db, d, sid, is_edit, pk):
 
 def _save_account(db, d, sid, is_edit, pk):
     if is_edit:
+        # Only bf_amount, depreciation_percent, is_depreciable are editable by admin
+        bf_amount = d.get("bf_amount")
+        dep_pct   = d.get("depreciation_percent")
+        is_dep    = d.get("is_depreciable")
+
+        # Normalise boolean string from dropdown
+        if isinstance(is_dep, str):
+            is_dep = is_dep.lower() == "true"
+
         db._execute(
-            "UPDATE accounts SET tab_name=%s,drcr_account=%s,bf_amount=%s "
+            "UPDATE accounts SET "
+            "bf_amount=%s, depreciation_percent=%s, is_depreciable=%s "
             "WHERE id=%s AND society_id=%s",
             (
-                d.get("tab_name"),
-                d.get("drcr_account"),
-                d.get("bf_amount") or 0,
-                pk,
-                sid,
+                float(bf_amount) if bf_amount not in (None, "") else 0,
+                float(dep_pct)   if dep_pct   not in (None, "") else 100,
+                bool(is_dep)     if is_dep is not None else False,
+                pk, sid,
             ),
         )
         return True, "Account updated", pk
+
+    # New account
     name = (d.get("name") or "").strip()
     if not name:
         return False, "Account name required", None
-    max_r = db._execute(
-        "SELECT MAX(id) as max_id FROM accounts WHERE society_id=%s",
-        (sid,),
-        fetch_one=True,
+
+    drcr = d.get("drcr_account") or None
+    if drcr not in ("Cr", "Dr", None):
+        drcr = None
+
+    bf_amount = float(d.get("bf_amount") or 0)
+    dep_pct   = float(d.get("depreciation_percent") or 100)
+    is_dep_raw = d.get("is_depreciable", "false")
+    is_dep = str(is_dep_raw).lower() == "true" if is_dep_raw is not None else False
+
+    # ID: use next available integer (accounts.id is not serial in seeded DBs)
+    max_r  = db._execute(
+        "SELECT COALESCE(MAX(id),0) AS max_id FROM accounts WHERE society_id=%s",
+        (sid,), fetch_one=True,
     )
     next_id = (max_r.get("max_id") or 0) + 1
+
     db._execute(
-        "INSERT INTO accounts(id,society_id,name,tab_name,drcr_account,"
-        "drcr_bf,bf_amount,depreciation_percent,is_depreciable,parent_account_id) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+        "INSERT INTO accounts("
+        "id, society_id, name, tab_name, header, drcr_account, "
+        "has_bf, drcr_bf, bf_amount, depreciation_percent, is_depreciable"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
-            next_id,
-            sid,
-            name,
-            d.get("tab_name"),
-            d.get("drcr_account", "Dr"),
-            d.get("drcr_bf", "Dr"),
-            d.get("bf_amount") or 0,
-            100,
-            False,
+            next_id, sid, name,
+            d.get("tab_name") or None,
+            d.get("header")   or None,
+            drcr,
+            bf_amount != 0,                      # has_bf
+            "Cr" if drcr == "Cr" else "Dr",      # drcr_bf mirrors drcr_account
+            bf_amount,
+            dep_pct,
+            is_dep,
         ),
     )
     return True, f"Account '{name}' created", next_id
@@ -1821,7 +1843,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
             "UPDATE ven_charges_fines_basis SET ven_id=%s, start_date=%s, end_date=%s,"
-            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, vendor_fine=%s, ven_status=%s"
+            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s"
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("ven_id"),
@@ -1830,7 +1852,6 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
                 d.get("vendor_1day"),
                 d.get("vendor_7day"),
                 d.get("vendor_1mth"),
-                d.get("vendor_fine"),
                 d.get("ven_status"),
                 pk,
                 sid,
@@ -1843,14 +1864,14 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         v1day = float(d.get("vendor_1day") or 0)
         v7day = float(d.get("vendor_7day") or 0)
         v1mth = float(d.get("vendor_1mth") or 0)
-        v_fine = float(d.get("vendor_fine") or 0)
+        
     except ValueError:
         return False, "Invalid numeric value", None
     r = db._execute(
         "INSERT INTO ven_charges_fines_basis(society_id, ven_id, start_date, end_date,"
-        " vendor_1day, vendor_7day, vendor_1mth, vendor_fine, ven_status)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, v_fine),
+        " vendor_1day, vendor_7day, vendor_1mth, ven_status)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth),
         fetch_one=True,
     )
     return (

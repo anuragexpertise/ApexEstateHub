@@ -132,6 +132,7 @@ ACCOUNTS = [
     (21111, "Saving Interest",            "IntSav",     "Saving Interest",          2111,  "Cr",  True,  "Cr", 0, 100),
     (2112,  "Exempt Income",              "IncExmpt",   "Exempt Income",             211,  "Cr",  True,  "Cr", 0, 100),
     (21112, "FD Interest",                "IntFD",      "FD Interest",              2111,  "Cr",  True,  "Cr", 0, 100),
+    (21113, "Due Interest",               "IntDue",     "DueInterest",              2111,  "Cr",  True,  "Cr", 0, 100),
     (212,   "Selling Asset",              "SellAs",     "Selling Asset",              21,  "Cr",  True,  "Cr", 0, 100),
     (213,   "Property Income",            "PropInc",    "Property Income",            21,  "Cr",  True,  "Cr", 0, 100),
     (22,    "Gifts Received",             "Gifts",      "Gifts Received",              2,  "Cr",  True,  "Cr", 0, 100),
@@ -219,7 +220,7 @@ SOCIETY = {
     "secretary_phone":  "9876543211",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
-    "calc_start_date":"2024-04-01",
+    "calc_start_date":  "2024-04-01",
 }
 
 MASTER = {"email": "master@estatehub.com",   "password": "Master@2024"}
@@ -464,7 +465,89 @@ def seed_demo(conn):
         conn.commit()
         print(f"  ✓ Gate log apartment_id={apt_id}")
 
-    cur.close()
+   # Apartment defaults
+    cur.execute("""
+    SELECT 1
+    FROM apt_charges_fines_basis
+    WHERE society_id=%s
+    AND apt_id IS NULL
+    AND end_date IS NULL
+    """, (society_id,))
+
+    if not cur.fetchone():
+        cur.execute("""
+            INSERT INTO apt_charges_fines_basis
+            (
+                society_id,
+                apt_id,
+                start_date,
+                end_date,
+                apt_maintenance_rate,
+                apt_due_day,
+                apt_interest_pct,
+                apt_maintenance_acc_id,
+                apt_interest_acc_id,
+                apt_status
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """,
+        (
+            society_id,
+            None,
+            "2024-01-01",
+            None,
+            3.0,
+            5,
+            2.0,
+            2311,
+            21113,   # verify this account exists
+            True,
+        ))
+        conn.commit()
+        print("  ✓ Apartment charge basis added")
+    cur.execute("""
+    SELECT 1
+    FROM ven_charges_fines_basis
+    WHERE society_id=%s
+    AND ven_id IS NULL
+    AND end_date IS NULL
+    """, (society_id,))
+
+    if not cur.fetchone():
+        cur.execute("""
+            INSERT INTO ven_charges_fines_basis
+            (
+                society_id,
+                ven_id,
+                start_date,
+                end_date,
+                vendor_1day,
+                vendor_7day,
+                vendor_1mth,
+                ven_pass_acc_id,
+                ven_status
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """,
+        (
+            society_id,
+            None,
+            "2024-01-01",
+            None,
+            100.0,
+            500.0,
+            2000.0,
+            2318,
+            True,
+        ))
+        conn.commit()
+    print("  ✓ Vendor charge basis added")
+
+    conn.close()
+    
+    
+
+
     print()
     print("  ┌─────────────────────────────────────────────────────────────┐")
     print("  │  Demo data ready!  Login credentials:                       │")
