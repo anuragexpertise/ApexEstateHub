@@ -476,33 +476,10 @@ def seed_demo(conn):
 
     if not cur.fetchone():
         cur.execute("""
-            INSERT INTO apt_charges_fines_basis
-            (
-                society_id,
-                apt_id,
-                start_date,
-                end_date,
-                apt_maintenance_rate,
-                apt_due_day,
-                apt_interest_pct,
-                apt_maintenance_acc_id,
-                apt_interest_acc_id,
-                apt_status
-            )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        (
-            society_id,
-            None,
-            "2024-01-01",
-            None,
-            3.0,
-            5,
-            2.0,
-            2311,
-            21113,   # verify this account exists
-            True,
-        ))
+            INSERT INTO apt_charges_fines_basis(
+                society_id, apt_id, start_date, end_date, apt_maintenance_rate, apt_due_day,apt_interest_pct, apt_status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        """,(society_id, None, "2024-01-01", None, 3.0, 5, 2.0,True))
         conn.commit()
         print("  ✓ Apartment charge basis added")
     cur.execute("""
@@ -515,31 +492,10 @@ def seed_demo(conn):
 
     if not cur.fetchone():
         cur.execute("""
-            INSERT INTO ven_charges_fines_basis
-            (
-                society_id,
-                ven_id,
-                start_date,
-                end_date,
-                vendor_1day,
-                vendor_7day,
-                vendor_1mth,
-                ven_pass_acc_id,
-                ven_status
-            )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        (
-            society_id,
-            None,
-            "2024-01-01",
-            None,
-            100.0,
-            500.0,
-            2000.0,
-            2318,
-            True,
-        ))
+            INSERT INTO ven_charges_fines_basis (
+                society_id, ven_id, start_date, end_date, vendor_1day, vendor_7day, vendor_1mth, ven_status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        """,(society_id,None, "2024-01-01", None, 100.0, 500.0, 2000.0, True))
         conn.commit()
     print("  ✓ Vendor charge basis added")
 
