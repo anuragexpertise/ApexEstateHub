@@ -614,7 +614,17 @@ def register_drilldown_callbacks(app):
                 continue
             if k_dict.get("type") != "form-field":
                 continue
-            if to_singular(k_dict.get("entity", "")) != entity_singular:
+            # NOTE: must use the guarded resolver here, not bare to_singular().
+            # to_singular("vendor_pass") falls through to .rstrip('s'), which
+            # strips BOTH trailing s's ("vendor_pass" → "vendor_pa") since
+            # "vendor_pass" isn't a key in ENTITY_MAP. That mismatched
+            # entity_singular ("vendor_pass" from _resolve_entity_singular)
+            # against every field's resolved entity ("vendor_pa"), so every
+            # field was silently skipped and pass_type/mode/etc never made it
+            # into form_data — surfacing downstream as "Please select a pass
+            # type" even though the user had selected one. Same class of bug
+            # as pay_due/pay_dues, which is why the guard exists at all.
+            if _resolve_entity_singular(k_dict) != entity_singular:
                 continue
             if val not in (None, ""):
                 form_data[k_dict.get("field")] = val
@@ -627,7 +637,7 @@ def register_drilldown_callbacks(app):
                 continue
             if k_dict.get("type") != "form-field-hidden":
                 continue
-            if to_singular(k_dict.get("entity", "")) != entity_singular:
+            if _resolve_entity_singular(k_dict) != entity_singular:
                 continue
             if val:
                 form_data[k_dict.get("field")] = val
