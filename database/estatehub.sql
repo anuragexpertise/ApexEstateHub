@@ -594,7 +594,7 @@ BEGIN
     -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
     SELECT id INTO v_fallback_maint_acc FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%Society Maintenance%'
+      AND name ILIKE '%Society Maintenance Charge%'
       AND drcr_account = 'Cr'
     LIMIT 1;
  
@@ -761,7 +761,7 @@ BEGIN
     -- elsewhere: fn_auto_generate_receivables, fn_create_default_charges).
     SELECT id INTO v_int_acc_id FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%Interest Due%'
+      AND name ILIKE '%Due Interest%'
       AND drcr_account = 'Cr'
     LIMIT 1;
  
