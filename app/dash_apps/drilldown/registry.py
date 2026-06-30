@@ -34,6 +34,8 @@ PK_MAP: dict = {
     "sec_charges": "id",
     "attendance": "id",
     "receivables": "id",
+    "payments": "id",
+    "assets": "id",
 }
 
 
@@ -57,7 +59,8 @@ ENTITY_MAP: dict = {
     "sec_charges": "sec_charge",
     "attendance": "attendance_entry",
     "receivables": "receivable",
-    "vendor_passes": "vendor_pass",
+    "payments": "payment",
+    "assets": "asset",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -226,6 +229,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_plan_validity": {"target": "list_societies", "label": "Society Plan Validity"},
     "kpi_accounts_count": {"target": "list_accounts", "label": "Chart of Accounts"},
+    "kpi_assets_total": {"target": "list_assets", "label": "All Assets"},
     "kpi_apt_charges_count": {
         "target": "list_apt_charges",
         "label": "Apartment Charges Rules",
@@ -262,6 +266,7 @@ DRILLDOWN_MAP: dict = {
     "list_cashbook": {"target": "profile_transaction", "label": "Transaction Details"},
     "list_societies": {"target": "profile_society", "label": "Society Profile"},
     "list_accounts": {"target": "profile_account", "label": "Account Details"},
+    "list_assets": {"target": "profile_asset", "label": "Asset Details"},
     "list_apt_charges": {
         "target": "profile_apt_charge",
         "label": "Apartment Charge Details",

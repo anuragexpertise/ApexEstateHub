@@ -110,7 +110,39 @@ _FIELD_FORMATTERS = {
         "✓ On Duty" if v else "✗ Off Duty",
         style={"color": "#17976e" if v else "#de5c52", "fontWeight": "600"},
     ),
+    "noc_eligible": lambda v: html.Span(
+        "✓ Eligible" if v else "✗ Not Eligible",
+        style={"color": "#17976e" if v else "#de5c52", "fontWeight": "600"},
+    ),
 }
+
+import re as _re
+_SNAKE_CASE_RE = _re.compile(r"^[a-z0-9]+(_[a-z0-9]+)+$")
+
+
+def _humanize_string(val: str) -> str:
+    """
+    Turn raw snake_case enum/status text ('in_progress', 'bank_transfer')
+    into readable Title Case ('In Progress', 'Bank Transfer').
+    Only touches strings that look like a code/enum value (all-lowercase,
+    underscore-separated) so real data — emails, names, flat numbers,
+    free-text particulars — passes through untouched.
+    """
+    if isinstance(val, str) and _SNAKE_CASE_RE.match(val):
+        return val.replace("_", " ").title()
+    return val
+
+
+# Unified date/datetime display format per app-wide convention: dd/mm/yyyy hh:mm:ss
+# Plain `date` values (no time component, e.g. due_date, start_date) are shown
+# as dd/mm/yyyy only — appending a synthetic 00:00:00 would be misleading.
+def _format_datetime(val) -> str:
+    if isinstance(val, datetime):
+        return val.strftime("%d/%m/%Y %H:%M:%S")
+    if isinstance(val, date):
+        return val.strftime("%d/%m/%Y")
+    return str(val) if val is not None else "—"
+
 
 def _display_value(field_key: str, row_dict: dict):
     alt_key = _FK_HUMAN_ALIASES.get(field_key)
@@ -119,6 +151,7 @@ def _display_value(field_key: str, row_dict: dict):
         if alt_val not in (None, ""):
             return alt_val
     return row_dict.get(field_key)
+
 
 
 # ── Fields hidden because the current view is already scoped to them ──────
@@ -270,18 +303,24 @@ def render_list_card(card_id: str, title: str, icon: str,
             field_key = c.get("field") or c.get("name") or ""
             val = _display_value(field_key, row_dict)
             fmt = c.get("format")
+            is_formatted = False
             if fmt in _FIELD_FORMATTERS and val is not None:
                 val = _FIELD_FORMATTERS[fmt](val)
-            if isinstance(val, bool):
+                is_formatted = True  # val is now a Dash component — don't re-coerce below
+
+            if is_formatted:
+                pass
+            elif isinstance(val, bool):
                 val = html.Span(
                     ["✓" if val else "✗"],
                     style={"color": "#17976e" if val else "#de5c52", "fontWeight": "700"},
                 )
             elif isinstance(val, (date, datetime)):
-                val = val.strftime("%d %b %Y") if val else "—"
-            
+                val = _format_datetime(val)
             elif val is None:
                 val = "—"
+            elif isinstance(val, str):
+                val = _humanize_string(val)
             else:
                 val = str(val)
             cells.append(html.Td(val, style={
@@ -559,15 +598,20 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # ── Text fields rendered as 2-column grid cells ──────────────────────
     def _field_cell(f: dict) -> html.Div:
         val = _display_value(f["field"], record_dict)
-        if val is None:
+        fmt = f.get("format")
+        if fmt in _FIELD_FORMATTERS and val is not None:
+            val = _FIELD_FORMATTERS[fmt](val)  # already a Dash component — skip below
+        elif val is None:
             val = "—"
         elif isinstance(val, bool):
             val = html.Span("✓ Active" if val else "✗ Inactive",
                             style={"color": "#17976e" if val else "#de5c52", "fontWeight": "600"})
         elif isinstance(val, (date, datetime)):
-            val = val.strftime("%d %b %Y")
+            val = _format_datetime(val)
         elif isinstance(val, Decimal):
             val = f"₹{val:,.2f}"
+        elif isinstance(val, str):
+            val = _humanize_string(val)
         else:
             val = str(val)
 
@@ -1477,28 +1521,37 @@ def render_noc_card(apt: dict, society: dict,
                     "boxShadow": "inset 0 1px 4px rgba(0,0,0,0.04)",
                 },
             ),
-            # Action buttons — clientside callbacks
+            # Action buttons — clientside callbacks. Disabled when not
+            # eligible: printing/saving/emailing a NOC for an apartment
+            # with outstanding dues should not be possible from the UI,
+            # even though the (preview) text is still shown above.
             html.Div([
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
                     id="noc-btn-print",
                     n_clicks=0,
+                    disabled=not eligible,
                     className="btn btn-outline-primary",
-                    style={"borderRadius": "10px", "fontWeight": "600"},
+                    style={"borderRadius": "10px", "fontWeight": "600",
+                           **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
                 ),
                 html.Button(
                     [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
                     id="noc-btn-pdf",
                     n_clicks=0,
+                    disabled=not eligible,
                     className="btn btn-outline-danger",
-                    style={"borderRadius": "10px", "fontWeight": "600"},
+                    style={"borderRadius": "10px", "fontWeight": "600",
+                           **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
                 ),
                 html.Button(
                     [html.I(className="fas fa-envelope me-2"), "Email NOC"],
                     id="noc-btn-email",
                     n_clicks=0,
+                    disabled=not eligible,
                     className="btn btn-outline-info",
-                    style={"borderRadius": "10px", "fontWeight": "600"},
+                    style={"borderRadius": "10px", "fontWeight": "600",
+                           **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
                 ),
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "16px", "paddingTop": "14px",

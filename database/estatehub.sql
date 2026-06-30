@@ -1434,7 +1434,8 @@ CREATE OR REPLACE FUNCTION fn_apartments_list(
 RETURNS TABLE (
     id INT, flat_number VARCHAR(20), owner_name VARCHAR(100), mobile VARCHAR(15),
     apartment_size INT, active BOOLEAN, society_id INT,
-    pending_dues NUMERIC(15,2), overdue_dues NUMERIC(15,2)
+    pending_dues NUMERIC(15,2), overdue_dues NUMERIC(15,2),
+    gate_pass BOOLEAN, noc_eligible BOOLEAN
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -1450,7 +1451,11 @@ BEGIN
     )
     SELECT a.id::INT, a.flat_number::VARCHAR(20), a.owner_name::VARCHAR(100), a.mobile::VARCHAR(15),
            a.apartment_size::INT, a.active::BOOLEAN, a.society_id::INT,
-           COALESCE(d.pending_dues, 0)::NUMERIC(15,2), COALESCE(d.overdue_dues, 0)::NUMERIC(15,2)
+           COALESCE(d.pending_dues, 0)::NUMERIC(15,2), COALESCE(d.overdue_dues, 0)::NUMERIC(15,2),
+           -- gate_pass fails only on OVERDUE dues (mirrors v_apartment_dues)
+           (COALESCE(d.overdue_dues, 0) <= 0)::BOOLEAN,
+           -- noc_eligible requires ALL dues cleared (mirrors v_apartment_dues)
+           (COALESCE(d.pending_dues, 0) <= 0)::BOOLEAN
     FROM apartments a LEFT JOIN dues d ON d.apt_id = a.id
     WHERE a.society_id = p_society_id
       AND (p_search IS NULL OR a.flat_number ILIKE '%'||p_search||'%' OR a.owner_name ILIKE '%'||p_search||'%')
@@ -1460,7 +1465,6 @@ BEGIN
     ORDER BY a.flat_number;
 END;
 $$;
-
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
 CREATE OR REPLACE FUNCTION fn_vendors_list(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (
