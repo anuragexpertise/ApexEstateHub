@@ -81,7 +81,7 @@ def create_default_accounts(db, society_id: int):
         # Sub-accounts under Income Expenditure (Income - Cr)
         (2311,  'Society Maintenance Charge','SocM',        'Society Maintanence Charge', 23,    'Cr',  True,  'Cr',  0,   100),
         (2317,  'Society Fine',              'SocF',        'Society Fine Charge',        23,    'Cr',  True,  'Cr',  0,   100),
-        (2318,  'Society Pass Charge',       'SocC',        'Society Fees',               23,    'Cr',  True,  'Cr',  0,   100),
+        (2318,  'Society Charge',            'SocC',        'Society Charge',               23,    'Cr',  True,  'Cr',  0,   100),
         
         # ───────────────────────────────────────────────────────────────────
         # OTHER CAPITAL ACCOUNT ITEMS
