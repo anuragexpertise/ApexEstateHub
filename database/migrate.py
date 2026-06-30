@@ -213,14 +213,15 @@ def seed_accounts(cur, conn, society_id: int) -> int:
 
 SOCIETY = {
     "name":             "Sunrise Residency",
+    "PAN_number":       "ABCDE1234X",
+    "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
     "email":            "admin@sunriseresidency.com",
     "phone":            "9876543210",
-    "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
     "secretary_name":   "Ramesh Kumar",
     "secretary_phone":  "9876543211",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
-    "calc_start_date":  "2024-04-01",
+    "calc_start_date":  "2026-04-01",
 }
 
 MASTER = {"email": "master@estatehub.com",   "password": "Master@2024"}
@@ -229,13 +230,13 @@ USERS = [
     {"role": "admin",     "email": "admin@sunriseresidency.com",    "password": "Admin@2024",
      "name": "Society Admin"},
     {"role": "apartment", "email": "owner1@sunriseresidency.com",   "password": "Owner1@2024",
-     "name": "Rajesh Sharma",   "flat": "A-101", "area": 1200, "mobile": "9811111111"},
+     "name": "Rajesh Sharma",   "flat_number": "A-101", "apartment_size": 1200, "mobile": "9811111111"},
     {"role": "apartment", "email": "owner2@sunriseresidency.com",   "password": "Owner2@2024",
-     "name": "Priya Gupta",     "flat": "B-202", "area": 950,  "mobile": "9822222222"},
+     "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,  "mobile": "9822222222"},
     {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
-     "name": "Speedy Plumbing", "service": "Plumbing", "mobile": "9833333333"},
+     "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing", "mobile": "9833333333", "service_description":"Best plumber in town"},
     {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
-     "name": "Green Gardeners", "service": "Gardening", "mobile": "9844444444"},
+     "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening", "mobile": "9844444444", "service_description":"Best Garderner"},
     {"role": "security",  "email": "guard1@sunriseresidency.com",   "password": "Guard1@2024",
      "name": "Ramu Singh",  "shift": "morning", "salary": 12000, "mobile": "9855555555"},
     {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
@@ -252,9 +253,9 @@ EVENTS = [
 ]
 
 CONCERNS = [
-    {"flat": "A-101", "type": "plumbing",   "status": "open",
+    {"flat_number": "A-101", "type": "plumbing",   "status": "open",
      "desc": "Water leakage from bathroom ceiling — needs urgent attention."},
-    {"flat": "B-202", "type": "electrical", "status": "in_progress",
+    {"flat_number": "B-202", "type": "electrical", "status": "in_progress",
      "desc": "Main corridor light flickering near staircase. Sparks observed twice.",
      "assigned": "Speedy Electricals"},
 ]
@@ -332,7 +333,7 @@ def seed_demo(conn):
                    ON CONFLICT (society_id,flat_number) DO UPDATE
                      SET owner_name = EXCLUDED.owner_name
                    RETURNING id""",
-                (society_id, u["flat"], u["name"], u.get("mobile",""), u.get("area",1000)),
+                (society_id, u["flat_number"], u["name"], u.get("mobile",""), u.get("apartment_size",1000)),
             )
             row = cur.fetchone()
             conn.commit()
@@ -348,14 +349,14 @@ def seed_demo(conn):
             conn.commit()
             uid = row["id"] if row else None
             if uid:
-                print(f"  ✓ Owner    {u['email']}  /  {u['password']}  [{u['flat']}]")
+                print(f"  ✓ Owner    {u['email']}  /  {u['password']}  [{u['flat_number']}]")
 
         elif u["role"] == "vendor":
             cur.execute(
                 """INSERT INTO vendors
-                   (society_id,business_name,name,service_type,mobile,active)
-                   VALUES (%s,%s,%s,%s,%s,TRUE) RETURNING id""",
-                (society_id, u["name"], u["name"], u.get("service","General"), u.get("mobile","")),
+                   (society_id,business_name,name,service_type,mobile,service_description,active)
+                   VALUES (%s,%s,%s,%s,%s,%s,TRUE) RETURNING id""",
+                (society_id, u.get("business_name",u["name"]), u["name"], u.get("service","General"), u.get("mobile",""), u.get("service_description", "Best in town")),
             )
             row= cur.fetchone()     
             conn.commit()
@@ -430,18 +431,18 @@ def seed_demo(conn):
     # ── Concerns ────────────────────────────────────────────────────────────
     for con in CONCERNS:
         cur.execute("SELECT id FROM concerns WHERE society_id=%s AND flat_no=%s AND concern_type=%s",
-                    (society_id, con["flat"], con["type"]))
+                    (society_id, con["flat_number"], con["type"]))
         if cur.fetchone():
             continue
         cur.execute(
             """INSERT INTO concerns
                (society_id,flat_no,concern_type,description,status,assigned_to)
                VALUES (%s,%s,%s,%s,%s,%s)""",
-            (society_id, con["flat"], con["type"], con["desc"],
+            (society_id, con["flat_number"], con["type"], con["desc"],
              con["status"], con.get("assigned","")),
         )
         conn.commit()
-        print(f"  ✓ Concern  [{con['flat']}] {con['type']} — {con['status']}")
+        print(f"  ✓ Concern  [{con['flat_number']}] {con['type']} — {con['status']}")
 
     # ── Gate logs ────────────────────────────────────────────────────────────
     # Fetch apartment ids for the two owners
@@ -479,7 +480,7 @@ def seed_demo(conn):
             INSERT INTO apt_charges_fines_basis(
                 society_id, apt_id, start_date, end_date, apt_maintenance_rate, apt_due_day,apt_interest_pct, apt_status)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,(society_id, None, "2024-01-01", None, 3.0, 5, 2.0,True))
+        """,(society_id, None, "2026-04-01", None, 3.0, 5, 2.0,True))
         conn.commit()
         print("  ✓ Apartment charge basis added")
     cur.execute("""
@@ -495,7 +496,7 @@ def seed_demo(conn):
             INSERT INTO ven_charges_fines_basis (
                 society_id, ven_id, start_date, end_date, vendor_1day, vendor_7day, vendor_1mth, ven_status)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,(society_id,None, "2024-01-01", None, 100.0, 500.0, 2000.0, True))
+        """,(society_id,None, "2026-04-01", None, 100.0, 500.0, 2000.0, True))
         conn.commit()
     print("  ✓ Vendor charge basis added")
 
