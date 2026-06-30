@@ -177,9 +177,6 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
     ("payments",              "acc_id"):                 "account_dropdown_dr",
     ("asset_register",        "acc_id"):                 "account_dropdown_asset",
-    ("apt_charges_fines_basis","apt_maintenance_acc_id"): "account_dropdown_cr",
-    ("apt_charges_fines_basis","apt_interest_acc_id"):    "account_dropdown_cr",
-    ("ven_charges_fines_basis","ven_pass_acc_id"):        "account_dropdown_cr",
 }
 
 # Preferred display columns when building FK option lists.

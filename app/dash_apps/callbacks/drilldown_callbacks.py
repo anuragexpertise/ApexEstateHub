@@ -1400,10 +1400,8 @@ def _save_asset_dispose(db, d, sid):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_vendor_pass(db, d, sid):
-    # vendor_user_id: the vendor's users.id (FK for fn_sell_vendor_pass p_user_id)
-    # user_id:        the admin/caller's users.id (stamped from auth → created_by)
     vendor_user_id = d.get("vendor_user_id") or d.get("entity_id")
-    created_by     = d.get("user_id")   # stamped from auth-store in handle_form_submit
+    created_by     = d.get("user_id")
 
     if not vendor_user_id:
         return False, "Vendor user ID is required", None
@@ -1412,17 +1410,35 @@ def _save_vendor_pass(db, d, sid):
     if pass_type not in ("1day", "7day", "1mth"):
         return False, "Please select a pass type (1-Day / 7-Day / Monthly)", None
 
+    mode = d.get("mode", "cash")
+    if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
+        return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
+
+    # ── acc_id auto-derived from account name, NOT from ven_charges_fines_basis ──
+    acc_id = d.get("acc_id")
+    if not acc_id:
+        acc = _get_account_by_name(sid, "Society Charge")
+        acc_id = acc["id"] if acc else None
+
+    particulars = d.get("particulars") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
+
     try:
         r = db._execute(
             "SELECT * FROM fn_sell_vendor_pass(%s,%s,%s,%s,%s,%s,%s)",
             (
-                int(vendor_user_id),                                    # p_user_id
-                pass_type,                                              # p_pass_type
-                d.get("acc_id"),                                        # p_acc_id (NULL → fn resolves)
-                d.get("mode", "cash"),                                  # p_mode
-                created_by,                                             # p_created_by (admin id)
-                d.get("issued_date") or dt_date.today().isoformat(),    # p_issued_date
-                d.get("particulars"),                                   # p_particulars
+                int(vendor_user_id),
+                pass_type,
+                acc_id,
+                mode,
+                created_by,
+                d.get("issued_date") or dt_date.today().isoformat(),
+                particulars,
             ),
             fetch_one=True,
         )
@@ -1431,7 +1447,6 @@ def _save_vendor_pass(db, d, sid):
         return True, f"Pass sold — valid until {valid_until}", receipt_id
     except Exception as e:
         return False, str(e), None
-
 def _save_asset(db, d, sid, is_edit, pk):
     if is_edit:
         # Editing an asset record (name, type, company — not purchase price)
