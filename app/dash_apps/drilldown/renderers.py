@@ -1311,6 +1311,12 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
+            # ── Dummy anchor for the non-cash-field clientside toggle ───────
+            # (a real Store prop, rather than borrowing an unrelated prop
+            # like dcc.Dropdown's nonexistent "title" — see qr_callbacks.py).
+            # Plain id (not pattern-matched) since only one vendor-pass
+            # form card is ever active in the nav stack at a time.
+            dcc.Store(id="vp-noncash-dummy", data=None),
             # ── Non-cash reference fields (shown via clientside toggle) ────
             html.Div(
                 id={"type": "vp-noncash-wrap", "pk": str(user_id)},

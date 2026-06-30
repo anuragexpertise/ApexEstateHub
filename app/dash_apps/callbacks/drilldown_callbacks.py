@@ -1803,10 +1803,23 @@ def _save_account(db, d, sid, is_edit, pk):
 
 
 def _save_apt_charge(db, d, sid, is_edit, pk):
+    # NOTE: apt_charges_fines_basis columns are id, society_id, apt_id,
+    # start_date, end_date, apt_maintenance_rate, apt_due_day,
+    # apt_interest_pct, apt_status, created_at. There is no
+    # apt_delay_fine / apt_fine column — those were stale leftovers
+    # from an older schema and caused every save to throw
+    # "column apt_delay_fine does not exist".
     if is_edit:
+        # apt_status arrives as the string "true"/"false" from the
+        # schema-driven select control; cast explicitly rather than
+        # relying on implicit text→boolean coercion.
+        apt_status = d.get("apt_status")
+        if isinstance(apt_status, str):
+            apt_status = apt_status.lower() == "true"
+
         db._execute(
             "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
-            " apt_maintenance_rate=%s, apt_due_day=%s, apt_delay_fine=%s, apt_fine=%s, apt_status=%s"
+            " apt_maintenance_rate=%s, apt_due_day=%s, apt_interest_pct=%s, apt_status=%s"
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("apt_id"),
@@ -1814,27 +1827,27 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
                 d.get("end_date"),
                 d.get("apt_maintenance_rate"),
                 d.get("apt_due_day"),
-                d.get("apt_delay_fine"),
-                d.get("apt_fine"),
-                d.get("apt_status"),
+                d.get("apt_interest_pct"),
+                apt_status if apt_status is not None else True,
                 pk,
                 sid,
             ),
         )
         return True, "Apartment charge rule updated", pk
+
     apt_id = d.get("apt_id")
     start_date = d.get("start_date") or dt_date.today().isoformat()
     try:
-        rate = float(d.get("apt_maintenance_rate") or 3.0)
-        due_day = int(d.get("apt_due_day") or 5)
-        delay_fine = float(d.get("apt_delay_fine") or 0)
-        apt_fine = float(d.get("apt_fine") or 0)
+        rate         = float(d.get("apt_maintenance_rate") or 3.0)
+        due_day      = int(d.get("apt_due_day") or 5)
+        interest_pct = float(d.get("apt_interest_pct") or 2.0)
     except ValueError:
         return False, "Invalid numeric value", None
+
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
-        " apt_maintenance_rate, apt_due_day, apt_delay_fine, apt_fine, apt_status)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        " apt_maintenance_rate, apt_due_day, apt_interest_pct, apt_status)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (
             sid,
             apt_id,
@@ -1842,20 +1855,27 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             d.get("end_date"),
             rate,
             due_day,
-            delay_fine,
-            apt_fine,
+            interest_pct,
         ),
         fetch_one=True,
     )
     return (
         True,
-        f"Charge rule created",
+        "Charge rule created",
         (r or {}).get("id"),
     )
 
 
 def _save_ven_charge(db, d, sid, is_edit, pk):
     if is_edit:
+        # ven_status arrives as the string "true"/"false" from the
+        # schema-driven select control; cast explicitly (same fix as
+        # apt_status in _save_apt_charge) rather than relying on
+        # implicit text→boolean coercion.
+        ven_status = d.get("ven_status")
+        if isinstance(ven_status, str):
+            ven_status = ven_status.lower() == "true"
+
         db._execute(
             "UPDATE ven_charges_fines_basis SET ven_id=%s, start_date=%s, end_date=%s,"
             " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s"
@@ -1867,7 +1887,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
                 d.get("vendor_1day"),
                 d.get("vendor_7day"),
                 d.get("vendor_1mth"),
-                d.get("ven_status"),
+                ven_status if ven_status is not None else True,
                 pk,
                 sid,
             ),
