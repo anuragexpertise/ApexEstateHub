@@ -125,7 +125,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Pending Dues",  "field": "pending_dues",  "icon": "fa-rupee-sign"},
         {"label": "Overdue Dues",  "field": "overdue_dues",  "icon": "fa-exclamation-triangle"},
         {"label": "Gate Pass",     "field": "gate_pass",     "icon": "fa-qrcode",  "format": "gate_pass"},
-        {"label": "NOC Eligible",  "field": "noc_eligible",  "icon": "fa-certificate"},
+        {"label": "NOC Eligible",  "field": "noc_eligible",  "icon": "fa-certificate", "format": "noc_eligible"},
     ],
     "vendors": [
         {"label": "Pass Expiry",   "field": "pass_expiry",   "icon": "fa-calendar-alt"},
