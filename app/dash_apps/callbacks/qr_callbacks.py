@@ -277,7 +277,20 @@ def register_qr_callbacks(app):
         State("qr-camera-store",    "data"),
         prevent_initial_call=True,
     )
-    # 1B. toggle of Vendor pass 
+    # 1B. Toggle non-cash reference fields (Cheque No. / Payment Gateway ID)
+    #     on the Vendor Pass form. Anchored to a dedicated dcc.Store
+    #     (id="vp-noncash-dummy", rendered inside render_vendor_pass_card
+    #     in renderers.py) rather than a prop borrowed from the mode
+    #     dcc.Dropdown — dcc.Dropdown has no "title" prop, so the previous
+    #     anchor only avoided erroring because the callback always returned
+    #     no_update. A real Store output is the correct, future-proof anchor.
+    #
+    #     NOTE: same constraint documented in noc_callbacks.py — since the
+    #     vendor-pass card (and its Store) only exists once drill-content
+    #     navigates there, this requires suppress_callback_exceptions=True
+    #     on the app (already required elsewhere for the ALL/MATCH
+    #     drilldown callbacks), so no separate permanent placeholder Store
+    #     is needed in app_shell.py.
     clientside_callback(
         """
         function(mode, pk) {
@@ -287,11 +300,11 @@ def register_qr_callbacks(app):
             return window.dash_clientside.no_update;
         }
         """,
-        Output({"type": "form-field", "entity": "vendor_pass", "field": "mode"}, "title"),
+        Output("vp-noncash-dummy", "data"),
         Input({"type": "form-field", "entity": "vendor_pass", "field": "mode"}, "value"),
         State({"type": "form-entity-pk", "entity": "vendor_pass"}, "value"),
         prevent_initial_call=True,
-)
+    )
     # ── 2. Generate user's static QR code (modal) ───────────────
     @app.callback(
         Output('qr-modal', 'is_open'),

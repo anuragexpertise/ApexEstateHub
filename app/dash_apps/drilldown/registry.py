@@ -57,6 +57,7 @@ ENTITY_MAP: dict = {
     "sec_charges": "sec_charge",
     "attendance": "attendance_entry",
     "receivables": "receivable",
+    "vendor_passes": "vendor_pass",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
