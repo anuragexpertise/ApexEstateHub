@@ -95,6 +95,9 @@ _FK_HUMAN_ALIASES = {
     "acc_id": "account_name", "vendor_id": "vendor_name",
     "security_id": "security_name", "apartment_id": "flat_number",
     "entity_id": "entity_name", "account_id": "account_name",
+    "apt_maintenance_acc_id": "maintenance_account_name",
+    "apt_interest_acc_id": "interest_account_name",
+    "ven_pass_acc_id": "pass_account_name",
 }
 
 _FIELD_FORMATTERS = {
@@ -592,14 +595,18 @@ def render_profile_card(card_id: str, title: str, icon: str,
     text_cells = [_field_cell(f) for f in text_fields]
 
     # ── Action buttons filtered by role ─────────────────────────────────
+    # renderers.py — render_profile_card(), action button loop
     action_btns = []
     for act in (actions or []):
         act_id = act.get("action_id", "")
+        act_roles = act.get("roles")
+        if act_roles and role not in act_roles:        # ← NEW: respects PROFILE_ACTIONS roles
+            continue
         if act_id == "edit"   and "edit"   not in allowed: continue
         if act_id == "delete" and "delete" not in allowed: continue
         action_btns.append(dbc.Button(
             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
-             act["label"]],
+            act["label"]],
             id={"type": "profile-action", "entity": entity, "pk": str(pk_val),
                 "action": act_id, "target": act.get("target_card", "")},
             n_clicks=0, color=act.get("color", "primary"), size="sm",
@@ -1304,7 +1311,31 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
- 
+            # ── Non-cash reference fields (shown via clientside toggle) ────
+            html.Div(
+                id={"type": "vp-noncash-wrap", "pk": str(user_id)},
+                style={"display": "none"},
+                children=[
+                    dbc.Row([
+                        dbc.Col(dbc.Label("Cheque No.",
+                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                                width=4, style={"paddingTop": "6px"}),
+                        dbc.Col(dbc.Input(
+                            id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
+                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                        ), width=8),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col(dbc.Label("Payment Gateway ID",
+                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                                width=4, style={"paddingTop": "6px"}),
+                        dbc.Col(dbc.Input(
+                            id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
+                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                        ), width=8),
+                    ], className="mb-2"),
+                ],
+            ),
             # ── Issue date ────────────────────────────────────────────────
             dbc.Row([
                 dbc.Col(dbc.Label("Issue Date",

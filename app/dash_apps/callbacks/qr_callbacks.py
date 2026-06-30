@@ -277,7 +277,21 @@ def register_qr_callbacks(app):
         State("qr-camera-store",    "data"),
         prevent_initial_call=True,
     )
-
+    # 1B. toggle of Vendor pass 
+    clientside_callback(
+        """
+        function(mode, pk) {
+            var wrap = document.querySelector(
+                '[id*="vp-noncash-wrap"][id*="' + pk + '"]');
+            if (wrap) wrap.style.display = (mode && mode !== 'cash') ? 'block' : 'none';
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output({"type": "form-field", "entity": "vendor_pass", "field": "mode"}, "title"),
+        Input({"type": "form-field", "entity": "vendor_pass", "field": "mode"}, "value"),
+        State({"type": "form-entity-pk", "entity": "vendor_pass"}, "value"),
+        prevent_initial_call=True,
+)
     # ── 2. Generate user's static QR code (modal) ───────────────
     @app.callback(
         Output('qr-modal', 'is_open'),

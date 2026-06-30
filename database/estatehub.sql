@@ -360,8 +360,6 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis
     apt_maintenance_rate   NUMERIC(10,4) NOT NULL DEFAULT 3.0,
     apt_due_day            INTEGER DEFAULT 5,
     apt_interest_pct       NUMERIC(5,2) DEFAULT 2.0,
-    apt_maintenance_acc_id INT REFERENCES accounts(id),   -- income account for maintenance receivables
-    apt_interest_acc_id    INT REFERENCES accounts(id),   -- income account for interest (NULL = same as above)
     apt_status             BOOLEAN DEFAULT TRUE,
     created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -382,7 +380,6 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     vendor_1day           NUMERIC(10,2) DEFAULT 0,
     vendor_7day           NUMERIC(10,2) DEFAULT 0,
     vendor_1mth           NUMERIC(10,2) DEFAULT 0,
-    ven_pass_acc_id       INT REFERENCES accounts(id),  -- income account for pass-sale receipts
     ven_status            BOOLEAN DEFAULT TRUE,
     created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -577,7 +574,6 @@ $$;
 -- society.calc_start_date through the current month. Idempotent via the
 -- partial unique index. The acc_id and interest_acc_id come from the
 -- apt_charges_fines_basis row for that apartment/society.
-DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -594,26 +590,25 @@ DECLARE
 BEGIN
     SELECT calc_start_date INTO v_calc_start FROM societies WHERE id = p_society_id;
     IF v_calc_start IS NULL THEN RETURN; END IF;
-
+ 
     -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
     SELECT id INTO v_fallback_maint_acc FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Society Maintenance%'
       AND drcr_account = 'Cr'
     LIMIT 1;
-
+ 
     SELECT id INTO v_fallback_int_acc FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%Interest Due%'
+      AND name ILIKE '%Due Interest%'
       AND drcr_account = 'Cr'
     LIMIT 1;
-
+ 
     FOR apt IN
         SELECT id, apartment_size FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
-        SELECT apt_maintenance_rate, apt_due_day, apt_interest_pct,
-               apt_maintenance_acc_id, apt_interest_acc_id
+        SELECT apt_maintenance_rate, apt_due_day, apt_interest_pct
         INTO charge
         FROM apt_charges_fines_basis
         WHERE society_id = p_society_id AND apt_status = TRUE
@@ -622,16 +617,13 @@ BEGIN
           AND (end_date IS NULL OR end_date >= CURRENT_DATE)
         ORDER BY apt_id NULLS LAST, start_date DESC
         LIMIT 1;
-
-        -- FIXED: fallback now resolves accounts by name instead of NULL
+ 
         IF charge.apt_maintenance_rate IS NULL THEN
-            charge.apt_maintenance_rate   := 3.0;
-            charge.apt_due_day            := 5;
-            charge.apt_interest_pct       := 2.0;
-            charge.apt_maintenance_acc_id := v_fallback_maint_acc;  -- was NULL
-            charge.apt_interest_acc_id    := v_fallback_int_acc;    -- was NULL
+            charge.apt_maintenance_rate := 3.0;
+            charge.apt_due_day          := 5;
+            charge.apt_interest_pct     := 2.0;
         END IF;
-
+ 
         -- Also patch existing NULL rows for this apartment while we are here
         UPDATE receivables
         SET acc_id          = COALESCE(acc_id, v_fallback_maint_acc),
@@ -640,13 +632,13 @@ BEGIN
           AND entity_id  = apt.id
           AND role       = 'apartment'
           AND (acc_id IS NULL OR interest_acc_id IS NULL);
-
+ 
         v_month := DATE_TRUNC('month', v_calc_start)::DATE;
         WHILE v_month <= DATE_TRUNC('month', CURRENT_DATE)::DATE LOOP
             v_base     := (apt.apartment_size * charge.apt_maintenance_rate)::NUMERIC(10,2);
             v_due_date := (v_month + ((COALESCE(charge.apt_due_day,5) - 1) * INTERVAL '1 day'))::DATE;
             v_desc     := 'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY');
-
+ 
             INSERT INTO receivables (
                 society_id, entity_id, role,
                 acc_id, interest_acc_id,
@@ -654,19 +646,20 @@ BEGIN
                 base_amount, amount, due_date, status, created_at
             ) VALUES (
                 p_society_id, apt.id, 'apartment',
-                charge.apt_maintenance_acc_id, charge.apt_interest_acc_id,
+                v_fallback_maint_acc, v_fallback_int_acc,
                 v_desc, v_month,
                 v_base, v_base, v_due_date, 'pending', NOW()
             )
             ON CONFLICT (entity_id, role, period_month)
             WHERE period_month IS NOT NULL
             DO NOTHING;
-
+ 
             v_month := (v_month + INTERVAL '1 month')::DATE;
         END LOOP;
     END LOOP;
 END;
 $$;
+ 
 -- Compounds apt_interest_pct monthly on the OVERDUE RESIDUAL of each row.
 -- interest_months_applied prevents double-application across multiple calls.
 -- On each application the `description` gains ' + Interest' so the verifying
@@ -753,16 +746,25 @@ DROP FUNCTION IF EXISTS fn_apply_receivable_interest CASCADE;
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
-    rec              RECORD;
-    v_rate           NUMERIC(5,2);
-    v_months_elapsed INT;
-    v_months_new     INT;
-    v_residual       NUMERIC(15,2);
-    v_increment      NUMERIC(15,2);
+    rec               RECORD;
+    v_rate            NUMERIC(5,2);
+    v_months_elapsed  INT;
+    v_months_new      INT;
+    v_residual        NUMERIC(15,2);
+    v_increment       NUMERIC(15,2);
     v_total_increment NUMERIC(15,2);
-    i                INT;
-    v_int_acc_id     INT;
+    i                 INT;
+    v_int_acc_id      INT;
 BEGIN
+    -- Resolve once per society call — apt_interest_acc_id column removed,
+    -- interest income account is now name-resolved (same pattern used
+    -- elsewhere: fn_auto_generate_receivables, fn_create_default_charges).
+    SELECT id INTO v_int_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%Interest Due%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+ 
     FOR rec IN
         SELECT r.id, r.entity_id, r.due_date, r.amount, r.paid_amount,
                r.interest_amount, r.interest_months_applied,
@@ -773,23 +775,25 @@ BEGIN
           AND r.due_date < CURRENT_DATE
         FOR UPDATE
     LOOP
-        -- Look up interest rate from the charge rule for this apartment
-        SELECT apt_interest_pct, apt_interest_acc_id
-        INTO v_rate, v_int_acc_id
+        -- Look up interest RATE only — acc_id column removed from
+        -- apt_charges_fines_basis; v_int_acc_id (resolved above) is
+        -- used as the fallback instead.
+        SELECT apt_interest_pct
+        INTO v_rate
         FROM apt_charges_fines_basis
         WHERE society_id = p_society_id AND apt_status = TRUE
           AND (apt_id = rec.entity_id OR apt_id IS NULL)
         ORDER BY apt_id NULLS LAST, start_date DESC
         LIMIT 1;
-
+ 
         IF v_rate IS NULL OR v_rate = 0 THEN CONTINUE; END IF;
-
+ 
         v_months_elapsed := GREATEST(
             (EXTRACT(YEAR  FROM AGE(CURRENT_DATE, rec.due_date)) * 12
            + EXTRACT(MONTH FROM AGE(CURRENT_DATE, rec.due_date)))::INT, 0);
         v_months_new := v_months_elapsed - rec.interest_months_applied;
         IF v_months_new <= 0 THEN CONTINUE; END IF;
-
+ 
         v_residual        := rec.amount - rec.paid_amount;
         v_total_increment := 0;
         FOR i IN 1..v_months_new LOOP
@@ -797,13 +801,14 @@ BEGIN
             v_residual  := v_residual + v_increment;
             v_total_increment := v_total_increment + v_increment;
         END LOOP;
-
+ 
         UPDATE receivables
              SET interest_amount         = rec.interest_amount + v_total_increment,
                  amount                  = rec.amount + v_total_increment,
                  interest_months_applied = rec.interest_months_applied + v_months_new,
                  interest_acc_id         = COALESCE(rec.interest_acc_id, v_int_acc_id),
-                 -- Append ' + Interest' to description once, so the admin can see it clearly
+                 -- Append ' + Interest' to description once, so the verifying
+                 -- admin can see at a glance that this row carries an interest component.
                  description = CASE
                      WHEN rec.description NOT LIKE '% + Interest' THEN rec.description || ' + Interest'
                      ELSE rec.description
@@ -1065,7 +1070,6 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 6: VENDOR PASS SALE
 -- ════════════════════════════════════════════════════════════════
-
 DROP FUNCTION IF EXISTS fn_sell_vendor_pass CASCADE;
 CREATE OR REPLACE FUNCTION fn_sell_vendor_pass(
     p_user_id     INT,
@@ -1092,48 +1096,47 @@ BEGIN
     IF p_pass_type NOT IN ('1day','7day','1mth') THEN
         RAISE EXCEPTION 'Invalid pass_type %. Use 1day / 7day / 1mth', p_pass_type;
     END IF;
-
+ 
     SELECT society_id, linked_id INTO v_society_id, v_vendor_id
     FROM users WHERE id = p_user_id AND role = 'vendor';
     IF NOT FOUND THEN RAISE EXCEPTION 'Vendor user not found'; END IF;
-
+ 
     SELECT v.name INTO v_vendor_name FROM vendors v WHERE v.id = v_vendor_id;
-
+ 
+    -- ven_pass_acc_id column removed — rate only
     SELECT CASE p_pass_type
         WHEN '1day' THEN vendor_1day
         WHEN '7day' THEN vendor_7day
         WHEN '1mth' THEN vendor_1mth
-    END,
-    ven_pass_acc_id
-    INTO v_rate, v_acc_id
+    END
+    INTO v_rate
     FROM ven_charges_fines_basis
     WHERE society_id = v_society_id AND ven_status = TRUE
       AND (ven_id = v_vendor_id OR ven_id IS NULL)
     ORDER BY ven_id NULLS LAST, start_date DESC
     LIMIT 1;
-
+ 
     IF v_rate IS NULL THEN
         RAISE EXCEPTION 'No pass pricing configured for type % in ven_charges_fines_basis', p_pass_type;
     END IF;
-
-    -- Caller-supplied acc_id wins over the table default
-    v_acc_id := COALESCE(p_acc_id, v_acc_id);
-    -- Last fallback: any Cr account named 'Society Charge'
+ 
+    -- Caller-supplied acc_id wins; else resolve by name
+    v_acc_id := p_acc_id;
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
         WHERE society_id = v_society_id AND name ILIKE '%Society Charge%' AND drcr_account = 'Cr'
         LIMIT 1;
     END IF;
-
+ 
     v_valid_until := CASE p_pass_type
         WHEN '1day' THEN p_issued_date + INTERVAL '1 day'
         WHEN '7day' THEN p_issued_date + INTERVAL '7 days'
         WHEN '1mth' THEN p_issued_date + INTERVAL '1 month'
     END::DATE;
-
+ 
     v_desc := COALESCE(p_particulars,
         'Vendor Pass (' || p_pass_type || ') - ' || COALESCE(v_vendor_name,''));
-
+ 
     -- Receipt: deemed paid immediately on creation
     INSERT INTO receipts(
         society_id, user_id, entity_id, role,
@@ -1144,7 +1147,7 @@ BEGIN
         p_issued_date, v_acc_id, v_desc, v_rate, p_mode,
         'confirmed', p_created_by, NOW(), NOW()
     ) RETURNING id INTO v_receipt_id;
-
+ 
     -- Transaction (acc_id directly from receipt, description as particulars)
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
@@ -1153,18 +1156,17 @@ BEGIN
         v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
         v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
     );
-
+ 
     -- Vendor pass
     INSERT INTO vendor_passes(
         society_id, user_id, pass_type, issued_date, valid_until, status, created_at
     ) VALUES (
         v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, 'active', NOW()
     ) RETURNING id INTO v_pass_id;
-
+ 
     RETURN QUERY SELECT v_receipt_id, v_pass_id, v_valid_until;
 END;
 $$;
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 7: ASSET PURCHASE / DISPOSAL
 -- fn_buy_asset:     creates asset_register row + expense row + transaction.
@@ -2209,19 +2211,28 @@ BEGIN
         acf.start_date::DATE, acf.end_date::DATE,
         acf.apt_maintenance_rate::NUMERIC(10,4),
         acf.apt_due_day::INT, acf.apt_interest_pct::NUMERIC(5,2),
-        COALESCE(ma.name,'—')::TEXT,
-        COALESCE(ia.name,'—')::TEXT,
+        COALESCE(
+            (SELECT name FROM accounts
+             WHERE society_id = acf.society_id
+               AND name ILIKE '%Society Maintenance Charge%'
+             LIMIT 1),
+            '—'
+        )::TEXT,
+        COALESCE(
+            (SELECT name FROM accounts
+             WHERE society_id = acf.society_id
+               AND name ILIKE '%Due Interest%'
+             LIMIT 1),
+            '—'
+        )::TEXT,
         acf.apt_status::BOOLEAN, acf.created_at::TIMESTAMP
     FROM apt_charges_fines_basis acf
-    LEFT JOIN apartments a  ON a.id  = acf.apt_id
-    LEFT JOIN accounts   ma ON ma.id = acf.apt_maintenance_acc_id
-    LEFT JOIN accounts   ia ON ia.id = acf.apt_interest_acc_id
+    LEFT JOIN apartments a ON a.id = acf.apt_id
     WHERE acf.society_id = p_society_id
       AND (p_apt_id IS NULL OR acf.apt_id = p_apt_id OR acf.apt_id IS NULL)
     ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC;
 END;
 $$;
-
 DROP FUNCTION IF EXISTS fn_ven_charges_list CASCADE;
 CREATE OR REPLACE FUNCTION fn_ven_charges_list(
     p_society_id INT,
@@ -2241,17 +2252,21 @@ BEGIN
         COALESCE(v.name,'ALL')::VARCHAR(100),
         vcf.start_date::DATE, vcf.end_date::DATE,
         vcf.vendor_1day::NUMERIC(10,2), vcf.vendor_7day::NUMERIC(10,2), vcf.vendor_1mth::NUMERIC(10,2),
-        COALESCE(pa.name,'—')::TEXT,
+        COALESCE(
+            (SELECT name FROM accounts
+             WHERE society_id = vcf.society_id
+               AND name ILIKE '%Society Charge%'
+             LIMIT 1),
+            '—'
+        )::TEXT,
         vcf.ven_status::BOOLEAN, vcf.created_at::TIMESTAMP
     FROM ven_charges_fines_basis vcf
-    LEFT JOIN vendors  v  ON v.id  = vcf.ven_id
-    LEFT JOIN accounts pa ON pa.id = vcf.ven_pass_acc_id
+    LEFT JOIN vendors v ON v.id = vcf.ven_id
     WHERE vcf.society_id = p_society_id
       AND (p_ven_id IS NULL OR vcf.ven_id = p_ven_id OR vcf.ven_id IS NULL)
     ORDER BY vcf.ven_id NULLS FIRST, vcf.start_date DESC;
 END;
 $$;
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 20: UTILITY FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
@@ -2287,32 +2302,27 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION fn_create_default_charges(p_society_id INT)
 RETURNS VOID AS $$
 DECLARE
-    v_calc_date        DATE;
-    v_maint_acc_id     INT;
-    v_interest_acc_id  INT;
-    v_pass_acc_id      INT;
+    v_calc_date DATE;
 BEGIN
     SELECT calc_start_date INTO v_calc_date FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Society % not found', p_society_id; END IF;
-
-    SELECT id INTO v_maint_acc_id    FROM accounts WHERE society_id=p_society_id AND name ILIKE '%Society Maintenance%' LIMIT 1;
-    SELECT id INTO v_interest_acc_id FROM accounts WHERE society_id=p_society_id AND name ILIKE '%Interest Income%'     LIMIT 1;
-    SELECT id INTO v_pass_acc_id     FROM accounts WHERE society_id=p_society_id AND name ILIKE '%Society Charge%'      LIMIT 1;
-
+ 
     INSERT INTO apt_charges_fines_basis(
         society_id, apt_id, start_date, apt_maintenance_rate, apt_due_day, apt_interest_pct,
-        apt_maintenance_acc_id, apt_interest_acc_id, apt_status
+        apt_status
     ) VALUES (
-        p_society_id, NULL, v_calc_date, 3.0, 5, 2.0,
-        v_maint_acc_id, v_interest_acc_id, TRUE
+        p_society_id, NULL, v_calc_date, 3.0, 5, 2.0, TRUE
     ) ON CONFLICT DO NOTHING;
-
+ 
     INSERT INTO ven_charges_fines_basis(
         society_id, ven_id, start_date, vendor_1day, vendor_7day, vendor_1mth,
-        ven_pass_acc_id, ven_status
+        ven_status
     ) VALUES (
-        p_society_id, NULL, v_calc_date, 100.0, 500.0, 1500.0,
-        v_pass_acc_id, TRUE
+        p_society_id, NULL, v_calc_date, 100.0, 500.0, 1500.0, TRUE
     ) ON CONFLICT DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
+ 
+
+
+
