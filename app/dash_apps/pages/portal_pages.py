@@ -188,6 +188,7 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
                 _kpi("kpi_payables_total",        "fa-clock",             "#de5c52", "Salary Pending"),
                 _kpi("kpi_cash_in_hand",          "fa-wallet",            "#2c3e50", "Cash in Hand"),
                 _kpi("kpi_bank_balance",          "fa-coins",             "#2c3e50", "Balance"),
+                _kpi("kpi_assets_count",          "fa-boxes",             "#6c5ce7", "Total Assets"),
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),

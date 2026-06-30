@@ -174,6 +174,7 @@ def _portal_content(role, society_id, pathname):
             "enroll"        if "/enroll"        in p else
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
+            "assets"        if "/assets"        in p else
             "evaluate_pass" if "/evaluate-pass" in p else
             "customize"     if "/customize"     in p else
             "settings"      if "/settings"      in p else

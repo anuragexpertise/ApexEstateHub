@@ -723,6 +723,7 @@ DEFAULT_LAYOUTS = {
         "kpi_payables_total",
         "kpi_cash_in_hand",
         "kpi_bank_balance",
+        "kpi_assets_count",
     ],
     "apartment": [
         "kpi_my_pending_dues",
