@@ -350,7 +350,8 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 -- monthly receivable row (was apt_delay_fine in old schema).
 -- apt_maintenance_acc_id = which income account (e.g. 2311) to put on generated receivable rows.
 -- apt_interest_acc_id    = which income account for interest portion (e.g. 211). NULL = same as maintenance.
-CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
+CREATE TABLE IF NOT EXISTS apt_charges_fines_basis
+ (
     id                     SERIAL PRIMARY KEY,
     society_id             INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     apt_id                 INT REFERENCES apartments(id),

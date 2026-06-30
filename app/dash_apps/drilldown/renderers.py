@@ -1160,17 +1160,31 @@ def render_vendor_pass_card(
     service_type: str,
     pass_expiry,
     active_passes: int,
-    rates: dict,          # {"1day": float, "7day": float, "1mth": float}
+    rates: dict,           # {"1day": float, "7day": float, "1mth": float}
     society_id=None,
     prefill_mode: str = "cash",
-    caller_role: str = "admin",
-) -> html.Div:
+    caller_role: str = "admin",   # "admin" → Sell Pass, "vendor" → Buy Pass
+) -> "html.Div":
+    """
+    Dedicated form card for Sell Vendor Pass (admin) / Buy Vendor Pass (vendor).
+ 
+    entity name on all IDs = "vendor_pass" — matches _resolve_entity_singular guard
+    and _save_entity("vendor_pass") → _save_vendor_pass() routing.
+ 
+    Pass flow recorded in DB:
+      vendor_passes  → one row per pass (society_id, user_id, pass_type, valid_until)
+      receipts       → status='confirmed' (immediate) — acc_id = ven_pass_acc_id
+      transactions   → source_table='receipts', source_id=receipt.id
+    """
     from datetime import date as _date
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+ 
     color        = "#17976e"
     today        = _date.today().strftime("%Y-%m-%d")
     action_label = "Sell Pass" if caller_role == "admin" else "Buy Pass"
     entity_name  = "vendor_pass"   # MUST match _resolve_entity_singular guard
-
+ 
     # ── Pass status banner ────────────────────────────────────────────────
     if active_passes and int(active_passes) > 0:
         expiry_str = (
@@ -1180,44 +1194,41 @@ def render_vendor_pass_card(
         )
         banner = dbc.Alert([
             html.I(className="fas fa-id-card me-2"),
-            f"Active pass — valid until {expiry_str}",
+            f"Active pass — valid until {expiry_str}. Selling a new pass extends validity.",
         ], color="success", style={"fontSize": "12px", "borderRadius": "10px",
                                     "padding": "8px 14px", "marginBottom": "12px"})
     else:
         banner = dbc.Alert([
             html.I(className="fas fa-exclamation-triangle me-2"),
-            "No active pass — entry will be denied at gate.",
+            "No active pass — this vendor will be denied at the gate.",
         ], color="warning", style={"fontSize": "12px", "borderRadius": "10px",
                                     "padding": "8px 14px", "marginBottom": "12px"})
-
-    # ── Rates summary cards ───────────────────────────────────────────────
-    rate_items = [
-        ("1day", "1-Day"),
-        ("7day", "7-Day"),
-        ("1mth", "Monthly"),
-    ]
-    rate_cols = []
+ 
+    # ── Rate summary cards ────────────────────────────────────────────────
+    rate_items = [("1day", "1-Day"), ("7day", "7-Day"), ("1mth", "Monthly")]
+    rate_cols  = []
     for pt, label in rate_items:
         rate = rates.get(pt, 0)
         rate_cols.append(dbc.Col(dbc.Card([
             html.Div(f"{label} Pass",
                      style={"fontSize": "10px", "color": "#7d8ea3",
-                            "fontWeight": "600", "textTransform": "uppercase"}),
+                            "fontWeight": "600", "textTransform": "uppercase",
+                            "marginBottom": "4px"}),
             html.Div(
                 f"₹{float(rate):,.0f}" if rate else "—",
-                style={"fontSize": "18px", "fontWeight": "800",
+                style={"fontSize": "20px", "fontWeight": "800",
                        "color": "#15304f" if rate else "#bbb"},
             ),
         ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
                               "textAlign": "center", "padding": "10px"}), width=4))
-
-    # ── Pass type dropdown with rates inline ──────────────────────────────
+ 
+    # ── Pass type dropdown — shows rate inline ────────────────────────────
     pass_options = []
     for pt, label in rate_items:
         rate = rates.get(pt, 0)
-        rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (no rate set)"
-        pass_options.append({"label": f"{label} Pass {rate_str}", "value": pt})
-
+        rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (rate not set)"
+        pass_options.append({"label": f"{label} Pass  {rate_str}", "value": pt})
+ 
     return dbc.Card([
         dbc.CardHeader(
             html.Div([
@@ -1242,8 +1253,9 @@ def render_vendor_pass_card(
         dbc.CardBody([
             banner,
             dbc.Row(rate_cols, className="mb-3"),
-
+ 
             # ── Hidden identity fields ────────────────────────────────────
+            # vendor_user_id: read by _save_vendor_pass as p_user_id
             dcc.Input(
                 id={"type": "form-field", "entity": entity_name, "field": "vendor_user_id"},
                 type="hidden", value=str(user_id or ""),
@@ -1256,7 +1268,7 @@ def render_vendor_pass_card(
                 id={"type": "form-entity-pk", "entity": entity_name},
                 type="hidden", value=str(user_id or ""),
             ),
-
+ 
             # ── Pass type ─────────────────────────────────────────────────
             dbc.Row([
                 dbc.Col(dbc.Label("Pass Type *",
@@ -1272,7 +1284,7 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
-
+ 
             # ── Payment mode ──────────────────────────────────────────────
             dbc.Row([
                 dbc.Col(dbc.Label("Payment Mode *",
@@ -1292,7 +1304,7 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
-
+ 
             # ── Issue date ────────────────────────────────────────────────
             dbc.Row([
                 dbc.Col(dbc.Label("Issue Date",
@@ -1305,7 +1317,8 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
-
+ 
+            # ── Submit ────────────────────────────────────────────────────
             dbc.Button(
                 [html.I(className="fas fa-id-card me-2"), action_label],
                 id={"type": "form-submit", "entity": entity_name,
@@ -1313,6 +1326,18 @@ def render_vendor_pass_card(
                 n_clicks=0, color="success", className="mt-3 w-100",
                 style={"borderRadius": "12px", "fontWeight": "700"},
             ),
+ 
+            # ── Pass recording info box ───────────────────────────────────
+            html.Hr(style={"margin": "16px 0 10px", "opacity": "0.15"}),
+            html.Div([
+                html.I(className="fas fa-info-circle me-2",
+                       style={"color": "#7d8ea3", "fontSize": "11px"}),
+                html.Span(
+                    "On submit: vendor_passes row created → receipt confirmed → "
+                    "transaction posted to cashbook.",
+                    style={"fontSize": "10px", "color": "#aaa"},
+                ),
+            ]),
         ], style={"padding": "16px"}),
     ], style={
         "borderRadius": "16px",
@@ -1320,6 +1345,8 @@ def render_vendor_pass_card(
         "boxShadow":    f"0 10px 30px {color}18",
         "overflow":     "hidden",
     })
+ 
+
 # ════════════════════════════════════════════════════════════════════════════
 # NOC CARD  — rich-text editor with eligibility banner + Print/PDF/Email
 # ════════════════════════════════════════════════════════════════════════════
