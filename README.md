@@ -701,8 +701,9 @@ ApexEstateHub/
 ├── app/
 │   ├── dash_apps/
 │   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
+│   │   ├── layout.py                         ← Shared page layout and UI components
 │   │   ├── callbacks/
-│   │   │   ├── __init__.py                   ← Registration order (1–10)
+│   │   │   ├── __init__.py                   ← Registration order & loader rules
 │   │   │   ├── shell_callbacks.py            ← URL routing, auth guard, sidebar, toast
 │   │   │   ├── login_callbacks.py            ← All login methods + password reset
 │   │   │   ├── card_catalogue_callbacks.py   ← KPI refresh (single callback, ALL pattern)
@@ -712,7 +713,10 @@ ApexEstateHub/
 │   │   │   ├── noc_callbacks.py              ← Print / PDF / Email NOC (clientside)
 │   │   │   ├── customize_callbacks.py        ← DnD layout editor
 │   │   │   ├── customize_kpi_callbacks.py    ← KPI Inspector + _KPI_PORTAL_ENTRIES
-│   │   │   └── debug_callbacks.py            ← KPI audit + SQL tester
+│   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
+│   │   │   ├── admin_callbacks.py            ← [Disabled] Admin specific actions (unregistered)
+│   │   │   ├── owner_callbacks.py            ← [Disabled] Owner portal specific actions (unregistered)
+│   │   │   └── security_callbacks.py         ← [Disabled] Security portal specific actions (unregistered)
 │   │   ├── drilldown/
 │   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo
 │   │   │   ├── renderers.py                  ← list/profile/form/pay-dues/NOC card HTML
@@ -723,17 +727,24 @@ ApexEstateHub/
 │   │   │   └── image_utils.py                ← compress_to_webp()
 │   │   └── pages/
 │   │       ├── portal_pages.py               ← 5 portal page layouts
-│   │       └── card_catalogue.py             ← KPI_CARDS, DEFAULT_LAYOUTS, make_kpi_card()
+│   │       ├── card_catalogue.py             ← KPI_CARDS, DEFAULT_LAYOUTS, make_kpi_card()
+│   │       ├── customize_layout.py           ← KPI Customize layout views
+│   │       ├── login_system.py               ← Login and pattern/PIN authentication views
+│   │       └── router.py                     ← Page routing definitions
 │   ├── services/
 │   │   ├── auth_service.py                   ← authenticate_user(), reset flow
 │   │   └── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
 │   └── assets/                               ← Static files + uploaded images
 │
 ├── database/
-│   └── db_manager.py                         ← db._execute() → NeonDB/Aiven
+│   ├── db_manager.py                         ← db._execute() → NeonDB/Aiven
+│   ├── estatehub.sql                         ← Full schema + all fn_* functions
+│   ├── migrate.py                            ← Account seeding + schema initialization
+│   └── reset_database.py                     ← Destructive DB reset and schema reload utility
 │
-├── estatehub.sql                             ← Full schema + all fn_* functions
-├── seed.py / migrate.py                      ← Account seeding from EstateAcc.xlsx
+├── cleanup.py                                ← Cleanup script for removing redundant files
+├── run.py                                    ← Local server launcher (dash)
+├── wsgi.py                                   ← WSGI entry point for production hosting
 └── requirements.txt
 ```
 
@@ -751,6 +762,8 @@ register_customize_kpi_callbacks(app)  # 8. KPI inspector
 register_debug_callbacks(app)          # 9. Dev tools
 register_noc_callbacks(app)            # 10. NOC actions (last — dynamic IDs)
 ```
+
+> **Note on disabled callback modules:** `admin_callbacks.py`, `owner_callbacks.py`, and `security_callbacks.py` are intentionally **not registered** in `register_callbacks(app)` to prevent Dash from throwing a `NonExistentIdException` on startup. Gate scanning and payment actions are instead fully handled by `qr_callbacks.py` and the main `drilldown_callbacks.py` form handling engine.
 
 ---
 
@@ -800,106 +813,26 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 
 ---
 
-## 20. 🗑️ Legacy Code Removal Guide
+## 20. 🧹 Legacy Code Cleanup Status
 
-The following code is **dead, superseded, or actively causing bugs**. Safe to remove.
+All dead, superseded, or bug-inducing code identified in previous phases has been **successfully cleaned up and removed** from the repository to ensure optimal performance, prevent startup crashes, and keep the codebase tidy:
 
-### 20.1 `shell_callbacks.py` — Stale `render_default_profile` callback
-
-A callback block was mistakenly added to `shell_callbacks.py` that references `loaders`, `renderers`, and `nav_state` without importing them. It is the source of ~12 Pylance undefined-variable warnings.
-
-```python
-# ❌ DELETE from shell_callbacks.py (approx lines 570–690):
-@app.callback(
-    Output("drill-content", "children", allow_duplicate=True),
-    Output("drill-breadcrumb", "children", allow_duplicate=True),
-    Output("drilldown-store", "data", allow_duplicate=True),
-    Input("auth-store", "data"),
-    Input("url", "pathname"),
-    State("drilldown-store", "data"),
-    prevent_initial_call="initial_duplicate",
-)
-def render_default_profile(auth_data, pathname, store):
-    ...
-```
-
-The correct implementation is `_render_default_profile()` inside `drilldown_callbacks.py`.
-
-### 20.2 `card_catalogue_callbacks.py` — Dead List Loader Callbacks
-
-Callbacks #2–#10 write to `Output` IDs owned by the old static shell (`FORM_CARDS`). They cause **"Duplicate callback outputs"** on startup. The drilldown engine owns all list rendering via `#drill-content`.
-
-```python
-# ❌ DELETE: everything from callback #2 to #10 in register_card_catalogue_callbacks()
-# Keep ONLY: format_kpi_value(), _err_toast(), and the single refresh_kpi_values callback
-```
-
-### 20.3 `card_catalogue.py` — `FORM_CARDS` Static Table Bodies
-
-`FORM_CARDS` defines HTML table shells with `html.Tbody(id=cfg["list_id"])`. These IDs clash with the dead callbacks above and are never populated by any active callback.
-
-```bash
-grep -r "make_form_card\|FORM_CARDS" app/ --include="*.py"
-# If only self-references → safe to delete entirely
-```
-
-### 20.4 `card_catalogue.py` — Duplicate `format_kpi_value()`
-
-Two identical implementations exist. Keep only the one in `card_catalogue_callbacks.py`.
-
-```python
-# ❌ DELETE: the copy at the bottom of card_catalogue.py
-```
-
-### 20.5 `loaders.py` — Typed Entity Loader Functions (~250 lines)
-
-`load_apartments_list()`, `load_vendor_profile()`, etc. are never called — the engine uses the generic `load_list()` / `load_profile()` dispatchers that return plain dicts.
-
-```python
-# ❌ DELETE: all typed loader functions below the generic dispatchers
-# Starting from: def load_apartments_list(society_id: int, ...) → tuple[list[Apartment], int]:
-# Through:       def load_cashbook_profile(transaction_id: int) → Transaction | None:
-```
-
-### 20.6 `savers.py` — OOP Saver Classes
-
-`ApartmentSaver`, `VendorSaver`, etc. define `create()`/`update()`/`delete()`. The actual save logic lives in `_save_*()` inline functions in `drilldown_callbacks.py`. `savers.py` is never imported.
-
-```bash
-grep -r "from.*savers import\|import savers" app/ --include="*.py"
-# If zero results → safe to delete savers.py entirely
-```
-
-### 20.7 `drilldown_callbacks.py` — Duplicate `_apply_portal_filters()`
-
-Defined twice in the same file. Keep only the bottom-of-file definition (after `_save_*` helpers).
-
-### 20.8 `card_catalogue.py` — Unused Calculation Helpers
-
-```python
-# ❌ DELETE: both standalone helpers (logic already in KPI SQL queries)
-def calculate_maintenance_for_apartment(db, apartment_id, society_id): ...  # ~50 lines
-def calculate_security_salary_due(db, security_id, society_id): ...          # ~40 lines
-```
-
-### Removal Summary
-
-| File | What to Remove | Lines | Risk |
+| File | What was Removed | Lines | Status |
 |---|---|---|---|
-| `shell_callbacks.py` | Stale `render_default_profile` callback | ~120 | ✅ Safe |
-| `card_catalogue_callbacks.py` | Callbacks #2–#10 (list loaders) | ~280 | ✅ Safe |
-| `card_catalogue.py` | `FORM_CARDS` dict + `make_form_card()` | ~480 | ⚠️ Verify no callers |
-| `card_catalogue.py` | Duplicate `format_kpi_value()` | ~60 | ✅ Safe |
-| `card_catalogue.py` | `calculate_maintenance_*` helpers | ~90 | ✅ Safe |
-| `drilldown_callbacks.py` | First `_apply_portal_filters()` def | ~15 | ✅ Safe |
-| `loaders.py` | Typed entity loader functions | ~250 | ✅ Safe — verify no callers |
-| `savers.py` | Entire file | ~230 | ⚠️ Verify no imports |
+| `shell_callbacks.py` | Stale `render_default_profile` callback | ~120 | ✅ Removed |
+| `card_catalogue_callbacks.py` | Callbacks #2–#10 (stale list loaders) | ~280 | ✅ Removed |
+| `card_catalogue.py` | `FORM_CARDS` dict + `make_form_card()` | ~480 | ✅ Removed |
+| `card_catalogue.py` | Duplicate `format_kpi_value()` | ~60 | ✅ Removed |
+| `card_catalogue.py` | Unused `calculate_maintenance_*` helpers | ~90 | ✅ Removed |
+| `drilldown_callbacks.py` | Duplicate `_apply_portal_filters()` definition | ~15 | ✅ Removed |
+| `loaders.py` | Typed entity loader functions (redundant wrappers) | ~250 | ✅ Removed |
+| `savers.py` | Entire redundant file | ~230 | ✅ Removed |
 
-**Total removable: ~1,500 lines of dead code.**
+**Total codebase reduction: ~1,500 lines of dead code.**
 
 ---
 
-## 21. Deployment Notes
+## 21. Deployment & Utility Notes
 
 ### Environment Variables
 
@@ -916,14 +849,34 @@ FERNET_KEY=<base64-fernet-key>   # for QR encryption
 gunicorn app:server -w 4 -b 0.0.0.0:8050 --timeout 120
 ```
 
-- Set `debug=False` in `app.run_server()` for production
-- `/app/assets/` must be writable for image uploads
-- NeonDB: use `?sslmode=require` and connection pooling
-- `suppress_callback_exceptions=True` is required in `app = Dash(...)` because list/profile/form components are rendered dynamically
+- Set `debug=False` in `app.run_server()` for production.
+- `/app/assets/` must be writable for image uploads.
+- NeonDB: use `?sslmode=require` and connection pooling.
+- `suppress_callback_exceptions=True` is required in `app = Dash(...)` because list, profile, and form components are rendered dynamically.
+
+### Database Reset Utility
+
+A utility script `database/reset_database.py` is provided to perform a destructive reset of the database schema:
+```bash
+python3 database/reset_database.py
+```
+This script connects to the target database, drops the `public` schema CASCADE, recreates it, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
+
+### Database Migrations
+
+All database stored procedures and queries are prefixed with `fn_` and use `%s` positional parameter placeholders (psycopg2 style). Schema changes require updating:
+1. The corresponding SQL function definitions in `database/estatehub.sql`.
+2. The corresponding database query inside `app/dash_apps/drilldown/loaders.py`.
+3. The parameter list in `_save_*` inside `app/dash_apps/callbacks/drilldown_callbacks.py` (for database writes).
+
+Use `database/migrate.py` to auto-initialize the schema and seed mock accounts from `database/EstateAcc.xlsx`:
+```bash
+python3 database/migrate.py --seed
+```
 
 ### VS Code / Pylance Setup
 
-All "missing import" warnings in the Problems panel are Pylance not finding the virtual environment — not real errors. Fix once:
+If VS Code shows missing import warnings on Flask/Dash components, it is usually because it is not pointing to the correct virtual environment. You can fix this by creating/updating:
 
 ```json
 // .vscode/settings.json
@@ -934,16 +887,7 @@ All "missing import" warnings in the Problems panel are Pylance not finding the 
 }
 ```
 
-Or: `Ctrl+Shift+P` → **Python: Select Interpreter** → pick your venv.
-
-### Database Migrations
-
-All DB functions are prefixed `fn_` and use `%s` parameter syntax (psycopg2 style). Schema changes require updating:
-1. The PostgreSQL function in `estatehub.sql`
-2. The corresponding loader in `loaders.py`
-3. The arg tuple in `_save_*` in `drilldown_callbacks.py` (if it's a save function)
-
-Run `fn_auto_generate_receivables` after adding a new society or changing `calc_start_date` to seed receivables.
+Or press `Ctrl+Shift+P` → **Python: Select Interpreter** and select your active virtual environment.
 
 ---
 
