@@ -4,6 +4,9 @@
 # Changes vs previous version:
 #   - Added registration of noc_callbacks (NOC Print/PDF/Email)
 #     as step 10, before debug callbacks.
+#   - Added registration of admin_callbacks (pruned to just
+#     validate_qr_code_admin — see admin_callbacks.py header)
+#     as step 11.
 # ============================================================
 
 def register_callbacks(app):
@@ -79,6 +82,25 @@ def register_callbacks(app):
         register_noc_callbacks(app)
     except Exception as e:
         print(f"  ⚠️ noc_callbacks failed: {e}")
+
+    # 11. Admin callbacks — pruned to just validate_qr_code_admin (manual
+    #     paste-and-validate QR entry). update_society_count,
+    #     update_recent_societies, and enroll_member were removed from
+    #     admin_callbacks.py: their target component IDs don't exist
+    #     anywhere in portal_pages.py — society counts already come from
+    #     the generic KPI system, and enrollment already goes through the
+    #     schema-driven "New" button flow. Registering the removed ones
+    #     would just be inert duplicate logic. See admin_callbacks.py's
+    #     module docstring for the full rationale.
+    #     NOTE: validate_qr_code_admin's own target IDs (qr-scan-input,
+    #     validate-qr-btn, qr-validation-result) also aren't in the layout
+    #     yet — this registers cleanly but stays inert until a manual-entry
+    #     panel is added somewhere (e.g. admin's Evaluate Pass tab).
+    try:
+        from .admin_callbacks import register_admin_callbacks
+        register_admin_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ admin_callbacks failed: {e}")
 
     # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
     # NOT registered — they reference component IDs that don't exist in any

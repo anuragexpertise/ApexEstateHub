@@ -321,8 +321,30 @@ def register_drilldown_callbacks(app):
             if action == "show_qr":
                 record = loaders.load_profile(entity, pk, sid) or {}
                 entity_name = record.get("owner_name") or record.get("name", entity)
+
+                # QR entity_id must always be users.id (see qr_service.py —
+                # validate_qr_code() looks the scanned user up by u.id and
+                # derives the role-specific id, e.g. apartments.id via
+                # linked_id, from that row). For vendor/security, `pk` from
+                # load_profile is already users.id, so it's used as-is.
+                # For apartments, `pk` is apartments.id (the profile's own
+                # PK) — it must be translated to the owning user's users.id
+                # via linked_id, or the QR would encode the wrong id and
+                # every scan of an apartment-profile-generated pass would
+                # fail "User not found".
+                if entity == "apartment":
+                    owner_user = db._execute(
+                        "SELECT id FROM users WHERE linked_id = %s AND role = 'apartment' AND society_id = %s",
+                        (pk, sid), fetch_one=True,
+                    )
+                    if not owner_user:
+                        return no_update, no_update, no_update, no_update, no_update
+                    qr_entity_id = owner_user["id"]
+                else:
+                    qr_entity_id = pk
+
                 trigger_data = {
-                    "entity_id": pk,
+                    "entity_id": qr_entity_id,
                     "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity, entity),
                     "society_id": sid,
                     "name": entity_name,

@@ -377,6 +377,11 @@ def shell_layout() -> html.Div:
             dcc.Store(id="debug-list-log",          storage_type="memory"),
             dcc.Store(id="debug-sql-error",         storage_type="memory"),
             dcc.Store(id="noc-action-store",        storage_type="memory"),
+            # cam-delegation-dummy: dummy Output anchor for camera_callbacks.py's
+            # click-delegation clientside callback. Deliberately separate from
+            # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
+            # scanner) — the two were previously colliding on the same store.
+            dcc.Store(id="cam-delegation-dummy",    storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
