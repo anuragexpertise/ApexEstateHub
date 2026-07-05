@@ -22,7 +22,7 @@ from app import create_app, create_dash_app
 flask_app = create_app(os.getenv('FLASK_CONFIG', 'production'))
 dash_app = create_dash_app(flask_app)
 server = dash_app.server  # ← gunicorn will import and use this
-
+# application= server
 # ════════════════════════════════════════════════════════════════
 # GUNICORN WORKER CONFIGURATION (optional)
 # ════════════════════════════════════════════════════════════════

@@ -290,10 +290,13 @@ DRILLDOWN_MAP: dict = {
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
         "actions": {
-            "gate_pass": {
-                "target": "modal_qr",
-                "prefill": {"entity_id": "id", "role": "_const_a"},
-            },
+            # NOTE: "Gate Pass" is NOT routed through this map. It uses
+            # action_id="show_qr" (see profile_actions.py), which
+            # route_drilldown() in drilldown_callbacks.py intercepts with
+            # an early return before DRILLDOWN_MAP is ever consulted. A
+            # "gate_pass" entry here was dead code, and its role constant
+            # was also wrong (_const_a maps to admin's gate code "a", not
+            # apartment's "o" — see role_code_map in qr_callbacks.py).
             "new_concern": {
                 "target": "form_concern_new",
                 "prefill": {"flat_no": "flat_number"},
@@ -303,19 +306,14 @@ DRILLDOWN_MAP: dict = {
     },
     "profile_vendor": {
         "actions": {
-            "gate_pass": {
-                "target": "modal_qr",
-                "prefill": {"entity_id": "id", "role": "_const_v"},
-            },
+            # See note above profile_apartment — same dead "gate_pass" entry removed.
             "edit": {"target": "form_vendor_edit", "prefill": {"*": "*"}},
         }
     },
     "profile_security": {
         "actions": {
-            "gate_pass": {
-                "target": "modal_qr",
-                "prefill": {"entity_id": "id", "role": "_const_s"},
-            },
+            # See note above profile_apartment — same dead "gate_pass" entry removed.
+            # "edit" is auto-populated by the post-processing loop below.
         }
     },
     "profile_concern": {
