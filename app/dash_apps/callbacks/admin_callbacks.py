@@ -15,10 +15,15 @@ duplicating logic that already exists elsewhere.
 
 validate_qr_code_admin is kept — it's a genuinely distinct feature (manual
 paste-and-validate QR entry) rather than a duplicate of the camera-based
-entry/exit scanner in qr_callbacks.py. NOTE: its target IDs (qr-scan-input,
-validate-qr-btn, qr-validation-result) also don't exist in the current
-layout yet — this callback will register cleanly but stay inert until a
-manual-entry panel is added somewhere (e.g. admin's Evaluate Pass tab).
+entry/exit scanner in qr_callbacks.py. It reads from "manual-qr-input"
+rather than "qr-scan-input" deliberately: qr-scan-input is a hidden element
+already owned by the camera pipeline in qr_callbacks.py/portal_pages.py's
+_evaluate_pass_page(), and that page is shared by both the admin and
+security portals — reusing its id for a second, visible field would create
+a duplicate-component-ID error. The manual-entry panel (added to
+_evaluate_pass_page(), so it renders on both portals) uses manual-qr-input /
+validate-qr-btn / qr-validation-result, all distinct from the camera
+pipeline's ids.
 """
 
 from dash import Input, Output, State, html, no_update
@@ -30,15 +35,20 @@ def register_admin_callbacks(app):
     @app.callback(
         Output("qr-validation-result", "children"),
         Input("validate-qr-btn", "n_clicks"),
-        State("qr-scan-input",   "value"),
+        State("manual-qr-input", "value"),
+        State("auth-store",      "data"),
         prevent_initial_call=True,
     )
-    def validate_qr_code_admin(n_clicks, qr_data):
+    def validate_qr_code_admin(n_clicks, qr_data, auth_data):
         if not n_clicks or not qr_data:
             return no_update
         try:
             from app.services.qr_service import validate_qr_code
-            result = validate_qr_code(qr_data, None)
+            # Pass the current society_id (was hardcoded None before) so the
+            # manual path enforces the same cross-society check the camera
+            # pipeline already does in qr_callbacks.py.
+            society_id = (auth_data or {}).get("society_id")
+            result = validate_qr_code(qr_data, society_id)
             if result.get("status") == "PASS":
                 return html.Div([
                     html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),

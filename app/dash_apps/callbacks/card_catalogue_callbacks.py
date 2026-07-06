@@ -85,6 +85,12 @@ def register_card_catalogue_callbacks(app):
         sec_id    = auth_data.get("security_id") or (
             auth_data.get("linked_id") if role == "security" else None
         )
+        # gate_access.entity_id is always users.id (see qr_callbacks.py's
+        # role_code_map insert), never a linked_id like apartments.id/
+        # vendors.id — apt_id/vendor_id above are linked_id (see
+        # login_callbacks.py's _build_auth_store). Use this for any
+        # gate_access-scoped KPI instead.
+        own_user_id = auth_data.get("user_id")
         is_master = role == "admin" and sid is None
 
         # ── Build portal-specific param resolver ──────────────────────────────
@@ -125,9 +131,17 @@ def register_card_catalogue_callbacks(app):
                         (apt_id,),
                     ),
                     "kpi_gate_logs": (
+                        # FIX: gate_access rows for apartment owners are
+                        # inserted by qr_callbacks.py's validate_qr_scanned
+                        # with entity_id=users.id and role='o' (see
+                        # role_code_map = {"apartment": "o", ...}). The
+                        # previous version filtered entity_id=apt_id
+                        # (apartments.id, a linked_id) and role='a' (admin's
+                        # code) — neither ever matches a real row, so this
+                        # KPI always showed 0.
                         "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='a' AND time_in::DATE=CURRENT_DATE",
-                        (apt_id,),
+                        "WHERE entity_id=%s AND role='o' AND time_in::DATE=CURRENT_DATE",
+                        (own_user_id,),
                     ),
                 }
                 return overrides.get(card_id)
@@ -147,9 +161,12 @@ def register_card_catalogue_callbacks(app):
                         (vendor_id,),
                     ),
                     "kpi_gate_logs": (
+                        # Same fix as the apartment override above: vendor_id
+                        # is linked_id (vendors.id), but gate_access.entity_id
+                        # is always users.id.
                         "SELECT COUNT(*)::INT AS v FROM gate_access "
                         "WHERE entity_id=%s AND role='v' AND time_in::DATE=CURRENT_DATE",
-                        (vendor_id,),
+                        (own_user_id,),
                     ),
                 }
                 return overrides.get(card_id)
