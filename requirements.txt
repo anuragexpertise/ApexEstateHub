@@ -37,7 +37,6 @@ cryptography>=41.0.0
 qrcode[pil]>=7.4.0
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0   # headless = no GUI deps, works on servers
-pyzbar>=0.1.9                    # ZBar-based QR/barcode decoder
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 requests>=2.31.0
