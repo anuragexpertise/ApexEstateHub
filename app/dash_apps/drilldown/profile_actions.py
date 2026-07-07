@@ -167,6 +167,16 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "success",
             "roles": ["admin"],
         },
+        {
+            "label": "Print Receipt",
+            "action_id": "print_receipt",
+            "target_card": "form_receipt_print",
+            "icon": "fa-print",
+            "color": "secondary",
+            # no "roles" restriction — anyone who can view a receipt at all
+            # (admin always; apartment/vendor/security for their own rows,
+            # per the view-only _PORTAL_PERMS entries) can print/save/email it.
+        },
     ],
     # ── ASSETS ───────────────────────────────────────────────────────────────
     "assets": [

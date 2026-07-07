@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS societies (
     secretary_name   VARCHAR(100),
     secretary_phone  VARCHAR(20),
     secretary_sign   VARCHAR(100),
-    payment_QR       VARCHAR(255),
+    payment_qr       VARCHAR(255),
     plan             VARCHAR(20) NOT NULL DEFAULT 'Free'
         CHECK (plan IN ('Free','9Apts','99Apts','999Apts','unlimited')),
     plan_validity    DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS asset_register (
     society_id           INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     company_name         VARCHAR(100),
     asset_name           VARCHAR(100) NOT NULL,
-    asset_type           VARCHAR(50),
+    asset_SNo            VARCHAR(50),
     purchase_date        DATE,
     purchase_value       NUMERIC(12,2),
     parent_account_id    INT REFERENCES accounts(id),  -- asset class account (e.g. Furniture 61)

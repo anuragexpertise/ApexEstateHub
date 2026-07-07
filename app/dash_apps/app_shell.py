@@ -382,6 +382,11 @@ def shell_layout() -> html.Div:
             # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
             # scanner) — the two were previously colliding on the same store.
             dcc.Store(id="cam-delegation-dummy",    storage_type="memory"),
+            # receipt-action-store: dummy Output anchor for receipt_callbacks.py's
+            # Print/Save-as-PDF/Email buttons on the receipt card (same pattern
+            # as noc-action-store — the card is rendered dynamically inside
+            # drill-content, not part of this permanent shell layout).
+            dcc.Store(id="receipt-action-store",    storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
