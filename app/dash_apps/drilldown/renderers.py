@@ -52,6 +52,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "gate_logs"):   {"view"},
     ("apartment", "receipts_tbl"):{"view"},
     ("apartment", "cashbook"):    {"view"},
+    ("apartment", "receivables"): {"view"},   # own dues — view only, admin verifies
+    ("apartment", "payments"):    {"view"},   # requested for symmetry with vendor
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -61,6 +63,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("vendor", "gate_logs"):      {"view"},
     ("vendor", "receipts_tbl"):   {"view"},
     ("vendor", "cashbook"):       {"view"},
+    ("vendor", "receivables"):    {"view"},   # own pass/charges — view only
+    ("vendor", "payments"):       {"view"},   # own payables if ever billed this way
     ("vendor", "*"):              set(),
 
     # ── SECURITY: view most lists + can create receipts ───────────────────
@@ -98,6 +102,10 @@ _FK_HUMAN_ALIASES = {
     "apt_maintenance_acc_id": "maintenance_account_name",
     "apt_interest_acc_id": "interest_account_name",
     "ven_pass_acc_id": "pass_account_name",
+    # fn_accounts_list already self-joins accounts to return this — it was
+    # just never registered here, so the accounts list was showing the raw
+    # parent_account_id FK (or nothing) instead of the resolved name.
+    "parent_account_id": "parent_account_name",
 }
 
 _FIELD_FORMATTERS = {
@@ -729,7 +737,16 @@ def render_form_card(card_id: str, title: str, icon: str,
                      society_id: int | None = None,
                      role: str | None = None) -> html.Div:
     from app.dash_apps.drilldown.registry import to_plural
-    prefill = prefill or {}
+    prefill = dict(prefill or {})
+    if not prefill.get("id"):
+        # New-entry form (no existing row id) — layer _NEW_FORM_DEFAULTS
+        # (schema_introspect.py) under whatever the caller already supplied,
+        # so e.g. events.open_to defaults to "all" and asset disposal
+        # fields default to their at-rest values, without ever overwriting
+        # an explicit profile-scoped prefill the caller set intentionally.
+        from app.dash_apps.drilldown.schema_introspect import _NEW_FORM_DEFAULTS
+        for k, v in _NEW_FORM_DEFAULTS.get(to_plural(entity), {}).items():
+            prefill.setdefault(k, v)
     entity_plural = to_plural(entity)
     fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
     form_rows = [
@@ -755,7 +772,14 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px"},
             )
         elif ftype == "select":
-            opts = [{"label": o.title(), "value": o} for o in f.get("options", [])]
+            # Support both plain string options (existing behavior — e.g.
+            # boolean true/false, CHECK-constraint values) and explicit
+            # {"label":..., "value":...} dict options (added for
+            # events.open_to via _EXPLICIT_SELECT_OPTIONS).
+            opts = [
+                o if isinstance(o, dict) else {"label": o.title(), "value": o}
+                for o in f.get("options", [])
+            ]
             ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 options=opts, value=pre_val,

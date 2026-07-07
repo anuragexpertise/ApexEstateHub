@@ -102,6 +102,15 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ admin_callbacks failed: {e}")
 
+    # 12. Form autofill — particulars auto-suggestion for Receipts/Expenses
+    #     forms (implements the previously-unwired PARTICULARS_TEMPLATES
+    #     intent noted in estatehub.sql's schema comments).
+    try:
+        from .form_autofill_callbacks import register_form_autofill_callbacks
+        register_form_autofill_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ form_autofill_callbacks failed: {e}")
+
     # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
     # NOT registered — they reference component IDs that don't exist in any
     # portal layout and caused NonExistentIdException at startup.

@@ -180,7 +180,7 @@ def _portal_content(role, society_id, pathname):
             "settings"      if "/settings"      in p else
             "dashboard"
         )
-        return admin_portal_page(tab)
+        return admin_portal_page(tab, sid=society_id)
     if role == "apartment":
         tab = (
             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
@@ -191,7 +191,7 @@ def _portal_content(role, society_id, pathname):
             "settings" if "/owner-settings" in p or "/settings" in p else
             "dashboard"
         )
-        return owner_portal_page(tab)
+        return owner_portal_page(tab, sid=society_id)
     if role == "vendor":
         tab = (
             "cashbook" if "/vendor-cashbook" in p or "/cashbook" in p else
@@ -201,7 +201,7 @@ def _portal_content(role, society_id, pathname):
             "settings" if "/vendor-settings" in p or "/settings" in p else
             "dashboard"
         )
-        return vendor_portal_page(tab)
+        return vendor_portal_page(tab, sid=society_id)
     if role == "security":
         tab = (
             "attendance"       if "/attendance"        in p else
@@ -211,7 +211,7 @@ def _portal_content(role, society_id, pathname):
             "settings"         if "/security-settings" in p or "/settings" in p else
             "pass_evaluation"
         )
-        return security_portal_page(tab)
+        return security_portal_page(tab, sid=society_id)
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
 

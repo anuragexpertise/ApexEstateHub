@@ -246,13 +246,31 @@ def load_list(
         # ── PAYMENTS (read-only, all portals) ────────────────────────────
         if entity == "payments":
             p_status = filters.get("status")
-            p_etype  = filters.get("role") or (
-                "security" if sec_id else None
+            # Portal scoping: without this, a vendor-portal view of
+            # "payments" would fall through to p_etype=None below, which
+            # (per fn_payments_named) returns ALL society payments
+            # unfiltered — including security payroll rows a vendor has no
+            # business seeing. Added when vendor was granted a view-only
+            # "payments" permission in _PORTAL_PERMS.
+            #
+            # NOTE: fn_payments_named only takes 4 params (society_id,
+            # search, status, entity_role) — unlike fn_receivables_named,
+            # it has no entity_id parameter, so we can filter OUT other
+            # roles' rows at the DB level but can't filter IN only this
+            # specific vendor's own rows there. Post-filtering by entity_id
+            # in Python below closes that gap; if per-vendor row counts
+            # grow large, fn_payments_named should get a p_entity_id param
+            # added to match fn_receivables_named's signature instead.
+            p_eid   = ven_id or sec_id
+            p_etype = filters.get("role") or (
+                "vendor" if ven_id else "security" if sec_id else None
             )
             rows = db._execute(
                 "SELECT * FROM fn_payments_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_status, p_etype, page_size, offset), fetch_all=True,
             ) or []
+            if p_eid:
+                rows = [r for r in rows if r.get("entity_id") == p_eid]
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM fn_payments_named(%s,NULL,%s,%s)",
                 (sid, p_status, p_etype), fetch_one=True,
