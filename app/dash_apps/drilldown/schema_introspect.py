@@ -62,6 +62,7 @@ NO_EDIT_ACTION = {
 _IMAGE_COLUMNS = {
     "photo", "photo_url", "image", "logo",
     "owner_photo", "id_proof", "secretary_sign", "login_background",
+    "license",   # vendors.license — confirmed to be an uploaded document/photo
 }
 
 # PostgreSQL type → form field type.
@@ -282,6 +283,24 @@ def load_fk_options(ref_table: str) -> list[dict]:
         return []
 
 
+# Explicit dropdown options for columns that are plain VARCHAR (no CHECK
+# constraint for _extract_check_options to pick up) but should still render
+# as a select, not free text. Scoped per (table, col) — do NOT apply
+# globally by column name alone, since e.g. concerns has no open_to column
+# at all and shouldn't get one implicitly if it's ever added later without
+# an explicit decision here.
+_EXPLICIT_SELECT_OPTIONS: dict[tuple[str, str], list[dict]] = {
+    ("events", "open_to"): [
+        {"label": "Apartments", "value": "apartment"},
+        {"label": "Vendors",    "value": "vendor"},
+        {"label": "Security",   "value": "security"},
+        {"label": "ALL",        "value": "all"},
+    ],
+    # concerns.open_to intentionally NOT added here — left as free text /
+    # excluded per instruction, even though the column doesn't exist yet.
+}
+
+
 def _build_field(col: dict) -> dict:
     name    = col["name"]
     table   = col.get("table_name", "")
@@ -291,6 +310,10 @@ def _build_field(col: dict) -> dict:
     # Account-dropdown overrides take priority over generic FK/check handling
     if ftype.startswith("account_dropdown"):
         pass   # type already set correctly; no options needed here
+
+    elif (table, name) in _EXPLICIT_SELECT_OPTIONS:
+        field["type"] = "select"
+        field["options"] = _EXPLICIT_SELECT_OPTIONS[(table, name)]
 
     elif col["check_options"]:
         field["type"] = "select"
@@ -308,6 +331,40 @@ def _build_field(col: dict) -> dict:
     if (not col["nullable"]) and not col["has_default"] and not col["is_pk"]:
         field["required"] = True
     return field
+
+
+# Columns that exist in the table and should still appear in list/profile
+# views, but must NOT appear on the generic New/Edit form for that entity —
+# because a dedicated action handles them instead (e.g. "Dispose Asset"),
+# rather than the generic form.
+#
+# asset_register: disposed/disposed_at/sale_value/sale_acc_id/disposed_by
+# are only ever written by _save_asset_dispose() (the "Dispose Asset"
+# profile action) — _save_asset()'s own edit branch doesn't touch them at
+# all, so showing them on the generic Edit form would be misleading (the
+# user could edit the value, submit, and nothing would happen).
+_HIDDEN_ON_FORM: dict[str, set[str]] = {
+    "assets": {
+        "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
+    },
+}
+
+# Default values injected on the New-entity form for columns in
+# _HIDDEN_ON_FORM (or any column you want a non-DB-default value for at
+# creation time).
+_NEW_FORM_DEFAULTS: dict[str, dict] = {
+    "assets": {
+        "disposed": False,
+        "disposed_at": None,
+        "sale_value": 0,
+        "sale_acc_id": None,
+        "disposed_by": None,
+    },
+    "events": {
+        "open_to": "all",   # matches the DB column default; shown explicitly
+                            # in the dropdown rather than left blank
+    },
+}
 
 
 def build_entity_meta() -> dict:
@@ -356,6 +413,13 @@ def build_entity_meta() -> dict:
                 })
 
             if is_system:
+                continue
+
+            # Hide disposal-only / system-set fields from the generic
+            # New/Edit form for this entity (see _HIDDEN_ON_FORM above) —
+            # they still appear in list_columns/profile_fields above, just
+            # not as editable inputs here.
+            if name in _HIDDEN_ON_FORM.get(ekey, set()):
                 continue
 
             field_def = _build_field(col)

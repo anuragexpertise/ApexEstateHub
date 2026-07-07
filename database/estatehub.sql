@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS societies (
     secretary_name   VARCHAR(100),
     secretary_phone  VARCHAR(20),
     secretary_sign   VARCHAR(100),
+    payment_QR       VARCHAR(255),
     plan             VARCHAR(20) NOT NULL DEFAULT 'Free'
         CHECK (plan IN ('Free','9Apts','99Apts','999Apts','unlimited')),
     plan_validity    DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -408,6 +409,17 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     UNIQUE (society_id, role, card_id, permission)
 );
 
+CREATE TABLE IF NOT EXISTS society_settings (
+    id          SERIAL PRIMARY KEY,
+    society_id  INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    key         VARCHAR(100) NOT NULL,
+    value       TEXT,
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, key)   -- required: matches _upsert_layout's
+                               -- ON CONFLICT (society_id, key) target exactly
+);
+ 
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
@@ -438,6 +450,7 @@ CREATE INDEX IF NOT EXISTS idx_ven_charges_society      ON ven_charges_fines_bas
 CREATE INDEX IF NOT EXISTS idx_ven_charges_status       ON ven_charges_fines_basis(society_id, ven_status);
 CREATE INDEX IF NOT EXISTS idx_vendor_passes_user       ON vendor_passes(user_id, valid_until);
 CREATE INDEX IF NOT EXISTS idx_asset_register_society   ON asset_register(society_id, disposed);
+CREATE INDEX IF NOT EXISTS idx_society_settings_lookup  ON society_settings(society_id, key);
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: APARTMENT HELPER FUNCTIONS (used by trigger + gate pass + NOC)

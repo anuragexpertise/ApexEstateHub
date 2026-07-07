@@ -11,6 +11,7 @@ v3 additions:
 """
 
 from __future__ import annotations
+import json
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
@@ -106,6 +107,69 @@ def _kpi_row(*kpis, cols: str = "repeat(auto-fill,minmax(155px,1fr))") -> html.D
     )
 
 
+def _kpi_from_id(card_id: str) -> html.Div:
+    """
+    Render a single _kpi() card purely from a card_id, pulling icon/color/
+    title/group straight from KPI_CARDS metadata (card_catalogue.py) instead
+    of needing them hardcoded at each call site. This is what makes
+    _kpi_row_dynamic() below possible — any saved Customize layout is just
+    a list of card_ids, so we need to be able to render an arbitrary one
+    without the caller having supplied its display metadata inline.
+    """
+    from app.dash_apps.pages.card_catalogue import KPI_CARDS
+    cfg = KPI_CARDS.get(card_id, {})
+    return _kpi(
+        card_id,
+        cfg.get("icon", "fa-chart-bar"),
+        cfg.get("color", "#3498db"),
+        cfg.get("title", card_id),
+        cfg.get("group", ""),
+    )
+
+
+def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
+                      cols: str = "repeat(auto-fill,minmax(155px,1fr))") -> html.Div:
+    """
+    THE FIX for "customization isn't working": the Customize tab's Save
+    button (customize_callbacks.py's save_layout()) has always correctly
+    written {"active": [...], "available": [...]} to
+    society_settings[key=f"dashboard_layout_{portal}_{tab}"] — but nothing
+    anywhere ever read it back. Every real dashboard tab rendered a
+    hardcoded, static list of _kpi(...) calls regardless of what was saved,
+    so Customize was a fully-functional dead end.
+
+    This helper is the read side: given the portal+tab this row belongs to,
+    it looks up the saved layout for the current society and renders THAT
+    ordered card_id list if one exists, falling back to default_kpi_ids
+    (the same values that used to be hardcoded inline) otherwise.
+
+    Usage — replace:
+        _kpi_row(_kpi("kpi_x", "fa-x", "#111", "X"), _kpi("kpi_y", ...), cols=...)
+    with:
+        _kpi_row_dynamic("admin", "dashboard", sid, "kpi_x", "kpi_y", ..., cols=...)
+    (just the card_ids as strings now — icon/color/title come from
+    KPI_CARDS automatically via _kpi_from_id).
+    """
+    ids = list(default_kpi_ids)
+    if sid:
+        try:
+            from database.db_manager import db
+            row = db._execute(
+                "SELECT value FROM society_settings WHERE society_id=%s AND key=%s",
+                (sid, f"dashboard_layout_{portal}_{tab}"),
+                fetch_one=True,
+            )
+            if row and row.get("value"):
+                from app.dash_apps.pages.card_catalogue import KPI_CARDS
+                parsed = json.loads(row["value"])
+                saved = [c for c in parsed.get("active", []) if c in KPI_CARDS]
+                if saved:
+                    ids = saved
+        except Exception as e:
+            print(f"_kpi_row_dynamic layout load error ({portal}/{tab}): {e}")
+    return _kpi_row(*[_kpi_from_id(cid) for cid in ids], cols=cols)
+
+
 def _drill_panel() -> html.Div:
     return html.Div(
         [
@@ -137,22 +201,17 @@ def _divider() -> html.Hr:
 # MASTER PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def master_portal_page() -> html.Div:
+def master_portal_page(sid=None) -> html.Div:
     c = _C["master"]
     return html.Div([
         _page_title("fa-crown", c, "Master Admin Portal", "Manage all societies on this platform"),
         _sec_hdr("Platform Overview", "click any card to drill down", "fa-chart-bar"),
-        _kpi_row(
-            _kpi("kpi_societies_total",     "fa-building",    c,         "Total Societies"),
-            _kpi("kpi_societies_free",       "fa-circle",      "#7d8ea3", "Free Plan"),
-            _kpi("kpi_societies_9Apts",      "fa-star",        "#17976e", "9Apts Plan"),
-            _kpi("kpi_societies_99Apts",     "fa-star",        "#17976e", "99Apts Plan"),
-            _kpi("kpi_societies_999Apts",    "fa-star",        "#17976e", "999Apts Plan"),
-            _kpi("kpi_societies_unlimited",  "fa-star",        "#17976e", "Unlimited"),
-            _kpi("kpi_societies_expired",    "fa-exclamation-triangle", "#de5c52", "Expired"),
-            _kpi("kpi_master_apartments_total", "fa-home",     "#1859b8", "Apartments"),
-            _kpi("kpi_master_vendors_total",    "fa-truck",    "#b98a07", "Vendors"),
-            _kpi("kpi_master_security_total",   "fa-user-shield", "#b63b3b", "Security"),
+        _kpi_row_dynamic(
+            "master", "dashboard", sid,
+            "kpi_societies_total", "kpi_societies_free", "kpi_societies_9Apts",
+            "kpi_societies_99Apts", "kpi_societies_999Apts", "kpi_societies_unlimited",
+            "kpi_societies_expired", "kpi_master_apartments_total",
+            "kpi_master_vendors_total", "kpi_master_security_total",
             cols="repeat(auto-fill,minmax(148px,1fr))",
         ),
         _divider(), _drill_panel(),
@@ -163,7 +222,7 @@ def master_portal_page() -> html.Div:
 # ADMIN PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
+def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     c = _C["admin"]
 
     # ── Dashboard ────────────────────────────────────────────────────────────
@@ -171,24 +230,14 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-user-shield", c, "Admin Dashboard"),
             _sec_hdr("Society Overview", "click any KPI to drill down"),
-            _kpi_row(
-                _kpi("kpi_apartments_total",     "fa-home",              "#1859b8", "Apartments"),
-                _kpi("kpi_apartments_dues",       "fa-exclamation-triangle", "#de5c52", "Apts Overdue"),
-                _kpi("kpi_receivables_total",     "fa-hand-holding-usd",  "#17976e", "Dues Pending"),
-                _kpi("kpi_advance_credits",       "fa-hand-point-down",   "#0ea5a8", "Advance Credits"),
-                _kpi("kpi_vendors_total",         "fa-truck",             "#b98a07", "Vendors"),
-                _kpi("kpi_vendors_passes",        "fa-id-card",           "#b98a07", "Valid Passes"),
-                _kpi("kpi_security_total",        "fa-user-shield",       "#b63b3b", "Security"),
-                _kpi("kpi_security_on_duty",      "fa-shield-alt",        "#691b1b", "On Duty"),
-                _kpi("kpi_events_total",          "fa-calendar-check",    "#8e44ad", "Upcoming Events"),
-                _kpi("kpi_concerns_open",         "fa-hand-point-up",     "#de5c52", "Open Concerns"),
-                _kpi("kpi_gate_logs",             "fa-receipt",           "#1abc9c", "Gate Logs Today"),
-                _kpi("kpi_receipts_month",        "fa-receipt",           "#17976e", "Receipts (Month)"),
-                _kpi("kpi_expenses_month",        "fa-wallet",            "#aa241a", "Expenses (Month)"),
-                _kpi("kpi_payables_total",        "fa-clock",             "#de5c52", "Salary Pending"),
-                _kpi("kpi_cash_in_hand",          "fa-wallet",            "#2c3e50", "Cash in Hand"),
-                _kpi("kpi_bank_balance",          "fa-coins",             "#2c3e50", "Balance"),
-                _kpi("kpi_assets_count",          "fa-boxes",             "#6c5ce7", "Total Assets"),
+            _kpi_row_dynamic(
+                "admin", "dashboard", sid,
+                "kpi_apartments_total", "kpi_apartments_dues", "kpi_receivables_total",
+                "kpi_advance_credits", "kpi_vendors_total", "kpi_vendors_passes",
+                "kpi_security_total", "kpi_security_on_duty", "kpi_events_total",
+                "kpi_concerns_open", "kpi_gate_logs", "kpi_receipts_month",
+                "kpi_expenses_month", "kpi_payables_total", "kpi_cash_in_hand",
+                "kpi_bank_balance", "kpi_assets_count",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -198,10 +247,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "enroll":
         return html.Div([
             _page_title("fa-user-plus", c, "Enroll Members", "apartments · vendors · security"),
-            _kpi_row(
-                _kpi("kpi_apartments_total", "fa-home",       "#1859b8", "Apartments"),
-                _kpi("kpi_vendors_total",    "fa-truck",      "#b98a07", "Vendors"),
-                _kpi("kpi_security_total",   "fa-user-shield","#b63b3b", "Security Staff"),
+            _kpi_row_dynamic(
+                "admin", "enroll", sid,
+                "kpi_apartments_total", "kpi_vendors_total", "kpi_security_total",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -211,11 +259,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "cashbook":
         return html.Div([
             _page_title("fa-book", c, "Cashbook", "full transaction ledger"),
-            _kpi_row(
-                _kpi("kpi_receipts_month",   "fa-receipt",  "#17976e",  "Receipts (Month)"),
-                _kpi("kpi_expenses_month",   "fa-wallet",   "#de5c52",  "Expenses (Month)"),
-                _kpi("kpi_cash_in_hand",     "fa-wallet",   "#2c3e50",  "Cash in Hand"),
-                _kpi("kpi_bank_balance",     "fa-coins",    "#2c3e50",  "Balance"),
+            _kpi_row_dynamic(
+                "admin", "cashbook", sid,
+                "kpi_receipts_month", "kpi_expenses_month", "kpi_cash_in_hand", "kpi_bank_balance",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -226,12 +272,10 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-hand-holding-usd", c, "Receivables",
                         "auto-generated maintenance dues — click Verify to post to ledger"),
-            _kpi_row(
-                _kpi("kpi_receivables_total",    "fa-hand-holding-usd", "#17976e", "Total Pending"),
-                _kpi("kpi_receivables_overdue",  "fa-exclamation-circle","#de5c52", "Overdue"),
-                _kpi("kpi_advance_credits",      "fa-hand-point-down",  "#0ea5a8", "Advance Credits"),
-                _kpi("kpi_apartments_dues",      "fa-home",             "#de5c52", "Apts Overdue"),
-                _kpi("kpi_apartments_no_dues",   "fa-check-circle",     "#17976e", "Apts Clear"),
+            _kpi_row_dynamic(
+                "admin", "receivables", sid,
+                "kpi_receivables_total", "kpi_receivables_overdue", "kpi_advance_credits",
+                "kpi_apartments_dues", "kpi_apartments_no_dues",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -241,10 +285,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "receipts":
         return html.Div([
             _page_title("fa-file-invoice-dollar", c, "Receipts", "manual income entries"),
-            _kpi_row(
-                _kpi("kpi_receipts_month",   "fa-receipt", "#17976e", "Receipts (Month)"),
-                _kpi("kpi_receipts_total",   "fa-receipt", "#17976e", "Receipts (All)"),
-                _kpi("kpi_bank_balance",     "fa-coins",   "#2c3e50", "Balance"),
+            _kpi_row_dynamic(
+                "admin", "receipts", sid,
+                "kpi_receipts_month", "kpi_receipts_total", "kpi_bank_balance",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -254,9 +297,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "expenses":
         return html.Div([
             _page_title("fa-wallet", c, "Expenses", "manual outgoing payments"),
-            _kpi_row(
-                _kpi("kpi_expenses_month",         "fa-wallet",      "#de5c52", "Expenses (Month)"),
-                _kpi("kpi_security_salaries_paid", "fa-check-double","#17976e", "Salary Verified"),
+            _kpi_row_dynamic(
+                "admin", "expenses", sid,
+                "kpi_expenses_month", "kpi_security_salaries_paid",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -267,11 +310,10 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-user-clock", c, "Salary Payments",
                         "auto-generated security payroll — click Verify to post to ledger"),
-            _kpi_row(
-                _kpi("kpi_payables_total",           "fa-wallet",       "#de5c52", "Total Pending"),
-                _kpi("kpi_security_salaries_due",    "fa-rupee-sign",   "#b63b3b", "Salary Due"),
-                _kpi("kpi_security_salaries_paid",   "fa-check-double", "#17976e", "Salary Verified"),
-                _kpi("kpi_security_shifts_pending",  "fa-clock",        "#e59620", "Shifts Unpaid"),
+            _kpi_row_dynamic(
+                "admin", "payments", sid,
+                "kpi_payables_total", "kpi_security_salaries_due",
+                "kpi_security_salaries_paid", "kpi_security_shifts_pending",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -281,8 +323,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "events":
         return html.Div([
             _page_title("fa-calendar-alt", c, "Events"),
-            _kpi_row(
-                _kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"),
+            _kpi_row_dynamic(
+                "admin", "events", sid,
+                "kpi_events_total",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -292,8 +335,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "concerns":
         return html.Div([
             _page_title("fa-hand-point-up", c, "Concerns"),
-            _kpi_row(
-                _kpi("kpi_concerns_open", "fa-hand-point-up", "#de5c52", "Open Concerns"),
+            _kpi_row_dynamic(
+                "admin", "concerns", sid,
+                "kpi_concerns_open",
                 cols="1fr",
             ),
             _divider(), _drill_panel(),
@@ -304,9 +348,9 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
         return html.Div([
             _page_title("fa-boxes", c, "Asset Register",
                         "buy / sell assets — creates expense or receipt automatically"),
-            _kpi_row(
-                _kpi("kpi_assets_count", "fa-boxes",     "#6c5ce7", "Active Assets"),
-                _kpi("kpi_assets_value", "fa-coins",     "#6c5ce7", "Assets at Cost"),
+            _kpi_row_dynamic(
+                "admin", "assets", sid,
+                "kpi_assets_count", "kpi_assets_value",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -316,12 +360,10 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "settings":
         return html.Div([
             _page_title("fa-cog", c, "Settings", "accounts · charge rates"),
-            _kpi_row(
-                _kpi("kpi_societies_calc_start_date","fa-clock",      "#34ee45", "Calc Start Date"),
-                _kpi("kpi_plan_validity",            "fa-calendar-times","#e67e22","Plan Expires"),
-                _kpi("kpi_accounts_count",           "fa-book-open",  "#6c5ce7", "Accounts"),
-                _kpi("kpi_apt_charges_count",        "fa-rupee-sign", "#de5c52", "Apt Charge Rules"),
-                _kpi("kpi_ven_charges_count",        "fa-rupee-sign", "#de5c52", "Vendor Charge Rules"),
+            _kpi_row_dynamic(
+                "admin", "settings", sid,
+                "kpi_societies_calc_start_date", "kpi_plan_validity", "kpi_accounts_count",
+                "kpi_apt_charges_count", "kpi_ven_charges_count",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -344,20 +386,17 @@ def admin_portal_page(active_tab: str = "dashboard") -> html.Div:
 # OWNER (APARTMENT) PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def owner_portal_page(active_tab: str = "dashboard") -> html.Div:
+def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     c = _C["apartment"]
 
     if active_tab == "dashboard":
         return html.Div([
             _page_title("fa-home", c, "Owner Dashboard"),
             _sec_hdr("My Account", "click any card to view details"),
-            _kpi_row(
-                _kpi("kpi_my_pending_dues",  "fa-rupee-sign",    "#de5c52", "Pending Dues"),
-                _kpi("kpi_my_overdue_dues",  "fa-exclamation-circle","#de5c52","Overdue Dues"),
-                _kpi("kpi_advance_credits",  "fa-hand-point-down","#0ea5a8", "Advance Credit"),
-                _kpi("kpi_concerns_open",    "fa-hand-point-up", "#e59620", "My Concerns"),
-                _kpi("kpi_events_total",     "fa-calendar-check","#8e44ad", "Upcoming Events"),
-                _kpi("kpi_gate_logs",        "fa-receipt",       "#1abc9c", "Gate Logs"),
+            _kpi_row_dynamic(
+                "owner", "dashboard", sid,
+                "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_advance_credits",
+                "kpi_concerns_open", "kpi_events_total", "kpi_gate_logs",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -367,10 +406,9 @@ def owner_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab in ("receivables", "owner_dues"):
         return html.Div([
             _page_title("fa-hand-holding-usd", c, "My Dues", "monthly maintenance + interest"),
-            _kpi_row(
-                _kpi("kpi_my_pending_dues", "fa-rupee-sign",     "#de5c52", "Pending"),
-                _kpi("kpi_my_overdue_dues", "fa-exclamation-circle","#de5c52","Overdue"),
-                _kpi("kpi_advance_credits", "fa-hand-point-down","#0ea5a8", "Advance Credit"),
+            _kpi_row_dynamic(
+                "owner", "receivables", sid,
+                "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_advance_credits",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -379,8 +417,9 @@ def owner_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab in ("cashbook", "owner_cashbook"):
         return html.Div([
             _page_title("fa-book", c, "My Cashbook"),
-            _kpi_row(
-                _kpi("kpi_my_pending_dues", "fa-rupee-sign", "#de5c52", "To Pay"),
+            _kpi_row_dynamic(
+                "owner", "cashbook", sid,
+                "kpi_my_pending_dues",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -389,22 +428,23 @@ def owner_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab == "concerns":
         return html.Div([
             _page_title("fa-hand-point-up", c, "My Concerns"),
-            _kpi_row(_kpi("kpi_concerns_open", "fa-hand-point-up", "#de5c52", "Open Concerns"), cols="1fr"),
+            _kpi_row_dynamic("owner", "concerns", sid, "kpi_concerns_open", cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
     if active_tab in ("events", "owner_events"):
         return html.Div([
             _page_title("fa-calendar-alt", c, "Events"),
-            _kpi_row(_kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Upcoming Events"), cols="1fr"),
+            _kpi_row_dynamic("owner", "events", sid, "kpi_events_total", cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
     if active_tab in ("charges", "owner_charges"):
         return html.Div([
             _page_title("fa-file-invoice", c, "My Charges"),
-            _kpi_row(
-                _kpi("kpi_maintainence_charges", "fa-file-invoice", "#e59620", "Maintenance Rules"),
+            _kpi_row_dynamic(
+                "owner", "charges", sid,
+                "kpi_maintainence_charges",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -426,17 +466,15 @@ def owner_portal_page(active_tab: str = "dashboard") -> html.Div:
 # VENDOR PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def vendor_portal_page(active_tab: str = "dashboard") -> html.Div:
+def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     c = _C["vendor"]
 
     if active_tab == "dashboard":
         return html.Div([
             _page_title("fa-briefcase", c, "Vendor Dashboard"),
-            _kpi_row(
-                _kpi("kpi_my_pass_expiry",  "fa-id-card",       "#b98a07", "Pass Expiry"),
-                _kpi("kpi_concerns_open",   "fa-hand-point-up", "#e59620", "Jobs / Concerns"),
-                _kpi("kpi_events_total",    "fa-calendar-check","#8e44ad", "Upcoming Events"),
-                _kpi("kpi_gate_logs",       "fa-receipt",       "#1abc9c", "Gate Logs Today"),
+            _kpi_row_dynamic(
+                "vendor", "dashboard", sid,
+                "kpi_my_pass_expiry", "kpi_concerns_open", "kpi_events_total", "kpi_gate_logs",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -446,8 +484,9 @@ def vendor_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab in ("receivables", "vendor_dues"):
         return html.Div([
             _page_title("fa-hand-holding-usd", c, "My Receivables"),
-            _kpi_row(
-                _kpi("kpi_my_pass_expiry", "fa-id-card", "#b98a07", "Pass Expiry"),
+            _kpi_row_dynamic(
+                "vendor", "receivables", sid,
+                "kpi_my_pass_expiry",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -456,8 +495,9 @@ def vendor_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab in ("cashbook", "vendor_cashbook"):
         return html.Div([
             _page_title("fa-book", c, "My Cashbook"),
-            _kpi_row(
-                _kpi("kpi_receipts_month", "fa-receipt", c, "Receipts (Month)"),
+            _kpi_row_dynamic(
+                "vendor", "cashbook", sid,
+                "kpi_receipts_month",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -466,14 +506,14 @@ def vendor_portal_page(active_tab: str = "dashboard") -> html.Div:
     if active_tab in ("events", "vendor_events"):
         return html.Div([
             _page_title("fa-calendar-alt", c, "Events"),
-            _kpi_row(_kpi("kpi_events_total", "fa-calendar-check", "#8e44ad", "Events"), cols="1fr"),
+            _kpi_row_dynamic("vendor", "events", sid, "kpi_events_total", cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
     if active_tab in ("settings", "vendor_settings"):
         return html.Div([
             _page_title("fa-cog", c, "My Settings"),
-            _kpi_row(_kpi("kpi_vendor_date", "fa-calendar-alt", "#de5c52", "Registered Since"), cols="1fr"),
+            _kpi_row_dynamic("vendor", "settings", sid, "kpi_vendor_date", cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -487,7 +527,7 @@ def vendor_portal_page(active_tab: str = "dashboard") -> html.Div:
 # SECURITY PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
+def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.Div:
     c = _C["security"]
 
     if active_tab == "pass_evaluation":
@@ -496,12 +536,10 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     if active_tab == "dashboard":
         return html.Div([
             _page_title("fa-users", c, "All Users", "registered members"),
-            _kpi_row(
-                _kpi("kpi_apartments_total",      "fa-home",         "#1859b8", "Apartments"),
-                _kpi("kpi_vendors_total",         "fa-truck",        "#b98a07", "Vendors"),
-                _kpi("kpi_security_total",        "fa-user-shield",  c,         "Security"),
-                _kpi("kpi_security_shift_count",  "fa-hand-point-up","#de5c52", "Active Shifts"),
-                _kpi("kpi_receipts_in_hand_total","fa-receipt",      "#17976e", "Receipts-in-hand"),
+            _kpi_row_dynamic(
+                "security", "dashboard", sid,
+                "kpi_apartments_total", "kpi_vendors_total", "kpi_security_total",
+                "kpi_security_shift_count", "kpi_receipts_in_hand_total",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -511,10 +549,9 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     if active_tab in ("payments", "security_payments"):
         return html.Div([
             _page_title("fa-user-clock", c, "My Salary", "per-shift payroll — read only"),
-            _kpi_row(
-                _kpi("kpi_security_salaries_due",  "fa-rupee-sign",   "#b63b3b", "Salary Due"),
-                _kpi("kpi_security_salaries_paid", "fa-check-double", "#17976e", "Salary Paid"),
-                _kpi("kpi_security_shifts_pending","fa-clock",        "#e59620", "Shifts Unpaid"),
+            _kpi_row_dynamic(
+                "security", "payments", sid,
+                "kpi_security_salaries_due", "kpi_security_salaries_paid", "kpi_security_shifts_pending",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -523,9 +560,9 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     if active_tab in ("cashbook", "security_cashbook"):
         return html.Div([
             _page_title("fa-book", c, "Cashbook"),
-            _kpi_row(
-                _kpi("kpi_receipts_month",  "fa-receipt", "#17976e", "Receipts (Month)"),
-                _kpi("kpi_expenses_month",  "fa-wallet",  "#de5c52", "Expenses (Month)"),
+            _kpi_row_dynamic(
+                "security", "cashbook", sid,
+                "kpi_receipts_month", "kpi_expenses_month",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -534,16 +571,16 @@ def security_portal_page(active_tab: str = "pass_evaluation") -> html.Div:
     if active_tab == "security_receipt":
         return html.Div([
             _page_title("fa-plus-circle", c, "New Receipt", "collect cash payments at gate"),
-            _kpi_row(_kpi("kpi_receipts_month", "fa-receipt", "#17976e", "Receipts (Month)"), cols="1fr"),
+            _kpi_row_dynamic("security", "security_receipt", sid, "kpi_receipts_month", cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
     if active_tab in ("settings", "security_settings"):
         return html.Div([
             _page_title("fa-cog", c, "My Settings"),
-            _kpi_row(
-                _kpi("kpi_security_date",          "fa-calendar-alt", "#de5c52", "Joined"),
-                _kpi("kpi_security_salary_per_shift","fa-rupee-sign", "#b63b3b", "Salary/Shift"),
+            _kpi_row_dynamic(
+                "security", "settings", sid,
+                "kpi_security_date", "kpi_security_salary_per_shift",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
