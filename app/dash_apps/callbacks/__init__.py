@@ -111,6 +111,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ form_autofill_callbacks failed: {e}")
 
+    # 13. Receipt Print / Save / Email buttons (receipt-action-store dummy
+    #     Output — requires that store added to app_shell.py).
+    try:
+        from .receipt_callbacks import register_receipt_callbacks
+        register_receipt_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ receipt_callbacks failed: {e}")
+
     # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
     # NOT registered — they reference component IDs that don't exist in any
     # portal layout and caused NonExistentIdException at startup.

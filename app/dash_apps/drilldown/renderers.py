@@ -1043,6 +1043,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         dbc.CardBody([
+            _payment_qr_banner(entity_plural, society_id, prefill),
             html.Div(form_rows),
             dbc.Button(
                 [html.I(className="fas fa-check me-2"), submit_label],
@@ -1059,6 +1060,40 @@ def render_form_card(card_id: str, title: str, icon: str,
         "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
         "overflow": "hidden",
     })
+
+
+def _payment_qr_banner(entity_plural: str, society_id, prefill: dict) -> html.Div | None:
+    """
+    Shows the society's payment_qr image (societies.payment_qr) at the top
+    of the NEW Receipt form only, so a payer filling it in has the scan
+    code right there. Not shown on Edit (prefill has an "id") or on any
+    entity other than receipts — this is specifically for someone about to
+    pay the society, not a generic banner.
+    """
+    if entity_plural != "receipts" or prefill.get("id") or not society_id:
+        return None
+    try:
+        from database.db_manager import db
+        row = db._execute(
+            "SELECT payment_qr FROM societies WHERE id = %s",
+            (society_id,), fetch_one=True,
+        )
+        qr_path = (row or {}).get("payment_qr")
+        if not qr_path:
+            return None
+        return html.Div([
+            html.Div("Scan to pay the society", style={
+                "fontSize": "12px", "fontWeight": "700", "color": "#15304f",
+                "textAlign": "center", "marginBottom": "8px",
+            }),
+            html.Img(src=qr_path, style={
+                "display": "block", "margin": "0 auto 14px", "maxWidth": "180px",
+                "borderRadius": "10px", "border": "1px solid #e2e8f0",
+            }),
+        ])
+    except Exception as e:
+        print(f"_payment_qr_banner error: {e}")
+        return None
 
 # ════════════════════════════════════════════════════════════════════════════
 # BREADCRUMB RENDERER
@@ -1576,6 +1611,106 @@ def render_noc_card(apt: dict, society: dict,
                     className="btn btn-outline-info",
                     style={"borderRadius": "10px", "fontWeight": "600",
                            **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
+                ),
+            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                      "marginTop": "16px", "paddingTop": "14px",
+                      "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+        ], style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# RECEIPT CARD — formatted receipt preview + Print/Save/Email
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_receipt_card(receipt: dict, society: dict) -> html.Div:
+    """
+    Read-only formatted receipt + Print/Save-as-HTML/Email buttons, same
+    clientside-callback pattern as render_noc_card (see receipt_callbacks.py)
+    but built from structured fields via a hidden JSON dcc.Store
+    (id="receipt-print-data") rather than an editable textarea — a receipt
+    is a record of what was already collected, not something to edit here.
+    """
+    from datetime import date as _date
+
+    color      = "#17976e"
+    receipt_no = receipt.get("id", "—")
+    r_date     = receipt.get("receipt_date") or _date.today().isoformat()
+    payer      = receipt.get("entity_name") or "—"
+    role_lbl   = (receipt.get("role") or "").title() or "—"
+    particulars = receipt.get("particulars", "—")
+    account    = receipt.get("account_name", "—")
+    amount     = float(receipt.get("amount") or 0)
+    mode       = (receipt.get("mode") or "cash").title()
+    ref        = receipt.get("transaction_id") or receipt.get("cheque_no") or ""
+    status     = (receipt.get("status") or "confirmed").title()
+    society_nm = society.get("name", "—")
+    society_addr = society.get("address", "")
+
+    print_data = {
+        "receipt_no": receipt_no, "date": r_date, "payer": payer,
+        "role": role_lbl, "particulars": particulars, "account": account,
+        "amount": f"{amount:,.2f}", "mode": mode, "ref": ref, "status": status,
+        "society_name": society_nm, "society_address": society_addr,
+    }
+
+    def _row(label, value):
+        return dbc.Row([
+            dbc.Col(html.Small(label, style={"color": "#7d8ea3", "fontWeight": "600"}), width=4),
+            dbc.Col(html.Span(str(value), style={"fontWeight": "500"}), width=8),
+        ], className="mb-2", style={"fontSize": "12px"})
+
+    return dbc.Card([
+        dcc.Store(id="receipt-print-data", data=print_data, storage_type="memory"),
+        dbc.CardHeader(
+            html.Div([
+                html.Div(html.I(className="fas fa-receipt",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong(f"Receipt #{receipt_no}", style={"fontSize": "14px"}),
+                    html.Div(f"{payer} — {role_lbl}",
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            html.Div([
+                html.Div(society_nm, style={"fontWeight": "800", "fontSize": "15px"}),
+                html.Div(society_addr, style={"fontSize": "11px", "color": "#999"}),
+            ], style={"textAlign": "center", "marginBottom": "14px",
+                      "paddingBottom": "10px", "borderBottom": "1px dashed #d0dae8"}),
+            _row("Date", r_date),
+            _row("Received From", f"{payer} ({role_lbl})"),
+            _row("Particulars", particulars),
+            _row("Account", account),
+            _row("Amount", f"₹{amount:,.2f}"),
+            _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
+            _row("Status", status),
+            html.Div([
+                html.Button(
+                    [html.I(className="fas fa-print me-2"), "Print"],
+                    id="receipt-btn-print", n_clicks=0,
+                    className="btn btn-outline-primary",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                    id="receipt-btn-pdf", n_clicks=0,
+                    className="btn btn-outline-danger",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-envelope me-2"), "Email Receipt"],
+                    id="receipt-btn-email", n_clicks=0,
+                    className="btn btn-outline-info",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "16px", "paddingTop": "14px",

@@ -1,4 +1,4 @@
-# EsateHub — Complete Society Management System
+# ApexEstateHub – The All‑In‑One Society Management Suite
 ### Professional Property Management Software for Modern Communities
 
 ![Version](https://img.shields.io/badge/version-2.0-blue)
@@ -7,11 +7,11 @@
 
 ---
 
-## 🏢 Executive Summary
+## 🚀 Why ApexEstateHub?
 
-**EsateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with cutting-edge technology and a mobile-first approach, it streamlines every aspect of community management—from financial tracking to security operations.
+**ApexEstateHub** is a comprehensive, cloud-based property management solution designed specifically for residential societies, apartment complexes, and gated communities. Built with cutting-edge technology and a mobile-first approach, it streamlines every aspect of community management—from financial tracking to security operations.
 
-### Why Choose EsateHub?
+### Why Choose ApexEstateHub?
 
 - ✅ **Complete Digital Transformation** - Eliminate paper-based processes entirely
 - ✅ **Real-Time Operations** - Instant updates across web and mobile platforms
@@ -43,7 +43,7 @@
 
 ### Competitive Advantages
 
-| Feature | EsateHub | Traditional Software |
+| Feature | ApexEstateHub | Traditional Software |
 |---------|---------------|---------------------|
 | **Deployment** | Cloud-instant setup | On-premise, weeks of setup |
 | **Mobile Access** | Native mobile experience | Desktop-only or basic mobile |

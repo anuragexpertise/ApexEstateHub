@@ -402,6 +402,15 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
+            # ── Print Receipt (any role that can view the receipt) ────────────────
+            elif action == "print_receipt":
+                store = nav_state.navigate_to(
+                    store, "form_receipt_print", "Print Receipt",
+                    prefill={"receipt_id": pk},
+                    entity_pk=pk,
+                )
+                hide_kpis = True
+
             # ── NOC Issue (apartment profile — admin only) ────────────────────────
             elif action == "issue_noc":
                 noc      = loaders.check_noc_eligibility(int(pk))
@@ -979,6 +988,22 @@ def _render_card(
                 society_id=sid_val,
                 caller_role=caller_role,
             )
+
+        # ── Receipt Print — formatted receipt + Print/Save/Email (bypasses schema-driven form) ──
+        if card_id == "form_receipt_print":
+            receipt_id = prefill.get("receipt_id") or prefill.get("id")
+            sid_val    = filters.get("society_id")
+            receipt = {}
+            if receipt_id and sid_val:
+                # Reuse fn_receipts_list's existing name-resolution (entity_name,
+                # account_name, etc.) instead of duplicating that join here —
+                # same "single call site" approach used for gate-pass evaluation.
+                receipt = db._execute(
+                    "SELECT * FROM fn_receipts_list(%s,NULL,NULL,NULL) f WHERE f.id = %s",
+                    (sid_val, receipt_id), fetch_one=True,
+                ) or {}
+            society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
+            return renderers.render_receipt_card(receipt=receipt, society=society)
 
         # ── NOC Print — rich-text editor with eligibility banner ──────────────
         if card_id == "form_noc_print":
