@@ -376,7 +376,9 @@ def shell_layout() -> html.Div:
             dcc.Store(id="debug-kpi-log",           storage_type="memory"),
             dcc.Store(id="debug-list-log",          storage_type="memory"),
             dcc.Store(id="debug-sql-error",         storage_type="memory"),
-            dcc.Store(id="noc-action-store",        storage_type="memory"),
+            dcc.Store(id="noc-action-store-print",        storage_type="memory"),
+            dcc.Store(id="noc-action-store-pdf",        storage_type="memory"),
+            dcc.Store(id="noc-action-store-email",        storage_type="memory"),
             # cam-delegation-dummy: dummy Output anchor for camera_callbacks.py's
             # click-delegation clientside callback. Deliberately separate from
             # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
