@@ -149,21 +149,21 @@ def register_receipt_callbacks(app):
 
     clientside_callback(
         _RECEIPT_PRINT_JS,
-        Output('receipt-action-store', 'data', allow_duplicate=True),
+        Output('receipt-action-store-print', 'data', allow_duplicate=True),
         Input('receipt-btn-print', 'n_clicks'),
         prevent_initial_call=True,
     )
 
     clientside_callback(
         _RECEIPT_PDF_JS,
-        Output('receipt-action-store', 'data', allow_duplicate=True),
+        Output('receipt-action-store-pdf', 'data', allow_duplicate=True),
         Input('receipt-btn-pdf', 'n_clicks'),
         prevent_initial_call=True,
     )
 
     clientside_callback(
         _RECEIPT_EMAIL_JS,
-        Output('receipt-action-store', 'data', allow_duplicate=True),
+        Output('receipt-action-store-email', 'data', allow_duplicate=True),
         Input('receipt-btn-email', 'n_clicks'),
         prevent_initial_call=True,
     )
