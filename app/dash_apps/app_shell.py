@@ -18,11 +18,7 @@ ROLE_CONFIG = {
         "icon": "fa-user-shield",
         "tabs": [
             {"label": "Dashboard",     "href": "/dashboard/admin-portal",  "icon": "fa-th-large"},
-            {"label": "Cashbook",      "href": "/dashboard/cashbook",       "icon": "fa-book"},
-            {"label": "Receivables",   "href": "/dashboard/receivables",    "icon": "fa-hand-holding-dollar"},
-            {"label": "Payments",      "href": "/dashboard/payments",       "icon": "fa-credit-card"},
-            {"label": "Receipts",      "href": "/dashboard/receipts",       "icon": "fa-file-invoice-dollar"},
-            {"label": "Expenses",      "href": "/dashboard/expenses",       "icon": "fa-wallet"},
+            {"label": "Financials",    "href": "/dashboard/financials",     "icon": "fa-book"},
             {"label": "Enroll",        "href": "/dashboard/enroll",         "icon": "fa-user-plus"},
             {"label": "Assets",        "href": "/dashboard/assets",         "icon": "fa-building"},
             {"label": "Events",        "href": "/dashboard/events",         "icon": "fa-calendar-alt"},
