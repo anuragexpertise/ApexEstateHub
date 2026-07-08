@@ -255,65 +255,19 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Cashbook ─────────────────────────────────────────────────────────────
-    if active_tab == "cashbook":
+    # ── Financials (NEW) ────────────────────────────────────────────────────────
+    if active_tab == "financials":
         return html.Div([
-            _page_title("fa-book", c, "Cashbook", "full transaction ledger"),
+            _page_title("fa-book", c, "Financials", "All financial transactions and accounts"),
             _kpi_row_dynamic(
-                "admin", "cashbook", sid,
-                "kpi_receipts_month", "kpi_expenses_month", "kpi_cash_in_hand", "kpi_bank_balance",
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
-
-    # ── Receivables (NEW) ─────────────────────────────────────────────────────
-    if active_tab == "receivables":
-        return html.Div([
-            _page_title("fa-hand-holding-usd", c, "Receivables",
-                        "auto-generated maintenance dues — click Verify to post to ledger"),
-            _kpi_row_dynamic(
-                "admin", "receivables", sid,
-                "kpi_receivables_total", "kpi_receivables_overdue", "kpi_advance_credits",
-                "kpi_apartments_dues", "kpi_apartments_no_dues",
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
-
-    # ── Receipts ──────────────────────────────────────────────────────────────
-    if active_tab == "receipts":
-        return html.Div([
-            _page_title("fa-file-invoice-dollar", c, "Receipts", "manual income entries"),
-            _kpi_row_dynamic(
-                "admin", "receipts", sid,
-                "kpi_receipts_month", "kpi_receipts_total", "kpi_bank_balance",
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
-
-    # ── Expenses ──────────────────────────────────────────────────────────────
-    if active_tab == "expenses":
-        return html.Div([
-            _page_title("fa-wallet", c, "Expenses", "manual outgoing payments"),
-            _kpi_row_dynamic(
-                "admin", "expenses", sid,
-                "kpi_expenses_month", "kpi_security_salaries_paid",
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
-
-    # ── Payments (NEW) ────────────────────────────────────────────────────────
-    if active_tab == "payments":
-        return html.Div([
-            _page_title("fa-user-clock", c, "Salary Payments",
-                        "auto-generated security payroll — click Verify to post to ledger"),
-            _kpi_row_dynamic(
-                "admin", "payments", sid,
+                "admin", "financials", sid,
+                "kpi_cash_in_hand", "kpi_bank_balance", 
+                "kpi_receivables_total", "kpi_receivables_overdue",
                 "kpi_payables_total", "kpi_security_salaries_due",
-                "kpi_security_salaries_paid", "kpi_security_shifts_pending",
+                "kpi_receipts_month", "kpi_receipts_total",
+                "kpi_expenses_month", "kpi_expenses_total",
+                "kpi_apartments_dues", "kpi_apartments_no_dues",
+                "kpi_advance_credits",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
