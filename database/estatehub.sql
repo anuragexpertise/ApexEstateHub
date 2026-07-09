@@ -180,14 +180,6 @@ CREATE TABLE IF NOT EXISTS security_roster (
     UNIQUE (society_id, security_id, roster_date)
 );
 
-CREATE TABLE IF NOT EXISTS attendance (
-    id          SERIAL PRIMARY KEY,
-    society_id  INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    security_id INT NOT NULL REFERENCES security_staff(id) ON DELETE CASCADE,
-    time_in     TIMESTAMP,
-    time_out    TIMESTAMP
-);
-
 -- ════════════════════════════════════════════════════════════════
 -- RECEIVABLES  — auto-credits, one row per entity per billing period.
 --
@@ -430,14 +422,11 @@ CREATE TABLE IF NOT EXISTS notifications (
     read              BOOLEAN NOT NULL DEFAULT FALSE,
     created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at DESC);
- 
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
-
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gate_entity_role_time    ON gate_access(entity_id, role, time_in);
 CREATE INDEX IF NOT EXISTS idx_users_email              ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_society_role       ON users(society_id, role);
 CREATE INDEX IF NOT EXISTS idx_apartments_society       ON apartments(society_id);
@@ -459,7 +448,6 @@ CREATE INDEX IF NOT EXISTS idx_events_society_date      ON events(society_id, ev
 CREATE INDEX IF NOT EXISTS idx_concerns_society_status  ON concerns(society_id, status);
 CREATE INDEX IF NOT EXISTS idx_gate_society_time        ON gate_access(society_id, time_in);
 CREATE INDEX IF NOT EXISTS idx_security_roster_date     ON security_roster(society_id, roster_date);
-CREATE INDEX IF NOT EXISTS idx_attendance_security_date ON attendance(security_id, time_in);
 CREATE INDEX IF NOT EXISTS idx_ven_charges_society      ON ven_charges_fines_basis(society_id, ven_id);
 CREATE INDEX IF NOT EXISTS idx_ven_charges_status       ON ven_charges_fines_basis(society_id, ven_status);
 CREATE INDEX IF NOT EXISTS idx_vendor_passes_user       ON vendor_passes(user_id, valid_until);
@@ -1017,33 +1005,30 @@ CREATE OR REPLACE FUNCTION fn_auto_generate_payments(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
     rec          RECORD;
-    v_user_id    INT;
     v_acc_id     INT;
     v_desc       TEXT;
 BEGIN
-    -- Find the salary expense account by well-known name
     SELECT id INTO v_acc_id FROM accounts
     WHERE society_id = p_society_id AND name ILIKE '%Salary%' AND drcr_account = 'Dr'
     LIMIT 1;
-
+ 
     FOR rec IN
         SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift
         FROM security_roster sr
         JOIN security_staff ss ON ss.id = sr.security_id
-        -- Only create payment when a matching attendance record shows time_out (shift completed)
-        JOIN attendance att
-             ON att.security_id = sr.security_id
-            AND att.time_in::DATE = sr.roster_date
-            AND att.time_out IS NOT NULL
+        JOIN users u2 ON u2.linked_id = sr.security_id AND u2.role = 'security'
+        -- Shift completed = a gate_access exit exists for that guard, that day
+        JOIN gate_access ga
+             ON ga.entity_id = u2.id
+            AND ga.role = 's'
+            AND ga.time_in::DATE = sr.roster_date
+            AND ga.time_out IS NOT NULL
         WHERE sr.society_id = p_society_id
           AND sr.roster_date <= CURRENT_DATE
           AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.roster_id = sr.id)
     LOOP
-        SELECT id INTO v_user_id FROM users
-        WHERE linked_id = rec.security_id AND role = 'security' LIMIT 1;
-
         v_desc := 'Salary ' || TO_CHAR(rec.roster_date, 'DD-Mon-YYYY');
-
+ 
         INSERT INTO payments(
             society_id, entity_id, role, acc_id, description,
             roster_id, shift_date, amount, status, due_date, created_at
@@ -1055,7 +1040,6 @@ BEGIN
     END LOOP;
 END;
 $$;
-
 -- Single-row verify (admin Verify button on Payments tab).
 -- acc_id and description come directly from the payments row.
 DROP FUNCTION IF EXISTS fn_verify_payment CASCADE;
@@ -2219,14 +2203,14 @@ SELECT
     u.id          AS user_id,
     u.society_id,
     s.id          AS security_id,
-    COUNT(att.id) FILTER (WHERE att.time_out IS NOT NULL)  AS shift_count,
+    COUNT(ga.id) FILTER (WHERE ga.role = 's' AND ga.time_out IS NOT NULL) AS shift_count,
     EXISTS(
-        SELECT 1 FROM gate_access ga
-        WHERE ga.entity_id = u.id AND ga.role = 's' AND ga.time_out IS NULL
+        SELECT 1 FROM gate_access ga2
+        WHERE ga2.entity_id = u.id AND ga2.role = 's' AND ga2.time_out IS NULL
     ) AS gate_pass
 FROM users u
 JOIN security_staff s ON s.id = u.linked_id
-LEFT JOIN attendance att ON att.security_id = s.id
+LEFT JOIN gate_access ga ON ga.entity_id = u.id AND ga.role = 's'
 WHERE u.role = 'security'
 GROUP BY u.id, u.society_id, s.id;
 

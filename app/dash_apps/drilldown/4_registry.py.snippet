@@ -1,0 +1,57 @@
+# app/dash_apps/drilldown/registry.py
+# ─────────────────────────────────────────────────────────────────
+# CHANGE 1: PK_MAP — add security_roster
+# ─────────────────────────────────────────────────────────────────
+
+PK_MAP: dict = {
+    # ... existing entries unchanged ...
+    "attendance": "id",
+    "receivables": "id",
+    "payments": "id",
+    "assets": "id",
+    "security_roster": "id",
+}
+
+
+# ─────────────────────────────────────────────────────────────────
+# CHANGE 2: ENTITY_MAP — add security_roster (plural == singular)
+# ─────────────────────────────────────────────────────────────────
+
+ENTITY_MAP: dict = {
+    # ... existing entries unchanged ...
+    "attendance": "attendance_entry",
+    "receivables": "receivable",
+    "payments": "payment",
+    "assets": "asset",
+    "security_roster": "security_roster",
+}
+
+
+# ─────────────────────────────────────────────────────────────────
+# CHANGE 3: DRILLDOWN_MAP — KPI → list target
+# (add next to the existing kpi_attendance_count entry)
+# ─────────────────────────────────────────────────────────────────
+
+    "kpi_attendance_count": {
+        "target": "list_attendance",
+        "label": "Attendance Records",
+    },
+    "kpi_security_roster_count": {
+        "target": "list_security_roster",
+        "label": "Security Roster",
+    },
+
+
+# ─────────────────────────────────────────────────────────────────
+# CHANGE 4: DRILLDOWN_MAP — list → profile target
+# (add next to the existing list_attendance entry)
+# ─────────────────────────────────────────────────────────────────
+
+    "list_attendance": {
+        "target": "profile_attendance_entry",
+        "label": "Attendance Details",
+    },
+    "list_security_roster": {
+        "target": "profile_security_roster",
+        "label": "Roster Details",
+    },

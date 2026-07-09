@@ -36,6 +36,7 @@ PK_MAP: dict = {
     "receivables": "id",
     "payments": "id",
     "assets": "id",
+    "security_roster": "id",
 }
 
 
@@ -61,6 +62,7 @@ ENTITY_MAP: dict = {
     "receivables": "receivable",
     "payments": "payment",
     "assets": "asset",
+    "security_roster": "security_roster",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -254,6 +256,12 @@ DRILLDOWN_MAP: dict = {
         "target": "list_attendance",
         "label": "Attendance Records",
     },
+    "kpi_security_roster_count": {
+        "target": "list_security_roster",
+        "label": "Security Roster",
+    },
+
+
     "kpi_late_fees_due": {"target": "list_payments", "label": "Late Fees Due"},
     "kpi_maintenance_due": {"target": "list_payments", "label": "Maintenance Due"},
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
@@ -291,7 +299,14 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_attendance_entry",
         "label": "Attendance Details",
     },
-    "list_receivables": {"target": "profile_receivable", "label": "Receivable Details"},
+    "list_security_roster": {
+        "target": "profile_security_roster",
+        "label": "Roster Details",
+    },
+    "list_receivables": {
+        "target": "profile_receivable",
+        "label": "Receivable Details"
+    },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
         "actions": {
