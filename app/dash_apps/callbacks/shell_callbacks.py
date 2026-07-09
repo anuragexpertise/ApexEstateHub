@@ -26,7 +26,7 @@ Fixes in this version
 """
 
 import dash
-from dash import Input, Output, State, html, dcc, no_update
+from dash import Input, Output, State, html, dcc, no_update, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -544,5 +544,178 @@ def register_shell_callbacks(app):
             icon=t, duration=4000, is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("profile-action-trigger", "data"),
+        prevent_initial_call=True,
+    )
+    def _forward_profile_toast(data):
+        if not data or "_toast" not in data:
+            raise PreventUpdate
+        return data["_toast"]
+
+    @app.callback(
+        Output("notifications-store", "data"),
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("notifications-interval", "n_intervals"),
+        Input("auth-store", "data"),
+        State("notifications-store", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def _load_notifications(n_intervals, auth, store):
+        if not auth or not auth.get("authenticated") or not auth.get("user_id"):
+            return {"unread_count": 0, "items": []}, no_update
+        try:
+            from database.db_manager import db
+            unread = db._execute(
+                "SELECT COUNT(*) AS c FROM notifications WHERE user_id=:uid AND read=FALSE",
+                {"uid": auth["user_id"]}, fetch_one=True
+            )
+            items = db._execute(
+                """SELECT id, title, body, url, created_at FROM notifications
+                   WHERE user_id=:uid AND read=FALSE
+                   ORDER BY created_at DESC LIMIT 20""",
+                {"uid": auth["user_id"]}, fetch_all=True
+            ) or []
+            new_count = unread.get("c", 0) if unread else 0
+            new_store = {"unread_count": new_count, "items": items}
+            old_count = (store or {}).get("unread_count", 0)
+            if n_intervals and new_count > old_count and items:
+                latest = items[0]
+                toast = {
+                    "type": "info",
+                    "message": f"🔔 {latest.get('title', 'New notification')}",
+                }
+                return new_store, toast
+            return new_store, no_update
+        except Exception as e:
+            print(f"Notifications load error: {e}")
+            return store or {"unread_count": 0, "items": []}, no_update
+
+    @app.callback(
+        Output("notifications-dropdown", "style"),
+        Output("notifications-list", "children"),
+        Input("notifications-btn", "n_clicks"),
+        State("notifications-store", "data"),
+        State("notifications-dropdown", "style"),
+        prevent_initial_call=True,
+    )
+    def _toggle_notifications_dropdown(n_clicks, store, current_style):
+        if not n_clicks:
+            raise PreventUpdate
+        visible = (current_style or {}).get("display") != "none"
+        if visible:
+            return {"display": "none"}, no_update
+        items = (store or {}).get("items", [])
+        children = []
+        for item in items:
+            children.append(
+                html.Div(
+                    html.A(
+                        html.Div([
+                            html.Div(item.get("title", ""), style={"fontWeight": "600", "fontSize": "13px"}),
+                            html.Div(item.get("body", ""), style={"fontSize": "11px", "color": "#666", "marginTop": "2px"}),
+                            html.Small(item.get("created_at", ""), style={"fontSize": "10px", "color": "#aaa"}),
+                        ], style={"padding": "8px 10px", "borderRadius": "8px", "cursor": "pointer",
+                                  "textDecoration": "none", "color": "inherit",
+                                  "background": "#f8fafc"}),
+                        href=item.get("url", "/dashboard/"),
+                        id={"type": "notification-item", "notif_id": item["id"]},
+                        n_clicks=0,
+                    ),
+                    style={"marginBottom": "4px"},
+                )
+            )
+        if not children:
+            children = [html.P("No unread notifications", className="text-muted text-center",
+                                style={"fontSize": "12px", "padding": "12px 0"})]
+        return (
+            {"position": "fixed", "top": "68px", "right": "56px", "width": "340px",
+             "maxHeight": "420px", "background": "#fff", "border": "1px solid #e2e8f0",
+             "borderRadius": "12px", "boxShadow": "0 12px 40px rgba(0,0,0,0.15)",
+             "zIndex": "9998", "display": "block", "overflow": "hidden"},
+            children,
+        )
+
+    @app.callback(
+        Output("notifications-dropdown", "style", allow_duplicate=True),
+        Output("notifications-store", "data", allow_duplicate=True),
+        Output("toast-store", "data", allow_duplicate=True),
+        Input({"type": "notification-item", "notif_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _mark_notification_read(n_clicks_list, auth):
+        if not auth or not auth.get("user_id"):
+            raise PreventUpdate
+        triggered = [c for c in n_clicks_list if c]
+        if not triggered:
+            raise PreventUpdate
+        notif_id = triggered[0]
+        try:
+            from database.db_manager import db
+            row = db._execute(
+                "SELECT title FROM notifications WHERE id=:nid AND user_id=:uid AND read=FALSE",
+                {"nid": notif_id, "uid": auth["user_id"]}, fetch_one=True
+            )
+            db._execute(
+                "UPDATE notifications SET read=TRUE WHERE id=:nid AND user_id=:uid",
+                {"nid": notif_id, "uid": auth["user_id"]}
+            )
+            unread = db._execute(
+                "SELECT COUNT(*) AS c FROM notifications WHERE user_id=:uid AND read=FALSE",
+                {"uid": auth["user_id"]}, fetch_one=True
+            )
+            new_count = unread.get("c", 0) if unread else 0
+            items = db._execute(
+                """SELECT id, title, body, url, created_at FROM notifications
+                   WHERE user_id=:uid AND read=FALSE
+                   ORDER BY created_at DESC LIMIT 20""",
+                {"uid": auth["user_id"]}, fetch_all=True
+            ) or []
+            toast_data = {"type": "info", "message": f"Opened: {row['title'] if row else 'notification'}"}
+            return ({"display": "none"}, {"unread_count": new_count, "items": items}, toast_data)
+        except Exception as e:
+            print(f"Mark read error: {e}")
+            raise PreventUpdate
+
+    @app.callback(
+        Output("notifications-badge", "children"),
+        Output("notifications-badge", "style"),
+        Input("notifications-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _update_badge(store):
+        count = (store or {}).get("unread_count", 0)
+        if count > 0:
+            return str(count), {
+                "position": "absolute", "top": "-6px", "right": "-8px",
+                "background": "#ef4444", "color": "#fff", "fontSize": "10px",
+                "fontWeight": "700", "width": "18px", "height": "18px",
+                "borderRadius": "50%", "display": "flex",
+                "alignItems": "center", "justifyContent": "center",
+            }
+        return "0", {"display": "none"}
+
+    @app.callback(
+        Output("notifications-store", "data", allow_duplicate=True),
+        Input("notifications-mark-all", "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _mark_all_read(n_clicks, auth):
+        if not n_clicks or not auth or not auth.get("user_id"):
+            raise PreventUpdate
+        try:
+            from database.db_manager import db
+            db._execute(
+                "UPDATE notifications SET read=TRUE WHERE user_id=:uid AND read=FALSE",
+                {"uid": auth["user_id"]}
+            )
+            return {"unread_count": 0, "items": []}
+        except Exception as e:
+            print(f"Mark all read error: {e}")
+            raise PreventUpdate
     
     print("  ✓ Shell callbacks registered")

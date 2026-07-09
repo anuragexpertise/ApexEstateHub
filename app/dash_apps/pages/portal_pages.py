@@ -266,7 +266,6 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
                 "kpi_payables_total", "kpi_security_salaries_due",
                 "kpi_receipts_month", "kpi_receipts_total",
                 "kpi_expenses_month", "kpi_expenses_total",
-                "kpi_apartments_dues", "kpi_apartments_no_dues",
                 "kpi_advance_credits",
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),

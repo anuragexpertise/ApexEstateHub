@@ -63,6 +63,18 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_ven_charges", "admin", "settings", "Settings"),
     ("kpi_sec_charges", "admin", "settings", "Settings"),
     ("kpi_attendance", "admin", "settings", "Settings"),
+    # ADMIN - Financials tab
+    ("kpi_cash_in_hand", "admin", "financials", "Cashbook"),
+    ("kpi_bank_balance", "admin", "financials", "Cashbook"),
+    ("kpi_receivables_total", "admin", "financials", "Receivables"),
+    ("kpi_receivables_overdue", "admin", "financials", "Receivables"),
+    ("kpi_payables_total", "admin", "financials", "Payables"),
+    ("kpi_security_salaries_due", "admin", "financials", "Payables"),
+    ("kpi_receipts_month", "admin", "financials", "Receipts"),
+    ("kpi_receipts_total", "admin", "financials", "Receipts"),
+    ("kpi_expenses_month", "admin", "financials", "Expenses"),
+    ("kpi_expenses_total", "admin", "financials", "Expenses"),
+    ("kpi_advance_credits", "admin", "financials", "Prepaid"),
     # MASTER PORTAL - Dashboard
     ("kpi_societies_total", "master", "dashboard", "Master"),
     ("kpi_societies_free", "master", "dashboard", "Master"),

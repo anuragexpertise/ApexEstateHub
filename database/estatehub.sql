@@ -410,14 +410,28 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 CREATE TABLE IF NOT EXISTS society_settings (
-    id          SERIAL PRIMARY KEY,
-    society_id  INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    key         VARCHAR(100) NOT NULL,
-    value       TEXT,
-    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, key)   -- required: matches _upsert_layout's
-                               -- ON CONFLICT (society_id, key) target exactly
+     id          SERIAL PRIMARY KEY,
+     society_id  INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+     key         VARCHAR(100) NOT NULL,
+     value       TEXT,
+     updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+     UNIQUE (society_id, key)   -- required: matches _upsert_layout's
+                                -- ON CONFLICT (society_id, key) target exactly
+ );
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id                SERIAL PRIMARY KEY,
+    user_id           INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    society_id        INT REFERENCES societies(id) ON DELETE CASCADE,
+    title             VARCHAR(200) NOT NULL,
+    body              TEXT NOT NULL,
+    url               VARCHAR(500),
+    notification_type VARCHAR(50) NOT NULL DEFAULT 'push',
+    read              BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at DESC);
  
 
 -- ════════════════════════════════════════════════════════════════

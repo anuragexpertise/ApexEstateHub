@@ -178,6 +178,17 @@ KPI_CARDS = {
         "title": "Expenses (Month)", "group": "manual debits",
     },
 
+    "kpi_expenses_total": {
+        "query": """
+            SELECT COALESCE(SUM(e.amount), 0) AS v
+            FROM expenses e
+            WHERE e.society_id=%s AND e.status='confirmed'
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-receipt", "color": "#c0392b",
+        "title": "Expenses (All-Time)", "group": "manual debits",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # CASHBOOK / BALANCE — derived from transactions (the ledger)
     # drcr_account = '' treated as NULL (balance-sheet / asset accounts)
@@ -750,8 +761,6 @@ DEFAULT_LAYOUTS = {
             "kpi_receipts_total",
             "kpi_expenses_month",
             "kpi_expenses_total",
-            "kpi_apartments_dues",
-            "kpi_apartments_no_dues",
             "kpi_advance_credits",
         ],
         "events": ["kpi_events_total"],

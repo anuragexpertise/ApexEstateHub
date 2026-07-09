@@ -43,9 +43,27 @@ def get_push_subscription(user_id):
         logger.error(f"Push get error: {e}")
     return None
 
-def send_push_notification(user_id, title, body, icon=None, url=None):
+def _create_notification(user_id, title, body, society_id=None, url=None):
+    """Persist a notification row so the in-app inbox can surface it."""
+    try:
+        from database.db_manager import db
+        if society_id is None:
+            row = db._execute(
+                "SELECT society_id FROM users WHERE id = :user_id",
+                {"user_id": user_id}, fetch_one=True
+            )
+            society_id = row["society_id"] if row else None
+        db._execute(
+            """INSERT INTO notifications (user_id, society_id, title, body, url, notification_type, read, created_at)
+               VALUES (:user_id, :society_id, :title, :body, :url, 'push', FALSE, NOW())""",
+            {"user_id": user_id, "society_id": society_id, "title": title, "body": body,
+             "url": url or '/dashboard/'}
+        )
+    except Exception as e:
+        logger.error(f"create_notification error: {e}")
+
+def send_push_notification(user_id, title, body, icon=None, url=None, society_id=None):
     """Send push notification to user."""
-    # Guard clause - check VAPID keys
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
         logger.warning("Push notifications disabled: VAPID keys not configured.")
         return False, "VAPID keys not configured"
@@ -70,6 +88,7 @@ def send_push_notification(user_id, title, body, icon=None, url=None):
             vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
         )
         logger.info(f"Push notification sent to user {user_id}: {title}")
+        _create_notification(user_id, title, body, society_id=society_id, url=url)
         return True, "Notification sent"
     except WebPushException as e:
         logger.error(f"WebPush error: {e}")
@@ -122,12 +141,12 @@ def get_notification_targets(society_id, roles=None, exclude_user_id=None):
         return []
 
 
-def send_bulk_push(user_ids, title, body, url=None):
+def send_bulk_push(user_ids, title, body, url=None, society_id=None):
     """Send the same notification to a list of user_ids. Never raises."""
     sent, failed = 0, 0
     for uid in user_ids:
         try:
-            ok, _ = send_push_notification(uid, title, body, url=url)
+            ok, _ = send_push_notification(uid, title, body, url=url, society_id=society_id)
             sent += 1 if ok else 0
             failed += 0 if ok else 1
         except Exception as e:
@@ -154,7 +173,7 @@ def notify_event_created(society_id, event_title, open_to="all", event_date=None
     body = f"New event: {event_title}"
     if event_date:
         body += f" on {event_date}"
-    return send_bulk_push(targets, "📅 New Event", body, url="/dashboard/events")
+    return send_bulk_push(targets, "📅 New Event", body, url="/dashboard/events", society_id=society_id)
 
 
 def notify_concern_created(society_id, flat_no, concern_type):
@@ -163,7 +182,7 @@ def notify_concern_created(society_id, flat_no, concern_type):
     if not targets:
         return 0, 0
     body = f"New concern from Flat {flat_no}: {concern_type.replace('_',' ').title()}"
-    return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns")
+    return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns", society_id=society_id)
 
 
 def notify_concern_status_change(user_id, concern_type, new_status):
@@ -191,7 +210,7 @@ def notify_admin_payment_recorded(society_id, amount, particulars=None, exclude_
     if not targets:
         return 0, 0
     body = f"₹{float(amount):,.2f} recorded" + (f" — {particulars}" if particulars else "")
-    return send_bulk_push(targets, "💰 Payment Recorded", body, url="/dashboard/financials")
+    return send_bulk_push(targets, "💰 Payment Recorded", body, url="/dashboard/financials", society_id=society_id)
 
 
 def notify_dues_overdue(user_id, amount):
