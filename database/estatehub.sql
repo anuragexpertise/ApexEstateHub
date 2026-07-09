@@ -1537,7 +1537,7 @@ CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFA
 RETURNS TABLE (
     id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
     shift VARCHAR(20), mobile VARCHAR(15), active BOOLEAN, salary_per_shift NUMERIC(10,2),
-    joining_date DATE, shifts_completed BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), on_duty BOOLEAN
+    joining_date DATE, shift_count BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), gate_pass BOOLEAN
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -1555,9 +1555,9 @@ BEGIN
         COALESCE(s.name, u.email)::VARCHAR(100), COALESCE(s.shift,'—')::VARCHAR(20),
         COALESCE(s.mobile,'—')::VARCHAR(15), COALESCE(s.active,TRUE)::BOOLEAN,
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
-        COALESCE(ps.shifts_completed, 0)::BIGINT,
+        COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
-        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='s' AND ga.time_out IS NULL)::BOOLEAN
+        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='s' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
     FROM users u
     LEFT JOIN security_staff s ON s.id = u.linked_id
     LEFT JOIN pay_sum ps ON ps.staff_id = s.id
