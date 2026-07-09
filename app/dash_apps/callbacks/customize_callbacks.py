@@ -9,10 +9,8 @@ from app.dash_apps.pages.card_catalogue import (
     DEFAULT_LAYOUTS,
     make_kpi_card,
 )
- 
-DEFAULT_ACTIVE = DEFAULT_LAYOUTS.get("admin", list(KPI_CARDS.keys())[:4])
- 
- 
+
+
 def _kpi_ids_for_portal_tab(portal, tab):
     """Duplicate-safe KPI list for a given portal+tab."""
     try:
@@ -189,12 +187,12 @@ def register_customize_callbacks(app):
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
  
         # ── Active zone: load saved layout for this portal+tab ────────────
-        # Default = role-level default if nothing saved yet
-        default_active = list(DEFAULT_LAYOUTS.get(role, DEFAULT_ACTIVE[:]))
-        # If portal and tab are set, restrict default to that subset
-        if portal and tab:
-            default_active = [c for c in palette_ids if c in default_active] \
-                             or palette_ids[:4]
+        # Default active KPIs for this portal+tab come from DEFAULT_LAYOUTS
+        # — the same single source of truth the live dashboards render from,
+        # so the Customize editor's default matches what actually displays.
+        default_active = list(
+            DEFAULT_LAYOUTS.get(portal or role, {}).get(tab, [])
+        ) or palette_ids[:4]
  
         saved_active: list[str] = []
         if society_id and portal and tab:
@@ -304,10 +302,12 @@ def register_customize_callbacks(app):
         sid    = (auth_data or {}).get("society_id")
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
  
-        default_active = list(DEFAULT_LAYOUTS.get(role, DEFAULT_ACTIVE[:]))
-        if portal and tab:
-            default_active = [c for c in palette_ids if c in default_active] \
-                             or palette_ids[:4]
+        # Default active KPIs for this portal+tab come from DEFAULT_LAYOUTS
+        # — the same single source of truth the live dashboards render from,
+        # so the Customize editor's default matches what actually displays.
+        default_active = list(
+            DEFAULT_LAYOUTS.get(portal or role, {}).get(tab, [])
+        ) or palette_ids[:4]
         active_ids    = default_active[:12]
         available_ids = [c for c in palette_ids if c not in active_ids]
         values        = _fetch_kpi_values(sid)
