@@ -367,17 +367,19 @@ a {
 }
 
 .kpi-card .card,
-.kpi-row>.dnd-card>.card {
-    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+.kpi-row>.dnd-card>.card,
+.kpi-card>div {
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease !important;
 }
 
 .kpi-card:hover .card,
-.kpi-row>.dnd-card:hover>.card {
+.kpi-row>.dnd-card:hover>.card,
+.kpi-card:hover>div {
     transform: translateY(-4px);
     border-color: rgba(var(--theme-dark-rgb), 0.55) !important;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(var(--theme-light-rgb), 0.55)) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(var(--theme-light-rgb), 0.55)) !important;
     box-shadow:
-        0 24px 54px rgba(15, 23, 42, 0.16),
+        0 20px 44px rgba(15, 23, 42, 0.18),
         0 0 0 2px rgba(var(--theme-dark-rgb), 0.35) !important;
 }
 
