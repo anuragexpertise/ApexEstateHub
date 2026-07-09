@@ -259,7 +259,7 @@ def _header() -> html.Header:
                     html.Img(
                         id="hdr-society-logo",
                         src="/static/assets/EH_logo.png",
-                        style={"width": "200px", "height": "100px",
+                        style={"width": "50px", "height": "25px",
                                "borderRadius": "10px", "objectFit": "contain", "flexShrink": "0"},
                     ),
                     html.Div(

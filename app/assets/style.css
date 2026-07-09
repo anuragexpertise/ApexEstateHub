@@ -6,7 +6,7 @@
 :root {
     --sidebar-width: 276px;
     --sidebar-collapsed: 92px;
-    --header-height: 116px;
+    --header-height: 76px;
     --page-gap: 20px;
     --surface-gap: 16px;
     --radius-lg: 24px;
@@ -617,12 +617,7 @@ a {
 
 @media (max-width: 767px) {
     :root {
-        --header-height: 82px;
-    }
-
-    #hdr-society-logo {
-        width: 120px !important;
-        height: 60px !important;
+        --header-height: 72px;
     }
 
     .page-wrapper {
