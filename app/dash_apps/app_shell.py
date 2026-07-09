@@ -259,8 +259,8 @@ def _header() -> html.Header:
                     html.Img(
                         id="hdr-society-logo",
                         src="/static/assets/EH_logo.png",
-                        style={"width": "36px", "height": "36px",
-                               "borderRadius": "10px", "objectFit": "cover", "flexShrink": "0"},
+                        style={"width": "200px", "height": "100px",
+                               "borderRadius": "10px", "objectFit": "contain", "flexShrink": "0"},
                     ),
                     html.Div(
                         id="hdr-society-name",
@@ -458,12 +458,6 @@ def shell_layout() -> html.Div:
                                     ),
                                 ],
                                 id="main-content",
-                            ),
-                            html.Footer(
-                                html.Small("© 2025 EstateHub — Aiven PostgreSQL",
-                                           style={"color": "#aaa", "fontSize": "10px"}),
-                                className="glass-footer",
-                                style={"textAlign": "center", "padding": "10px"},
                             ),
                         ],
                         id="page-wrapper",

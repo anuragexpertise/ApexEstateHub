@@ -6,8 +6,7 @@
 :root {
     --sidebar-width: 276px;
     --sidebar-collapsed: 92px;
-    --header-height: 76px;
-    --footer-height: 64px;
+    --header-height: 116px;
     --page-gap: 20px;
     --surface-gap: 16px;
     --radius-lg: 24px;
@@ -188,13 +187,11 @@ a {
     padding-left: var(--sidebar-collapsed);
 }
 
-.app-sidebar.sidebar-open~.page-wrapper .glass-header,
-.app-sidebar.sidebar-open~.page-wrapper .glass-footer {
+.app-sidebar.sidebar-open~.page-wrapper .glass-header {
     left: var(--sidebar-collapsed);
 }
 
-.glass-header,
-.glass-footer {
+.glass-header {
     position: fixed;
     right: 0;
     left: var(--sidebar-width);
@@ -205,19 +202,10 @@ a {
     box-shadow: var(--glass-shadow-soft);
     transition: left 0.28s ease, transform 0.28s ease;
     z-index: 1030;
-}
-
-.glass-header {
     top: 0;
     min-height: var(--header-height);
-    margin: 14px 16px 0;
+    margin: 4px 5px 0;
     border-radius: 20px;
-}
-
-.glass-footer {
-    bottom: 0;
-    margin: 0 16px 14px;
-    border-radius: 18px;
 }
 
 .mobile-menu-btn {
@@ -243,7 +231,7 @@ a {
     display: flex;
     align-items: center;
     min-height: 48px;
-    margin: 0 16px;
+    margin: 0 5px;
     padding: 8px 16px;
     border-radius: 16px;
     background: linear-gradient(135deg, rgba(var(--theme-light-rgb), 0.5), rgba(255, 255, 255, 0.72));
@@ -321,7 +309,7 @@ a {
 
 #main-content {
     min-height: 100vh;
-    padding: calc(var(--header-height) + 26px) 0 calc(var(--footer-height) + 30px);
+    padding: calc(var(--header-height) + 26px) 0 24px;
 }
 
 #portal-content,
@@ -372,11 +360,25 @@ a {
 }
 
 .portal-page .card:hover,
-.dnd-card:hover,
-.kpi-card .card:hover {
+.dnd-card:hover {
     transform: translateY(-3px);
     transition: transform 0.22s ease, box-shadow 0.22s ease;
     box-shadow: 0 24px 54px rgba(15, 23, 42, 0.16) !important;
+}
+
+.kpi-card .card,
+.kpi-row>.dnd-card>.card {
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+}
+
+.kpi-card:hover .card,
+.kpi-row>.dnd-card:hover>.card {
+    transform: translateY(-4px);
+    border-color: rgba(var(--theme-dark-rgb), 0.55) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(var(--theme-light-rgb), 0.55)) !important;
+    box-shadow:
+        0 24px 54px rgba(15, 23, 42, 0.16),
+        0 0 0 2px rgba(var(--theme-dark-rgb), 0.35) !important;
 }
 
 .kpi-row {
@@ -580,22 +582,16 @@ a {
 
 .theme-master .glass-header,
 .theme-master .glass-breadcrumb,
-.theme-master .glass-footer,
 .theme-admin .glass-header,
 .theme-admin .glass-breadcrumb,
-.theme-admin .glass-footer,
 .theme-apartment .glass-header,
 .theme-apartment .glass-breadcrumb,
-.theme-apartment .glass-footer,
 .theme-vendor .glass-header,
 .theme-vendor .glass-breadcrumb,
-.theme-vendor .glass-footer,
 .theme-security .glass-header,
 .theme-security .glass-breadcrumb,
-.theme-security .glass-footer,
 .theme-guest .glass-header,
-.theme-guest .glass-breadcrumb,
-.theme-guest .glass-footer {
+.theme-guest .glass-breadcrumb {
     box-shadow:
         0 10px 30px rgba(15, 23, 42, 0.08),
         0 0 0 1px rgba(var(--theme-dark-rgb), 0.06);
@@ -621,8 +617,12 @@ a {
 
 @media (max-width: 767px) {
     :root {
-        --header-height: 72px;
-        --footer-height: 86px;
+        --header-height: 82px;
+    }
+
+    #hdr-society-logo {
+        width: 120px !important;
+        height: 60px !important;
     }
 
     .page-wrapper {
@@ -674,14 +674,12 @@ a {
     }
 
     .glass-header,
-    .glass-footer,
-    .app-sidebar.sidebar-open~.page-wrapper .glass-header,
-    .app-sidebar.sidebar-open~.page-wrapper .glass-footer {
+    .app-sidebar.sidebar-open~.page-wrapper .glass-header {
         left: 0;
     }
 
     .glass-header {
-        margin: 12px 12px 0;
+        margin: 4px 4px 0;
         padding: 0 12px !important;
         gap: 10px;
     }
@@ -696,10 +694,6 @@ a {
         min-width: 0 !important;
         font-size: 26px !important;
         padding: 0 8px !important;
-    }
-
-    .glass-footer {
-        margin: 0 12px 12px;
     }
 
     .mobile-menu-btn {
@@ -724,7 +718,7 @@ a {
 
     #main-content {
         padding-top: calc(var(--header-height) + 24px);
-        padding-bottom: calc(var(--footer-height) + 22px);
+        padding-bottom: 20px;
     }
 
     .portal-page {
@@ -743,12 +737,6 @@ a {
 
     .quick-actions-grid {
         grid-template-columns: 1fr;
-    }
-
-    .glass-footer>div {
-        flex-direction: column;
-        gap: 4px;
-        text-align: center;
     }
 
     .portal-page .card-header,
@@ -814,10 +802,6 @@ a {
     pointer-events: none;
 }
 
-.dnd-card[data-card-type="kpi"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-}
 .dnd-card[data-card-type="kpi"]:active {
     transform: translateY(0);
 }
