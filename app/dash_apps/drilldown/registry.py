@@ -87,18 +87,23 @@ DRILLDOWN_MAP: dict = {
     "kpi_apartments_dues": {
         "target": "list_apartments",
         "label": "Apartments With Dues",
-        "filter": {"has_dues": True},
+        "filter": {"pending_dues": {"gt":0.0}},
     },
     "kpi_apartments_no_dues": {
         "target": "list_apartments",
         "label": "Apartments No Dues",
-        "filter": {"has_dues": False},
+        "filter": {"pending_dues": {"eq":0.0}},
     },
     "kpi_vendors_total": {"target": "list_vendors", "label": "All Vendors"},
     "kpi_vendors_dues": {
         "target": "list_vendors",
         "label": "Vendors With Dues",
         "filter": {"has_dues": True},
+    },
+    "kpi_vendors_passes": {
+        "target": "list_vendors",
+        "label": "Vendors With Passes",
+        "filter": {"active_passes": {"gt": 0}},
     },
     "kpi_security_total": {"target": "list_security", "label": "Security Staff"},
     "kpi_security_on_duty": {

@@ -71,38 +71,54 @@ def load_list(
         # ── APARTMENTS ──────────────────────────────────────────────────────
         if entity == "apartments":
             # Portal scoping: apartment portal sees only their own flat
+            pdues_filter = filters.get("pending_dues", {})
+            if isinstance(pdues_filter, dict):
+                if "gt" in pdues_filter:
+                    p_has_dues = True
+                elif "eq" in pdues_filter:
+                    p_has_dues = pdues_filter.get("eq", 0.0) != 0.0
+                else:
+                    p_has_dues = False
+            else:
+                p_has_dues = bool(pdues_filter)
+            p_has_dues_sql = "TRUE" if p_has_dues else "FALSE"
             p_apt_id = _apt_id(filters)
             if p_apt_id:
                 rows = db._execute(
-                    "SELECT * FROM fn_apartments_list(%s,%s,NULL) WHERE id=%s",
+                    "SELECT * FROM fn_apartments_list(%s,%s," + p_has_dues_sql + ") WHERE id=%s",
                     (sid, s, p_apt_id), fetch_all=True,
                 ) or []
                 return rows, len(rows)
             rows = db._execute(
-                "SELECT * FROM fn_apartments_list(%s,%s,NULL) LIMIT %s OFFSET %s",
+                "SELECT * FROM fn_apartments_list(%s,%s," + p_has_dues_sql + ") LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_apartments_list(%s,NULL,NULL)", (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_apartments_list(%s,NULL," + p_has_dues_sql + ")", (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── VENDORS ─────────────────────────────────────────────────────────
         if entity == "vendors":
+            app_filter = filters.get("active_passes", {})
+            if isinstance(app_filter, dict):
+                p_has_passes = "gt" in app_filter
+            else:
+                p_has_passes = bool(app_filter)
+            p_has_passes_sql = "TRUE" if p_has_passes else "FALSE"
             p_ven_id = _ven_id(filters)
             if p_ven_id:
-                # vendor portal: return only this vendor's user row
                 rows = db._execute(
-                    "SELECT * FROM fn_vendors_list(%s,%s) WHERE id=%s",
+                    "SELECT * FROM fn_vendors_list(%s,%s," + p_has_passes_sql + ") WHERE id=%s",
                     (sid, s, p_ven_id), fetch_all=True,
                 ) or []
                 return rows, len(rows)
             rows = db._execute(
-                "SELECT * FROM fn_vendors_list(%s,%s) LIMIT %s OFFSET %s",
+                "SELECT * FROM fn_vendors_list(%s,%s," + p_has_passes_sql + ") LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_vendors_list(%s,NULL)", (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_vendors_list(%s,NULL," + p_has_passes_sql + ")", (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
@@ -844,7 +860,7 @@ def pay_apartment_dues_fifo(
 # LOAD VENDOR PASS RATES
 # ════════════════════════════════════════════════════════════════════════════
 def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
-    """Return {"1day": rate, "7day": rate, "1mth": rate} from ven_charges_fines_basis."""
+    """Return {"1day": rate, "7day": rate, "1mth": rate, "free_1mth": 0.0} from ven_charges_fines_basis."""
     try:
         # Get vendors.id from users.linked_id
         u = db._execute(
@@ -864,10 +880,11 @@ def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
             "1day": float(row.get("vendor_1day") or 0),
             "7day": float(row.get("vendor_7day") or 0),
             "1mth": float(row.get("vendor_1mth") or 0),
+            "free_1mth": 0.0,
         }
     except Exception as e:
         print(f"❌ load_vendor_pass_rates: {e}")
-        return {"1day": 0, "7day": 0, "1mth": 0}
+        return {"1day": 0, "7day": 0, "1mth": 0, "free_1mth": 0.0}
 
 # ════════════════════════════════════════════════════════════════════════════
 # VERIFY RECEIPT
