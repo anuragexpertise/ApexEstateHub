@@ -17,17 +17,21 @@ def create_dash_app(flask_app):
     here         = os.path.dirname(os.path.abspath(__file__))
     assets_folder = os.path.join(os.path.dirname(here), "assets")
     os.makedirs(assets_folder, exist_ok=True)
-
+    external_scripts = [
+        "https://unpkg.com/dash.nprogress@latest/dist/dash.nprogress.js",
+    ]
+    external_stylesheets = [
+        dbc.themes.BOOTSTRAP,
+        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+    ]
     dash_app = Dash(
         __name__,
         server               = flask_app,
         url_base_pathname    = "/dashboard/",
         assets_folder        = assets_folder,
         assets_url_path      = "/dashboard/assets",
-        external_stylesheets = [
-            dbc.themes.BOOTSTRAP,
-            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
-        ],
+        external_scripts     = external_scripts,
+        external_stylesheets = external_stylesheets,
         suppress_callback_exceptions = True,
         update_title         = "Loading… | EstateHub",
     )
