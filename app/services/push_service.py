@@ -63,16 +63,26 @@ def _create_notification(user_id, title, body, society_id=None, url=None):
         logger.error(f"create_notification error: {e}")
 
 def send_push_notification(user_id, title, body, icon=None, url=None, society_id=None):
-    """Send push notification to user."""
+    """Send push notification to user.
+
+    The in-app notification (which drives the dashboard toast/inbox via
+    polling) is always persisted first, independent of whether the actual
+    browser push succeeds. Push delivery requires VAPID keys to be
+    configured AND the user to have an active push_subscription; neither
+    of those should gate the in-app notification, or users who haven't
+    opted into browser push would never see anything at all.
+    """
+    _create_notification(user_id, title, body, society_id=society_id, url=url)
+
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
-        logger.warning("Push notifications disabled: VAPID keys not configured.")
+        logger.warning("Push notifications disabled: VAPID keys not configured. In-app notification still recorded.")
         return False, "VAPID keys not configured"
-    
+
     subscription = get_push_subscription(user_id)
     if not subscription:
-        logger.warning(f"No subscription found for user {user_id}")
+        logger.warning(f"No subscription found for user {user_id}. In-app notification still recorded.")
         return False, "No subscription found"
-    
+
     try:
         notification_data = {
             'title': title,
@@ -80,7 +90,7 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
             'icon': icon or '/static/assets/EH_logo.png',
             'url': url or '/dashboard/',
         }
-        
+
         webpush(
             subscription_info=subscription,
             data=json.dumps(notification_data),
@@ -88,7 +98,6 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
             vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
         )
         logger.info(f"Push notification sent to user {user_id}: {title}")
-        _create_notification(user_id, title, body, society_id=society_id, url=url)
         return True, "Notification sent"
     except WebPushException as e:
         logger.error(f"WebPush error: {e}")
@@ -121,12 +130,18 @@ def send_maintenance_update(user_id, apartment, status):
 
 def get_notification_targets(society_id, roles=None, exclude_user_id=None):
     """
-    Return user_ids in a society matching one or more roles, that have a
-    push_subscription on file. roles=None means all roles.
+    Return user_ids in a society matching one or more roles.
+
+    Deliberately NOT filtered to push_subscription IS NOT NULL: these ids
+    feed the in-app notification inbox/toast (via send_push_notification's
+    _create_notification call) as well as actual browser push. Excluding
+    non-subscribed users here would silently drop the in-app notification
+    for anyone who hasn't opted into browser push, even though the dashboard
+    toast has nothing to do with push delivery.
     """
     try:
         from database.db_manager import db
-        query = "SELECT id FROM users WHERE society_id = :sid AND push_subscription IS NOT NULL"
+        query = "SELECT id FROM users WHERE society_id = :sid"
         params = {"sid": society_id}
         if roles:
             query += " AND role = ANY(:roles)"
