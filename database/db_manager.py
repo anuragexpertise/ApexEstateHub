@@ -107,7 +107,7 @@ class DatabaseManager:
         try:
             dsn = self._dsn()
             self._pool = pool.ThreadedConnectionPool(
-                minconn=1,
+                minconn=5,
                 maxconn=10,
                 dsn=dsn,
                 cursor_factory=psycopg2.extras.RealDictCursor,
@@ -131,7 +131,11 @@ class DatabaseManager:
         if self._pool is None:
             raise RuntimeError("Database connection pool unavailable")
 
+        _t_get0 = time.monotonic()
         conn = self._pool.getconn()
+        _get_elapsed = time.monotonic() - _t_get0
+        if _get_elapsed > 0.5:
+            print(f"    ↳ getconn() took {_get_elapsed:.2f}s (new/blocked connection)")
         try:
             yield conn
             conn.commit()
@@ -166,30 +170,37 @@ class DatabaseManager:
 
         retries = 2
         for attempt in range(retries + 1):
+            _t0 = time.monotonic()
             try:
                 with self._conn() as conn:
+                    _t_exec0 = time.monotonic()
                     cur = conn.cursor()
                     cur.execute(converted_sql, converted_params)
+                    _exec_elapsed = time.monotonic() - _t_exec0
 
                     if fetch_one:
                         row = cur.fetchone()
+                        print(f"  ⏱ DB query ok (attempt {attempt + 1}) total={time.monotonic() - _t0:.2f}s exec={_exec_elapsed:.2f}s")
                         return dict(row) if row else None
 
                     if fetch_all:
                         rows = cur.fetchall()
+                        print(f"  ⏱ DB query ok (attempt {attempt + 1}) total={time.monotonic() - _t0:.2f}s exec={_exec_elapsed:.2f}s")
                         return [dict(r) for r in rows] if rows else []
 
+                    print(f"  ⏱ DB query ok (attempt {attempt + 1}) total={time.monotonic() - _t0:.2f}s exec={_exec_elapsed:.2f}s")
                     return None          # DML with no fetch
 
             except psycopg2.OperationalError as exc:
+                _elapsed = time.monotonic() - _t0
                 # Stale pooled connection — rebuild pool once
                 if attempt < retries:
-                    log.warning("DB operational error (attempt %d): %s", attempt + 1, exc)
+                    print(f"  ⚠️  DB operational error (attempt {attempt + 1}, {_elapsed:.2f}s elapsed): {exc}")
                     self._pool = None
                     self._init_pool()
                     time.sleep(0.5)
                 else:
-                    log.error("DB query failed after %d retries: %s", retries, exc)
+                    print(f"  ❌ DB query failed after {retries} retries ({_elapsed:.2f}s on final attempt): {exc}")
                     raise
 
     # Alias so existing code that calls db._execute() still works
