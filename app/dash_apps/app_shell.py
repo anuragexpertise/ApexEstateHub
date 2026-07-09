@@ -280,6 +280,28 @@ def _header() -> html.Header:
                 [
                     html.Div(id="hdr-entity-name", children="User",
                              style={"fontWeight": "600", "fontSize": "13px", "marginRight": "8px"}),
+                    html.Div([
+                        html.Button(
+                            html.I(className="far fa-bell"),
+                            id="notifications-btn",
+                            n_clicks=0,
+                            style={
+                                "background": "none", "border": "none", "color": "#fff",
+                                "fontSize": "18px", "cursor": "pointer", "position": "relative",
+                            },
+                        ),
+                        html.Span(
+                            id="notifications-badge",
+                            children="0",
+                            style={
+                                "position": "absolute", "top": "-6px", "right": "-8px",
+                                "background": "#ef4444", "color": "#fff", "fontSize": "10px",
+                                "fontWeight": "700", "width": "18px", "height": "18px",
+                                "borderRadius": "50%", "display": "none",
+                                "alignItems": "center", "justifyContent": "center",
+                            },
+                        ),
+                    ], style={"position": "relative", "marginRight": "8px"}),
                     html.Div(
                         id="hdr-avatar", children="?", n_clicks=0,
                         title="Show my QR code", role="button",
@@ -390,12 +412,14 @@ def shell_layout() -> html.Div:
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
             dcc.Store(id="portal-content-store",     storage_type="memory", data={"rendered": False}),
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
+            dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
             html.Div(id="dnd-init-dummy",            style={"display": "none"}),
             dcc.Input(id="dnd-order-capture", value="",
                       debounce=False,                style={"display": "none"}),
+            dcc.Interval(id="notifications-interval", interval=30_000, n_intervals=0),
 
             # ── Login modals ───────────────────────────────────────────────────
             _login_modal(),
@@ -454,6 +478,32 @@ def shell_layout() -> html.Div:
             html.Div(id="toast-container",
                      style={"position": "fixed", "top": "80px", "right": "16px",
                             "zIndex": "9999", "minWidth": "280px"}),
+
+            # ── Notifications dropdown ─────────────────────────────────────────
+            html.Div(
+                id="notifications-dropdown",
+                children=[
+                    html.Div([
+                        html.H6("Notifications", className="mb-2",
+                                style={"fontWeight": "700", "fontSize": "14px"}),
+                        dbc.Button("Mark all read", id="notifications-mark-all",
+                                    n_clicks=0, size="sm", color="link",
+                                    style={"fontSize": "11px", "padding": 0}),
+                    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
+                    html.Hr(style={"margin": "4px 0 8px"}),
+                    html.Div(id="notifications-list", children=[
+                        html.P("No notifications yet", className="text-muted text-center",
+                               style={"fontSize": "12px", "padding": "12px 0"}),
+                    ]),
+                ],
+                style={
+                    "position": "fixed", "top": "68px", "right": "56px",
+                    "width": "340px", "maxHeight": "420px",
+                    "background": "#fff", "border": "1px solid #e2e8f0",
+                    "borderRadius": "12px", "boxShadow": "0 12px 40px rgba(0,0,0,0.15)",
+                    "zIndex": "9998", "display": "none", "overflow": "hidden",
+                },
+            ),
 
             # ── QR modal ───────────────────────────────────────────────────────
             _qr_modal(),
