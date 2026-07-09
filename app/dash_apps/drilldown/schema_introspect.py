@@ -201,50 +201,105 @@ def _extract_check_options(check_clause: str) -> list[str]:
     return re.findall(r"'([^']*)'", check_clause or "")
 
 
-def get_table_columns(table_name: str) -> list[dict]:
+_SCHEMA_CACHE: dict | None = None
+
+
+def _load_schema_batch() -> dict:
+    """
+    One-shot introspection of every table in the 'public' schema: 4 total
+    queries (columns / PKs / FKs / check-constraints) instead of 4 queries
+    PER table. Raises on failure — callers decide how to handle that; this
+    function never partially-populates the cache.
+    """
     cols_raw = db._execute(
-        "SELECT column_name, data_type, is_nullable, column_default "
+        "SELECT table_name, column_name, data_type, is_nullable, column_default "
         "FROM information_schema.columns "
-        "WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position",
-        (table_name,), fetch_all=True,
+        "WHERE table_schema='public' ORDER BY table_name, ordinal_position",
+        (), fetch_all=True,
     ) or []
-    if not cols_raw:
-        return []
 
     pk_rows = db._execute(
-        "SELECT kcu.column_name FROM information_schema.table_constraints tc "
+        "SELECT tc.table_name, kcu.column_name "
+        "FROM information_schema.table_constraints tc "
         "JOIN information_schema.key_column_usage kcu "
         "  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema "
-        "WHERE tc.table_schema='public' AND tc.table_name=%s AND tc.constraint_type='PRIMARY KEY'",
-        (table_name,), fetch_all=True,
+        "WHERE tc.table_schema='public' AND tc.constraint_type='PRIMARY KEY'",
+        (), fetch_all=True,
     ) or []
-    pk_cols = {r["column_name"] for r in pk_rows}
 
     fk_rows = db._execute(
-        "SELECT kcu.column_name, ccu.table_name AS ref_table "
+        "SELECT tc.table_name, kcu.column_name, ccu.table_name AS ref_table "
         "FROM information_schema.table_constraints tc "
         "JOIN information_schema.key_column_usage kcu "
         "  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema "
         "JOIN information_schema.constraint_column_usage ccu "
         "  ON tc.constraint_name=ccu.constraint_name AND tc.table_schema=ccu.table_schema "
-        "WHERE tc.table_schema='public' AND tc.table_name=%s AND tc.constraint_type='FOREIGN KEY'",
-        (table_name,), fetch_all=True,
+        "WHERE tc.table_schema='public' AND tc.constraint_type='FOREIGN KEY'",
+        (), fetch_all=True,
     ) or []
-    fk_map = {r["column_name"]: r["ref_table"] for r in fk_rows}
 
     check_rows = db._execute(
-        "SELECT ccu.column_name, cc.check_clause "
+        "SELECT ccu.table_name, ccu.column_name, cc.check_clause "
         "FROM information_schema.check_constraints cc "
         "JOIN information_schema.constraint_column_usage ccu "
         "  ON cc.constraint_name=ccu.constraint_name AND cc.constraint_schema=ccu.constraint_schema "
-        "WHERE ccu.table_schema='public' AND ccu.table_name=%s",
-        (table_name,), fetch_all=True,
+        "WHERE ccu.table_schema='public'",
+        (), fetch_all=True,
     ) or []
-    check_options: dict[str, list[str]] = {}
+
+    pk_by_table: dict[str, set] = {}
+    for r in pk_rows:
+        pk_by_table.setdefault(r["table_name"], set()).add(r["column_name"])
+
+    fk_by_table: dict[str, dict] = {}
+    for r in fk_rows:
+        fk_by_table.setdefault(r["table_name"], {})[r["column_name"]] = r["ref_table"]
+
+    check_by_table: dict[str, dict] = {}
     for r in check_rows:
         opts = _extract_check_options(r.get("check_clause", ""))
         if opts:
-            check_options.setdefault(r["column_name"], []).extend(opts)
+            check_by_table.setdefault(r["table_name"], {}) \
+                          .setdefault(r["column_name"], []).extend(opts)
+
+    cols_by_table: dict[str, list] = {}
+    for r in cols_raw:
+        cols_by_table.setdefault(r["table_name"], []).append(r)
+
+    print(f"✓ schema_introspect: batched introspection loaded for {len(cols_by_table)} tables "
+          f"(4 queries total, was up to {len(cols_by_table) * 4})")
+
+    return {
+        "cols_by_table":  cols_by_table,
+        "pk_by_table":    pk_by_table,
+        "fk_by_table":    fk_by_table,
+        "check_by_table": check_by_table,
+    }
+
+
+def _get_schema_cache() -> dict:
+    global _SCHEMA_CACHE
+    if not _SCHEMA_CACHE:   # None OR {} (a previously failed load) → retry
+        _SCHEMA_CACHE = _load_schema_batch()
+    return _SCHEMA_CACHE
+
+
+def invalidate_schema_cache() -> None:
+    """Force the next get_table_columns()/build_entity_meta() call to re-introspect."""
+    global _SCHEMA_CACHE
+    _SCHEMA_CACHE = None
+
+
+def get_table_columns(table_name: str) -> list[dict]:
+    cache = _get_schema_cache()
+
+    cols_raw = cache["cols_by_table"].get(table_name, [])
+    if not cols_raw:
+        return []
+
+    pk_cols       = cache["pk_by_table"].get(table_name, set())
+    fk_map        = cache["fk_by_table"].get(table_name, {})
+    check_options = cache["check_by_table"].get(table_name, {})
 
     columns = []
     for r in cols_raw:
@@ -373,8 +428,18 @@ def build_entity_meta() -> dict:
 
     meta: dict = {}
 
+    # Load the batched schema data ONCE here. If this fails, fail fast with
+    # 4 query attempts total — don't let the loop below retry the whole
+    # batch load per-entity (which would defeat the point of batching).
+    _get_schema_cache()
+
     for ekey, table in ENTITY_TABLE_MAP.items():
-        columns = get_table_columns(table)
+        try:
+            columns = get_table_columns(table)
+        except Exception as e:
+            print(f"❌ schema_introspect: failed to introspect table '{table}' "
+                  f"for entity '{ekey}': {e} — skipping this entity only")
+            continue
         if not columns:
             print(f"⚠️  schema_introspect: table '{table}' not found for entity '{ekey}'")
             continue
@@ -498,12 +563,13 @@ _ENTITY_META_CACHE: dict | None = None
 
 def get_entity_meta() -> dict:
     global _ENTITY_META_CACHE
-    if _ENTITY_META_CACHE is None:
+    if not _ENTITY_META_CACHE:   # None OR {} (a previously failed build) → retry
         _ENTITY_META_CACHE = _safe_build()
     return _ENTITY_META_CACHE
 
 
 def refresh_entity_meta() -> dict:
     global _ENTITY_META_CACHE
+    invalidate_schema_cache()
     _ENTITY_META_CACHE = _safe_build()
     return _ENTITY_META_CACHE
