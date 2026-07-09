@@ -337,7 +337,7 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     society_id  INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     user_id     INT NOT NULL REFERENCES users(id),
     pass_type   VARCHAR(20) NOT NULL DEFAULT '1day'
-        CHECK (pass_type IN ('1day','7day','1mth')),
+        CHECK (pass_type IN ('1day','7day','1mth','free_1mth')),
     issued_date DATE DEFAULT CURRENT_DATE,
     valid_until DATE NOT NULL,
     status      VARCHAR(20) DEFAULT 'active',
@@ -1120,33 +1120,36 @@ DECLARE
     v_pass_id     INT;
     v_desc        TEXT;
 BEGIN
-    IF p_pass_type NOT IN ('1day','7day','1mth') THEN
-        RAISE EXCEPTION 'Invalid pass_type %. Use 1day / 7day / 1mth', p_pass_type;
+    IF p_pass_type NOT IN ('1day','7day','1mth','free_1mth') THEN
+        RAISE EXCEPTION 'Invalid pass_type %. Use 1day / 7day / 1mth / free_1mth', p_pass_type;
     END IF;
- 
+  
     SELECT society_id, linked_id INTO v_society_id, v_vendor_id
     FROM users WHERE id = p_user_id AND role = 'vendor';
     IF NOT FOUND THEN RAISE EXCEPTION 'Vendor user not found'; END IF;
- 
+  
     SELECT v.name INTO v_vendor_name FROM vendors v WHERE v.id = v_vendor_id;
- 
-    -- ven_pass_acc_id column removed — rate only
-    SELECT CASE p_pass_type
-        WHEN '1day' THEN vendor_1day
-        WHEN '7day' THEN vendor_7day
-        WHEN '1mth' THEN vendor_1mth
-    END
-    INTO v_rate
-    FROM ven_charges_fines_basis
-    WHERE society_id = v_society_id AND ven_status = TRUE
-      AND (ven_id = v_vendor_id OR ven_id IS NULL)
-    ORDER BY ven_id NULLS LAST, start_date DESC
-    LIMIT 1;
- 
-    IF v_rate IS NULL THEN
-        RAISE EXCEPTION 'No pass pricing configured for type % in ven_charges_fines_basis', p_pass_type;
+  
+    IF p_pass_type = 'free_1mth' THEN
+        v_rate := 0;
+    ELSE
+        SELECT CASE p_pass_type
+            WHEN '1day' THEN vendor_1day
+            WHEN '7day' THEN vendor_7day
+            WHEN '1mth' THEN vendor_1mth
+        END
+        INTO v_rate
+        FROM ven_charges_fines_basis
+        WHERE society_id = v_society_id AND ven_status = TRUE
+          AND (ven_id = v_vendor_id OR ven_id IS NULL)
+        ORDER BY ven_id NULLS LAST, start_date DESC
+        LIMIT 1;
+  
+        IF v_rate IS NULL THEN
+            RAISE EXCEPTION 'No pass pricing configured for type % in ven_charges_fines_basis', p_pass_type;
+        END IF;
     END IF;
- 
+  
     -- Caller-supplied acc_id wins; else resolve by name
     v_acc_id := p_acc_id;
     IF v_acc_id IS NULL THEN
@@ -1154,43 +1157,46 @@ BEGIN
         WHERE society_id = v_society_id AND name ILIKE '%Society Charge%' AND drcr_account = 'Cr'
         LIMIT 1;
     END IF;
- 
+  
     v_valid_until := CASE p_pass_type
         WHEN '1day' THEN p_issued_date + INTERVAL '1 day'
         WHEN '7day' THEN p_issued_date + INTERVAL '7 days'
         WHEN '1mth' THEN p_issued_date + INTERVAL '1 month'
+        WHEN 'free_1mth' THEN p_issued_date + INTERVAL '1 month'
     END::DATE;
- 
+  
     v_desc := COALESCE(p_particulars,
         'Vendor Pass (' || p_pass_type || ') - ' || COALESCE(v_vendor_name,''));
- 
-    -- Receipt: deemed paid immediately on creation
-    INSERT INTO receipts(
-        society_id, user_id, entity_id, role,
-        receipt_date, acc_id, particulars, amount, mode,
-        status, confirmed_by, confirmed_at, created_at
-    ) VALUES (
-        v_society_id, p_user_id, v_vendor_id, 'vendor',
-        p_issued_date, v_acc_id, v_desc, v_rate, p_mode,
-        'confirmed', p_created_by, NOW(), NOW()
-    ) RETURNING id INTO v_receipt_id;
- 
-    -- Transaction (acc_id directly from receipt, description as particulars)
-    INSERT INTO transactions(
-        society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
-    ) VALUES (
-        v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
-        v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
-    );
- 
+  
+    IF p_pass_type != 'free_1mth' THEN
+        -- Receipt: deemed paid immediately on creation
+        INSERT INTO receipts(
+            society_id, user_id, entity_id, role,
+            receipt_date, acc_id, particulars, amount, mode,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_user_id, v_vendor_id, 'vendor',
+            p_issued_date, v_acc_id, v_desc, v_rate, p_mode,
+            'confirmed', p_created_by, NOW(), NOW()
+        ) RETURNING id INTO v_receipt_id;
+  
+        -- Transaction (acc_id directly from receipt, description as particulars)
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id
+        ) VALUES (
+            v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
+            v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
+        );
+    END IF;
+  
     -- Vendor pass
     INSERT INTO vendor_passes(
         society_id, user_id, pass_type, issued_date, valid_until, status, created_at
     ) VALUES (
         v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, 'active', NOW()
     ) RETURNING id INTO v_pass_id;
- 
+  
     RETURN QUERY SELECT v_receipt_id, v_pass_id, v_valid_until;
 END;
 $$;
@@ -1493,7 +1499,11 @@ BEGIN
 END;
 $$;
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
-CREATE OR REPLACE FUNCTION fn_vendors_list(p_society_id INT, p_search TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION fn_vendors_list(
+    p_society_id INT,
+    p_search TEXT DEFAULT NULL,
+    p_has_passes BOOLEAN DEFAULT NULL
+)
 RETURNS TABLE (
     id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
     service_type VARCHAR(100), mobile VARCHAR(15), active BOOLEAN,
@@ -1515,6 +1525,9 @@ BEGIN
     LEFT JOIN vendors v ON v.id = u.linked_id
     WHERE u.society_id = p_society_id AND u.role = 'vendor'
       AND (p_search IS NULL OR v.name ILIKE '%'||p_search||'%' OR u.email ILIKE '%'||p_search||'%')
+      AND (p_has_passes IS NULL
+           OR (p_has_passes AND (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE) > 0)
+           OR (NOT p_has_passes AND (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE) <= 0))
     ORDER BY v.name;
 END;
 $$;

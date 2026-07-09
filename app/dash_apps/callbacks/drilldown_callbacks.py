@@ -955,7 +955,7 @@ def _render_card(
             record = loaders.load_profile("vendor", vendor_user_id, sid_val) or {} \
                      if vendor_user_id else {}
             # Load pass rates from ven_charges_fines_basis
-            rates = {"1day": 0.0, "7day": 0.0, "1mth": 0.0}
+            rates = {"1day": 0.0, "7day": 0.0, "1mth": 0.0, "free_1mth": 0.0}
             if vendor_user_id and sid_val:
                 try:
                     u = db._execute(
@@ -975,6 +975,7 @@ def _render_card(
                         "1day": float(row.get("vendor_1day") or 0),
                         "7day": float(row.get("vendor_7day") or 0),
                         "1mth": float(row.get("vendor_1mth") or 0),
+                        "free_1mth": 0.0,
                     }
                 except Exception as _e:
                     print(f"  ⚠️  vendor pass rates: {_e}")
@@ -1501,11 +1502,11 @@ def _save_vendor_pass(db, d, sid):
         return False, "Vendor user ID is required", None
 
     pass_type = (d.get("pass_type") or "").strip()
-    if pass_type not in ("1day", "7day", "1mth"):
-        return False, "Please select a pass type (1-Day / 7-Day / Monthly)", None
+    if pass_type not in ("1day", "7day", "1mth", "free_1mth"):
+        return False, "Please select a pass type (1-Day / 7-Day / Monthly / Free 1-Month)", None
 
     mode = d.get("mode", "cash")
-    if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
+    if pass_type != "free_1mth" and mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
 
     # ── acc_id auto-derived from account name, NOT from ven_charges_fines_basis ──

@@ -1315,28 +1315,37 @@ def render_vendor_pass_card(
                                     "padding": "8px 14px", "marginBottom": "12px"})
  
     # ── Rate summary cards ────────────────────────────────────────────────
-    rate_items = [("1day", "1-Day"), ("7day", "7-Day"), ("1mth", "Monthly")]
+    rate_items = [("1day", "1-Day"), ("7day", "7-Day"), ("1mth", "Monthly"), ("free_1mth", "Free (1 Month)")]
     rate_cols  = []
     for pt, label in rate_items:
         rate = rates.get(pt, 0)
+        if pt == "free_1mth":
+            rate_display = "FREE"
+            rate_color = "#17976e"
+        else:
+            rate_display = f"₹{float(rate):,.0f}" if rate else "—"
+            rate_color = "#15304f" if rate else "#bbb"
         rate_cols.append(dbc.Col(dbc.Card([
             html.Div(f"{label} Pass",
                      style={"fontSize": "10px", "color": "#7d8ea3",
                             "fontWeight": "600", "textTransform": "uppercase",
                             "marginBottom": "4px"}),
             html.Div(
-                f"₹{float(rate):,.0f}" if rate else "—",
+                rate_display,
                 style={"fontSize": "20px", "fontWeight": "800",
-                       "color": "#15304f" if rate else "#bbb"},
+                       "color": rate_color},
             ),
         ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
                               "textAlign": "center", "padding": "10px"}), width=4))
- 
+  
     # ── Pass type dropdown — shows rate inline ────────────────────────────
     pass_options = []
     for pt, label in rate_items:
         rate = rates.get(pt, 0)
-        rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (rate not set)"
+        if pt == "free_1mth":
+            rate_str = "  FREE"
+        else:
+            rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (rate not set)"
         pass_options.append({"label": f"{label} Pass  {rate_str}", "value": pt})
  
     return dbc.Card([
