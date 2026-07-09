@@ -286,7 +286,7 @@ def _header() -> html.Header:
                             id="notifications-btn",
                             n_clicks=0,
                             style={
-                                "background": "none", "border": "none", "color": "#fff",
+                                "background": "none", "border": "none", "color": "#000",
                                 "fontSize": "18px", "cursor": "pointer", "position": "relative",
                             },
                         ),
