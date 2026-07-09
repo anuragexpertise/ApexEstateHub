@@ -59,7 +59,7 @@ from app.dash_apps.drilldown.registry import (
     build_prefill,
 )
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
-
+import  app.services.push_service as PushService
 DB_ERROR_KEYWORDS = [
     "no database connection",
     "error in processing",
@@ -1260,7 +1260,22 @@ def _save_receipt_v3(db, d, sid):
                 ),
                 fetch_one=True,
             )
-            receipt_id = (r or {}).get("receipt_id")
+                        # NEW: notify payer + (if security-recorded) admins
+            try:
+                entity_id = d.get("entity_id")
+                role      = d.get("role")
+                if entity_id and role == "apartment":
+                    payer_user = db._execute(
+                        "SELECT u.id AS user_id FROM users u "
+                        "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='apartment'",
+                        (entity_id, sid), fetch_one=True,
+                    )
+                    if payer_user:
+                        PushService.notify_payment_received(payer_user["user_id"], amt, particulars)
+                if use_pending:
+                    PushService.notify_admin_payment_recorded(sid, amt, particulars, exclude_user_id=d.get("user_id"))
+            except Exception as e:
+                print(f"⚠️  payment push notify failed: {e}")
             return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
         else:
             r = db._execute(
@@ -1281,7 +1296,21 @@ def _save_receipt_v3(db, d, sid):
                 fetch_one=True,
             )
             receipt_id = (r or {}).get("receipt_id")
-            return True, f"Receipt of ₹{amt:,.2f} recorded", receipt_id
+            # NEW: notify payer + (if security-recorded) admins
+            try:
+                entity_id = d.get("entity_id")
+                role      = d.get("role")
+                if entity_id and role == "apartment":
+                    payer_user = db._execute(
+                        "SELECT u.id AS user_id FROM users u "
+                        "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='apartment'",
+                        (entity_id, sid), fetch_one=True,
+                    )
+                    if payer_user:
+                        PushService.notify_payment_received(payer_user["user_id"], amt, particulars)
+            except Exception as e:
+                print(f"⚠️  payment push notify failed: {e}")
+            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
     except Exception as e:
         return False, str(e), None
 
@@ -1399,13 +1428,21 @@ def _save_pay_dues(db, d, sid):
         confirmed_by = None
 
     ok, msg, result = loaders.pay_apartment_dues_fifo(
-        apartment_id=apt_id,
-        amount=amt,
-        mode=d.get("mode", "cash"),
-        confirmed_by=confirmed_by,
-        particulars=d.get("particulars"),
+        apartment_id=apt_id, amount=amt, mode=d.get("mode", "cash"),
+        confirmed_by=confirmed_by, particulars=d.get("particulars"),
     )
     trx_id = result.get("transaction_id") if ok and result else None
+    # NEW: confirm to the resident that payment was applied
+    if ok:
+        try:
+            payer_user = db._execute(
+                "SELECT id FROM users WHERE linked_id=%s AND society_id=%s AND role='apartment'",
+                (apt_id, sid), fetch_one=True,
+            )
+            if payer_user:
+                PushService.notify_payment_received(payer_user["id"], amt, d.get("particulars"))
+        except Exception as e:
+            print(f"⚠️  notify_payment_received (pay_dues) failed: {e}")
     return ok, msg, trx_id
 
 
@@ -1678,6 +1715,10 @@ def _save_event(db, d, sid, is_edit, pk):
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
+        try:    
+            PushService.notify_event_created(sid, d.get("title", "Event"), d.get("open_to", "all"), d.get("event_date"))
+        except Exception as e:
+            print(f"⚠️  notify_event_created failed: {e}")
         return True, "Event updated", pk
     title = (d.get("title") or "").strip()
     if not title:
@@ -1699,6 +1740,10 @@ def _save_event(db, d, sid, is_edit, pk):
         fetch_one=True,
     )
     new_id = (r or {}).get("id")
+    try:
+        PushService.notify_event_created(sid, title, d.get("open_to", "all"), d.get("event_date"))
+    except Exception as e:
+        print(f"⚠️  notify_event_created failed: {e}")
     return True, f"Event '{title}' created", new_id
 
 
@@ -1714,6 +1759,26 @@ def _save_concern(db, d, sid, is_edit, pk):
                 else (d.get("status", "open"), d.get("assigned_to"), pk, sid)
             ),
         )
+        try:
+            new_status = d.get("status", "open")
+            if new_status in ("in_progress", "resolved"):
+                concern_row = db._execute(
+                    "SELECT flat_no, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                    (pk, sid), fetch_one=True,
+                )
+                if concern_row and concern_row.get("flat_no"):
+                    owner = db._execute(
+                        "SELECT u.id AS user_id FROM users u "
+                        "JOIN apartments a ON a.id = u.linked_id "
+                        "WHERE a.flat_number = %s AND a.society_id = %s AND u.role='apartment'",
+                        (concern_row["flat_no"], sid), fetch_one=True,
+                    )
+                    if owner:
+                        PushService.notify_concern_status_change(
+                            owner["user_id"], concern_row["concern_type"], new_status
+                        )
+        except Exception as e:
+            print(f"⚠️  notify_concern_status_change failed: {e}")
         return True, "Concern updated", pk
     desc = (d.get("description") or "").strip()
     if not desc:
@@ -1733,6 +1798,10 @@ def _save_concern(db, d, sid, is_edit, pk):
         fetch_one=True,
     )
     new_id = (r or {}).get("id")
+    try:
+        PushService.notify_concern_created(sid, d.get("flat_no"), d.get("concern_type", "other"))
+    except Exception as e:
+        print(f"⚠️  notify_concern_created failed: {e}")
     return True, "Concern submitted", new_id
 
 
