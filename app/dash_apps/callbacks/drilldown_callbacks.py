@@ -1194,6 +1194,7 @@ def _save_entity(entity, card_id, data):
         if entity == "account":         return _save_account(db, data, sid, is_edit, pk)
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
+        if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
             return False, "Security charge rules have been removed. Use manual expenses for security payments.", None
         # ── PATCH: previously missing branches ──────────────────────────
@@ -2042,6 +2043,43 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         (r or {}).get("id"),
     )
 
+def _save_security_roster(db, d, sid, is_edit, pk):
+    # assigned_by is never a form field — it's always the logged-in
+    # admin, stamped generically as d["user_id"] before _save_entity
+    # is called (see "Always stamp user_id from auth" above).
+    security_id = d.get("security_id")
+    roster_date = d.get("roster_date")
+    shift_type  = d.get("shift_type")
+    assigned_by = d.get("user_id")
+
+    if not security_id or not roster_date or not shift_type:
+        return False, "Guard, shift date, and shift type are all required", None
+
+    if is_edit:
+        try:
+            db._execute(
+                "UPDATE security_roster SET security_id=%s, roster_date=%s, shift_type=%s"
+                " WHERE id=%s AND society_id=%s",
+                (security_id, roster_date, shift_type, pk, sid),
+            )
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
+                return False, "This guard already has a shift assigned on that date", None
+            raise
+        return True, "Roster updated", pk
+
+    try:
+        r = db._execute(
+            "INSERT INTO security_roster(society_id, security_id, roster_date, shift_type, assigned_by)"
+            " VALUES(%s,%s,%s,%s,%s) RETURNING id",
+            (sid, security_id, roster_date, shift_type, assigned_by),
+            fetch_one=True,
+        )
+    except Exception as e:
+        if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
+            return False, "This guard already has a shift assigned on that date", None
+        raise
+    return True, "Shift assigned", (r or {}).get("id")
 
 def _get_account_by_name(society_id, account_name):
     try:

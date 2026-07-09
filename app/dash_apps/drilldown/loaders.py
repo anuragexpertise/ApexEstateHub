@@ -406,6 +406,30 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── SECURITY ROSTER (duty/shift assignment) ─────────────────────
+        if entity == "security_roster":
+            extra_sql, extra_params = "", []
+            if sec_id:
+                extra_sql = " AND sr.security_id=%s"
+                extra_params.append(sec_id)
+            rows = db._execute(
+                "SELECT sr.*, "
+                "COALESCE(ss.name,'Unknown') AS security_name, "
+                "COALESCE(au.email,'') AS assigned_by_name "
+                "FROM security_roster sr "
+                "JOIN security_staff ss ON ss.id=sr.security_id "
+                "LEFT JOIN users au ON au.id=sr.assigned_by "
+                "WHERE sr.society_id=%s" + extra_sql +
+                " ORDER BY sr.roster_date DESC, sr.id DESC LIMIT %s OFFSET %s",
+                [sid] + extra_params + [page_size, offset], fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM security_roster sr "
+                "WHERE sr.society_id=%s" + extra_sql,
+                [sid] + extra_params, fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
@@ -645,6 +669,19 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 )
             return dict(r) if r else None
 
+        # ── SECURITY ROSTER ──────────────────────────────────────────────
+        if entity_singular == "security_roster":
+            r = db._execute(
+                "SELECT sr.*, "
+                "COALESCE(ss.name,'Unknown') AS security_name, "
+                "COALESCE(au.email,'') AS assigned_by_name "
+                "FROM security_roster sr "
+                "JOIN security_staff ss ON ss.id=sr.security_id "
+                "LEFT JOIN users au ON au.id=sr.assigned_by "
+                "WHERE sr.id=%s AND sr.society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
         return None
 
     except Exception as e:

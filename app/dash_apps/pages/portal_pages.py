@@ -460,6 +460,26 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
     if active_tab == "pass_evaluation":
         return _evaluate_pass_page()
 
+    if active_tab == "attendance":
+        return html.Div([
+            _page_title("fa-clock", c, "Attendance", "clock in/out for your shift"),
+            dbc.Card(
+                dbc.CardBody([
+                    html.Div(id="attendance-status", children=[
+                        html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#95a5a6"}),
+                        html.H5("Not clocked in"),
+                    ], style={"textAlign": "center", "marginBottom": "16px"}),
+                    html.Div([
+                        dbc.Button("Clock In", id="clock-in-btn", n_clicks=0,
+                                    color="success", className="me-2"),
+                        dbc.Button("Clock Out", id="clock-out-btn", n_clicks=0,
+                                    color="danger"),
+                    ], style={"textAlign": "center"}),
+                ]),
+                style={"maxWidth": "360px", "margin": "0 auto"},
+            ),
+        ], className="portal-page")
+
     if active_tab == "dashboard":
         return html.Div([
             _page_title("fa-users", c, "All Users", "registered members"),

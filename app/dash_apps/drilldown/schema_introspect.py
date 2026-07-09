@@ -38,7 +38,8 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "apt_charges":  "apt_charges_fines_basis",
     "ven_charges":  "ven_charges_fines_basis",
     "sec_charges":  "sec_charges_fines_basis",   # ← added
-    "attendance":   "gate_access",               # ← added (security shifts)
+    "attendance":   "gate_access",              # ← added (security shifts)
+    "security_roster": "security_roster",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -402,7 +403,12 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     "assets": {
         "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
     },
+    "security_roster": {
+        "assigned_by",   # always stamped from the logged-in admin, see
+                         # "Always stamp user_id from auth" in drilldown_callbacks.py
+    },
 }
+
 
 # Default values injected on the New-entity form for columns in
 # _HIDDEN_ON_FORM (or any column you want a non-DB-default value for at
