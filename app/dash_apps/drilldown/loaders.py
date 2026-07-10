@@ -197,6 +197,21 @@ def load_list(
             p_etype = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
             ) if not eid else None
+            # Security user_id filter: receipts are tied to users.id (created_by),
+            # not security_staff.id. When portal adds `user_id`, query directly.
+            sec_uid = filters.get("user_id") if filters.get("security_id") else None
+            if sec_uid and not eid:
+                rows = db._execute(
+                    "SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) WHERE user_id=%s "
+                    "LIMIT %s OFFSET %s",
+                    (sid, s, sec_uid, page_size, offset), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM receipts "
+                    "WHERE society_id=%s AND user_id=%s AND status='confirmed'",
+                    (sid, sec_uid), fetch_one=True,
+                )
+                return rows, int((cnt or {}).get("n", len(rows)))
             rows = db._execute(
                 "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,
@@ -205,6 +220,10 @@ def load_list(
                 "SELECT COUNT(*) AS n FROM fn_receipts_list(%s,NULL,%s,%s)",
                 (sid, p_eid, p_etype), fetch_one=True,
             )
+            # Fallback portal scoping: security users see only their own receipts
+            if sec_uid:
+                rows = [r for r in rows if r.get("user_id") == sec_uid]
+                cnt = {"n": len(rows)}
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── EXPENSES ────────────────────────────────────────────────────────

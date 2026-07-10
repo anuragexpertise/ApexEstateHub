@@ -205,8 +205,42 @@ def _divider() -> html.Hr:
 # MASTER PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def master_portal_page(sid=None) -> html.Div:
+def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
     c = _C["master"]
+    if active_tab == "master-create":
+        return html.Div([
+            _page_title("fa-crown", c, "Create Society"),
+            _sec_hdr("New Society Registration", "register a new society on the platform", "fa-building"),
+            dbc.Form([
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("Society Name", html_for="new-society-name"),
+                        dbc.Input(id="new-society-name", type="text", placeholder="Enter society name"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Label("Admin Email", html_for="new-society-email"),
+                        dbc.Input(id="new-society-email", type="email", placeholder="admin@society.com"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Label("Admin Password", html_for="new-society-password"),
+                        dbc.Input(id="new-society-password", type="password", placeholder="Min 8 characters"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Button([html.I(className="fas fa-plus me-2"), "Create Society"], id="master-create-society-btn", color="primary", className="me-2"),
+                        dbc.Button("Clear", id="master-clear-btn", color="secondary", outline=True),
+                    ], width=12),
+                ]),
+                html.Div(id="master-create-result", className="mt-3"),
+            ], className="p-4"),
+            html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+            _drill_panel(),
+        ], className="portal-page")
+    if active_tab == "master-settings":
+        return html.Div([
+            _page_title("fa-crown", c, "Master Settings"),
+            _sec_hdr("Platform Configuration", "global settings for all societies", "fa-cog"),
+            _drill_panel(),
+        ], className="portal-page")
     return html.Div([
         _page_title("fa-crown", c, "Master Admin Portal", "Manage all societies on this platform"),
         _sec_hdr("Platform Overview", "click any card to drill down", "fa-chart-bar"),
@@ -335,10 +369,21 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Receivables tab (NEW for apartment portal) ────────────────────────
+    # ── Financials ────────────────────────────────────────────────────────
+    if active_tab == "financials":
+        return html.Div([
+            _page_title("fa-book", c, "Financials", "Cashbook, bills, and charges"),
+            _kpi_row_dynamic(
+                "owner", "financials", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Receivables tab (apartment dues) ──────────────────────────────────
     if active_tab in ("receivables", "owner_dues"):
         return html.Div([
-            _page_title("fa-hand-holding-usd", c, "My Dues", "monthly maintenance + interest"),
+            _page_title("fa-hand-holding-usd", c, "Bills Due", "monthly maintenance + interest"),
             _kpi_row_dynamic(
                 "owner", "receivables", sid,
                 cols="repeat(auto-fill,minmax(148px,1fr))",
@@ -346,9 +391,19 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    if active_tab == "owner_receipts":
+        return html.Div([
+            _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
+            _kpi_row_dynamic(
+                "owner", "receipts", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
     if active_tab in ("cashbook", "owner_cashbook"):
         return html.Div([
-            _page_title("fa-book", c, "My Cashbook"),
+            _page_title("fa-book", c, "Cashbook"),
             _kpi_row_dynamic(
                 "owner", "cashbook", sid,
                 cols="repeat(auto-fill,minmax(148px,1fr))",
@@ -356,10 +411,13 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    if active_tab == "concerns":
+    if active_tab in ("charges", "owner_charges"):
         return html.Div([
-            _page_title("fa-hand-point-up", c, "My Concerns"),
-            _kpi_row_dynamic("owner", "concerns", sid, cols="1fr"),
+            _page_title("fa-file-invoice", c, "Charges"),
+            _kpi_row_dynamic(
+                "owner", "charges", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -370,13 +428,10 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    if active_tab in ("charges", "owner_charges"):
+    if active_tab == "concerns":
         return html.Div([
-            _page_title("fa-file-invoice", c, "My Charges"),
-            _kpi_row_dynamic(
-                "owner", "charges", sid,
-                cols="repeat(auto-fill,minmax(148px,1fr))",
-            ),
+            _page_title("fa-hand-point-up", c, "Concerns"),
+            _kpi_row_dynamic("owner", "concerns", sid, cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -409,12 +464,31 @@ def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Receivables tab (vendor's own pass charges / fines) ──────────────
-    if active_tab in ("receivables", "vendor_dues"):
+    if active_tab == "financials":
         return html.Div([
-            _page_title("fa-hand-holding-usd", c, "My Receivables"),
+            _page_title("fa-book", c, "Financials", "Cashbook, payments, and charges"),
             _kpi_row_dynamic(
-                "vendor", "receivables", sid,
+                "vendor", "financials", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "vendor_passes":
+        return html.Div([
+            _page_title("fa-id-card", c, "My Passes", "active and expired passes"),
+            _kpi_row_dynamic(
+                "vendor", "vendor_passes", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "vendor_receipts":
+        return html.Div([
+            _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
+            _kpi_row_dynamic(
+                "vendor", "receipts", sid,
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -425,6 +499,23 @@ def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _page_title("fa-book", c, "My Cashbook"),
             _kpi_row_dynamic(
                 "vendor", "cashbook", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "My Concerns"),
+            _kpi_row_dynamic("vendor", "concerns", sid, cols="1fr"),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("charges", "vendor_charges"):
+        return html.Div([
+            _page_title("fa-file-invoice", c, "My Charges"),
+            _kpi_row_dynamic(
+                "vendor", "charges", sid,
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -513,8 +604,29 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
 
     if active_tab == "security_receipt":
         return html.Div([
-            _page_title("fa-plus-circle", c, "New Receipt", "collect cash payables at gate"),
+            _page_title("fa-plus-circle", c, "New Receipt", "collect cash at gate"),
             _kpi_row_dynamic("security", "security_receipt", sid, cols="1fr"),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_receipts":
+        return html.Div([
+            _page_title("fa-receipt", c, "My Receipts", "your collected receipts"),
+            _kpi_row_dynamic("security", "security_receipts", sid, cols="1fr"),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_events":
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events"),
+            _kpi_row_dynamic("security", "events", sid, cols="1fr"),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "My Concerns"),
+            _kpi_row_dynamic("security", "concerns", sid, cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")
 

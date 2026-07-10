@@ -667,19 +667,18 @@ KPI_CARDS = {
         "icon": "fa-list-alt", "color": "#b63b3b",
         "title": "Security Pay Records", "group": "all rules",
     },
- 
-    "kpi_security_salary_due": {
+  
+    "kpi_security_salaries_paid": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payables
-            WHERE society_id=%s AND role='security' AND status='pending'
+            WHERE society_id=%s AND role='security' AND status='verified'
         """,
         "params": 1, "format": "currency",
-        "icon": "fa-rupee-sign", "color": "#b63b3b",
-        "title": "Security Salary Due", "group": "pending",
+        "icon": "fa-check-double", "color": "#17976e",
+        "title": "Security Salary Paid", "group": "verified",
     },
- 
-    "kpi_security_bonus_due": {
+    "kpi_security_paid_for_month": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payables
@@ -688,9 +687,20 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-check-circle", "color": "#17976e",
-        "title": "Salary Paid (Month)", "group": "pending",
+        "title": "Salary Paid (Month)", "group": "verified this month",
     },
- 
+  
+    "kpi_security_receipts": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM receipts
+            WHERE society_id=%s AND status='confirmed'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-receipt", "color": "#17976e",
+        "title": "My Receipts", "group": "collected",
+    },
+  
     "kpi_security_shift": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
@@ -790,30 +800,43 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
-            "kpi_concerns_open",
-            "kpi_events_total",
             "kpi_gate_logs",
+        ],
+        "financials": [
+            "kpi_cash_in_hand",
+            "kpi_my_pending_dues",
+            "kpi_my_overdue_dues",
+            "kpi_maintainence_charges",
         ],
         "receivables": [
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
         ],
-        "cashbook": ["kpi_my_pending_dues"],
+        "cashbook": ["kpi_cash_in_hand"],
+        "owner_receipts": ["kpi_receipts_total"],
+        "charges": ["kpi_maintainence_charges", "kpi_apt_charges_count"],
         "concerns": ["kpi_concerns_open"],
         "events": ["kpi_events_total"],
-        "charges": ["kpi_maintainence_charges"],
         "settings": [],
     },
     "vendor": {
         "dashboard": [
             "kpi_my_pass_expiry",
-            "kpi_concerns_open",
-            "kpi_events_total",
             "kpi_gate_logs",
         ],
-        "receivables": ["kpi_my_pass_expiry"],
-        "cashbook": ["kpi_receipts_month"],
+        "financials": [
+            "kpi_cash_in_hand",
+            "kpi_receipts_total",
+            "kpi_ven_charges_count",
+        ],
+        "vendor_passes": [
+            "kpi_my_pass_expiry",
+        ],
+        "vendor_receipts": ["kpi_receipts_total"],
+        "cashbook": ["kpi_cash_in_hand"],
+        "concerns": ["kpi_concerns_open"],
+        "charges": ["kpi_ven_charges_count", "kpi_vendor_other_charges"],
         "events": ["kpi_events_total"],
         "settings": ["kpi_vendor_date"],
     },
@@ -827,11 +850,14 @@ DEFAULT_LAYOUTS = {
         ],
         "payables": [
             "kpi_security_salaries_due",
-            "kpi_security_salaries_paid",
+            "kpi_security_paid_for_month",
             "kpi_security_shifts_pending",
         ],
         "cashbook": ["kpi_receipts_month", "kpi_expenses_month"],
         "security_receipt": ["kpi_receipts_month"],
+        "security_receipts": ["kpi_security_receipts"],
+        "security_events": ["kpi_events_total"],
+        "security_concerns": ["kpi_concerns_open"],
         "settings": [
             "kpi_security_date",
             "kpi_security_salary_per_shift",

@@ -225,8 +225,15 @@ DRILLDOWN_MAP: dict = {
         "label": "Shifts Unpaid",
         "filter": {"role": "security", "status": "pending"},
     },
-    "kpi_security_salary_due": {"target": "list_payables", "label": "Salary Due"},
-    "kpi_security_bonus_due": {"target": "list_payables", "label": "Bonus Due"},
+    # ── KPI → LIST ─────────────────────────────────────────────────────────
+    "kpi_security_paid_for_month": {
+        "target": "list_payables",
+        "label": "Salary Paid (Month)",
+    },
+    "kpi_security_receipts": {
+        "target": "list_receipts",
+        "label": "My Receipts",
+    },
     # MASTER PORTAL KPIs
     "kpi_societies_total": {"target": "list_societies", "label": "All Societies"},
     "kpi_societies_9Apts": {
