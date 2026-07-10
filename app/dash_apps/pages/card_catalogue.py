@@ -772,7 +772,7 @@ DEFAULT_LAYOUTS = {
             "kpi_apartments_total",
             "kpi_vendors_total",
             "kpi_security_total",
-            "kpi_shifts_roster_count",
+            "kpi_security_roster_count",
         ],
         "financials": [
             "kpi_receivables_overdue",

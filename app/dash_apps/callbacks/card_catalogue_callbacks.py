@@ -118,6 +118,12 @@ def register_card_catalogue_callbacks(app):
                         "AND status IN ('pending','partial')",
                         (apt_id,),
                     ),
+                    "kpi_advance_credits": (
+                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        "FROM receivables WHERE entity_id=%s AND role='apartment' "
+                        "AND status='credit'",
+                        (apt_id,),
+                    ),
                     "kpi_receipts_month": (
                         "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
                         "WHERE entity_id=%s AND role='apartment' AND status='confirmed' "
@@ -159,6 +165,12 @@ def register_card_catalogue_callbacks(app):
                         "FROM receivables WHERE entity_id=%s AND role='vendor' "
                         "AND status IN ('pending','partial')",
                         (vendor_id,),
+                    ),
+                    "kpi_my_pass_expiry": (
+                        "SELECT MAX(vp.valid_until)::DATE AS v FROM vendor_passes vp "
+                        "JOIN users u ON u.id=vp.user_id "
+                        "WHERE u.society_id=%s AND u.linked_id=%s AND vp.status='active'",
+                        (sid, vendor_id,),
                     ),
                     "kpi_gate_logs": (
                         # Same fix as the apartment override above: vendor_id
