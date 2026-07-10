@@ -226,10 +226,10 @@ CREATE TABLE IF NOT EXISTS receipts (
     id              SERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     user_id         INT REFERENCES users(id),
-    entity_id       INT,
-    role            VARCHAR(20) CHECK (role IN ('apartment','vendor','security','other')),
     receipt_date    DATE NOT NULL,
     acc_id          INT REFERENCES accounts(id),   -- income account (Cr) — IS the category
+    role            VARCHAR(20) CHECK (role IN ('apartment','vendor','security','other')),
+    entity_id       INT,
     particulars     TEXT NOT NULL,                 -- human-readable label; suggested from Python PARTICULARS_TEMPLATES
     amount          NUMERIC(10,2) NOT NULL CHECK (amount > 0),
     mode            VARCHAR(20) DEFAULT 'cash'
