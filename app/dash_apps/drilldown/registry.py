@@ -24,8 +24,8 @@ PK_MAP: dict = {
     "events": "id",
     "concerns": "id",
     "gate_logs": "id",
-    "receipts_tbl": "id",
-    "expenses_tbl": "id",
+    "receipts": "id",
+    "expenses": "id",
     "cashbook": "id",
     "societies": "id",
     "accounts": "id",
@@ -34,7 +34,7 @@ PK_MAP: dict = {
     "sec_charges": "id",
     "attendance": "id",
     "receivables": "id",
-    "payments": "id",
+    "payables": "id",
     "assets": "id",
     "security_roster": "id",
 }
@@ -50,8 +50,8 @@ ENTITY_MAP: dict = {
     "events": "event",
     "concerns": "concern",
     "gate_logs": "gate_log",
-    "receipts_tbl": "receipt_entry",
-    "expenses_tbl": "expense_entry",
+    "receipts": "receipt_entry",
+    "expenses": "expense_entry",
     "cashbook": "transaction",
     "societies": "society",
     "accounts": "account",
@@ -60,7 +60,7 @@ ENTITY_MAP: dict = {
     "sec_charges": "sec_charge",
     "attendance": "attendance_entry",
     "receivables": "receivable",
-    "payments": "payment",
+    "payables": "payment",
     "assets": "asset",
     "security_roster": "security_roster",
 }
@@ -117,11 +117,11 @@ DRILLDOWN_MAP: dict = {
     "kpi_concerns_open": {"target": "list_concerns", "label": "Open Concerns"},
     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
     "kpi_receipts_month": {
-        "target": "list_receipts_tbl",
+        "target": "list_receipts",
         "label": "Receipts This Month",
     },
     "kpi_expenses_month": {
-        "target": "list_expenses_tbl",
+        "target": "list_expenses",
         "label": "Expenses This Month",
     },
     "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"},
@@ -145,21 +145,21 @@ DRILLDOWN_MAP: dict = {
         "filter": {"status": "credit"},
     },
     "kpi_receipts_pending": {
-        "target": "list_receipts_tbl",
+        "target": "list_receipts",
         "label": "Receipts Pending Confirmation",
         "filter": {"status": "pending"},
     },
 
-    "kpi_payables_total": {"target": "list_expenses_tbl", "label": "Payables Total"},
+    "kpi_payables_total": {"target": "list_expenses", "label": "Payables Total"},
     "kpi_vendor_payables_due": {
-        "target": "list_payments",
+        "target": "list_payables",
         "label": "Vendor Payables Due",
     },
     "kpi_security_salaries_due": {
-        "target": "list_payments",
+        "target": "list_payables",
         "label": "Security Salaries Due",
     },
-    "kpi_amc_due": {"target": "list_expenses_tbl", "label": "AMC Due"},
+    "kpi_amc_due": {"target": "list_expenses", "label": "AMC Due"},
     "kpi_maintainence_charges": {
         "target": "list_apt_charges",
         "label": "Maintenance Charges",
@@ -184,8 +184,8 @@ DRILLDOWN_MAP: dict = {
         "label": "Receipts in Hand",
     },
     "kpi_security_shift_count": {"target": "list_security", "label": "Shift Count"},
-    "kpi_security_salary_due": {"target": "list_payments", "label": "Salary Due"},
-    "kpi_security_bonus_due": {"target": "list_payments", "label": "Bonus Due"},
+    "kpi_security_salary_due": {"target": "list_payables", "label": "Salary Due"},
+    "kpi_security_bonus_due": {"target": "list_payables", "label": "Bonus Due"},
     # MASTER PORTAL KPIs
     "kpi_societies_total": {"target": "list_societies", "label": "All Societies"},
     "kpi_societies_9Apts": {
@@ -273,8 +273,8 @@ DRILLDOWN_MAP: dict = {
     },
 
 
-    "kpi_late_fees_due": {"target": "list_payments", "label": "Late Fees Due"},
-    "kpi_maintenance_due": {"target": "list_payments", "label": "Maintenance Due"},
+    "kpi_late_fees_due": {"target": "list_payables", "label": "Late Fees Due"},
+    "kpi_maintenance_due": {"target": "list_payables", "label": "Maintenance Due"},
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
     "list_apartments": {"target": "profile_apartment", "label": "Apartment Profile"},
     "list_vendors": {"target": "profile_vendor", "label": "Vendor Profile"},
@@ -282,11 +282,11 @@ DRILLDOWN_MAP: dict = {
     "list_events": {"target": "profile_event", "label": "Event Details"},
     "list_concerns": {"target": "profile_concern", "label": "Concern Details"},
     "list_gate_logs": {"target": "profile_gate_log", "label": "Gate Log Details"},
-    "list_receipts_tbl": {
+    "list_receipts": {
         "target": "profile_receipt_entry",
         "label": "Receipt Details",
     },
-    "list_expenses_tbl": {
+    "list_expenses": {
         "target": "profile_expense_entry",
         "label": "Expense Details",
     },
@@ -444,10 +444,10 @@ try:
             actions["edit"] = {"target": f"form_{singular}_edit", "prefill": {"*": "*"}}
         # financial show_transactions action for financial-like entities
         if plural in (
-            "receipts_tbl",
-            "expenses_tbl",
+            "receipts",
+            "expenses",
             "receivables",
-            "payments",
+            "payables",
             "cashbook",
             "transactions",
         ):

@@ -4,9 +4,9 @@ KPI Card Catalogue — EstateHub v3
 ===================================
 All financial KPIs now query the authoritative tables directly:
   receivables  → credits (auto-generated monthly dues + interest)
-  payments     → debits  (auto-generated security payroll per roster shift)
+  payables     → debits  (auto-generated security payroll per roster shift)
   receipts     → manual credits (fines, donations, pass sales, etc.)
-  expenses     → manual debits  (vendor payments, utilities, etc.)
+  expenses     → manual debits  (vendor payables, utilities, etc.)
   transactions → the ledger (source of truth for cashbook / balances)
 
 drcr_account semantics:
@@ -109,13 +109,13 @@ KPI_CARDS = {
     },
 
     # ══════════════════════════════════════════════════════════════════════
-    # PAYMENTS (security payroll — auto-generated, pending verification)
+    # payables (security payroll — auto-generated, pending verification)
     # ══════════════════════════════════════════════════════════════════════
 
     "kpi_payables_total": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND status='pending'
         """,
         "params": 1, "format": "currency",
@@ -126,7 +126,7 @@ KPI_CARDS = {
     "kpi_security_salaries_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security' AND status='pending'
         """,
         "params": 1, "format": "currency",
@@ -137,7 +137,7 @@ KPI_CARDS = {
     "kpi_security_salaries_paid": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security' AND status='verified'
         """,
         "params": 1, "format": "currency",
@@ -298,7 +298,7 @@ KPI_CARDS = {
 
     "kpi_security_shifts_pending": {
         "query": """
-            SELECT COUNT(*) AS v FROM payments
+            SELECT COUNT(*) AS v FROM payables
             WHERE society_id=%s AND role='security' AND status='pending'
         """,
         "params": 1, "format": "number",
@@ -533,7 +533,7 @@ KPI_CARDS = {
     },
  
     "kpi_sec_charges_count": {
-        "query": "SELECT COUNT(*) AS v FROM payments WHERE society_id=%s AND role='security' AND status='pending'",
+        "query": "SELECT COUNT(*) AS v FROM payables WHERE society_id=%s AND role='security' AND status='pending'",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#b63b3b",
         "title": "Security Pending Pays", "group": "active",
@@ -588,7 +588,7 @@ KPI_CARDS = {
     "kpi_vendor_payables_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='vendor' AND status='pending'
         """,
         "params": 1, "format": "currency",
@@ -662,7 +662,7 @@ KPI_CARDS = {
     "kpi_security_fines": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security' AND status='pending'
         """,
         "params": 1, "format": "currency",
@@ -673,7 +673,7 @@ KPI_CARDS = {
     "kpi_security_other_charges": {
         "query": """
             SELECT COUNT(*) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security'
         """,
         "params": 1, "format": "number",
@@ -684,7 +684,7 @@ KPI_CARDS = {
     "kpi_security_salary_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security' AND status='pending'
         """,
         "params": 1, "format": "currency",
@@ -695,7 +695,7 @@ KPI_CARDS = {
     "kpi_security_bonus_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payments
+            FROM payables
             WHERE society_id=%s AND role='security' AND status='verified'
               AND shift_date >= DATE_TRUNC('month', CURRENT_DATE)
         """,
@@ -772,6 +772,7 @@ DEFAULT_LAYOUTS = {
             "kpi_apartments_total",
             "kpi_vendors_total",
             "kpi_security_total",
+            "kpi_shifts_roster_count",
         ],
         "financials": [
             "kpi_receivables_overdue",
@@ -837,7 +838,7 @@ DEFAULT_LAYOUTS = {
             "kpi_security_shift_count",
             "kpi_receipts_in_hand_total",
         ],
-        "payments": [
+        "payables": [
             "kpi_security_salaries_due",
             "kpi_security_salaries_paid",
             "kpi_security_shifts_pending",

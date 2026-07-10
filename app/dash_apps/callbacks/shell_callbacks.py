@@ -121,8 +121,8 @@ _PATH_LABELS = {
     "owner-settings":    "Settings",
     "vendor-settings":   "Settings",
     "security-settings": "Settings",
-    "payments":          "Payments",
-    "vendor-payments":   "Payments",
+    "payables":          "payables",
+    "vendor-payables":   "payables",
     "charges":           "Charges",
     "vendor-charges":    "Charges",
     "concerns":          "Concerns",
@@ -184,7 +184,7 @@ def _portal_content(role, society_id, pathname):
     if role == "apartment":
         tab = (
             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
-            "payments" if "/payments"       in p else
+            "payables" if "/payables"       in p else
             "charges"  if "/charges"        in p else
             "events"   if "/owner-events"   in p or "/events"   in p else
             "concerns" if "/concerns"       in p else
@@ -195,7 +195,7 @@ def _portal_content(role, society_id, pathname):
     if role == "vendor":
         tab = (
             "cashbook" if "/vendor-cashbook" in p or "/cashbook" in p else
-            "payments" if "/vendor-payments" in p or "/payments" in p else
+            "payables" if "/vendor-payables" in p or "/payables" in p else
             "charges"  if "/vendor-charges"  in p or "/charges"  in p else
             "events"   if "/vendor-events"   in p or "/events"   in p else
             "settings" if "/vendor-settings" in p or "/settings" in p else

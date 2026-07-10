@@ -179,7 +179,7 @@ def register_card_catalogue_callbacks(app):
                         (sec_id,),
                     ),
                     "kpi_security_salary_due": (
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payments "
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payables "
                         "WHERE entity_id=%s AND role='security' AND status='pending'",
                         (sec_id,),
                     ),

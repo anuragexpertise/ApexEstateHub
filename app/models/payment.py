@@ -2,7 +2,7 @@ from app import db
 from datetime import datetime
 
 class Payment(db.Model):
-    __tablename__ = 'payments'
+    __tablename__ = 'payables'
     
     id = db.Column(db.Integer, primary_key=True)
     society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=False, index=True)
@@ -18,13 +18,13 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     
     # Relationships
-    user = db.relationship('User', backref='payments')
-    apartment = db.relationship('Apartment', backref='payments')
+    user = db.relationship('User', backref='payables')
+    apartment = db.relationship('Apartment', backref='payables')
     
     __table_args__ = (
-        db.Index('idx_payments_society_status', 'society_id', 'status'),
-        db.Index('idx_payments_user', 'user_id'),
-        db.Index('idx_payments_due_date', 'due_date'),
+        db.Index('idx_payables_society_status', 'society_id', 'status'),
+        db.Index('idx_payables_user', 'user_id'),
+        db.Index('idx_payables_due_date', 'due_date'),
     )
     
     def verify(self):

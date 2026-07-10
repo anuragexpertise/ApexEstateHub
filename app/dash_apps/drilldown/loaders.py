@@ -14,7 +14,7 @@ Entity map for load_list():
   expenses        → fn_expenses_list
   cashbook        → fn_cashbook_paired
   receivables     → fn_receivables_named   (read-only, all portals)
-  payments        → fn_payments_named      (read-only, all portals)
+  payables        → fn_payables_named      (read-only, all portals)
   assets          → fn_asset_list          (admin CRUD + view)
   accounts        → fn_accounts_list
   societies       → fn_societies_list
@@ -259,36 +259,36 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
-        # ── PAYMENTS (read-only, all portals) ────────────────────────────
-        if entity == "payments":
+        # ── payables (read-only, all portals) ────────────────────────────
+        if entity == "payables":
             p_status = filters.get("status")
             # Portal scoping: without this, a vendor-portal view of
-            # "payments" would fall through to p_etype=None below, which
-            # (per fn_payments_named) returns ALL society payments
+            # "payables" would fall through to p_etype=None below, which
+            # (per fn_payables_named) returns ALL society payables
             # unfiltered — including security payroll rows a vendor has no
             # business seeing. Added when vendor was granted a view-only
-            # "payments" permission in _PORTAL_PERMS.
+            # "payables" permission in _PORTAL_PERMS.
             #
-            # NOTE: fn_payments_named only takes 4 params (society_id,
+            # NOTE: fn_payables_named only takes 4 params (society_id,
             # search, status, entity_role) — unlike fn_receivables_named,
             # it has no entity_id parameter, so we can filter OUT other
             # roles' rows at the DB level but can't filter IN only this
             # specific vendor's own rows there. Post-filtering by entity_id
             # in Python below closes that gap; if per-vendor row counts
-            # grow large, fn_payments_named should get a p_entity_id param
+            # grow large, fn_payables_named should get a p_entity_id param
             # added to match fn_receivables_named's signature instead.
             p_eid   = ven_id or sec_id
             p_etype = filters.get("role") or (
                 "vendor" if ven_id else "security" if sec_id else None
             )
             rows = db._execute(
-                "SELECT * FROM fn_payments_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                "SELECT * FROM fn_payables_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_status, p_etype, page_size, offset), fetch_all=True,
             ) or []
             if p_eid:
                 rows = [r for r in rows if r.get("entity_id") == p_eid]
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_payments_named(%s,NULL,%s,%s)",
+                "SELECT COUNT(*) AS n FROM fn_payables_named(%s,NULL,%s,%s)",
                 (sid, p_status, p_etype), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
@@ -349,8 +349,8 @@ def load_list(
                 (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
-         # ── RECEIPTS_TBL alias ─────────────────────────────────────────
-        if entity == "receipts_tbl":
+         # ── receipts alias ─────────────────────────────────────────
+        if entity == "receipts":
             entity = "receipts"   # redirect to existing branch below
             # fall through — Python won't re-evaluate elif, so call directly:
             p_eid   = eid or apt_id or ven_id or sec_id
@@ -379,8 +379,8 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
  
-        # ── EXPENSES_TBL alias ─────────────────────────────────────────
-        if entity == "expenses_tbl":
+        # ── expenses alias ─────────────────────────────────────────
+        if entity == "expenses":
             p_eid   = eid or ven_id or sec_id or apt_id
             p_etype = (
                 "vendor"   if ven_id and not eid else
@@ -621,13 +621,13 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── PAYMENT (read-only profile) ──────────────────────────────────────
         if entity_singular == "payment":
             r = db._execute(
-                "SELECT * FROM fn_payments_named(%s,NULL,NULL,NULL) WHERE id=%s",
+                "SELECT * FROM fn_payables_named(%s,NULL,NULL,NULL) WHERE id=%s",
                 (society_id, pk), fetch_one=True,
             )
             if not r:
                 r = db._execute(
                     "SELECT p.*, COALESCE(a.name,'') AS account_name "
-                    "FROM payments p LEFT JOIN accounts a ON a.id=p.acc_id "
+                    "FROM payables p LEFT JOIN accounts a ON a.id=p.acc_id "
                     "WHERE p.id=%s AND p.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
@@ -801,10 +801,10 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
             )
             return True, "Receivable cancelled"
 
-        if entity_plural == "payments":
-            # Only pending payments can be cancelled; verified ones are locked in transactions
+        if entity_plural == "payables":
+            # Only pending payables can be cancelled; verified ones are locked in transactions
             db._execute(
-                "UPDATE payments SET status='cancelled' "
+                "UPDATE payables SET status='cancelled' "
                 "WHERE id=%s AND society_id=%s AND status='pending'",
                 (pk, society_id),
             )

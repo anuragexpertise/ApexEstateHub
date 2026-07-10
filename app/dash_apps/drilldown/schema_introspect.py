@@ -7,7 +7,7 @@ Builds entity metadata directly from information_schema / pg_catalog.
 Key v3 changes:
   - accounts.category REMOVED — categorisation is via acc_id + drcr_account
   - drcr_account = '' (empty string) treated identically to NULL in dropdowns
-  - New entities: receivables, payments, assets
+  - New entities: receivables, payables, assets
   - apt_charges: apt_maintenance_acc_id / apt_interest_acc_id rendered
     as account dropdowns (options_from injected manually, not from FK)
   - assets: acc_id is the asset-class account (NULL/empty drcr)
@@ -26,12 +26,12 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "concerns":     "concerns",
     "gate_logs":    "gate_access",
     "receipts":     "receipts",
-    "receipts_tbl": "receipts",         # ← alias added
+    "receipts": "receipts",         # ← alias added
     "expenses":     "expenses",
-    "expenses_tbl": "expenses",         # ← alias added
+    "expenses": "expenses",         # ← alias added
     "cashbook":     "transactions",
     "receivables":  "receivables",
-    "payments":     "payments",
+    "payables":     "payables",
     "assets":       "assets",
     "societies":    "societies",
     "accounts":     "accounts",
@@ -56,7 +56,7 @@ _SYSTEM_COLUMNS = {
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
 NO_EDIT_ACTION = {
-    "gate_logs", "cashbook", "receivables", "payments",
+    "gate_logs", "cashbook", "receivables", "payables",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -145,7 +145,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Days Overdue",     "field": "days_overdue", "icon": "fa-clock"},
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
     ],
-    "payments": [
+    "payables": [
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
         {"label": "Shift Date",       "field": "shift_date",   "icon": "fa-calendar"},
         {"label": "Days Overdue",     "field": "days_overdue", "icon": "fa-clock"},
@@ -177,7 +177,7 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     ("expenses",              "acc_id"):                 "account_dropdown_expense",
     ("receivables",           "acc_id"):                 "account_dropdown_cr",
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
-    ("payments",              "acc_id"):                 "account_dropdown_dr",
+    ("payables",              "acc_id"):                 "account_dropdown_dr",
     ("assets",        "acc_id"):                 "account_dropdown_asset",
 }
 

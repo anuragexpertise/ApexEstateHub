@@ -18,16 +18,16 @@ Behavior (per spec):
     "or (if profile-scoped auto-fill)" half of the spec: profile-scoped
     prefills always win; this is only a fallback suggestion for the
     unscoped "New Receipt" / "New Expense" case.
-  - Only fires for entity in {"receipts", "receipts_tbl", "expenses",
-    "expenses_tbl"} — other entities that happen to have an acc_id field
-    (receivables, payments, assets) are explicitly left alone; they don't
+  - Only fires for entity in {"receipts", "receipts", "expenses",
+    "expenses"} — other entities that happen to have an acc_id field
+    (receivables, payables, assets) are explicitly left alone; they don't
     have a comparable free-text particulars field to suggest into, or (for
     assets) already have their own dedicated save/prefill flow.
 """
 from dash import Input, Output, State, MATCH, no_update, callback_context
 
 
-_APPLIES_TO = {"receipts", "receipts_tbl", "expenses", "expenses_tbl"}
+_APPLIES_TO = {"receipts", "receipts", "expenses", "expenses"}
 
 
 def register_form_autofill_callbacks(app):

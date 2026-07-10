@@ -392,7 +392,7 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast   
 
-            # ── Verify payment (admin only, from payments list) ───────────────────
+            # ── Verify payment (admin only, from payables list) ───────────────────
             elif action == "verify_payment":
                 user_id = (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
@@ -546,8 +546,8 @@ def register_drilldown_callbacks(app):
         elif trig_type == "btn-new":
             entity = id_dict.get("entity")
             _new_map = {
-                "receipts_tbl": "form_receipt_new",
-                "expenses_tbl": "form_expense_new",
+                "receipts": "form_receipt_new",
+                "expenses": "form_expense_new",
                 "cashbook": "form_receipt_new",
             }
             target = _new_map.get(entity, f"form_{to_singular(entity)}_new")
@@ -1196,7 +1196,7 @@ def _save_entity(entity, card_id, data):
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
-            return False, "Security charge rules have been removed. Use manual expenses for security payments.", None
+            return False, "Security charge rules have been removed. Use manual expenses for security payables.", None
         # ── PATCH: previously missing branches ──────────────────────────
         if entity in ("pay_due", "pay_dues"):
             return _save_pay_dues(db, data, sid)
@@ -1508,7 +1508,7 @@ def _save_vendor_pass(db, d, sid):
 
     mode = d.get("mode", "cash")
     if pass_type != "free_1mth" and mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
-        return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
+        return False, "Cheque No. or Payment Gateway ID is required for non-cash payables", None
 
     # ── acc_id auto-derived from account name, NOT from ven_charges_fines_basis ──
     acc_id = d.get("acc_id")
@@ -2143,7 +2143,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     elif role == "security":
         # linked_id for security = security_staff.id
         # fn_security_list returns users.id as `id`
-        # but attendance/payments use security_staff.id = linked_id
+        # but attendance/payables use security_staff.id = linked_id
         sec_staff_id = auth.get("linked_id")
         if sec_staff_id:
             f["security_id"] = sec_staff_id

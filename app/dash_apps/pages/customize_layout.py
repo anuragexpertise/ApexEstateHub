@@ -15,7 +15,7 @@ from app.dash_apps.pages.card_catalogue import (
 GROUP_COLORS = {
     "Apartments": "#3498db", "Vendors": "#9b59b6", "Security": "#e67e22",
     "Events": "#8e44ad",     "Cashbook": "#27ae60", "Society": "#2c3e50",
-    "Entities": "#16a085",   "Accounts": "#8e44ad", "Payments": "#c0392b",
+    "Entities": "#16a085",   "Accounts": "#8e44ad", "payables": "#c0392b",
     "Charges": "#d35400",    "Gate Logs": "#1abc9c","Concerns": "#e74c3c",
     "Settings": "#7f8c8d",
 }
