@@ -357,6 +357,18 @@ def load_list(
             p_etype = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
             ) if not eid else None
+            p_status = filters.get("status")
+            if p_status:
+                # fn_receipts_list has no status parameter — filter/paginate
+                # here (e.g. kpi_receipts_pending → status='pending').
+                all_rows = db._execute(
+                    "SELECT * FROM fn_receipts_list(%s,%s,%s,%s)",
+                    (sid, s, p_eid, p_etype), fetch_all=True,
+                ) or []
+                status_rows = [r for r in all_rows if r.get("status") == p_status]
+                total = len(status_rows)
+                return status_rows[offset: offset + page_size], total
+
             rows = db._execute(
                 "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,

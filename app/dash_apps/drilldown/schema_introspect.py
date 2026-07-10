@@ -10,7 +10,7 @@ Key v3 changes:
   - New entities: receivables, payments, assets
   - apt_charges: apt_maintenance_acc_id / apt_interest_acc_id rendered
     as account dropdowns (options_from injected manually, not from FK)
-  - asset_register: acc_id is the asset-class account (NULL/empty drcr)
+  - assets: acc_id is the asset-class account (NULL/empty drcr)
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "cashbook":     "transactions",
     "receivables":  "receivables",
     "payments":     "payments",
-    "assets":       "asset_register",
+    "assets":       "assets",
     "societies":    "societies",
     "accounts":     "accounts",
     "apt_charges":  "apt_charges_fines_basis",
@@ -178,7 +178,7 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     ("receivables",           "acc_id"):                 "account_dropdown_cr",
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
     ("payments",              "acc_id"):                 "account_dropdown_dr",
-    ("asset_register",        "acc_id"):                 "account_dropdown_asset",
+    ("assets",        "acc_id"):                 "account_dropdown_asset",
 }
 
 # Preferred display columns when building FK option lists.
@@ -394,7 +394,7 @@ def _build_field(col: dict) -> dict:
 # because a dedicated action handles them instead (e.g. "Dispose Asset"),
 # rather than the generic form.
 #
-# asset_register: disposed/disposed_at/sale_value/sale_acc_id/disposed_by
+# assets: disposed/disposed_at/sale_value/sale_acc_id/disposed_by
 # are only ever written by _save_asset_dispose() (the "Dispose Asset"
 # profile action) — _save_asset()'s own edit branch doesn't touch them at
 # all, so showing them on the generic Edit form would be misleading (the

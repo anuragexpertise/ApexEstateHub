@@ -139,6 +139,17 @@ DRILLDOWN_MAP: dict = {
         "label": "Overdue Receivables",
         "filter": {"status": "overdue"},
     },
+    "kpi_advance_credits": {
+        "target": "list_receivables",
+        "label": "Advance Credits",
+        "filter": {"status": "credit"},
+    },
+    "kpi_receipts_pending": {
+        "target": "list_receipts_tbl",
+        "label": "Receipts Pending Confirmation",
+        "filter": {"status": "pending"},
+    },
+
     "kpi_payables_total": {"target": "list_expenses_tbl", "label": "Payables Total"},
     "kpi_vendor_payables_due": {
         "target": "list_payments",

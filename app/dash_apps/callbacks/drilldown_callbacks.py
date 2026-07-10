@@ -1372,7 +1372,7 @@ def _save_expense_v3(db, d, sid):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 4.  NEW: Asset save (buy = fn_buy_asset, edit = UPDATE asset_register)
+# 4.  NEW: Asset save (buy = fn_buy_asset, edit = UPDATE assets)
 # ════════════════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1547,9 +1547,9 @@ def _save_asset(db, d, sid, is_edit, pk):
     if is_edit:
         # Editing an asset record (name, type, company — not purchase price)
         db._execute(
-            "UPDATE asset_register SET asset_name=%s, asset_type=%s, company_name=%s "
+            "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s "
             "WHERE id=%s AND society_id=%s",
-            (d.get("asset_name"), d.get("asset_type"), d.get("company_name"), pk, sid),
+            (d.get("asset_name"), d.get("asset_SNo"), d.get("company_name"), pk, sid),
         )
         return True, "Asset updated", pk
 
@@ -1582,7 +1582,7 @@ def _save_asset(db, d, sid, is_edit, pk):
             (
                 sid,
                 asset_name,
-                d.get("asset_type"),
+                d.get("asset_SNo"),
                 purchase_value,
                 acc_id,
                 d.get("purchase_date") or dt_date.today().isoformat(),
