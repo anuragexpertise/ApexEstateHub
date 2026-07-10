@@ -40,9 +40,15 @@ COLORS = {
 _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # ── ADMIN: full CRUD on everything ───────────────────────────────────────
     ("admin", "*"):            {"view", "edit", "delete", "new"},
-
+    ("admin", "receivables"):  {},
+    ("admin", "payments"):     {},
+    ("admin","gate_logs"):     {},
+    ("admin", "security_roster"): {"view"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
+    ("master", "receivables"): {},
+    ("master", "payments"):    {},
+    ("master", "security_roster"): {"view"},
     ("master", "*"):           {"view"},
 
     # ── APARTMENT: view own data only, can raise concern / pay ────────────

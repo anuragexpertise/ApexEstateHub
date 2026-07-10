@@ -539,6 +539,16 @@ KPI_CARDS = {
         "icon": "fa-clock", "color": "#b63b3b",
         "title": "Shifts (Month)", "group": "attendance",
     },
+    
+    "kpi_security_roster_count": {
+        "query": """
+            SELECT COUNT(*) AS v FROM security_roster
+            WHERE society_id=%s AND roster_date >= CURRENT_DATE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-calendar-check", "color": "#1859b8",
+        "title": "Shifts Rostered (Upcoming)", "group": "enroll",
+    },
  
     "kpi_maintenance_due": {
         "query": """
