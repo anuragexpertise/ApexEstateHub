@@ -194,6 +194,20 @@ CREATE TABLE IF NOT EXISTS security_roster (
 --   description  → acc_particulars that lands in transactions.transactions.
 --                  DEFAULT pattern: 'Maintenance Apr-2025' / 'Salary Apr-2025'.
 --   NO charge_type column — the account row itself is the category.
+--
+--   ADVANCE CREDIT rows (status='credit'):
+--   Created when fn_pay_apartment_dues_fifo() collects more than the entity
+--   currently owes. Reuses the same row shape as an ordinary due, but
+--   inverted in meaning — it's money the SOCIETY owes back to the entity,
+--   held as a balance to auto-offset future dues:
+--     amount       → the credit originally granted (unallocated overpayment)
+--     paid_amount  → how much of that credit has since been drawn down
+--                    against later dues (0 = fully available)
+--     residual (amount - paid_amount, same formula fn_receivables_named
+--                    already exposes) → remaining unused credit balance
+--   fn_apply_advance_credit() draws these down FIFO against the entity's
+--   oldest pending/partial rows; a credit row flips to 'paid' once fully
+--   consumed (paid_amount = amount), same terminal state as a settled due.
 -- ════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS receivables (
     id                      SERIAL PRIMARY KEY,
@@ -211,7 +225,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     paid_amount             NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
     due_date                DATE,
     status                  VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','partial','unverified','paid','cancelled')),
+        CHECK (status IN ('pending','partial','unverified','paid','cancelled','credit')),
     confirmed_by            INT REFERENCES users(id),
     confirmed_at            TIMESTAMP,
     created_at              TIMESTAMP NOT NULL DEFAULT NOW()
@@ -226,10 +240,10 @@ CREATE TABLE IF NOT EXISTS receipts (
     id              SERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     user_id         INT REFERENCES users(id),
+    entity_id       INT,
+    role            VARCHAR(20) CHECK (role IN ('apartment','vendor','security','other')),
     receipt_date    DATE NOT NULL,
     acc_id          INT REFERENCES accounts(id),   -- income account (Cr) — IS the category
-    role            VARCHAR(20) CHECK (role IN ('apartment','vendor','security','other')),
-    entity_id       INT,
     particulars     TEXT NOT NULL,                 -- human-readable label; suggested from Python PARTICULARS_TEMPLATES
     amount          NUMERIC(10,2) NOT NULL CHECK (amount > 0),
     mode            VARCHAR(20) DEFAULT 'cash'
@@ -585,6 +599,65 @@ $$;
 -- SECTION 4: RECEIVABLES ENGINE (apartment maintenance, monthly)
 -- ════════════════════════════════════════════════════════════════
 
+-- Draws down an entity's available advance-credit rows (status='credit')
+-- FIFO against their oldest pending/partial dues. Called automatically
+-- whenever new dues are generated (fn_auto_generate_receivables) and
+-- right after a credit row is created (fn_pay_apartment_dues_fifo), so
+-- application code never has to net credit against dues itself — the
+-- 'residual' a portal displays for any pending row already has any
+-- available credit applied.
+DROP FUNCTION IF EXISTS fn_apply_advance_credit CASCADE;
+CREATE OR REPLACE FUNCTION fn_apply_advance_credit(
+    p_entity_id INT,
+    p_role      VARCHAR
+)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+    credit_rec  RECORD;
+    due_rec     RECORD;
+    v_credit_left NUMERIC(15,2);
+    v_take        NUMERIC(15,2);
+BEGIN
+    FOR credit_rec IN
+        SELECT id, amount, paid_amount
+        FROM receivables
+        WHERE entity_id = p_entity_id AND role = p_role AND status = 'credit'
+          AND amount > paid_amount
+        ORDER BY created_at ASC, id ASC
+        FOR UPDATE
+    LOOP
+        v_credit_left := credit_rec.amount - credit_rec.paid_amount;
+        EXIT WHEN v_credit_left <= 0;
+
+        FOR due_rec IN
+            SELECT id, amount, paid_amount
+            FROM receivables
+            WHERE entity_id = p_entity_id AND role = p_role
+              AND status IN ('pending','partial')
+            ORDER BY due_date ASC NULLS LAST, id ASC
+            FOR UPDATE
+        LOOP
+            EXIT WHEN v_credit_left <= 0;
+            v_take := LEAST(v_credit_left, due_rec.amount - due_rec.paid_amount);
+            IF v_take <= 0 THEN CONTINUE; END IF;
+
+            UPDATE receivables
+                 SET paid_amount = due_rec.paid_amount + v_take,
+                     status      = CASE WHEN due_rec.paid_amount + v_take >= due_rec.amount
+                                         THEN 'paid' ELSE 'partial' END
+                 WHERE id = due_rec.id;
+
+            v_credit_left := v_credit_left - v_take;
+        END LOOP;
+
+        UPDATE receivables
+             SET paid_amount = credit_rec.amount - v_credit_left,
+                 status      = CASE WHEN v_credit_left <= 0 THEN 'paid' ELSE 'credit' END
+             WHERE id = credit_rec.id;
+    END LOOP;
+END;
+$$;
+
 -- Generates one receivable row per apartment per calendar month from
 -- society.calc_start_date through the current month. Idempotent via the
 -- partial unique index. The acc_id and interest_acc_id come from the
@@ -671,6 +744,10 @@ BEGIN
  
             v_month := (v_month + INTERVAL '1 month')::DATE;
         END LOOP;
+
+        -- Any advance credit this apartment is holding auto-offsets the
+        -- month(s) just generated (or any older still-open row).
+        PERFORM fn_apply_advance_credit(apt.id, 'apartment');
     END LOOP;
 END;
 $$;
@@ -985,9 +1062,21 @@ BEGIN
         v_remaining := v_remaining - v_take;
     END LOOP;
 
-    -- Note: if v_remaining > 0 after all rows cleared, the excess is NOT
-    -- applied anywhere (no advance-credit concept). The transaction row
-    -- stands for the full p_amount paid; the diff is the unallocated return value.
+    -- Excess beyond every currently-open due is banked as an advance-credit
+    -- row (status='credit') rather than discarded — fn_apply_advance_credit
+    -- (or the next fn_auto_generate_receivables run) will draw it down
+    -- against future dues automatically.
+    IF v_remaining > 0 THEN
+        INSERT INTO receivables (
+            society_id, entity_id, role, acc_id,
+            description, base_amount, amount, paid_amount,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_apartment_id, 'apartment', v_acc_id,
+            'Advance Credit', v_remaining, v_remaining, 0,
+            'credit', p_confirmed_by, NOW(), NOW()
+        );
+    END IF;
 
     RETURN QUERY SELECT v_trx_id,
         (p_amount - v_remaining)::NUMERIC(15,2),

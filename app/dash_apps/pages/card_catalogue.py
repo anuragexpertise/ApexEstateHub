@@ -68,6 +68,16 @@ KPI_CARDS = {
         "icon": "fa-hand-point-down", "color": "#0ea5a8",
         "title": "Advance Credits", "group": "prepaid",
     },
+    "kpi_receipts_pending": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM receipts
+            WHERE society_id=%s AND status='pending'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-hourglass-half", "color": "#e59620",
+        "title": "Receipts Pending Confirmation", "group": "awaiting admin",
+    },
 
     "kpi_apartments_dues": {
         "query": """
@@ -340,7 +350,7 @@ KPI_CARDS = {
 
     "kpi_assets_count": {
         "query": """
-            SELECT COUNT(*) AS v FROM asset_register
+            SELECT COUNT(*) AS v FROM assets
             WHERE society_id=%s AND disposed=FALSE
         """,
         "params": 1, "format": "number",
@@ -351,7 +361,7 @@ KPI_CARDS = {
     "kpi_assets_value": {
         "query": """
             SELECT COALESCE(SUM(purchase_value), 0) AS v
-            FROM asset_register WHERE society_id=%s AND disposed=FALSE
+            FROM assets WHERE society_id=%s AND disposed=FALSE
         """,
         "params": 1, "format": "currency",
         "icon": "fa-coins", "color": "#6c5ce7",
@@ -539,7 +549,7 @@ KPI_CARDS = {
         "icon": "fa-clock", "color": "#b63b3b",
         "title": "Shifts (Month)", "group": "attendance",
     },
-    
+
     "kpi_security_roster_count": {
         "query": """
             SELECT COUNT(*) AS v FROM security_roster
@@ -752,8 +762,7 @@ DEFAULT_LAYOUTS = {
             "kpi_assets_count",
             "kpi_receivables_total",
             "kpi_advance_credits",
-            "kpi_receipts_month",
-            "kpi_expenses_month",
+            "kpi_receipts_pending",
             "kpi_payables_total",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
