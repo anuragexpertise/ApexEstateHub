@@ -1660,9 +1660,10 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             )
         elif role == "vendor":
             db._execute(
-                "UPDATE vendors v SET name=%s,service_type=%s,mobile=%s,photo=%s,logo=%s,license=%s "
+                "UPDATE vendors v SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
+                "photo=%s,logo=%s,license=%s "
                 "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
-                (d.get("name"), d.get("service_type"), d.get("mobile"),
+                (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
                  d.get("photo"), d.get("logo"), d.get("license"), pk),
             )
         pw = (d.get("password") or "").strip()
@@ -1679,6 +1680,8 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required", None
+    if role == "vendor" and not (d.get("business_name") or "").strip():
+        return False, "Business Name is required", None
     ur = db._execute(
         "INSERT INTO users(society_id,email,password_hash,role,login_method) "
         "VALUES(%s,%s,%s,%s,'password') RETURNING id",
@@ -1687,9 +1690,9 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     user_id = ur["id"]
     if role == "vendor":
         vr = db._execute(
-            "INSERT INTO vendors(society_id,name,service_type,mobile,photo,logo,license,active) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-            (sid, d.get("name"), d.get("service_type"), d.get("mobile"),
+            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
              d.get("photo"), d.get("logo"), d.get("license")), fetch_one=True,
         )
         db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (vr["id"], user_id))
