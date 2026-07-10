@@ -85,7 +85,10 @@ ROLE_FILTERS: dict = {
 # ══════════════════════════════════════════════════════════════════════════════
 DRILLDOWN_MAP: dict = {
     # ── KPI → LIST ────────────────────────────────────────────────────────────
-    "kpi_apartments_total": {"target": "list_apartments", "label": "All Apartments"},
+    "kpi_apartments_total": {
+        "target": "list_apartments",
+        "label": "All Apartments"
+    },
     "kpi_apartments_dues": {
         "target": "list_apartments",
         "label": "Apartments With Dues",
@@ -107,6 +110,10 @@ DRILLDOWN_MAP: dict = {
         "label": "Vendors With Passes",
         "filter": {"active_passes": {"gt": 0}},
     },
+    "kpi_my_pass_expiry": {
+        "target": "list_vendors",
+        "label": "My Pass & Vendor Details",
+    },
     "kpi_security_total": {"target": "list_security", "label": "Security Staff"},
     "kpi_security_on_duty": {
         "target": "list_security",
@@ -120,9 +127,17 @@ DRILLDOWN_MAP: dict = {
         "target": "list_receipts",
         "label": "Receipts This Month",
     },
+    "kpi_receipts_total": {
+        "target": "list_receipts",
+        "label": "All Receipts",
+    },
     "kpi_expenses_month": {
         "target": "list_expenses",
         "label": "Expenses This Month",
+    },
+    "kpi_expenses_total": {
+        "target": "list_expenses",
+        "label": "All Expenses",
     },
     "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"},
     "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"},
@@ -144,6 +159,15 @@ DRILLDOWN_MAP: dict = {
         "label": "Advance Credits",
         "filter": {"status": "credit"},
     },
+    "kpi_my_pending_dues": {
+        "target": "list_receivables",
+        "label": "My Pending Dues",
+    },
+    "kpi_my_overdue_dues": {
+        "target": "list_receivables",
+        "label": "My Overdue Dues",
+        "filter": {"status": "overdue"},
+    },
     "kpi_receipts_pending": {
         "target": "list_receipts",
         "label": "Receipts Pending Confirmation",
@@ -158,6 +182,10 @@ DRILLDOWN_MAP: dict = {
     "kpi_security_salaries_due": {
         "target": "list_payables",
         "label": "Security Salaries Due",
+    },
+    "kpi_security_salaries_paid": {
+        "target": "list_payables",
+        "label": "Security Salaries Paid",
     },
     "kpi_amc_due": {"target": "list_expenses", "label": "AMC Due"},
     "kpi_maintainence_charges": {
@@ -184,6 +212,10 @@ DRILLDOWN_MAP: dict = {
         "label": "Receipts in Hand",
     },
     "kpi_security_shift_count": {"target": "list_security", "label": "Shift Count"},
+    "kpi_security_shifts_pending": {
+        "target": "list_payables",
+        "label": "Shifts Unpaid",
+    },
     "kpi_security_salary_due": {"target": "list_payables", "label": "Salary Due"},
     "kpi_security_bonus_due": {"target": "list_payables", "label": "Bonus Due"},
     # MASTER PORTAL KPIs
