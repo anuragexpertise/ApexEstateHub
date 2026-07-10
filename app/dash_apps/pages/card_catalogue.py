@@ -85,11 +85,10 @@ KPI_CARDS = {
             FROM receivables
             WHERE society_id=%s AND role='apartment'
               AND status IN ('pending','partial')
-              AND due_date < CURRENT_DATE
         """,
         "params": 1, "format": "number",
         "icon": "fa-exclamation-triangle", "color": "#de5c52",
-        "title": "Apts With Overdue", "group": "failing gate-pass",
+        "title": "Apts With Dues", "group": "pending dues",
     },
 
     "kpi_apartments_no_dues": {
@@ -100,7 +99,6 @@ KPI_CARDS = {
                 SELECT 1 FROM receivables r
                 WHERE r.entity_id=a.id AND r.role='apartment'
                   AND r.status IN ('pending','partial')
-                  AND r.due_date < CURRENT_DATE
               )
         """,
         "params": 1, "format": "number",
@@ -658,18 +656,7 @@ KPI_CARDS = {
         "icon": "fa-list-alt", "color": "#b98a07",
         "title": "Vendor Other Charges", "group": "all rules",
     },
- 
-    "kpi_security_fines": {
-        "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payables
-            WHERE society_id=%s AND role='security' AND status='pending'
-        """,
-        "params": 1, "format": "currency",
-        "icon": "fa-gavel", "color": "#b63b3b",
-        "title": "Security Salary Pending", "group": "fines",
-    },
- 
+
     "kpi_security_other_charges": {
         "query": """
             SELECT COUNT(*) AS v

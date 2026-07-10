@@ -116,7 +116,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_security_total": {"target": "list_security", "label": "Security Staff"},
     "kpi_security_on_duty": {
-        "target": "list_security",
+        "target": "list_gate_logs",
         "label": "Security On Duty",
         "filter": {"on_duty": True},
     },
@@ -152,7 +152,6 @@ DRILLDOWN_MAP: dict = {
     "kpi_receivables_overdue": {
         "target": "list_receivables",
         "label": "Overdue Receivables",
-        "filter": {"status": "overdue"},
     },
     "kpi_advance_credits": {
         "target": "list_receivables",
@@ -166,7 +165,6 @@ DRILLDOWN_MAP: dict = {
     "kpi_my_overdue_dues": {
         "target": "list_receivables",
         "label": "My Overdue Dues",
-        "filter": {"status": "overdue"},
     },
     "kpi_receipts_pending": {
         "target": "list_receipts",
@@ -174,7 +172,7 @@ DRILLDOWN_MAP: dict = {
         "filter": {"status": "pending"},
     },
 
-    "kpi_payables_total": {"target": "list_expenses", "label": "Payables Total"},
+    "kpi_payables_total": {"target": "list_payables", "label": "Payables Total"},
     "kpi_vendor_payables_due": {
         "target": "list_payables",
         "label": "Vendor Payables Due",
@@ -192,12 +190,22 @@ DRILLDOWN_MAP: dict = {
         "target": "list_apt_charges",
         "label": "Maintenance Charges",
     },
-    "kpi_apartment_fines": {"target": "list_apt_charges", "label": "Apartment Fines"},
+    "kpi_apartment_fines": {"target": "list_receivables", "label": "Apartment Fines"},
     "kpi_apartment_other_charges": {
         "target": "list_apt_charges",
         "label": "Other Charges",
     },
-    "kpi_vendor_fines": {"target": "list_ven_charges", "label": "Vendor Fines"},
+    "kpi_vendor_fines": {"target": "list_receipts", "label": "Vendor Fines"},
+    "kpi_vendor_other_charges": {
+        "target": "list_ven_charges",
+        "label": "Other Charges",
+    },
+
+    "kpi_security_fines": {"target": "list_payables", "label": "Security Fines"},
+    "kpi_security_other_charges": {
+        "target": "list_payables",
+        "label": "Other Charges",
+    },
     "kpi_vendor_other_charges": {
         "target": "list_ven_charges",
         "label": "Other Charges",
@@ -211,10 +219,11 @@ DRILLDOWN_MAP: dict = {
         "target": "list_cashbook",
         "label": "Receipts in Hand",
     },
-    "kpi_security_shift_count": {"target": "list_security", "label": "Shift Count"},
+    "kpi_security_shift_count": {"target": "list_gate_logs", "label": "Shift Count"},
     "kpi_security_shifts_pending": {
         "target": "list_payables",
         "label": "Shifts Unpaid",
+        "filter": {"role": "security", "status": "pending"},
     },
     "kpi_security_salary_due": {"target": "list_payables", "label": "Salary Due"},
     "kpi_security_bonus_due": {"target": "list_payables", "label": "Bonus Due"},
@@ -292,7 +301,7 @@ DRILLDOWN_MAP: dict = {
         "label": "Vendor Charges Rules",
     },
     "kpi_sec_charges_count": {
-        "target": "list_sec_charges",
+        "target": "list_payables",
         "label": "Security Charges Rules",
     },
     "kpi_attendance_count": {
@@ -305,8 +314,8 @@ DRILLDOWN_MAP: dict = {
     },
 
 
-    "kpi_late_fees_due": {"target": "list_payables", "label": "Late Fees Due"},
-    "kpi_maintenance_due": {"target": "list_payables", "label": "Maintenance Due"},
+    "kpi_late_fees_due": {"target": "list_receivables", "label": "Late Fees Due"},
+    "kpi_maintenance_due": {"target": "list_receivables", "label": "Maintenance Due"},
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
     "list_apartments": {"target": "profile_apartment", "label": "Apartment Profile"},
     "list_vendors": {"target": "profile_vendor", "label": "Vendor Profile"},
