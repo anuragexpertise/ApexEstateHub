@@ -402,6 +402,16 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
+            # ── Toggle Duty (security profile — manual clock in/out) ──────────────
+            elif action == "toggle_duty":
+                ok, msg = loaders.toggle_security_duty(int(pk), sid)
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+
             # ── Print Receipt (any role that can view the receipt) ────────────────
             elif action == "print_receipt":
                 store = nav_state.navigate_to(

@@ -106,7 +106,25 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "icon": "fa-qrcode",
             "color": "primary",
         },
+        {
+            # Manual on/off-duty clock toggle. Clocking IN opens a
+            # gate_access row (role='s', time_out NULL), which is exactly
+            # what fn_evaluate_gate_pass() / fn_security_list's "gate_pass"
+            # column checks to treat the guard as on duty for gate scans.
+            # Clocking OUT stamps time_out=NOW() on that row. Shift/payroll
+            # counting itself (fn_security_list's shift_count) is driven
+            # separately by the security_roster + payables system — this
+            # toggle only controls live on/off-duty status for gate scans.
+            # See loaders.toggle_security_duty().
+            "label": "Toggle Duty",
+            "action_id": "toggle_duty",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-toggle-on",
+            "color": "warning",
+            "roles": ["admin", "security"],
+        },
     ],
+
 
     # ── CONCERNS ─────────────────────────────────────────────────────────────
     "concerns": [
