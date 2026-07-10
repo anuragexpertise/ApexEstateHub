@@ -119,6 +119,16 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ receipt_callbacks failed: {e}")
 
+    # 14. Bulk Enroll (CSV upload for apartments/vendors/security on the
+    #     Admin/Enroll tab). Requires "bulk-enroll-modal" +
+    #     "bulk-enroll-entity-store" in app_shell.py, and a "Bulk Enroll"
+    #     button rendered next to "New" in renderers.py::render_list_card.
+    try:
+        from .bulk_enroll_callbacks import register_bulk_enroll_callbacks
+        register_bulk_enroll_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ bulk_enroll_callbacks failed: {e}")
+
     # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
     # NOT registered — they reference component IDs that don't exist in any
     # portal layout and caused NonExistentIdException at startup.

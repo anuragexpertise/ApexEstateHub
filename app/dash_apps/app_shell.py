@@ -321,6 +321,61 @@ def _header() -> html.Header:
     )
 
 
+# ── Bulk Enroll modal ───────────────────────────────────────────────────────────
+# Single global modal (like the QR modal below) reused for all three
+# enrollable entities — apartments, vendors, security. Which entity it's
+# currently open for is tracked in "bulk-enroll-entity-store"; content/labels
+# are filled in dynamically by bulk_enroll_callbacks.py.
+
+def _bulk_enroll_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle(id="bulk-enroll-modal-title", children="Bulk Enroll"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="bulk-enroll-instructions", className="mb-2"),
+                    dbc.Button(
+                        [html.I(className="fas fa-file-download me-2"), "Download CSV Template"],
+                        id="bulk-enroll-template-btn", n_clicks=0,
+                        color="secondary", outline=True, size="sm",
+                        className="mb-3",
+                    ),
+                    dcc.Download(id="bulk-enroll-template-download"),
+                    dcc.Upload(
+                        id="bulk-enroll-upload",
+                        children=html.Div([
+                            html.I(className="fas fa-cloud-upload-alt me-2"),
+                            "Drag & drop or click to select a CSV file",
+                        ]),
+                        style={
+                            "width": "100%", "height": "70px", "lineHeight": "70px",
+                            "borderWidth": "2px", "borderStyle": "dashed",
+                            "borderRadius": "10px", "textAlign": "center",
+                            "borderColor": "#667eea",
+                            "background": "rgba(102,126,234,0.04)",
+                            "color": "#667eea", "cursor": "pointer",
+                        },
+                        multiple=False, accept=".csv",
+                    ),
+                    dcc.Loading(
+                        html.Div(id="bulk-enroll-result", className="mt-3"),
+                        type="dot",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-bulk-enroll-modal", n_clicks=0, color="secondary"),
+            ),
+        ],
+        id="bulk-enroll-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20050"},
+    )
+
+
 # ── QR modal ──────────────────────────────────────────────────────────────────
 
 def _qr_modal() -> dbc.Modal:
@@ -410,6 +465,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="portal-content-store",     storage_type="memory", data={"rendered": False}),
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
             dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
+            dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
@@ -498,5 +554,8 @@ def shell_layout() -> html.Div:
 
             # ── QR modal ───────────────────────────────────────────────────────
             _qr_modal(),
+
+            # ── Bulk Enroll modal ────────────────────────────────────────────────
+            _bulk_enroll_modal(),
         ]
     )
