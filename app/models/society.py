@@ -21,7 +21,7 @@ class Society(db.Model):
     
     # Relationships
     apartments = db.relationship('Apartment', backref='society', lazy='dynamic', cascade='all, delete-orphan')
-    payments = db.relationship('Payment', backref='society', lazy='dynamic')
+    payables = db.relationship('Payment', backref='society', lazy='dynamic')
     transactions = db.relationship('Transaction', backref='society', lazy='dynamic')
     gate_access = db.relationship('GateAccess', backref='society', lazy='dynamic')
     

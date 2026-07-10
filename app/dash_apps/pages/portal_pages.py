@@ -2,11 +2,11 @@
 """
 ALL 5 PORTAL PAGE LAYOUTS — single source of truth.
 v3 additions:
-  Admin:     new tabs — Receivables, Payments, Assets
+  Admin:     new tabs — Receivables, payables, Assets
   Apartment: new tab  — Receivables (read-only own dues)
   Vendor:    new tab  — Receivables (read-only own pass/charges)
-  Security:  new tab  — Payments    (read-only own salary rows)
-  All portals: Verify button on Receivables/Payments is admin-only
+  Security:  new tab  — payables    (read-only own salary rows)
+  All portals: Verify button on Receivables/payables is admin-only
                (enforced in renderers.py via _PORTAL_PERMS)
 """
 
@@ -490,12 +490,12 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Payments tab (security's own salary rows — read-only) ─────────────
-    if active_tab in ("payments", "security_payments"):
+    # ── payables tab (security's own salary rows — read-only) ─────────────
+    if active_tab in ("payables", "security_payables"):
         return html.Div([
             _page_title("fa-user-clock", c, "My Salary", "per-shift payroll — read only"),
             _kpi_row_dynamic(
-                "security", "payments", sid,
+                "security", "payables", sid,
                 cols="repeat(auto-fill,minmax(148px,1fr))",
             ),
             _divider(), _drill_panel(),
@@ -513,7 +513,7 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
 
     if active_tab == "security_receipt":
         return html.Div([
-            _page_title("fa-plus-circle", c, "New Receipt", "collect cash payments at gate"),
+            _page_title("fa-plus-circle", c, "New Receipt", "collect cash payables at gate"),
             _kpi_row_dynamic("security", "security_receipt", sid, cols="1fr"),
             _divider(), _drill_panel(),
         ], className="portal-page")

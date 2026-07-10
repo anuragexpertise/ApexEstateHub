@@ -21,7 +21,7 @@ class UserRole(str, Enum):
     SECURITY = "security"
     MASTER_ADMIN = "master_admin"
 
-class PaymentStatus(str, Enum):
+class payablestatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     VERIFIED = "verified"
@@ -261,7 +261,7 @@ class Transaction:
         return data
 
 # ════════════════════════════════════════════════════════════════
-# RECEIVABLES & PAYMENTS
+# RECEIVABLES & payables
 # ════════════════════════════════════════════════════════════════
 
 @dataclass
@@ -300,7 +300,7 @@ class Payment:
     entity_id: int
     role: str
     amount: Decimal
-    status: PaymentStatus = PaymentStatus.PENDING
+    status: payablestatus = payablestatus.PENDING
     user_id: Optional[int] = None
     payment_type: Optional[str] = None
     payment_method: Optional[str] = None

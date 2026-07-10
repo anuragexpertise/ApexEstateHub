@@ -376,7 +376,7 @@ if not is_valid:
 # PARTICULARS TEMPLATES  — hard-coded in Python, NOT stored in the database.
 #
 # These strings are what appears in receipts.particulars / expenses.particulars
-# / receivables.description / payments.description, and flow through to
+# / receivables.description / payables.description, and flow through to
 # transactions.acc_particulars.
 #
 # Usage in renderers.py / drilldown_callbacks.py:

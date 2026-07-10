@@ -51,7 +51,7 @@ Every dashboard in ApexEstateHub is powered by a **live, customizable KPI engine
 - 📊 **Drag-and-drop dashboard customization** — every committee member can build the view that matters to *them*.
 - 🔍 **Drill-down navigation** — click any number (overdue dues, open concerns, active passes) and go straight from KPI → filtered list → individual profile → action, in three clicks.
 - 💰 **Dual-ledger financial engine** — every receipt and expense is written directly to an authoritative transaction ledger, with automatic running balances, cash-in-hand, and bank-balance reconciliation.
-- 📈 **FIFO-based dues settlement** — payments are automatically applied to the oldest outstanding dues first, with any excess banked as an advance credit. No manual reconciliation spreadsheets, ever.
+- 📈 **FIFO-based dues settlement** — payables are automatically applied to the oldest outstanding dues first, with any excess banked as an advance credit. No manual reconciliation spreadsheets, ever.
 
 ---
 

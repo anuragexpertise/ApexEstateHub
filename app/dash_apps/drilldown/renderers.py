@@ -41,13 +41,13 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # ── ADMIN: full CRUD on everything ───────────────────────────────────────
     ("admin", "*"):            {"view", "edit", "delete", "new"},
     ("admin", "receivables"):  {"view"},
-    ("admin", "payments"):     {"view"},
+    ("admin", "payables"):     {"view"},
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
-    ("master", "payments"):    {"view"},
+    ("master", "payables"):    {"view"},
     ("master", "security_roster"): {"view"},
     ("master", "*"):           {"view"},
 
@@ -56,10 +56,10 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "concerns"):    {"view", "new"},
     ("apartment", "events"):      {"view"},
     ("apartment", "gate_logs"):   {"view"},
-    ("apartment", "receipts_tbl"):{"view"},
+    ("apartment", "receipts"):{"view"},
     ("apartment", "cashbook"):    {"view"},
     ("apartment", "receivables"): {"view"},   # own dues — view only, admin verifies
-    ("apartment", "payments"):    {"view"},   # requested for symmetry with vendor
+    ("apartment", "payables"):    {"view"},   # requested for symmetry with vendor
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -67,10 +67,10 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("vendor", "events"):         {"view"},
     ("vendor", "concerns"):       {"view"},
     ("vendor", "gate_logs"):      {"view"},
-    ("vendor", "receipts_tbl"):   {"view"},
+    ("vendor", "receipts"):   {"view"},
     ("vendor", "cashbook"):       {"view"},
     ("vendor", "receivables"):    {"view"},   # own pass/charges — view only
-    ("vendor", "payments"):       {"view"},   # own payables if ever billed this way
+    ("vendor", "payables"):       {"view"},   # own payables if ever billed this way
     ("vendor", "*"):              set(),
 
     # ── SECURITY: view most lists + can create receipts ───────────────────
@@ -80,7 +80,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("security", "events"):       {"view"},
     ("security", "concerns"):     {"view"},
     ("security", "gate_logs"):    {"view"},
-    ("security", "receipts_tbl"): {"view", "new"},   # create receipt
+    ("security", "receipts"): {"view", "new"},   # create receipt
     ("security", "cashbook"):     {"view"},
     ("security", "*"):            set(),
 }
@@ -413,8 +413,8 @@ def render_list_card(card_id: str, title: str, icon: str,
         new_target = f"form_{entity.rstrip('s') if not entity.endswith('_tbl') else entity.replace('_tbl','')}_new"
         # Special cases
         _new_target_map = {
-            "receipts_tbl": "form_receipt_new",
-            "expenses_tbl": "form_expense_new",
+            "receipts": "form_receipt_new",
+            "expenses": "form_expense_new",
             "cashbook":     "form_receipt_new",
         }
         new_target = _new_target_map.get(entity, new_target)

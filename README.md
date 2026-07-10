@@ -47,7 +47,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Portals** | Master Admin · Society Admin · Apartment Owner · Vendor · Security |
 | **Auth** | Password · PIN · Pattern · JWT tokens · Master Admin flag |
 | **Navigation** | Zero-reload SPA — KPI → List → Profile → Form drill-down |
-| **Financials** | Cashbook · Receipts · Expenses · Receivables · Payments · FIFO Pay Dues |
+| **Financials** | Cashbook · Receipts · Expenses · Receivables · payables · FIFO Pay Dues |
 | **Entities** | Apartments · Vendors · Security Staff · Societies · Accounts · Assets |
 | **Operations** | Events · Concerns/Complaints · Gate Logs · Attendance · NOC |
 | **Gate Pass** | Fernet-encrypted QR · Dual-mode camera scanner · Entry IN / Exit OUT |
@@ -148,7 +148,7 @@ Primary management console. Scoped to `society_id`.
 ### 4.3 Owner Portal (Apartment)
 Self-service for residents. Scoped to `[society_id, apartment_id]`.
 
-**Tabs:** Dashboard · My Payments · My Charges · Events · Concerns · Cashbook · Settings
+**Tabs:** Dashboard · My payables · My Charges · Events · Concerns · Cashbook · Settings
 
 - View own pending dues, payment history, charges
 - Raise and track maintenance concerns
@@ -275,7 +275,7 @@ _PORTAL_PERMS = {
     ("apartment", "concerns"):     {"view", "new"},
     ("apartment", "*"):            {"view"},   # own data only
     ("vendor",    "*"):            {"view"},   # own data only
-    ("security",  "receipts_tbl"): {"view", "new"},
+    ("security",  "receipts"): {"view", "new"},
     ("security",  "*"):            {"view"},
 }
 ```
@@ -288,12 +288,12 @@ _PORTAL_PERMS = {
 "kpi_apartments_dues":    {"target": "list_apartments",  "label": "Apartments With Dues",
                            "filter": {"has_dues": True}},
 "kpi_receivables_total":  {"target": "list_receivables", "label": "Receivables Total"},  # ← fixed
-"kpi_receipts_month":     {"target": "list_receipts_tbl","label": "Receipts This Month"},
+"kpi_receipts_month":     {"target": "list_receipts","label": "Receipts This Month"},
 
 # List → Profile
 "list_apartments":    {"target": "profile_apartment",    "label": "Apartment Profile"},
 "list_receivables":   {"target": "profile_receivable",   "label": "Receivable Details"},
-"list_receipts_tbl":  {"target": "profile_receipt_entry","label": "Receipt Details"},
+"list_receipts":  {"target": "profile_receipt_entry","label": "Receipt Details"},
 
 # Profile actions in registry.py
 "profile_apartment": {"actions": {
@@ -396,7 +396,7 @@ Navigate to **Admin → Customize → KPI Audit** and click **Run Full Audit**:
 |---|---|---|---|---|
 | `receivables` | Auto-calculated credits | `fn_auto_generate_receivables` | pending → partial → paid | On admin verify |
 | `receipts` | Manual credits | Admin / Security | pending → confirmed / cancelled | On create (admin) or verify (security) |
-| `payments` | Auto-calculated debits | `fn_auto_generate_payments` | pending → verified / cancelled | On admin verify |
+| `payables` | Auto-calculated debits | `fn_auto_generate_payables` | pending → verified / cancelled | On admin verify |
 | `expenses` | Manual debits | Admin | confirmed immediately | On create |
 | `transactions` | Immutable ledger | All of above | paid | Source of truth |
 
@@ -452,7 +452,7 @@ WHERE r.acc_id IS NULL AND r.role='apartment' AND r.status IN ('pending','partia
 
 ## 10. Pay Dues — Five Paths
 
-All five paths ultimately call `fn_pay_apartment_dues_fifo(apartment_id, amount, mode, confirmed_by, particulars)` which processes payments FIFO (oldest due_date first).
+All five paths ultimately call `fn_pay_apartment_dues_fifo(apartment_id, amount, mode, confirmed_by, particulars)` which processes payables FIFO (oldest due_date first).
 
 ### Path 1 — Admin: KPI → Apartments List → Profile → Pay Dues
 
@@ -468,11 +468,11 @@ kpi_apartments_dues (DRILLDOWN_MAP → list_apartments, filter: has_dues=True)
 ### Path 2 — Security Portal: Manual Receipt → Pending → Admin Verify → FIFO
 
 ```
-Security creates receipt (receipts_tbl → New)
+Security creates receipt (receipts → New)
   → _save_receipt_v3 detects caller_role="security"
     → fn_save_receipt_pending (status='pending', no transaction yet)
 
-Admin: list_receipts_tbl → profile_receipt_entry
+Admin: list_receipts → profile_receipt_entry
   → [Verify & Post] button (profile_actions.py: action_id="verify_receipt", roles=["admin"])
     → loaders.verify_receipt → fn_verify_receipt
       → INSERT into transactions + UPDATE receipts SET status='confirmed'
@@ -495,7 +495,7 @@ kpi_receivables_total (DRILLDOWN_MAP → list_receivables)
 ### Path 4 — Admin: KPI → Receipts List → New Receipt → Manual Entry
 
 ```
-kpi_receipts_month (DRILLDOWN_MAP → list_receipts_tbl)
+kpi_receipts_month (DRILLDOWN_MAP → list_receipts)
   → [New] button → form_receipt_new
     → Admin fills amount, account, particulars, mode, date
       → _save_receipt_v3 (caller_role="admin")
@@ -668,7 +668,7 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 |---|---|
 | `fn_auto_generate_receivables(society_id)` | Creates monthly receivable rows per apartment |
 | `fn_apply_receivable_interest(society_id)` | Accrues interest on overdue receivables |
-| `fn_auto_generate_payments(society_id)` | Creates salary payment rows per security shift |
+| `fn_auto_generate_payables(society_id)` | Creates salary payment rows per security shift |
 | `fn_pay_apartment_dues_fifo(apt_id, amount, mode, confirmed_by, particulars)` | FIFO payment → marks receivables paid → creates receipt + transaction |
 | `fn_verify_receivable(receivable_id, confirmed_by, mode)` | Posts pending receivable to transactions |
 | `fn_verify_payment(payment_id, confirmed_by, mode)` | Posts pending salary payment to transactions |
@@ -804,7 +804,7 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 | `fn_auto_generate_receivables` NULL acc_id | `fn_verify_receivable` returns "No income account set" | Fallback now looks up accounts by name; one-time UPDATE patches existing rows |
 | `fn_save_receipt` arg order wrong | Silent data corruption — role written to acc_id column | Fixed arg order in `_save_receipt_v3` to match SQL signature |
 | `fn_save_expense` arg order wrong | Same as above | Fixed arg order in `_save_expense_v3` |
-| `kpi_receivables_total` → wrong target | Clicked KPI opened receipts list instead of receivables | Fixed `DRILLDOWN_MAP` entry: `"list_receipts_tbl"` → `"list_receivables"` |
+| `kpi_receivables_total` → wrong target | Clicked KPI opened receipts list instead of receivables | Fixed `DRILLDOWN_MAP` entry: `"list_receipts"` → `"list_receivables"` |
 | Default profile not showing | `_render_card("dashboard_admin")` fell through to `_empty_state` | Added `dashboard_*` handler + `_render_default_profile()` + `portal-content-store` Input |
 | KPI `prevent_initial_call=True` blocked page-load refresh | KPI values stayed `"—"` until user clicked | Changed to `"initial_duplicate"` |
 | `portal-content-store` guard blocked KPI refresh | KPI callback gated on store having `rendered=True` then crashed | Removed blocking guard |

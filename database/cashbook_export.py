@@ -18,7 +18,7 @@ Column layout (A–O):
   K  Payment L.F. No.       (accounts.id)
   L  Payment Cash           (mode='cash' → Dr amount)
   M  Payment Chq            (mode≠'cash' → Dr amount, informational)
-  N  Payment Running Total  (running sum of col L — cash payments only)
+  N  Payment Running Total  (running sum of col L — cash payables only)
   O  Balance                (= G − N, physical cash in hand)
 
 Row structure:

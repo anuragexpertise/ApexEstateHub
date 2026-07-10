@@ -8,7 +8,7 @@ v3 changes:
   - apartments: added 'issue_noc', kept 'pay_dues' (now routes to FIFO form)
   - vendors:    added 'sell_vendor_pass'
   - receivables: added 'verify_receivable' (admin-only; enforced in renderers.py)
-  - payments:    added 'verify_payment'    (admin-only)
+  - payables:    added 'verify_payment'    (admin-only)
   - assets:      added 'dispose_asset'     (admin-only)
   - Removed:     sec_charges (table dropped in v3)
 """
@@ -146,8 +146,8 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
 
-    # ── PAYMENTS  (read-only tab — Verify is the only action) ───────────────
-    "payments": [
+    # ── payables  (read-only tab — Verify is the only action) ───────────────
+    "payables": [
         {
             "label": "Verify",
             "action_id": "verify_payment",
@@ -158,7 +158,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
     # ── RECEIPTS ─────────────────────────────────────────────────────────────
-    "receipts_tbl": [
+    "receipts": [
         {
             "label": "Verify & Post",
             "action_id": "verify_receipt",
@@ -235,7 +235,7 @@ FIELD_VISIBILITY: dict[str, dict[str, set[str]]] = {
         "confirmed_by": {"admin", "master"},
         "confirmed_at": {"admin", "master"},
     },
-    "payments": {
+    "payables": {
         "confirmed_by": {"admin", "master"},
         "confirmed_at": {"admin", "master"},
     },

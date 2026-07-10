@@ -62,8 +62,8 @@ class RBACManager:
             "list_concerns": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_accounts": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_gate_logs": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
-            "list_receipts_tbl": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
-            "list_expenses_tbl": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_receipts": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "list_expenses": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_cashbook": {Permission.VIEW},
             
             # Profiles
@@ -100,7 +100,7 @@ class RBACManager:
             # Owner Cashbook
             "list_cashbook": {Permission.VIEW},
             
-            # Owner Payments
+            # Owner payables
             "kpi_apartments_dues": {Permission.VIEW},
             
             # Owner Settings
@@ -122,7 +122,7 @@ class RBACManager:
             # Vendor Cashbook
             "list_cashbook": {Permission.VIEW},
             
-            # Vendor Payments
+            # Vendor payables
             "kpi_vendors_dues": {Permission.VIEW},
             
             # Forms

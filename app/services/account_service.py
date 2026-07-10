@@ -364,7 +364,7 @@ def record_receipt(society_id: int, data: dict, created_by: int = None) -> tuple
             "acc_particulars": str (required - description),
             "amount": Decimal (required),
             "mode": str (cash/cheque/upi/card/bank/crypto, default: cash),
-            "payment_gateway_id": str (for online payments)
+            "payment_gateway_id": str (for online payables)
         }
     
     Returns:
@@ -449,7 +449,7 @@ def record_expense(society_id: int, data: dict, created_by: int = None) -> tuple
             "acc_particulars": str (required - description),
             "amount": Decimal (required),
             "mode": str (cash/cheque/upi/card/bank/crypto, default: cash),
-            "payment_gateway_id": str (for online payments)
+            "payment_gateway_id": str (for online payables)
         }
     
     Returns:
@@ -592,7 +592,7 @@ def delete_transaction(transaction_id: int, society_id: int) -> tuple[bool, str]
 def get_cashbook(society_id: int, start_date: date = None, end_date: date = None, page: int = 1, page_size: int = 100) -> tuple[list, int, dict]:
     """
     Get cashbook with running balance.
-    Shows receipts (Cr accounts) and payments (Dr accounts) in dual-column format.
+    Shows receipts (Cr accounts) and payables (Dr accounts) in dual-column format.
     
     Args:
         society_id: Society ID
@@ -607,7 +607,7 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
     Summary contains:
         - opening_balance: Balance at start_date
         - total_receipts: Sum of all receipts
-        - total_payments: Sum of all payments
+        - total_payables: Sum of all payables
         - closing_balance: Final balance
     """
     try:
@@ -715,12 +715,12 @@ def get_cashbook(society_id: int, start_date: date = None, end_date: date = None
         
         # Calculate summary
         total_receipts = sum(float(r.get("receipt_total", 0)) for r in rows if r.get("receipt_total"))
-        total_payments = sum(float(r.get("payment_total", 0)) for r in rows if r.get("payment_total"))
+        total_payables = sum(float(r.get("payment_total", 0)) for r in rows if r.get("payment_total"))
         
         summary = {
             "opening_balance": round(opening_balance, 2),
             "total_receipts": round(total_receipts, 2),
-            "total_payments": round(total_payments, 2),
+            "total_payables": round(total_payables, 2),
             "closing_balance": round(balance, 2)
         }
         
@@ -739,7 +739,7 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
         {
             "opening_balance": Decimal,
             "total_receipts": Decimal,
-            "total_payments": Decimal,
+            "total_payables": Decimal,
             "closing_balance": Decimal
         }
     """
@@ -782,7 +782,7 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
             f"""
             SELECT 
                 COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount END), 0) as total_receipts,
-                COALESCE(SUM(CASE WHEN a.drcr_account = 'Dr' THEN t.amount END), 0) as total_payments
+                COALESCE(SUM(CASE WHEN a.drcr_account = 'Dr' THEN t.amount END), 0) as total_payables
             FROM transactions t
             JOIN accounts a ON t.acc_id = a.id
             WHERE t.society_id = :society_id
@@ -794,13 +794,13 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
         )
         
         total_receipts = float(totals.get("total_receipts", 0)) if totals else 0.0
-        total_payments = float(totals.get("total_payments", 0)) if totals else 0.0
-        closing_balance = opening_balance + total_receipts - total_payments
+        total_payables = float(totals.get("total_payables", 0)) if totals else 0.0
+        closing_balance = opening_balance + total_receipts - total_payables
         
         return {
             "opening_balance": round(opening_balance, 2),
             "total_receipts": round(total_receipts, 2),
-            "total_payments": round(total_payments, 2),
+            "total_payables": round(total_payables, 2),
             "closing_balance": round(closing_balance, 2)
         }
         
@@ -809,7 +809,7 @@ def get_cashbook_summary(society_id: int, start_date: date = None, end_date: dat
         return {
             "opening_balance": 0.0,
             "total_receipts": 0.0,
-            "total_payments": 0.0,
+            "total_payables": 0.0,
             "closing_balance": 0.0
         }
 
