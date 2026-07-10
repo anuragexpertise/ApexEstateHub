@@ -93,7 +93,7 @@ def _resolve_entity_singular(id_dict):
     # Guard entities whose names are mangled by to_singular()
     if raw in ("pay_due", "pay_dues"):
         return "pay_due"
-    if raw in ("vendor_pass", "vendor_pass_new", "vendor_pas"):
+    if raw in ("vendor_pass", "vendor_pass_new"):
         return "vendor_pass"
     return to_singular(raw)
 
@@ -2147,4 +2147,8 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         sec_staff_id = auth.get("linked_id")
         if sec_staff_id:
             f["security_id"] = sec_staff_id
+        # user_id is used for receipts (created_by = users.id)
+        sec_user_id = auth.get("user_id") or auth.get("id")
+        if sec_user_id:
+            f["user_id"] = sec_user_id
     return f

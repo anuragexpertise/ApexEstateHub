@@ -103,14 +103,21 @@ _PATH_LABELS = {
     "owner-portal":      "Dashboard",
     "vendor-portal":     "Dashboard",
     "master":            "Dashboard",
+    "master-create":     "Create Society",
+    "master-settings":   "Settings",
     "pass-evaluation":   "Pass Eval",
     "cashbook":          "Cashbook",
     "owner-cashbook":    "Cashbook",
+    "owner-financials":  "Financials",
     "vendor-cashbook":   "Cashbook",
+    "vendor-financials": "Financials",
     "receipts":          "Receipts",
+    "owner-receivables": "Bills Due",
+    "owner-receipts":    "Bills Paid",
+    "vendor-receipts":   "Bills Paid",
+    "vendor-passes":     "Passes",
     "expenses":          "Expenses",
     "enroll":            "Enroll",
-    "users":             "Users",
     "events":            "Events",
     "owner-events":      "Events",
     "vendor-events":     "Events",
@@ -121,13 +128,17 @@ _PATH_LABELS = {
     "owner-settings":    "Settings",
     "vendor-settings":   "Settings",
     "security-settings": "Settings",
-    "payables":          "payables",
-    "vendor-payables":   "payables",
+    "payables":          "Payables",
+    "vendor-payables":   "Payables",
     "charges":           "Charges",
     "vendor-charges":    "Charges",
     "concerns":          "Concerns",
+    "owner-concerns":    "Concerns",
+    "vendor-concerns":   "Concerns",
+    "security-concerns": "Concerns",
     "attendance":        "Attendance",
-    "security-receipt":  "New Receipt",
+    "security-receipts":  "Receipts",
+    "security-receipt":   "New Receipt",
     "security-users":    "Users",
 }
 
@@ -165,7 +176,12 @@ def _portal_content(role, society_id, pathname):
     p = pathname or ""
 
     if is_master:
-        return master_portal_page()
+        tab = (
+            "master-create"   if "/master-create"   in p else
+            "master-settings" if "/master-settings" in p else
+            "master"
+        )
+        return master_portal_page(active_tab=tab, sid=society_id)
     if role == "admin":
         tab = (
             "cashbook"      if "/cashbook"      in p else
@@ -183,32 +199,40 @@ def _portal_content(role, society_id, pathname):
         return admin_portal_page(tab, sid=society_id)
     if role == "apartment":
         tab = (
+            "financials" if "/owner-financials" in p else
+            "receivables" if "/owner-receivables" in p else
+            "receipts" if "/owner-receipts" in p else
             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
-            "payables" if "/payables"       in p else
-            "charges"  if "/charges"        in p else
+            "charges"  if "/owner-charges"  in p else
             "events"   if "/owner-events"   in p or "/events"   in p else
-            "concerns" if "/concerns"       in p else
+            "concerns" if "/owner-concerns" in p or "/concerns" in p else
             "settings" if "/owner-settings" in p or "/settings" in p else
             "dashboard"
         )
         return owner_portal_page(tab, sid=society_id)
     if role == "vendor":
         tab = (
-            "cashbook" if "/vendor-cashbook" in p or "/cashbook" in p else
-            "payables" if "/vendor-payables" in p or "/payables" in p else
-            "charges"  if "/vendor-charges"  in p or "/charges"  in p else
-            "events"   if "/vendor-events"   in p or "/events"   in p else
-            "settings" if "/vendor-settings" in p or "/settings" in p else
+            "financials" if "/vendor-financials" in p else
+            "receivables" if "/vendor-receipts" in p else
+            "passes"      if "/vendor-passes"     in p else
+            "cashbook"    if "/vendor-cashbook"   in p or "/cashbook"  in p else
+            "charges"     if "/vendor-charges"    in p or "/charges"   in p else
+            "events"      if "/vendor-events"     in p or "/events"    in p else
+            "concerns"    if "/vendor-concerns"   in p or "/concerns"  in p else
+            "settings"    if "/vendor-settings"   in p or "/settings"  in p else
             "dashboard"
         )
         return vendor_portal_page(tab, sid=society_id)
     if role == "security":
         tab = (
-            "attendance"       if "/attendance"        in p else
-            "security_events"  if "/security-events"   in p else
-            "security_receipt" if "/security-receipt"  in p else
-            "dashboard"        if "/security-users"    in p else
-            "settings"         if "/security-settings" in p or "/settings" in p else
+            "pass_evaluation" if "/pass-evaluation"     in p else
+            "attendance"      if "/attendance"          in p else
+            "security_receipts" if "/security-receipts" in p else
+            "security_receipt" if "/security-receipt"   in p else
+            "security_events"  if "/security-events"    in p else
+            "security_concerns" if "/security-concerns"  in p else
+            "dashboard"        if "/security-users"      in p else
+            "settings"         if "/security-settings"   in p or "/settings" in p else
             "pass_evaluation"
         )
         return security_portal_page(tab, sid=society_id)

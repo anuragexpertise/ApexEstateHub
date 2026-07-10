@@ -32,6 +32,9 @@ def _build_auth(row: dict) -> dict | None:
         "role":              row["role"],
         "society_id":        row.get("society_id"),
         "linked_id":         row.get("linked_id"),
+        "security_id":       row.get("id") if row.get("role") == "security" else None,
+        "apartment_id":      row.get("id") if row.get("role") == "apartment" else None,
+        "vendor_id":         row.get("id") if row.get("role") == "vendor" else None,
         "token":             secrets.token_hex(32),
         "push_subscription": row.get("push_subscription"),
     }
@@ -73,6 +76,13 @@ def authenticate_user(email: str, password: str,
     if not row:
         log.warning("No user: %s sid=%s", email, society_id)
         return None
+
+    # Enforce account lockout
+    locked_until = row.get("locked_until")
+    if locked_until and locked_until > datetime.utcnow():
+        log.warning("Locked account attempt: %s until %s", email, locked_until)
+        return None
+
     stored = row.get("password_hash") or ""
     if not stored or not check_password_hash(stored, password):
         log.warning("Bad password: %s", email)

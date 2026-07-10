@@ -26,7 +26,8 @@ def _build_auth_store(user: dict) -> dict:
         "role":          user.get("role", "admin"),
         "society_id":    user.get("society_id"),
         "linked_id":     user.get("linked_id"),
-        # Portal-scoping fields — loaders use these to filter data
+        "security_id":   user.get("security_id") or (
+                             user.get("linked_id") if user.get("role") == "security" else None),
         "apartment_id":  user.get("apartment_id") or (
                              user.get("linked_id") if user.get("role") == "apartment" else None),
         "vendor_id":     user.get("vendor_id") or (
