@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS asset_register (
+CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     company_name VARCHAR(100),
@@ -612,7 +612,7 @@ CREATE INDEX IF NOT EXISTS idx_ven_charges_status ON ven_charges_fines_basis (so
 
 CREATE INDEX IF NOT EXISTS idx_vendor_passes_user ON vendor_passes (user_id, valid_until);
 
-CREATE INDEX IF NOT EXISTS idx_asset_register_society ON asset_register (society_id, disposed);
+CREATE INDEX IF NOT EXISTS idx_assets_society ON assets (society_id, disposed);
 
 CREATE INDEX IF NOT EXISTS idx_society_settings_lookup ON society_settings (society_id, key);
 
@@ -1435,7 +1435,7 @@ END;
 $$;
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 7: ASSET PURCHASE / DISPOSAL
--- fn_buy_asset:     creates asset_register row + expense row + transaction.
+-- fn_buy_asset:     creates assets row + expense row + transaction.
 -- fn_dispose_asset: creates receipt row + transaction; marks asset disposed.
 -- Both require parent_account_id on the asset row (the asset class account,
 -- e.g. Furniture=61). acc_id on the expense/receipt is the flow account
@@ -1475,7 +1475,7 @@ BEGIN
 
     SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_parent_account_id;
 
-    INSERT INTO asset_register(
+    INSERT INTO assets(
         society_id, asset_name, asset_sno, purchase_date, purchase_value,
         parent_account_id, depreciation_rate, created_at
     ) VALUES (
@@ -1527,12 +1527,12 @@ CREATE OR REPLACE FUNCTION fn_dispose_asset(
 RETURNS TABLE(receipt_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_asset      asset_register%ROWTYPE;
+    v_asset      assets%ROWTYPE;
     v_acc_id     INT;
     v_receipt_id INT;
     v_desc       TEXT;
 BEGIN
-    SELECT * INTO v_asset FROM asset_register WHERE id = p_asset_id FOR UPDATE;
+    SELECT * INTO v_asset FROM assets WHERE id = p_asset_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Asset not found'; END IF;
     IF v_asset.disposed THEN RAISE EXCEPTION 'Asset already disposed'; END IF;
     IF p_sale_value IS NULL OR p_sale_value <= 0 THEN
@@ -1564,7 +1564,7 @@ BEGIN
         p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
     );
 
-    UPDATE asset_register
+    UPDATE assets
     SET disposed    = TRUE,
         disposed_at = p_sale_date,
         sale_value  = p_sale_value,
@@ -1982,7 +1982,7 @@ BEGIN
             WHEN e.role = 'vendor'   THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), '')
             WHEN e.role = 'security' THEN COALESCE(s.name||COALESCE(' ('||s.shift||')',''), '')
             WHEN e.role = 'assets'   THEN COALESCE(
-                (SELECT asset_name FROM asset_register WHERE asset_register.id = e.entity_id),
+                (SELECT asset_name FROM assets WHERE assets.id = e.entity_id),
                 'Asset #'||e.entity_id::TEXT)
             ELSE 'Other'
         END::TEXT,
@@ -2424,7 +2424,7 @@ BEGIN
         ar.disposed_at::DATE,
         ar.sale_value::NUMERIC(12,2),
         ar.created_at::TIMESTAMP
-    FROM asset_register ar
+    FROM assets ar
     LEFT JOIN accounts a ON a.id = ar.parent_account_id
     WHERE ar.society_id = p_society_id
       AND ar.disposed = COALESCE(p_disposed, FALSE)

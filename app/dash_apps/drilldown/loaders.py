@@ -301,7 +301,7 @@ def load_list(
                 (sid, s, disposed, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM asset_register WHERE society_id=%s AND disposed=%s",
+                "SELECT COUNT(*) AS n FROM assets WHERE society_id=%s AND disposed=%s",
                 (sid, disposed), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
@@ -597,7 +597,7 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 "LEFT JOIN accounts a ON a.id=e.acc_id "
                 "LEFT JOIN vendors v ON v.id=e.entity_id AND e.role='vendor' "
                 "LEFT JOIN security_staff s ON s.id=e.entity_id AND e.role='security' "
-                "LEFT JOIN asset_register ar ON ar.id=e.entity_id AND e.role='assets' "
+                "LEFT JOIN assets ar ON ar.id=e.entity_id AND e.role='assets' "
                 "WHERE e.id=%s AND e.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
@@ -642,7 +642,7 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 "  GREATEST(ar.purchase_value * "
                 "    (1 - COALESCE(ar.depreciation_rate,a.depreciation_percent,100)/100), 0) "
                 "    AS book_value "
-                "FROM asset_register ar "
+                "FROM assets ar "
                 "LEFT JOIN accounts a ON a.id=ar.acc_id "
                 "WHERE ar.id=%s AND ar.society_id=%s",
                 (pk, society_id), fetch_one=True,
@@ -819,7 +819,7 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
             if (trx_count or {}).get("n", 0) > 0:
                 return False, "Cannot delete asset with existing transactions"
             db._execute(
-                "DELETE FROM asset_register WHERE id=%s AND society_id=%s AND disposed=FALSE",
+                "DELETE FROM assets WHERE id=%s AND society_id=%s AND disposed=FALSE",
                 (pk, society_id),
             )
             return True, "Asset deleted"
