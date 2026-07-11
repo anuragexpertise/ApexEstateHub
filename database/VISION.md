@@ -19,7 +19,7 @@ We didn't build ApexEstateHub on legacy infrastructure. We built it on the same 
 
 | Layer | Technology | Why It Matters For Your Society |
 |---|---|---|
-| **Database** | NeonDB — serverless PostgreSQL | Auto-scales with your society's growth. Zero downtime, instant backups, branch-and-test safety for every upgrade. |
+| **Database** | Aiven — serverless PostgreSQL | Auto-scales with your society's growth. Zero downtime, instant backups, branch-and-test safety for every upgrade. |
 | **Application Engine** | Python · Flask · Plotly Dash | Enterprise-grade reliability with the same language ecosystem trusted by banks and research institutions. |
 | **Architecture** | Schema-introspection + stored-function engine | New features (a new charge type, a new report) can be added by *extending the database schema* — no risky rewrites, no months-long dev cycles. |
 | **Security** | JWT + Werkzeug password hashing + PIN + 9-dot pattern login | Bank-grade authentication, with the flexibility for elderly residents to use a simple pattern instead of typing a password. |
@@ -101,7 +101,7 @@ This is the same principle bleeding-edge SaaS platforms use to ship features wee
 
 ## 09 · Ready When You Are
 
-ApexEstateHub deploys on modern, production-grade infrastructure (Render, gunicorn, NeonDB) with full JWT authentication, push notifications, and PWA support out of the box. Whether you're a single 40-flat community or a management company running a portfolio of societies, the architecture scales with you — not against you.
+ApexEstateHub deploys on modern, production-grade infrastructure (Render, gunicorn, Aiven) with full JWT authentication, push notifications, and PWA support out of the box. Whether you're a single 40-flat community or a management company running a portfolio of societies, the architecture scales with you — not against you.
 
 **This is society management, rebuilt for the way people actually live and pay and enter buildings today.**
 

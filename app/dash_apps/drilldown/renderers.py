@@ -562,13 +562,21 @@ def render_profile_card(card_id: str, title: str, icon: str,
         img_entity_pk = pk_val
 
     # ── Split fields into image fields and text fields ───────────────────
+    _IMAGE_FIELD_NAMES = {
+        "photo", "photo_url", "image", "logo",
+        "owner_photo", "id_proof", "secretary_sign", "login_background",
+        "license",
+    }
     visible_fields = [
         f for f in fields
         if f.get("field") not in hidden
         and _field_visible(entity_plural, f.get("field"), role)
     ]
-    image_fields = [f for f in visible_fields if f.get("type") == "image"]
-    text_fields  = [f for f in visible_fields if f.get("type") != "image"]
+    image_fields = [
+        f for f in visible_fields
+        if f.get("type") == "image" or f.get("field") in _IMAGE_FIELD_NAMES
+    ]
+    text_fields  = [f for f in visible_fields if f not in image_fields]
 
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
     image_section = []
