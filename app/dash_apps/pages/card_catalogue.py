@@ -952,5 +952,7 @@ def make_kpi_card(card_id: str, value) -> html.Div:
             "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
             "cursor": "pointer", "userSelect": "none",
             "transition": "transform 0.1s, box-shadow 0.1s",
+            "height": "120px", "display": "flex",
+            "flexDirection": "column", "justifyContent": "center",
         },
     )

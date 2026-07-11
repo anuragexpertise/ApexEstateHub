@@ -395,6 +395,20 @@ a {
     min-width: 0;
 }
 
+/* Uniform KPI tile height across every tab / portal. The outer .kpi-card is
+   fixed-height and the inner card fills it, so a card with a subtitle is the
+   exact same height as one without. */
+.kpi-card {
+    height: 120px;
+}
+
+.kpi-card>div {
+    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
 .kpi-card .card-body,
 .dnd-card.kpi-card {
     position: relative;

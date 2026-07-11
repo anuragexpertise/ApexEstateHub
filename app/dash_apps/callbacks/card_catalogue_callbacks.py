@@ -171,10 +171,14 @@ def register_card_catalogue_callbacks(app):
                         (vendor_id,),
                     ),
                     "kpi_my_pass_expiry": (
-                        "SELECT MAX(vp.valid_until)::DATE AS v FROM vendor_passes vp "
-                        "JOIN users u ON u.id=vp.user_id "
-                        "WHERE u.society_id=%s AND u.linked_id=%s AND vp.status='active'",
-                        (sid, vendor_id,),
+                        # Mirror fn_vendors_list's pass_expiry calc exactly:
+                        # MAX(valid_until) keyed on vendor_passes.user_id (= users.id),
+                        # not via a users JOIN on linked_id (which returned NULL
+                        # whenever the linkage didn't line up, leaving the card "—").
+                        "SELECT MAX(vp.valid_until)::DATE AS v "
+                        "FROM vendor_passes vp "
+                        "WHERE vp.user_id=%s AND vp.status='active'",
+                        (own_user_id,),
                     ),
                     "kpi_gate_logs": (
                         # Same fix as the apartment override above: vendor_id
