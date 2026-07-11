@@ -116,7 +116,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_security_total": {"target": "list_security", "label": "Security Staff"},
     "kpi_security_on_duty": {
-        "target": "list_gate_logs",
+        "target": "list_security",
         "label": "Security On Duty",
         "filter": {"on_duty": True},
     },
@@ -126,6 +126,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_receipts_month": {
         "target": "list_receipts",
         "label": "Receipts This Month",
+        "filter":{"date": {"gt": "MONTH(NOW())"}}, # to do
     },
     "kpi_receipts_total": {
         "target": "list_receipts",
@@ -134,13 +135,14 @@ DRILLDOWN_MAP: dict = {
     "kpi_expenses_month": {
         "target": "list_expenses",
         "label": "Expenses This Month",
+        "filter":{"date": {"gt": "MONTH(NOW())"}}, # to do
     },
     "kpi_expenses_total": {
         "target": "list_expenses",
         "label": "All Expenses",
     },
-    "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"},
-    "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"},
+    "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"}, # to do
+    "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"}, # to do
     "kpi_societies_calc_start_date": {
         "target": "list_societies",
         "label": "Calc Start Date",
@@ -152,6 +154,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_receivables_overdue": {
         "target": "list_receivables",
         "label": "Overdue Receivables",
+
     },
     "kpi_advance_credits": {
         "target": "list_receivables",
@@ -161,10 +164,12 @@ DRILLDOWN_MAP: dict = {
     "kpi_my_pending_dues": {
         "target": "list_receivables",
         "label": "My Pending Dues",
+        "filter": {"status": "pending"},
     },
     "kpi_my_overdue_dues": {
         "target": "list_receivables",
         "label": "My Overdue Dues",
+        "filter": {"status": "overdue"},
     },
     "kpi_receipts_pending": {
         "target": "list_receipts",
