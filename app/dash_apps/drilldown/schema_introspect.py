@@ -64,6 +64,7 @@ _IMAGE_COLUMNS = {
     "photo", "photo_url", "image", "logo",
     "owner_photo", "id_proof", "secretary_sign", "login_background",
     "license",   # vendors.license — confirmed to be an uploaded document/photo
+    "payment_qr",  # societies.payment_qr — payment QR code image
 }
 
 # PostgreSQL type → form field type.
