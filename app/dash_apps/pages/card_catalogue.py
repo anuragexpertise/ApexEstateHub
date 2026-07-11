@@ -294,6 +294,19 @@ KPI_CARDS = {
         "title": "On Duty Now", "group": "active guards",
     },
 
+    "kpi_security_off_duty": {
+        "query": """
+            SELECT GREATEST(
+                (SELECT COUNT(*) FROM security_staff WHERE society_id=%s AND active=TRUE) -
+                (SELECT COUNT(*) FROM gate_access WHERE society_id=%s AND role='s' AND time_out IS NULL),
+                0
+            ) AS v
+        """,
+        "params": 2, "format": "number",
+        "icon": "fa-user-clock", "color": "#8a8f98",
+        "title": "Off Duty", "group": "not clocked in",
+    },
+
     "kpi_security_shifts_pending": {
         "query": """
             SELECT COUNT(*) AS v FROM payables
@@ -416,6 +429,16 @@ KPI_CARDS = {
     "kpi_societies_999Apts":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='999Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "999Apts Plans", "group": "active"},
     "kpi_societies_unlimited":{"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='unlimited' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "Unlimited Plans", "group": "active"},
     "kpi_societies_expired":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan_validity<CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-exclamation-triangle", "color": "#de5c52", "title": "Expired Plans", "group": "renewal needed"},
+    "kpi_societies_expiring_soon": {
+        "query": """
+            SELECT COUNT(*) AS v FROM societies
+            WHERE plan_validity >= CURRENT_DATE
+              AND plan_validity <= CURRENT_DATE + INTERVAL '30 days'
+        """,
+        "params": 0, "format": "number",
+        "icon": "fa-hourglass-half", "color": "#e2a03f",
+        "title": "Expiring Soon", "group": "next 30 days",
+    },
     "kpi_master_apartments_total": {"query": "SELECT COUNT(*) AS v FROM apartments WHERE active=TRUE", "params": 0, "format": "number", "icon": "fa-home",       "color": "#1859b8", "title": "Apartments",    "group": "across all"},
     "kpi_master_vendors_total":    {"query": "SELECT COUNT(*) AS v FROM vendors WHERE active=TRUE",    "params": 0, "format": "number", "icon": "fa-truck",      "color": "#b98a07", "title": "Vendors",       "group": "across all"},
     "kpi_master_security_total":   {"query": "SELECT COUNT(*) AS v FROM security_staff WHERE active=TRUE", "params": 0, "format": "number", "icon": "fa-user-shield", "color": "#b63b3b", "title": "Security", "group": "across all"},
@@ -434,6 +457,17 @@ KPI_CARDS = {
         "params": 2, "format": "currency",    # second %s = apartment_id
         "icon": "fa-rupee-sign", "color": "#de5c52",
         "title": "My Pending Dues", "group": "to pay",
+    },
+
+    "kpi_owner_member_since": {
+        # Fallback (society-wide) query — the real per-apartment value is
+        # supplied via the "apartment" scoped override in
+        # card_catalogue_callbacks.py (WHERE id=%s using apt_id), since a
+        # generic society_id filter can't identify a single apartment.
+        "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s",
+        "params": 1, "format": "date",
+        "icon": "fa-calendar-check", "color": "#1859b8",
+        "title": "Member Since", "group": "enrolled",
     },
 
     "kpi_my_overdue_dues": {
@@ -747,6 +781,9 @@ DEFAULT_LAYOUTS = {
             "kpi_master_vendors_total",
             "kpi_master_security_total",
         ],
+        "master-settings": [
+            "kpi_societies_expiring_soon",
+        ],
     },
     "admin": {
         "dashboard": [
@@ -818,7 +855,7 @@ DEFAULT_LAYOUTS = {
         "charges": ["kpi_maintainence_charges", "kpi_apt_charges_count"],
         "concerns": ["kpi_concerns_open"],
         "events": ["kpi_events_total"],
-        "settings": [],
+        "settings": ["kpi_owner_member_since"],
     },
     "vendor": {
         "dashboard": [
@@ -841,12 +878,13 @@ DEFAULT_LAYOUTS = {
         "settings": ["kpi_vendor_date"],
     },
     "security": {
+        # NOTE: "dashboard" is what the sidebar's "Users" link renders
+        # (shell_callbacks.py maps /security-users -> tab "dashboard").
+        # Kept as a dedicated on-duty/off-duty roster set per request.
         "dashboard": [
-            "kpi_apartments_total",
-            "kpi_vendors_total",
             "kpi_security_total",
-            "kpi_security_shift_count",
-            "kpi_receipts_in_hand_total",
+            "kpi_security_on_duty",
+            "kpi_security_off_duty",
         ],
         "payables": [
             "kpi_security_salaries_due",
