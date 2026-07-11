@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/qr_callbacks.py (COMPLETE WITH CAMERA)
 
-from dash import Input, Output, State, html, no_update, clientside_callback
+from dash import Input, Output, State, dcc, html, no_update, clientside_callback
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from datetime import datetime
@@ -598,8 +598,7 @@ def register_qr_callbacks(app):
 
     # ── 5b. Save QR as PNG ────────────────────────────────────────
     @app.callback(
-        Output('qr-download-link', 'href'),
-        Output('qr-download-link', 'download'),
+        Output('qr-download', 'data'),
         Input('save-qr-png-btn', 'n_clicks'),
         State('qr-modal-img', 'src'),
         State('qr-entity-store', 'data'),
@@ -609,7 +608,6 @@ def register_qr_callbacks(app):
         if not n_clicks or not img_src or not entity_data:
             raise PreventUpdate
         
-        # img_src format: "data:image/png;base64,{data}"
         if not img_src.startswith('data:image/png;base64,'):
             raise PreventUpdate
         
@@ -618,11 +616,46 @@ def register_qr_callbacks(app):
             role = entity_data.get('role', 'entity')
             filename = f"Gate_Pass_{entity_id}_{role}.png"
             
-            # Return data URL and filename for browser download
-            return img_src, filename
+            return dcc.send_data_url(img_src, filename)
         except Exception as e:
             print(f"QR PNG save error: {e}")
             raise PreventUpdate
+
+    # ── 5c. Print QR as PNG ───────────────────────────────────────
+    clientside_callback(
+        """
+        function(n_clicks, img_src, entity_data) {
+            if (!n_clicks || !img_src || !entity_data) 
+                return window.dash_clientside.no_update;
+            
+            if (!img_src.startsWith('data:image/png;base64,')) 
+                return window.dash_clientside.no_update;
+            
+            var win = window.open('', '_blank');
+            if (!win) return window.dash_clientside.no_update;
+            
+            win.document.write(
+                '<!DOCTYPE html>' +
+                '<html><head><title>Print Gate Pass QR</title>' +
+                '<style>' +
+                '  body { display:flex; justify-content:center; align-items:center; min-height:100vh; margin:0; }' +
+                '  img { max-width:90%; max-height:90vh; border:2px solid #333; border-radius:8px; padding:8px; }' +
+                '  @media print { body { margin:0; } img { border:none; } }' +
+                '</style></head><body>' +
+                '<img src="' + img_src + '" onload="window.print();window.close();" />' +
+                '</body></html>'
+            );
+            win.document.close();
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('print-qr-png-btn', 'n_clicks'),
+        Input('print-qr-png-btn', 'n_clicks'),
+        State('qr-modal-img', 'src'),
+        State('qr-entity-store', 'data'),
+        prevent_initial_call=True,
+    )
 
     # ── 5. Emergency Alert ──────────────────────────────────────
     @app.callback(
