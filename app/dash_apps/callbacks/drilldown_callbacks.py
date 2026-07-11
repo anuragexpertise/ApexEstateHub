@@ -856,6 +856,22 @@ def register_drilldown_callbacks(app):
             output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx"
         )
 
+    # ── Vendor Pass type card selection ──────────────────────────────────
+    @app.callback(
+        Output({"type": "form-field", "entity": "vendor_pass", "field": "pass_type"}, "value"),
+        Input({"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": ALL}, "n_clicks"),
+        State({"type": "form-field", "entity": "vendor_pass", "field": "pass_type"}, "value"),
+        prevent_initial_call=True,
+    )
+    def select_pass_type(n_clicks_list, current_value):
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            return no_update
+        triggered_id = json.loads(ctx.triggered[0]["prop_id"].split(".")[0])
+        selected = triggered_id["value"]
+        if selected == current_value:
+            return ""
+        return selected
+
     print("✓ Drilldown callbacks registered (portal-aware)")
 
 

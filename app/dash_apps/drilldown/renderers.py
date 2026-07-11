@@ -1333,7 +1333,7 @@ def render_vendor_pass_card(
         ], color="warning", style={"fontSize": "12px", "borderRadius": "10px",
                                     "padding": "8px 14px", "marginBottom": "12px"})
  
-    # ── Rate summary cards ────────────────────────────────────────────────
+    # ── Rate summary cards (clickable) ───────────────────────────────────
     rate_items = [("1day", "1-Day"), ("7day", "7-Day"), ("1mth", "Monthly"), ("free_1mth", "Free (1 Month)")]
     rate_cols  = []
     for pt, label in rate_items:
@@ -1344,18 +1344,34 @@ def render_vendor_pass_card(
         else:
             rate_display = f"₹{float(rate):,.0f}" if rate else "—"
             rate_color = "#15304f" if rate else "#bbb"
-        rate_cols.append(dbc.Col(dbc.Card([
-            html.Div(f"{label} Pass",
-                     style={"fontSize": "10px", "color": "#7d8ea3",
-                            "fontWeight": "600", "textTransform": "uppercase",
-                            "marginBottom": "4px"}),
-            html.Div(
-                rate_display,
-                style={"fontSize": "20px", "fontWeight": "800",
-                       "color": rate_color},
-            ),
-        ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
-                              "textAlign": "center", "padding": "10px"}), width=4))
+        rate_cols.append(dbc.Col(
+            html.Button([
+                html.Div(f"{label} Pass",
+                         style={"fontSize": "10px", "color": "#7d8ea3",
+                                "fontWeight": "600", "textTransform": "uppercase",
+                                "marginBottom": "4px"}),
+                html.Div(
+                    rate_display,
+                    style={"fontSize": "20px", "fontWeight": "800",
+                           "color": rate_color},
+                ),
+            ],
+            id={"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": pt},
+            n_clicks=0,
+            style={
+                "width": "100%", "height": "100%", "minHeight": "80px",
+                "border": "2px solid #e8edf5",
+                "borderRadius": "10px",
+                "background": "white",
+                "textAlign": "center",
+                "padding": "10px",
+                "cursor": "pointer",
+                "display": "flex",
+                "flexDirection": "column",
+                "justifyContent": "center",
+                "alignItems": "center",
+            },
+        ), width=3))
   
     # ── Pass type dropdown — shows rate inline ────────────────────────────
     pass_options = []
@@ -1390,7 +1406,7 @@ def render_vendor_pass_card(
         ),
         dbc.CardBody([
             banner,
-            dbc.Row(rate_cols, className="mb-3"),
+            dbc.Row(rate_cols, className="g-3"),
  
             # ── Hidden identity fields ────────────────────────────────────
             # vendor_user_id: read by _save_vendor_pass as p_user_id
