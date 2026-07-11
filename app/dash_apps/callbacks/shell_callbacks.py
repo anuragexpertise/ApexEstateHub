@@ -184,6 +184,7 @@ def _portal_content(role, society_id, pathname):
         return master_portal_page(active_tab=tab, sid=society_id)
     if role == "admin":
         tab = (
+            "financials"    if "/financials"    in p else
             "cashbook"      if "/cashbook"      in p else
             "receipts"      if "/receipts"      in p else
             "expenses"      if "/expenses"      in p else
