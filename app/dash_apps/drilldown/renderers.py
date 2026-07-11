@@ -222,7 +222,7 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     clickable: bool = True) -> html.Div:
     return html.Div(
         id={"type": "kpi-card-div", "card_id": card_id},
-        n_click=0,
+        n_clicks=0,
         children=[
             dbc.Card(
                 [

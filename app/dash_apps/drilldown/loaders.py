@@ -71,17 +71,21 @@ def load_list(
         # ── APARTMENTS ──────────────────────────────────────────────────────
         if entity == "apartments":
             # Portal scoping: apartment portal sees only their own flat
-            pdues_filter = filters.get("pending_dues", {})
-            if isinstance(pdues_filter, dict):
+            pdues_filter = filters.get("pending_dues", None)   # None = key absent = no dues filter
+            if pdues_filter is None:
+                # kpi_apartments_total (and any other card with no dues filter):
+                # pass NULL to fn_apartments_list so it returns ALL apartments.
+                p_has_dues_sql = "NULL"
+            elif isinstance(pdues_filter, dict):
                 if "gt" in pdues_filter:
-                    p_has_dues = True
+                    p_has_dues_sql = "TRUE"   # has dues
                 elif "eq" in pdues_filter:
-                    p_has_dues = pdues_filter.get("eq", 0.0) != 0.0
+                    # {"eq": 0.0} → no dues; {"eq": nonzero} → has dues
+                    p_has_dues_sql = "FALSE" if pdues_filter.get("eq", 0.0) == 0.0 else "TRUE"
                 else:
-                    p_has_dues = False
+                    p_has_dues_sql = "NULL"   # unrecognised dict key → no filter
             else:
-                p_has_dues = bool(pdues_filter)
-            p_has_dues_sql = "TRUE" if p_has_dues else "FALSE"
+                p_has_dues_sql = "TRUE" if pdues_filter else "NULL"
             p_apt_id = _apt_id(filters)
             if p_apt_id:
                 rows = db._execute(
@@ -100,12 +104,13 @@ def load_list(
 
         # ── VENDORS ─────────────────────────────────────────────────────────
         if entity == "vendors":
-            app_filter = filters.get("active_passes", {})
-            if isinstance(app_filter, dict):
-                p_has_passes = "gt" in app_filter
+            app_filter = filters.get("active_passes", None)  # None = key absent = no pass filter
+            if app_filter is None:
+                p_has_passes_sql = "NULL"   # kpi_vendors_total → all vendors
+            elif isinstance(app_filter, dict):
+                p_has_passes_sql = "TRUE" if "gt" in app_filter else "NULL"
             else:
-                p_has_passes = bool(app_filter)
-            p_has_passes_sql = "TRUE" if p_has_passes else "FALSE"
+                p_has_passes_sql = "TRUE" if app_filter else "NULL"
             p_ven_id = _ven_id(filters)
             if p_ven_id:
                 rows = db._execute(
