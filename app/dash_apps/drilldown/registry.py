@@ -126,7 +126,8 @@ DRILLDOWN_MAP: dict = {
     "kpi_receipts_month": {
         "target": "list_receipts",
         "label": "Receipts This Month",
-        "filter":{}, #  static filter here, dynamic filter in callback
+        "filter": {}, #  static filter here, dynamic filter in callback
+    },
     "kpi_receipts_total": {
         "target": "list_receipts",
         "label": "All Receipts",

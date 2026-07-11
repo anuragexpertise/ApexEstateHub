@@ -63,7 +63,7 @@ from dateutil.relativedelta import relativedelta
 
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
-    today = date.today()
+    today = dt_date.today()
     
     if card_id == "kpi_receipts_month":
         # This month: 1st to today
