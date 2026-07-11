@@ -149,6 +149,10 @@ def register_card_catalogue_callbacks(app):
                         "WHERE entity_id=%s AND role='o' AND time_in::DATE=CURRENT_DATE",
                         (own_user_id,),
                     ),
+                    "kpi_owner_member_since": (
+                        "SELECT created_at::DATE AS v FROM apartments WHERE id=%s",
+                        (apt_id,),
+                    ),
                 }
                 return overrides.get(card_id)
 

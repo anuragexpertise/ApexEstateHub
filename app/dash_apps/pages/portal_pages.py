@@ -239,7 +239,11 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
         return html.Div([
             _page_title("fa-crown", c, "Master Settings"),
             _sec_hdr("Platform Configuration", "global settings for all societies", "fa-cog"),
-            _drill_panel(),
+            _kpi_row_dynamic(
+                "master", "master-settings", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
         ], className="portal-page")
     return html.Div([
         _page_title("fa-crown", c, "Master Admin Portal", "Manage all societies on this platform"),
@@ -438,7 +442,11 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     if active_tab in ("settings", "owner_settings"):
         return html.Div([
             _page_title("fa-cog", c, "My Profile & Settings"),
-            _drill_panel(),
+            _kpi_row_dynamic(
+                "owner", "settings", sid,
+                cols="repeat(auto-fill,minmax(148px,1fr))",
+            ),
+            _divider(), _drill_panel(),
         ], className="portal-page")
 
     return html.Div([
