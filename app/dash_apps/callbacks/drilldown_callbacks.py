@@ -66,6 +66,20 @@ DB_ERROR_KEYWORDS = [
     "error in querying",
     "operational error",
 ]
+
+def _clean_pg_error(e: Exception) -> str:
+    """
+    Strip PostgreSQL CONTEXT / DETAIL / HINT blocks from exception strings
+    so only the human-readable RAISE message reaches the toast.
+    psycopg2 appends these blocks after a newline, e.g.:
+      'Cannot change active status: outstanding dues of Rs.X\\nCONTEXT: PL/pgSQL ...'
+    """
+    msg = str(e)
+    for marker in ("\nCONTEXT:", "\nDETAIL:", "\nHINT:", "\nLINE "):
+        msg = msg.split(marker)[0]
+    return msg.strip()
+
+
 _IMAGE_FIELDS = {
     "image", "owner_photo", "photo", "logo",
     "id_proof", "license", "secretary_sign", "login_background",
@@ -98,23 +112,31 @@ def _resolve_entity_singular(id_dict):
     return to_singular(raw)
 
 def _handle_list_delete(entity, pk, sid, store, auth):
-    ok, msg = loaders.delete_entity(entity, pk, sid)
+    try:
+        ok, msg = loaders.delete_entity(entity, pk, sid)
+    except Exception as e:
+        ok, msg = False, f"Delete error: {e}"
     store["refresh"] = True
-    content, bc, db_err = _render_current(store, auth)
+    try:
+        content, bc, db_err = _render_current(store, auth)
+    except Exception as e:
+        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
     if db_err:
-        toast_data = {"type": "error",   "message": db_err}
+        toast_type, toast_msg = "error", db_err
     elif ok:
-        toast_data = {"type": "success", "message": msg}
+        toast_type, toast_msg = "success", msg
     else:
-        toast_data = {"type": "error",   "message": msg}
+        toast_type, toast_msg = "error", msg
+    print(f"[DELETE] entity={entity} pk={pk} sid={sid} ok={ok} msg={msg}")
+    # profile-action-trigger → _forward_profile_toast requires {"_toast": {...}}
     return (
         store,
         content,
         bc,
         {"display": "none"} if hide_kpis else {"display": "grid"},
-        toast_data,
+        {"_toast": {"type": toast_type, "message": toast_msg}},
     )
 
 def register_drilldown_callbacks(app):
@@ -189,7 +211,6 @@ def register_drilldown_callbacks(app):
         Output("profile-action-trigger", "data", allow_duplicate=True),
         Input({"type": "kpi-card-div", "card_id": ALL}, "n_clicks"),
         Input({"type": "kpi-card", "card_id": ALL}, "n_clicks"),
-        Input({"type": "list-row", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-view", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-edit", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "n_clicks"),
@@ -253,23 +274,6 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── Row click → profile ───────────────────────────────────────────
-        elif trig_type == "list-row":
-            entity = id_dict.get("entity")
-            pk = id_dict.get("pk")
-            singular = to_singular(entity)
-            record = loaders.load_profile(singular, pk, sid)
-            if not record:
-                return no_update, no_update, no_update, no_update, no_update
-            meta = get_entity_meta().get(entity, {})
-            store = nav_state.navigate_to(
-                store,
-                f"profile_{singular}",
-                meta.get("profile_title", singular.title()),
-                entity_pk=pk,
-                entity_label=_label_for(entity, record),
-            )
-            hide_kpis = True
-
         # ── View button → profile ─────────────────────────────────────────
         elif trig_type == "list-view":
             entity = id_dict.get("entity")
@@ -608,7 +612,10 @@ def register_drilldown_callbacks(app):
 
         content, bc, db_err = _render_current(store, auth)
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
-        toast_data = {"type": "error", "message": db_err} if db_err else no_update
+        if db_err:
+            toast_data = {"_toast": {"type": "error", "message": db_err}}
+        else:
+            toast_data = no_update
         return store, content, bc, kpi_style, toast_data
 
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
@@ -1217,7 +1224,7 @@ def _save_entity(entity, card_id, data):
         # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2.  NEW: Receipt save using fn_save_receipt
@@ -1324,7 +1331,7 @@ def _save_receipt_v3(db, d, sid):
                 print(f"⚠️  payment push notify failed: {e}")
             return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3.  NEW: Expense save using fn_save_expense
@@ -1378,7 +1385,7 @@ def _save_expense_v3(db, d, sid):
         expense_id = (r or {}).get("expense_id")
         return True, f"Expense of ₹{amt:,.2f} recorded", expense_id
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1498,7 +1505,7 @@ def _save_asset_dispose(db, d, sid):
         receipt_id = (r or {}).get("receipt_id")
         return True, f"Asset disposed — receipt #{receipt_id}", receipt_id
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1552,7 +1559,7 @@ def _save_vendor_pass(db, d, sid):
         receipt_id  = (r or {}).get("receipt_id")
         return True, f"Pass sold — valid until {valid_until}", receipt_id
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 def _save_asset(db, d, sid, is_edit, pk):
     if is_edit:
         # Editing an asset record (name, type, company — not purchase price)
@@ -1605,13 +1612,13 @@ def _save_asset(db, d, sid, is_edit, pk):
         asset_id = (r or {}).get("asset_id")
         return True, f"Asset '{asset_name}' purchased (₹{purchase_value:,.2f})", asset_id
     except Exception as e:
-        return False, str(e), None
+        return False, _clean_pg_error(e), None
 
 def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
         r = db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
-            "active=%s,owner_photo=%s,id_proof=%s,"
+            "active=%s,owner_photo=%s,id_proof=%s "
             "WHERE id=%s AND society_id=%s RETURNING id",
             (
                 d.get("owner_name"),

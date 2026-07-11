@@ -222,7 +222,7 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
                     clickable: bool = True) -> html.Div:
     return html.Div(
         id={"type": "kpi-card-div", "card_id": card_id},
-        n_clicks=0,
+        n_click=0,
         children=[
             dbc.Card(
                 [
@@ -345,15 +345,17 @@ def render_list_card(card_id: str, title: str, icon: str,
         if allowed:
             action_btns = []
 
-            if "view" in allowed:
-                action_btns.append(dbc.Button(
-                    html.I(className="fas fa-eye"),
-                    id={"type": "list-view", "entity": entity, "pk": pk_val},
-                    size="sm", color="info", outline=True,
-                    title="View details",
-                    style={"fontSize": "11px", "padding": "3px 7px",
-                           "borderRadius": "7px"},
-                ))
+            # "view" button is always shown when an actions column is present —
+            # it is now the sole way to open a profile since html.Tr no longer
+            # carries n_clicks (removing the bubbling conflict with delete/edit).
+            action_btns.append(dbc.Button(
+                html.I(className="fas fa-eye"),
+                id={"type": "list-view", "entity": entity, "pk": pk_val},
+                size="sm", color="info", outline=True,
+                title="View details",
+                style={"fontSize": "11px", "padding": "3px 7px",
+                       "borderRadius": "7px"},
+            ))
 
             if "edit" in allowed:
                 action_btns.append(dbc.Button(
@@ -385,9 +387,7 @@ def render_list_card(card_id: str, title: str, icon: str,
             html.Tr(
                 cells,
                 id={"type": "list-row", "entity": entity, "pk": str(pk_val)},
-                n_clicks=0,
-                style={"cursor": "pointer", "transition": "background 0.12s ease"},
-                title="Click to open profile",
+                style={"transition": "background 0.12s ease"},
             )
         )
         

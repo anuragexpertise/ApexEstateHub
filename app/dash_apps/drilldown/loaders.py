@@ -866,7 +866,10 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
         return False, f"No delete handler for '{entity_plural}'"
 
     except Exception as e:
-        return False, str(e)
+        # psycopg2 appends CONTEXT / DETAIL / HINT blocks after a newline.
+        # Strip them so only the human-readable RAISE message reaches the toast.
+        msg = str(e).split("\nCONTEXT:")[0].split("\nDETAIL:")[0].strip()
+        return False, msg
 
 
 # ════════════════════════════════════════════════════════════════════════════
