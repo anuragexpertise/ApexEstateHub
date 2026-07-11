@@ -126,8 +126,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_receipts_month": {
         "target": "list_receipts",
         "label": "Receipts This Month",
-        "filter":{"date": {"gt": "MONTH(NOW())"}}, # to do
-    },
+        "filter":{}, #  static filter here, dynamic filter in callback
     "kpi_receipts_total": {
         "target": "list_receipts",
         "label": "All Receipts",
@@ -135,7 +134,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_expenses_month": {
         "target": "list_expenses",
         "label": "Expenses This Month",
-        "filter":{"date": {"gt": "MONTH(NOW())"}}, # to do
+        "filter":{}, #  static filter here, dynamic filter in callback
     },
     "kpi_expenses_total": {
         "target": "list_expenses",
