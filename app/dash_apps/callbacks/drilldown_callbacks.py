@@ -58,6 +58,39 @@ from app.dash_apps.drilldown.registry import (
     to_plural,
     build_prefill,
 )
+from datetime import date
+from dateutil.relativedelta import relativedelta
+
+def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
+    """Return extra filter dict for time-relative KPIs."""
+    today = date.today()
+    
+    if card_id == "kpi_receipts_month":
+        # This month: 1st to today
+        return {
+            "date_from": today.replace(day=1).isoformat(),
+            "date_to": today.isoformat(),
+        }
+    
+    if card_id == "kpi_expenses_month":
+        return {
+            "date_from": today.replace(day=1).isoformat(),
+            "date_to": today.isoformat(),
+        }
+    
+    if card_id == "kpi_receipts_last_30_days":
+        return {
+            "date_from": (today - relativedelta(days=30)).isoformat(),
+            "date_to": today.isoformat(),
+        }
+    
+    if card_id == "kpi_payables_this_month":
+        return {
+            "shift_date_from": today.replace(day=1).isoformat(),
+            "shift_date_to": today.isoformat(),
+        }
+    
+    return {}
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService
 DB_ERROR_KEYWORDS = [
@@ -264,15 +297,20 @@ def register_drilldown_callbacks(app):
             target = nav_info.get("target")
             if not target:
                 return no_update, no_update, no_update, no_update, no_update
+            
             store = nav_state.initial_state(role, sid)
+            
+            # ─── Dynamic filter computation ───
+            static_filter = nav_info.get("filter", {}) or {}
+            dynamic_filter = _compute_dynamic_filter(card_id, static_filter, sid)
+            
             store = nav_state.navigate_to(
                 store,
                 target,
                 nav_info.get("label", target.title()),
-                filters=nav_info.get("filter", {}),
+                filters={**static_filter, **dynamic_filter},  # merge
             )
             hide_kpis = True
-
         # ── Row click → profile ───────────────────────────────────────────
         # ── View button → profile ─────────────────────────────────────────
         elif trig_type == "list-view":

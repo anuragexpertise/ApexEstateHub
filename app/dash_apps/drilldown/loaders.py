@@ -202,33 +202,81 @@ def load_list(
             p_etype = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
             ) if not eid else None
+
             # Security user_id filter: receipts are tied to users.id (created_by),
             # not security_staff.id. When portal adds `user_id`, query directly.
             sec_uid = filters.get("user_id") if filters.get("security_id") else None
+
+            # Dynamic date filters from caller (e.g., customize_kpi_callbacks, dashboard)
+            date_from = filters.get("date_from")
+            date_to   = filters.get("date_to")
+            month     = filters.get("month")     # 'YYYY-MM'
+            year      = filters.get("year")      # 'YYYY' or int
+            status    = filters.get("status")    # optional status override
+
+            # Build WHERE clause for date filtering on receipt_date
+            date_where = ""
+            date_params = []
+            if date_from:
+                date_where += " AND receipt_date >= %s"
+                date_params.append(date_from)
+            if date_to:
+                date_where += " AND receipt_date <= %s"
+                date_params.append(date_to)
+            if month:
+                # month format: 'YYYY-MM'
+                date_where += " AND DATE_TRUNC('month', receipt_date) = %s::DATE"
+                date_params.append(f"{month}-01")
+            if year:
+                date_where += " AND EXTRACT(YEAR FROM receipt_date) = %s"
+                date_params.append(int(year))
+
+            # Status filter
+            status_where = ""
+            if status:
+                status_where = " AND status = %s"
+                date_params.append(status)
+
+            # Base params for fn_receipts_list
+            base_params = [sid, s, p_eid, p_etype]
+
             if sec_uid and not eid:
+                # Security portal: filter by user_id (created_by)
+                where = "WHERE user_id = %s" + date_where + status_where
+                params = [sec_uid] + date_params
+
                 rows = db._execute(
-                    "SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) WHERE user_id=%s "
-                    "LIMIT %s OFFSET %s",
-                    (sid, s, sec_uid, page_size, offset), fetch_all=True,
+                    f"SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) {where} "
+                    f"ORDER BY receipt_date DESC LIMIT %s OFFSET %s",
+                    base_params + params + [page_size, offset], fetch_all=True,
                 ) or []
+
                 cnt = db._execute(
-                    "SELECT COUNT(*) AS n FROM receipts "
-                    "WHERE society_id=%s AND user_id=%s AND status='confirmed'",
-                    (sid, sec_uid), fetch_one=True,
+                    f"SELECT COUNT(*) AS n FROM receipts "
+                    f"WHERE society_id = %s AND user_id = %s {date_where} {status_where}",
+                    [sid, sec_uid] + date_params, fetch_one=True,
                 )
                 return rows, int((cnt or {}).get("n", len(rows)))
+
+            # Standard path: use fn_receipts_list with entity/type filters
             rows = db._execute(
-                "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,
+                f"SELECT * FROM fn_receipts_list(%s,%s,%s,%s) "
+                f"WHERE 1=1 {date_where} {status_where} "
+                f"ORDER BY receipt_date DESC LIMIT %s OFFSET %s",
+                base_params + date_params + [page_size, offset], fetch_all=True,
             ) or []
+
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_receipts_list(%s,NULL,%s,%s)",
-                (sid, p_eid, p_etype), fetch_one=True,
+                f"SELECT COUNT(*) AS n FROM fn_receipts_list(%s,NULL,%s,%s) "
+                f"WHERE 1=1 {date_where} {status_where}",
+                [sid, p_eid, p_etype] + date_params, fetch_one=True,
             )
+
             # Fallback portal scoping: security users see only their own receipts
             if sec_uid:
                 rows = [r for r in rows if r.get("user_id") == sec_uid]
                 cnt = {"n": len(rows)}
+
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── EXPENSES ────────────────────────────────────────────────────────
