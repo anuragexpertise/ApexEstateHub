@@ -587,7 +587,7 @@ Accessible at **Admin → Customize → Layout Editor**.
 
 - Filter KPI palette by **Portal** and **Tab** using cascading dropdowns
 - Drag cards from **Palette** into **Active Zone** (max 12)
-- Layout saved to `society_settings` table per `(society_id, portal, tab)` key: `"dashboard_layout_{portal}_{tab}"`
+- Layout saved to `Dashboard_settings` table per `(society_id, portal, tab)` key: `"dashboard_layout_{portal}_{tab}"`
 - Reset to role-level default
 
 ### KPI Inspector

@@ -37,7 +37,7 @@ def _kpi_ids_for_portal_tab(portal, tab):
  
  
 def _layout_key(portal: str | None, tab: str | None) -> str:
-    """DB key for society_settings to store a specific portal+tab layout."""
+    """DB key for Dashboard_settings to store a specific portal+tab layout."""
     p = portal or "all"
     t = tab    or "all"
     return f"dashboard_layout_{p}_{t}"
@@ -195,15 +195,15 @@ def register_customize_callbacks(app):
         ) or palette_ids[:4]
  
         saved_active: list[str] = []
-        if society_id and portal and tab:
-            key = _layout_key(portal, tab)
-            try:
-                from database.db_manager import db
-                row = db._execute(
-                    "SELECT value FROM society_settings "
-                    "WHERE society_id=%s AND key=%s",
-                    (society_id, key), fetch_one=True,
-                )
+if society_id and portal and tab:
+                key = _layout_key(portal, tab)
+                try:
+                    from database.db_manager import db
+                    row = db._execute(
+                        "SELECT value FROM Dashboard_settings "
+                        "WHERE society_id=%s AND key=%s",
+                        (society_id, key), fetch_one=True,
+                    )
                 if row and row.get("value"):
                     parsed = json.loads(row["value"])
                     saved_active = [c for c in parsed.get("active", [])
@@ -404,7 +404,7 @@ def _fetch_kpi_values(society_id) -> dict:
  
 def _upsert_layout(db, society_id: int, key: str, value_json: str) -> None:
     db._execute(
-        """INSERT INTO society_settings (society_id, key, value)
+        """INSERT INTO Dashboard_settings (society_id, key, value)
            VALUES (%s, %s, %s)
            ON CONFLICT (society_id, key)
            DO UPDATE SET value = EXCLUDED.value""",

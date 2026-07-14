@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS apartments (
     owner_photo VARCHAR(255),
     id_proof VARCHAR(255),
     mobile VARCHAR(15),
+    alt_mobile VARCHAR(15),
+    alt_address TEXT,
     apartment_size INT NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -532,7 +534,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     )
 );
 
-CREATE TABLE IF NOT EXISTS society_settings (
+CREATE TABLE IF NOT EXISTS Dashboard_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     key VARCHAR(100) NOT NULL,
@@ -541,6 +543,8 @@ CREATE TABLE IF NOT EXISTS society_settings (
     UNIQUE (society_id, key) -- required: matches _upsert_layout's
     -- ON CONFLICT (society_id, key) target exactly
 );
+
+
 
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
@@ -614,7 +618,7 @@ CREATE INDEX IF NOT EXISTS idx_vendor_passes_user ON vendor_passes (user_id, val
 
 CREATE INDEX IF NOT EXISTS idx_assets_society ON assets (society_id, disposed);
 
-CREATE INDEX IF NOT EXISTS idx_society_settings_lookup ON society_settings (society_id, key);
+CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (society_id, key);
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: APARTMENT HELPER FUNCTIONS (used by trigger + gate pass + NOC)
