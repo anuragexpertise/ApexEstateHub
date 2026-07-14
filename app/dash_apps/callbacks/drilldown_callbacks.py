@@ -43,6 +43,7 @@ Store schema (id="drilldown-store"):
 
 from __future__ import annotations
 from datetime import date as dt_date, datetime
+from decimal import Decimal
 import json
 import io
 import pandas as pd
@@ -290,6 +291,9 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-prev", "entity": ALL}, "n_clicks"),
         Input({"type": "list-page-next", "entity": ALL}, "n_clicks"),
         Input({"type": "list-search", "entity": ALL}, "value"),
+        Input({"type": "list-sort", "entity": ALL, "column": ALL}, "n_clicks"),
+        Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
+        Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
@@ -305,8 +309,6 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         trig = ctx.triggered[0]
-        if not trig["value"]:
-            return no_update, no_update, no_update, no_update, no_update
 
         if not store.get("stack"):
             store = nav_state.initial_state(role, sid)
@@ -317,6 +319,59 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         trig_type = id_dict.get("type", "")
+
+        # ── Sort click → toggle asc/desc for this column (handled before the
+        #    truthiness guard so a re-click on the active column still flips) ──
+        if trig_type == "list-sort":
+            entity = id_dict.get("entity")
+            column = id_dict.get("column")
+            cur = (store.get("list_sort") or {}).get(entity, {})
+            new_dir = ("desc" if cur.get("column") == column
+                       and cur.get("direction") == "asc" else "asc")
+            store.setdefault("list_sort", {})[entity] = {
+                "column": column, "direction": new_dir,
+            }
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+            content, bc, db_err = _render_current(store, auth)
+            kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+            toast_data = {"_toast": {"type": "error", "message": db_err}} if db_err else no_update
+            return store, content, bc, kpi_style, toast_data
+
+        # ── Column filter → update per-column filter map for this entity ─────
+        if trig_type == "list-filter":
+            entity = id_dict.get("entity")
+            column = id_dict.get("column")
+            val = trig["value"]
+            if val in (None, "", "__ALL__"):
+                val = ""
+            entity_filters = dict((store.get("list_filter") or {}).get(entity, {}))
+            if val:
+                entity_filters[column] = val
+            else:
+                entity_filters.pop(column, None)
+            store.setdefault("list_filter", {})[entity] = entity_filters
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+            content, bc, db_err = _render_current(store, auth)
+            kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+            toast_data = {"_toast": {"type": "error", "message": db_err}} if db_err else no_update
+            return store, content, bc, kpi_style, toast_data
+
+        # ── Clear all column filters for this entity ───────────────────────
+        if trig_type == "list-clear-filters":
+            entity = id_dict.get("entity")
+            (store.get("list_filter") or {}).pop(entity, None)
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+            content, bc, db_err = _render_current(store, auth)
+            kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+            toast_data = {"_toast": {"type": "error", "message": db_err}} if db_err else no_update
+            return store, content, bc, kpi_style, toast_data
+
+        if not trig["value"]:
+            return no_update, no_update, no_update, no_update, no_update
+
         hide_kpis = False
         print(f"Triggered: {trig_type} with ID {id_dict}")
         # ── KPI click → list ──────────────────────────────────────────────
@@ -975,6 +1030,42 @@ def _render_current(store: dict, auth: dict) -> tuple:
         return _empty_state(f"Error: {str(e)[:100]}"), [], None
 
 
+def _sort_key(row, col):
+    """Produce a type-aware sort key; None always sorts last."""
+    rd = row.to_dict(include_calculated=True) if hasattr(row, "to_dict") else dict(row)
+    val = renderers._display_value(col, rd)
+    if val is None:
+        return (1, "")
+    if isinstance(val, bool):
+        return (0, int(val))
+    if isinstance(val, (int, float, Decimal)):
+        return (0, float(val))
+    if isinstance(val, (date, datetime)):
+        return (0, val.isoformat())
+    return (0, str(val).lower())
+
+
+def _build_filter_options(rows, columns) -> dict:
+    """Distinct, sorted display values per column key for filter dropdowns."""
+    opts: dict = {}
+    for c in columns:
+        key = c.get("field") or c.get("name") or ""
+        if not key:
+            continue
+        seen, vals = set(), []
+        for r in rows:
+            rd = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
+            v = renderers._display_value(key, rd)
+            if v is None:
+                continue
+            s = str(v)
+            if s not in seen:
+                seen.add(s)
+                vals.append(s)
+        opts[key] = sorted(vals)
+    return opts
+
+
 def _render_card(
     card_id: str, filters: dict, prefill: dict, store: dict, auth: dict
 ) -> html.Div:
@@ -986,27 +1077,82 @@ def _render_card(
         page = (store.get("list_pages") or {}).get(entity, 1)
         search = (store.get("list_search") or {}).get(entity, "")
         sort = (store.get("list_sort") or {}).get(entity, {})
+        col_filters = (store.get("list_filter") or {}).get(entity, {})
+        page_size = loaders.PAGE_SIZE
 
-        rows, total = loaders.load_list(entity, filters, page=page, search=search)
-        if sort and rows:
-            col = sort.get("column")
-            rev = sort.get("direction", "asc") == "desc"
-            try:
-                rows = sorted(rows, key=lambda x: x.get(col, ""), reverse=rev)
-            except Exception:
-                pass
+        # Distinct filter options per column (cached in store so we don't
+        # re-fetch the full set on every pagination/sort interaction).
+        filter_options = (store.get("list_filter_options") or {}).get(entity)
+        if filter_options is None:
+            all_rows, _ = loaders.load_list(
+                entity, filters, page=1, search="", page_size=100_000
+            )
+            filter_options = _build_filter_options(
+                all_rows, meta.get("list_columns", [])
+            )
+            store.setdefault("list_filter_options", {})[entity] = filter_options
+
+        # When sorting/filtering is active, fetch the whole set so the
+        # operations and pagination run against the filtered result.
+        active = bool(sort) or bool([v for v in (col_filters or {}).values() if v])
+
+        if active:
+            rows, _ = loaders.load_list(
+                entity, filters, page=1, search=search, page_size=100_000
+            )
+            # ── Column-level filtering (case-insensitive substring on display value) ──
+            col_filters = {
+                k: v for k, v in (col_filters or {}).items() if v not in (None, "")
+            }
+            if col_filters and rows:
+                filtered = []
+                for r in rows:
+                    rd = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
+                    match = True
+                    for col, val in col_filters.items():
+                        cell = renderers._display_value(col, rd)
+                        if cell is None:
+                            cell = "—"
+                        if val and str(cell).lower().find(str(val).lower()) == -1:
+                            match = False
+                            break
+                    if match:
+                        filtered.append(r)
+                rows = filtered
+
+            # ── Column sorting ──────────────────────────────────────────────
+            if sort and rows:
+                col = sort.get("column")
+                rev = sort.get("direction", "asc") == "desc"
+                try:
+                    rows = sorted(rows, key=lambda x: _sort_key(x, col), reverse=rev)
+                except Exception:
+                    pass
+
+            # The filtered/sorted set size is now the authoritative total.
+            total = len(rows)
+            start = (page - 1) * page_size
+            page_rows = rows[start: start + page_size]
+        else:
+            rows, total = loaders.load_list(
+                entity, filters, page=page, search=search, page_size=page_size
+            )
+            page_rows = rows
 
         return renderers.render_list_card(
             card_id=card_id,
             title=meta.get("list_title", entity.title()),
             icon=meta.get("list_icon", "fa-list"),
             columns=meta.get("list_columns", []),
-            rows=rows,
+            rows=page_rows,
             entity=entity,
             page=page,
             total_rows=total,
             auth_data=auth,
-            filters= filters,  
+            filters=filters,
+            sort=sort,
+            col_filters=col_filters,
+            filter_options=filter_options,
         )
 
     # ── profile ───────────────────────────────────────────────────────────────
