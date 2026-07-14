@@ -377,6 +377,16 @@ def render_list_card(card_id: str, title: str, icon: str,
                            "borderRadius": "7px"},
                 ))
 
+            if entity == "receipts" and role == "admin" and row_dict.get("status") == "pending":
+                action_btns.append(dbc.Button(
+                    html.I(className="fas fa-check"),
+                    id={"type": "list-confirm", "entity": entity, "pk": pk_val},
+                    size="sm", color="success", outline=True,
+                    title="Confirm receipt",
+                    style={"fontSize": "11px", "padding": "3px 7px",
+                           "borderRadius": "7px"},
+                ))
+
             cells.append(html.Td(
                 html.Div(action_btns, style={"display": "flex", "gap": "4px",
                                              "flexWrap": "nowrap"}),
