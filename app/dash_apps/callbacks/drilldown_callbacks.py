@@ -862,6 +862,16 @@ def register_drilldown_callbacks(app):
                 prefill[field] = val.split("/")[-1]
 
         merged = {**prefill, **form_data}
+
+        # ── 5b. Normalise dd/mm/yyyy date entries to ISO yyyy-mm-dd ────────────
+        #       Date-entry inputs present dd/mm/yyyy to the user; the backend and
+        #       DB expect the canonical yyyy-mm-dd string, so convert on submit.
+        for _f, _v in list(merged.items()):
+            if isinstance(_v, str):
+                _iso = renderers._parse_date_entry(_v)
+                if _iso is not None:
+                    merged[_f] = _iso
+
         merged["society_id"] = sid
         merged['caller_role']= (auth or {}).get("role", "admin")
         # Always stamp user_id from auth — form fields never collect it,
