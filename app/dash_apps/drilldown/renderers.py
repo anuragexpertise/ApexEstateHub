@@ -692,7 +692,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     _IMAGE_FIELD_NAMES = {
         "photo", "photo_url", "image", "logo",
         "owner_photo", "id_proof", "secretary_sign", "login_background",
-        "license",
+        "license", "payment_qr",
     }
     visible_fields = [
         f for f in fields
@@ -1235,12 +1235,13 @@ def _payment_qr_banner(entity_plural: str, society_id, prefill: dict) -> html.Di
         qr_path = (row or {}).get("payment_qr")
         if not qr_path:
             return None
+        qr_url = get_image_url(qr_path, society_id, "society", society_id)
         return html.Div([
             html.Div("Scan to pay the society", style={
                 "fontSize": "12px", "fontWeight": "700", "color": "#15304f",
                 "textAlign": "center", "marginBottom": "8px",
             }),
-            html.Img(src=qr_path, style={
+            html.Img(src=qr_url, style={
                 "display": "block", "margin": "0 auto 14px", "maxWidth": "180px",
                 "borderRadius": "10px", "border": "1px solid #e2e8f0",
             }),

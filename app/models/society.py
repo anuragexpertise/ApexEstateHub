@@ -6,6 +6,7 @@ class Society(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    pan_number = db.Column(db.String(10), nullable=True)
     logo = db.Column(db.String(100), nullable=True)
     address = db.Column(db.Text, nullable=True)
     email = db.Column(db.String(100), nullable=True)
@@ -13,6 +14,7 @@ class Society(db.Model):
     secretary_name = db.Column(db.String(100), nullable=True)
     secretary_phone = db.Column(db.String(20), nullable=True)
     secretary_sign = db.Column(db.String(100), nullable=True)
+    payment_qr = db.Column(db.String(255), nullable=True)
     plan = db.Column(db.String(4), default='Free')
     plan_validity = db.Column(db.Date, nullable=False)
     calc_start_date = db.Column(db.Date, default=datetime.now().date)
