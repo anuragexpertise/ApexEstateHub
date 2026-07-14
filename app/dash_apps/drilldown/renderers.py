@@ -273,14 +273,22 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_list_card(card_id: str, title: str, icon: str,
-                     columns: list[dict], rows: list[dict],
-                     entity: str, page: int = 1, total_rows: int = 0,
-                     page_size: int = 15, auth_data: dict | None = None,
-                     filters: dict | None = None) -> html.Div:
+                      columns: list[dict], rows: list[dict],
+                      entity: str, page: int = 1, total_rows: int = 0,
+                      page_size: int = 15, auth_data: dict | None = None,
+                      filters: dict | None = None,
+                      sort: dict | None = None,
+                      col_filters: dict | None = None,
+                      filter_options: dict | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
+
+    sort = sort or {}
+    sort_col   = sort.get("column")
+    sort_dir   = (sort.get("direction") or "asc").lower()
+    col_filters = {k: v for k, v in (col_filters or {}).items() if v not in (None, "")}
 
     # ── Resolve permissions for this role × entity ─────────────────────────
     allowed = _perms_for(role, entity)
@@ -292,19 +300,65 @@ def render_list_card(card_id: str, title: str, icon: str,
     ]
     total_pages = max(1, -(-total_rows // page_size))
 
-    # ── Header row ──────────────────────────────────────────────────────────
+    # ── Header row (sortable) ──────────────────────────────────────────────
     header_cells = []
+    filter_cells = []
     for c in visible_columns:
-        col_label = c.get("label") or c.get("name") or c.get("field", "").title()
-        header_cells.append(html.Th(col_label, style={
-            "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
-            "padding": "10px 8px", "whiteSpace": "nowrap",
-        }))
+        field_key = c.get("field") or c.get("name") or ""
+        col_label = c.get("label") or c.get("name") or field_key.title()
+
+        # Sort indicator: active column shows ▲/▼, others show a faint ⇅ hint
+        is_sorted = (sort_col == field_key)
+        if is_sorted:
+            arrow = "▲" if sort_dir == "asc" else "▼"
+            arrow_style = {"color": COLORS["primary"], "fontSize": "10px",
+                           "marginLeft": "4px", "fontWeight": "700"}
+        else:
+            arrow = "⇅"
+            arrow_style = {"color": "#c2cdda", "fontSize": "10px",
+                           "marginLeft": "4px", "fontWeight": "400"}
+        indicator = html.Span(arrow, style=arrow_style)
+
+        header_cells.append(html.Th(
+            html.Div([
+                html.Span(col_label),
+                indicator,
+            ], style={"display": "flex", "alignItems": "center",
+                      "gap": "2px", "cursor": "pointer",
+                      "whiteSpace": "nowrap"}),
+            id={"type": "list-sort", "entity": entity, "column": field_key},
+            n_clicks=0,
+            style={
+                "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
+                "padding": "10px 8px", "userSelect": "none",
+                "background": "rgba(248,251,255,0.97)",
+            },
+        ))
+
+        # Per-column filter dropdown: "All" + distinct values for this column
+        opts = [{"label": "All", "value": "__ALL__"}]
+        for v in (filter_options or {}).get(field_key, []):
+            opts.append({"label": str(v), "value": str(v)})
+        cur_val = col_filters.get(field_key)
+        filter_cells.append(html.Td(
+            dcc.Dropdown(
+                id={"type": "list-filter", "entity": entity, "column": field_key},
+                options=opts,
+                value=cur_val if cur_val else "__ALL__",
+                clearable=False,
+                searchable=False,
+                style={"fontSize": "11px", "width": "100%"},
+            ),
+            style={"padding": "4px 6px", "background": "#f4f7fb"},
+        ))
+
     if allowed:
         header_cells.append(html.Th("Actions", style={
             "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
             "padding": "10px 8px",
         }))
+        filter_cells.append(html.Td(
+            "", style={"padding": "4px 6px", "background": "#f4f7fb"}))
 
     body_rows = []
     for row in rows:
@@ -467,6 +521,14 @@ def render_list_card(card_id: str, title: str, icon: str,
         dcc.Download(id={"type": "xls-download-trigger", "entity": entity}),
     ]
 
+    if col_filters:
+        header_right.append(dbc.Button(
+            [html.I(className="fas fa-times me-1"), "Clear Filters"],
+            id={"type": "list-clear-filters", "entity": entity},
+            size="sm", color="warning", outline=True,
+            style={"fontSize": "11px", "borderRadius": "8px", "fontWeight": "600"},
+        ))
+
     return dbc.Card([
         dbc.CardHeader(
             html.Div([
@@ -489,10 +551,17 @@ def render_list_card(card_id: str, title: str, icon: str,
         dbc.CardBody([
             html.Div(
                 dbc.Table([
-                    html.Thead(html.Tr(header_cells),
-                               style={"position": "sticky", "top": 0,
-                                      "zIndex": 1,
-                                      "background": "rgba(248,251,255,0.97)"}),
+                    html.Thead([
+                        html.Tr(header_cells,
+                                style={"position": "sticky", "top": 0,
+                                       "zIndex": 2,
+                                       "background": "rgba(248,251,255,0.97)"}),
+                        html.Tr(filter_cells,
+                                style={"position": "sticky", "top": "38px",
+                                       "zIndex": 1,
+                                       "background": "#f4f7fb",
+                                       "borderTop": "1px solid rgba(120,148,181,0.2)"}),
+                    ]),
                     html.Tbody(body_rows),
                 ], hover=True, responsive=True, size="sm",
                    style={"marginBottom": 0}),
