@@ -2273,7 +2273,9 @@ CREATE OR REPLACE FUNCTION fn_societies_list(
 )
 RETURNS TABLE (
     id INT, name VARCHAR(100), email VARCHAR(100), phone VARCHAR(20),
+    pan_number VARCHAR(10), secretary_name VARCHAR(100),
     plan VARCHAR(20), plan_status VARCHAR(10), plan_validity DATE,
+    calc_start_date DATE,
     total_apartments INT, total_users INT, total_receivables NUMERIC(15,2),
     created_at TIMESTAMP, secretary_phone VARCHAR(20)
 )
@@ -2282,11 +2284,13 @@ BEGIN
     RETURN QUERY
     SELECT
         s.id::INT, s.name::VARCHAR(100), s.email::VARCHAR(100), s.phone::VARCHAR(20),
+        s.pan_number::VARCHAR(10), s.secretary_name::VARCHAR(100),
         s.plan::VARCHAR(20),
         CASE WHEN s.plan='Free' THEN 'Free'
              WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
              ELSE 'Expired' END::VARCHAR(10),
         s.plan_validity::DATE,
+        s.calc_start_date::DATE,
         (SELECT COUNT(*)::INT FROM apartments WHERE society_id=s.id AND active=TRUE),
         (SELECT COUNT(*)::INT FROM users        WHERE society_id=s.id),
         (SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC(15,2)
