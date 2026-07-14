@@ -154,7 +154,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_receivables_overdue": {
         "target": "list_receivables",
         "label": "Overdue Receivables",
-
+        "filter": {"status": "overdue"},
     },
     "kpi_advance_credits": {
         "target": "list_receivables",
