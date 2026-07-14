@@ -855,13 +855,14 @@ def _customize_page(c: str) -> html.Div:
                         dcc.Input(id="dnd-order-capture", value="", debounce=False,
                                   style={"display": "none"}),
                         html.Div(id="dnd-init-dummy", children="", style={"display": "none"}),
-                        dbc.Card([
-                            dbc.CardHeader(html.Div([
+                        html.Div([
+                            html.Div([
                                 html.I(className="fas fa-filter me-2", style={"color": c}),
                                 html.Strong("Select Dashboard to Edit"),
-                            ], style={"display": "flex", "alignItems": "center"}),
-                            style={"padding": "10px 14px"}),
-                            dbc.CardBody([
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": f"linear-gradient(135deg,{c}15,{c}08)"}),
+                            html.Div([
                                 dbc.Row([
                                     dbc.Col([
                                         dbc.Label("Portal", style={"fontSize": "12px", "fontWeight": "600"}),
@@ -888,16 +889,17 @@ def _customize_page(c: str) -> html.Div:
                                 ]),
                                 html.Div(id="layout-status-msg", className="mt-2"),
                             ], style={"padding": "12px 14px"}),
-                        ], className="mb-3 shadow-sm", style={"borderRadius": "14px", "overflow": "hidden"}),
-                        dbc.Card([
-                            dbc.CardHeader(html.Div([
+                        ], className="mb-3"),
+                        html.Div([
+                            html.Div([
                                 html.I(className="fas fa-th-large me-2", style={"color": c}),
                                 html.Strong("Active Dashboard"),
                                 html.Small(" — drag KPIs here",
                                            style={"color": "#999", "fontSize": "11px", "marginLeft": "6px"}),
-                            ], style={"display": "flex", "alignItems": "center"}),
-                            style={"padding": "10px 14px"}),
-                            dbc.CardBody(
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": f"linear-gradient(135deg,{c}15,{c}08)"}),
+                            html.Div(
                                 html.Div(id="dnd-active-zone",
                                          children=[html.Div(
                                              [html.I(className="fas fa-arrow-down me-2"),
@@ -908,18 +910,19 @@ def _customize_page(c: str) -> html.Div:
                                          style={"display": "grid",
                                                  "gridTemplateColumns": KPI_GRID_COLS,
                                                 "gap": "12px", "minHeight": "120px", "padding": "10px",
-                                                "border": "2px dashed #dee2e6", "borderRadius": "10px",
+                                                 "border": "2px dashed #dee2e6", "borderRadius": "10px",
                                                 "background": "rgba(248,251,255,0.6)"}),
                                 style={"padding": "14px"},
                             ),
-                        ], className="mb-3 shadow-sm", style={"borderRadius": "14px", "overflow": "hidden"}),
-                        dbc.Card([
-                            dbc.CardHeader(html.Div([
+                        ], className="mb-3"),
+                        html.Div([
+                            html.Div([
                                 html.I(className="fas fa-grip-horizontal me-2", style={"color": "#7d8ea3"}),
                                 html.Strong("KPI Palette"),
-                            ], style={"display": "flex", "alignItems": "center"}),
-                            style={"padding": "10px 14px"}),
-                            dbc.CardBody(
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": "linear-gradient(135deg,#7d8ea312,#7d8ea308)"}),
+                            html.Div(
                                 html.Div(style={"maxHeight": "52vh", "overflowY": "auto", "padding": "4px 0"},
                                          children=[html.Div(id="dnd-palette-zone",
                                                             children=[html.Div(
@@ -932,7 +935,7 @@ def _customize_page(c: str) -> html.Div:
                                                                    "minHeight": "80px"})]),
                                 style={"padding": "8px"},
                             ),
-                        ], className="shadow-sm", style={"borderRadius": "14px", "overflow": "hidden"}),
+                        ], className="mb-3"),
                     ], style={"marginTop": "20px"}),
                 ]),
                 dbc.Tab(tab_id="customize-kpi", label="KPI Inspector", children=[
