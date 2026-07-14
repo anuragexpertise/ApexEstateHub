@@ -192,14 +192,14 @@ def _drill_panel() -> html.Div:
                            style={"color": "rgba(29,116,216,0.18)"}),
                     html.P("Click any KPI card above to explore →",
                            className="text-muted", style={"fontSize": "13px"}),
-                ], className="text-center", style={"padding": "60px 20px"}),
+                ], className="text-center", style={"padding": "6px 2px"}),
             ),
         ],
         style={
-            "background": "rgba(255,255,255,0.55)", "backdropFilter": "blur(12px)",
-            "border": "1px solid rgba(255,255,255,0.6)", "borderRadius": "20px",
-            "padding": "20px", "boxShadow": "0 8px 26px rgba(15,23,42,0.06)",
-            "minHeight": "380px",
+            "background": "rgba(255,255,255,0.55)", "backdropFilter": "blur(2px)",
+            "border": "2px solid rgba(255,255,255,0.6)", "borderRadius": "2px",
+            "padding": "2px", "boxShadow": "0 2px 6px rgba(15,23,42,0.06)",
+            "minHeight": "500px",
         },
     )
 
