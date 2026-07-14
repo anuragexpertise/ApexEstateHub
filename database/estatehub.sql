@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     alt_mobile VARCHAR(15),
     alt_address TEXT,
     apartment_size INT NOT NULL DEFAULT 0,
+    apt_calc_start_date DATE DEFAULT CURRENT_DATE,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
@@ -471,7 +472,8 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     apt_id INT REFERENCES apartments (id),
     start_date DATE NOT NULL,
     end_date DATE,
-    apt_maintenance_rate NUMERIC(10, 4) NOT NULL DEFAULT 3.0,
+    apt_maintenance_amount NUMERIC(10, 2) NOT NULL DEFAULT 1500, -- amount overide rate
+    apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
     apt_interest_pct NUMERIC(5, 2) DEFAULT 2.0,
     apt_status BOOLEAN DEFAULT TRUE,
