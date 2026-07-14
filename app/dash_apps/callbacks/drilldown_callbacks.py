@@ -172,6 +172,34 @@ def _handle_list_delete(entity, pk, sid, store, auth):
         {"_toast": {"type": toast_type, "message": toast_msg}},
     )
 
+def _handle_list_confirm(entity, pk, sid, store, auth):
+    try:
+        user_id = (auth or {}).get("user_id")
+        ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
+    except Exception as e:
+        ok, msg = False, f"Confirm error: {e}"
+    store["refresh"] = True
+    try:
+        content, bc, db_err = _render_current(store, auth)
+    except Exception as e:
+        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+    store["refresh"] = False
+    hide_kpis = len(store.get("stack", [])) > 1
+    if db_err:
+        toast_type, toast_msg = "error", db_err
+    elif ok:
+        toast_type, toast_msg = "success", msg
+    else:
+        toast_type, toast_msg = "error", msg
+    print(f"[CONFIRM] entity={entity} pk={pk} sid={sid} ok={ok} msg={msg}")
+    return (
+        store,
+        content,
+        bc,
+        {"display": "none"} if hide_kpis else {"display": "grid"},
+        {"_toast": {"type": toast_type, "message": toast_msg}},
+    )
+
 def register_drilldown_callbacks(app):
 
     # ── 0. Image upload ──────────────────────────────────────────────────────
@@ -247,6 +275,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-view", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-edit", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "n_clicks"),
+        Input({"type": "list-confirm", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input(
             {
                 "type": "profile-action",
@@ -352,6 +381,12 @@ def register_drilldown_callbacks(app):
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
             return _handle_list_delete(entity, pk, sid, store, auth)
+
+        # ── Confirm button → verify pending receipt + refresh ───────────
+        elif trig_type == "list-confirm":
+            entity = id_dict.get("entity")
+            pk = id_dict.get("pk")
+            return _handle_list_confirm(entity, pk, sid, store, auth)
 
         # ── Profile action ────────────────────────────────────────────────
         elif trig_type == "profile-action":
