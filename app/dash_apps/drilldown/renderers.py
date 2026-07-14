@@ -529,8 +529,8 @@ def render_list_card(card_id: str, title: str, icon: str,
             style={"fontSize": "11px", "borderRadius": "8px", "fontWeight": "600"},
         ))
 
-    return dbc.Card([
-        dbc.CardHeader(
+    return html.Div([
+        html.Div(
             html.Div([
                 html.Div([
                     html.I(className=f"fas {icon} me-2",
@@ -548,7 +548,7 @@ def render_list_card(card_id: str, title: str, icon: str,
             style={"padding": "10px 16px",
                    "background": "linear-gradient(180deg,rgba(255,255,255,0.85),rgba(248,251,255,0.95))"},
         ),
-        dbc.CardBody([
+        html.Div([
             html.Div(
                 dbc.Table([
                     html.Thead([
@@ -772,8 +772,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
             style={"borderRadius": "10px", "fontWeight": "600"},
         ))
 
-    return dbc.Card([
-        dbc.CardHeader(
+    return html.Div([
+        html.Div(
             html.Div([
                 html.Div([
                     html.Div(
@@ -799,7 +799,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
             style={"padding": "12px 16px",
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
-        dbc.CardBody([
+        html.Div([
 
             # ── Images (full-width, stacked) ─────────────────────────
             html.Div(image_section) if image_section else None,
@@ -1128,8 +1128,8 @@ def render_form_card(card_id: str, title: str, icon: str,
     # Filter out None (the PK input was only added once)
     form_rows = [r for r in form_rows if r is not None]
 
-    return dbc.Card([
-        dbc.CardHeader(
+    return html.Div([
+        html.Div(
             html.Div([
                 html.Div(
                     html.I(className=f"fas {icon}",
@@ -1148,7 +1148,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             style={"padding": "10px 16px",
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
-        dbc.CardBody([
+        html.Div([
             _payment_qr_banner(entity_plural, society_id, prefill),
             html.Div(form_rows),
             dbc.Button(
@@ -1282,8 +1282,8 @@ def render_pay_dues_card(
                               "textAlign": "center", "padding": "10px"}), width=6),
     ], className="mb-3")
 
-    return dbc.Card([
-        dbc.CardHeader(
+    return html.Div([
+        html.Div(
             html.Div([
                 html.Div(html.I(className="fas fa-rupee-sign",
                                 style={"color": "#fff", "fontSize": "16px"}),
@@ -1300,7 +1300,7 @@ def render_pay_dues_card(
             style={"padding": "12px 16px",
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
-        dbc.CardBody([
+        html.Div([
             dues_summary,
             dbc.Alert([
                 html.I(className="fas fa-info-circle me-2"),
@@ -1470,8 +1470,8 @@ def render_vendor_pass_card(
             rate_str = f"  ₹{float(rate):,.0f}" if rate else "  (rate not set)"
         pass_options.append({"label": f"{label} Pass  {rate_str}", "value": pt})
  
-    return dbc.Card([
-        dbc.CardHeader(
+    return html.Div([
+        html.Div(
             html.Div([
                 html.Div(
                     html.I(className="fas fa-id-card",
@@ -1491,7 +1491,7 @@ def render_vendor_pass_card(
             style={"padding": "12px 16px",
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
-        dbc.CardBody([
+        html.Div([
             banner,
             dbc.Row(rate_cols, className="g-3"),
  
