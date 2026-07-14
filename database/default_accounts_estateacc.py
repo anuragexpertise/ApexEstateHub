@@ -535,7 +535,7 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Asset Purchase — {r.get('asset_name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Miscellaneous',                # acc 233; parent_account_id on asset row matters more
+        'account_hint': 'Miscellaneous',                # acc 233; acc_id on asset row matters more
         'role': 'assets',
     },
     'depreciation': {

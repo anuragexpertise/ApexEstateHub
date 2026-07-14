@@ -165,7 +165,15 @@ def register_customize_callbacks(app):
                     for t in get_tabs_for_portal(portal)]
         except Exception:
             return []
- 
+
+    @app.callback(
+        Output("layout-tab-select", "value"),
+        Input("layout-portal-select", "value"),
+        prevent_initial_call=False,
+    )
+    def layout_tab_reset(portal):
+        return None
+
     # ── Load palette + saved active zone when portal/tab changes ─────────────
     @app.callback(
         Output("dnd-active-zone",    "children"),
@@ -195,15 +203,15 @@ def register_customize_callbacks(app):
         ) or palette_ids[:4]
  
         saved_active: list[str] = []
-if society_id and portal and tab:
-                key = _layout_key(portal, tab)
-                try:
-                    from database.db_manager import db
-                    row = db._execute(
-                        "SELECT value FROM Dashboard_settings "
-                        "WHERE society_id=%s AND key=%s",
-                        (society_id, key), fetch_one=True,
-                    )
+        if society_id and portal and tab:
+            key = _layout_key(portal, tab)
+            try:
+                from database.db_manager import db
+                row = db._execute(
+                    "SELECT value FROM Dashboard_settings "
+                    "WHERE society_id=%s AND key=%s",
+                    (society_id, key), fetch_one=True,
+                )
                 if row and row.get("value"):
                     parsed = json.loads(row["value"])
                     saved_active = [c for c in parsed.get("active", [])

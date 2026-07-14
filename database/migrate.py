@@ -263,9 +263,9 @@ CONCERNS = [
 ]
 ASSETS = [
     {"company_name": "Jackson", "asset_name": "Society Generator", "asset_SNo": "JACKSON1234", "purchase_date": "2025-01-15",
-     "purchase_value": 500000, "parent_account_id": 62, "depreciation_rate": 15.0, "last_depreciation_date": "2025-01-15"},
-    {"company_name": "Society", "asset_name": "Community Hall Projector", "asset_SNo": "projector", "purchase_date": "2025-06-20",
-     "purchase_value": 75000, "parent_account_id": 62, "depreciation_rate": 10.0, "last_depreciation_date": "2025-06-20"},
+     "purchase_value": 500000, "acc_id": 2314, "depreciation_rate": 15.0, "last_depreciation_date": "2025-01-15"},
+    {"company_name": "SSamsung", "asset_name": "Community Hall Projector", "asset_SNo": "S234574", "purchase_date": "2025-06-20",
+     "purchase_value": 75000, "acc_id": 62, "depreciation_rate": 10.0, "last_depreciation_date": "2025-06-20"},
 ]
 
 def _insert(cur, conn, sql: str, params: tuple):
@@ -458,9 +458,9 @@ def seed_demo(conn):
             continue        
         cur.execute(
             """INSERT INTO assets
-               (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,parent_account_id,depreciation_rate,last_depreciation_date)
+               (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,acc_id,depreciation_rate,last_depreciation_date)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_date"], asset["purchase_value"], asset["parent_account_id"], asset["depreciation_rate"], asset["last_depreciation_date"]),
+             (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_date"], asset["purchase_value"], asset["acc_id"], asset["depreciation_rate"], asset["last_depreciation_date"]),
         )
         conn.commit()
         print(f"  ✓ Asset    '{asset['asset_name']}' purchased on {asset['purchase_date']}")
