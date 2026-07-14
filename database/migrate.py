@@ -12,7 +12,7 @@ What it does
      • 1 society  (Sunrise Residency)
      • 50 Chart-of-Accounts entries
      • 1 admin, 2 apartment owners, 2 vendors, 2 security staff
-     • 2 concerns, 2 events, 2 gate-log entries
+     • 2 concerns, 2 events, 2 gate-log entries, 2 assets
 
 All passwords stored with werkzeug generate_password_hash so
 auth_service.check_password_hash() can verify them.
@@ -230,9 +230,11 @@ USERS = [
     {"role": "admin",     "email": "admin@sunriseresidency.com",    "password": "Admin@2024",
      "name": "Society Admin"},
     {"role": "apartment", "email": "owner1@sunriseresidency.com",   "password": "Owner1@2024",
-     "name": "Rajesh Sharma",   "flat_number": "A-101", "apartment_size": 1200, "mobile": "9811111111"},
+     "name": "Rajesh Sharma",   "flat_number": "A-101", "apartment_size": 1200, "mobile": "9811111111", "alt_mobile": "9811111112",
+     "alt_address": "123, Main Street, Agra, UP - 282001"},
     {"role": "apartment", "email": "owner2@sunriseresidency.com",   "password": "Owner2@2024",
-     "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,  "mobile": "9822222222"},
+     "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,  "mobile": "9822222222", "alt_mobile": "9822222223", 
+     "alt_address": "456, Secondary Road, Agra, UP - 282001"},
     {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
      "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing", "mobile": "9833333333", "service_description":"Best plumber in town"},
     {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
@@ -259,7 +261,12 @@ CONCERNS = [
      "desc": "Main corridor light flickering near staircase. Sparks observed twice.",
      "assigned": "Speedy Electricals"},
 ]
-
+ASSETS = [
+    {"company_name": "Jackson", "asset_name": "Society Generator", "asset_SNo": "JACKSON1234", "purchase_date": "2025-01-15",
+     "purchase_value": 500000, "parent_account_id": 62, "depreciation_rate": 15.0, "last_depreciation_date": "2025-01-15"},
+    {"company_name": "Society", "asset_name": "Community Hall Projector", "asset_SNo": "projector", "purchase_date": "2025-06-20",
+     "purchase_value": 75000, "parent_account_id": 62, "depreciation_rate": 10.0, "last_depreciation_date": "2025-06-20"},
+]
 
 def _insert(cur, conn, sql: str, params: tuple):
     cur.execute(sql, params)
@@ -443,7 +450,20 @@ def seed_demo(conn):
         )
         conn.commit()
         print(f"  ✓ Concern  [{con['flat_number']}] {con['type']} — {con['status']}")
-
+    # ── Assets ───────────────────────────────────────────────────────────────
+    for asset in ASSETS: 
+        cur.execute("SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
+                    (society_id, asset["asset_name"]))
+        if cur.fetchone():
+            continue        
+        cur.execute(
+            """INSERT INTO assets
+               (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,parent_account_id,depreciation_rate,last_depreciation_date)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_date"], asset["purchase_value"], asset["parent_account_id"], asset["depreciation_rate"], asset["last_depreciation_date"]),
+        )
+        conn.commit()
+        print(f"  ✓ Asset    '{asset['asset_name']}' purchased on {asset['purchase_date']}")
     # ── Gate logs ────────────────────────────────────────────────────────────
     # Fetch apartment ids for the two owners
     cur.execute(
