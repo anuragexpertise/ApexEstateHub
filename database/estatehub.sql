@@ -2574,14 +2574,14 @@ BEGIN
         acf.apt_due_day::INT, acf.apt_interest_pct::NUMERIC(5,2),
         COALESCE(
             (SELECT name FROM accounts
-             WHERE society_id = acf.society_id
+             WHERE accounts.society_id = acf.society_id
                AND name ILIKE '%Society Maintenance Charge%'
              LIMIT 1),
             '—'
         )::TEXT,
         COALESCE(
             (SELECT name FROM accounts
-             WHERE society_id = acf.society_id
+             WHERE accounts.society_id = acf.society_id
                AND name ILIKE '%Due Interest%'
              LIMIT 1),
             '—'
@@ -2617,7 +2617,7 @@ BEGIN
         vcf.vendor_1day::NUMERIC(10,2), vcf.vendor_7day::NUMERIC(10,2), vcf.vendor_1mth::NUMERIC(10,2),
         COALESCE(
             (SELECT name FROM accounts
-             WHERE society_id = vcf.society_id
+             WHERE accounts.society_id = vcf.society_id
                AND name ILIKE '%Society Charge%'
              LIMIT 1),
             '—'
