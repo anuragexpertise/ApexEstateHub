@@ -569,6 +569,114 @@ def register_shell_callbacks(app):
             icon=t, duration=4000, is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
+ 
+    app.clientside_callback(
+        """
+        function(data) {
+            if (!data) return window.dash_clientside.no_update;
+            window.playEvaluationSound = window.playEvaluationSound || function(data) {
+                const type = data.type || 'info';
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    if (ctx.state === 'suspended') ctx.resume();
+                    const now = ctx.currentTime;
+
+                    function tone(freq, dur, wave, start) {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = wave || 'sine';
+                        osc.frequency.value = freq;
+                        gain.gain.setValueAtTime(0.0001, start);
+                        gain.gain.linearRampToValueAtTime(0.3, start + 0.01);
+                        gain.gain.linearRampToValueAtTime(0.0001, start + dur);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(start);
+                        osc.stop(start + dur + 0.05);
+                    }
+
+                    let t = now;
+                    if (type === 'success') {
+                        tone(523, 0.08, 'sine', t); t += 0.08;
+                        tone(659, 0.08, 'sine', t); t += 0.08;
+                        tone(784, 0.25, 'sine', t);
+                    } else if (type === 'error') {
+                        tone(180, 0.5, 'square', now);
+                    } else if (type === 'warning' || type === 'alert') {
+                        tone(1320, 0.1, 'sine', now);
+                        tone(1320, 0.1, 'sine', now + 0.1);
+                    } else if (type === 'info') {
+                        tone(880, 0.15, 'sine', now);
+                    } else {
+                        tone(440, 0.5, 'sine', now);
+                    }
+                } catch (e) {
+                    console.warn('Audio play failed', e);
+                }
+            };
+            window.playEvaluationSound(data);
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("toast-sound-trigger", "data"),
+        Input("toast-store", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(data) {
+            if (!data) return window.dash_clientside.no_update;
+            if (!window.playEvaluationSound) {
+                window.playEvaluationSound = function(data) {
+                    const type = data.type || 'info';
+                    try {
+                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        if (ctx.state === 'suspended') ctx.resume();
+                        const now = ctx.currentTime;
+
+                        function tone(freq, dur, wave, start) {
+                            const osc = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            osc.type = wave || 'sine';
+                            osc.frequency.value = freq;
+                            gain.gain.setValueAtTime(0.0001, start);
+                            gain.gain.linearRampToValueAtTime(0.3, start + 0.01);
+                            gain.gain.linearRampToValueAtTime(0.0001, start + dur);
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.start(start);
+                            osc.stop(start + dur + 0.05);
+                        }
+
+                        let t = now;
+                        if (type === 'success') {
+                            tone(523, 0.08, 'sine', t); t += 0.08;
+                            tone(659, 0.08, 'sine', t); t += 0.08;
+                            tone(784, 0.25, 'sine', t);
+                        } else if (type === 'error') {
+                            tone(180, 0.5, 'square', now);
+                        } else if (type === 'warning' || type === 'alert') {
+                            tone(1320, 0.1, 'sine', now);
+                            tone(1320, 0.1, 'sine', now + 0.1);
+                        } else if (type === 'info') {
+                            tone(880, 0.15, 'sine', now);
+                        } else {
+                            tone(440, 0.5, 'sine', now);
+                        }
+                    } catch (e) {
+                        console.warn('Audio play failed', e);
+                    }
+                };
+            }
+            window.playEvaluationSound(data);
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("evaluate-pass-sound-dummy", "children"),
+        Input("evaluate-pass-sound-store", "data"),
+        prevent_initial_call=True,
+    )
 
     @app.callback(
         Output("toast-store", "data", allow_duplicate=True),
