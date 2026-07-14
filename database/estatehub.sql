@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS assets (
     asset_SNo VARCHAR(50),
     purchase_date DATE,
     purchase_value NUMERIC(12, 2),
-    parent_account_id INT REFERENCES accounts (id), -- asset class account (e.g. Furniture 61)
+    acc_id INT REFERENCES accounts (id), -- asset class account (e.g. Furniture 61)
     depreciation_rate NUMERIC(5, 2),
     last_depreciation_date DATE,
     disposed BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1502,7 +1502,7 @@ $$;
 -- SECTION 7: ASSET PURCHASE / DISPOSAL
 -- fn_buy_asset:     creates assets row + expense row + transaction.
 -- fn_dispose_asset: creates receipt row + transaction; marks asset disposed.
--- Both require parent_account_id on the asset row (the asset class account,
+-- Both require acc_id on the asset row (the asset class account,
 -- e.g. Furniture=61). acc_id on the expense/receipt is the flow account
 -- (e.g. 234=Depreciation, 212=Selling Asset, 233=Miscellaneous).
 -- ════════════════════════════════════════════════════════════════
@@ -1513,7 +1513,7 @@ CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_society_id        INT,
     p_asset_name        VARCHAR,
     p_purchase_value    NUMERIC,
-    p_parent_account_id INT,
+    p_acc_id INT,
 
     p_asset_sno        VARCHAR DEFAULT NULL,
     p_purchase_date     DATE DEFAULT CURRENT_DATE,
@@ -1531,21 +1531,21 @@ DECLARE
     v_dep_rate   NUMERIC(5,2);
     v_desc       TEXT;
 BEGIN
-    IF p_parent_account_id IS NULL THEN
-        RAISE EXCEPTION 'parent_account_id (asset class account) is required';
+    IF p_acc_id IS NULL THEN
+        RAISE EXCEPTION 'acc_id (asset class account) is required';
     END IF;
     IF p_purchase_value IS NULL OR p_purchase_value <= 0 THEN
         RAISE EXCEPTION 'purchase_value must be > 0';
     END IF;
 
-    SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_parent_account_id;
+    SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id;
 
     INSERT INTO assets(
         society_id, asset_name, asset_sno, purchase_date, purchase_value,
-        parent_account_id, depreciation_rate, created_at
+        acc_id, depreciation_rate, created_at
     ) VALUES (
         p_society_id, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
-        p_parent_account_id, v_dep_rate, NOW()
+        p_acc_id, v_dep_rate, NOW()
     ) RETURNING id INTO v_asset_id;
 
     -- Resolve expense (Dr) account
@@ -1769,6 +1769,7 @@ CREATE OR REPLACE FUNCTION fn_apartments_list(
 )
 RETURNS TABLE (
     id INT, flat_number VARCHAR(20), owner_name VARCHAR(100), mobile VARCHAR(15),
+    alt_mobile VARCHAR(15), apt_calc_start_date DATE,
     apartment_size INT, active BOOLEAN, society_id INT,
     pending_dues NUMERIC(15,2), overdue_dues NUMERIC(15,2),
     gate_pass BOOLEAN, noc_eligible BOOLEAN
@@ -1786,6 +1787,7 @@ BEGIN
         GROUP BY entity_id
     )
     SELECT a.id::INT, a.flat_number::VARCHAR(20), a.owner_name::VARCHAR(100), a.mobile::VARCHAR(15),
+           a.alt_mobile::VARCHAR(15), a.apt_calc_start_date::DATE,
            a.apartment_size::INT, a.active::BOOLEAN, a.society_id::INT,
            COALESCE(d.pending_dues, 0)::NUMERIC(15,2), COALESCE(d.overdue_dues, 0)::NUMERIC(15,2),
            -- gate_pass fails only on OVERDUE dues (mirrors v_apartment_dues)
@@ -1811,7 +1813,7 @@ CREATE OR REPLACE FUNCTION fn_vendors_list(
 )
 RETURNS TABLE (
     id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
-    service_type VARCHAR(100), mobile VARCHAR(15), active BOOLEAN,
+    business_name VARCHAR(100), service_type VARCHAR(100), mobile VARCHAR(15), active BOOLEAN,
     pass_expiry DATE, gate_pass BOOLEAN, active_passes INT
 )
 LANGUAGE plpgsql STABLE AS $$
@@ -1820,6 +1822,7 @@ BEGIN
     SELECT
         u.id::INT, u.email::VARCHAR(100), u.society_id::INT,
         COALESCE(v.name, u.email)::VARCHAR(100),
+        v.business_name::VARCHAR(100),
         COALESCE(v.service_type,'—')::VARCHAR(100),
         COALESCE(v.mobile,'—')::VARCHAR(15),
         COALESCE(v.active,TRUE)::BOOLEAN,
@@ -2470,7 +2473,7 @@ CREATE OR REPLACE FUNCTION fn_asset_list(
     p_disposed   BOOLEAN DEFAULT FALSE
 )
 RETURNS TABLE (
-    id INT, asset_name VARCHAR(100), asset_sno VARCHAR(50),
+    id INT, company_name VARCHAR(100), asset_name VARCHAR(100), asset_sno VARCHAR(50),
     purchase_date DATE, purchase_value NUMERIC(12,2),
     parent_account_name VARCHAR(100), depreciation_rate NUMERIC(5,2),
     book_value NUMERIC(15,2), disposed BOOLEAN,
@@ -2481,6 +2484,7 @@ BEGIN
     RETURN QUERY
     SELECT
         ar.id::INT,
+        ar.company_name::VARCHAR(100),
         ar.asset_name::VARCHAR(100),
         ar.asset_sno::VARCHAR(50),
         ar.purchase_date::DATE,
@@ -2498,7 +2502,7 @@ BEGIN
         ar.sale_value::NUMERIC(12,2),
         ar.created_at::TIMESTAMP
     FROM assets ar
-    LEFT JOIN accounts a ON a.id = ar.parent_account_id
+    LEFT JOIN accounts a ON a.id = ar.acc_id
     WHERE ar.society_id = p_society_id
       AND ar.disposed = COALESCE(p_disposed, FALSE)
       AND (p_search IS NULL OR ar.asset_name ILIKE '%'||p_search||'%')
