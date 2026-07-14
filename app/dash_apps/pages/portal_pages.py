@@ -142,7 +142,7 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
     THE FIX for "customization isn't working": the Customize tab's Save
     button (customize_callbacks.py's save_layout()) has always correctly
     written {"active": [...], "available": [...]} to
-    society_settings[key=f"dashboard_layout_{portal}_{tab}"] — but nothing
+    Dashboard_settings[key=f"dashboard_layout_{portal}_{tab}"] — but nothing
     anywhere ever read it back. Every real dashboard tab rendered a
     hardcoded, static list of _kpi(...) calls regardless of what was saved,
     so Customize was a fully-functional dead end.
@@ -166,7 +166,7 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
         try:
             from database.db_manager import db
             row = db._execute(
-                "SELECT value FROM society_settings WHERE society_id=%s AND key=%s",
+                "SELECT value FROM Dashboard_settings WHERE society_id=%s AND key=%s",
                 (sid, f"dashboard_layout_{portal}_{tab}"),
                 fetch_one=True,
             )
