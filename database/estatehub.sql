@@ -213,7 +213,7 @@ CREATE TABLE IF NOT EXISTS security_roster (
 --                  Set by the generator function; flows directly into transactions
 --                  when fn_verify_receivable / fn_pay_apartment_dues_fifo run.
 --   interest_acc_id → separate income account for the interest component
---                  (e.g. 211 = Interest Income). If NULL, interest is posted
+--                  (e.g. 2113 = Due Interest). If NULL, interest is posted
 --                  to the same acc_id as the base amount.
 --   description  → acc_particulars that lands in transactions.transactions.
 --                  DEFAULT pattern: 'Maintenance Apr-2025' / 'Salary Apr-2025'.
