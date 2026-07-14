@@ -818,15 +818,37 @@ BEGIN
 END;
 $$;
 
+
 -- Generates one receivable row per apartment per calendar month from
--- society.calc_start_date through the current month. Idempotent via the
--- partial unique index. The acc_id and interest_acc_id come from the
--- apt_charges_fines_basis row for that apartment/society.
+-- the apartment's own calc-start (apartments.apt_calc_start_date), falling
+-- back to society.calc_start_date when the apartment has none, through the
+-- current month. Idempotent via the partial unique index. The acc_id and
+-- interest_acc_id come from the apt_charges_fines_basis row for that
+-- apartment/society.
+--
+-- Per-month amount resolution (the charge-basis row is now re-resolved for
+-- EACH calendar month, not once per apartment, since a mid-month rate/
+-- amount change must be pro-rated):
+--   1. If apt_charges_fines_basis.apt_maintenance_amount is set (> 0) for
+--      the row covering that month, that flat amount is used, pro-rated
+--      for the days of the month the row (start_date..end_date) actually
+--      covers.
+--   2. Otherwise, falls back to apt_maintenance_rate * apartments.apartment_size,
+--      pro-rated the same way.
+-- Pro-ration is also clipped to the apartment's own calc-start date, so an
+-- apartment onboarded mid-month is only charged from that day forward.
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
-    v_calc_start  DATE;
-    v_month       DATE;
+    v_society_calc_start DATE;
+    v_calc_start         DATE;
+    v_month              DATE;
+    v_month_start        DATE;
+    v_month_end          DATE;
+    v_days_in_month      INT;
+    v_overlap_start      DATE;
+    v_overlap_end        DATE;
+    v_overlap_days       INT;
     apt           RECORD;
     charge        RECORD;
     v_base        NUMERIC(10,2);
@@ -836,8 +858,8 @@ DECLARE
     v_fallback_maint_acc  INT;
     v_fallback_int_acc    INT;
 BEGIN
-    SELECT calc_start_date INTO v_calc_start FROM societies WHERE id = p_society_id;
-    IF v_calc_start IS NULL THEN RETURN; END IF;
+    SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
+    IF v_society_calc_start IS NULL THEN RETURN; END IF;
  
     -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
     SELECT id INTO v_fallback_maint_acc FROM accounts
@@ -853,25 +875,12 @@ BEGIN
     LIMIT 1;
  
     FOR apt IN
-        SELECT id, apartment_size FROM apartments
+        SELECT id, apartment_size, apt_calc_start_date FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
-        SELECT apt_maintenance_rate, apt_due_day, apt_interest_pct
-        INTO charge
-        FROM apt_charges_fines_basis
-        WHERE society_id = p_society_id AND apt_status = TRUE
-          AND (apt_id = apt.id OR apt_id IS NULL)
-          AND start_date <= CURRENT_DATE
-          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
-        ORDER BY apt_id NULLS LAST, start_date DESC
-        LIMIT 1;
- 
-        IF charge.apt_maintenance_rate IS NULL THEN
-            charge.apt_maintenance_rate := 3.0;
-            charge.apt_due_day          := 5;
-            charge.apt_interest_pct     := 2.0;
-        END IF;
- 
+        -- CHANGE 1: apartment-level calc-start overrides the society-wide one
+        v_calc_start := COALESCE(apt.apt_calc_start_date, v_society_calc_start);
+
         -- Also patch existing NULL rows for this apartment while we are here
         UPDATE receivables
         SET acc_id          = COALESCE(acc_id, v_fallback_maint_acc),
@@ -883,7 +892,55 @@ BEGIN
  
         v_month := DATE_TRUNC('month', v_calc_start)::DATE;
         WHILE v_month <= DATE_TRUNC('month', CURRENT_DATE)::DATE LOOP
-            v_base     := (apt.apartment_size * charge.apt_maintenance_rate)::NUMERIC(10,2);
+            v_month_start   := v_month;
+            v_month_end     := (v_month + INTERVAL '1 month - 1 day')::DATE;
+            v_days_in_month := (v_month_end - v_month_start + 1);
+
+            -- Re-resolve the charge-basis row for THIS month specifically
+            -- (apt-specific row wins over the society-wide one; among rows
+            -- of the same specificity the most recently started wins)
+            SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
+                   apt_interest_pct, start_date, end_date
+            INTO charge
+            FROM apt_charges_fines_basis
+            WHERE society_id = p_society_id AND apt_status = TRUE
+              AND (apt_id = apt.id OR apt_id IS NULL)
+              AND start_date <= v_month_end
+              AND (end_date IS NULL OR end_date >= v_month_start)
+            ORDER BY apt_id NULLS LAST, start_date DESC
+            LIMIT 1;
+ 
+            IF charge.apt_maintenance_rate IS NULL THEN
+                -- no charge-basis row covers this month at all — legacy default,
+                -- treated as covering the whole month (no override amount)
+                charge.apt_maintenance_amount := NULL;
+                charge.apt_maintenance_rate   := 3.0;
+                charge.apt_due_day            := 5;
+                charge.apt_interest_pct       := 2.0;
+                charge.start_date             := v_month_start;
+                charge.end_date               := v_month_end;
+            END IF;
+
+            -- CHANGE 2 (pro-ration window): overlap of the charge-basis
+            -- validity window, this calendar month, and the apartment's
+            -- own calc-start date (clips the first month for late joiners)
+            v_overlap_start := GREATEST(v_month_start, charge.start_date, v_calc_start);
+            v_overlap_end   := LEAST(v_month_end, COALESCE(charge.end_date, v_month_end));
+            v_overlap_days  := GREATEST((v_overlap_end - v_overlap_start + 1)::INT, 0);
+
+            IF v_overlap_days = 0 THEN
+                v_month := (v_month + INTERVAL '1 month')::DATE;
+                CONTINUE;
+            END IF;
+
+            IF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
+                -- flat monthly amount override, pro-rated for partial coverage
+                v_base := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            ELSE
+                -- fallback: rate * apartment_size, pro-rated for partial coverage
+                v_base := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            END IF;
+
             v_due_date := (v_month + ((COALESCE(charge.apt_due_day,5) - 1) * INTERVAL '1 day'))::DATE;
             v_desc     := 'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY');
  
@@ -911,6 +968,8 @@ BEGIN
     END LOOP;
 END;
 $$;
+
+
 
 -- Compounds apt_interest_pct monthly on the OVERDUE RESIDUAL of each row.
 -- interest_months_applied prevents double-application across multiple calls.
