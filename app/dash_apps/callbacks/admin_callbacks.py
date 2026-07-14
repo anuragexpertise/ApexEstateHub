@@ -34,6 +34,7 @@ def register_admin_callbacks(app):
 
     @app.callback(
         Output("qr-validation-result", "children"),
+        Output("evaluate-pass-sound-store", "data"),
         Input("validate-qr-btn", "n_clicks"),
         State("manual-qr-input", "value"),
         State("auth-store",      "data"),
@@ -41,37 +42,43 @@ def register_admin_callbacks(app):
     )
     def validate_qr_code_admin(n_clicks, qr_data, auth_data):
         if not n_clicks or not qr_data:
-            return no_update
+            return no_update, no_update
         try:
             from app.services.qr_service import validate_qr_code
-            # Pass the current society_id (was hardcoded None before) so the
-            # manual path enforces the same cross-society check the camera
-            # pipeline already does in qr_callbacks.py.
             society_id = (auth_data or {}).get("society_id")
             result = validate_qr_code(qr_data, society_id)
             if result.get("status") == "PASS":
-                return html.Div([
-                    html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
-                    html.H4("Access Granted", style={"color": "#2ecc71", "marginTop": "10px"}),
-                    html.P(f"Welcome {result.get('user', {}).get('name', 'Visitor')}!"),
+                return (
+                    html.Div([
+                        html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
+                        html.H4("Access Granted", style={"color": "#2ecc71", "marginTop": "10px"}),
+                        html.P(f"Welcome {result.get('user', {}).get('name', 'Visitor')}!"),
+                        html.Hr(),
+                        html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+                    ], className="text-center p-3",
+                       style={"backgroundColor": "#d4edda", "borderRadius": "10px"}),
+                    {"type": "success"}
+                )
+            return (
+                html.Div([
+                    html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
+                    html.H4("Access Denied", style={"color": "#e74c3c", "marginTop": "10px"}),
+                    html.P(result.get("reason", "Invalid QR code")),
                     html.Hr(),
                     html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
                 ], className="text-center p-3",
-                   style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
-            return html.Div([
-                html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
-                html.H4("Access Denied", style={"color": "#e74c3c", "marginTop": "10px"}),
-                html.P(result.get("reason", "Invalid QR code")),
-                html.Hr(),
-                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
-            ], className="text-center p-3",
-               style={"backgroundColor": "#f8d7da", "borderRadius": "10px"})
+                   style={"backgroundColor": "#f8d7da", "borderRadius": "10px"}),
+                {"type": "error"}
+            )
         except Exception as e:
-            return html.Div([
-                html.I(className="fas fa-exclamation-triangle fa-2x", style={"color": "#f39c12"}),
-                html.H4("Error", style={"color": "#f39c12", "marginTop": "10px"}),
-                html.P(str(e)),
-            ], className="text-center p-3",
-               style={"backgroundColor": "#fff3cd", "borderRadius": "10px"})
+            return (
+                html.Div([
+                    html.I(className="fas fa-exclamation-triangle fa-2x", style={"color": "#f39c12"}),
+                    html.H4("Error", style={"color": "#f39c12", "marginTop": "10px"}),
+                    html.P(str(e)),
+                ], className="text-center p-3",
+                   style={"backgroundColor": "#fff3cd", "borderRadius": "10px"}),
+                {"type": "alert"}
+            )
 
     print("  ✓ Admin callbacks registered (manual QR validate)")

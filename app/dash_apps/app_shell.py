@@ -526,6 +526,9 @@ def shell_layout() -> html.Div:
             html.Div(id="toast-container",
                      style={"position": "fixed", "top": "80px", "right": "16px",
                             "zIndex": "9999", "minWidth": "280px"}),
+            dcc.Store(id="toast-sound-trigger", storage_type="memory", data=None),
+            dcc.Store(id="evaluate-pass-sound-store", storage_type="memory", data=None),
+            html.Div(id="evaluate-pass-sound-dummy", style={"display": "none"}),
 
             # ── Notifications dropdown ─────────────────────────────────────────
             html.Div(
