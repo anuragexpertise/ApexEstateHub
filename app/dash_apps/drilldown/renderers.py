@@ -155,7 +155,55 @@ def _format_datetime(val) -> str:
         return val.strftime("%d/%m/%Y %H:%M:%S")
     if isinstance(val, date):
         return val.strftime("%d/%m/%Y")
+    if isinstance(val, str):
+        # Be resilient to backend date strings that arrive as text.
+        s = val.strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y",
+                    "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                d = datetime.strptime(s, fmt)
+                return d.strftime("%d/%m/%Y %H:%M:%S" if " " in fmt else "%d/%m/%Y")
+            except ValueError:
+                continue
     return str(val) if val is not None else "—"
+
+
+def _format_date_entry(val) -> str:
+    """Render a date/datetime/string as dd/mm/yyyy for a date-entry input."""
+    if val in (None, ""):
+        return ""
+    if isinstance(val, datetime):
+        return val.strftime("%d/%m/%Y")
+    if isinstance(val, date):
+        return val.strftime("%d/%m/%Y")
+    if isinstance(val, str):
+        s = val.strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y",
+                    "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                continue
+    return str(val)
+
+
+def _parse_date_entry(val):
+    """Parse a user-entered date string into the canonical yyyy-mm-dd string.
+
+    Accepts dd/mm/yyyy (the app-wide entry convention) plus a few fallbacks.
+    Returns None when the value is not a recognisable date.
+    """
+    if not isinstance(val, str):
+        return None
+    s = val.strip()
+    if not s:
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
 
 
 def _display_value(field_key: str, row_dict: dict):
@@ -901,11 +949,11 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
         elif ftype == "date":
-            from datetime import datetime as _dt
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
-                type="date",
-                value=str(pre_val) if pre_val else _dt.today().strftime("%Y-%m-%d"),
+                type="text",
+                value=_format_date_entry(pre_val) or date.today().strftime("%d/%m/%Y"),
+                placeholder="DD/MM/YYYY",
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
@@ -1584,7 +1632,9 @@ def render_vendor_pass_card(
                         width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dbc.Input(
                     id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
-                    type="date", value=today,
+                    type="text",
+                    value=_format_date_entry(today),
+                    placeholder="DD/MM/YYYY",
                     style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
