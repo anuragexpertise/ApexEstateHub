@@ -2311,6 +2311,7 @@ RETURNS TABLE (
     email VARCHAR(100), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
     plan_status VARCHAR(10), plan_validity DATE, calc_start_date DATE,
     secretary_name VARCHAR(100), secretary_phone VARCHAR(20), secretary_sign VARCHAR(100),
+    PAN_number VARCHAR(10), payment_qr VARCHAR(255),
     total_apartments INT, total_vendors INT, total_security INT, total_users INT,
     total_receivables NUMERIC(15,2), created_at TIMESTAMP, _image_society_id INT
 )
@@ -2323,6 +2324,7 @@ LANGUAGE SQL STABLE AS $$
              ELSE 'Expired' END::VARCHAR(10),
         s.plan_validity::DATE, s.calc_start_date::DATE,
         s.secretary_name::VARCHAR(100), s.secretary_phone::VARCHAR(20), s.secretary_sign::VARCHAR(100),
+        s.PAN_number::VARCHAR(10), s.payment_qr::VARCHAR(255),
         (SELECT COUNT(*)::INT FROM apartments    WHERE society_id=s.id),
         (SELECT COUNT(*)::INT FROM vendors       WHERE society_id=s.id),
         (SELECT COUNT(*)::INT FROM security_staff WHERE society_id=s.id),

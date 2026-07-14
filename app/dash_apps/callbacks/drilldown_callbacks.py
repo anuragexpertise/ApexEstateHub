@@ -117,6 +117,7 @@ def _clean_pg_error(e: Exception) -> str:
 _IMAGE_FIELDS = {
     "image", "owner_photo", "photo", "logo",
     "id_proof", "license", "secretary_sign", "login_background",
+    "payment_qr",
 }
  
 def _has_any_image(form_data: dict) -> bool:
@@ -2091,7 +2092,7 @@ def _save_society(db, d, sid, is_edit, pk):
     if is_edit:
         society_dir = Path("app/assets") / str(pk)
         society_dir.mkdir(parents=True, exist_ok=True)
-        for field in ["logo", "login_background", "secretary_sign"]:
+        for field in ["logo", "login_background", "secretary_sign", "payment_qr"]:
             filename = d.get(field)
             if (
                 filename
@@ -2109,7 +2110,7 @@ def _save_society(db, d, sid, is_edit, pk):
             "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
             "logo=%s,login_background=%s,secretary_sign=%s,"
             "secretary_name=%s,secretary_phone=%s,"
-            "plan_validity=%s,calc_start_date=%s WHERE id=%s",
+            "plan_validity=%s,calc_start_date=%s,PAN_number=%s,payment_qr=%s WHERE id=%s",
             (
                 d.get("name"),
                 d.get("email"),
@@ -2123,6 +2124,8 @@ def _save_society(db, d, sid, is_edit, pk):
                 d.get("secretary_phone"),
                 d.get("plan_validity"),
                 d.get("calc_start_date"),
+                d.get("pan_number"),
+                d.get("payment_qr"),
                 pk,
             ),
         )
