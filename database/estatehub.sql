@@ -1859,7 +1859,9 @@ BEGIN
     LEFT JOIN vendors v     ON  v.id = r.entity_id AND r.role='vendor'
     LEFT JOIN security_staff s ON s.id = r.entity_id AND r.role='security'
     WHERE r.society_id = p_society_id
-      AND (p_status      IS NULL OR r.status = p_status)
+      AND (p_status IS NULL OR
+           (p_status = 'overdue' AND r.status IN ('pending','partial') AND r.due_date < CURRENT_DATE) OR
+           (p_status <> 'overdue' AND r.status = p_status))
       AND (p_entity_id   IS NULL OR r.entity_id = p_entity_id)
       AND (p_entity_role IS NULL OR r.role = p_entity_role)
       AND (p_search IS NULL OR r.description ILIKE '%'||p_search||'%' OR a.name ILIKE '%'||p_search||'%')
