@@ -190,7 +190,7 @@ def register_customize_callbacks(app):
         Output("dnd-layout-store",   "data",       allow_duplicate=True),
         Output("active-count-badge", "children"),
         Output("dnd-init-dummy",     "children"),
-        Input("dnd-init-dummy",      "id"),            # fires once on mount
+        Input("portal-content",      "children"),      # fires when Customize page renders
         Input("layout-portal-select","value"),
         Input("layout-tab-select",   "value"),
         State("auth-store",          "data"),

@@ -850,11 +850,6 @@ def _customize_page(c: str) -> html.Div:
             children=[
                 dbc.Tab(tab_id="customize-layout", label="Layout Editor", children=[
                     html.Div([
-                        dcc.Store(id="dnd-layout-store", storage_type="session",
-                                  data={"active": [], "available": []}),
-                        dcc.Input(id="dnd-order-capture", value="", debounce=False,
-                                  style={"display": "none"}),
-                        html.Div(id="dnd-init-dummy", children="", style={"display": "none"}),
                         html.Div([
                             html.Div([
                                 html.I(className="fas fa-filter me-2", style={"color": c}),
@@ -896,6 +891,9 @@ def _customize_page(c: str) -> html.Div:
                                 html.Strong("Active Dashboard"),
                                 html.Small(" — drag KPIs here",
                                            style={"color": "#999", "fontSize": "11px", "marginLeft": "6px"}),
+                                dbc.Badge("0 / 12 active", id="active-count-badge",
+                                          color="primary", className="ms-auto",
+                                          style={"fontSize": "11px"}),
                             ], style={"display": "flex", "alignItems": "center",
                                       "padding": "10px 14px",
                                       "background": f"linear-gradient(135deg,{c}15,{c}08)"}),
