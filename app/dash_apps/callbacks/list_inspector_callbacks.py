@@ -143,7 +143,7 @@ def register_list_inspector_callbacks(app):
         kpi_chips = html.Div(
             [dbc.Badge(
                 _kpi_chip_label(k),
-                color=("info" if k["card_id"] == selected_kpi else "light"),
+                color=("info" if k["card_id"] == selected_kpi else "dark"),
                 className="me-1 mb-1",
                 style={"fontSize": "10px", "fontWeight": "600",
                        "borderRadius": "8px", "padding": "4px 8px"},
@@ -204,7 +204,7 @@ def register_list_inspector_callbacks(app):
             _meta_row("Profile actions", str(len(profile_actions))),
             html.Div([
                 html.Small("Triggered by KPIs",
-                           style={"fontWeight": "600", "color": "#7d8ea3",
+                           style={"fontWeight": "700", "color": "#15304f",
                                   "fontSize": "10px"}),
                 html.Div(kpi_chips, style={"marginTop": "4px", "marginBottom": "8px"}),
             ]),
