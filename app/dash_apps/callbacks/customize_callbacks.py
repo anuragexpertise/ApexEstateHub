@@ -172,7 +172,16 @@ def register_customize_callbacks(app):
         prevent_initial_call=False,
     )
     def layout_tab_reset(portal):
-        return None
+        if not portal:
+            portal = "admin"
+        try:
+            from app.dash_apps.callbacks.customize_kpi_callbacks import (
+                get_tabs_for_portal,
+            )
+            tabs = get_tabs_for_portal(portal)
+            return tabs[0] if tabs else None
+        except Exception:
+            return None
 
     # ── Load palette + saved active zone when portal/tab changes ─────────────
     @app.callback(
@@ -185,7 +194,7 @@ def register_customize_callbacks(app):
         Input("layout-portal-select","value"),
         Input("layout-tab-select",   "value"),
         State("auth-store",          "data"),
-        prevent_initial_call=True,
+        prevent_initial_call="initial_duplicate",
     )
     def load_layout(_dummy_id, portal, tab, auth_data):
         society_id = (auth_data or {}).get("society_id")
@@ -221,9 +230,10 @@ def register_customize_callbacks(app):
  
         active_ids    = saved_active if saved_active else default_active
         active_ids    = active_ids[:12]
-        # Palette shows all tab KPIs; those already in active show grayed-out
-        # (we just show them all — SortableJS handles duplicates gracefully)
-        available_ids = [c for c in palette_ids if c not in active_ids]
+        # Palette shows ALL tab KPIs (so every KPI is draggable into the
+        # Active Dashboard). SortableJS moves items between the two zones,
+        # so a KPI appearing in both is fine — dragging it relocates it.
+        available_ids = list(palette_ids)
  
         values    = _fetch_kpi_values(society_id)
         layout    = {"active": active_ids, "available": available_ids}
@@ -317,7 +327,7 @@ def register_customize_callbacks(app):
             DEFAULT_LAYOUTS.get(portal or role, {}).get(tab, [])
         ) or palette_ids[:4]
         active_ids    = default_active[:12]
-        available_ids = [c for c in palette_ids if c not in active_ids]
+        available_ids = list(palette_ids)
         values        = _fetch_kpi_values(sid)
         layout        = {"active": active_ids, "available": available_ids}
  
