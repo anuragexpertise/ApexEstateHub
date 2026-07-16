@@ -1864,12 +1864,16 @@ def _save_apartment(db, d, sid, is_edit, pk):
     if is_edit:
         r = db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
-            "active=%s,owner_photo=%s,id_proof=%s "
+            "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
+            "owner_photo=%s,id_proof=%s "
             "WHERE id=%s AND society_id=%s RETURNING id",
             (
                 d.get("owner_name"),
                 d.get("mobile"),
                 d.get("apartment_size") or 0,
+                d.get("alt_mobile"),
+                d.get("alt_address"),
+                d.get("apt_calc_start_date"),
                 d.get("active", True),
                 d.get("owner_photo"),
                 d.get("id_proof"),
