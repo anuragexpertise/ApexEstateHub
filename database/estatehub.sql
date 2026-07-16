@@ -1769,7 +1769,7 @@ CREATE OR REPLACE FUNCTION fn_apartments_list(
 )
 RETURNS TABLE (
     id INT, flat_number VARCHAR(20), owner_name VARCHAR(100), mobile VARCHAR(15),
-    alt_mobile VARCHAR(15), apt_calc_start_date DATE,
+    alt_mobile VARCHAR(15), alt_address TEXT, apt_calc_start_date DATE,
     apartment_size INT, active BOOLEAN, society_id INT,
     pending_dues NUMERIC(15,2), overdue_dues NUMERIC(15,2),
     gate_pass BOOLEAN, noc_eligible BOOLEAN
@@ -1787,7 +1787,7 @@ BEGIN
         GROUP BY entity_id
     )
     SELECT a.id::INT, a.flat_number::VARCHAR(20), a.owner_name::VARCHAR(100), a.mobile::VARCHAR(15),
-           a.alt_mobile::VARCHAR(15), a.apt_calc_start_date::DATE,
+           a.alt_mobile::VARCHAR(15), a.alt_address::TEXT, a.apt_calc_start_date::DATE,
            a.apartment_size::INT, a.active::BOOLEAN, a.society_id::INT,
            COALESCE(d.pending_dues, 0)::NUMERIC(15,2), COALESCE(d.overdue_dues, 0)::NUMERIC(15,2),
            -- gate_pass fails only on OVERDUE dues (mirrors v_apartment_dues)
