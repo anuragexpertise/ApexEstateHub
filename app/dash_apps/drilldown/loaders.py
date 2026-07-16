@@ -52,6 +52,255 @@ def _sec_id(f): return f.get("security_id")
 # LOAD LIST
 # ════════════════════════════════════════════════════════════════════════════
 
+def _build_list_sql(entity: str, filters: dict, page: int = 1,
+                    page_size: int = PAGE_SIZE) -> tuple[str, tuple]:
+    """
+    Single source of truth for the (paginated) data SELECT used by load_list().
+
+    Returns (sql_string, params_tuple) for the row query so the List Inspector
+    can surface an editable, copy-pasteable query and re-execute it directly.
+    Mirrors the branch logic in load_list() exactly.
+    """
+    sid    = _sid(filters)
+    apt_id = _apt_id(filters)
+    ven_id = _ven_id(filters)
+    sec_id = _sec_id(filters)
+    eid    = _eid(filters)
+    offset = (page - 1) * page_size
+    s      = (filters.get("search") or None)
+
+    # ── APARTMENTS ──────────────────────────────────────────────────────
+    if entity == "apartments":
+        pdues_filter = filters.get("pending_dues", None)
+        if pdues_filter is None:
+            p_has_dues_sql = "NULL"
+        elif isinstance(pdues_filter, dict):
+            if "gt" in pdues_filter:
+                p_has_dues_sql = "TRUE"
+            elif "eq" in pdues_filter:
+                p_has_dues_sql = "FALSE" if pdues_filter.get("eq", 0.0) == 0.0 else "TRUE"
+            else:
+                p_has_dues_sql = "NULL"
+        else:
+            p_has_dues_sql = "TRUE" if pdues_filter else "NULL"
+        if apt_id:
+            return ("SELECT * FROM fn_apartments_list(%s,%s," + p_has_dues_sql + ") WHERE id=%s",
+                    (sid, s, apt_id))
+        return ("SELECT * FROM fn_apartments_list(%s,%s," + p_has_dues_sql + ") LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── VENDORS ─────────────────────────────────────────────────────────
+    if entity == "vendors":
+        app_filter = filters.get("active_passes", None)
+        if app_filter is None:
+            p_has_passes_sql = "NULL"
+        elif isinstance(app_filter, dict):
+            p_has_passes_sql = "TRUE" if "gt" in app_filter else "NULL"
+        else:
+            p_has_passes_sql = "TRUE" if app_filter else "NULL"
+        if ven_id:
+            return ("SELECT * FROM fn_vendors_list(%s,%s," + p_has_passes_sql + ") WHERE id=%s",
+                    (sid, s, ven_id))
+        return ("SELECT * FROM fn_vendors_list(%s,%s," + p_has_passes_sql + ") LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── SECURITY ────────────────────────────────────────────────────────
+    if entity == "security":
+        if sec_id:
+            return ("SELECT * FROM fn_security_list(%s,%s) WHERE id=%s",
+                    (sid, s, sec_id))
+        return ("SELECT * FROM fn_security_list(%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── EVENTS ──────────────────────────────────────────────────────────
+    if entity == "events":
+        return ("SELECT * FROM fn_events_list(%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── CONCERNS ────────────────────────────────────────────────────────
+    if entity == "concerns":
+        extra, params = "", [sid]
+        if apt_id:
+            flat_r = db._execute(
+                "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
+                (apt_id, sid), fetch_one=True,
+            )
+            flat_no = (flat_r or {}).get("flat_number")
+            if flat_no:
+                extra = " AND c.flat_no=%s"
+                params.append(flat_no)
+        if s:
+            extra += " AND (c.flat_no ILIKE %s OR c.concern_type ILIKE %s)"
+            params += [f"%{s}%", f"%{s}%"]
+        return (
+            "SELECT c.* FROM concerns c WHERE c.society_id=%s "
+            "AND c.status IN ('open','in_progress')" + extra +
+            " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
+            tuple(params) + (page_size, offset),
+        )
+
+    # ── GATE LOGS ───────────────────────────────────────────────────────
+    if entity == "gate_logs":
+        return ("SELECT * FROM fn_gate_logs_named(%s,%s,CURRENT_DATE) LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── RECEIPTS ────────────────────────────────────────────────────────
+    if entity == "receipts":
+        p_eid   = eid or apt_id or ven_id or sec_id
+        p_etype = (
+            "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
+        ) if not eid else None
+        sec_uid = filters.get("user_id") if filters.get("security_id") else None
+        date_from = filters.get("date_from")
+        date_to   = filters.get("date_to")
+        month     = filters.get("month")
+        year      = filters.get("year")
+        status    = filters.get("status")
+
+        date_where = ""
+        date_params: list = []
+        if date_from:
+            date_where += " AND receipt_date >= %s"
+            date_params.append(date_from)
+        if date_to:
+            date_where += " AND receipt_date <= %s"
+            date_params.append(date_to)
+        if month:
+            date_where += " AND DATE_TRUNC('month', receipt_date) = %s::DATE"
+            date_params.append(f"{month}-01")
+        if year:
+            date_where += " AND EXTRACT(YEAR FROM receipt_date) = %s"
+            date_params.append(int(year))
+        status_where = ""
+        if status:
+            status_where = " AND status = %s"
+            date_params.append(status)
+
+        base_params = [sid, s, p_eid, p_etype]
+        if sec_uid and not eid:
+            where = "WHERE user_id = %s" + date_where + status_where
+            return (
+                f"SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) {where} "
+                f"ORDER BY receipt_date DESC LIMIT %s OFFSET %s",
+                tuple(base_params + [sec_uid] + date_params + [page_size, offset]),
+            )
+        if status:
+            all_rows_sql = (
+                "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) "
+                "WHERE 1=1 " + status_where + " "
+                "ORDER BY receipt_date DESC LIMIT %s OFFSET %s"
+            )
+            return (all_rows_sql,
+                    tuple(base_params + date_params + [page_size, offset]))
+        return (
+            "SELECT * FROM fn_receipts_list(%s,%s,%s,%s) "
+            "WHERE 1=1" + date_where + status_where + " "
+            "ORDER BY receipt_date DESC LIMIT %s OFFSET %s",
+            tuple(base_params + date_params + [page_size, offset]),
+        )
+
+    # ── EXPENSES ────────────────────────────────────────────────────────
+    if entity == "expenses":
+        p_eid   = eid or ven_id or sec_id or apt_id
+        p_etype = (
+            "vendor" if ven_id and not eid else
+            "security" if sec_id and not eid else
+            "apartment" if apt_id and not eid else None
+        )
+        return ("SELECT * FROM fn_expenses_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_eid, p_etype, page_size, offset))
+
+    # ── CASHBOOK ────────────────────────────────────────────────────────
+    if entity == "cashbook":
+        p_eid   = eid or apt_id or ven_id or sec_id
+        p_etype = (
+            "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
+        ) if not eid else None
+        return ("SELECT * FROM fn_cashbook_paired(%s,%s,%s,%s,NULL,NULL) LIMIT %s OFFSET %s",
+                (sid, p_eid, p_etype, s, page_size, offset))
+
+    # ── RECEIVABLES ─────────────────────────────────────────────────────
+    if entity == "receivables":
+        p_status = filters.get("status")
+        p_eid    = eid or apt_id or ven_id or sec_id
+        p_etype  = (
+            "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
+        ) if not eid else None
+        return ("SELECT * FROM fn_receivables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_eid, p_etype, page_size, offset))
+
+    # ── PAYABLES ────────────────────────────────────────────────────────
+    if entity == "payables":
+        p_status = filters.get("status")
+        p_eid   = ven_id or sec_id
+        p_etype = filters.get("role") or (
+            "vendor" if ven_id else "security" if sec_id else None
+        )
+        return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_etype, page_size, offset))
+
+    # ── ASSETS ──────────────────────────────────────────────────────────
+    if entity == "assets":
+        disposed = filters.get("disposed", False)
+        return ("SELECT * FROM fn_asset_list(%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, disposed, page_size, offset))
+
+    # ── ACCOUNTS ────────────────────────────────────────────────────────
+    if entity == "accounts":
+        return ("SELECT * FROM fn_accounts_list(%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, page_size, offset))
+
+    # ── SOCIETIES ───────────────────────────────────────────────────────
+    if entity == "societies":
+        return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
+                (s, page_size, offset))
+
+    # ── APT_CHARGES ─────────────────────────────────────────────────────
+    if entity == "apt_charges":
+        return ("SELECT * FROM fn_apt_charges_list(%s,%s) LIMIT %s OFFSET %s",
+                (sid, apt_id, page_size, offset))
+
+    # ── VEN_CHARGES ─────────────────────────────────────────────────────
+    if entity == "ven_charges":
+        return ("SELECT * FROM fn_ven_charges_list(%s,%s) LIMIT %s OFFSET %s",
+                (sid, ven_id, page_size, offset))
+
+    # ── ATTENDANCE ──────────────────────────────────────────────────────
+    if entity == "attendance":
+        extra_sql, extra_params = "", []
+        if sec_id:
+            extra_sql = " AND g.entity_id=%s"
+            extra_params.append(sec_id)
+        return (
+            "SELECT g.*, COALESCE(s.name,'') AS staff_name "
+            "FROM gate_access g "
+            "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='s' "
+            "WHERE g.society_id=%s AND g.role='s'" + extra_sql +
+            " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
+            tuple([sid] + extra_params + [page_size, offset]),
+        )
+
+    # ── SECURITY ROSTER ─────────────────────────────────────────────────
+    if entity == "security_roster":
+        extra_sql, extra_params = "", []
+        if sec_id:
+            extra_sql = " AND sr.security_id=%s"
+            extra_params.append(sec_id)
+        return (
+            "SELECT sr.*, "
+            "COALESCE(ss.name,'Unknown') AS security_name, "
+            "COALESCE(au.email,'') AS assigned_by_name "
+            "FROM security_roster sr "
+            "JOIN security_staff ss ON ss.id=sr.security_id "
+            "LEFT JOIN users au ON au.id=sr.assigned_by "
+            "WHERE sr.society_id=%s" + extra_sql +
+            " ORDER BY sr.roster_date DESC, sr.id DESC LIMIT %s OFFSET %s",
+            tuple([sid] + extra_params + [page_size, offset]),
+        )
+
+    return ("SELECT 1 WHERE FALSE", ())
+
+
 def load_list(
     entity: str,
     filters: dict,
