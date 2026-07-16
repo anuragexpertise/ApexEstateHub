@@ -52,8 +52,7 @@ class RBACManager:
             "kpi_accounts_count": {Permission.VIEW},
             "kpi_apt_charges": {Permission.VIEW},
             "kpi_ven_charges": {Permission.VIEW},
-            "kpi_sec_charges": {Permission.VIEW},
-            
+
             # Lists
             "list_apartments": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_vendors": {Permission.VIEW, Permission.EDIT, Permission.DELETE},

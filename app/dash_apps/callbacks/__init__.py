@@ -68,6 +68,13 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ customize_kpi_callbacks failed: {e}")
 
+    # 8b. List Inspector callbacks (Customize → List Inspector tab)
+    try:
+        from .list_inspector_callbacks import register_list_inspector_callbacks
+        register_list_inspector_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ list_inspector_callbacks failed: {e}")
+
     # 9. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
     try:
         from .debug_callbacks import register_debug_callbacks

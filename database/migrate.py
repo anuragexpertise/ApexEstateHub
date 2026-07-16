@@ -335,12 +335,12 @@ def seed_demo(conn):
             # Insert apartment first
             cur.execute(
                 """INSERT INTO apartments
-                   (society_id,flat_number,owner_name,mobile,apartment_size,active)
-                   VALUES (%s,%s,%s,%s,%s,TRUE)
+                   (society_id,flat_number,owner_name,mobile,alt_mobile,alt_address,apartment_size,active)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,TRUE)
                    ON CONFLICT (society_id,flat_number) DO UPDATE
                      SET owner_name = EXCLUDED.owner_name
                    RETURNING id""",
-                (society_id, u["flat_number"], u["name"], u.get("mobile",""), u.get("apartment_size",1000)),
+                (society_id, u["flat_number"], u["name"], u.get("mobile",""), u.get("alt_mobile",""), u.get("alt_address",""), u.get("apartment_size",1000)),
             )
             row = cur.fetchone()
             conn.commit()
@@ -601,7 +601,7 @@ def main():
         print()
         print("  First run — no societies found.")
         print("  Seed demo data?  (1 society, 7 users, 50 accounts,")
-        print("  2 events, 2 concerns, 2 gate logs)")
+        print("  2 events, 2 concerns, 2 gate logs, 2 assets)")
         print()
         try:
             ans = input("  Seed demo data? [Y/n]: ").strip().lower()
