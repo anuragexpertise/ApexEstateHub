@@ -31,7 +31,6 @@ PK_MAP: dict = {
     "accounts": "id",
     "apt_charges": "id",
     "ven_charges": "id",
-    "sec_charges": "id",
     "attendance": "id",
     "receivables": "id",
     "payables": "id",
@@ -57,7 +56,6 @@ ENTITY_MAP: dict = {
     "accounts": "account",
     "apt_charges": "apt_charge",
     "ven_charges": "ven_charge",
-    "sec_charges": "sec_charge",
     "attendance": "attendance_entry",
     "receivables": "receivable",
     "payables": "payment",
@@ -211,15 +209,6 @@ DRILLDOWN_MAP: dict = {
         "target": "list_payables",
         "label": "Other Charges",
     },
-    "kpi_vendor_other_charges": {
-        "target": "list_ven_charges",
-        "label": "Other Charges",
-    },
-    "kpi_security_fines": {"target": "list_sec_charges", "label": "Security Fines"},
-    "kpi_security_other_charges": {
-        "target": "list_sec_charges",
-        "label": "Other Charges",
-    },
     "kpi_receipts_in_hand_total": {
         "target": "list_cashbook",
         "label": "Receipts in Hand",
@@ -355,10 +344,6 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_ven_charge",
         "label": "Vendor Charge Details",
     },
-    "list_sec_charges": {
-        "target": "profile_sec_charge",
-        "label": "Security Charge Details",
-    },
     "list_attendance": {
         "target": "profile_attendance_entry",
         "label": "Attendance Details",
@@ -430,11 +415,6 @@ DRILLDOWN_MAP: dict = {
     "profile_ven_charge": {
         "actions": {
             "edit": {"target": "form_ven_charge_edit", "prefill": {"*": "*"}},
-        }
-    },
-    "profile_sec_charge": {
-        "actions": {
-            "edit": {"target": "form_sec_charge_edit", "prefill": {"*": "*"}},
         }
     },
     "profile_attendance_entry": {

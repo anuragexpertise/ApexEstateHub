@@ -37,7 +37,6 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "accounts":     "accounts",
     "apt_charges":  "apt_charges_fines_basis",
     "ven_charges":  "ven_charges_fines_basis",
-    "sec_charges":  "sec_charges_fines_basis",   # ← added
     "attendance":   "gate_access",              # ← added (security shifts)
     "security_roster": "security_roster",
 }

@@ -840,7 +840,7 @@ def _customize_page(c: str) -> html.Div:
             html.Div([
                 html.H4("Customize Dashboard", className="mb-0",
                         style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
-                html.Small("Layout Editor · KPI Inspector · KPI Audit",
+                html.Small("Layout Editor · KPI Inspector · List Inspector · KPI Audit",
                            style={"color": "#aaa", "fontSize": "12px"}),
             ]),
         ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"}),
@@ -989,6 +989,50 @@ def _customize_page(c: str) -> html.Div:
                                 ),
                                 html.Div(id="customize-entity-reference", style={"marginTop":"10px"}),
                             ], width=6),
+                        ], className="mb-3"),
+                    ], style={"marginTop": "20px"}),
+                ]),
+                dbc.Tab(tab_id="customize-list-inspector", label="List Inspector", children=[
+                    html.Div([
+                        dbc.Row([
+                            dbc.Col([dbc.Label("List", style={"fontSize": "12px", "fontWeight": "600"}),
+                                     dcc.Dropdown(id="list-inspector-select", options=[],
+                                                  placeholder="Select list…", clearable=True,
+                                                  style={"fontSize": "13px"})], width=6),
+                            dbc.Col([dbc.Label("Triggered by KPI", style={"fontSize": "12px", "fontWeight": "600"}),
+                                     dcc.Dropdown(id="list-inspector-kpi-select", options=[],
+                                                  placeholder="Select KPI…", clearable=True,
+                                                  style={"fontSize": "13px"})], width=6),
+                        ], className="mb-3"),
+                        html.Hr(style={"margin": "12px 0"}),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label([html.I(className="fas fa-info-circle me-1"), "List Details"],
+                                          style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                dcc.Loading(
+                                    html.Div(id="list-inspector-details",
+                                             children="Select a list to inspect",
+                                             style={"fontSize": "11px", "backgroundColor": "#f5f7fa",
+                                                    "border": "1px solid #cdd5df", "borderRadius": "8px",
+                                                    "padding": "12px", "minHeight": "340px",
+                                                    "maxHeight": "640px", "overflowY": "auto", "color": "#2c3e50"}),
+                                    type="default",
+                                ),
+                            ], width=8),
+                            dbc.Col([
+                                dbc.Label([html.I(className="fas fa-play me-1"), "Live Test"],
+                                          style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                html.P("Run the list loader with the selected KPI's filter "
+                                       "against the current society and report the row count + timing.",
+                                       style={"fontSize": "11px", "color": "#7d8ea3"}),
+                                dbc.Button([html.I(className="fas fa-play me-1"), "Test Load"],
+                                           id="list-inspector-test-btn", color="success", size="sm",
+                                           style={"borderRadius": "8px", "fontWeight": "600", "marginBottom": "10px"}),
+                                dcc.Loading(
+                                    html.Div(id="list-inspector-test-result", style={"marginTop": "8px"}),
+                                    type="circle",
+                                ),
+                            ], width=4),
                         ], className="mb-3"),
                     ], style={"marginTop": "20px"}),
                 ]),
