@@ -424,8 +424,30 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
     "events": {
         "open_to": "all",   # matches the DB column default; shown explicitly
                             # in the dropdown rather than left blank
-    },
+    }
 }
+
+
+# Cashbook is backed by fn_cashbook_paired(), which returns a paired
+# credit/debit layout with rc_*/pc_* columns. The generic transactions
+# table introspection produces columns that do not match this output,
+# so we override the list columns for cashbook explicitly.
+_CASHBOOK_LIST_COLUMNS = [
+    {"name": "Date",         "field": "row_date",         "sortable": True},
+    {"name": "Cr Account",   "field": "rc_account_name",  "sortable": True},
+    {"name": "Cr Entity",    "field": "rc_entity_name",   "sortable": False},
+    {"name": "Cr Particulars","field": "rc_particulars",  "sortable": False},
+    {"name": "Cr Mode",      "field": "rc_mode",          "sortable": False},
+    {"name": "Cr Amount",    "field": "rc_amount",        "sortable": True, "format": "currency"},
+    {"name": "Dr Account",   "field": "pc_account_name",  "sortable": True},
+    {"name": "Dr Entity",    "field": "pc_entity_name",   "sortable": False},
+    {"name": "Dr Particulars","field": "pc_particulars",  "sortable": False},
+    {"name": "Dr Mode",      "field": "pc_mode",          "sortable": False},
+    {"name": "Dr Amount",    "field": "pc_amount",        "sortable": True, "format": "currency"},
+    {"name": "Day Cr Total", "field": "day_rc_total",     "sortable": True, "format": "currency"},
+    {"name": "Day Dr Total", "field": "day_pc_total",     "sortable": True, "format": "currency"},
+    {"name": "Running Bal",  "field": "running_balance",  "sortable": True, "format": "currency"},
+]
 
 
 def build_entity_meta() -> dict:
@@ -547,6 +569,9 @@ def build_entity_meta() -> dict:
             "profile_actions": actions,
             "form_fields":     {"new": new_fields, "edit": edit_fields},
         }
+
+        if ekey == "cashbook":
+            meta[ekey]["list_columns"] = _CASHBOOK_LIST_COLUMNS
 
     return meta
 

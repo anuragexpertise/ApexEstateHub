@@ -2098,6 +2098,7 @@ CREATE OR REPLACE FUNCTION fn_cashbook_paired(
     p_end_date   DATE DEFAULT NULL
 )
 RETURNS TABLE (
+    id               INT,
     row_date         DATE,
     rc_id            INT,    rc_trx_date DATE,
     rc_account_name  TEXT,   rc_entity_name TEXT,
@@ -2194,7 +2195,8 @@ BEGIN
         FROM max_rn m CROSS JOIN LATERAL generate_series(1, m.max_rows) AS gs(rn)
     )
     SELECT
-        rs.dt::DATE,
+        COALESCE(cr.rc_id, dr.pc_id)::INT AS id,
+        rs.dt::DATE AS row_date,
         cr.rc_id::INT, cr.rc_date::DATE,
         COALESCE(cr.rc_account_name,'')::TEXT, COALESCE(cr.rc_entity_name,'')::TEXT,
         COALESCE(cr.rc_particulars,'')::TEXT,  COALESCE(cr.rc_mode,'')::TEXT,

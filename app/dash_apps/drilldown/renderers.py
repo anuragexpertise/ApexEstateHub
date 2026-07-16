@@ -128,6 +128,10 @@ _FIELD_FORMATTERS = {
         "✓ Eligible" if v else "✗ Not Eligible",
         style={"color": "#17976e" if v else "#de5c52", "fontWeight": "600"},
     ),
+    "currency": lambda v: html.Span(
+        f"₹{float(v):,.2f}" if v is not None else "—",
+        style={"fontWeight": "600", "textAlign": "right", "display": "block"}
+    ),
 }
 
 import re as _re
