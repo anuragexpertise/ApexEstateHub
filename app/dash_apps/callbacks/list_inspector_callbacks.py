@@ -251,20 +251,19 @@ def register_list_inspector_callbacks(app):
                    "minHeight": "340px", "maxHeight": "640px", "overflowY": "auto"},
         )
 
-    # ── Test load: run the list loader with the selected KPI filter ────────
+    # ── Populate editable List SQL when list / KPI changes ────────────────
     @app.callback(
-        Output("list-inspector-test-result", "children"),
-        Input("list-inspector-test-btn", "n_clicks"),
-        State("list-inspector-select", "value"),
-        State("list-inspector-kpi-select", "value"),
+        Output("list-inspector-sql", "value"),
+        Input("list-inspector-select", "value"),
+        Input("list-inspector-kpi-select", "value"),
         State("auth-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call=False,
     )
-    def test_list_load(n_clicks, selected_list, selected_kpi, auth_data):
-        if not n_clicks or not selected_list or selected_list not in LIST_INDEX:
-            return no_update
+    def load_list_sql(selected_list, selected_kpi, auth_data):
         from app.dash_apps.drilldown import loaders
 
+        if not selected_list or selected_list not in LIST_INDEX:
+            return ""
         entry = LIST_INDEX[selected_list]
         plural = to_plural(entry["entity"])
         sid = (auth_data or {}).get("society_id")
@@ -281,25 +280,45 @@ def register_list_inspector_callbacks(app):
         if sid:
             filters["society_id"] = sid
 
+        try:
+            sql, params = loaders._build_list_sql(plural, filters, page=1, page_size=25)
+            # Inline params for a human-readable, copy-pasteable query
+            return _inline_params(sql, params)
+        except Exception as e:
+            return "-- could not build SQL: %s" % e
+
+    # ── Load: run the (editable) list SQL and display rows in a list box ──
+    @app.callback(
+        Output("list-inspector-load-result", "children"),
+        Output("list-inspector-result-box", "children"),
+        Input("list-inspector-load-btn", "n_clicks"),
+        State("list-inspector-sql", "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def run_list_sql(n_clicks, sql_text, auth_data):
+        if not n_clicks or not sql_text or not sql_text.strip():
+            return no_update, no_update
+        from database.db_manager import db
+
         t0 = time.perf_counter()
         try:
-            rows, total = loaders.load_list(plural, filters, page=1, page_size=25)
+            rows = db._execute(sql_text.strip(), (), fetch_all=True) or []
             elapsed = (time.perf_counter() - t0) * 1000
-            n = len(rows) if rows is not None else 0
-            total_disp = total if total is not None else n
-            return dbc.Alert(
+            n = len(rows)
+            result_alert = dbc.Alert(
                 [
-                    html.Strong("Rows loaded: "),
+                    html.Strong("Rows: "),
                     html.Span(str(n), style={"fontWeight": "700", "marginRight": "12px"}),
-                    html.Strong("Total matched: "),
-                    html.Span(str(total_disp), style={"fontWeight": "700", "marginRight": "12px"}),
                     html.Small("(%0.1f ms)" % elapsed, style={"color": "#888"}),
                 ],
-                color="success", className="mt-2 py-2", style={"fontSize": "12px"},
+                color="success" if n else "warning",
+                className="mt-2 py-2", style={"fontSize": "12px"},
             )
+            return result_alert, _render_result_box(rows)
         except Exception as e:
             elapsed = (time.perf_counter() - t0) * 1000
-            return dbc.Alert(
+            result_alert = dbc.Alert(
                 [
                     html.Strong("ERROR: "),
                     html.Code(str(e), style={"fontSize": "11px", "whiteSpace": "pre-wrap"}),
@@ -308,6 +327,23 @@ def register_list_inspector_callbacks(app):
                 ],
                 color="danger", className="mt-2 py-2", style={"fontSize": "12px"},
             )
+            return result_alert, html.Small("Query failed — see error above.",
+                                            className="text-danger")
+
+    # ── Export .sql ───────────────────────────────────────────────────────
+    @app.callback(
+        Output("list-inspector-export-download", "data"),
+        Input("list-inspector-export-btn", "n_clicks"),
+        State("list-inspector-sql", "value"),
+        State("list-inspector-select", "value"),
+        prevent_initial_call=True,
+    )
+    def export_list_sql(n_clicks, sql_text, selected_list):
+        if not n_clicks or not sql_text:
+            return no_update
+        block = ("\n-- ── LIST: %s ─────────────────────────\n%s;\n"
+                 % (selected_list or "unknown", sql_text.strip()))
+        return dcc.send_string(block, filename="list_%s.sql" % (selected_list or "query"))
 
     print("  ✓ List inspector callbacks registered")
 
@@ -328,3 +364,46 @@ def _meta_row(label, value):
                                    "fontWeight": "500", "marginBottom": "8px"}),
         ]
     )
+
+
+def _inline_params(sql: str, params: tuple) -> str:
+    """Substitute %s placeholders with their literal params for readability."""
+    out = sql
+    for p in params:
+        if p is None:
+            lit = "NULL"
+        elif isinstance(p, bool):
+            lit = "TRUE" if p else "FALSE"
+        elif isinstance(p, (int, float)):
+            lit = str(p)
+        else:
+            lit = "'%s'" % str(p).replace("'", "''")
+        out = out.replace("%s", lit, 1)
+    return out
+
+
+def _render_result_box(rows: list) -> html.Div:
+    """Render list rows as a scrollable list box (one JSON-ish line per row)."""
+    if not rows:
+        return html.Small("No rows returned.", className="text-muted")
+
+    items = []
+    for i, row in enumerate(rows[:200]):
+        rd = row.to_dict(include_calculated=True) if hasattr(row, "to_dict") else dict(row)
+        preview = ", ".join(
+            "%s=%s" % (k, _short(v)) for k, v in list(rd.items())[:12]
+        )
+        items.append(html.Li(
+            preview,
+            style={"padding": "3px 0", "borderBottom": "1px solid #eef2f7" if i < len(rows) - 1 else "none"},
+        ))
+    if len(rows) > 200:
+        items.append(html.Li("… %d more rows (truncated)" % (len(rows) - 200),
+                            style={"padding": "3px 0", "color": "#999"}))
+
+    return html.Ul(items, style={"listStyleType": "none", "paddingLeft": "0", "margin": "0"})
+
+
+def _short(v) -> str:
+    s = str(v)
+    return s if len(s) <= 40 else s[:37] + "..."
