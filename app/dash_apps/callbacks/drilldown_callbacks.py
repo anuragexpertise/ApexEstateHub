@@ -2240,7 +2240,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
     try:
         rate         = float(d.get("apt_maintenance_rate") or 3.0)
         due_day      = int(d.get("apt_due_day") or 5)
-        interest_pct = float(d.get("apt_interest_pct") or 2.0)
+        interest_pct = float(d.get("apt_interest_pct") or 1.75)
     except ValueError:
         return False, "Invalid numeric value", None
 
