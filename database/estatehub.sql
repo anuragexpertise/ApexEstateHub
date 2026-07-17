@@ -253,6 +253,12 @@ CREATE TABLE IF NOT EXISTS receivables (
     interest_months_applied INT NOT NULL DEFAULT 0,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0), -- base + interest, kept in sync
     paid_amount NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+    -- paid_principal = portion of paid_amount applied to the BASE (principal)
+    -- component only. paid_amount - paid_principal = interest portion paid.
+    -- Tracked separately so Simple Interest next month is charged strictly on
+    -- the UNPAID principal residual (never on interest) — required by Indian
+    -- housing-society bye-laws. See fn_pay_apartment_dues_fifo / fn_verify_receivable.
+    paid_principal NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_principal >= 0),
     due_date DATE,
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
@@ -477,7 +483,7 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     apt_maintenance_amount NUMERIC(10, 2) NOT NULL DEFAULT 1500, -- amount overide rate
     apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
-    apt_interest_pct NUMERIC(5, 2) DEFAULT 2.0,
+    apt_interest_pct NUMERIC(5, 2) DEFAULT 1.75,
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -779,6 +785,11 @@ DECLARE
     due_rec     RECORD;
     v_credit_left NUMERIC(15,2);
     v_take        NUMERIC(15,2);
+    v_row_residual NUMERIC(15,2);
+    v_row_int      NUMERIC(15,2);
+    v_row_prin     NUMERIC(15,2);
+    v_pay_int      NUMERIC(15,2);
+    v_pay_prin     NUMERIC(15,2);
 BEGIN
     FOR credit_rec IN
         SELECT id, amount, paid_amount
@@ -792,7 +803,8 @@ BEGIN
         EXIT WHEN v_credit_left <= 0;
 
         FOR due_rec IN
-            SELECT id, amount, paid_amount
+            SELECT id, amount, paid_amount, paid_principal, base_amount,
+                   interest_amount
             FROM receivables
             WHERE entity_id = p_entity_id AND role = p_role
               AND status IN ('pending','partial')
@@ -800,13 +812,24 @@ BEGIN
             FOR UPDATE
         LOOP
             EXIT WHEN v_credit_left <= 0;
-            v_take := LEAST(v_credit_left, due_rec.amount - due_rec.paid_amount);
+            v_row_residual := due_rec.amount - due_rec.paid_amount;
+            v_row_int      := LEAST(
+                due_rec.interest_amount - GREATEST(due_rec.paid_amount - due_rec.paid_principal, 0),
+                v_row_residual);
+            v_row_int      := GREATEST(v_row_int, 0);
+            v_row_prin     := v_row_residual - v_row_int;
+
+            -- Apply advance credit interest-first (bye-law allocation order).
+            v_pay_int  := LEAST(v_credit_left, v_row_int);
+            v_pay_prin := LEAST(v_credit_left - v_pay_int, v_row_prin);
+            v_take     := v_pay_int + v_pay_prin;
             IF v_take <= 0 THEN CONTINUE; END IF;
 
             UPDATE receivables
-                 SET paid_amount = due_rec.paid_amount + v_take,
-                     status      = CASE WHEN due_rec.paid_amount + v_take >= due_rec.amount
-                                         THEN 'paid' ELSE 'partial' END
+                 SET paid_amount   = due_rec.paid_amount + v_take,
+                     paid_principal = due_rec.paid_principal + v_pay_prin,
+                     status        = CASE WHEN due_rec.paid_amount + v_take >= due_rec.amount
+                                          THEN 'paid' ELSE 'partial' END
                  WHERE id = due_rec.id;
 
             v_credit_left := v_credit_left - v_take;
@@ -918,7 +941,7 @@ BEGIN
                 charge.apt_maintenance_amount := NULL;
                 charge.apt_maintenance_rate   := 3.0;
                 charge.apt_due_day            := 5;
-                charge.apt_interest_pct       := 2.0;
+                charge.apt_interest_pct       := 1.75;
                 charge.start_date             := v_month_start;
                 charge.end_date               := v_month_end;
             END IF;
@@ -950,12 +973,12 @@ BEGIN
                 society_id, entity_id, role,
                 acc_id, interest_acc_id,
                 description, period_month,
-                base_amount, amount, due_date, status, created_at
+                base_amount, amount, paid_principal, due_date, status, created_at
             ) VALUES (
                 p_society_id, apt.id, 'apartment',
                 v_fallback_maint_acc, v_fallback_int_acc,
                 v_desc, v_month,
-                v_base, v_base, v_due_date, 'pending', NOW()
+                v_base, v_base, 0, v_due_date, 'pending', NOW()
             )
             ON CONFLICT (entity_id, role, period_month)
             WHERE period_month IS NOT NULL
@@ -1085,7 +1108,7 @@ BEGIN
     FOR rec IN
         SELECT r.id, r.entity_id, r.due_date, r.amount, r.paid_amount,
                r.interest_amount, r.interest_months_applied,
-               r.description, r.interest_acc_id
+               r.paid_principal, r.description, r.interest_acc_id
         FROM receivables r
         WHERE r.society_id = p_society_id AND r.role = 'apartment'
           AND r.status IN ('pending','partial')
@@ -1111,12 +1134,12 @@ BEGIN
         v_months_new := v_months_elapsed - rec.interest_months_applied;
         IF v_months_new <= 0 THEN CONTINUE; END IF;
  
-        -- Simple Interest (SI) only: interest is charged on the ORIGINAL
-        -- overdue residual (rec.amount - rec.paid_amount), never on previously
-        -- accrued interest. Charging compound interest on arrears is illegal
-        -- under Indian housing-society model bye-laws / consumer-protection
-        -- guidelines, so v_residual is held fixed across the loop.
-        v_residual        := rec.amount - rec.paid_amount;
+        -- Simple Interest (SI) only: interest is charged strictly on the UNPAID
+        -- PRINCIPAL residual (base_amount - paid_principal), never on previously
+        -- accrued interest and never on already-paid principal. Charging compound
+        -- interest (on arrears that include interest) is illegal under Indian
+        -- housing-society model bye-laws / consumer-protection guidelines.
+        v_residual        := rec.base_amount - rec.paid_principal;
         v_total_increment := 0;
         FOR i IN 1..v_months_new LOOP
             v_increment := (v_residual * v_rate / 100)::NUMERIC(15,2);
@@ -1207,6 +1230,7 @@ BEGIN
 
     UPDATE receivables
          SET paid_amount  = v_rec.amount,
+             paid_principal = v_rec.base_amount,
              status       = 'paid',
              confirmed_by = p_confirmed_by,
              confirmed_at = NOW()
@@ -1239,7 +1263,12 @@ DECLARE
     v_remaining  NUMERIC(15,2) := p_amount;
     v_trx_id     INT;
     rec          RECORD;
-    v_take       NUMERIC(15,2);
+    v_take        NUMERIC(15,2);
+    v_row_residual NUMERIC(15,2);
+    v_row_int      NUMERIC(15,2);
+    v_row_prin     NUMERIC(15,2);
+    v_pay_int      NUMERIC(15,2);
+    v_pay_prin     NUMERIC(15,2);
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         RAISE EXCEPTION 'Amount must be > 0';
@@ -1274,20 +1303,39 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     FOR rec IN
-        SELECT id, amount, paid_amount, confirmed_by FROM receivables
+        SELECT id, amount, paid_amount, paid_principal, base_amount,
+               interest_amount, confirmed_by FROM receivables
         WHERE entity_id = p_apartment_id AND role = 'apartment'
           AND status IN ('pending','partial')
         ORDER BY due_date ASC NULLS LAST, id ASC
         FOR UPDATE
     LOOP
         EXIT WHEN v_remaining <= 0;
-        v_take := LEAST(v_remaining, rec.amount - rec.paid_amount);
+
+        -- Per-row residual split into interest vs principal.
+        -- Interest outstanding on this row = total interest minus any
+        -- interest already paid (paid_amount - paid_principal).
+        v_row_residual := rec.amount - rec.paid_amount;
+        v_row_int      := LEAST(
+            rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
+            v_row_residual);
+        v_row_int      := GREATEST(v_row_int, 0);
+        v_row_prin     := v_row_residual - v_row_int;
+
+        -- Indian housing-society bye-law allocation order: clear INTEREST
+        -- first, then PRINCIPAL — so interest is never left to compound.
+        v_pay_int  := LEAST(v_remaining, v_row_int);
+        v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
+        v_take     := v_pay_int + v_pay_prin;
+        IF v_take <= 0 THEN CONTINUE; END IF;
 
         UPDATE receivables
-             SET paid_amount   = rec.paid_amount + v_take,
-                 status        = CASE WHEN rec.paid_amount + v_take >= rec.amount THEN 'paid' ELSE 'partial' END,
-                 confirmed_by  = COALESCE(p_confirmed_by, rec.confirmed_by),
-                 confirmed_at  = NOW()
+             SET paid_amount    = rec.paid_amount + v_take,
+                 paid_principal = rec.paid_principal + v_pay_prin,
+                 status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
+                                       THEN 'paid' ELSE 'partial' END,
+                 confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
+                 confirmed_at   = NOW()
              WHERE id = rec.id;
 
         v_remaining := v_remaining - v_take;
@@ -1300,11 +1348,11 @@ BEGIN
     IF v_remaining > 0 THEN
         INSERT INTO receivables (
             society_id, entity_id, role, acc_id,
-            description, base_amount, amount, paid_amount,
+            description, base_amount, amount, paid_amount, paid_principal,
             status, confirmed_by, confirmed_at, created_at
         ) VALUES (
             v_society_id, p_apartment_id, 'apartment', v_acc_id,
-            'Advance Credit', v_remaining, v_remaining, 0,
+            'Advance Credit', v_remaining, v_remaining, 0, 0,
             'credit', p_confirmed_by, NOW(), NOW()
         );
     END IF;
