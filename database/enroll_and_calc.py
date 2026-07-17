@@ -77,7 +77,7 @@ def main():
         db._execute(
             "UPDATE apt_charges_fines_basis "
             "SET apt_maintenance_amount = %s, apt_maintenance_rate = %s, apt_due_day = 5, "
-            "apt_interest_pct = 2.0, start_date = %s "
+            "apt_interest_pct = 1.75, start_date = %s "
             "WHERE id = %s",
             (maintenance_amount, maintenance_rate, calc_start_date, existing_charge["id"]),
         )
@@ -88,7 +88,7 @@ def main():
             "INSERT INTO apt_charges_fines_basis "
             "(society_id, apt_id, start_date, end_date, "
             "apt_maintenance_rate, apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status) "
-            "VALUES (%s, NULL, %s, NULL, %s, %s, 5, 2.0, TRUE)",
+            "VALUES (%s, NULL, %s, NULL, %s, %s, 5, 1.75, TRUE)",
             (sid, calc_start_date, maintenance_rate, maintenance_amount),
         )
         print(f"Created new society-wide charge rule")
