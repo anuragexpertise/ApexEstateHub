@@ -462,8 +462,10 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 
 -- ── Apartment charges / fines basis ───────────────────────────
 -- apt_id NULL = society-wide default rate; apt_id = override for one apartment.
--- apt_interest_pct = flat % compounded monthly on the overdue residual of each
--- monthly receivable row (was apt_delay_fine in old schema).
+-- apt_interest_pct = flat % charged as SIMPLE INTEREST monthly on the overdue
+-- residual of each monthly receivable row (was apt_delay_fine in old schema).
+-- Interest is never compounded — compounding on arrears is illegal under Indian
+-- housing-society model bye-laws.
 -- apt_maintenance_acc_id = which income account (e.g. 2311) to put on generated receivable rows.
 -- apt_interest_acc_id    = which income account for interest portion (e.g. 211). NULL = same as maintenance.
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
@@ -971,10 +973,13 @@ $$;
 
 
 
--- Compounds apt_interest_pct monthly on the OVERDUE RESIDUAL of each row.
--- interest_months_applied prevents double-application across multiple calls.
--- On each application the `description` gains ' + Interest' so the verifying
--- admin can see at a glance that this row carries an interest component.
+-- Applies SIMPLE INTEREST (apt_interest_pct) monthly on the ORIGINAL OVERDUE
+-- RESIDUAL of each row. Interest is NEVER compounded (never charged on prior
+-- interest) — compounding on arrears is illegal under Indian housing-society
+-- model bye-laws / consumer-protection guidelines. interest_months_applied
+-- prevents double-application across multiple calls. On each application the
+-- `description` gains ' + Interest' so the verifying admin can see at a glance
+-- that this row carries an interest component.
 CREATE OR REPLACE FUNCTION fn_save_receipt_pending(
     p_society_id   INT,
     p_acc_id       INT,
@@ -1106,11 +1111,15 @@ BEGIN
         v_months_new := v_months_elapsed - rec.interest_months_applied;
         IF v_months_new <= 0 THEN CONTINUE; END IF;
  
+        -- Simple Interest (SI) only: interest is charged on the ORIGINAL
+        -- overdue residual (rec.amount - rec.paid_amount), never on previously
+        -- accrued interest. Charging compound interest on arrears is illegal
+        -- under Indian housing-society model bye-laws / consumer-protection
+        -- guidelines, so v_residual is held fixed across the loop.
         v_residual        := rec.amount - rec.paid_amount;
         v_total_increment := 0;
         FOR i IN 1..v_months_new LOOP
             v_increment := (v_residual * v_rate / 100)::NUMERIC(15,2);
-            v_residual  := v_residual + v_increment;
             v_total_increment := v_total_increment + v_increment;
         END LOOP;
  
