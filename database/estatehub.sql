@@ -279,6 +279,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (ent
 WHERE
     period_month IS NOT NULL;
 
+-- ── SELF-HEALING MIGRATION for EXISTING databases ──────────────
+-- The columns below were added in a later schema revision. On a fresh
+-- database CREATE TABLE IF NOT EXISTS already includes them; on an EXISTING
+-- database the table is left untouched, so add the columns idempotently
+-- here and backfill any rows that predate the change. Without this, the
+-- PL/pgSQL functions that reference these columns (fn_apply_receivable_interest,
+-- fn_pay_apartment_dues_fifo, fn_apply_advance_credit) raise
+-- "record has no field ..." on re-run.
+ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
+    base_amount NUMERIC(10, 2) NOT NULL DEFAULT 0;
+ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
+    paid_principal NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_principal >= 0);
+
+-- Backfill legacy rows created before these columns existed:
+--   base_amount  ← amount (whole outstanding was principal when no interest split)
+--   paid_principal ← paid_amount (whole amount paid was treated as principal)
+UPDATE receivables
+    SET base_amount   = CASE WHEN base_amount = 0 AND amount > 0 THEN amount ELSE base_amount END,
+        paid_principal = CASE WHEN paid_principal = 0 AND paid_amount > 0 THEN paid_amount ELSE paid_principal END
+    WHERE base_amount = 0 OR paid_principal = 0;
+
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
 CREATE TABLE IF NOT EXISTS receipts (
     id SERIAL PRIMARY KEY,
@@ -1081,87 +1102,152 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_apply_receivable_interest CASCADE;
+DROP FUNCTION IF EXISTS fn_apply_receivable_interest (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
-RETURNS VOID LANGUAGE plpgsql AS $$
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
 DECLARE
     rec               RECORD;
     v_rate            NUMERIC(5,2);
     v_months_elapsed  INT;
     v_months_new      INT;
     v_residual        NUMERIC(15,2);
-    v_increment       NUMERIC(15,2);
     v_total_increment NUMERIC(15,2);
-    i                 INT;
     v_int_acc_id      INT;
 BEGIN
-    -- Resolve once per society call — apt_interest_acc_id column removed,
-    -- interest income account is now name-resolved (same pattern used
-    -- elsewhere: fn_auto_generate_receivables, fn_create_default_charges).
-    SELECT id INTO v_int_acc_id FROM accounts
+    ------------------------------------------------------------------
+    -- Resolve Due Interest income account once
+    ------------------------------------------------------------------
+    SELECT id
+      INTO v_int_acc_id
+    FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Due Interest%'
       AND drcr_account = 'Cr'
     LIMIT 1;
- 
+
+    ------------------------------------------------------------------
+    -- Process overdue apartment receivables
+    ------------------------------------------------------------------
     FOR rec IN
-        SELECT r.id, r.entity_id, r.due_date, r.amount, r.paid_amount,
-               r.interest_amount, r.interest_months_applied,
-               r.paid_principal, r.description, r.interest_acc_id
+        SELECT
+            r.id,
+            r.entity_id,
+            r.due_date,
+            r.base_amount,
+            r.amount,
+            COALESCE(r.paid_amount,0)               AS paid_amount,
+            COALESCE(r.paid_principal,0)            AS paid_principal,
+            COALESCE(r.interest_amount,0)           AS interest_amount,
+            COALESCE(r.interest_months_applied,0)   AS interest_months_applied,
+            r.description,
+            r.interest_acc_id
         FROM receivables r
-        WHERE r.society_id = p_society_id AND r.role = 'apartment'
+        WHERE r.society_id = p_society_id
+          AND r.role = 'apartment'
           AND r.status IN ('pending','partial')
           AND r.due_date < CURRENT_DATE
         FOR UPDATE
     LOOP
-        -- Look up interest RATE only — acc_id column removed from
-        -- apt_charges_fines_basis; v_int_acc_id (resolved above) is
-        -- used as the fallback instead.
+
+        ------------------------------------------------------------------
+        -- Interest Rate
+        ------------------------------------------------------------------
         SELECT apt_interest_pct
-        INTO v_rate
+          INTO v_rate
         FROM apt_charges_fines_basis
-        WHERE society_id = p_society_id AND apt_status = TRUE
+        WHERE society_id = p_society_id
+          AND apt_status = TRUE
           AND (apt_id = rec.entity_id OR apt_id IS NULL)
-        ORDER BY apt_id NULLS LAST, start_date DESC
+        ORDER BY apt_id NULLS LAST,
+                 start_date DESC
         LIMIT 1;
- 
-        IF v_rate IS NULL OR v_rate = 0 THEN CONTINUE; END IF;
- 
-        v_months_elapsed := GREATEST(
-            (EXTRACT(YEAR  FROM AGE(CURRENT_DATE, rec.due_date)) * 12
-           + EXTRACT(MONTH FROM AGE(CURRENT_DATE, rec.due_date)))::INT, 0);
-        v_months_new := v_months_elapsed - rec.interest_months_applied;
-        IF v_months_new <= 0 THEN CONTINUE; END IF;
- 
-        -- Simple Interest (SI) only: interest is charged strictly on the UNPAID
-        -- PRINCIPAL residual (base_amount - paid_principal), never on previously
-        -- accrued interest and never on already-paid principal. Charging compound
-        -- interest (on arrears that include interest) is illegal under Indian
-        -- housing-society model bye-laws / consumer-protection guidelines.
-        v_residual        := rec.base_amount - rec.paid_principal;
-        v_total_increment := 0;
-        FOR i IN 1..v_months_new LOOP
-            v_increment := (v_residual * v_rate / 100)::NUMERIC(15,2);
-            v_total_increment := v_total_increment + v_increment;
-        END LOOP;
- 
+
+        IF COALESCE(v_rate,0) <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        ------------------------------------------------------------------
+        -- Months overdue
+        ------------------------------------------------------------------
+        v_months_elapsed :=
+            GREATEST(
+                (
+                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, rec.due_date))*12
+                  + EXTRACT(MONTH FROM AGE(CURRENT_DATE, rec.due_date))
+                )::INT,
+                0
+            );
+
+        v_months_new :=
+            v_months_elapsed - rec.interest_months_applied;
+
+        IF v_months_new <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        ------------------------------------------------------------------
+        -- Outstanding principal only
+        ------------------------------------------------------------------
+        v_residual :=
+            GREATEST(
+                COALESCE(rec.base_amount,0)
+              - COALESCE(rec.paid_principal,0),
+                0
+            );
+
+        IF v_residual = 0 THEN
+            CONTINUE;
+        END IF;
+
+        ------------------------------------------------------------------
+        -- Simple Interest
+        ------------------------------------------------------------------
+        v_total_increment :=
+            ROUND(
+                v_residual
+                * v_rate
+                * v_months_new
+                / 100.0,
+                2
+            );
+
+        IF v_total_increment <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        ------------------------------------------------------------------
+        -- Update receivable
+        ------------------------------------------------------------------
         UPDATE receivables
-             SET interest_amount         = rec.interest_amount + v_total_increment,
-                 amount                  = rec.amount + v_total_increment,
-                 interest_months_applied = rec.interest_months_applied + v_months_new,
-                 interest_acc_id         = COALESCE(rec.interest_acc_id, v_int_acc_id),
-                 -- Append ' + Interest' to description once, so the verifying
-                 -- admin can see at a glance that this row carries an interest component.
-                 description = CASE
-                     WHEN rec.description NOT LIKE '% + Interest' THEN rec.description || ' + Interest'
-                     ELSE rec.description
-                 END
-             WHERE id = rec.id;
+           SET interest_amount =
+                    COALESCE(interest_amount,0) + v_total_increment,
+
+               amount =
+                    COALESCE(amount,0) + v_total_increment,
+
+               interest_months_applied =
+                    COALESCE(interest_months_applied,0) + v_months_new,
+
+               interest_acc_id =
+                    COALESCE(interest_acc_id, v_int_acc_id),
+
+               description =
+                    CASE
+                        WHEN description IS NULL
+                            THEN 'Interest'
+                        WHEN description LIKE '% + Interest'
+                            THEN description
+                        ELSE description || ' + Interest'
+                    END
+
+         WHERE id = rec.id;
+
     END LOOP;
 END;
 $$;
-
 -- Single-row verify (the Verify button on a specific receivable row).
 -- Writes TWO transaction lines when the row has an interest component:
 --   Line 1: base_amount → acc_id           (maintenance income, e.g. 2311)

@@ -500,7 +500,7 @@ def seed_demo(conn):
             INSERT INTO apt_charges_fines_basis(
                 society_id, apt_id, start_date, end_date, apt_maintenance_rate, apt_due_day,apt_interest_pct, apt_status)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,(society_id, None, "2026-04-01", None, 3.0, 5, 2.0,True))
+        """,(society_id, None, "2026-04-01", None, 3.0, 5, 1.75,True))
         conn.commit()
         print("  ✓ Apartment charge basis added")
     cur.execute("""
