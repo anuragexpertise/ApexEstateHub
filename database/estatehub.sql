@@ -1066,7 +1066,7 @@ BEGIN
                 v_desc, v_month,
                 v_base, v_base, 0, v_due_date, 'pending', NOW()
             )
-            ON CONFLICT ON CONSTRAINT uq_receivable_entity_month DO NOTHING;
+            ON CONFLICT DO NOTHING;
 
             v_month := (v_month + INTERVAL '1 month')::DATE;
         END LOOP;
@@ -2571,10 +2571,14 @@ BEGIN
         FULL OUTER JOIN dr_rows dr
              ON dr.pc_date = cr.rc_date AND dr.pair_key = cr.pair_key
     ),
+    paired_with_rn AS (
+        SELECT p.*,
+               ROW_NUMBER() OVER (PARTITION BY p.dt ORDER BY COALESCE(p.rc_id, p.pc_id)) AS rn
+        FROM paired p
+    ),
     row_slots AS (
-        SELECT dt,
-               ROW_NUMBER() OVER (PARTITION BY dt ORDER BY COALESCE(rc_id, pc_id)) AS rn
-        FROM paired
+        SELECT dt, rn
+        FROM paired_with_rn
     )
     SELECT
         COALESCE(p.rc_id, p.pc_id)::INT AS id,
@@ -2592,8 +2596,7 @@ BEGIN
         ad.running_balance::NUMERIC(15,2)
     FROM row_slots rs
     JOIN all_dates ad ON ad.dt = rs.dt
-    JOIN paired p ON p.dt = rs.dt
-        AND ROW_NUMBER() OVER (PARTITION BY p.dt ORDER BY COALESCE(p.rc_id, p.pc_id)) = rs.rn
+    JOIN paired_with_rn p ON p.dt = rs.dt AND p.rn = rs.rn
     ORDER BY rs.dt, rs.rn;
 END;
 $$;
