@@ -50,6 +50,7 @@ class RBACManager:
             
             # Enroll Tab
             "kpi_accounts_count": {Permission.VIEW},
+            "kpi_ledger_open": {Permission.VIEW},
             "kpi_apt_charges": {Permission.VIEW},
             "kpi_ven_charges": {Permission.VIEW},
 
@@ -64,9 +65,11 @@ class RBACManager:
             "list_receipts": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_expenses": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "list_cashbook": {Permission.VIEW},
+            "list_ledger": {Permission.VIEW},
             
             # Profiles
             "profile_apartment": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
+            "profile_ledger": {Permission.VIEW},
             "profile_vendor": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "profile_security": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
             "profile_event": {Permission.VIEW, Permission.EDIT, Permission.DELETE},

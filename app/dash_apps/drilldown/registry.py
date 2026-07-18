@@ -291,6 +291,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_plan_validity": {"target": "list_societies", "label": "Society Plan Validity"},
     "kpi_accounts_count": {"target": "list_accounts", "label": "Chart of Accounts"},
+    "kpi_ledger_open": {"target": "list_accounts", "label": "Account Ledger"},
     # NOTE: "kpi_assets_total" doesn't exist in KPI_CARDS — the real card id
     # is "kpi_assets_count" (titled "Active Assets" in card_catalogue.py).
     "kpi_assets_count": {"target": "list_assets", "label": "All Assets"},

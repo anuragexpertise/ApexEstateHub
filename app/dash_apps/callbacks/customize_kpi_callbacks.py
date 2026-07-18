@@ -76,6 +76,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_expenses_month", "admin", "financials", "Expenses"),
     ("kpi_expenses_total", "admin", "financials", "Expenses"),
     ("kpi_advance_credits", "admin", "financials", "Prepaid"),
+    ("kpi_ledger_open", "admin", "financials", "Ledger"),
     # MASTER PORTAL - Dashboard
     ("kpi_societies_total", "master", "dashboard", "Master"),
     ("kpi_societies_free", "master", "dashboard", "Master"),

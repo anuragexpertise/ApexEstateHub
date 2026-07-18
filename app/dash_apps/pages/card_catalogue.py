@@ -404,6 +404,13 @@ KPI_CARDS = {
         "title": "Accounts", "group": "chart",
     },
 
+    "kpi_ledger_open": {
+        "query": "SELECT COUNT(*) AS v FROM accounts WHERE society_id=%s",
+        "params": 1, "format": "number",
+        "icon": "fa-columns", "color": "#1d74d8",
+        "title": "Open Ledger", "group": "chart",
+    },
+
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
@@ -820,6 +827,7 @@ DEFAULT_LAYOUTS = {
             "kpi_expenses_total",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
+            "kpi_ledger_open",
         ],
         "events": ["kpi_events_total"],
         "concerns": ["kpi_concerns_open"],

@@ -44,7 +44,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin", "payables"):     {"view"},
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
-    ("admin", "ledger"):       set(),
+    ("admin", "ledger"):       {"view"},
+    ("admin", "accounts"):     {"view", "edit", "delete", "new"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
