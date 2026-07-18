@@ -44,11 +44,13 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin", "payables"):     {"view"},
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
+    ("admin", "ledger"):       set(),
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
     ("master", "payables"):    {"view"},
     ("master", "security_roster"): {"view"},
+    ("master", "ledger"):      set(),
     ("master", "*"):           {"view"},
 
     # ── APARTMENT: view own data only, can raise concern / pay ────────────
@@ -58,8 +60,9 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "gate_logs"):   {"view"},
     ("apartment", "receipts"):{"view"},
     ("apartment", "cashbook"):    {"view"},
-    ("apartment", "receivables"): {"view"},   # own dues — view only, admin verifies
-    ("apartment", "payables"):    {"view"},   # requested for symmetry with vendor
+    ("apartment", "receivables"): {"view"},
+    ("apartment", "payables"):    {"view"},
+    ("apartment", "ledger"):      set(),
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -69,8 +72,9 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("vendor", "gate_logs"):      {"view"},
     ("vendor", "receipts"):   {"view"},
     ("vendor", "cashbook"):       {"view"},
-    ("vendor", "receivables"):    {"view"},   # own pass/charges — view only
-    ("vendor", "payables"):       {"view"},   # own payables if ever billed this way
+    ("vendor", "receivables"):    {"view"},
+    ("vendor", "payables"):       {"view"},
+    ("vendor", "ledger"):         set(),
     ("vendor", "*"):              set(),
 
     # ── SECURITY: view most lists + can create receipts ───────────────────
@@ -80,8 +84,9 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("security", "events"):       {"view"},
     ("security", "concerns"):     {"view"},
     ("security", "gate_logs"):    {"view"},
-    ("security", "receipts"): {"view", "new"},   # create receipt
+    ("security", "receipts"): {"view", "new"},
     ("security", "cashbook"):     {"view"},
+    ("security", "ledger"):       set(),
     ("security", "*"):            set(),
 }
 
@@ -506,6 +511,22 @@ def render_list_card(card_id: str, title: str, icon: str,
                 style={"transition": "background 0.12s ease"},
             )
         )
+
+    # Ledger row highlighting: BF in yellow, closing in green, negative balance in red
+    if entity == "ledger" and rows:
+        for i, row in enumerate(rows):
+            if i >= len(body_rows):
+                break
+            row_dict = (row.to_dict(include_calculated=True)
+                        if hasattr(row, "to_dict") else dict(row))
+            is_closing = bool(row_dict.get("is_closing"))
+            balance = float(row_dict.get("balance") or 0)
+            if is_closing:
+                body_rows[i].style = {"backgroundColor": "#d4edda", "fontWeight": "700"}
+            elif balance < 0:
+                body_rows[i].style = {"backgroundColor": "#f8d7da"}
+            elif row_dict.get("particulars") == "Brought Forward":
+                body_rows[i].style = {"backgroundColor": "#fff3cd"}
         
 
     if not body_rows:
