@@ -36,6 +36,7 @@ PK_MAP: dict = {
     "payables": "id",
     "assets": "id",
     "security_roster": "id",
+    "ledger": "row_date",
 }
 
 
@@ -61,6 +62,7 @@ ENTITY_MAP: dict = {
     "payables": "payment",
     "assets": "asset",
     "security_roster": "security_roster",
+    "ledger": "ledger",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -335,6 +337,7 @@ DRILLDOWN_MAP: dict = {
     "list_cashbook": {"target": "profile_transaction", "label": "Transaction Details"},
     "list_societies": {"target": "profile_society", "label": "Society Profile"},
     "list_accounts": {"target": "profile_account", "label": "Account Details"},
+    "list_ledger": {"target": "profile_account", "label": "Account Ledger"},
     "list_assets": {"target": "profile_asset", "label": "Asset Details"},
     "list_apt_charges": {
         "target": "profile_apt_charge",
@@ -421,6 +424,18 @@ DRILLDOWN_MAP: dict = {
         "actions": {
             "edit": {"target": "form_attendance_entry_edit", "prefill": {"*": "*"}},
         }
+    },
+    "profile_account": {
+        "actions": {
+            "edit": {"target": "form_account_edit", "prefill": {"*": "*"}},
+            "show_ledger": {
+                "target": "list_ledger",
+                "prefill": {"account_id": "id"},
+            },
+        }
+    },
+    "profile_ledger": {
+        "actions": {}
     },
 }
 

@@ -39,6 +39,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "ven_charges":  "ven_charges_fines_basis",
     "attendance":   "gate_access",              # ← added (security shifts)
     "security_roster": "security_roster",
+    "ledger":       "accounts",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -56,6 +57,7 @@ _SYSTEM_COLUMNS = {
 # Entities with no Edit action (immutable ledger / read-only tabs).
 NO_EDIT_ACTION = {
     "gate_logs", "cashbook", "receivables", "payables",
+    "ledger",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -449,6 +451,18 @@ _CASHBOOK_LIST_COLUMNS = [
     {"name": "Running Bal",  "field": "running_balance",  "sortable": True, "format": "currency"},
 ]
 
+# Ledger is backed by fn_account_ledger(), which returns a virtual
+# double-sided ledger with BF, transaction rows, and closing balance.
+_LEDGER_LIST_COLUMNS = [
+    {"name": "Date",         "field": "row_date",         "sortable": True},
+    {"name": "Particulars",  "field": "particulars",      "sortable": False},
+    {"name": "Debit",        "field": "debit",            "sortable": True, "format": "currency"},
+    {"name": "Credit",       "field": "credit",           "sortable": True, "format": "currency"},
+    {"name": "Balance",      "field": "balance",          "sortable": True, "format": "currency"},
+    {"name": "Closing",      "field": "is_closing",       "sortable": False},
+    {"name": "Parent",       "field": "parent_name",      "sortable": False},
+]
+
 
 def build_entity_meta() -> dict:
     from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
@@ -572,6 +586,11 @@ def build_entity_meta() -> dict:
 
         if ekey == "cashbook":
             meta[ekey]["list_columns"] = _CASHBOOK_LIST_COLUMNS
+
+        if ekey == "ledger":
+            meta[ekey]["list_columns"] = _LEDGER_LIST_COLUMNS
+            meta[ekey]["list_title"] = "Account Ledger"
+            meta[ekey]["list_icon"] = "fa-book"
 
     return meta
 

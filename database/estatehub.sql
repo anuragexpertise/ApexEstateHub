@@ -1,7 +1,9 @@
 -- ============================================================
--- ESTATEHUB - COMPLETE DATABASE SCHEMA & FUNCTIONS (v3)
+-- ESTATEHUB - COMPLETE DATABASE SCHEMA & FUNCTIONS (v3 - CORRECTED)
 -- Accounts-as-categorisation: acc_id replaces charge_type/payment_type/category
 -- Interest split: single receivable row, two transaction lines on verify
+-- Double-entry bookkeeping: every financial event posts paired Dr + Cr lines
+--   linked by transactions.journal_id.
 -- ============================================================
 -- SAFE TO RE-RUN: CREATE OR REPLACE / IF NOT EXISTS / ON CONFLICT DO NOTHING
 -- Intended for a FRESH database reset followed by migrate.py seeding.
@@ -108,6 +110,8 @@ CREATE TABLE IF NOT EXISTS apartments (
     apt_calc_start_date DATE DEFAULT CURRENT_DATE,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id),
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
 
@@ -123,7 +127,9 @@ CREATE TABLE IF NOT EXISTS vendors (
     mobile VARCHAR(15),
     service_description TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS security_staff (
@@ -137,7 +143,9 @@ CREATE TABLE IF NOT EXISTS security_staff (
     shift VARCHAR(20),
     salary_per_shift NUMERIC(10, 2),
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS assets (
@@ -156,7 +164,9 @@ CREATE TABLE IF NOT EXISTS assets (
     sale_value NUMERIC(12, 2),
     sale_acc_id INT REFERENCES accounts (id), -- Selling Asset income account (e.g. 212)
     disposed_by INT REFERENCES users (id),
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -170,7 +180,9 @@ CREATE TABLE IF NOT EXISTS events (
     open_to VARCHAR(20) DEFAULT 'all',
     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
     image TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS concerns (
@@ -183,7 +195,9 @@ CREATE TABLE IF NOT EXISTS concerns (
     status VARCHAR(20) NOT NULL DEFAULT 'open',
     assigned_to VARCHAR(100),
     image TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
 -- ── security_roster & attendance (needed before payables FK) ──
@@ -280,21 +294,12 @@ WHERE
     period_month IS NOT NULL;
 
 -- ── SELF-HEALING MIGRATION for EXISTING databases ──────────────
--- The columns below were added in a later schema revision. On a fresh
--- database CREATE TABLE IF NOT EXISTS already includes them; on an EXISTING
--- database the table is left untouched, so add the columns idempotently
--- here and backfill any rows that predate the change. Without this, the
--- PL/pgSQL functions that reference these columns (fn_apply_receivable_interest,
--- fn_pay_apartment_dues_fifo, fn_apply_advance_credit) raise
--- "record has no field ..." on re-run.
 ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
     base_amount NUMERIC(10, 2) NOT NULL DEFAULT 0;
 ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
     paid_principal NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_principal >= 0);
 
 -- Backfill legacy rows created before these columns existed:
---   base_amount  ← amount (whole outstanding was principal when no interest split)
---   paid_principal ← paid_amount (whole amount paid was treated as principal)
 UPDATE receivables
     SET base_amount   = CASE WHEN base_amount = 0 AND amount > 0 THEN amount ELSE base_amount END,
         paid_principal = CASE WHEN paid_principal = 0 AND paid_amount > 0 THEN paid_amount ELSE paid_principal END
@@ -341,6 +346,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     confirmed_at TIMESTAMP DEFAULT NOW(),
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
+    receipt_number VARCHAR(50) UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -437,6 +443,8 @@ CREATE TABLE IF NOT EXISTS payables (
 -- ── TRANSACTIONS — single ledger source of truth ───────────────
 -- source_table / source_id trace every row back to its origin
 -- (receipts / expenses / receivables / payables).
+-- journal_id links the paired Dr + Cr lines of one financial event
+-- for double-entry bookkeeping.
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -460,8 +468,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     source_table VARCHAR(50),
     source_id INT,
     created_by INTEGER REFERENCES users (id),
+    journal_id INT,
+    transaction_number VARCHAR(50) UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_transactions_journal ON transactions (journal_id);
 
 -- ── Vendor passes ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendor_passes (
@@ -488,13 +500,6 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 );
 
 -- ── Apartment charges / fines basis ───────────────────────────
--- apt_id NULL = society-wide default rate; apt_id = override for one apartment.
--- apt_interest_pct = flat % charged as SIMPLE INTEREST monthly on the overdue
--- residual of each monthly receivable row (was apt_delay_fine in old schema).
--- Interest is never compounded — compounding on arrears is illegal under Indian
--- housing-society model bye-laws.
--- apt_maintenance_acc_id = which income account (e.g. 2311) to put on generated receivable rows.
--- apt_interest_acc_id    = which income account for interest portion (e.g. 211). NULL = same as maintenance.
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -506,16 +511,14 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     apt_due_day INTEGER DEFAULT 5,
     apt_interest_pct NUMERIC(5, 2) DEFAULT 1.75,
     apt_status BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
 
--- apt_charges index on society + apt for the per-apartment rule lookup
 CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
 
 -- ── Vendor charges ─────────────────────────────────────────────
--- vendor_fine removed — ad-hoc fines are manual receipts.
--- ven_maintenance_acc_id = income account for pass-sale receipts generated
--- by fn_sell_vendor_pass (e.g. 2318 = Society Charge / pass fees income).
 CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -526,12 +529,10 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     vendor_7day NUMERIC(10, 2) DEFAULT 0,
     vendor_1mth NUMERIC(10, 2) DEFAULT 0,
     ven_status BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
-
--- ── sec_charges_fines_basis removed — security no longer generates
---    receivables. Security payroll flows entirely through payables
---    (roster-driven), with a salary expense account (235) set on each row.
 
 -- ── Gate access & other tables ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS gate_access (
@@ -571,11 +572,8 @@ CREATE TABLE IF NOT EXISTS Dashboard_settings (
     key VARCHAR(100) NOT NULL,
     value TEXT,
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, key) -- required: matches _upsert_layout's
-    -- ON CONFLICT (society_id, key) target exactly
+    UNIQUE (society_id, key)
 );
-
-
 
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
@@ -588,6 +586,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     read BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
@@ -619,19 +618,31 @@ CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (societ
 
 CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions (source_table, source_id);
 
+CREATE INDEX IF NOT EXISTS idx_transactions_acc_date ON transactions (acc_id, trx_date);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_entity_date ON transactions (entity_id, trx_date);
+
 CREATE INDEX IF NOT EXISTS idx_payables_society_status ON payables (society_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_payables_roster ON payables (roster_id);
 
 CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, status);
 
+CREATE INDEX IF NOT EXISTS idx_receipts_entity_role ON receipts (entity_id, role);
+
 CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_entity_role ON expenses (entity_id, role);
+
+CREATE INDEX IF NOT EXISTS idx_payables_entity_role ON payables (entity_id, role);
 
 CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_id, role);
 
 CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables (due_date);
+
+CREATE INDEX IF NOT EXISTS idx_receivables_entity_status_date ON receivables (entity_id, role, status, due_date);
 
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
 
@@ -650,6 +661,49 @@ CREATE INDEX IF NOT EXISTS idx_vendor_passes_user ON vendor_passes (user_id, val
 CREATE INDEX IF NOT EXISTS idx_assets_society ON assets (society_id, disposed);
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (society_id, key);
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
+-- Auto-generate human-friendly receipt_number / transaction_number.
+-- ════════════════════════════════════════════════════════════════
+CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
+CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
+
+DROP FUNCTION IF EXISTS fn_trg_receipt_number() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_receipt_number()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
+        NEW.receipt_number := 'RCPT-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-' ||
+            LPAD(NEXTVAL('seq_receipt_number')::TEXT, 6, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_receipt_number ON receipts;
+CREATE TRIGGER trg_receipt_number
+    BEFORE INSERT ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipt_number();
+
+DROP FUNCTION IF EXISTS fn_trg_transaction_number() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_transaction_number()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.transaction_number IS NULL OR TRIM(NEW.transaction_number) = '' THEN
+        NEW.transaction_number := 'TXN-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-' ||
+            LPAD(NEXTVAL('seq_transaction_number')::TEXT, 6, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_transaction_number ON transactions;
+CREATE TRIGGER trg_transaction_number
+    BEFORE INSERT ON transactions
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_transaction_number();
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: APARTMENT HELPER FUNCTIONS (used by trigger + gate pass + NOC)
@@ -678,8 +732,6 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3A: APARTMENT ACTIVE-STATE TRIGGER
--- Blocks toggling apartments.active in EITHER direction while ANY
--- outstanding balance exists (all dues, not just overdue ones).
 -- ════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION fn_trg_apartment_active_guard()
@@ -694,6 +746,8 @@ BEGIN
                 OLD.flat_number, v_outstanding
                 USING ERRCODE = 'check_violation';
         END IF;
+        NEW.updated_at := NOW();
+        NEW.updated_by := OLD.updated_by;
     END IF;
     RETURN NEW;
 END;
@@ -706,12 +760,60 @@ CREATE TRIGGER trg_apartment_active_guard
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_apartment_active_guard();
 
+-- Generic updated_at stamping trigger factory
+DROP FUNCTION IF EXISTS fn_trg_set_updated_at() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_vendors_updated ON vendors;
+CREATE TRIGGER trg_vendors_updated
+    BEFORE UPDATE ON vendors
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_security_updated ON security_staff;
+CREATE TRIGGER trg_security_updated
+    BEFORE UPDATE ON security_staff
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_assets_updated ON assets;
+CREATE TRIGGER trg_assets_updated
+    BEFORE UPDATE ON assets
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_events_updated ON events;
+CREATE TRIGGER trg_events_updated
+    BEFORE UPDATE ON events
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
+CREATE TRIGGER trg_concerns_updated
+    BEFORE UPDATE ON concerns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_apt_charges_updated ON apt_charges_fines_basis;
+CREATE TRIGGER trg_apt_charges_updated
+    BEFORE UPDATE ON apt_charges_fines_basis
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ven_charges_updated ON ven_charges_fines_basis;
+CREATE TRIGGER trg_ven_charges_updated
+    BEFORE UPDATE ON ven_charges_fines_basis
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3B: GATE-PASS EVALUATION
--- Single callable for the QR scanner. Returns (passed, reason, amount_due).
--- Apartment: FAILS only on OVERDUE residual (not future billing).
--- Vendor:    FAILS when no vendor_passes row has valid_until >= today.
--- Security:  FAILS when not clocked in (no open gate_access row with role='s').
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_evaluate_gate_pass CASCADE;
@@ -763,7 +865,6 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3C: NOC ELIGIBILITY
--- ALL outstanding dues (not just overdue) must be zero.
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_check_noc_eligibility CASCADE;
@@ -787,13 +888,6 @@ $$;
 -- SECTION 4: RECEIVABLES ENGINE (apartment maintenance, monthly)
 -- ════════════════════════════════════════════════════════════════
 
--- Draws down an entity's available advance-credit rows (status='credit')
--- FIFO against their oldest pending/partial dues. Called automatically
--- whenever new dues are generated (fn_auto_generate_receivables) and
--- right after a credit row is created (fn_pay_apartment_dues_fifo), so
--- application code never has to net credit against dues itself — the
--- 'residual' a portal displays for any pending row already has any
--- available credit applied.
 DROP FUNCTION IF EXISTS fn_apply_advance_credit CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apply_advance_credit(
@@ -864,25 +958,7 @@ BEGIN
 END;
 $$;
 
-
--- Generates one receivable row per apartment per calendar month from
--- the apartment's own calc-start (apartments.apt_calc_start_date), falling
--- back to society.calc_start_date when the apartment has none, through the
--- current month. Idempotent via the partial unique index. The acc_id and
--- interest_acc_id come from the apt_charges_fines_basis row for that
--- apartment/society.
---
--- Per-month amount resolution (the charge-basis row is now re-resolved for
--- EACH calendar month, not once per apartment, since a mid-month rate/
--- amount change must be pro-rated):
---   1. If apt_charges_fines_basis.apt_maintenance_amount is set (> 0) for
---      the row covering that month, that flat amount is used, pro-rated
---      for the days of the month the row (start_date..end_date) actually
---      covers.
---   2. Otherwise, falls back to apt_maintenance_rate * apartments.apartment_size,
---      pro-rated the same way.
--- Pro-ration is also clipped to the apartment's own calc-start date, so an
--- apartment onboarded mid-month is only charged from that day forward.
+-- Generates one receivable row per apartment per calendar month.
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -906,28 +982,27 @@ DECLARE
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF v_society_calc_start IS NULL THEN RETURN; END IF;
- 
+
     -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
     SELECT id INTO v_fallback_maint_acc FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Society Maintenance Charge%'
       AND drcr_account = 'Cr'
     LIMIT 1;
- 
+
     SELECT id INTO v_fallback_int_acc FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Due Interest%'
       AND drcr_account = 'Cr'
     LIMIT 1;
- 
+
     FOR apt IN
         SELECT id, apartment_size, apt_calc_start_date FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
-        -- CHANGE 1: apartment-level calc-start overrides the society-wide one
         v_calc_start := COALESCE(apt.apt_calc_start_date, v_society_calc_start);
 
-        -- Also patch existing NULL rows for this apartment while we are here
+        -- Patch existing NULL rows for this apartment while we are here
         UPDATE receivables
         SET acc_id          = COALESCE(acc_id, v_fallback_maint_acc),
             interest_acc_id = COALESCE(interest_acc_id, v_fallback_int_acc)
@@ -935,16 +1010,13 @@ BEGIN
           AND entity_id  = apt.id
           AND role       = 'apartment'
           AND (acc_id IS NULL OR interest_acc_id IS NULL);
- 
+
         v_month := DATE_TRUNC('month', v_calc_start)::DATE;
         WHILE v_month <= DATE_TRUNC('month', CURRENT_DATE)::DATE LOOP
             v_month_start   := v_month;
             v_month_end     := (v_month + INTERVAL '1 month - 1 day')::DATE;
             v_days_in_month := (v_month_end - v_month_start + 1);
 
-            -- Re-resolve the charge-basis row for THIS month specifically
-            -- (apt-specific row wins over the society-wide one; among rows
-            -- of the same specificity the most recently started wins)
             SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
                    apt_interest_pct, start_date, end_date
             INTO charge
@@ -955,10 +1027,8 @@ BEGIN
               AND (end_date IS NULL OR end_date >= v_month_start)
             ORDER BY apt_id NULLS LAST, start_date DESC
             LIMIT 1;
- 
+
             IF charge.apt_maintenance_rate IS NULL THEN
-                -- no charge-basis row covers this month at all — legacy default,
-                -- treated as covering the whole month (no override amount)
                 charge.apt_maintenance_amount := NULL;
                 charge.apt_maintenance_rate   := 3.0;
                 charge.apt_due_day            := 5;
@@ -967,9 +1037,6 @@ BEGIN
                 charge.end_date               := v_month_end;
             END IF;
 
-            -- CHANGE 2 (pro-ration window): overlap of the charge-basis
-            -- validity window, this calendar month, and the apartment's
-            -- own calc-start date (clips the first month for late joiners)
             v_overlap_start := GREATEST(v_month_start, charge.start_date, v_calc_start);
             v_overlap_end   := LEAST(v_month_end, COALESCE(charge.end_date, v_month_end));
             v_overlap_days  := GREATEST((v_overlap_end - v_overlap_start + 1)::INT, 0);
@@ -980,16 +1047,14 @@ BEGIN
             END IF;
 
             IF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
-                -- flat monthly amount override, pro-rated for partial coverage
                 v_base := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE
-                -- fallback: rate * apartment_size, pro-rated for partial coverage
                 v_base := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
             END IF;
 
             v_due_date := (v_month + ((COALESCE(charge.apt_due_day,5) - 1) * INTERVAL '1 day'))::DATE;
             v_desc     := 'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY');
- 
+
             INSERT INTO receivables (
                 society_id, entity_id, role,
                 acc_id, interest_acc_id,
@@ -1001,107 +1066,18 @@ BEGIN
                 v_desc, v_month,
                 v_base, v_base, 0, v_due_date, 'pending', NOW()
             )
-            ON CONFLICT (entity_id, role, period_month)
-            WHERE period_month IS NOT NULL
-            DO NOTHING;
- 
+            ON CONFLICT ON CONSTRAINT uq_receivable_entity_month DO NOTHING;
+
             v_month := (v_month + INTERVAL '1 month')::DATE;
         END LOOP;
 
-        -- Any advance credit this apartment is holding auto-offsets the
-        -- month(s) just generated (or any older still-open row).
         PERFORM fn_apply_advance_credit(apt.id, 'apartment');
     END LOOP;
 END;
 $$;
 
 
-
--- Applies SIMPLE INTEREST (apt_interest_pct) monthly on the ORIGINAL OVERDUE
--- RESIDUAL of each row. Interest is NEVER compounded (never charged on prior
--- interest) — compounding on arrears is illegal under Indian housing-society
--- model bye-laws / consumer-protection guidelines. interest_months_applied
--- prevents double-application across multiple calls. On each application the
--- `description` gains ' + Interest' so the verifying admin can see at a glance
--- that this row carries an interest component.
-CREATE OR REPLACE FUNCTION fn_save_receipt_pending(
-    p_society_id   INT,
-    p_acc_id       INT,
-    p_particulars  TEXT,
-    p_amount       NUMERIC,
-    p_entity_id    INT     DEFAULT NULL,
-    p_role         VARCHAR DEFAULT 'other',
-    p_mode         VARCHAR DEFAULT 'cash',
-    p_receipt_date DATE    DEFAULT CURRENT_DATE,
-    p_created_by   INT     DEFAULT NULL,
-    p_cheque_no    VARCHAR DEFAULT NULL,
-    p_trx_id       VARCHAR DEFAULT NULL
-)
-RETURNS TABLE(receipt_id INT)  -- NO transaction_id: transaction posted only on admin verify
-LANGUAGE plpgsql AS $$
-DECLARE v_receipt_id INT; v_drcr VARCHAR(2);
-BEGIN
-    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
-    IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
-    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
-
-    SELECT drcr_account INTO v_drcr FROM accounts
-    WHERE id = p_acc_id AND society_id = p_society_id;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found', p_acc_id; END IF;
-    IF v_drcr = 'Dr' THEN
-        RAISE EXCEPTION 'Account % is a Dr account — use fn_save_expense', p_acc_id;
-    END IF;
-
-    INSERT INTO receipts(
-        society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
-        amount, mode, cheque_no, transaction_id, status, created_at
-        -- confirmed_by / confirmed_at intentionally NULL until admin verifies
-    ) VALUES (
-        p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
-        p_amount, p_mode, p_cheque_no, p_trx_id, 'pending', NOW()
-    ) RETURNING id INTO v_receipt_id;
-
-    RETURN QUERY SELECT v_receipt_id;
-END;
-$$;
-
--- Admin verify: post pending receipt to transactions and mark confirmed
-CREATE OR REPLACE FUNCTION fn_verify_receipt(
-    p_receipt_id   INT,
-    p_confirmed_by INT,
-    p_mode         VARCHAR DEFAULT NULL   -- NULL = use receipt's own mode
-)
-RETURNS TEXT LANGUAGE plpgsql AS $$
-DECLARE
-    v_rec    receipts%ROWTYPE;
-    v_trx_id INT;
-BEGIN
-    SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
-    IF NOT FOUND    THEN RETURN 'Error: Receipt not found'; END IF;
-    IF v_rec.status = 'confirmed'  THEN RETURN 'Already confirmed'; END IF;
-    IF v_rec.status = 'cancelled'  THEN RETURN 'Error: Receipt is cancelled'; END IF;
-    IF v_rec.acc_id IS NULL        THEN RETURN 'Error: No income account on this receipt'; END IF;
-
-    INSERT INTO transactions(
-        society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
-    ) VALUES (
-        v_rec.society_id, v_rec.receipt_date, v_rec.acc_id, v_rec.entity_id,
-        v_rec.particulars,
-        v_rec.amount, COALESCE(p_mode, v_rec.mode), 'paid',
-        p_confirmed_by, NOW(), 'receipts', v_rec.id
-    ) RETURNING id INTO v_trx_id;
-
-    UPDATE receipts
-    SET status       = 'confirmed',
-        confirmed_by = p_confirmed_by,
-        confirmed_at = NOW()
-    WHERE id = p_receipt_id;
-
-    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
-END;
-$$;
-
+-- Applies SIMPLE INTEREST monthly on overdue residual.
 DROP FUNCTION IF EXISTS fn_apply_receivable_interest (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
@@ -1117,9 +1093,6 @@ DECLARE
     v_total_increment NUMERIC(15,2);
     v_int_acc_id      INT;
 BEGIN
-    ------------------------------------------------------------------
-    -- Resolve Due Interest income account once
-    ------------------------------------------------------------------
     SELECT id
       INTO v_int_acc_id
     FROM accounts
@@ -1128,9 +1101,6 @@ BEGIN
       AND drcr_account = 'Cr'
     LIMIT 1;
 
-    ------------------------------------------------------------------
-    -- Process overdue apartment receivables
-    ------------------------------------------------------------------
     FOR rec IN
         SELECT
             r.id,
@@ -1151,10 +1121,6 @@ BEGIN
           AND r.due_date < CURRENT_DATE
         FOR UPDATE
     LOOP
-
-        ------------------------------------------------------------------
-        -- Interest Rate
-        ------------------------------------------------------------------
         SELECT apt_interest_pct
           INTO v_rate
         FROM apt_charges_fines_basis
@@ -1169,9 +1135,6 @@ BEGIN
             CONTINUE;
         END IF;
 
-        ------------------------------------------------------------------
-        -- Months overdue
-        ------------------------------------------------------------------
         v_months_elapsed :=
             GREATEST(
                 (
@@ -1188,9 +1151,6 @@ BEGIN
             CONTINUE;
         END IF;
 
-        ------------------------------------------------------------------
-        -- Outstanding principal only
-        ------------------------------------------------------------------
         v_residual :=
             GREATEST(
                 COALESCE(rec.base_amount,0)
@@ -1202,9 +1162,6 @@ BEGIN
             CONTINUE;
         END IF;
 
-        ------------------------------------------------------------------
-        -- Simple Interest
-        ------------------------------------------------------------------
         v_total_increment :=
             ROUND(
                 v_residual
@@ -1218,22 +1175,15 @@ BEGIN
             CONTINUE;
         END IF;
 
-        ------------------------------------------------------------------
-        -- Update receivable
-        ------------------------------------------------------------------
         UPDATE receivables
            SET interest_amount =
                     COALESCE(interest_amount,0) + v_total_increment,
-
                amount =
                     COALESCE(amount,0) + v_total_increment,
-
                interest_months_applied =
                     COALESCE(interest_months_applied,0) + v_months_new,
-
                interest_acc_id =
                     COALESCE(interest_acc_id, v_int_acc_id),
-
                description =
                     CASE
                         WHEN description IS NULL
@@ -1242,17 +1192,154 @@ BEGIN
                             THEN description
                         ELSE description || ' + Interest'
                     END
-
          WHERE id = rec.id;
 
     END LOOP;
 END;
 $$;
--- Single-row verify (the Verify button on a specific receivable row).
--- Writes TWO transaction lines when the row has an interest component:
---   Line 1: base_amount → acc_id           (maintenance income, e.g. 2311)
---   Line 2: interest_amount → interest_acc_id (interest income, e.g. 211)
--- If interest_acc_id IS NULL, interest folds into Line 1.
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 4B: DOUBLE-ENTRY CASH ACCOUNT RESOLVER
+-- Returns the Dr (cash/bank) account to pair against an income/expense
+-- account for a given society + payment mode.
+--   mode='bank' → SBI A/c - Society (6311) if present, else first Dr account
+--   otherwise   → Cash-in-hand (633) if present, else first Dr account
+-- ════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_resolve_cash_account(INT, VARCHAR) CASCADE;
+CREATE OR REPLACE FUNCTION fn_resolve_cash_account(p_society_id INT, p_mode VARCHAR)
+RETURNS INT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+BEGIN
+    IF p_mode = 'bank' THEN
+        SELECT id INTO v_acc_id FROM accounts
+        WHERE society_id = p_society_id AND drcr_account = 'Dr'
+          AND name ILIKE '%SBI A/c - Society%'
+        LIMIT 1;
+    ELSE
+        SELECT id INTO v_acc_id FROM accounts
+        WHERE society_id = p_society_id AND drcr_account = 'Dr'
+          AND name ILIKE '%Cash-in-hand%'
+        LIMIT 1;
+    END IF;
+
+    IF v_acc_id IS NULL THEN
+        SELECT id INTO v_acc_id FROM accounts
+        WHERE society_id = p_society_id AND drcr_account = 'Dr'
+        ORDER BY id ASC LIMIT 1;
+    END IF;
+
+    RETURN v_acc_id;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 4C: PENDING RECEIPT SAVE + VERIFY (double-entry)
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_save_receipt_pending CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_save_receipt_pending(
+    p_society_id   INT,
+    p_acc_id       INT,
+    p_particulars  TEXT,
+    p_amount       NUMERIC,
+    p_entity_id    INT     DEFAULT NULL,
+    p_role         VARCHAR DEFAULT 'other',
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_receipt_date DATE    DEFAULT CURRENT_DATE,
+    p_created_by   INT     DEFAULT NULL,
+    p_cheque_no    VARCHAR DEFAULT NULL,
+    p_trx_id       VARCHAR DEFAULT NULL
+)
+RETURNS TABLE(receipt_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE v_receipt_id INT; v_drcr VARCHAR(2);
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+    IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
+    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
+
+    SELECT drcr_account INTO v_drcr FROM accounts
+    WHERE id = p_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found', p_acc_id; END IF;
+    IF v_drcr = 'Dr' THEN
+        RAISE EXCEPTION 'Account % is a Dr account — use fn_save_expense', p_acc_id;
+    END IF;
+
+    INSERT INTO receipts(
+        society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
+        amount, mode, cheque_no, transaction_id, status, created_at
+    ) VALUES (
+        p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
+        p_amount, p_mode, p_cheque_no, p_trx_id, 'pending', NOW()
+    ) RETURNING id INTO v_receipt_id;
+
+    RETURN QUERY SELECT v_receipt_id;
+END;
+$$;
+
+-- Admin verify: post pending receipt to transactions AND the cash/bank Dr side.
+DROP FUNCTION IF EXISTS fn_verify_receipt CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_verify_receipt(
+    p_receipt_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT NULL
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec    receipts%ROWTYPE;
+    v_trx_id INT;
+    v_journal_id INT;
+    v_cash_acc INT;
+    v_mode VARCHAR(20);
+BEGIN
+    SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
+    IF NOT FOUND    THEN RETURN 'Error: Receipt not found'; END IF;
+    IF v_rec.status = 'confirmed'  THEN RETURN 'Already confirmed'; END IF;
+    IF v_rec.status = 'cancelled'  THEN RETURN 'Error: Receipt is cancelled'; END IF;
+    IF v_rec.acc_id IS NULL        THEN RETURN 'Error: No income account on this receipt'; END IF;
+
+    v_mode := COALESCE(p_mode, v_rec.mode);
+    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Cr: income account (the receipt's acc_id)
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_rec.society_id, v_rec.receipt_date, v_rec.acc_id, v_rec.entity_id,
+        v_rec.particulars,
+        v_rec.amount, v_mode, 'paid',
+        p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
+
+    -- Dr: cash / bank paired side (double-entry)
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_rec.society_id, v_rec.receipt_date, v_cash_acc, v_rec.entity_id,
+            'Cash received - ' || v_rec.particulars,
+            v_rec.amount, v_mode, 'paid',
+            p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id
+        );
+    END IF;
+
+    UPDATE receipts
+    SET status       = 'confirmed',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW()
+    WHERE id = p_receipt_id;
+
+    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+END;
+$$;
+
+-- Single-row verify. Writes the income side(s), then the cash/bank Dr side.
 DROP FUNCTION IF EXISTS fn_verify_receivable CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receivable(
@@ -1268,6 +1355,8 @@ DECLARE
     v_int_post    NUMERIC(15,2);
     v_int_acc     INT;
     v_trx_id      INT;
+    v_journal_id  INT;
+    v_cash_acc    INT;
 BEGIN
     SELECT * INTO v_rec FROM receivables WHERE id = p_receivable_id FOR UPDATE;
     IF NOT FOUND THEN RETURN 'Error: Receivable not found'; END IF;
@@ -1277,41 +1366,56 @@ BEGIN
     v_residual := v_rec.amount - v_rec.paid_amount;
     IF v_residual <= 0 THEN RETURN 'Nothing outstanding on this row'; END IF;
 
-    v_int_acc  := v_rec.interest_acc_id;           -- may be NULL
+    v_int_acc  := v_rec.interest_acc_id;
     v_int_post := LEAST(v_rec.interest_amount - GREATEST(v_rec.paid_amount - v_rec.base_amount, 0), v_residual);
     v_int_post := GREATEST(COALESCE(v_int_post, 0), 0);
     v_base_post := v_residual - v_int_post;
 
-    -- Line 1: base maintenance income (or full amount if no interest split)
+    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
     IF v_int_acc IS NOT NULL AND v_int_post > 0 THEN
+        -- Line 1: base maintenance income
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_rec.society_id, CURRENT_DATE, v_rec.acc_id, v_rec.entity_id,
             REPLACE(v_rec.description, ' + Interest', ''),
-            v_base_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id
+            v_base_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
         -- Line 2: interest income to separate account
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_rec.society_id, CURRENT_DATE, v_int_acc, v_rec.entity_id,
             'Interest on ' || REPLACE(v_rec.description, ' + Interest', ''),
-            v_int_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id
+            v_int_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         );
     ELSE
         -- Single line: full residual goes to maintenance income account
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_rec.society_id, CURRENT_DATE, v_rec.acc_id, v_rec.entity_id,
             v_rec.description,
-            v_residual, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id
+            v_residual, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
+    END IF;
+
+    -- Dr: cash / bank paired side (total residual)
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_rec.society_id, CURRENT_DATE, v_cash_acc, v_rec.entity_id,
+            'Cash received - ' || REPLACE(v_rec.description, ' + Interest', ''),
+            v_residual, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
+        );
     END IF;
 
     UPDATE receivables
@@ -1326,11 +1430,8 @@ BEGIN
 END;
 $$;
 
--- Bulk FIFO payment across monthly rows (the "Pay Dues" button amount entry).
--- ONE transaction per call using the acc_id of the earliest unpaid row.
--- Interest split on bulk payment: interest folds into the single transaction
--- (does not split to interest_acc_id) to keep bulk-pay accounting simple.
--- For precise interest-split accounting use the per-row Verify button.
+-- Bulk FIFO payment across monthly rows (Pay Dues button).
+-- Posts ONE journal (income side + cash Dr side) for the whole payment.
 DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
@@ -1340,7 +1441,7 @@ CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
     p_confirmed_by INT     DEFAULT NULL,
     p_particulars  TEXT    DEFAULT NULL
 )
-RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id INT;
@@ -1348,6 +1449,8 @@ DECLARE
     v_desc       TEXT;
     v_remaining  NUMERIC(15,2) := p_amount;
     v_trx_id     INT;
+    v_journal_id INT;
+    v_cash_acc   INT;
     rec          RECORD;
     v_take        NUMERIC(15,2);
     v_row_residual NUMERIC(15,2);
@@ -1355,6 +1458,7 @@ DECLARE
     v_row_prin     NUMERIC(15,2);
     v_pay_int      NUMERIC(15,2);
     v_pay_prin     NUMERIC(15,2);
+    v_fallback_int_acc INT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         RAISE EXCEPTION 'Amount must be > 0';
@@ -1363,14 +1467,17 @@ BEGIN
     SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
 
-    -- Use acc_id + description from the oldest unpaid row as the transaction label
+    SELECT id INTO v_fallback_int_acc FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr'
+    LIMIT 1;
+
     SELECT acc_id, description INTO v_acc_id, v_desc
     FROM receivables
     WHERE entity_id = p_apartment_id AND role = 'apartment'
       AND status IN ('pending','partial')
     ORDER BY due_date ASC NULLS LAST LIMIT 1;
 
-    -- Fallback: find maintenance income account by well-known name
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
         WHERE society_id = v_society_id
@@ -1379,14 +1486,30 @@ BEGIN
         LIMIT 1;
     END IF;
 
+    v_cash_acc := fn_resolve_cash_account(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Cr: income side (one journal line for the whole payment)
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table
+        amount, mode, status, created_by, created_at, source_table, journal_id
     ) VALUES (
         v_society_id, CURRENT_DATE, v_acc_id, p_apartment_id,
         COALESCE(p_particulars, 'Maintenance Payment'),
-        p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables'
+        p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
     ) RETURNING id INTO v_trx_id;
+
+    -- Dr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, CURRENT_DATE, v_cash_acc, p_apartment_id,
+            'Cash received - Maintenance Payment',
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_trx_id, v_journal_id
+        );
+    END IF;
 
     FOR rec IN
         SELECT id, amount, paid_amount, paid_principal, base_amount,
@@ -1398,9 +1521,6 @@ BEGIN
     LOOP
         EXIT WHEN v_remaining <= 0;
 
-        -- Per-row residual split into interest vs principal.
-        -- Interest outstanding on this row = total interest minus any
-        -- interest already paid (paid_amount - paid_principal).
         v_row_residual := rec.amount - rec.paid_amount;
         v_row_int      := LEAST(
             rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
@@ -1408,8 +1528,6 @@ BEGIN
         v_row_int      := GREATEST(v_row_int, 0);
         v_row_prin     := v_row_residual - v_row_int;
 
-        -- Indian housing-society bye-law allocation order: clear INTEREST
-        -- first, then PRINCIPAL — so interest is never left to compound.
         v_pay_int  := LEAST(v_remaining, v_row_int);
         v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
         v_take     := v_pay_int + v_pay_prin;
@@ -1419,7 +1537,7 @@ BEGIN
              SET paid_amount    = rec.paid_amount + v_take,
                  paid_principal = rec.paid_principal + v_pay_prin,
                  status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
-                                       THEN 'paid' ELSE 'partial' END,
+                                        THEN 'paid' ELSE 'partial' END,
                  confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
                  confirmed_at   = NOW()
              WHERE id = rec.id;
@@ -1428,16 +1546,15 @@ BEGIN
     END LOOP;
 
     -- Excess beyond every currently-open due is banked as an advance-credit
-    -- row (status='credit') rather than discarded — fn_apply_advance_credit
-    -- (or the next fn_auto_generate_receivables run) will draw it down
-    -- against future dues automatically.
+    -- row (status='credit') rather than discarded.
     IF v_remaining > 0 THEN
         INSERT INTO receivables (
-            society_id, entity_id, role, acc_id,
+            society_id, entity_id, role, acc_id, interest_acc_id,
             description, base_amount, amount, paid_amount, paid_principal,
             status, confirmed_by, confirmed_at, created_at
         ) VALUES (
             v_society_id, p_apartment_id, 'apartment', v_acc_id,
+            COALESCE(v_fallback_int_acc, v_acc_id),
             'Advance Credit', v_remaining, v_remaining, 0, 0,
             'credit', p_confirmed_by, NOW(), NOW()
         );
@@ -1445,13 +1562,13 @@ BEGIN
 
     RETURN QUERY SELECT v_trx_id,
         (p_amount - v_remaining)::NUMERIC(15,2),
-        v_remaining::NUMERIC(15,2);
+        v_remaining::NUMERIC(15,2),
+        v_journal_id;
 END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 5: payables ENGINE (security payroll, roster-driven)
--- acc_id IS the category (235 = Salary); description IS the particulars.
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_auto_generate_payables CASCADE;
@@ -1466,13 +1583,12 @@ BEGIN
     SELECT id INTO v_acc_id FROM accounts
     WHERE society_id = p_society_id AND name ILIKE '%Salary%' AND drcr_account = 'Dr'
     LIMIT 1;
- 
+
     FOR rec IN
         SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift
         FROM security_roster sr
         JOIN security_staff ss ON ss.id = sr.security_id
         JOIN users u2 ON u2.linked_id = sr.security_id AND u2.role = 'security'
-        -- Shift completed = a gate_access exit exists for that guard, that day
         JOIN gate_access ga
              ON ga.entity_id = u2.id
             AND ga.role = 's'
@@ -1483,7 +1599,7 @@ BEGIN
           AND NOT EXISTS (SELECT 1 FROM payables p WHERE p.roster_id = sr.id)
     LOOP
         v_desc := 'Salary ' || TO_CHAR(rec.roster_date, 'DD-Mon-YYYY');
- 
+
         INSERT INTO payables(
             society_id, entity_id, role, acc_id, description,
             roster_id, shift_date, amount, status, due_date, created_at
@@ -1495,8 +1611,8 @@ BEGIN
     END LOOP;
 END;
 $$;
--- Single-row verify (admin Verify button on payables tab).
--- acc_id and description come directly from the payables row.
+
+-- Single-row verify. Posts Dr expense side + Cr cash/bank side.
 DROP FUNCTION IF EXISTS fn_verify_payment CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_payment(
@@ -1508,20 +1624,38 @@ RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_pay    payables%ROWTYPE;
     v_trx_id INT;
+    v_journal_id INT;
+    v_cash_acc INT;
 BEGIN
     SELECT * INTO v_pay FROM payables WHERE id = p_payment_id FOR UPDATE;
     IF NOT FOUND THEN RETURN 'Error: Payment not found'; END IF;
     IF v_pay.status = 'verified' THEN RETURN 'Already verified'; END IF;
     IF v_pay.acc_id IS NULL THEN RETURN 'Error: No expense account set on this payment row'; END IF;
 
+    v_cash_acc := fn_resolve_cash_account(v_pay.society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Dr: expense account (salary etc.)
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
         v_pay.society_id, CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
         v_pay.description,
-        v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id
+        v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
     ) RETURNING id INTO v_trx_id;
+
+    -- Cr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_pay.acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_pay.society_id, CURRENT_DATE, v_cash_acc, v_pay.entity_id,
+            'Cash paid - ' || v_pay.description,
+            v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
+        );
+    END IF;
 
     UPDATE payables
     SET status       = 'verified',
@@ -1548,7 +1682,7 @@ CREATE OR REPLACE FUNCTION fn_sell_vendor_pass(
     p_issued_date DATE    DEFAULT CURRENT_DATE,
     p_particulars TEXT    DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, pass_id INT, valid_until DATE)
+RETURNS TABLE(receipt_id INT, pass_id INT, valid_until DATE, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id  INT;
@@ -1560,17 +1694,19 @@ DECLARE
     v_receipt_id  INT;
     v_pass_id     INT;
     v_desc        TEXT;
+    v_cash_acc    INT;
+    v_journal_id  INT;
 BEGIN
     IF p_pass_type NOT IN ('1day','7day','1mth','free_1mth') THEN
         RAISE EXCEPTION 'Invalid pass_type %. Use 1day / 7day / 1mth / free_1mth', p_pass_type;
     END IF;
-  
+
     SELECT society_id, linked_id INTO v_society_id, v_vendor_id
     FROM users WHERE id = p_user_id AND role = 'vendor';
     IF NOT FOUND THEN RAISE EXCEPTION 'Vendor user not found'; END IF;
-  
+
     SELECT v.name INTO v_vendor_name FROM vendors v WHERE v.id = v_vendor_id;
-  
+
     IF p_pass_type = 'free_1mth' THEN
         v_rate := 0;
     ELSE
@@ -1585,32 +1721,33 @@ BEGIN
           AND (ven_id = v_vendor_id OR ven_id IS NULL)
         ORDER BY ven_id NULLS LAST, start_date DESC
         LIMIT 1;
-  
+
         IF v_rate IS NULL THEN
             RAISE EXCEPTION 'No pass pricing configured for type % in ven_charges_fines_basis', p_pass_type;
         END IF;
     END IF;
-  
-    -- Caller-supplied acc_id wins; else resolve by name
+
     v_acc_id := p_acc_id;
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
         WHERE society_id = v_society_id AND name ILIKE '%Society Charge%' AND drcr_account = 'Cr'
         LIMIT 1;
     END IF;
-  
+
     v_valid_until := CASE p_pass_type
         WHEN '1day' THEN p_issued_date + INTERVAL '1 day'
         WHEN '7day' THEN p_issued_date + INTERVAL '7 days'
         WHEN '1mth' THEN p_issued_date + INTERVAL '1 month'
         WHEN 'free_1mth' THEN p_issued_date + INTERVAL '1 month'
     END::DATE;
-  
+
     v_desc := COALESCE(p_particulars,
         'Vendor Pass (' || p_pass_type || ') - ' || COALESCE(v_vendor_name,''));
-  
+
+    v_cash_acc := fn_resolve_cash_account(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
     IF p_pass_type != 'free_1mth' THEN
-        -- Receipt: deemed paid immediately on creation
         INSERT INTO receipts(
             society_id, user_id, entity_id, role,
             receipt_date, acc_id, particulars, amount, mode,
@@ -1620,34 +1757,47 @@ BEGIN
             p_issued_date, v_acc_id, v_desc, v_rate, p_mode,
             'confirmed', p_created_by, NOW(), NOW()
         ) RETURNING id INTO v_receipt_id;
-  
-        -- Transaction (acc_id directly from receipt, description as particulars)
+
+        -- Cr: income account
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
-            v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
+            v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
         );
+
+        -- Dr: cash / bank paired side
+        IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_society_id, p_issued_date, v_cash_acc, v_vendor_id,
+                'Cash received - ' || v_desc,
+                v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+            );
+        END IF;
     END IF;
-  
-    -- Vendor pass
+
     INSERT INTO vendor_passes(
         society_id, user_id, pass_type, issued_date, valid_until, status, created_at
     ) VALUES (
         v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, 'active', NOW()
     ) RETURNING id INTO v_pass_id;
-  
-    RETURN QUERY SELECT v_receipt_id, v_pass_id, v_valid_until;
+
+    RETURN QUERY SELECT v_receipt_id, v_pass_id, v_valid_until, v_journal_id;
 END;
 $$;
+
 -- ════════════════════════════════════════════════════════════════
--- SECTION 7: ASSET PURCHASE / DISPOSAL
--- fn_buy_asset:     creates assets row + expense row + transaction.
--- fn_dispose_asset: creates receipt row + transaction; marks asset disposed.
--- Both require acc_id on the asset row (the asset class account,
--- e.g. Furniture=61). acc_id on the expense/receipt is the flow account
--- (e.g. 234=Depreciation, 212=Selling Asset, 233=Miscellaneous).
+-- SECTION 7: ASSET PURCHASE / DISPOSAL  (double-entry)
+--
+-- fn_buy_asset:     Dr Asset account  +  Cr Cash/Bank (NO expense row).
+-- fn_dispose_asset: Dr Cash/Bank  +  Cr Asset (book value)  +  gain/loss.
+-- Signatures are matched EXACTLY to the Python callers:
+--   fn_buy_asset(sid, name, sno, value, acc_id, date, mode, by, particulars)
+--   fn_dispose_asset(id, value, mode, by, date, particulars, acc_id)
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_buy_asset CASCADE;
@@ -1655,22 +1805,21 @@ DROP FUNCTION IF EXISTS fn_buy_asset CASCADE;
 CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_society_id        INT,
     p_asset_name        VARCHAR,
+    p_asset_sno         VARCHAR,
     p_purchase_value    NUMERIC,
-    p_acc_id INT,
-
-    p_asset_sno        VARCHAR DEFAULT NULL,
-    p_purchase_date     DATE DEFAULT CURRENT_DATE,
-    p_expense_acc_id    INT DEFAULT NULL,
+    p_acc_id            INT,
+    p_purchase_date     DATE    DEFAULT CURRENT_DATE,
     p_mode              VARCHAR DEFAULT 'cash',
-    p_created_by        INT DEFAULT NULL,
-    p_particulars       TEXT DEFAULT NULL
+    p_created_by        INT     DEFAULT NULL,
+    p_particulars       TEXT    DEFAULT NULL
 )
-RETURNS TABLE(asset_id INT, expense_id INT)
+RETURNS TABLE(asset_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_asset_id   INT;
-    v_expense_id INT;
-    v_acc_id     INT;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_cash_acc   INT;
     v_dep_rate   NUMERIC(5,2);
     v_desc       TEXT;
 BEGIN
@@ -1684,40 +1833,39 @@ BEGIN
     SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id;
 
     INSERT INTO assets(
-        society_id, asset_name, asset_sno, purchase_date, purchase_value,
+        society_id, asset_name, asset_SNo, purchase_date, purchase_value,
         acc_id, depreciation_rate, created_at
     ) VALUES (
         p_society_id, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
         p_acc_id, v_dep_rate, NOW()
     ) RETURNING id INTO v_asset_id;
 
-    -- Resolve expense (Dr) account
-    v_acc_id := p_expense_acc_id;
-    IF v_acc_id IS NULL THEN
-        SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = p_society_id AND drcr_account = 'Dr' AND name ILIKE '%Miscellaneous%'
-        LIMIT 1;
-    END IF;
-
     v_desc := COALESCE(p_particulars, 'Asset Purchase - ' || p_asset_name);
+    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
 
-    INSERT INTO expenses(
-        society_id, user_id, entity_id, role, expense_date, acc_id,
-        particulars, amount, mode, status, confirmed_by, confirmed_at, created_at
-    ) VALUES (
-        p_society_id, p_created_by, v_asset_id, 'assets', p_purchase_date, v_acc_id,
-        v_desc, p_purchase_value, p_mode, 'confirmed', p_created_by, NOW(), NOW()
-    ) RETURNING id INTO v_expense_id;
-
+    -- Dr: asset class account
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        p_society_id, p_purchase_date, v_acc_id, v_asset_id, v_desc,
-        p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id
-    );
+        p_society_id, p_purchase_date, p_acc_id, v_asset_id, v_desc,
+        p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'assets', v_asset_id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
 
-    RETURN QUERY SELECT v_asset_id, v_expense_id;
+    -- Cr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, p_purchase_date, v_cash_acc, v_asset_id,
+            'Cash paid - ' || v_desc,
+            p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'assets', v_asset_id, v_journal_id
+        );
+    END IF;
+
+    RETURN QUERY SELECT v_asset_id, v_trx_id, v_journal_id;
 END;
 $$;
 
@@ -1726,18 +1874,23 @@ DROP FUNCTION IF EXISTS fn_dispose_asset CASCADE;
 CREATE OR REPLACE FUNCTION fn_dispose_asset(
     p_asset_id    INT,
     p_sale_value  NUMERIC,
-    p_acc_id      INT     DEFAULT NULL,   -- Cr account for the sale income (e.g. 212)
     p_mode        VARCHAR DEFAULT 'cash',
     p_created_by  INT     DEFAULT NULL,
     p_sale_date   DATE    DEFAULT CURRENT_DATE,
-    p_particulars TEXT    DEFAULT NULL
+    p_particulars TEXT    DEFAULT NULL,
+    p_acc_id      INT     DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT)
+RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_asset      assets%ROWTYPE;
     v_acc_id     INT;
+    v_cash_acc   INT;
     v_receipt_id INT;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_book_value NUMERIC(15,2);
+    v_gain_loss  NUMERIC(15,2);
     v_desc       TEXT;
 BEGIN
     SELECT * INTO v_asset FROM assets WHERE id = p_asset_id FOR UPDATE;
@@ -1754,23 +1907,61 @@ BEGIN
         LIMIT 1;
     END IF;
 
+    -- Book value = purchase_value less straight-line depreciation
+    v_book_value := GREATEST(
+        v_asset.purchase_value * (1 - COALESCE(v_asset.depreciation_rate,
+                                              COALESCE((SELECT depreciation_percent FROM accounts WHERE id = v_asset.acc_id), 100)) / 100),
+        0);
+    v_gain_loss := p_sale_value - v_book_value;
+
     v_desc := COALESCE(p_particulars, 'Asset Sale - ' || v_asset.asset_name);
+    v_cash_acc := fn_resolve_cash_account(v_asset.society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
 
-    INSERT INTO receipts(
-        society_id, user_id, entity_id, role, receipt_date, acc_id,
-        particulars, amount, mode, status, confirmed_by, confirmed_at, created_at
-    ) VALUES (
-        v_asset.society_id, p_created_by, p_asset_id, 'other', p_sale_date, v_acc_id,
-        v_desc, p_sale_value, p_mode, 'confirmed', p_created_by, NOW(), NOW()
-    ) RETURNING id INTO v_receipt_id;
-
+    -- Dr: cash / bank (sale proceeds)
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        v_asset.society_id, p_sale_date, v_acc_id, p_asset_id, v_desc,
-        p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
+        v_asset.society_id, p_sale_date, v_cash_acc, p_asset_id,
+        'Cash received - ' || v_desc,
+        p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
+
+    -- Cr: asset class account (book value removal)
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_asset.society_id, p_sale_date, v_asset.acc_id, p_asset_id,
+        'Asset written off - ' || v_asset.asset_name,
+        v_book_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
     );
+
+    -- Cr (balancing): gain, or Dr (balancing): loss via the sale income account
+    IF v_gain_loss <> 0 THEN
+        IF v_gain_loss > 0 THEN
+            -- Gain: Cr income account
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_asset.society_id, p_sale_date, v_acc_id, p_asset_id,
+                'Gain on sale - ' || v_asset.asset_name,
+                v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+            );
+        ELSE
+            -- Loss: Dr loss account (the same income account, debited)
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_asset.society_id, p_sale_date, v_acc_id, p_asset_id,
+                'Loss on sale - ' || v_asset.asset_name,
+                -v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+            );
+        END IF;
+    END IF;
 
     UPDATE assets
     SET disposed    = TRUE,
@@ -1780,17 +1971,12 @@ BEGIN
         disposed_by = p_created_by
     WHERE id = p_asset_id;
 
-    RETURN QUERY SELECT v_receipt_id;
+    RETURN QUERY SELECT v_receipt_id, v_trx_id, v_journal_id;
 END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 8: MANUAL RECEIPT / EXPENSE SAVE HELPER
--- Called by the Python layer when admin creates a receipt or expense
--- manually (fines, donations, salary bonus, vendor service payables, etc.).
--- The acc_id selects the appropriate income/expense account from the chart.
--- The particulars string is supplied by the caller (from Python's
--- PARTICULARS_TEMPLATES hard-coded dict).
+-- SECTION 8: MANUAL RECEIPT / EXPENSE SAVE HELPER (double-entry)
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_save_receipt CASCADE;
@@ -1809,11 +1995,13 @@ CREATE OR REPLACE FUNCTION fn_save_receipt(
     p_cheque_no    VARCHAR DEFAULT NULL,
     p_trx_id       VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, transaction_id INT)
+RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_receipt_id INT;
     v_trx_id     INT;
+    v_journal_id INT;
+    v_cash_acc   INT;
     v_drcr       VARCHAR(2);
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
@@ -1834,15 +2022,31 @@ BEGIN
         p_amount, p_mode, p_cheque_no, p_trx_id, 'confirmed', p_created_by, NOW(), NOW()
     ) RETURNING id INTO v_receipt_id;
 
+    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Cr: income account
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
         p_society_id, p_receipt_date, p_acc_id, p_entity_id, p_particulars,
-        p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id
+        p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
 
-    RETURN QUERY SELECT v_receipt_id, v_trx_id;
+    -- Dr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, p_receipt_date, v_cash_acc, p_entity_id,
+            'Cash received - ' || p_particulars,
+            p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+        );
+    END IF;
+
+    RETURN QUERY SELECT v_receipt_id, v_trx_id, v_journal_id;
 END;
 $$;
 
@@ -1862,11 +2066,13 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
     p_cheque_no    VARCHAR DEFAULT NULL,
     p_trx_id       VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(expense_id INT, transaction_id INT)
+RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_expense_id INT;
     v_trx_id     INT;
+    v_journal_id INT;
+    v_cash_acc   INT;
     v_drcr       VARCHAR(2);
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
@@ -1887,15 +2093,31 @@ BEGIN
         p_amount, p_mode, p_cheque_no, p_trx_id, 'confirmed', p_created_by, NOW(), NOW()
     ) RETURNING id INTO v_expense_id;
 
+    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Dr: expense account
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
         p_society_id, p_expense_date, p_acc_id, p_entity_id, p_particulars,
-        p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id
+        p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
 
-    RETURN QUERY SELECT v_expense_id, v_trx_id;
+    -- Cr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, p_expense_date, v_cash_acc, p_entity_id,
+            'Cash paid - ' || p_particulars,
+            p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
+        );
+    END IF;
+
+    RETURN QUERY SELECT v_expense_id, v_trx_id, v_journal_id;
 END;
 $$;
 
@@ -1933,9 +2155,7 @@ BEGIN
            a.alt_mobile::VARCHAR(15), a.alt_address::TEXT, a.apt_calc_start_date::DATE,
            a.apartment_size::INT, a.active::BOOLEAN, a.society_id::INT,
            COALESCE(d.pending_dues, 0)::NUMERIC(15,2), COALESCE(d.overdue_dues, 0)::NUMERIC(15,2),
-           -- gate_pass fails only on OVERDUE dues (mirrors v_apartment_dues)
            (COALESCE(d.overdue_dues, 0) <= 0)::BOOLEAN,
-           -- noc_eligible requires ALL dues cleared (mirrors v_apartment_dues)
            (COALESCE(d.pending_dues, 0) <= 0)::BOOLEAN
     FROM apartments a LEFT JOIN dues d ON d.apt_id = a.id
     WHERE a.society_id = p_society_id
@@ -1947,6 +2167,8 @@ BEGIN
 END;
 $$;
 
+-- Optimised vendor list: replaces repeated correlated subqueries with a
+-- single LEFT JOIN LATERAL to vendor_passes.
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendors_list(
@@ -1969,16 +2191,29 @@ BEGIN
         COALESCE(v.service_type,'—')::VARCHAR(100),
         COALESCE(v.mobile,'—')::VARCHAR(15),
         COALESCE(v.active,TRUE)::BOOLEAN,
-        (SELECT MAX(valid_until) FROM vendor_passes WHERE user_id=u.id AND status='active')::DATE,
-        COALESCE((SELECT MAX(valid_until) FROM vendor_passes WHERE user_id=u.id AND status='active') >= CURRENT_DATE, FALSE),
-        (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE)
+        COALESCE(pass.pass_expiry, p_pass_max.expiry)::DATE,
+        COALESCE(pass.pass_expiry >= CURRENT_DATE, FALSE),
+        (COALESCE(pass.active_passes, 0))::INT
     FROM users u
     LEFT JOIN vendors v ON v.id = u.linked_id
+    LEFT JOIN LATERAL (
+        SELECT MAX(valid_until) AS pass_expiry,
+               COUNT(*)::INT   AS active_passes
+        FROM vendor_passes vp
+        WHERE vp.user_id = u.id
+          AND vp.status = 'active'
+          AND vp.valid_until >= CURRENT_DATE
+    ) pass ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT MAX(valid_until) AS expiry
+        FROM vendor_passes vp2
+        WHERE vp2.user_id = u.id AND vp2.status = 'active'
+    ) p_pass_max ON TRUE
     WHERE u.society_id = p_society_id AND u.role = 'vendor'
       AND (p_search IS NULL OR v.name ILIKE '%'||p_search||'%' OR u.email ILIKE '%'||p_search||'%')
       AND (p_has_passes IS NULL
-           OR (p_has_passes AND (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE) > 0)
-           OR (NOT p_has_passes AND (SELECT COUNT(*)::INT FROM vendor_passes WHERE user_id=u.id AND status='active' AND valid_until >= CURRENT_DATE) <= 0))
+           OR (p_has_passes AND COALESCE(pass.active_passes, 0) > 0)
+           OR (NOT p_has_passes AND COALESCE(pass.active_passes, 0) <= 0))
     ORDER BY v.name;
 END;
 $$;
@@ -2020,8 +2255,7 @@ END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 10: NAMED RECEIVABLES / payables (read-only tab listing)
--- Exposes acc_id + account name so the UI can show "Maintenance Income" etc.
+-- SECTION 10: NAMED RECEIVABLES / payables
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_receivables_named CASCADE;
@@ -2114,7 +2348,6 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 11: RECEIPTS / EXPENSES LIST FUNCTIONS
--- account_name is derived from acc_id — no category field needed.
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_receipts_list CASCADE;
@@ -2226,8 +2459,8 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 12: CASHBOOK (paired Cr/Dr over transactions table)
--- Unchanged logic; transactions.acc_particulars already carries the
--- description text set by the engine functions above.
+-- Pairing prefers transactions.journal_id when available; otherwise
+-- falls back to the row_number-by-date method.
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_cashbook_paired CASCADE;
@@ -2268,7 +2501,8 @@ BEGIN
                COALESCE(t.acc_particulars,'')::TEXT AS rc_particulars,
                COALESCE(t.mode,'')::TEXT AS rc_mode,
                t.amount::NUMERIC(15,2) AS rc_amount,
-               ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id) AS rn
+               -- Pairing key: journal_id if present, else row_number within the date
+               COALESCE(t.journal_id, -ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id)) AS pair_key
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Cr'
         LEFT JOIN apartments   ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
@@ -2289,7 +2523,7 @@ BEGIN
                COALESCE(t.acc_particulars,'')::TEXT AS pc_particulars,
                COALESCE(t.mode,'')::TEXT AS pc_mode,
                t.amount::NUMERIC(15,2) AS pc_amount,
-               ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id) AS rn
+               COALESCE(t.journal_id, -ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id)) AS pair_key
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Dr'
         LEFT JOIN vendors       v ON  v.id = t.entity_id AND  v.society_id = p_society_id
@@ -2326,41 +2560,46 @@ BEGIN
                 + v_opening_balance AS running_balance
         FROM date_totals dts
     ),
-    max_rn AS (
-        SELECT COALESCE(cr.rc_date, dr.pc_date) AS dt,
-               GREATEST(MAX(cr.rn), MAX(dr.rn)) AS max_rows
+    paired AS (
+        SELECT
+            COALESCE(cr.rc_date, dr.pc_date) AS dt,
+            cr.rc_id, cr.rc_date, cr.rc_account_name, cr.rc_entity_name,
+            cr.rc_particulars, cr.rc_mode, cr.rc_amount,
+            dr.pc_id, dr.pc_date, dr.pc_account_name, dr.pc_entity_name,
+            dr.pc_particulars, dr.pc_mode, dr.pc_amount
         FROM cr_rows cr
-        FULL OUTER JOIN dr_rows dr ON dr.pc_date = cr.rc_date AND dr.rn = cr.rn
-        GROUP BY COALESCE(cr.rc_date, dr.pc_date)
+        FULL OUTER JOIN dr_rows dr
+             ON dr.pc_date = cr.rc_date AND dr.pair_key = cr.pair_key
     ),
     row_slots AS (
-        SELECT m.dt, gs.rn
-        FROM max_rn m CROSS JOIN LATERAL generate_series(1, m.max_rows) AS gs(rn)
+        SELECT dt,
+               ROW_NUMBER() OVER (PARTITION BY dt ORDER BY COALESCE(rc_id, pc_id)) AS rn
+        FROM paired
     )
     SELECT
-        COALESCE(cr.rc_id, dr.pc_id)::INT AS id,
+        COALESCE(p.rc_id, p.pc_id)::INT AS id,
         rs.dt::DATE AS row_date,
-        cr.rc_id::INT, cr.rc_date::DATE,
-        COALESCE(cr.rc_account_name,'')::TEXT, COALESCE(cr.rc_entity_name,'')::TEXT,
-        COALESCE(cr.rc_particulars,'')::TEXT,  COALESCE(cr.rc_mode,'')::TEXT,
-        COALESCE(cr.rc_amount, 0)::NUMERIC(15,2),
-        dr.pc_id::INT, dr.pc_date::DATE,
-        COALESCE(dr.pc_account_name,'')::TEXT, COALESCE(dr.pc_entity_name,'')::TEXT,
-        COALESCE(dr.pc_particulars,'')::TEXT,  COALESCE(dr.pc_mode,'')::TEXT,
-        COALESCE(dr.pc_amount, 0)::NUMERIC(15,2),
+        p.rc_id::INT, p.rc_date::DATE,
+        COALESCE(p.rc_account_name,'')::TEXT, COALESCE(p.rc_entity_name,'')::TEXT,
+        COALESCE(p.rc_particulars,'')::TEXT,  COALESCE(p.rc_mode,'')::TEXT,
+        COALESCE(p.rc_amount, 0)::NUMERIC(15,2),
+        p.pc_id::INT, p.pc_date::DATE,
+        COALESCE(p.pc_account_name,'')::TEXT, COALESCE(p.pc_entity_name,'')::TEXT,
+        COALESCE(p.pc_particulars,'')::TEXT,  COALESCE(p.pc_mode,'')::TEXT,
+        COALESCE(p.pc_amount, 0)::NUMERIC(15,2),
         ad.day_rc_total::NUMERIC(15,2),
         ad.day_pc_total::NUMERIC(15,2),
         ad.running_balance::NUMERIC(15,2)
     FROM row_slots rs
     JOIN all_dates ad ON ad.dt = rs.dt
-    LEFT JOIN cr_rows cr ON cr.rc_date = rs.dt AND cr.rn = rs.rn
-    LEFT JOIN dr_rows dr ON dr.pc_date = rs.dt AND dr.rn = rs.rn
+    JOIN paired p ON p.dt = rs.dt
+        AND ROW_NUMBER() OVER (PARTITION BY p.dt ORDER BY COALESCE(p.rc_id, p.pc_id)) = rs.rn
     ORDER BY rs.dt, rs.rn;
 END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 13: GATE LOGS  (unchanged)
+-- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_gate_logs_named CASCADE;
@@ -2382,7 +2621,7 @@ BEGIN
         CASE
             WHEN g.role = 'a' THEN COALESCE(ap.flat_number||' — '||COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
             WHEN g.role = 'v' THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), 'Vendor #'||g.entity_id::TEXT)
-            WHEN g.role = 's' THEN COALESCE(s.name||COALESCE(' ('||s.shift||')',''), 'Security #'||g.entity_id::TEXT)
+            WHEN g.role = 's' THEN COALESCE(ss.name||COALESCE(' ('||ss.shift||')',''), 'Security #'||g.entity_id::TEXT)
             ELSE 'Unknown #'||g.entity_id::TEXT
         END::TEXT,
         g.time_in::TIMESTAMP, g.time_out::TIMESTAMP,
@@ -2392,13 +2631,14 @@ BEGIN
     FROM gate_access g
     LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'a'
     LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'v'
-    LEFT JOIN security_staff s ON s.id = g.entity_id AND g.role = 's'
+    LEFT JOIN users         su ON su.id = g.entity_id AND g.role = 's'
+    LEFT JOIN security_staff ss ON ss.id = su.linked_id
     WHERE g.society_id = p_society_id
       AND (p_date   IS NULL OR g.time_in::DATE = p_date)
       AND (p_search IS NULL OR CASE
            WHEN g.role='a' THEN ap.flat_number||' '||COALESCE(ap.owner_name,'')
            WHEN g.role='v' THEN v.name
-           WHEN g.role='s' THEN s.name
+           WHEN g.role='s' THEN ss.name
            ELSE '' END ILIKE '%'||p_search||'%')
     ORDER BY g.time_in DESC;
 END;
@@ -2470,7 +2710,7 @@ LANGUAGE SQL STABLE AS $$
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 15: SOCIETIES LIST / PROFILE  (unchanged logic)
+-- SECTION 15: SOCIETIES LIST / PROFILE
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_societies_list CASCADE;
@@ -2493,7 +2733,7 @@ BEGIN
     RETURN QUERY
     SELECT
         s.id::INT, s.name::VARCHAR(100), s.email::VARCHAR(100), s.phone::VARCHAR(20),
-        s.pan_number::VARCHAR(10), s.secretary_name::VARCHAR(100),
+        s.PAN_number::VARCHAR(10), s.secretary_name::VARCHAR(100),
         s.plan::VARCHAR(20),
         CASE WHEN s.plan='Free' THEN 'Free'
              WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
@@ -2545,7 +2785,7 @@ LANGUAGE SQL STABLE AS $$
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 16: EVENTS / CONCERNS  (unchanged)
+-- SECTION 16: EVENTS / CONCERNS
 -- ════════════════════════════════════════════════════════════════
 
 DROP FUNCTION IF EXISTS fn_events_list CASCADE;
@@ -2636,8 +2876,6 @@ BEGIN
         ar.purchase_value::NUMERIC(12,2),
         COALESCE(a.name,'—')::VARCHAR(100),
         COALESCE(ar.depreciation_rate, a.depreciation_percent, 100)::NUMERIC(5,2),
-        -- Approximate straight-line book value; proper per-annum calculation
-        -- happens in Python / a future fn_calculate_asset_depreciation call.
         GREATEST(
             ar.purchase_value * (1 - COALESCE(ar.depreciation_rate, a.depreciation_percent, 100) / 100),
             0
@@ -2656,8 +2894,7 @@ END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 18: VIEWS  (apartment dues, vendor pass status, security duty)
--- Used by load_profile() in loaders.py.
+-- SECTION 18: VIEWS
 -- ════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE VIEW v_apartment_dues AS
@@ -2679,7 +2916,6 @@ SELECT
         ),
         0
     ) AS overdue_dues,
-    -- gate_pass fails only on OVERDUE dues
     COALESCE(
         SUM(r.amount - r.paid_amount) FILTER (
             WHERE
@@ -2688,7 +2924,6 @@ SELECT
         ),
         0
     ) <= 0 AS gate_pass,
-    -- noc_eligible requires ALL dues cleared
     COALESCE(
         SUM(r.amount - r.paid_amount) FILTER (
             WHERE
@@ -2755,6 +2990,124 @@ GROUP BY
     u.id,
     u.society_id,
     s.id;
+
+-- ── v_apartment_data: enriched apartment info ──
+CREATE OR REPLACE VIEW v_apartment_data AS
+SELECT
+    a.id AS apartment_id,
+    a.society_id,
+    a.flat_number,
+    a.owner_name,
+    a.mobile,
+    a.apartment_size,
+    a.active,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending','partial')),
+        0
+    ) AS pending_dues,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending','partial') AND r.due_date < CURRENT_DATE),
+        0
+    ) AS overdue_dues,
+    COALESCE(apd.gate_pass, TRUE) AS gate_pass,
+    COALESCE(apd.noc_eligible, TRUE) AS noc_eligible,
+    (
+        SELECT MAX(vp.valid_until)
+        FROM vendor_passes vp
+        JOIN users vu ON vu.id = vp.user_id AND vu.role = 'vendor'
+        WHERE vu.linked_id = a.id AND vp.status = 'active'
+    ) AS gate_pass_valid_until,
+    (
+        SELECT COALESCE(SUM(r2.amount - r2.paid_amount), 0)
+        FROM receivables r2
+        WHERE r2.entity_id = a.id AND r2.role = 'apartment' AND r2.status = 'credit'
+    ) AS advance_credit
+FROM apartments a
+LEFT JOIN receivables r ON r.entity_id = a.id AND r.role = 'apartment'
+LEFT JOIN v_apartment_dues apd ON apd.apartment_id = a.id
+GROUP BY a.id, a.society_id, a.flat_number, a.owner_name, a.mobile,
+         a.apartment_size, a.active, apd.gate_pass, apd.noc_eligible;
+
+-- ── v_financial_trial_balance: every account with Dr/Cr split ──
+CREATE OR REPLACE VIEW v_financial_trial_balance AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    a.drcr_account,
+    a.parent_account_id,
+    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Dr'), 0)::NUMERIC(15,2)
+        + COALESCE(a.bf_amount, 0) AS dr_total,
+    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Cr'), 0)::NUMERIC(15,2)
+        + COALESCE(a.bf_amount, 0) AS cr_total,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(a.bf_amount, 0))::NUMERIC(15,2) AS balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.parent_account_id, a.bf_amount
+ORDER BY a.society_id, a.id;
+
+-- ── v_financial_income_expenditure: income & expense accounts ──
+CREATE OR REPLACE VIEW v_financial_income_expenditure AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    a.drcr_account,
+    COALESCE(SUM(t.amount), 0)::NUMERIC(15,2) AS gross_movement,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(a.bf_amount, 0))::NUMERIC(15,2) AS net_balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+WHERE a.drcr_account IN ('Dr','Cr')
+  AND (a.name ILIKE '%Income%' OR a.name ILIKE '%Receipt%'
+       OR a.name ILIKE '%Expense%' OR a.name ILIKE '%Salary%'
+       OR a.header ILIKE '%Income%' OR a.header ILIKE '%Expense%')
+GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.bf_amount
+ORDER BY a.society_id, a.drcr_account, a.name;
+
+-- ── v_financial_balance_sheet: assets, liabilities, capital ──
+CREATE OR REPLACE VIEW v_financial_balance_sheet AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    CASE
+        WHEN a.name ILIKE '%Asset%' OR a.header ILIKE '%Asset%' THEN 'Assets'
+        WHEN a.drcr_account = 'Cr' THEN 'Liabilities & Capital'
+        ELSE 'Expenses'
+    END AS category,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(a.bf_amount, 0))::NUMERIC(15,2) AS balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.header, a.bf_amount
+HAVING (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(a.bf_amount, 0)) <> 0
+ORDER BY a.society_id, category, a.name;
+
+-- ── v_dashboard_stats: key metrics ──
+CREATE OR REPLACE VIEW v_dashboard_stats AS
+SELECT
+    s.id AS society_id,
+    s.name AS society_name,
+    (SELECT COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC(15,2)
+     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS total_receivables,
+    (SELECT COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.due_date < CURRENT_DATE), 0)::NUMERIC(15,2)
+     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS overdue_dues,
+    (SELECT COALESCE(SUM(p.amount), 0)::NUMERIC(15,2)
+     FROM payables p WHERE p.society_id = s.id AND p.status = 'pending') AS total_payables,
+    (SELECT COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)::NUMERIC(15,2)
+     FROM transactions t
+     JOIN accounts a ON a.id = t.acc_id
+     WHERE t.society_id = s.id AND t.status = 'paid'
+       AND (a.name ILIKE '%Cash%' OR a.name ILIKE '%Bank%' OR a.name ILIKE '%SBI%')
+     AND a.drcr_account = 'Dr') AS cash_balance,
+    (SELECT COUNT(*) FROM apartments ap WHERE ap.society_id = s.id AND ap.active = TRUE) AS total_apartments,
+    (SELECT COUNT(*) FROM vendors vd WHERE vd.society_id = s.id) AS total_vendors,
+    (SELECT COUNT(*) FROM security_staff ss WHERE ss.society_id = s.id) AS total_security
+FROM societies s
+ORDER BY s.id;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 19: APT CHARGES LIST / VEN CHARGES LIST
@@ -2840,11 +3193,11 @@ BEGIN
     ORDER BY vcf.ven_id NULLS FIRST, vcf.start_date DESC;
 END;
 $$;
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 20: UTILITY FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
 
--- Introspect a stored function's definition (used by KPI Inspector tab)
 CREATE OR REPLACE FUNCTION get_function_sql(p_function_name TEXT)
 RETURNS TEXT AS $$
 DECLARE v_sql TEXT;
@@ -2855,7 +3208,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- List all fn_* functions (used by KPI Inspector)
 CREATE OR REPLACE FUNCTION get_kpi_functions()
 RETURNS TABLE(function_name TEXT, function_schema TEXT, parameters TEXT, source_code TEXT) AS $$
 BEGIN
@@ -2869,9 +3221,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create default charge rules for a new society after accounts are seeded.
--- Resolves account names to IDs at call time so it's robust against
--- different insertion orders.
 CREATE OR REPLACE FUNCTION fn_create_default_charges(p_society_id INT)
 RETURNS VOID AS $$
 DECLARE
@@ -2879,14 +3228,14 @@ DECLARE
 BEGIN
     SELECT calc_start_date INTO v_calc_date FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Society % not found', p_society_id; END IF;
- 
+
     INSERT INTO apt_charges_fines_basis(
         society_id, apt_id, start_date, apt_maintenance_rate, apt_due_day, apt_interest_pct,
         apt_status
     ) VALUES (
         p_society_id, NULL, v_calc_date, 3.0, 5, 2.0, TRUE
     ) ON CONFLICT DO NOTHING;
- 
+
     INSERT INTO ven_charges_fines_basis(
         society_id, ven_id, start_date, vendor_1day, vendor_7day, vendor_1mth,
         ven_status
@@ -2895,3 +3244,561 @@ BEGIN
     ) ON CONFLICT DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 21: REPORTING FUNCTIONS
+-- ════════════════════════════════════════════════════════════════
+
+-- Trial balance: all accounts with current Dr/Cr balances.
+DROP FUNCTION IF EXISTS fn_trial_balance(INT, TEXT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_trial_balance(p_society_id INT, p_search TEXT DEFAULT NULL)
+RETURNS TABLE (
+    account_id INT, account_name VARCHAR(100), drcr_account VARCHAR(2),
+    dr_balance NUMERIC(15,2), cr_balance NUMERIC(15,2), net_balance NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.id::INT,
+        a.name::VARCHAR(100),
+        a.drcr_account::VARCHAR(2),
+        CASE WHEN a.drcr_account = 'Dr'
+             THEN (COALESCE(SUM(t.amount),0) + COALESCE(a.bf_amount,0))::NUMERIC(15,2)
+             ELSE 0::NUMERIC(15,2) END AS dr_balance,
+        CASE WHEN a.drcr_account = 'Cr'
+             THEN (COALESCE(SUM(t.amount),0) + COALESCE(a.bf_amount,0))::NUMERIC(15,2)
+             ELSE 0::NUMERIC(15,2) END AS cr_balance,
+        (COALESCE(SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END),0)
+            + COALESCE(a.bf_amount,0))::NUMERIC(15,2) AS net_balance
+    FROM accounts a
+    LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+    WHERE a.society_id = p_society_id
+      AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%')
+    GROUP BY a.id, a.name, a.drcr_account, a.bf_amount
+    ORDER BY a.drcr_account, a.name;
+END;
+$$;
+
+-- Income & expenditure over a date range.
+DROP FUNCTION IF EXISTS fn_income_expenditure(INT, DATE, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION fn_income_expenditure(
+    p_society_id INT,
+    p_start_date DATE DEFAULT NULL,
+    p_end_date   DATE DEFAULT NULL
+)
+RETURNS TABLE (
+    account_id INT, account_name VARCHAR(100), drcr_account VARCHAR(2),
+    total NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.id::INT,
+        a.name::VARCHAR(100),
+        a.drcr_account::VARCHAR(2),
+        COALESCE(SUM(t.amount),0)::NUMERIC(15,2) AS total
+    FROM accounts a
+    LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+        AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
+        AND (p_end_date   IS NULL OR t.trx_date <= p_end_date)
+    WHERE a.society_id = p_society_id
+      AND a.drcr_account IN ('Dr','Cr')
+    GROUP BY a.id, a.name, a.drcr_account
+    ORDER BY a.drcr_account DESC, a.name;
+END;
+$$;
+
+-- Balance sheet as of a date.
+DROP FUNCTION IF EXISTS fn_balance_sheet(INT, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION fn_balance_sheet(
+    p_society_id INT,
+    p_as_of      DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    account_id INT, account_name VARCHAR(100), category VARCHAR(30),
+    balance NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.id::INT,
+        a.name::VARCHAR(100),
+        CASE
+            WHEN a.name ILIKE '%Asset%' OR a.header ILIKE '%Asset%' THEN 'Assets'
+            WHEN a.drcr_account = 'Cr' THEN 'Liabilities & Capital'
+            ELSE 'Expenses'
+        END::VARCHAR(30),
+        (COALESCE(SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END),0)
+            + COALESCE(a.bf_amount,0))::NUMERIC(15,2)
+    FROM accounts a
+    LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+        AND t.trx_date <= p_as_of
+    WHERE a.society_id = p_society_id
+    GROUP BY a.id, a.name, a.drcr_account, a.header, a.bf_amount
+    ORDER BY category, a.name;
+END;
+$$;
+
+-- Dashboard stats for a society.
+DROP FUNCTION IF EXISTS fn_dashboard_stats(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_dashboard_stats(p_society_id INT)
+RETURNS TABLE (
+    total_receivables NUMERIC(15,2),
+    overdue_dues NUMERIC(15,2),
+    total_payables NUMERIC(15,2),
+    cash_balance NUMERIC(15,2),
+    total_apartments INT,
+    total_vendors INT,
+    total_security INT,
+    total_transactions BIGINT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_cash_acc_ids INT[];
+BEGIN
+    SELECT ARRAY_AGG(id) INTO v_cash_acc_ids
+    FROM accounts
+    WHERE society_id = p_society_id
+      AND drcr_account = 'Dr'
+      AND (name ILIKE '%Cash%' OR name ILIKE '%Bank%' OR name ILIKE '%SBI%');
+
+    RETURN QUERY
+    SELECT
+        (SELECT COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC(15,2)
+         FROM receivables r WHERE r.society_id = p_society_id AND r.status IN ('pending','partial'))
+            AS total_receivables,
+        (SELECT COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.due_date < CURRENT_DATE), 0)::NUMERIC(15,2)
+         FROM receivables r WHERE r.society_id = p_society_id AND r.status IN ('pending','partial'))
+            AS overdue_dues,
+        (SELECT COALESCE(SUM(p.amount), 0)::NUMERIC(15,2)
+         FROM payables p WHERE p.society_id = p_society_id AND p.status = 'pending')
+            AS total_payables,
+        (SELECT COALESCE(SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END), 0)::NUMERIC(15,2)
+         FROM transactions t JOIN accounts a ON a.id = t.acc_id
+         WHERE t.society_id = p_society_id AND t.status = 'paid'
+           AND a.id = ANY(v_cash_acc_ids))
+            AS cash_balance,
+        (SELECT COUNT(*)::INT FROM apartments ap WHERE ap.society_id = p_society_id AND ap.active = TRUE)
+            AS total_apartments,
+        (SELECT COUNT(*)::INT FROM vendors vd WHERE vd.society_id = p_society_id)
+            AS total_vendors,
+        (SELECT COUNT(*)::INT FROM security_staff ss WHERE ss.society_id = p_society_id)
+            AS total_security,
+        (SELECT COUNT(*)::BIGINT FROM transactions t WHERE t.society_id = p_society_id AND t.status = 'paid')
+            AS total_transactions;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 22: VENDOR LEDGER
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_vendor_ledger(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_vendor_ledger(p_society_id INT, p_vendor_id INT)
+RETURNS TABLE (
+    ledger_type VARCHAR(20),
+    ref_id INT,
+    trx_date DATE,
+    particulars TEXT,
+    debit NUMERIC(15,2),
+    credit NUMERIC(15,2),
+    balance NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_running NUMERIC(15,2) := 0;
+    rec RECORD;
+BEGIN
+    FOR rec IN
+        -- Bills (payables) = vendor is owed → debit
+        SELECT 'bill'::VARCHAR(20) AS ledger_type, p.id AS ref_id, p.shift_date AS trx_date,
+               p.description AS particulars, p.amount AS debit, 0::NUMERIC(15,2) AS credit
+        FROM payables p
+        WHERE p.society_id = p_society_id AND p.entity_id = p_vendor_id AND p.role = 'vendor'
+          AND p.status IN ('pending','verified')
+        UNION ALL
+        -- Payments made to vendor (expenses) = vendor paid → credit
+        SELECT 'payment'::VARCHAR(20), e.id, e.expense_date, e.particulars,
+               0::NUMERIC(15,2) AS debit, e.amount AS credit
+        FROM expenses e
+        WHERE e.society_id = p_society_id AND e.entity_id = p_vendor_id AND e.role = 'vendor'
+          AND e.status = 'confirmed'
+        UNION ALL
+        -- Pass-sale receipts tied to the vendor (credit to society, but tracked here as vendor activity)
+        SELECT 'receipt'::VARCHAR(20), r.id, r.receipt_date, r.particulars,
+               0::NUMERIC(15,2) AS debit, r.amount AS credit
+        FROM receipts r
+        WHERE r.society_id = p_society_id AND r.entity_id = p_vendor_id AND r.role = 'vendor'
+          AND r.status = 'confirmed'
+        ORDER BY trx_date ASC, ref_id ASC
+    LOOP
+        v_running := v_running + rec.debit - rec.credit;
+        ledger_type := rec.ledger_type;
+        ref_id := rec.ref_id;
+        trx_date := rec.trx_date;
+        particulars := rec.particulars;
+        debit := rec.debit;
+        credit := rec.credit;
+        balance := v_running;
+        RETURN NEXT;
+    END LOOP;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 23: DATA INTEGRITY VALIDATION FUNCTIONS
+-- Each returns zero or more problem rows describing the anomaly.
+-- ════════════════════════════════════════════════════════════════
+
+-- Apartments with no owning user row (orphan apartments).
+DROP FUNCTION IF EXISTS fn_check_orphan_apartments(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_orphan_apartments(p_society_id INT)
+RETURNS TABLE (apartment_id INT, flat_number VARCHAR(20), issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT a.id, a.flat_number, 'No linked apartment user account'::TEXT
+    FROM apartments a
+    WHERE a.society_id = p_society_id
+      AND NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.linked_id = a.id AND u.society_id = p_society_id AND u.role = 'apartment'
+      );
+$$;
+
+-- Ledger entries (transactions) referencing accounts/users that no longer exist.
+DROP FUNCTION IF EXISTS fn_check_orphan_ledger_entries(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_orphan_ledger_entries(p_society_id INT)
+RETURNS TABLE (transaction_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT t.id, 'Transaction references missing account'::TEXT
+    FROM transactions t
+    WHERE t.society_id = p_society_id
+      AND t.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.acc_id)
+    UNION ALL
+    SELECT t.id, 'Transaction references missing created_by user'::TEXT
+    FROM transactions t
+    WHERE t.society_id = p_society_id
+      AND t.created_by IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.created_by);
+$$;
+
+-- Receipts whose acc_id (income account) no longer exists.
+DROP FUNCTION IF EXISTS fn_check_orphan_receipts(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_orphan_receipts(p_society_id INT)
+RETURNS TABLE (receipt_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT r.id, 'Receipt references missing income account'::TEXT
+    FROM receipts r
+    WHERE r.society_id = p_society_id
+      AND r.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.acc_id);
+$$;
+
+-- Vendors with no linked user account.
+DROP FUNCTION IF EXISTS fn_check_orphan_vendors(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_orphan_vendors(p_society_id INT)
+RETURNS TABLE (vendor_id INT, business_name VARCHAR(100), issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT v.id, v.business_name, 'No linked vendor user account'::TEXT
+    FROM vendors v
+    WHERE v.society_id = p_society_id
+      AND NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.linked_id = v.id AND u.society_id = p_society_id AND u.role = 'vendor'
+      );
+$$;
+
+-- Receivables pointing at a missing apartment/vendor/security entity.
+DROP FUNCTION IF EXISTS fn_check_orphan_receivables(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_orphan_receivables(p_society_id INT)
+RETURNS TABLE (receivable_id INT, role VARCHAR(20), entity_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT r.id, r.role, r.entity_id, 'Receivable references missing entity'::TEXT
+    FROM receivables r
+    WHERE r.society_id = p_society_id
+      AND r.role = 'apartment'
+      AND NOT EXISTS (SELECT 1 FROM apartments a WHERE a.id = r.entity_id)
+    UNION ALL
+    SELECT r.id, r.role, r.entity_id, 'Receivable references missing vendor'::TEXT
+    FROM receivables r
+    WHERE r.society_id = p_society_id
+      AND r.role = 'vendor'
+      AND NOT EXISTS (SELECT 1 FROM vendors v WHERE v.id = r.entity_id)
+    UNION ALL
+    SELECT r.id, r.role, r.entity_id, 'Receivable references missing security staff'::TEXT
+    FROM receivables r
+    WHERE r.society_id = p_society_id
+      AND r.role = 'security'
+      AND NOT EXISTS (SELECT 1 FROM security_staff s WHERE s.id = r.entity_id);
+$$;
+
+-- Duplicate receivable rows for the same entity/role/period_month.
+DROP FUNCTION IF EXISTS fn_check_duplicate_receivables(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_duplicate_receivables(p_society_id INT)
+RETURNS TABLE (entity_id INT, role VARCHAR(20), period_month DATE, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT r.entity_id, r.role, r.period_month, COUNT(*) AS dup_count,
+           'Multiple receivables for same entity/role/period'::TEXT
+    FROM receivables r
+    WHERE r.society_id = p_society_id AND r.period_month IS NOT NULL
+    GROUP BY r.entity_id, r.role, r.period_month
+    HAVING COUNT(*) > 1;
+$$;
+
+-- Journal ids that do not have exactly one Dr and one Cr line (unbalanced).
+DROP FUNCTION IF EXISTS fn_check_duplicate_journals(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_duplicate_journals(p_society_id INT)
+RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(15,2), cr_sum NUMERIC(15,2), issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT t.journal_id,
+           COUNT(*) FILTER (WHERE a.drcr_account = 'Dr') AS dr_count,
+           COUNT(*) FILTER (WHERE a.drcr_account = 'Cr') AS cr_count,
+           COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'),0)::NUMERIC(15,2) AS dr_sum,
+           COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'),0)::NUMERIC(15,2) AS cr_sum,
+           'Unbalanced journal (Dr != Cr)'::TEXT
+    FROM transactions t
+    JOIN accounts a ON a.id = t.acc_id
+    WHERE t.society_id = p_society_id AND t.journal_id IS NOT NULL AND t.status = 'paid'
+    GROUP BY t.journal_id
+    HAVING COUNT(*) FILTER (WHERE a.drcr_account = 'Dr') <> 1
+        OR COUNT(*) FILTER (WHERE a.drcr_account = 'Cr') <> 1
+        OR COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'),0)
+           <> COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'),0);
+$$;
+
+-- Broken foreign keys across the major tables.
+DROP FUNCTION IF EXISTS fn_check_broken_fks(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_check_broken_fks(p_society_id INT)
+RETURNS TABLE (table_name TEXT, row_id INT, column_name TEXT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT 'receivables'::TEXT, r.id, 'acc_id'::TEXT, 'Missing account FK'::TEXT
+    FROM receivables r
+    WHERE r.society_id = p_society_id AND r.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.acc_id)
+    UNION ALL
+    SELECT 'expenses'::TEXT, e.id, 'acc_id'::TEXT, 'Missing account FK'::TEXT
+    FROM expenses e
+    WHERE e.society_id = p_society_id AND e.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = e.acc_id)
+    UNION ALL
+    SELECT 'payables'::TEXT, p.id, 'acc_id'::TEXT, 'Missing account FK'::TEXT
+    FROM payables p
+    WHERE p.society_id = p_society_id AND p.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = p.acc_id)
+    UNION ALL
+    SELECT 'assets'::TEXT, ar.id, 'acc_id'::TEXT, 'Missing asset-class account FK'::TEXT
+    FROM assets ar
+    WHERE ar.society_id = p_society_id AND ar.acc_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = ar.acc_id)
+    UNION ALL
+    SELECT 'security_roster'::TEXT, sr.id, 'security_id'::TEXT, 'Missing security staff FK'::TEXT
+    FROM security_roster sr
+    WHERE sr.society_id = p_society_id
+      AND NOT EXISTS (SELECT 1 FROM security_staff ss WHERE ss.id = sr.security_id)
+    UNION ALL
+    SELECT 'gate_access'::TEXT, g.id, 'entity_id'::TEXT, 'Missing user FK for gate_access'::TEXT
+    FROM gate_access g
+    WHERE g.society_id = p_society_id AND g.role = 's'
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = g.entity_id);
+$$;
+
+-- ============================================================
+-- SECTION 21: LEDGER FUNCTIONS
+-- ============================================================
+
+-- Resolve Brought Forward amount for an account at a given start date.
+-- Priority:
+--   1. If account has_bf=TRUE, use bf_amount (with sign from drcr_bf).
+--   2. Else, sum closing balances of all child accounts for the period
+--      before p_start_date (auto from last period / hierarchy).
+--   3. Fallback: 0.
+DROP FUNCTION IF EXISTS fn_resolve_bf_amount(INT, INT, DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_resolve_bf_amount(
+    p_society_id  INT,
+    p_account_id  INT,
+    p_start_date  DATE
+)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_bf         NUMERIC(15,2) := 0;
+    v_drcr_bf    VARCHAR(2);
+    v_has_bf     BOOLEAN;
+    v_parent_id  INT;
+BEGIN
+    SELECT has_bf, drcr_bf, bf_amount, parent_account_id
+      INTO v_has_bf, v_drcr_bf, v_bf, v_parent_id
+      FROM accounts
+     WHERE id = p_account_id AND society_id = p_society_id;
+
+    IF NOT FOUND THEN
+        RETURN 0;
+    END IF;
+
+    -- If account has explicit BF, use it with sign
+    IF v_has_bf THEN
+        IF v_drcr_bf = 'Dr' THEN
+            RETURN COALESCE(v_bf, 0);
+        ELSE
+            RETURN -COALESCE(v_bf, 0);
+        END IF;
+    END IF;
+
+    -- Auto from last period: sum child account balances before p_start_date
+    SELECT COALESCE(SUM(
+        CASE WHEN a.drcr_account = 'Cr'
+             THEN COALESCE(t.cr_sum, 0) - COALESCE(t.dr_sum, 0)
+             ELSE COALESCE(t.dr_sum, 0) - COALESCE(t.cr_sum, 0)
+        END
+    ), 0) INTO v_bf
+    FROM accounts a
+    LEFT JOIN (
+        SELECT t.acc_id, t.society_id, a.drcr_account,
+               SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr') AS cr_sum,
+               SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr') AS dr_sum
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        WHERE t.status = 'paid' AND t.trx_date < p_start_date
+        GROUP BY t.acc_id, t.society_id, a.drcr_account
+    ) t ON t.acc_id = a.id AND t.society_id = p_society_id
+    WHERE a.parent_account_id = p_account_id
+      AND a.society_id = p_society_id
+    GROUP BY a.id;
+
+    RETURN COALESCE(v_bf, 0);
+END;
+$$;
+
+-- Generate a full ledger for an account with running balance.
+-- Returns one row per transaction plus a synthetic closing-balance row.
+-- Columns: row_date, particulars, debit, credit, balance, is_closing, parent_name
+--
+-- Balance formula (matches Excel ld.xlsx):
+--   Cr account (drcr_account='Cr'): balance = prev_balance + credit - debit
+--   Dr account (drcr_account='Dr'): balance = prev_balance - credit + debit
+--
+-- BF row: if has_bf=TRUE or BF came from hierarchy, first data row is BF entry
+--   placed in Debit or Credit column per drcr_bf.
+-- Closing row: last row transfers final balance to parent and zeroes balance.
+DROP FUNCTION IF EXISTS fn_account_ledger(INT, INT, DATE, DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_account_ledger(
+    p_society_id  INT,
+    p_account_id  INT,
+    p_start_date  DATE DEFAULT NULL,
+    p_end_date    DATE DEFAULT NULL
+)
+RETURNS TABLE (
+    row_date      DATE,
+    particulars   TEXT,
+    debit         NUMERIC(15,2),
+    credit        NUMERIC(15,2),
+    balance       NUMERIC(15,2),
+    is_closing    BOOLEAN,
+    parent_name   TEXT
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc         RECORD;
+    v_bf          NUMERIC(15,2);
+    v_bf_drcr     VARCHAR(2);
+    v_balance     NUMERIC(15,2);
+    v_parent_name TEXT;
+    v_final_balance NUMERIC(15,2);
+BEGIN
+    SELECT a.drcr_account, a.has_bf, a.drcr_bf, a.bf_amount, a.parent_account_id,
+           COALESCE(p.name, '--') AS parent_name
+      INTO v_acc
+      FROM accounts a
+      LEFT JOIN accounts p ON p.id = a.parent_account_id
+     WHERE a.id = p_account_id AND a.society_id = p_society_id;
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    v_parent_name := v_acc.parent_name;
+
+    -- Resolve BF
+    v_bf := fn_resolve_bf_amount(p_society_id, p_account_id, p_start_date);
+    v_bf_drcr := CASE WHEN v_bf > 0 THEN 'Dr' WHEN v_bf < 0 THEN 'Cr' ELSE NULL END;
+    IF v_bf < 0 THEN v_bf := -v_bf; END IF;
+
+    -- Initialise running balance with BF
+    v_balance := COALESCE(
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN v_bf
+            WHEN 'Dr' THEN v_bf
+        END, 0);
+
+    -- BF row
+    IF v_bf <> 0 THEN
+        RETURN QUERY
+        SELECT
+            COALESCE(p_start_date, CURRENT_DATE) - INTERVAL '1 day',
+            'Brought Forward',
+            CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
+            CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
+            v_balance,
+            FALSE,
+            v_parent_name;
+    END IF;
+
+    -- Transaction rows with running balance
+    RETURN QUERY
+    WITH txns AS (
+        SELECT
+            t.trx_date,
+            t.acc_particulars::TEXT,
+            COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0) AS debit,
+            COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0) AS credit
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        WHERE t.acc_id = p_account_id
+          AND t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
+          AND (p_end_date IS NULL OR t.trx_date <= p_end_date)
+        GROUP BY t.trx_date, t.acc_particulars
+        ORDER BY t.trx_date ASC, t.acc_particulars
+    )
+    SELECT
+        tx.trx_date,
+        tx.acc_particulars,
+        tx.debit,
+        tx.credit,
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN v_balance + tx.credit - tx.debit
+            WHEN 'Dr' THEN v_balance - tx.credit + tx.debit
+        END,
+        FALSE,
+        v_parent_name
+    FROM txns tx;
+
+    -- Compute final balance for closing row
+    SELECT COALESCE(
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0)
+                        - COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0)
+            WHEN 'Dr' THEN COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0)
+                        - COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0)
+        END, 0) + v_bf
+    INTO v_final_balance
+    FROM transactions t
+    JOIN accounts a ON a.id = t.acc_id
+    WHERE t.acc_id = p_account_id
+      AND t.society_id = p_society_id
+      AND t.status = 'paid'
+      AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
+      AND (p_end_date IS NULL OR t.trx_date <= p_end_date);
+
+    -- Closing balance row
+    IF v_final_balance <> 0 THEN
+        RETURN QUERY
+        SELECT
+            COALESCE(p_end_date, CURRENT_DATE),
+            'Closing Balance / Transfer to ' || COALESCE(v_parent_name, 'Parent'),
+            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_final_balance ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN v_acc.drcr_account = 'Cr' THEN v_final_balance ELSE 0::NUMERIC(15,2) END,
+            0::NUMERIC(15,2),
+            TRUE,
+            v_parent_name;
+    END IF;
+END;
+$$;
+
+

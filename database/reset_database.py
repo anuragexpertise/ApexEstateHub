@@ -202,7 +202,7 @@ def main():
 
         print("✓ Fresh schema created")
 
-        # execute_sql_file(cur, sql_file)
+        execute_sql_file(cur, sql_file)
 
         validate(cur)
 

@@ -250,6 +250,18 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         return ("SELECT * FROM fn_accounts_list(%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset))
 
+    # ── LEDGER ─────────────────────────────────────────────────────────
+    if entity == "ledger":
+        p_account_id = filters.get("account_id")
+        p_start_date = filters.get("start_date")
+        p_end_date   = filters.get("end_date")
+        if not p_account_id:
+            raise ValueError("ledger requires account_id")
+        return (
+            "SELECT * FROM fn_account_ledger(%s,%s,%s,%s) ORDER BY row_date, particulars",
+            (sid, p_account_id, p_start_date, p_end_date),
+        )
+
     # ── SOCIETIES ───────────────────────────────────────────────────────
     if entity == "societies":
         return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
@@ -637,6 +649,20 @@ def load_list(
                 "SELECT COUNT(*) AS n FROM accounts WHERE society_id=%s", (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
+
+        # ── LEDGER ─────────────────────────────────────────────────────────
+        if entity == "ledger":
+            p_account_id = filters.get("account_id")
+            p_start_date = filters.get("start_date")
+            p_end_date   = filters.get("end_date")
+            if not p_account_id:
+                raise ValueError("ledger requires account_id")
+            rows = db._execute(
+                "SELECT * FROM fn_account_ledger(%s,%s,%s,%s) ORDER BY row_date, particulars",
+                (sid, p_account_id, p_start_date, p_end_date),
+                fetch_all=True,
+            ) or []
+            return rows, len(rows)
 
         # ── SOCIETIES ───────────────────────────────────────────────────────
         if entity == "societies":
