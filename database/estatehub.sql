@@ -91,11 +91,25 @@ CREATE TABLE IF NOT EXISTS accounts (
     bf_amount NUMERIC(12, 2) DEFAULT 0.00,
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
+-- is_cash_or_bank: explicit flag so cashbook logic doesn't have to guess
+-- account identity from name/header text matching. Set TRUE on Cash-in-Hand
+-- and every bank account (ICICI, SBI, etc). Non-breaking addition.
+    is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE;
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
 
+-- One-time backfill guess for existing rows (review after running — this
+-- is a convenience seed, not a guarantee). Uses the same name patterns
+-- fn_resolve_cash_account already relies on.
+UPDATE accounts
+   SET is_cash_or_bank = TRUE
+ WHERE is_cash_or_bank = FALSE
+   AND drcr_account = 'Dr'
+   AND (name ILIKE '%cash-in-hand%' OR name ILIKE '%cash in hand%'
+        OR name ILIKE '%bank%' OR name ILIKE '%SBI%' OR name ILIKE '%ICICI%');
+    
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -292,18 +306,6 @@ CREATE TABLE IF NOT EXISTS receivables (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month)
 WHERE
     period_month IS NOT NULL;
-
--- ── SELF-HEALING MIGRATION for EXISTING databases ──────────────
-ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
-    base_amount NUMERIC(10, 2) NOT NULL DEFAULT 0;
-ALTER TABLE receivables ADD COLUMN IF NOT EXISTS
-    paid_principal NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_principal >= 0);
-
--- Backfill legacy rows created before these columns existed:
-UPDATE receivables
-    SET base_amount   = CASE WHEN base_amount = 0 AND amount > 0 THEN amount ELSE base_amount END,
-        paid_principal = CASE WHEN paid_principal = 0 AND paid_amount > 0 THEN paid_amount ELSE paid_principal END
-    WHERE base_amount = 0 OR paid_principal = 0;
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
 CREATE TABLE IF NOT EXISTS receipts (
@@ -544,6 +546,27 @@ CREATE TABLE IF NOT EXISTS gate_access (
     time_out TIMESTAMP
 );
 
+-- brought_forward: opening balance per account per financial year.
+-- Replaces accounts.bf_amount/drcr_bf as the source of truth once
+-- seeded (see fn_seed_brought_forward_from_accounts below).
+CREATE TABLE IF NOT EXISTS brought_forward (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2025 = FY 1-Apr-2025..31-Mar-2026
+    acc_id INT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
+    bf_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (bf_amount >= 0),
+    is_auto_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE if written by fn_close_financial_year
+    remarks VARCHAR(200),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id),
+    CONSTRAINT uq_bf_society_fy_acc UNIQUE (society_id, financial_year, acc_id)
+);
+ 
+CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
+ 
 CREATE TABLE IF NOT EXISTS role_permissions (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
@@ -2457,149 +2480,227 @@ BEGIN
 END;
 $$;
 
--- ════════════════════════════════════════════════════════════════
--- SECTION 12: CASHBOOK (paired Cr/Dr over transactions table)
--- Pairing prefers transactions.journal_id when available; otherwise
--- falls back to the row_number-by-date method.
--- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_cashbook_paired CASCADE;
-
-CREATE OR REPLACE FUNCTION fn_cashbook_paired(
-    p_society_id INT,
-    p_entity_id  INT  DEFAULT NULL,
-    p_entity_role TEXT DEFAULT NULL,
-    p_search     TEXT DEFAULT NULL,
-    p_start_date DATE DEFAULT NULL,
-    p_end_date   DATE DEFAULT NULL
+DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_resolve_bf_amount_fy(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
 )
-RETURNS TABLE (
-    id               INT,
-    row_date         DATE,
-    rc_id            INT,    rc_trx_date DATE,
-    rc_account_name  TEXT,   rc_entity_name TEXT,
-    rc_particulars   TEXT,   rc_mode TEXT,   rc_amount NUMERIC(15,2),
-    pc_id            INT,    pc_trx_date DATE,
-    pc_account_name  TEXT,   pc_entity_name TEXT,
-    pc_particulars   TEXT,   pc_mode TEXT,   pc_amount NUMERIC(15,2),
-    day_rc_total     NUMERIC(15,2),
-    day_pc_total     NUMERIC(15,2),
-    running_balance  NUMERIC(15,2)
-)
-LANGUAGE plpgsql STABLE AS $$
-DECLARE v_opening_balance NUMERIC(15,2);
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_bf        NUMERIC(15,2);
+    v_drcr_bf   VARCHAR(2);
+    v_fy_start  DATE := MAKE_DATE(p_financial_year, 4, 1);
 BEGIN
-    SELECT COALESCE(SUM(CASE WHEN drcr_bf='Cr' THEN bf_amount ELSE -bf_amount END),0)
-    INTO v_opening_balance FROM accounts WHERE society_id = p_society_id;
-
-    RETURN QUERY
-    WITH
-    cr_rows AS (
-        SELECT t.id::INT AS rc_id, t.trx_date::DATE AS rc_date,
-               a.name::TEXT AS rc_account_name,
-               COALESCE(ap.flat_number||COALESCE(' ('||ap.owner_name||')',''), v.name, s.name, '')::TEXT AS rc_entity_name,
-               COALESCE(t.acc_particulars,'')::TEXT AS rc_particulars,
-               COALESCE(t.mode,'')::TEXT AS rc_mode,
-               t.amount::NUMERIC(15,2) AS rc_amount,
-               -- Pairing key: journal_id if present, else row_number within the date
-               COALESCE(t.journal_id, -ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id)) AS pair_key
+    SELECT bf_amount, drcr_bf INTO v_bf, v_drcr_bf
+    FROM brought_forward
+    WHERE society_id = p_society_id AND acc_id = p_account_id
+      AND financial_year = p_financial_year;
+ 
+    IF FOUND THEN
+        RETURN CASE WHEN v_drcr_bf = 'Dr' THEN v_bf ELSE -v_bf END;
+    END IF;
+ 
+    -- No explicit row: sum child accounts' pre-FY closing position
+    -- (mirrors the original fn_resolve_bf_amount hierarchy fallback).
+    SELECT COALESCE(SUM(
+        CASE WHEN a.drcr_account = 'Cr'
+             THEN COALESCE(t.cr_sum, 0) - COALESCE(t.dr_sum, 0)
+             ELSE COALESCE(t.dr_sum, 0) - COALESCE(t.cr_sum, 0)
+        END
+    ), 0) INTO v_bf
+    FROM accounts a
+    LEFT JOIN (
+        SELECT t.acc_id, a3.drcr_account,
+               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Cr') AS cr_sum,
+               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Dr') AS dr_sum
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Cr'
-        LEFT JOIN apartments   ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        LEFT JOIN vendors       v ON  v.id = t.entity_id AND  v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND  s.society_id = p_society_id
-        WHERE t.society_id = p_society_id AND t.status = 'paid'
-          AND (p_start_date  IS NULL OR t.trx_date >= p_start_date)
-          AND (p_end_date    IS NULL OR t.trx_date <= p_end_date)
-          AND (p_entity_id   IS NULL OR t.entity_id = p_entity_id)
-          AND (p_search IS NULL
-               OR a.name ILIKE '%'||p_search||'%'
-               OR t.acc_particulars ILIKE '%'||p_search||'%')
-    ),
-    dr_rows AS (
-        SELECT t.id::INT AS pc_id, t.trx_date::DATE AS pc_date,
-               a.name::TEXT AS pc_account_name,
-               COALESCE(v.name, s.name, ap.flat_number, '')::TEXT AS pc_entity_name,
-               COALESCE(t.acc_particulars,'')::TEXT AS pc_particulars,
-               COALESCE(t.mode,'')::TEXT AS pc_mode,
-               t.amount::NUMERIC(15,2) AS pc_amount,
-               COALESCE(t.journal_id, -ROW_NUMBER() OVER (PARTITION BY t.trx_date ORDER BY t.id)) AS pair_key
-        FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Dr'
-        LEFT JOIN vendors       v ON  v.id = t.entity_id AND  v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND  s.society_id = p_society_id
-        LEFT JOIN apartments   ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        WHERE t.society_id = p_society_id AND t.status = 'paid'
-          AND (p_start_date  IS NULL OR t.trx_date >= p_start_date)
-          AND (p_end_date    IS NULL OR t.trx_date <= p_end_date)
-          AND (p_entity_id   IS NULL OR t.entity_id = p_entity_id)
-          AND (p_search IS NULL
-               OR a.name ILIKE '%'||p_search||'%'
-               OR t.acc_particulars ILIKE '%'||p_search||'%')
-    ),
-    date_totals AS (
-        SELECT d::DATE AS dt,
-            COALESCE(SUM(cr.rc_amount),0)::NUMERIC(15,2) AS day_rc_total,
-            COALESCE(SUM(dr.pc_amount),0)::NUMERIC(15,2) AS day_pc_total
-        FROM (SELECT DISTINCT rc_date AS d FROM cr_rows
-              UNION SELECT DISTINCT pc_date FROM dr_rows) dates
-        LEFT JOIN cr_rows cr ON cr.rc_date = d::DATE
-        LEFT JOIN dr_rows dr ON dr.pc_date = d::DATE
-        GROUP BY d
-    ),
-    all_dates AS (
-        SELECT
-            dts.dt,
-            dts.day_rc_total,
-            dts.day_pc_total,
-            SUM(dts.day_rc_total - dts.day_pc_total)
-                OVER (
-                    ORDER BY dts.dt
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                )
-                + v_opening_balance AS running_balance
-        FROM date_totals dts
-    ),
-    paired AS (
-        SELECT
-            COALESCE(cr.rc_date, dr.pc_date) AS dt,
-            cr.rc_id, cr.rc_date, cr.rc_account_name, cr.rc_entity_name,
-            cr.rc_particulars, cr.rc_mode, cr.rc_amount,
-            dr.pc_id, dr.pc_date, dr.pc_account_name, dr.pc_entity_name,
-            dr.pc_particulars, dr.pc_mode, dr.pc_amount
-        FROM cr_rows cr
-        FULL OUTER JOIN dr_rows dr
-             ON dr.pc_date = cr.rc_date AND dr.pair_key = cr.pair_key
-    ),
-    paired_with_rn AS (
-        SELECT p.*,
-               ROW_NUMBER() OVER (PARTITION BY p.dt ORDER BY COALESCE(p.rc_id, p.pc_id)) AS rn
-        FROM paired p
-    ),
-    row_slots AS (
-        SELECT dt, rn
-        FROM paired_with_rn
-    )
-    SELECT
-        COALESCE(p.rc_id, p.pc_id)::INT AS id,
-        rs.dt::DATE AS row_date,
-        p.rc_id::INT, p.rc_date::DATE,
-        COALESCE(p.rc_account_name,'')::TEXT, COALESCE(p.rc_entity_name,'')::TEXT,
-        COALESCE(p.rc_particulars,'')::TEXT,  COALESCE(p.rc_mode,'')::TEXT,
-        COALESCE(p.rc_amount, 0)::NUMERIC(15,2),
-        p.pc_id::INT, p.pc_date::DATE,
-        COALESCE(p.pc_account_name,'')::TEXT, COALESCE(p.pc_entity_name,'')::TEXT,
-        COALESCE(p.pc_particulars,'')::TEXT,  COALESCE(p.pc_mode,'')::TEXT,
-        COALESCE(p.pc_amount, 0)::NUMERIC(15,2),
-        ad.day_rc_total::NUMERIC(15,2),
-        ad.day_pc_total::NUMERIC(15,2),
-        ad.running_balance::NUMERIC(15,2)
-    FROM row_slots rs
-    JOIN all_dates ad ON ad.dt = rs.dt
-    JOIN paired_with_rn p ON p.dt = rs.dt AND p.rn = rs.rn
-    ORDER BY rs.dt, rs.rn;
+        JOIN accounts a3 ON a3.id = t.acc_id
+        WHERE t.status = 'paid' AND t.trx_date < v_fy_start
+        GROUP BY t.acc_id, a3.drcr_account
+    ) t ON t.acc_id = a.id
+    WHERE a.parent_account_id = p_account_id AND a.society_id = p_society_id;
+ 
+    RETURN COALESCE(v_bf, 0);
 END;
 $$;
+ 
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 4: DEPRECIATION CALCULATION
+-- Full-year depreciation on brought-forward WDV; half-year depreciation
+-- on assets purchased on/after 1-Sep of the financial year (per spec:
+-- "Half depreciation if asset date > 1 Sep of the year").
+-- ════════════════════════════════════════════════════════════════
+ 
+DROP FUNCTION IF EXISTS fn_account_depreciation(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_account_depreciation(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
+)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_dep_pct      NUMERIC(5,2);
+    v_is_dep       BOOLEAN;
+    v_opening_wdv  NUMERIC(15,2);
+    v_dep_opening  NUMERIC(15,2) := 0;
+    v_dep_additions NUMERIC(15,2) := 0;
+    v_half_cutoff  DATE := MAKE_DATE(p_financial_year, 9, 1);
+    v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
+    v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+BEGIN
+    SELECT depreciation_percent, is_depreciable
+      INTO v_dep_pct, v_is_dep
+      FROM accounts WHERE id = p_account_id AND society_id = p_society_id;
+ 
+    IF NOT FOUND OR NOT COALESCE(v_is_dep, FALSE) OR COALESCE(v_dep_pct, 100) >= 100 THEN
+        RETURN 0;
+    END IF;
+ 
+    -- Depreciation on the opening WDV (assets already owned before this FY)
+    v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
+    v_dep_opening := GREATEST(v_opening_wdv, 0) * v_dep_pct / 100.0;
+ 
+    -- Depreciation on assets purchased DURING this FY (half-year rule)
+    SELECT COALESCE(SUM(
+        purchase_value * v_dep_pct / 100.0 *
+        CASE WHEN purchase_date >= v_half_cutoff THEN 0.5 ELSE 1.0 END
+    ), 0)
+    INTO v_dep_additions
+    FROM assets
+    WHERE society_id = p_society_id
+      AND acc_id = p_account_id
+      AND purchase_date BETWEEN v_fy_start AND v_fy_end
+      AND disposed = FALSE;
+ 
+    RETURN ROUND(v_dep_opening + v_dep_additions, 2);
+END;
+$$;
+ 
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 5: LEDGER v2 — FY-aware BF + depreciation-aware closing
+-- ════════════════════════════════════════════════════════════════
+ 
+DROP FUNCTION IF EXISTS fn_account_ledger_fy(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
+)
+RETURNS TABLE (
+    row_date      DATE,
+    particulars   TEXT,
+    debit         NUMERIC(15,2),
+    credit        NUMERIC(15,2),
+    balance       NUMERIC(15,2),
+    row_type      TEXT,       -- 'bf' | 'txn' | 'depreciation' | 'closing'
+    parent_name   TEXT
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc          RECORD;
+    v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
+    v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+    v_bf           NUMERIC(15,2);
+    v_bf_drcr      VARCHAR(2);
+    v_balance      NUMERIC(15,2);
+    v_dep_acc_id   INT;
+    v_dep_amount   NUMERIC(15,2) := 0;
+    v_final_balance NUMERIC(15,2);
+    v_transfer_amt  NUMERIC(15,2);
+BEGIN
+    SELECT a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
+           COALESCE(p.name, '--') AS parent_name
+      INTO v_acc
+      FROM accounts a
+      LEFT JOIN accounts p ON p.id = a.parent_account_id
+     WHERE a.id = p_account_id AND a.society_id = p_society_id;
+ 
+    IF NOT FOUND THEN RETURN; END IF;
+ 
+    -- Resolve BF (signed: +ve = natural Dr, -ve = natural Cr, per fn_resolve_bf_amount_fy)
+    v_bf := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
+    v_bf_drcr := CASE WHEN v_bf >= 0 THEN 'Dr' ELSE 'Cr' END;
+    v_bf := ABS(v_bf);
+ 
+    v_balance := v_bf;
+ 
+    IF v_bf <> 0 THEN
+        RETURN QUERY SELECT
+            v_fy_start - INTERVAL '1 day', 'Balance B/F'::TEXT,
+            CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
+            CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
+            v_balance, 'bf'::TEXT, v_acc.parent_name;
+    END IF;
+ 
+    -- Transaction rows, running balance
+    RETURN QUERY
+    WITH txns AS (
+        SELECT t.trx_date,
+               t.acc_particulars::TEXT,
+               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0) AS debit,
+               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0) AS credit
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+        GROUP BY t.trx_date, t.acc_particulars
+        ORDER BY t.trx_date ASC
+    )
+    SELECT
+        tx.trx_date, tx.acc_particulars, tx.debit, tx.credit,
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN v_balance + tx.credit - tx.debit
+            ELSE v_balance - tx.credit + tx.debit
+        END,
+        'txn'::TEXT, v_acc.parent_name
+    FROM txns tx;
+ 
+    -- Final balance before depreciation/closing
+    SELECT v_bf + COALESCE(
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END)
+            ELSE SUM(CASE WHEN a.drcr_account='Dr' THEN t.amount ELSE -t.amount END)
+        END, 0)
+    INTO v_final_balance
+    FROM transactions t JOIN accounts a ON a.id = t.acc_id
+    WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
+      AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
+ 
+    v_transfer_amt := v_final_balance;
+ 
+    -- Depreciation split (only for is_depreciable accounts with % < 100)
+    IF COALESCE(v_acc.is_depreciable, FALSE) AND COALESCE(v_acc.depreciation_percent, 100) < 100 THEN
+        v_dep_amount := fn_account_depreciation(p_society_id, p_account_id, p_financial_year);
+        IF v_dep_amount > 0 THEN
+            SELECT id INTO v_dep_acc_id FROM accounts
+            WHERE society_id = p_society_id AND name = 'Dep' LIMIT 1;
+ 
+            RETURN QUERY SELECT
+                v_fy_end, ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
+                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
+                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
+                (v_final_balance - v_dep_amount), 'depreciation'::TEXT,
+                COALESCE((SELECT name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
+ 
+            v_transfer_amt := v_final_balance - v_dep_amount;
+        END IF;
+    END IF;
+ 
+    -- Closing row: transfer remainder to parent, balance -> 0
+    IF v_transfer_amt <> 0 THEN
+        RETURN QUERY SELECT
+            v_fy_end,
+            ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
+    END IF;
+END;
+$$;
+ 
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
@@ -3604,15 +3705,227 @@ $$;
 -- SECTION 21: LEDGER FUNCTIONS
 -- ============================================================
 
--- Resolve Brought Forward amount for an account at a given start date.
--- Priority:
---   1. If account has_bf=TRUE, use bf_amount (with sign from drcr_bf).
---   2. Else, sum closing balances of all child accounts for the period
---      before p_start_date (auto from last period / hierarchy).
---   3. Fallback: 0.
-DROP FUNCTION IF EXISTS fn_resolve_bf_amount(INT, INT, DATE) CASCADE;
-
-CREATE OR REPLACE FUNCTION fn_resolve_bf_amount(
+DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_resolve_bf_amount_fy(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
+)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_bf        NUMERIC(15,2);
+    v_drcr_bf   VARCHAR(2);
+    v_fy_start  DATE := MAKE_DATE(p_financial_year, 4, 1);
+BEGIN
+    SELECT bf_amount, drcr_bf INTO v_bf, v_drcr_bf
+    FROM brought_forward
+    WHERE society_id = p_society_id AND acc_id = p_account_id
+      AND financial_year = p_financial_year;
+ 
+    IF FOUND THEN
+        RETURN CASE WHEN v_drcr_bf = 'Dr' THEN v_bf ELSE -v_bf END;
+    END IF;
+ 
+    -- No explicit row: sum child accounts' pre-FY closing position
+    -- (mirrors the original fn_resolve_bf_amount hierarchy fallback).
+    SELECT COALESCE(SUM(
+        CASE WHEN a.drcr_account = 'Cr'
+             THEN COALESCE(t.cr_sum, 0) - COALESCE(t.dr_sum, 0)
+             ELSE COALESCE(t.dr_sum, 0) - COALESCE(t.cr_sum, 0)
+        END
+    ), 0) INTO v_bf
+    FROM accounts a
+    LEFT JOIN (
+        SELECT t.acc_id, a3.drcr_account,
+               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Cr') AS cr_sum,
+               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Dr') AS dr_sum
+        FROM transactions t
+        JOIN accounts a3 ON a3.id = t.acc_id
+        WHERE t.status = 'paid' AND t.trx_date < v_fy_start
+        GROUP BY t.acc_id, a3.drcr_account
+    ) t ON t.acc_id = a.id
+    WHERE a.parent_account_id = p_account_id AND a.society_id = p_society_id;
+ 
+    RETURN COALESCE(v_bf, 0);
+END;
+$$;
+ 
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 4: DEPRECIATION CALCULATION
+-- Full-year depreciation on brought-forward WDV; half-year depreciation
+-- on assets purchased on/after 1-Sep of the financial year (per spec:
+-- "Half depreciation if asset date > 1 Sep of the year").
+-- ════════════════════════════════════════════════════════════════
+ 
+DROP FUNCTION IF EXISTS fn_account_depreciation(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_account_depreciation(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
+)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_dep_pct      NUMERIC(5,2);
+    v_is_dep       BOOLEAN;
+    v_opening_wdv  NUMERIC(15,2);
+    v_dep_opening  NUMERIC(15,2) := 0;
+    v_dep_additions NUMERIC(15,2) := 0;
+    v_half_cutoff  DATE := MAKE_DATE(p_financial_year, 9, 1);
+    v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
+    v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+BEGIN
+    SELECT depreciation_percent, is_depreciable
+      INTO v_dep_pct, v_is_dep
+      FROM accounts WHERE id = p_account_id AND society_id = p_society_id;
+ 
+    IF NOT FOUND OR NOT COALESCE(v_is_dep, FALSE) OR COALESCE(v_dep_pct, 100) >= 100 THEN
+        RETURN 0;
+    END IF;
+ 
+    -- Depreciation on the opening WDV (assets already owned before this FY)
+    v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
+    v_dep_opening := GREATEST(v_opening_wdv, 0) * v_dep_pct / 100.0;
+ 
+    -- Depreciation on assets purchased DURING this FY (half-year rule)
+    SELECT COALESCE(SUM(
+        purchase_value * v_dep_pct / 100.0 *
+        CASE WHEN purchase_date >= v_half_cutoff THEN 0.5 ELSE 1.0 END
+    ), 0)
+    INTO v_dep_additions
+    FROM assets
+    WHERE society_id = p_society_id
+      AND acc_id = p_account_id
+      AND purchase_date BETWEEN v_fy_start AND v_fy_end
+      AND disposed = FALSE;
+ 
+    RETURN ROUND(v_dep_opening + v_dep_additions, 2);
+END;
+$$;
+ 
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 5: LEDGER v2 — FY-aware BF + depreciation-aware closing
+-- ════════════════════════════════════════════════════════════════
+ 
+DROP FUNCTION IF EXISTS fn_account_ledger_fy(INT, INT, SMALLINT) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year SMALLINT
+)
+RETURNS TABLE (
+    row_date      DATE,
+    particulars   TEXT,
+    debit         NUMERIC(15,2),
+    credit        NUMERIC(15,2),
+    balance       NUMERIC(15,2),
+    row_type      TEXT,       -- 'bf' | 'txn' | 'depreciation' | 'closing'
+    parent_name   TEXT
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc          RECORD;
+    v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
+    v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+    v_bf           NUMERIC(15,2);
+    v_bf_drcr      VARCHAR(2);
+    v_balance      NUMERIC(15,2);
+    v_dep_acc_id   INT;
+    v_dep_amount   NUMERIC(15,2) := 0;
+    v_final_balance NUMERIC(15,2);
+    v_transfer_amt  NUMERIC(15,2);
+BEGIN
+    SELECT a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
+           COALESCE(p.name, '--') AS parent_name
+      INTO v_acc
+      FROM accounts a
+      LEFT JOIN accounts p ON p.id = a.parent_account_id
+     WHERE a.id = p_account_id AND a.society_id = p_society_id;
+ 
+    IF NOT FOUND THEN RETURN; END IF;
+ 
+    -- Resolve BF (signed: +ve = natural Dr, -ve = natural Cr, per fn_resolve_bf_amount_fy)
+    v_bf := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
+    v_bf_drcr := CASE WHEN v_bf >= 0 THEN 'Dr' ELSE 'Cr' END;
+    v_bf := ABS(v_bf);
+ 
+    v_balance := v_bf;
+ 
+    IF v_bf <> 0 THEN
+        RETURN QUERY SELECT
+            v_fy_start - INTERVAL '1 day', 'Balance B/F'::TEXT,
+            CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
+            CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
+            v_balance, 'bf'::TEXT, v_acc.parent_name;
+    END IF;
+ 
+    -- Transaction rows, running balance
+    RETURN QUERY
+    WITH txns AS (
+        SELECT t.trx_date,
+               t.acc_particulars::TEXT,
+               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0) AS debit,
+               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0) AS credit
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+        GROUP BY t.trx_date, t.acc_particulars
+        ORDER BY t.trx_date ASC
+    )
+    SELECT
+        tx.trx_date, tx.acc_particulars, tx.debit, tx.credit,
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN v_balance + tx.credit - tx.debit
+            ELSE v_balance - tx.credit + tx.debit
+        END,
+        'txn'::TEXT, v_acc.parent_name
+    FROM txns tx;
+ 
+    -- Final balance before depreciation/closing
+    SELECT v_bf + COALESCE(
+        CASE v_acc.drcr_account
+            WHEN 'Cr' THEN SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END)
+            ELSE SUM(CASE WHEN a.drcr_account='Dr' THEN t.amount ELSE -t.amount END)
+        END, 0)
+    INTO v_final_balance
+    FROM transactions t JOIN accounts a ON a.id = t.acc_id
+    WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
+      AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
+ 
+    v_transfer_amt := v_final_balance;
+ 
+    -- Depreciation split (only for is_depreciable accounts with % < 100)
+    IF COALESCE(v_acc.is_depreciable, FALSE) AND COALESCE(v_acc.depreciation_percent, 100) < 100 THEN
+        v_dep_amount := fn_account_depreciation(p_society_id, p_account_id, p_financial_year);
+        IF v_dep_amount > 0 THEN
+            SELECT id INTO v_dep_acc_id FROM accounts
+            WHERE society_id = p_society_id AND name = 'Dep' LIMIT 1;
+ 
+            RETURN QUERY SELECT
+                v_fy_end, ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
+                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
+                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
+                (v_final_balance - v_dep_amount), 'depreciation'::TEXT,
+                COALESCE((SELECT name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
+ 
+            v_transfer_amt := v_final_balance - v_dep_amount;
+        END IF;
+    END IF;
+ 
+    -- Closing row: transfer remainder to parent, balance -> 0
+    IF v_transfer_amt <> 0 THEN
+        RETURN QUERY SELECT
+            v_fy_end,
+            ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
+    END IF;
+END;
+$$;
+ 
     p_society_id  INT,
     p_account_id  INT,
     p_start_date  DATE
@@ -3804,4 +4117,72 @@ BEGIN
 END;
 $$;
 
+
+-- Year-end close: compute each has_bf account's closing balance as of
+-- 31-Mar of p_financial_year, and write it as the OPENING balance for
+-- p_financial_year + 1. p_overwrite=FALSE (default) never touches a row
+-- that already exists — protects manual admin overrides. Pass TRUE to
+-- force a recompute.
+DROP FUNCTION IF EXISTS fn_close_financial_year(INT, SMALLINT, BOOLEAN) CASCADE;
+ 
+CREATE OR REPLACE FUNCTION fn_close_financial_year(
+    p_society_id     INT,
+    p_financial_year SMALLINT,
+    p_overwrite      BOOLEAN DEFAULT FALSE
+)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_fy_end   DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+    v_count    INT := 0;
+    rec        RECORD;
+    v_closing  NUMERIC(15,2);
+    v_drcr     VARCHAR(2);
+BEGIN
+    FOR rec IN
+        SELECT a.id AS acc_id, a.drcr_account
+        FROM accounts a
+        WHERE a.society_id = p_society_id AND a.has_bf = TRUE
+    LOOP
+        -- Closing balance = opening BF for THIS fy + net movement during it
+        SELECT
+            fn_resolve_bf_amount_fy(p_society_id, rec.acc_id, p_financial_year)
+            + COALESCE(SUM(CASE WHEN rec.drcr_account = 'Cr' THEN
+                              CASE WHEN a2.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END
+                          ELSE
+                              CASE WHEN a2.drcr_account = 'Dr' THEN t.amount ELSE -t.amount END
+                          END), 0)
+        INTO v_closing
+        FROM transactions t
+        JOIN accounts a2 ON a2.id = t.acc_id
+        WHERE t.acc_id = rec.acc_id
+          AND t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND t.trx_date BETWEEN MAKE_DATE(p_financial_year, 4, 1) AND v_fy_end;
+ 
+        v_drcr := CASE WHEN v_closing < 0 THEN
+                        CASE WHEN rec.drcr_account = 'Dr' THEN 'Cr' ELSE 'Dr' END
+                   ELSE rec.drcr_account END;
+ 
+        INSERT INTO brought_forward (
+            society_id, financial_year, acc_id, drcr_bf, bf_amount,
+            is_auto_calculated, remarks, created_at
+        ) VALUES (
+            p_society_id, p_financial_year + 1, rec.acc_id, v_drcr, ABS(v_closing),
+            TRUE, 'Auto-calculated at year-end close of FY' || p_financial_year, NOW()
+        )
+        ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE
+            SET drcr_bf = EXCLUDED.drcr_bf,
+                bf_amount = EXCLUDED.bf_amount,
+                is_auto_calculated = TRUE,
+                updated_at = NOW()
+            WHERE p_overwrite = TRUE AND brought_forward.is_auto_calculated = TRUE;
+            -- Never overwrites a row an admin hand-edited (is_auto_calculated=FALSE),
+            -- even with p_overwrite=TRUE.
+ 
+        v_count := v_count + 1;
+    END LOOP;
+ 
+    RETURN v_count;
+END;
+$$;
 

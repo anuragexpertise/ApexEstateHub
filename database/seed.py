@@ -155,6 +155,7 @@ ACCOUNTS = [
     (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", False,  "Dr", 0, 100),
     (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", False,  "Dr", 0, 100),
     (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", False,  "Dr", 0, 100),
+    (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", False,  "Dr", 0, 100),
     (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", False,  "Dr", 0, 100),
     (633,   "Cash-in-hand",               "CiH",        "Cash-in-hand",               63,  "Dr", False,  "Dr", 0, 100),
     (64,    "Instruments",                "Inst",       "Instruments",                 6,  "Dr", False,  "Dr", 0,  15),
