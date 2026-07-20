@@ -212,7 +212,7 @@ def _check_required(row: dict, required_cols: list[str]) -> str | None:
     return f"Missing required column(s): {', '.join(missing)}" if missing else None
 
 
-def _bulk_insert_apartments(rows: list[dict], sid: int) -> dict:
+def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each CSV row:
       1. Insert into apartments → get apartments.id
@@ -246,14 +246,15 @@ def _bulk_insert_apartments(rows: list[dict], sid: int) -> dict:
         try:
             apt_r = db._execute(
                 "INSERT INTO apartments"
-                "(society_id, flat_number, owner_name, mobile, apartment_size, active) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE) RETURNING id",
+                "(society_id, flat_number, owner_name, mobile, apartment_size, active, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
                 (
                     sid,
                     flat,
                     row.get("owner_name") or None,
                     row.get("mobile")     or None,
                     _safe_int(row.get("apartment_size")),
+                    user_id,
                 ),
                 fetch_one=True,
             )
@@ -290,7 +291,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int) -> dict:
     return {"success": success, "failed": failed}
 
 
-def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
+def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each CSV row:
       1. Insert into users (role='vendor')
@@ -310,7 +311,6 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
         email    = row["email"].strip().lower()
         password = row["password"].strip()
         name     = row["name"].strip()
-        # business_name NOT NULL in schema; fall back to name then email
         biz_name = (row.get("business_name") or name or email).strip()
 
         # ── 1. users row ────────────────────────────────────────────────────
@@ -322,7 +322,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
                 (sid, email, generate_password_hash(password)),
                 fetch_one=True,
             )
-            user_id = usr_r["id"]
+            user_id_vendor = usr_r["id"]
         except Exception as e:
             failed.append((i, f"User account creation failed: {e}"))
             continue
@@ -331,14 +331,15 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
         try:
             ven_r = db._execute(
                 "INSERT INTO vendors"
-                "(society_id, business_name, name, service_type, mobile, active) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE) RETURNING id",
+                "(society_id, business_name, name, service_type, mobile, active, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
                 (
                     sid,
                     biz_name,
                     name,
                     row.get("service_type") or None,
                     row.get("mobile")       or None,
+                    user_id,
                 ),
                 fetch_one=True,
             )
@@ -347,7 +348,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
             try:
                 db._execute(
                     "DELETE FROM users WHERE id=%s AND society_id=%s",
-                    (user_id, sid),
+                    (user_id_vendor, sid),
                 )
             except Exception:
                 pass
@@ -358,7 +359,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
         try:
             db._execute(
                 "UPDATE users SET linked_id=%s WHERE id=%s",
-                (ven_id, user_id),
+                (ven_id, user_id_vendor),
             )
         except Exception as e:
             failed.append((i, f"Linking failed (records exist but unlinked): {e}"))
@@ -369,7 +370,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int) -> dict:
     return {"success": success, "failed": failed}
 
 
-def _bulk_insert_security(rows: list[dict], sid: int) -> dict:
+def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each CSV row:
       1. Insert into users (role='security')
@@ -399,7 +400,7 @@ def _bulk_insert_security(rows: list[dict], sid: int) -> dict:
                 (sid, email, generate_password_hash(password)),
                 fetch_one=True,
             )
-            user_id = usr_r["id"]
+            user_id_sec = usr_r["id"]
         except Exception as e:
             failed.append((i, f"User account creation failed: {e}"))
             continue
@@ -408,14 +409,15 @@ def _bulk_insert_security(rows: list[dict], sid: int) -> dict:
         try:
             sec_r = db._execute(
                 "INSERT INTO security_staff"
-                "(society_id, name, mobile, shift, salary_per_shift, active) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE) RETURNING id",
+                "(society_id, name, mobile, shift, salary_per_shift, active, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
                 (
                     sid,
                     name,
                     row.get("mobile")            or None,
                     row.get("shift")             or None,
                     _safe_float(row.get("salary_per_shift")),
+                    user_id,
                 ),
                 fetch_one=True,
             )
@@ -424,21 +426,21 @@ def _bulk_insert_security(rows: list[dict], sid: int) -> dict:
             try:
                 db._execute(
                     "DELETE FROM users WHERE id=%s AND society_id=%s",
-                    (user_id, sid),
+                    (user_id_sec, sid),
                 )
             except Exception:
                 pass
-            failed.append((i, f"Security staff record failed (user row rolled back): {e}"))
+            failed.append((i, f"Security staff record failed (user row rolled back): {e})"))
             continue
 
         # ── 3. link ─────────────────────────────────────────────────────────
         try:
             db._execute(
                 "UPDATE users SET linked_id=%s WHERE id=%s",
-                (sec_id, user_id),
+                (sec_id, user_id_sec),
             )
         except Exception as e:
-            failed.append((i, f"Linking failed (records exist but unlinked): {e}"))
+            failed.append((i, f"Linking failed (records exist but unlinked): {e})"))
             continue
 
         success += 1
@@ -541,11 +543,11 @@ def register_bulk_enroll_callbacks(app):
             )
 
         if entity == "apartments":
-            results = _bulk_insert_apartments(rows, sid)
+            results = _bulk_insert_apartments(rows, sid, auth.get("user_id") if auth else None)
         elif entity == "vendors":
-            results = _bulk_insert_vendors(rows, sid)
+            results = _bulk_insert_vendors(rows, sid, auth.get("user_id") if auth else None)
         else:   # security
-            results = _bulk_insert_security(rows, sid)
+            results = _bulk_insert_security(rows, sid, auth.get("user_id") if auth else None)
 
         result_ui = _render_results(results, filename or "upload.csv")
 

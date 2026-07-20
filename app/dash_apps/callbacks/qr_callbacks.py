@@ -678,11 +678,11 @@ def register_qr_callbacks(app):
             # Create emergency event for ALL entities
             db._execute(
                 """INSERT INTO events 
-                   (society_id, title, description, event_date, open_to)
+                   (society_id, title, description, event_date, open_to, created_by)
                    VALUES (%s, 'SECURITY EMERGENCY', 
                            'Emergency alert triggered by security at gate', 
-                           CURRENT_DATE, 'all')""",
-                (society_id,)
+                           CURRENT_DATE, 'all', %s)""",
+                (society_id, auth_data.get("user_id") if auth_data else None)
             )
             return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
         except Exception as e:

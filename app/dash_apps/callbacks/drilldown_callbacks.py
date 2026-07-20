@@ -1808,11 +1808,11 @@ def _save_vendor_pass(db, d, sid):
         return False, _clean_pg_error(e), None
 def _save_asset(db, d, sid, is_edit, pk):
     if is_edit:
-        # Editing an asset record (name, type, company — not purchase price)
         db._execute(
-            "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s "
+            "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, "
+            "updated_by=%s "
             "WHERE id=%s AND society_id=%s",
-            (d.get("asset_name"), d.get("asset_SNo"), d.get("company_name"), pk, sid),
+            (d.get("asset_name"), d.get("asset_SNo"), d.get("company_name"), d.get("user_id"), pk, sid),
         )
         return True, "Asset updated", pk
 
@@ -1866,7 +1866,8 @@ def _save_apartment(db, d, sid, is_edit, pk):
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
             "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
             "owner_photo=COALESCE(NULLIF(%s, ''), owner_photo),"
-            "id_proof=COALESCE(NULLIF(%s, ''), id_proof) "
+            "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
+            "updated_by=%s "
             "WHERE id=%s AND society_id=%s RETURNING id",
             (
                 d.get("owner_name"),
@@ -1878,6 +1879,7 @@ def _save_apartment(db, d, sid, is_edit, pk):
                 d.get("active", True),
                 d.get("owner_photo"),
                 d.get("id_proof"),
+                d.get("user_id"),
                 pk,
                 sid,
             ),
@@ -1890,10 +1892,10 @@ def _save_apartment(db, d, sid, is_edit, pk):
         return False, "Flat number is required", None
     r = db._execute(
         "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-        "apartment_size,owner_photo,id_proof,active) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        "apartment_size,owner_photo,id_proof,active,created_by) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
         (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
-         d.get("owner_photo"), d.get("id_proof")),
+         d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
         fetch_one=True,
     )
     new_id = r["id"] if r else None
@@ -1913,20 +1915,22 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             db._execute(
                 "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
-                "id_proof=COALESCE(NULLIF(%s, ''), id_proof) "
+                "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
+                "updated_by=%s "
                 "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
-                 d.get("photo"), d.get("id_proof"), pk),
+                 d.get("photo"), d.get("id_proof"), d.get("user_id"), pk),
             )
         elif role == "vendor":
             db._execute(
                 "UPDATE vendors v SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
-                "license=COALESCE(NULLIF(%s, ''), license) "
+                "license=COALESCE(NULLIF(%s, ''), license),"
+                "updated_by=%s "
                 "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
-                 d.get("photo"), d.get("logo"), d.get("license"), pk),
+                 d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"), pk),
             )
         pw = (d.get("password") or "").strip()
         if pw:
@@ -1975,6 +1979,8 @@ def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
         _img = d.get("image") or None
         _img_clause = ", image=%s" if _img else ""
+        _upd_by_clause = ", updated_by=%s"
+        _upd_by_param = (d.get("user_id"),)
         _img_param = (
             d.get("title"),
             d.get("description"),
@@ -1985,10 +1991,10 @@ def _save_event(db, d, sid, is_edit, pk):
         )
         if _img:
             _img_param += (_img,)
-        _img_param += (pk, sid)
+        _img_param += _upd_by_param + (pk, sid)
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
-            f"event_time=%s, venue=%s, open_to=%s{_img_clause} "
+            f"event_time=%s, venue=%s, open_to=%s{_img_clause}{_upd_by_clause} "
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
@@ -2002,8 +2008,8 @@ def _save_event(db, d, sid, is_edit, pk):
         return False, "Title is required", None
     r = db._execute(
         "INSERT INTO events(society_id, title, description, event_date, "
-        "event_time, venue, open_to, image, created_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id",
+        "event_time, venue, open_to, image, created_at, created_by) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
         (
             sid,
             title,
@@ -2013,6 +2019,7 @@ def _save_event(db, d, sid, is_edit, pk):
             d.get("venue"),
             d.get("open_to", "all"),
             d.get("image") or None,
+            d.get("user_id"),
         ),
         fetch_one=True,
     )
@@ -2026,14 +2033,16 @@ def _save_event(db, d, sid, is_edit, pk):
 
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
+        _upd_by_clause = ", updated_by=%s"
         db._execute(
             "UPDATE concerns SET status=%s, assigned_to=%s"
             + (", image=%s" if d.get("image") else "")
+            + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
-                (d.get("status", "open"), d.get("assigned_to"), d.get("image"), pk, sid)
+                (d.get("status", "open"), d.get("assigned_to"), d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
-                else (d.get("status", "open"), d.get("assigned_to"), pk, sid)
+                else (d.get("status", "open"), d.get("assigned_to"), d.get("user_id"), pk, sid)
             ),
         )
         try:
@@ -2062,8 +2071,8 @@ def _save_concern(db, d, sid, is_edit, pk):
         return False, "Description is required", None
     r = db._execute(
         "INSERT INTO concerns(society_id, flat_no, concern_type, description, "
-        "preferred_time, status, image, created_at) "
-        "VALUES(%s,%s,%s,%s,%s,'open',%s,NOW()) RETURNING id",
+        "preferred_time, status, image, created_at, created_by) "
+        "VALUES(%s,%s,%s,%s,%s,'open',%s,NOW(),%s) RETURNING id",
         (
             sid,
             d.get("flat_no"),
@@ -2071,6 +2080,7 @@ def _save_concern(db, d, sid, is_edit, pk):
             desc,
             d.get("preferred_time", "anytime"),
             d.get("image") or None,
+            d.get("user_id"),
         ),
         fetch_one=True,
     )
@@ -2115,32 +2125,61 @@ def _save_society(db, d, sid, is_edit, pk):
                     if dst.exists():
                         dst.unlink()
                     tmp.rename(dst)
-        db._execute(
-            "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
-            "logo=COALESCE(NULLIF(%s, ''), logo),"
-            "login_background=COALESCE(NULLIF(%s, ''), login_background),"
-            "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
-            "secretary_name=%s,secretary_phone=%s,"
-            "plan_validity=%s,calc_start_date=%s,PAN_number=%s,"
-            "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) WHERE id=%s",
-            (
-                d.get("name"),
-                d.get("email"),
-                d.get("phone"),
-                d.get("address"),
-                d.get("plan", "Free"),
-                d.get("logo"),
-                d.get("login_background"),
-                d.get("secretary_sign"),
-                d.get("secretary_name"),
-                d.get("secretary_phone"),
-                d.get("plan_validity"),
-                d.get("calc_start_date"),
-                d.get("pan_number"),
-                d.get("payment_qr"),
-                pk,
-            ),
-        )
+        caller_role = d.get("caller_role", "admin")
+        immutable_cols = {"name", "pan_number", "plan_validity", "calc_start_date"}
+        if caller_role == "master":
+            db._execute(
+                "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
+                "logo=COALESCE(NULLIF(%s, ''), logo),"
+                "login_background=COALESCE(NULLIF(%s, ''), login_background),"
+                "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
+                "secretary_name=%s,secretary_phone=%s,"
+                "plan_validity=%s,calc_start_date=%s,PAN_number=%s,"
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr),updated_by=%s "
+                "WHERE id=%s",
+                (
+                    d.get("name"),
+                    d.get("email"),
+                    d.get("phone"),
+                    d.get("address"),
+                    d.get("plan", "Free"),
+                    d.get("logo"),
+                    d.get("login_background"),
+                    d.get("secretary_sign"),
+                    d.get("secretary_name"),
+                    d.get("secretary_phone"),
+                    d.get("plan_validity"),
+                    d.get("calc_start_date"),
+                    d.get("pan_number"),
+                    d.get("payment_qr"),
+                    d.get("user_id"),
+                    pk,
+                ),
+            )
+        else:
+            db._execute(
+                "UPDATE societies SET email=%s,phone=%s,address=%s,plan=%s,"
+                "logo=COALESCE(NULLIF(%s, ''), logo),"
+                "login_background=COALESCE(NULLIF(%s, ''), login_background),"
+                "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
+                "secretary_name=%s,secretary_phone=%s,"
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr),updated_by=%s "
+                "WHERE id=%s",
+                (
+                    d.get("email"),
+                    d.get("phone"),
+                    d.get("address"),
+                    d.get("plan", "Free"),
+                    d.get("logo"),
+                    d.get("login_background"),
+                    d.get("secretary_sign"),
+                    d.get("secretary_name"),
+                    d.get("secretary_phone"),
+                    d.get("payment_qr"),
+                    d.get("user_id"),
+                    pk,
+                ),
+            )
         return True, "Society updated", pk
     return False, "New society creation handled elsewhere", None
 
@@ -2152,7 +2191,7 @@ def _current_fy() -> int:
     return today.year - 1 if today.month < 4 else today.year
 
 
-def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount):
+def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount, user_id=None):
     """Manual admin edit via Settings -> Accounts always wins over an
     auto-calculated year-end value — sets is_auto_calculated=FALSE so
     fn_close_financial_year() won't clobber it on a future run."""
@@ -2163,8 +2202,8 @@ def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount):
         "VALUES (%s,%s,%s,%s,%s,FALSE,NOW()) "
         "ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE SET "
         "drcr_bf=EXCLUDED.drcr_bf, bf_amount=EXCLUDED.bf_amount, "
-        "is_auto_calculated=FALSE, updated_at=NOW()",
-        (sid, fy, acc_id, drcr_bf, bf_amount),
+        "is_auto_calculated=FALSE, updated_at=NOW(), updated_by=%s",
+        (sid, fy, acc_id, drcr_bf, bf_amount, user_id),
     )
 
 
@@ -2185,12 +2224,13 @@ def _save_account(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE accounts SET "
-            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s "
+            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s, updated_by=%s "
             "WHERE id=%s AND society_id=%s",
             (
                 bf_val != 0,
                 float(dep_pct)   if dep_pct   not in (None, "") else 100,
                 bool(is_dep)     if is_dep is not None else False,
+                d.get("user_id"),
                 pk, sid,
             ),
         )
@@ -2201,7 +2241,7 @@ def _save_account(db, d, sid, is_edit, pk):
             "SELECT drcr_bf FROM accounts WHERE id=%s AND society_id=%s",
             (pk, sid), fetch_one=True,
         ) or {}
-        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val)
+        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val, d.get("user_id"))
 
         return True, "Account updated", pk
 
@@ -2265,7 +2305,8 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
-            " apt_maintenance_rate=%s, apt_due_day=%s, apt_interest_pct=%s, apt_status=%s"
+            " apt_maintenance_rate=%s, apt_due_day=%s, apt_interest_pct=%s, apt_status=%s,"
+            " updated_by=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("apt_id"),
@@ -2275,6 +2316,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
                 d.get("apt_due_day"),
                 d.get("apt_interest_pct"),
                 apt_status if apt_status is not None else True,
+                d.get("user_id"),
                 pk,
                 sid,
             ),
@@ -2324,7 +2366,8 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE ven_charges_fines_basis SET ven_id=%s, start_date=%s, end_date=%s,"
-            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s"
+            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s,"
+            " updated_by=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("ven_id"),
@@ -2334,6 +2377,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
                 d.get("vendor_7day"),
                 d.get("vendor_1mth"),
                 ven_status if ven_status is not None else True,
+                d.get("user_id"),
                 pk,
                 sid,
             ),
@@ -2376,9 +2420,10 @@ def _save_security_roster(db, d, sid, is_edit, pk):
     if is_edit:
         try:
             db._execute(
-                "UPDATE security_roster SET security_id=%s, roster_date=%s, shift_type=%s"
+                "UPDATE security_roster SET security_id=%s, roster_date=%s, shift_type=%s,"
+                " updated_by=%s "
                 " WHERE id=%s AND society_id=%s",
-                (security_id, roster_date, shift_type, pk, sid),
+                (security_id, roster_date, shift_type, d.get("user_id"), pk, sid),
             )
         except Exception as e:
             if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
