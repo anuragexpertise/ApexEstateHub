@@ -735,8 +735,6 @@ def render_profile_card(card_id: str, title: str, icon: str,
     image_section = []
     for f in image_fields:
         image_path = record_dict.get(f["field"])
-        print(f"[IMG DEBUG] field={f['field']} value={image_path!r} "
-              f"entity={entity} pk={img_entity_pk} sid={img_society_id}")  # remove after fix confirmed
         if not image_path or str(image_path).strip() in ("", "None"):
             continue
         full_url = get_image_url(
@@ -745,7 +743,6 @@ def render_profile_card(card_id: str, title: str, icon: str,
             entity,
             img_entity_pk,          # ← was pk_val but now named consistently
         )
-        print(f"[IMG DEBUG] resolved URL={full_url!r}")  # remove after fix confirmed
         if not full_url:
             continue
         size = f.get("size", "medium")

@@ -1889,10 +1889,10 @@ def _save_apartment(db, d, sid, is_edit, pk):
         return False, "Flat number is required", None
     r = db._execute(
         "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-        "apartment_size,owner_photo,id_proof,photo,active) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        "apartment_size,owner_photo,id_proof,active) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
         (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
-         d.get("owner_photo"), d.get("id_proof"), d.get("photo")),
+         d.get("owner_photo"), d.get("id_proof")),
         fetch_one=True,
     )
     new_id = r["id"] if r else None

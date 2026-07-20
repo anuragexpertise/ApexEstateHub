@@ -109,7 +109,6 @@ class Apartment:
     owner_name: Optional[str] = None
     owner_photo: Optional[str] = None
     id_proof: Optional[str] = None
-    photo: Optional[str] = None
     mobile: Optional[str] = None
     apartment_size: int = 0
     active: bool = True
