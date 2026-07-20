@@ -69,7 +69,7 @@ class User(UserMixin):
         return str(self.id)
     
     def is_master_admin(self):
-        return self.role == 'admin' and self.society_id is None
+        return self.role == 'master' or (self.role == 'admin' and self.society_id is None)
     
     def is_admin(self):
         return self.role == 'admin' and self.society_id is not None

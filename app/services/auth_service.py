@@ -26,10 +26,13 @@ def _build_auth(row: dict) -> dict | None:
     """Convert a DB user row into the auth-store payload."""
     if not row:
         return None
+    role = row["role"]
+    if role == "admin" and not row.get("society_id") and row.get("is_master_admin"):
+        role = "master"
     return {
         "user_id":           row["id"],
         "email":             row["email"],
-        "role":              row["role"],
+        "role":              role,
         "society_id":        row.get("society_id"),
         "linked_id":         row.get("linked_id"),
         "security_id":       row.get("id") if row.get("role") == "security" else None,
@@ -45,20 +48,20 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
     try:
         if society_id is None:
             return db._execute(
-                """SELECT id, email, role, society_id, linked_id,
+                """SELECT id, email, role, society_id, linked_id, is_master_admin,
                           password_hash, pin_hash, pattern_hash, push_subscription
-                   FROM users
-                   WHERE email = :email
-                     AND is_master_admin = TRUE""",
+                    FROM users
+                    WHERE email = :email
+                      AND is_master_admin = TRUE""",
                 {"email": email},
                 fetch_one=True,
             )
         return db._execute(
-            """SELECT id, email, role, society_id, linked_id,
+            """SELECT id, email, role, society_id, linked_id, is_master_admin,
                       password_hash, pin_hash, pattern_hash, push_subscription
-               FROM users
-               WHERE email = :email
-                 AND society_id = :sid""",
+                FROM users
+                WHERE email = :email
+                  AND society_id = :sid""",
             {"email": email, "sid": society_id},
             fetch_one=True,
         )

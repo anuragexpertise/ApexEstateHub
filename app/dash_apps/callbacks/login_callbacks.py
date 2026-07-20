@@ -39,7 +39,7 @@ def _build_auth_store(user: dict) -> dict:
 
 def _redirect(role: str, society_id) -> str:
     """Default landing URL for each role."""
-    if role == "admin" and society_id is None:
+    if role == "master":
         return "/dashboard/master"
     paths = {
         "admin":     "/dashboard/admin-portal",
@@ -167,7 +167,7 @@ def register_login_callbacks(app):
 
         # Authenticate without a society_id
         user = authenticate_user(email.strip(), password, society_id=None)
-        if not user or user.get("role") != "admin":
+        if not user or user.get("role") != "master":
             return _login_error("Invalid master admin credentials")
 
         # Confirm the is_master_admin flag in the DB

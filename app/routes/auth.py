@@ -31,7 +31,7 @@ def generate_tokens(user_id, email, role):
 
 
 def _redirect_url(role, society_id):
-    if role == 'admin' and society_id is None:
+    if role == 'master':
         return '/dashboard/master'
     if role == 'admin':
         return '/dashboard/admin-portal'
@@ -109,7 +109,10 @@ def refresh_token():
         user = User.get(payload['user_id'])
         if not user:
             return jsonify({'success': False, 'message': 'User not found'}), 401
-        access_token, _ = generate_tokens(user.id, user.email, user.role)
+        role = user.role
+        if role == 'admin' and user.society_id is None:
+            role = 'master'
+        access_token, _ = generate_tokens(user.id, user.email, role)
         return jsonify({'success': True, 'access_token': access_token})
     except jwt.ExpiredSignatureError:
         return jsonify({'success': False, 'message': 'Refresh token expired'}), 401
