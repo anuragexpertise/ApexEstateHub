@@ -799,9 +799,8 @@ BEGIN
                 OLD.flat_number, v_outstanding
                 USING ERRCODE = 'check_violation';
         END IF;
-        NEW.updated_at := NOW();
-        NEW.updated_by := OLD.updated_by;
     END IF;
+    NEW.updated_at := NOW();
     RETURN NEW;
 END;
 $$;
@@ -1887,10 +1886,10 @@ BEGIN
 
     INSERT INTO assets(
         society_id, asset_name, asset_SNo, purchase_date, purchase_value,
-        acc_id, depreciation_rate, created_at
+        acc_id, depreciation_rate, created_at, created_by
     ) VALUES (
         p_society_id, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
-        p_acc_id, v_dep_rate, NOW()
+        p_acc_id, v_dep_rate, NOW(), p_created_by
     ) RETURNING id INTO v_asset_id;
 
     v_desc := COALESCE(p_particulars, 'Asset Purchase - ' || p_asset_name);
@@ -3985,4 +3984,15 @@ BEGIN
     RETURN v_count;
 END;
 $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- MIGRATION: add created_by columns missing from initial schema
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE apartments ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE events ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE concerns ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 
