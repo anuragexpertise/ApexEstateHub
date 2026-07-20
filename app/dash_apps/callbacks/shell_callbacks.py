@@ -56,7 +56,7 @@ def _make_nav_items(role, society_id, pathname):
     Build sidebar nav using dcc.Link — History API push, no page reload,
     all stores survive tab clicks, auth-store stays populated.
     """
-    is_master = role == "admin" and society_id is None
+    is_master = role == "master"
     key   = "master" if is_master else (role or "admin")
     cfg   = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
     color = cfg["color"]
@@ -172,7 +172,7 @@ def _portal_content(role, society_id, pathname):
         master_portal_page, admin_portal_page, owner_portal_page,
         vendor_portal_page, security_portal_page,
     )
-    is_master = role == "admin" and society_id is None
+    is_master = role == "master"
     p = pathname or ""
 
     if is_master:
@@ -492,7 +492,7 @@ def register_shell_callbacks(app):
             except Exception:
                 pass
 
-        is_master = role == "admin" and society_id is None
+        is_master = role == "master"
         key = "master" if is_master else (role or "admin")
         cfg = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
         portal_style = {

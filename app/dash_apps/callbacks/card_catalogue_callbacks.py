@@ -91,7 +91,7 @@ def register_card_catalogue_callbacks(app):
         # login_callbacks.py's _build_auth_store). Use this for any
         # gate_access-scoped KPI instead.
         own_user_id = auth_data.get("user_id")
-        is_master = role == "admin" and sid is None
+        is_master = role == "master"
 
         # ── Build portal-specific param resolver ──────────────────────────────
         # KPI queries always bind (society_id,) * n_params.

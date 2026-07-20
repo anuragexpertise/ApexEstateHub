@@ -132,7 +132,7 @@ def validate_qr_code(qr_data: str, society_id: int = None) -> dict:
             "flat_number": "",
         }
 
-        if role == "admin":
+        if role in ("admin", "master"):
             # Admin: always passes, no gate-pass evaluation needed.
             return {
                 "status": "PASS",

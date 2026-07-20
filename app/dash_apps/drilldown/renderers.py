@@ -1472,7 +1472,7 @@ def render_vendor_pass_card(
  
     color        = "#17976e"
     today        = _date.today().strftime("%Y-%m-%d")
-    action_label = "Sell Pass" if caller_role == "admin" else "Buy Pass"
+    action_label = "Sell Pass" if caller_role in ("admin", "master") else "Buy Pass"
     entity_name  = "vendor_pass"   # MUST match _resolve_entity_singular guard
  
     # ── Pass status banner ────────────────────────────────────────────────
