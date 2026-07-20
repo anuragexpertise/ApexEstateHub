@@ -94,6 +94,7 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
     return {}
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService
+from app.security.audit_context import get_current_user_id
 DB_ERROR_KEYWORDS = [
     "no database connection",
     "error in processing",
@@ -176,7 +177,11 @@ def _handle_list_delete(entity, pk, sid, store, auth):
 
 def _handle_list_confirm(entity, pk, sid, store, auth):
     try:
-        user_id = (auth or {}).get("user_id")
+        # SECURITY: confirmed_by must reflect who actually clicked Confirm on
+        # the server, not the client-editable auth-store — resolve from the
+        # Flask-Login session, falling back to auth-store only if no server
+        # session exists yet (see app/security/audit_context.py).
+        user_id = get_current_user_id() or (auth or {}).get("user_id")
         ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
     except Exception as e:
         ok, msg = False, f"Confirm error: {e}"
@@ -486,7 +491,7 @@ def register_drilldown_callbacks(app):
 
             # ── Verify receivable — server action only, no navigation ─────────────
             elif action == "verify_receivable":
-                user_id = (auth or {}).get("user_id")
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -516,7 +521,7 @@ def register_drilldown_callbacks(app):
                 hide_kpis = True
             # ── Verify receipt — 
             elif action == "verify_receipt":
-                user_id = (auth or {}).get("user_id")
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -527,7 +532,7 @@ def register_drilldown_callbacks(app):
 
             # ── Verify payment (admin only, from payables list) ───────────────────
             elif action == "verify_payment":
-                user_id = (auth or {}).get("user_id")
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -875,10 +880,21 @@ def register_drilldown_callbacks(app):
 
         merged["society_id"] = sid
         merged['caller_role']= (auth or {}).get("role", "admin")
-        # Always stamp user_id from auth — form fields never collect it,
-        # but _save_pay_dues / _save_vendor_pass / _save_asset_dispose need it
-        # as confirmed_by / created_by.
-        if not merged.get("user_id"):
+        # Always stamp user_id — form fields never collect it, but
+        # _save_pay_dues / _save_vendor_pass / _save_asset_dispose /
+        # _save_concern / receipts, etc. need it as confirmed_by /
+        # created_by / updated_by.
+        #
+        # SECURITY: auth-store is a browser dcc.Store and can be edited via
+        # devtools, so it must never be trusted for who-did-what. Prefer the
+        # server-side Flask-Login session (set at login) here; only fall
+        # back to the client-supplied auth value if no server session is
+        # present, so writes don't silently fail during rollout — but that
+        # fallback path is NOT audit-trustworthy.
+        _server_uid = get_current_user_id()
+        if _server_uid is not None:
+            merged["user_id"] = _server_uid
+        elif not merged.get("user_id"):
             merged["user_id"] = (auth or {}).get("user_id")
 
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
@@ -2503,6 +2519,9 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         vendor_user_id = auth.get("user_id")
         if vendor_user_id:
             f["vendor_id"] = vendor_user_id
+            # concerns.created_by is stamped with users.id regardless of
+            # role, so a vendor should only see concerns they raised.
+            f["concern_creator_id"] = vendor_user_id
     elif role == "security":
         # linked_id for security = security_staff.id
         # fn_security_list returns users.id as `id`
@@ -2514,4 +2533,5 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         sec_user_id = auth.get("user_id") or auth.get("id")
         if sec_user_id:
             f["user_id"] = sec_user_id
+            f["concern_creator_id"] = sec_user_id
     return f

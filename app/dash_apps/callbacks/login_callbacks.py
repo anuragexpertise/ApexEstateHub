@@ -19,6 +19,36 @@ def _db():
     return db
 
 
+def _establish_server_session(user: dict) -> None:
+    """
+    Log the user into the server-side Flask-Login session so that
+    `flask_login.current_user` is available on every subsequent Dash
+    callback request. This is what makes server-side audit resolution
+    (app/security/audit_context.py) possible — without it, `created_by` /
+    `updated_by` / `confirmed_by` have no trustworthy source and fall back
+    to the client-editable auth-store.
+
+    Never let a failure here block login — worst case the session isn't
+    established and audit writes fall back to the (untrusted) client value,
+    same as before this change.
+    """
+    try:
+        from flask_login import login_user
+        from app.models.user import User
+
+        uid = user.get("user_id") or user.get("id")
+        if not uid:
+            return
+        login_user(User(
+            user_id=uid,
+            email=user.get("email", ""),
+            role=user.get("role", "admin"),
+            society_id=user.get("society_id"),
+        ), remember=True)
+    except Exception as exc:
+        print(f"⚠️  Could not establish server-side session for user_id={user.get('user_id')}: {exc}")
+
+
 def _build_auth_store(user: dict) -> dict:
     return {
         "user_id":       user.get("user_id") or user.get("id"),
@@ -52,6 +82,7 @@ def _redirect(role: str, society_id) -> str:
 
 def _login_response(user: dict):
     """Tuple returned by every successful login callback."""
+    _establish_server_session(user)
     role       = user.get("role", "admin")
     society_id = user.get("society_id")
     name       = user.get("email", "").split("@")[0]

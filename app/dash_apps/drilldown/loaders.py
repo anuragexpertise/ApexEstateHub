@@ -443,6 +443,10 @@ def load_list(
                 if flat_no:
                     extra = " AND c.flat_no=%s"
                     params.append(flat_no)
+            creator_id = filters.get("concern_creator_id")
+            if creator_id:
+                extra += " AND c.created_by=%s"
+                params.append(creator_id)
             if s:
                 extra += " AND (c.flat_no ILIKE %s OR c.concern_type ILIKE %s)"
                 params += [f"%{s}%", f"%{s}%"]

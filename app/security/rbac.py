@@ -161,41 +161,41 @@ class RBACManager:
         First checks DB overrides, then DEFAULT_PERMISSIONS
         """
         try:
-            # 1. Check database for custom overrides
-            override = db._execute(
+            # A custom override for a (role, card_id) is authoritative for
+            # that card: if ANY row exists at a given scope, the permissions
+            # granted at that scope are the *complete* set for the card —
+            # defaults are not consulted — so an admin can revoke a default
+            # permission (e.g. remove "delete") and not just add new ones.
+            #
+            # Society-specific overrides take priority over global
+            # (society_id IS NULL) overrides, which take priority over the
+            # hardcoded DEFAULT_PERMISSIONS.
+            if society_id is not None:
+                specific_rows = db._execute(
+                    """SELECT permission FROM role_permissions
+                       WHERE society_id = %s AND role = %s AND card_id = %s""",
+                    (society_id, role, card_id),
+                    fetch_all=True,
+                )
+                if specific_rows:
+                    granted = {r["permission"] for r in specific_rows}
+                    return permission.value in granted
+
+            global_rows = db._execute(
                 """SELECT permission FROM role_permissions
-                   WHERE (society_id = %s OR society_id IS NULL)
-                   AND role = %s AND card_id = %s AND permission = %s
-                   ORDER BY society_id DESC LIMIT 1""",
-                (society_id, role, card_id, permission.value),
-                fetch_one=True
+                   WHERE society_id IS NULL AND role = %s AND card_id = %s""",
+                (role, card_id),
+                fetch_all=True,
             )
-            
-            if override:
-                return True
-            
-            # 2. Check if explicitly denied
-            denial = db._execute(
-                """SELECT 1 FROM role_permissions
-                   WHERE (society_id = %s OR society_id IS NULL)
-                   AND role = %s AND card_id = %s AND permission != %s
-                   AND card_id NOT IN (
-                       SELECT card_id FROM role_permissions 
-                       WHERE role = %s AND permission = %s
-                   )
-                   ORDER BY society_id DESC LIMIT 1""",
-                (society_id, role, card_id, permission.value, role, permission.value),
-                fetch_one=True
-            )
-            
-            if denial:
-                return False
-            
+            if global_rows:
+                granted = {r["permission"] for r in global_rows}
+                return permission.value in granted
+
         except Exception as e:
             # Database unavailable, fall back to defaults
             pass
         
-        # 3. Fall back to defaults (always executed)
+        # Fall back to hardcoded defaults (no override rows exist at all)
         permissions = RBACManager.DEFAULT_PERMISSIONS.get(role, {})
         card_perms = permissions.get(card_id, set())
         return permission in card_perms
