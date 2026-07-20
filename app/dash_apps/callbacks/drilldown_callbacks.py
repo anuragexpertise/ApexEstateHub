@@ -2137,9 +2137,34 @@ def _save_society(db, d, sid, is_edit, pk):
     return False, "New society creation handled elsewhere", None
 
 
+def _current_fy() -> int:
+    """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
+    fn_current_financial_year() in estatehub.sql — keep both in sync."""
+    today = date.today()
+    return today.year - 1 if today.month < 4 else today.year
+
+
+def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount):
+    """Manual admin edit via Settings -> Accounts always wins over an
+    auto-calculated year-end value — sets is_auto_calculated=FALSE so
+    fn_close_financial_year() won't clobber it on a future run."""
+    fy = _current_fy()
+    db._execute(
+        "INSERT INTO brought_forward "
+        "(society_id, financial_year, acc_id, drcr_bf, bf_amount, is_auto_calculated, created_at) "
+        "VALUES (%s,%s,%s,%s,%s,FALSE,NOW()) "
+        "ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE SET "
+        "drcr_bf=EXCLUDED.drcr_bf, bf_amount=EXCLUDED.bf_amount, "
+        "is_auto_calculated=FALSE, updated_at=NOW()",
+        (sid, fy, acc_id, drcr_bf, bf_amount),
+    )
+
+
 def _save_account(db, d, sid, is_edit, pk):
     if is_edit:
-        # Only bf_amount, depreciation_percent, is_depreciable are editable by admin
+        # bf_amount, depreciation_percent, is_depreciable are editable by
+        # admin. bf_amount now lives in brought_forward (FY-scoped), not
+        # accounts directly — accounts.bf_amount has been retired.
         bf_amount = d.get("bf_amount")
         dep_pct   = d.get("depreciation_percent")
         is_dep    = d.get("is_depreciable")
@@ -2148,17 +2173,28 @@ def _save_account(db, d, sid, is_edit, pk):
         if isinstance(is_dep, str):
             is_dep = is_dep.lower() == "true"
 
+        bf_val = float(bf_amount) if bf_amount not in (None, "") else 0
+
         db._execute(
             "UPDATE accounts SET "
-            "bf_amount=%s, depreciation_percent=%s, is_depreciable=%s "
+            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s "
             "WHERE id=%s AND society_id=%s",
             (
-                float(bf_amount) if bf_amount not in (None, "") else 0,
+                bf_val != 0,
                 float(dep_pct)   if dep_pct   not in (None, "") else 100,
                 bool(is_dep)     if is_dep is not None else False,
                 pk, sid,
             ),
         )
+
+        # drcr_bf isn't editable via this form — carry forward the
+        # account's existing value for the brought_forward row.
+        acc_row = db._execute(
+            "SELECT drcr_bf FROM accounts WHERE id=%s AND society_id=%s",
+            (pk, sid), fetch_one=True,
+        ) or {}
+        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val)
+
         return True, "Account updated", pk
 
     # New account
@@ -2174,6 +2210,7 @@ def _save_account(db, d, sid, is_edit, pk):
     dep_pct   = float(d.get("depreciation_percent") or 100)
     is_dep_raw = d.get("is_depreciable", "false")
     is_dep = str(is_dep_raw).lower() == "true" if is_dep_raw is not None else False
+    drcr_bf = "Cr" if drcr == "Cr" else "Dr"
 
     # ID: use next available integer (accounts.id is not serial in seeded DBs)
     max_r  = db._execute(
@@ -2185,20 +2222,21 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, bf_amount, depreciation_percent, is_depreciable"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, drcr_bf, depreciation_percent, is_depreciable"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
             d.get("header")   or None,
             drcr,
             bf_amount != 0,                      # has_bf
-            "Cr" if drcr == "Cr" else "Dr",      # drcr_bf mirrors drcr_account
-            bf_amount,
+            drcr_bf,                             # drcr_bf mirrors drcr_account
             dep_pct,
             is_dep,
         ),
     )
+    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount)
+
     return True, f"Account '{name}' created", next_id
 
 

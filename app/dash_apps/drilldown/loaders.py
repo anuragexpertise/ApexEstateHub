@@ -12,7 +12,7 @@ Entity map for load_list():
   gate_logs       → fn_gate_logs_named
   receipts        → fn_receipts_list
   expenses        → fn_expenses_list
-  cashbook        → fn_cashbook_paired
+  cashbook        → fn_cashbook_paired_v2 (Cash/Chq split, FY-scoped)
   receivables     → fn_receivables_named   (read-only, all portals)
   payables        → fn_payables_named      (read-only, all portals)
   assets          → fn_asset_list          (admin CRUD + view)
@@ -46,6 +46,18 @@ def _apt_id(f): return f.get("apartment_id")
 def _ven_id(f): return f.get("vendor_id")
 def _eid(f): return f.get("entity_id")
 def _sec_id(f): return f.get("security_id")
+
+
+def _current_fy() -> int:
+    """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
+    fn_current_financial_year() in estatehub.sql — keep both in sync."""
+    today = date.today()
+    return today.year - 1 if today.month < 4 else today.year
+
+
+def _fy_date_range(fy: int) -> tuple[date, date]:
+    """(start, end) dates for a given financial-year start year."""
+    return date(fy, 4, 1), date(fy + 1, 3, 31)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -216,8 +228,10 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_etype = (
             "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
         ) if not eid else None
-        return ("SELECT * FROM fn_cashbook_paired(%s,%s,%s,%s,NULL,NULL) LIMIT %s OFFSET %s",
-                (sid, p_eid, p_etype, s, page_size, offset))
+        fy = filters.get("financial_year", _current_fy())
+        fy_start, fy_end = _fy_date_range(fy)
+        return ("SELECT * FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset))
 
     # ── RECEIVABLES ─────────────────────────────────────────────────────
     if entity == "receivables":
@@ -253,13 +267,12 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     # ── LEDGER ─────────────────────────────────────────────────────────
     if entity == "ledger":
         p_account_id = filters.get("account_id")
-        p_start_date = filters.get("start_date")
-        p_end_date   = filters.get("end_date")
         if not p_account_id:
             raise ValueError("ledger requires account_id")
+        fy = filters.get("financial_year", _current_fy())
         return (
-            "SELECT * FROM fn_account_ledger(%s,%s,%s,%s) ORDER BY row_date, particulars",
-            (sid, p_account_id, p_start_date, p_end_date),
+            "SELECT * FROM fn_account_ledger_fy(%s,%s,%s) ORDER BY row_date, particulars",
+            (sid, p_account_id, fy),
         )
 
     # ── SOCIETIES ───────────────────────────────────────────────────────
@@ -564,13 +577,15 @@ def load_list(
             p_etype = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
             ) if not eid else None
+            fy = filters.get("financial_year", _current_fy())
+            fy_start, fy_end = _fy_date_range(fy)
             rows = db._execute(
-                "SELECT * FROM fn_cashbook_paired(%s,%s,%s,%s,NULL,NULL) LIMIT %s OFFSET %s",
-                (sid, p_eid, p_etype, s, page_size, offset), fetch_all=True,
+                "SELECT * FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_cashbook_paired(%s,%s,%s,NULL,NULL,NULL)",
-                (sid, p_eid, p_etype), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s)",
+                (sid, p_eid, p_etype, s, fy_start, fy_end), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
@@ -653,13 +668,12 @@ def load_list(
         # ── LEDGER ─────────────────────────────────────────────────────────
         if entity == "ledger":
             p_account_id = filters.get("account_id")
-            p_start_date = filters.get("start_date")
-            p_end_date   = filters.get("end_date")
             if not p_account_id:
                 raise ValueError("ledger requires account_id")
+            fy = filters.get("financial_year", _current_fy())
             rows = db._execute(
-                "SELECT * FROM fn_account_ledger(%s,%s,%s,%s) ORDER BY row_date, particulars",
-                (sid, p_account_id, p_start_date, p_end_date),
+                "SELECT * FROM fn_account_ledger_fy(%s,%s,%s) ORDER BY row_date, particulars",
+                (sid, p_account_id, fy),
                 fetch_all=True,
             ) or []
             return rows, len(rows)
