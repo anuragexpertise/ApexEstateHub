@@ -27,7 +27,7 @@ Row structure:
           J2='Asst.Yr.', K2=year_range, L2='Month', M2=month_abbrev
   Row 3: blank
   Row 4: Column headers
-  Row 5: B/F balance row (Balance B/F from accounts.bf_amount sum)
+  Row 5: B/F balance row (Balance B/F from brought_forward, Cash/Bank accounts, current FY)
   Row 6+: Data rows (receipt side / payment side, odd side left blank)
   Last:  C/F row (Balance C/F, closing cash → payment side)
 
@@ -143,13 +143,17 @@ def generate_cashbook_excel(
     calc_start   = soc.get("calc_start_date", date(year, 4, 1))
     asst_year    = f"{year}-{year+1}"
 
-    # ── 2. Opening balance = sum of all Cr BF − all Dr BF ────────────────
+    # ── 2. Opening balance = FY-start BF of Cash/Bank accounts only ───────
+    # (Capital Account and depreciable-asset BF must NOT be included here —
+    # a cashbook's B/F is physical cash + bank balances only.)
+    fy = year if month >= 4 else year - 1
     bf_row = db._execute(
-        "SELECT COALESCE(SUM(CASE WHEN drcr_bf='Cr' THEN bf_amount ELSE -bf_amount END),0) AS bf "
-        "FROM accounts WHERE society_id=%s AND has_bf=TRUE",
-        (society_id,), fetch_one=True,
+        "SELECT COALESCE(SUM(CASE WHEN bf.drcr_bf='Dr' THEN bf.bf_amount ELSE -bf.bf_amount END),0) AS bf "
+        "FROM accounts a JOIN brought_forward bf ON bf.acc_id=a.id AND bf.society_id=a.society_id "
+        "WHERE a.society_id=%s AND a.is_cash_or_bank=TRUE AND bf.financial_year=%s",
+        (society_id, fy), fetch_one=True,
     ) or {}
-    opening_balance = float(bf_row.get("bf", 0))
+    fy_opening_balance = float(bf_row.get("bf", 0))
 
     # ── 3. Pull cashbook data for the month ───────────────────────────────
     month_start = date(year, month, 1)
@@ -157,13 +161,20 @@ def generate_cashbook_excel(
         month_end = date(year + 1, 1, 1)
     else:
         month_end = date(year, month + 1, 1)
+    fy_start = date(fy, 4, 1)
 
-    # fn_cashbook_paired returns paired rows sorted by date
-    rows = db._execute(
-        "SELECT * FROM fn_cashbook_paired(%s, NULL, NULL, NULL, %s, %s)",
-        (society_id, month_start, month_end),
+    # Query from FY start through this month's end so running_balance is
+    # correct even for months after April — fn_cashbook_paired_v2's own
+    # opening balance is FY-start-scoped, so prior months in the same FY
+    # must be included to get the right running total for this month.
+    all_fy_rows = db._execute(
+        "SELECT * FROM fn_cashbook_paired_v2(%s, NULL, NULL, NULL, %s, %s) ORDER BY row_date",
+        (society_id, fy_start, date(month_end.year, month_end.month, 1)),
         fetch_all=True,
     ) or []
+    rows = [r for r in all_fy_rows if month_start <= r["row_date"] < month_end]
+    prior_rows = [r for r in all_fy_rows if r["row_date"] < month_start]
+    opening_balance = float(prior_rows[-1]["running_balance"]) if prior_rows else fy_opening_balance
 
     # ── 4. Build the workbook ─────────────────────────────────────────────
     wb = Workbook()
@@ -266,24 +277,20 @@ def generate_cashbook_excel(
         fill = _FILL_ALT if i % 2 == 0 else None
 
         # ── Receipt side (Cr) ─────────────────────────────────────────────
-        rc_date  = r.get("rc_trx_date")
+        rc_date  = r.get("row_date")
         rc_acc   = r.get("rc_account_name") or ""
         rc_part  = _particulars(r, "rc_")
-        rc_lf    = r.get("rc_id")             # cashbook row → ledger folio
-        rc_amt   = float(r.get("rc_amount") or 0)
-        rc_mode  = (r.get("rc_mode") or "cash").lower()
-        rc_cash  = rc_amt if rc_mode == "cash" else None
-        rc_chq   = rc_amt if rc_mode != "cash" else None
+        rc_lf    = r.get("rc_acc_id")          # ledger folio = accounts.id
+        rc_cash  = float(r.get("rc_cash") or 0) or None
+        rc_chq   = float(r.get("rc_chq") or 0) or None
 
         # ── Payment side (Dr) ─────────────────────────────────────────────
-        pc_date  = r.get("pc_trx_date")
+        pc_date  = r.get("row_date")
         pc_acc   = r.get("pc_account_name") or ""
         pc_part  = _particulars(r, "pc_")
-        pc_lf    = r.get("pc_id")
-        pc_amt   = float(r.get("pc_amount") or 0)
-        pc_mode  = (r.get("pc_mode") or "cash").lower()
-        pc_cash  = pc_amt if pc_mode == "cash" else None
-        pc_chq   = pc_amt if pc_mode != "cash" else None
+        pc_lf    = r.get("pc_acc_id")
+        pc_cash  = float(r.get("pc_cash") or 0) or None
+        pc_chq   = float(r.get("pc_chq") or 0) or None
 
         row_data = {
             1:  rc_date or None,

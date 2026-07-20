@@ -32,9 +32,11 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
             "drcr_account": str ('Dr' or 'Cr', required),
             "has_bf": bool (default=False),
             "drcr_bf": str ('Dr' or 'Cr'),
-            "bf_amount": Decimal,
             "depreciation_percent": Decimal
         }
+        Note: opening balances are no longer set here — use
+        set_brought_forward()-style logic against the brought_forward
+        table (FY-scoped) instead of an account-level "bf_amount".
     
     Returns:
         (success: bool, message: str, account_id: int)
@@ -78,14 +80,14 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
         depreciation_percent = data.get("depreciation_percent", 100)
         is_depreciable = depreciation_percent < 100
         
-        # Create account
+        # Create account (bf_amount removed — use brought_forward table)
         db._execute(
             """
             INSERT INTO accounts (
                 id, society_id, name, tab_name, header, parent_account_id,
-                drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent, is_depreciable
+                drcr_account, has_bf, drcr_bf, depreciation_percent, is_depreciable
             ) VALUES (:id, :society_id, :name, :tab_name, :header, :parent_account_id,
-                      :drcr_account, :has_bf, :drcr_bf, :bf_amount, :depreciation_percent, :is_depreciable)
+                      :drcr_account, :has_bf, :drcr_bf, :depreciation_percent, :is_depreciable)
             """,
             {
                 'id': account_id,
@@ -97,7 +99,6 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
                 'drcr_account': data["drcr_account"],
                 'has_bf': data.get("has_bf", False),
                 'drcr_bf': drcr_bf,
-                'bf_amount': data.get("bf_amount", 0),
                 'depreciation_percent': depreciation_percent,
                 'is_depreciable': is_depreciable
             }
@@ -124,8 +125,8 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
     try:
         allowed_fields = [
             "name", "tab_name", "header", "parent_account_id",
-            "drcr_account", "has_bf", "drcr_bf", 
-            "bf_amount", "depreciation_percent", "is_depreciable"
+            "drcr_account", "has_bf", "drcr_bf",
+            "depreciation_percent", "is_depreciable"
         ]
         
         updates = []
@@ -232,7 +233,7 @@ def list_accounts(society_id: int, filters: dict = None, page: int = 1, page_siz
             f"""
             SELECT 
                 id, name, tab_name, header, parent_account_id,
-                drcr_account, has_bf, drcr_bf, bf_amount, 
+                drcr_account, has_bf, drcr_bf,
                 depreciation_percent, created_at
             FROM accounts {where_sql}
             ORDER BY id
@@ -841,14 +842,21 @@ def get_ledger(society_id: int, account_id: int, start_date: date = None, end_da
         - closing_balance: Final balance (with Dr/Cr side)
     """
     try:
-        # Get account info
+        # Get account info + this-FY brought-forward amount (brought_forward
+        # replaced accounts.bf_amount — one row per account per FY)
         account = db._execute(
             """
-            SELECT id, name, drcr_account, has_bf, drcr_bf, bf_amount
-            FROM accounts 
-            WHERE id = :id AND society_id = :society_id
+            SELECT a.id, a.name, a.drcr_account, a.has_bf, a.drcr_bf,
+                   bf.bf_amount AS bf_amount
+            FROM accounts a
+            LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                AND bf.financial_year = (
+                    EXTRACT(YEAR FROM COALESCE(:as_of, CURRENT_DATE))::SMALLINT
+                    - CASE WHEN EXTRACT(MONTH FROM COALESCE(:as_of, CURRENT_DATE)) < 4 THEN 1 ELSE 0 END
+                )
+            WHERE a.id = :id AND a.society_id = :society_id
             """,
-            {'id': account_id, 'society_id': society_id},
+            {'id': account_id, 'society_id': society_id, 'as_of': start_date},
             fetch_one=True
         )
         
@@ -990,8 +998,17 @@ def get_account_balance(account_id: int, as_of_date: date = None) -> dict:
     """
     try:
         account = db._execute(
-            "SELECT drcr_account, has_bf, drcr_bf, bf_amount FROM accounts WHERE id = :id",
-            {'id': account_id},
+            """
+            SELECT a.drcr_account, a.has_bf, a.drcr_bf, bf.bf_amount AS bf_amount
+            FROM accounts a
+            LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                AND bf.financial_year = (
+                    EXTRACT(YEAR FROM COALESCE(:as_of, CURRENT_DATE))::SMALLINT
+                    - CASE WHEN EXTRACT(MONTH FROM COALESCE(:as_of, CURRENT_DATE)) < 4 THEN 1 ELSE 0 END
+                )
+            WHERE a.id = :id
+            """,
+            {'id': account_id, 'as_of': as_of_date},
             fetch_one=True
         )
         

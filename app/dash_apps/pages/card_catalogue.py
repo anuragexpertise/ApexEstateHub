@@ -217,8 +217,9 @@ KPI_CARDS = {
                 WHERE t.society_id=%s AND t.status='paid' AND a.drcr_account='Dr'
             ),
             bf AS (
-                SELECT COALESCE(SUM(CASE WHEN drcr_bf='Cr' THEN bf_amount ELSE -bf_amount END),0) AS amt
-                FROM accounts WHERE society_id=%s AND has_bf=TRUE
+                SELECT COALESCE(SUM(CASE WHEN bf.drcr_bf='Cr' THEN bf.bf_amount ELSE -bf.bf_amount END),0) AS amt
+                FROM accounts a JOIN brought_forward bf ON bf.acc_id=a.id AND bf.society_id=a.society_id
+                WHERE a.society_id=%s AND a.has_bf=TRUE AND bf.financial_year=fn_current_financial_year()
             )
             SELECT (bf.amt + cr.amt - dr.amt) AS v FROM cr, dr, bf
         """,

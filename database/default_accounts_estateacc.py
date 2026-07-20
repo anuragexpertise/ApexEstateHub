@@ -154,19 +154,21 @@ def create_default_accounts(db, society_id: int):
                 skipped_count += 1
                 continue
             
-            # Insert account
+            # Insert account. bf_amount is intentionally NOT inserted here —
+            # opening balances now live in the brought_forward table
+            # (per financial year), entered via Settings -> Accounts.
             db._execute(
                 """
                 INSERT INTO accounts(
                     id, society_id, name, tab_name, header, parent_account_id,
-                    drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent,
+                    drcr_account, has_bf, drcr_bf, depreciation_percent,
                     is_depreciable,
                     created_at
                 )
-                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 """,
                 (acc_id, society_id, name, tab, header, parent,
-                 drcr_ac, has_bf, drcr_bf, bf_amt, dep_pct, dep_pct < 100),
+                 drcr_ac, has_bf, drcr_bf, dep_pct, dep_pct < 100),
             )
             created_count += 1
             

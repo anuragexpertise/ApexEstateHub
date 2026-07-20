@@ -280,14 +280,17 @@ def seed_accounts(cur, conn, society_id: int) -> int:
             cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
             if cur.fetchone():
                 continue
+            # bf_amount is intentionally NOT inserted — opening balances now
+            # live in brought_forward (per FY), seeded separately by
+            # seed_brought_forward() below.
             cur.execute(
                 """INSERT INTO accounts
                    (id, society_id, name, tab_name, header, parent_account_id,
-                    drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent,
+                    drcr_account, has_bf, drcr_bf, depreciation_percent,
                     is_depreciable)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (aid, society_id, name, tab, header, parent,
-                 drcr, has_bf, drcr_bf, bf_amt, dep, dep < 100),
+                 drcr, has_bf, drcr_bf, dep, dep < 100),
             )
             conn.commit()
             created += 1
@@ -333,25 +336,31 @@ def seed_society(cur, conn) -> int:
 
 
 def set_opening_balances(cur, conn, society_id: int):
-    """req 7 — direct UPDATE accounts for BF amounts."""
+    """req 7 — flag which accounts take a brought-forward opening balance.
+
+    Does NOT write amounts here (accounts.bf_amount has been retired) —
+    actual FY-scoped amounts are seeded by seed_brought_forward() below.
+    This just sets has_bf/drcr_bf so these accounts show up in
+    Settings -> Accounts for BF entry, including Furniture (61), which
+    wasn't part of the multi-year brought_forward seed.
+    """
     updates = [
-        (633,  "Dr", BF_CASH_IN_HAND),
-        (6311, "Dr", BF_BANK),
-        (61,   "Dr", BF_FURNITURE),
-        (64,   "Dr", BF_INSTRUMENTS),
-        (2,    "Cr", BF_CAPITAL),
+        (633,  "Dr"),
+        (6311, "Dr"),
+        (61,   "Dr"),
+        (64,   "Dr"),
+        (2,    "Cr"),
     ]
-    for acc_id, drcr, amount in updates:
+    for acc_id, drcr in updates:
         cur.execute(
             """UPDATE accounts
-               SET has_bf = TRUE, drcr_bf = %s, bf_amount = %s
+               SET has_bf = TRUE, drcr_bf = %s
                WHERE id = %s AND society_id = %s""",
-            (drcr, amount, acc_id, society_id),
+            (drcr, acc_id, society_id),
         )
     conn.commit()
-    print(f"  ✓ Opening balances set — CIH {BF_CASH_IN_HAND}, Bank {BF_BANK}, "
-          f"Furniture {BF_FURNITURE}, Instruments {BF_INSTRUMENTS} (Dr) / "
-          f"Capital A/c {BF_CAPITAL} (Cr)")
+    print("  ✓ has_bf/drcr_bf flagged for CIH, Bank, Furniture, Instruments, Capital A/c "
+          "— actual amounts seeded per-FY by seed_brought_forward()")
 
 
 def seed_master_admin(cur, conn) -> int:
