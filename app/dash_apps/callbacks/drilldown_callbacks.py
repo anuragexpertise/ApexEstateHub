@@ -1865,7 +1865,8 @@ def _save_apartment(db, d, sid, is_edit, pk):
         r = db._execute(
             "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
             "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
-            "owner_photo=%s,id_proof=%s "
+            "owner_photo=COALESCE(NULLIF(%s, ''), owner_photo),"
+            "id_proof=COALESCE(NULLIF(%s, ''), id_proof) "
             "WHERE id=%s AND society_id=%s RETURNING id",
             (
                 d.get("owner_name"),
@@ -1910,7 +1911,9 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         )
         if role == "security":
             db._execute(
-                "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s,photo=%s,id_proof=%s "
+                "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s,"
+                "photo=COALESCE(NULLIF(%s, ''), photo),"
+                "id_proof=COALESCE(NULLIF(%s, ''), id_proof) "
                 "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
                  d.get("photo"), d.get("id_proof"), pk),
@@ -1918,7 +1921,9 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         elif role == "vendor":
             db._execute(
                 "UPDATE vendors v SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
-                "photo=%s,logo=%s,license=%s "
+                "photo=COALESCE(NULLIF(%s, ''), photo),"
+                "logo=COALESCE(NULLIF(%s, ''), logo),"
+                "license=COALESCE(NULLIF(%s, ''), license) "
                 "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
                  d.get("photo"), d.get("logo"), d.get("license"), pk),
@@ -2112,9 +2117,12 @@ def _save_society(db, d, sid, is_edit, pk):
                     tmp.rename(dst)
         db._execute(
             "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
-            "logo=%s,login_background=%s,secretary_sign=%s,"
+            "logo=COALESCE(NULLIF(%s, ''), logo),"
+            "login_background=COALESCE(NULLIF(%s, ''), login_background),"
+            "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
             "secretary_name=%s,secretary_phone=%s,"
-            "plan_validity=%s,calc_start_date=%s,PAN_number=%s,payment_qr=%s WHERE id=%s",
+            "plan_validity=%s,calc_start_date=%s,PAN_number=%s,"
+            "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) WHERE id=%s",
             (
                 d.get("name"),
                 d.get("email"),
