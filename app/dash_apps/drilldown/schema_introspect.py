@@ -329,6 +329,11 @@ def _pick_display_column(ref_table: str) -> str:
 
 
 def load_fk_options(ref_table: str) -> list[dict]:
+    # SECURITY: prevent SQL injection — only allow known entity tables.
+    _ALLOWED_TABLES = set(ENTITY_TABLE_MAP.values())
+    if ref_table not in _ALLOWED_TABLES:
+        print(f"⚠️  load_fk_options: blocked unexpected table '{ref_table}'")
+        return []
     display_col = _pick_display_column(ref_table)
     try:
         rows = db._execute(

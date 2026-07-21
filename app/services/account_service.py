@@ -10,6 +10,8 @@ from decimal import Decimal
 from database.db_manager import db
 import logging
 
+from app.security.audit_context import get_current_user_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,9 +156,11 @@ def update_account(account_id: int, society_id: int, data: dict) -> tuple[bool, 
         
         params['account_id'] = account_id
         params['society_id'] = society_id
-        
+        params['updated_by'] = get_current_user_id()
+
         db._execute(
-            f"UPDATE accounts SET {', '.join(updates)} WHERE id = :account_id AND society_id = :society_id",
+            f"UPDATE accounts SET {', '.join(updates)}, updated_by = :updated_by "
+            "WHERE id = :account_id AND society_id = :society_id",
             params
         )
         
@@ -551,9 +555,11 @@ def update_transaction(transaction_id: int, society_id: int, data: dict) -> tupl
         
         params['transaction_id'] = transaction_id
         params['society_id'] = society_id
+        params['updated_by'] = get_current_user_id()
         
         db._execute(
-            f"UPDATE transactions SET {', '.join(updates)} WHERE id = :transaction_id AND society_id = :society_id",
+            f"UPDATE transactions SET {', '.join(updates)}, updated_by = :updated_by "
+            "WHERE id = :transaction_id AND society_id = :society_id",
             params
         )
         

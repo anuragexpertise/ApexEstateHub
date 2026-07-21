@@ -4009,3 +4009,19 @@ $$;
 -- renaming has no functional upside and meaningful regression risk.
 COMMENT ON COLUMN receipts.user_id IS
     'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- MIGRATION: add created_by columns missing from initial schema
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE security_roster ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE receivables ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE payables ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE vendor_passes ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE ven_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);

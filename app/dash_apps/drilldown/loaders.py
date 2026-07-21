@@ -250,6 +250,11 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_etype = filters.get("role") or (
             "vendor" if ven_id else "security" if sec_id else None
         )
+        # Defense-in-depth: if no entity scoping is present (e.g. apartment
+        # role somehow reached payables), return empty result rather than
+        # leaking all society payables.
+        if not p_eid and not p_etype:
+            return "SELECT 1 WHERE FALSE", ()
         return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_status, p_etype, p_eid, page_size, offset))
 
@@ -1106,27 +1111,29 @@ def check_noc_eligibility(apartment_id: int) -> dict:
 
 def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
     try:
+        from app.security.audit_context import get_current_user_id
+        _upd_by = get_current_user_id()
         if entity_plural == "apartments":
             # Trigger will block if outstanding dues > 0
             db._execute(
-                "UPDATE apartments SET active=FALSE WHERE id=%s AND society_id=%s",
-                (pk, society_id),
+                "UPDATE apartments SET active=FALSE, updated_by=%s WHERE id=%s AND society_id=%s",
+                (_upd_by, pk, society_id),
             )
             return True, "Apartment deactivated"
 
         if entity_plural == "vendors":
             db._execute(
-                "UPDATE vendors v SET active=FALSE FROM users u "
+                "UPDATE vendors v SET active=FALSE, updated_by=%s FROM users u "
                 "WHERE v.id=u.linked_id AND u.id=%s AND u.society_id=%s",
-                (pk, society_id),
+                (_upd_by, pk, society_id),
             )
             return True, "Vendor deactivated"
 
         if entity_plural == "security":
             db._execute(
-                "UPDATE security_staff s SET active=FALSE FROM users u "
+                "UPDATE security_staff s SET active=FALSE, updated_by=%s FROM users u "
                 "WHERE s.id=u.linked_id AND u.id=%s AND u.society_id=%s",
-                (pk, society_id),
+                (_upd_by, pk, society_id),
             )
             return True, "Security staff deactivated"
 
@@ -1136,38 +1143,38 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 
         if entity_plural == "concerns":
             db._execute(
-                "UPDATE concerns SET status='closed' WHERE id=%s AND society_id=%s",
-                (pk, society_id),
+                "UPDATE concerns SET status='closed', updated_by=%s WHERE id=%s AND society_id=%s",
+                (_upd_by, pk, society_id),
             )
             return True, "Concern closed"
 
         if entity_plural == "receipts":
             db._execute(
-                "UPDATE receipts SET status='cancelled' WHERE id=%s AND society_id=%s",
-                (pk, society_id),
+                "UPDATE receipts SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
+                (_upd_by, pk, society_id),
             )
             return True, "Receipt cancelled"
 
         if entity_plural == "expenses":
             db._execute(
-                "UPDATE expenses SET status='cancelled' WHERE id=%s AND society_id=%s",
-                (pk, society_id),
+                "UPDATE expenses SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
+                (_upd_by, pk, society_id),
             )
             return True, "Expense cancelled"
 
         if entity_plural == "receivables":
             db._execute(
-                "UPDATE receivables SET status='cancelled' WHERE id=%s AND society_id=%s",
-                (pk, society_id),
+                "UPDATE receivables SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
+                (_upd_by, pk, society_id),
             )
             return True, "Receivable cancelled"
 
         if entity_plural == "payables":
             # Only pending payables can be cancelled; verified ones are locked in transactions
             db._execute(
-                "UPDATE payables SET status='cancelled' "
+                "UPDATE payables SET status='cancelled', updated_by=%s "
                 "WHERE id=%s AND society_id=%s AND status='pending'",
-                (pk, society_id),
+                (_upd_by, pk, society_id),
             )
             return True, "Payment cancelled (if it was still pending)"
 
@@ -1175,7 +1182,7 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
             # Hard-delete only if not yet disposed and has no linked transactions
             trx_count = db._execute(
                 "SELECT COUNT(*) AS n FROM transactions WHERE source_table='expenses' AND entity_id=%s",
-                (pk,), fetch_one=True,
+                (pk,), fetch_one=True
             )
             if (trx_count or {}).get("n", 0) > 0:
                 return False, "Cannot delete asset with existing transactions"
@@ -1196,7 +1203,8 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 
         if entity_plural == "societies":
             db._execute(
-                "UPDATE societies SET plan_validity=CURRENT_DATE-1 WHERE id=%s", (pk,)
+                "UPDATE societies SET plan_validity=CURRENT_DATE-1, updated_by=%s WHERE id=%s",
+                (_upd_by, pk,)
             )
             return True, "Society plan expired"
 
@@ -1259,6 +1267,8 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
                 by this row directly.
     """
     try:
+        from app.security.audit_context import get_current_user_id
+        _upd_by = get_current_user_id()
         open_row = db._execute(
             "SELECT id FROM gate_access "
             "WHERE entity_id=%s AND role='s' AND time_out IS NULL AND society_id=%s "
@@ -1267,15 +1277,15 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
         )
         if open_row:
             db._execute(
-                "UPDATE gate_access SET time_out=NOW() WHERE id=%s",
-                (open_row["id"],),
+                "UPDATE gate_access SET time_out=NOW(), updated_by=%s WHERE id=%s",
+                (_upd_by, open_row["id"],),
             )
             return True, "Shift ended — marked OFF duty"
         else:
             db._execute(
-                "INSERT INTO gate_access(society_id, entity_id, role, time_in) "
-                "VALUES(%s,%s,'s',NOW())",
-                (society_id, user_id),
+                "INSERT INTO gate_access(society_id, entity_id, role, time_in, created_by) "
+                "VALUES(%s,%s,'s',NOW(),%s)",
+                (society_id, user_id, _upd_by),
             )
             return True, "Marked ON duty — shift started"
     except Exception as e:
