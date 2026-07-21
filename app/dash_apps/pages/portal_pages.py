@@ -406,7 +406,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
         return html.Div([
             _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
             _kpi_row_dynamic(
-                "owner", "receipts", sid,
+                "owner", "owner_receipts", sid,
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),

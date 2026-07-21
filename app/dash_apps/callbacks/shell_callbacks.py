@@ -202,7 +202,7 @@ def _portal_content(role, society_id, pathname):
         tab = (
             "financials" if "/owner-financials" in p else
             "receivables" if "/owner-receivables" in p else
-            "receipts" if "/owner-receipts" in p else
+            "owner_receipts" if "/owner-receipts" in p else
             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
             "charges"  if "/owner-charges"  in p else
             "events"   if "/owner-events"   in p or "/events"   in p else

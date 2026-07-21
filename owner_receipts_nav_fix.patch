@@ -1,0 +1,38 @@
+diff --git a/app/dash_apps/app_shell.py b/app/dash_apps/app_shell.py
+index 433b505..e224775 100644
+--- a/app/dash_apps/app_shell.py
++++ b/app/dash_apps/app_shell.py
+@@ -35,6 +35,7 @@ ROLE_CONFIG = {
+         "tabs": [
+             {"label": "Dashboard",   "href": "/dashboard/owner-portal",    "icon": "fa-th-large"},
+             {"label": "Financials",  "href": "/dashboard/owner-financials", "icon": "fa-book"},
++            {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},
+             {"label": "Events",      "href": "/dashboard/owner-events",     "icon": "fa-calendar-alt"},
+             {"label": "Concerns",    "href": "/dashboard/owner-concerns",   "icon": "fa-hand-point-up"},
+             {"label": "Settings",    "href": "/dashboard/owner-settings",   "icon": "fa-cog"},
+diff --git a/app/dash_apps/callbacks/shell_callbacks.py b/app/dash_apps/callbacks/shell_callbacks.py
+index 783eef1..f92357f 100644
+--- a/app/dash_apps/callbacks/shell_callbacks.py
++++ b/app/dash_apps/callbacks/shell_callbacks.py
+@@ -202,7 +202,7 @@ def _portal_content(role, society_id, pathname):
+         tab = (
+             "financials" if "/owner-financials" in p else
+             "receivables" if "/owner-receivables" in p else
+-            "receipts" if "/owner-receipts" in p else
++            "owner_receipts" if "/owner-receipts" in p else
+             "cashbook" if "/owner-cashbook" in p or "/cashbook" in p else
+             "charges"  if "/owner-charges"  in p else
+             "events"   if "/owner-events"   in p or "/events"   in p else
+diff --git a/app/dash_apps/pages/portal_pages.py b/app/dash_apps/pages/portal_pages.py
+index b5649bb..52302b2 100644
+--- a/app/dash_apps/pages/portal_pages.py
++++ b/app/dash_apps/pages/portal_pages.py
+@@ -406,7 +406,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
+         return html.Div([
+             _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
+             _kpi_row_dynamic(
+-                "owner", "receipts", sid,
++                "owner", "owner_receipts", sid,
+                 cols=KPI_GRID_COLS,
+             ),
+             _divider(), _drill_panel(),
