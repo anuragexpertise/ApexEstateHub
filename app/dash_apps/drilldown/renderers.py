@@ -55,7 +55,10 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("master", "*"):           {"view"},
 
     # ── APARTMENT: view own data only, can raise concern / pay ────────────
-    ("apartment", "apartments"):  {"view"},
+    # "edit" here is self-service profile editing (e.g. mobile number via
+    # Settings) — FIELD_VISIBILITY still restricts *which* columns a form
+    # exposes to this role, this only grants the action itself.
+    ("apartment", "apartments"):  {"view", "edit"},
     ("apartment", "concerns"):    {"view", "new"},
     ("apartment", "events"):      {"view"},
     ("apartment", "gate_logs"):   {"view"},
@@ -67,7 +70,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
-    ("vendor", "vendors"):        {"view"},
+    # "edit" here is self-service profile editing, same rationale as above.
+    ("vendor", "vendors"):        {"view", "edit"},
     ("vendor", "events"):         {"view"},
     ("vendor", "concerns"):       {"view"},
     ("vendor", "gate_logs"):      {"view"},
@@ -81,7 +85,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # ── SECURITY: view most lists + can create receipts ───────────────────
     ("security", "apartments"):   {"view"},
     ("security", "vendors"):      {"view"},
-    ("security", "security"):     {"view"},
+    # "edit" here is self-service profile editing, same rationale as above.
+    ("security", "security"):     {"view", "edit"},
     ("security", "events"):       {"view"},
     ("security", "concerns"):     {"view"},
     ("security", "gate_logs"):    {"view"},

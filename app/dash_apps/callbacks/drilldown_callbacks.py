@@ -784,6 +784,40 @@ def register_drilldown_callbacks(app):
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
         card_id=id_dict.get("card_id","")
+
+        # ── SECURITY (Phase 4 #15) ──────────────────────────────────────────
+        # _PORTAL_PERMS / PROFILE_ACTIONS "roles" lists previously only
+        # controlled whether a New/Edit button was *shown* in the UI — this
+        # save callback never re-checked permission itself, so a crafted
+        # request hitting it directly (e.g. a raw POST replaying this
+        # callback's payload) could write regardless of role, even with no
+        # button ever rendered. Gate the actual write here.
+        #
+        # A few pseudo-entities (pay_dues, vendor_pass, asset_dispose) are
+        # hand-built forms with no schema-driven _PORTAL_PERMS entry — their
+        # access is defined by PROFILE_ACTIONS' "roles" list instead, so
+        # they're checked against that same list here rather than against
+        # _PORTAL_PERMS (which would otherwise deny them for everyone but
+        # admin, breaking e.g. a vendor buying their own pass).
+        _SPECIAL_ENTITY_ROLES = {
+            "pay_due": {"admin"}, "pay_dues": {"admin"},
+            "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
+            "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
+        }
+        _actor_role = (auth or {}).get("role", "admin")
+        if entity_singular in _SPECIAL_ENTITY_ROLES:
+            _write_allowed = _actor_role in _SPECIAL_ENTITY_ROLES[entity_singular]
+        else:
+            _required_action = "edit" if "edit" in card_id else "new"
+            _write_allowed = _required_action in renderers._perms_for(_actor_role, to_plural(entity_singular))
+        if not _write_allowed:
+            return (
+                store,
+                no_update,
+                no_update,
+                {"type": "error", "message": "You don't have permission to do that."},
+                no_update,
+            )
         
 
         # ── 1. Collect form-field values for THIS entity only ────────────────
@@ -1502,6 +1536,42 @@ def _save_entity(entity, card_id, data):
 # 2.  NEW: Receipt save using fn_save_receipt
 # ════════════════════════════════════════════════════════════════════════════
 
+def _notify_receipt_saved(db, sid, d, amt, particulars, use_pending):
+    """
+    Shared post-save notification for both fn_save_receipt and
+    fn_save_receipt_pending paths — was previously duplicated in each
+    branch, which is how the vendor-payer gap (item 3.3 / #14) went
+    unnoticed: the apartment lookup existed in both copies, but neither
+    had the equivalent vendor lookup, so a vendor-role receipt (e.g.
+    security recording a vendor's pass payment) never notified the vendor
+    at all, only admins.
+    """
+    try:
+        entity_id = d.get("entity_id")
+        role      = d.get("role")
+        payer_user_id = None
+        if entity_id and role == "apartment":
+            payer_user = db._execute(
+                "SELECT u.id AS user_id FROM users u "
+                "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='apartment'",
+                (entity_id, sid), fetch_one=True,
+            )
+            payer_user_id = (payer_user or {}).get("user_id")
+        elif entity_id and role == "vendor":
+            payer_user = db._execute(
+                "SELECT u.id AS user_id FROM users u "
+                "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='vendor'",
+                (entity_id, sid), fetch_one=True,
+            )
+            payer_user_id = (payer_user or {}).get("user_id")
+        if payer_user_id:
+            PushService.notify_payment_received(payer_user_id, amt, particulars)
+        if use_pending:
+            PushService.notify_admin_payment_recorded(sid, amt, particulars, exclude_user_id=d.get("user_id"))
+    except Exception as e:
+        print(f"⚠️  payment push notify failed: {e}")
+
+
 def _save_receipt_v3(db, d, sid):
     amt = d.get("amount")
     if not amt:
@@ -1553,22 +1623,8 @@ def _save_receipt_v3(db, d, sid):
                 ),
                 fetch_one=True,
             )
-                        # NEW: notify payer + (if security-recorded) admins
-            try:
-                entity_id = d.get("entity_id")
-                role      = d.get("role")
-                if entity_id and role == "apartment":
-                    payer_user = db._execute(
-                        "SELECT u.id AS user_id FROM users u "
-                        "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='apartment'",
-                        (entity_id, sid), fetch_one=True,
-                    )
-                    if payer_user:
-                        PushService.notify_payment_received(payer_user["user_id"], amt, particulars)
-                if use_pending:
-                    PushService.notify_admin_payment_recorded(sid, amt, particulars, exclude_user_id=d.get("user_id"))
-            except Exception as e:
-                print(f"⚠️  payment push notify failed: {e}")
+            receipt_id = (r or {}).get("receipt_id")
+            _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=True)
             return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
         else:
             r = db._execute(
@@ -1589,21 +1645,8 @@ def _save_receipt_v3(db, d, sid):
                 fetch_one=True,
             )
             receipt_id = (r or {}).get("receipt_id")
-            # NEW: notify payer + (if security-recorded) admins
-            try:
-                entity_id = d.get("entity_id")
-                role      = d.get("role")
-                if entity_id and role == "apartment":
-                    payer_user = db._execute(
-                        "SELECT u.id AS user_id FROM users u "
-                        "WHERE u.linked_id = %s AND u.society_id = %s AND u.role='apartment'",
-                        (entity_id, sid), fetch_one=True,
-                    )
-                    if payer_user:
-                        PushService.notify_payment_received(payer_user["user_id"], amt, particulars)
-            except Exception as e:
-                print(f"⚠️  payment push notify failed: {e}")
-            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
+            _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=False)
+            return True, f"Receipt of ₹{amt:,.2f} saved and confirmed", receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -2526,8 +2569,11 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if apt_id:
             f["apartment_id"] = apt_id
     elif role == "vendor":
-        # linked_id for vendor = vendors.id (NOT users.id)
-        # load_list "vendors" uses users.id — so vendor_id filter = users.id
+        # A vendor's `linked_id` (auth.linked_id) points at vendors.id, but
+        # fn_vendors_list returns users.id as its `id` column, and that's
+        # what vendor-scoped list/receipt/payable queries filter against.
+        # So the correct scoping value here is auth.user_id, NOT linked_id
+        # — confirmed against fn_vendors_list's actual return columns.
         vendor_user_id = auth.get("user_id")
         if vendor_user_id:
             f["vendor_id"] = vendor_user_id
