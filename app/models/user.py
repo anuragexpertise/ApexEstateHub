@@ -50,14 +50,14 @@ class User(UserMixin):
 
 
     @staticmethod
-    def create(email, password_hash, role, society_id=None, name=None, phone=None):
+    def create(email, password_hash, role, society_id=None, name=None, phone=None, created_by=None):
         """Create a new user"""
         try:
             result = db._execute(
-                """INSERT INTO users (email, password_hash, role, society_id, name, login_method)
-                   VALUES (%s, %s, %s, %s, %s, 'password')
+                """INSERT INTO users (email, password_hash, role, society_id, name, login_method, created_by)
+                   VALUES (%s, %s, %s, %s, %s, 'password', %s)
                    RETURNING id""",
-                (email, password_hash, role, society_id, name), fetch_one=True
+                (email, password_hash, role, society_id, name, created_by), fetch_one=True
             )
             if result:
                 return User.get(result['id'])

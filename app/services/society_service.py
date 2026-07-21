@@ -71,16 +71,17 @@ def create_society(data: dict) -> int | None:
         return None
 
 
-def create_society_admin(society_id: int, email: str, password: str) -> int | None:
+def create_society_admin(society_id: int, email: str, password: str, created_by=None) -> int | None:
     try:
         result = db._execute(
             """INSERT INTO users
-               (society_id,email,password_hash,role,login_method)
-               VALUES (:sid,:email,:ph,'admin','password')
+               (society_id,email,password_hash,role,login_method,created_by)
+               VALUES (:sid,:email,:ph,'admin','password',:created_by)
                ON CONFLICT (email) DO NOTHING
                RETURNING id""",
             {"sid": society_id, "email": email,
-             "ph": generate_password_hash(password)},
+             "ph": generate_password_hash(password),
+             "created_by": created_by},
             fetch_one=True,
         )
         return result["id"] if result else None

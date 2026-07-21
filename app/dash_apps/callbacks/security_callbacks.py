@@ -72,9 +72,9 @@ def register_security_callbacks(app):
                 return no_update, {"type": "error", "message": "Already clocked in — clock out first"}
 
             db._execute(
-                """INSERT INTO gate_access (society_id, role, entity_id, time_in)
-                   VALUES (%s, 's', %s, NOW())""",
-                (society_id, user_id)
+                """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
+                   VALUES (%s, 's', %s, NOW(), %s)""",
+                (society_id, user_id, user_id)
             )
             return html.Div([
                 html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#2ecc71"}),
@@ -84,7 +84,7 @@ def register_security_callbacks(app):
 
         else:
             updated = db._execute(
-                """UPDATE gate_access SET time_out = NOW()
+                """UPDATE gate_access SET time_out = NOW(), updated_by = %s
                    WHERE id = (
                        SELECT id FROM gate_access
                        WHERE society_id = %s AND entity_id = %s AND role = 's'
@@ -92,7 +92,7 @@ def register_security_callbacks(app):
                        ORDER BY time_in DESC LIMIT 1
                    )
                    RETURNING id""",
-                (society_id, user_id), fetch_one=True
+                (user_id, society_id, user_id), fetch_one=True
             )
             if not updated:
                 return no_update, {"type": "error", "message": "You're not clocked in"}

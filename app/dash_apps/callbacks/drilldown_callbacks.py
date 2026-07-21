@@ -136,6 +136,27 @@ from app.dash_apps.drilldown.schema_introspect import (
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SERVER-SIDE PERMISSION GUARDS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _is_admin(auth: dict | None) -> bool:
+    """Return True only for society-level admins. Master admins (role='master')
+    are NOT society admins and must not perform society-specific actions like
+    verifying receipts/payables or deleting society data.
+    
+    SECURITY: Never trust client-side auth-store for role checks. Resolve
+    from Flask-Login session first."""
+    server_role = get_current_user_role()
+    if server_role is not None:
+        return server_role == "admin"
+    return (auth or {}).get("role", "") == "admin"
+
+def _require_admin(auth: dict | None) -> bool:
+    """Server-side guard: returns True if caller is a society admin.
+    Callers should use this before executing admin-only actions."""
+    return _is_admin(auth)
+
+# ═══════════════════════════════════════════════════════════════════════════
 # REGISTER ALL DRILLDOWN CALLBACKS (ENHANCED)
 # ═══════════════════════════════════════════════════════════════════════════
 def _resolve_entity_singular(id_dict):
@@ -148,6 +169,15 @@ def _resolve_entity_singular(id_dict):
     return to_singular(raw)
 
 def _handle_list_delete(entity, pk, sid, store, auth):
+    if not _require_admin(auth):
+        store["refresh"] = False
+        return (
+            store,
+            html.Div("", style={"display": "none"}),
+            [],
+            {"display": "none"},
+            {"_toast": {"type": "error", "message": "Only society admin can delete"}},
+        )
     try:
         ok, msg = loaders.delete_entity(entity, pk, sid)
     except Exception as e:
@@ -176,6 +206,15 @@ def _handle_list_delete(entity, pk, sid, store, auth):
     )
 
 def _handle_list_confirm(entity, pk, sid, store, auth):
+    if not _require_admin(auth):
+        store["refresh"] = False
+        return (
+            store,
+            html.Div("", style={"display": "none"}),
+            [],
+            {"display": "none"},
+            {"_toast": {"type": "error", "message": "Only society admin can confirm"}},
+        )
     try:
         # SECURITY: confirmed_by must reflect who actually clicked Confirm on
         # the server, not the client-editable auth-store — resolve from the
@@ -491,6 +530,9 @@ def register_drilldown_callbacks(app):
 
             # ── Verify receivable — server action only, no navigation ─────────────
             elif action == "verify_receivable":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
+                    return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -521,6 +563,9 @@ def register_drilldown_callbacks(app):
                 hide_kpis = True
             # ── Verify receipt — 
             elif action == "verify_receipt":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can confirm"}}
+                    return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
                 store["refresh"] = True
@@ -532,6 +577,9 @@ def register_drilldown_callbacks(app):
 
             # ── Verify payment (admin only, from payables list) ───────────────────
             elif action == "verify_payment":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
+                    return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() or (auth or {}).get("user_id")
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
@@ -1166,6 +1214,18 @@ def _build_filter_options(rows, columns) -> dict:
 def _render_card(
     card_id: str, filters: dict, prefill: dict, store: dict, auth: dict
 ) -> html.Div:
+
+    # ── SOCIETIES LIST: master admin only ────────────────────────────────
+    # Master has no society_id and should be the ONLY role that can view
+    # the societies list. All other roles (admin, apartment, vendor,
+    # security) must be blocked — a non-master navigating to societies
+    # would otherwise see every society in the database.
+    if card_id.startswith("list_societies"):
+        if (auth or {}).get("role") != "master":
+            return html.Div(
+                "Access denied — only master admin can view societies",
+                style={"color": "#de5c52", "padding": "20px"},
+            )
 
     # ── list ─────────────────────────────────────────────────────────────────
     if card_id.startswith("list_"):
@@ -2046,26 +2106,26 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     if role == "vendor" and not (d.get("business_name") or "").strip():
         return False, "Business Name is required", None
     ur = db._execute(
-        "INSERT INTO users(society_id,email,password_hash,role,login_method) "
-        "VALUES(%s,%s,%s,%s,'password') RETURNING id",
-        (sid, email, generate_password_hash(pw), role), fetch_one=True,
+        "INSERT INTO users(society_id,email,password_hash,role,login_method,created_by) "
+        "VALUES(%s,%s,%s,%s,'password',%s) RETURNING id",
+        (sid, email, generate_password_hash(pw), role, d.get("user_id")), fetch_one=True,
     )
     user_id = ur["id"]
     if role == "vendor":
         vr = db._execute(
-            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
             (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
-             d.get("photo"), d.get("logo"), d.get("license")), fetch_one=True,
+             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id")), fetch_one=True,
         )
         db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (vr["id"], user_id))
         linked_id = vr["id"]
     else:
         sr = db._execute(
-            "INSERT INTO security_staff(society_id,name,mobile,shift,photo,id_proof,active) "
-            "VALUES(%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            "INSERT INTO security_staff(society_id,name,mobile,shift,photo,id_proof,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
             (sid, d.get("name"), d.get("mobile"), d.get("shift"),
-             d.get("photo"), d.get("id_proof")), fetch_one=True,
+             d.get("photo"), d.get("id_proof"), d.get("user_id")), fetch_one=True,
         )
         db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (sr["id"], user_id))
         linked_id = sr["id"]
@@ -2295,12 +2355,12 @@ def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount, user_id=None):
     fy = _current_fy()
     db._execute(
         "INSERT INTO brought_forward "
-        "(society_id, financial_year, acc_id, drcr_bf, bf_amount, is_auto_calculated, created_at) "
-        "VALUES (%s,%s,%s,%s,%s,FALSE,NOW()) "
+        "(society_id, financial_year, acc_id, drcr_bf, bf_amount, is_auto_calculated, created_at, created_by) "
+        "VALUES (%s,%s,%s,%s,%s,FALSE,NOW(),%s) "
         "ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE SET "
         "drcr_bf=EXCLUDED.drcr_bf, bf_amount=EXCLUDED.bf_amount, "
         "is_auto_calculated=FALSE, updated_at=NOW(), updated_by=%s",
-        (sid, fy, acc_id, drcr_bf, bf_amount, user_id),
+        (sid, fy, acc_id, drcr_bf, bf_amount, user_id, user_id),
     )
 
 
@@ -2367,8 +2427,8 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, depreciation_percent, is_depreciable"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, drcr_bf, depreciation_percent, is_depreciable, created_by"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
@@ -2378,9 +2438,10 @@ def _save_account(db, d, sid, is_edit, pk):
             drcr_bf,                             # drcr_bf mirrors drcr_account
             dep_pct,
             is_dep,
+            d.get("user_id"),
         ),
     )
-    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount)
+    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount, d.get("user_id"))
 
     return True, f"Account '{name}' created", next_id
 
@@ -2431,8 +2492,8 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
 
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
-        " apt_maintenance_rate, apt_due_day, apt_interest_pct, apt_status)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        " apt_maintenance_rate, apt_due_day, apt_interest_pct, apt_status, created_by)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
         (
             sid,
             apt_id,
@@ -2441,6 +2502,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             rate,
             due_day,
             interest_pct,
+            d.get("user_id"),
         ),
         fetch_one=True,
     )
@@ -2491,9 +2553,9 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         return False, "Invalid numeric value", None
     r = db._execute(
         "INSERT INTO ven_charges_fines_basis(society_id, ven_id, start_date, end_date,"
-        " vendor_1day, vendor_7day, vendor_1mth, ven_status)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth),
+        " vendor_1day, vendor_7day, vendor_1mth, ven_status, created_by)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, d.get("user_id")),
         fetch_one=True,
     )
     return (
