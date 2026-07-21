@@ -1319,10 +1319,16 @@ def render_payment_qr_widget(society_id, label: str = "Scan to pay the society")
                 "fontSize": "12px", "fontWeight": "700", "color": "#15304f",
                 "textAlign": "center", "marginBottom": "8px",
             }),
-            html.Img(src=qr_url, style={
-                "display": "block", "margin": "0 auto 14px", "maxWidth": "180px",
-                "borderRadius": "10px", "border": "1px solid #e2e8f0",
-            }),
+            html.Img(
+                src=qr_url,
+                alt="Payment QR",
+                style={
+                    "display": "block", "margin": "0 auto 14px", "maxWidth": "180px",
+                    "minHeight": "120px", "borderRadius": "10px",
+                    "border": "1px solid #e2e8f0", "background": "#f4f6f9",
+                    "objectFit": "contain",
+                },
+            ),
         ], style={"flex": "0 0 auto", "maxWidth": "220px", "float": "right"})
     except Exception as e:
         print(f"render_payment_qr_widget error: {e}")

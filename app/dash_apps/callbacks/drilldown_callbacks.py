@@ -2268,6 +2268,7 @@ def _save_society(db, d, sid, is_edit, pk):
     if is_edit:
         society_dir = Path("app/assets") / str(pk)
         society_dir.mkdir(parents=True, exist_ok=True)
+        _missing_files = []
         for field in ["logo", "login_background", "secretary_sign", "payment_qr"]:
             filename = d.get(field)
             if (
@@ -2277,11 +2278,24 @@ def _save_society(db, d, sid, is_edit, pk):
                 and "." in filename
             ):
                 tmp = Path("app/assets/default/society") / filename
+                dst = society_dir / filename
                 if tmp.exists():
-                    dst = society_dir / filename
                     if dst.exists():
                         dst.unlink()
                     tmp.rename(dst)
+                elif not dst.exists():
+                    # Neither the freshly-uploaded temp file nor an
+                    # already-placed file exists at this filename — writing
+                    # it to the DB would leave this field pointing at a
+                    # 404 (this is exactly how payment_qr went stale before).
+                    # Drop it so COALESCE(NULLIF(...)) below keeps whatever
+                    # was there previously, and surface a toast instead of
+                    # silently saving a broken image reference.
+                    print(f"⚠️  _save_society: {field} file '{filename}' not found in "
+                          f"app/assets/default/society/ or {society_dir}/ — "
+                          f"keeping existing {field} unchanged")
+                    _missing_files.append(field)
+                    d[field] = ""
         caller_role = d.get("caller_role", "admin")
         immutable_cols = {"name", "pan_number", "plan_validity", "calc_start_date"}
         if caller_role == "master":
@@ -2337,7 +2351,11 @@ def _save_society(db, d, sid, is_edit, pk):
                     pk,
                 ),
             )
-        return True, "Society updated", pk
+        msg = "Society updated"
+        if _missing_files:
+            field_list = ", ".join(_missing_files)
+            msg += f" — warning: {field_list} file not found on disk, previous image kept"
+        return True, msg, pk
     return False, "New society creation handled elsewhere", None
 
 
