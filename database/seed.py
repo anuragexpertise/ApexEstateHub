@@ -141,6 +141,8 @@ ACCOUNTS = [
     (2317,  "Society Fine",               "SocF",       "Society Fine Charge",        23,  "Cr",  True,  "Cr", 0, 100),
     (2318,  "Society Charge",             "SocC",       "Society Fees",               23,  "Cr",  True,  "Cr", 0, 100),
     (2319,  "Event Ticket",               "EventT",     "Event Ticket",               23,  "Cr",  True,  "Cr", 0, 100),
+    (23191, "Holi",                       "Holi",       "Holi Celebrations",        2319,  "Cr",  True,  "Cr", 0, 100),
+    (23192, "Diwali",                     "Diwali",     "Diwali Celebrations",      2319,  "Cr",  True,  "Cr", 0, 100),
     (24,    "Duties Paid",                "DutyP",      "Duties Paid",                 2,  "Cr", False,  "Cr", 0, 100),
     (25,    "Taxes Paid",                 "TaxP",       "Taxes Paid",                  2,  "Cr", False,  "Cr", 0, 100),
     (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr",  True,  "Cr", 0, 100),
