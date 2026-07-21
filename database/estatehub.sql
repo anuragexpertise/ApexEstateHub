@@ -2366,7 +2366,8 @@ DROP FUNCTION IF EXISTS fn_payables_named CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_payables_named(
     p_society_id  INT, p_search TEXT DEFAULT NULL,
-    p_status      TEXT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL
+    p_status      TEXT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL,
+    p_entity_id   INT  DEFAULT NULL
 )
 RETURNS TABLE (
     id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
@@ -2393,6 +2394,7 @@ BEGIN
     WHERE p.society_id = p_society_id
       AND (p_status      IS NULL OR p.status = p_status)
       AND (p_entity_role IS NULL OR p.role = p_entity_role)
+      AND (p_entity_id   IS NULL OR p.entity_id = p_entity_id)
       AND (p_search IS NULL OR p.description ILIKE '%'||p_search||'%' OR a.name ILIKE '%'||p_search||'%')
     ORDER BY p.due_date ASC, p.created_at DESC;
 END;
@@ -3996,3 +3998,17 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 ALTER TABLE events ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 ALTER TABLE concerns ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- DOCUMENTATION: clarify receipts.user_id's dual role
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- receipts.user_id is semantically "created_by" / "recorded_by" — the user
+-- who entered the receipt (an admin entering it directly, or security/an
+-- apartment owner submitting one that lands as status='pending'). It is
+-- NOT who verified/approved it — that's confirmed_by, set separately by
+-- fn_verify_receipt when an admin confirms a pending receipt. Left as
+-- `user_id` rather than renamed to `created_by`, since dozens of existing
+-- call sites (fn_save_receipt, fn_save_receipt_pending, fn_verify_receipt,
+-- every receipts list/report query) already depend on this exact name;
+-- renaming has no functional upside and meaningful regression risk.
+COMMENT ON COLUMN receipts.user_id IS
+    'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';

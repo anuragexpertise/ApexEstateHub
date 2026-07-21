@@ -250,8 +250,8 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_etype = filters.get("role") or (
             "vendor" if ven_id else "security" if sec_id else None
         )
-        return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_etype, page_size, offset))
+        return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_etype, p_eid, page_size, offset))
 
     # ── ASSETS ──────────────────────────────────────────────────────────
     if entity == "assets":
@@ -621,27 +621,23 @@ def load_list(
             # business seeing. Added when vendor was granted a view-only
             # "payables" permission in _PORTAL_PERMS.
             #
-            # NOTE: fn_payables_named only takes 4 params (society_id,
-            # search, status, entity_role) — unlike fn_receivables_named,
-            # it has no entity_id parameter, so we can filter OUT other
-            # roles' rows at the DB level but can't filter IN only this
-            # specific vendor's own rows there. Post-filtering by entity_id
-            # in Python below closes that gap; if per-vendor row counts
-            # grow large, fn_payables_named should get a p_entity_id param
-            # added to match fn_receivables_named's signature instead.
+            # fn_payables_named now takes a p_entity_id param (matching
+            # fn_receivables_named's signature) so this scoping happens at
+            # the DB level, before LIMIT/OFFSET — a Python post-filter here
+            # would apply AFTER pagination already ran, silently breaking
+            # both the page contents and the displayed total count for any
+            # security guard or vendor with more than one page of payables.
             p_eid   = ven_id or sec_id
             p_etype = filters.get("role") or (
                 "vendor" if ven_id else "security" if sec_id else None
             )
             rows = db._execute(
-                "SELECT * FROM fn_payables_named(%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_etype, page_size, offset), fetch_all=True,
+                "SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_etype, p_eid, page_size, offset), fetch_all=True,
             ) or []
-            if p_eid:
-                rows = [r for r in rows if r.get("entity_id") == p_eid]
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_payables_named(%s,NULL,%s,%s)",
-                (sid, p_status, p_etype), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_payables_named(%s,NULL,%s,%s,%s)",
+                (sid, p_status, p_etype, p_eid), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
