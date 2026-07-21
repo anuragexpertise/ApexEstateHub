@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
+    created_by INT REFERENCES users(id),
     updated_by INT REFERENCES users (id),
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
@@ -173,6 +174,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
+    created_by INT REFERENCES users(id),
     updated_by INT REFERENCES users (id)
 );
 
@@ -189,6 +191,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
+    created_by INT REFERENCES users(id),
     updated_by INT REFERENCES users (id)
 );
 
@@ -209,6 +212,7 @@ CREATE TABLE IF NOT EXISTS assets (
     sale_acc_id INT REFERENCES accounts (id), -- Selling Asset income account (e.g. 212)
     disposed_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INT REFERENCES users(id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -225,6 +229,7 @@ CREATE TABLE IF NOT EXISTS events (
     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users(id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -240,6 +245,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     assigned_to VARCHAR(100),
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users(id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -3987,16 +3993,7 @@ BEGIN
 END;
 $$;
 
--- ═══════════════════════════════════════════════════════════════════════════════
--- MIGRATION: add created_by columns missing from initial schema
--- ═══════════════════════════════════════════════════════════════════════════════
 
-ALTER TABLE apartments ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE assets ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE events ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE concerns ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- DOCUMENTATION: clarify receipts.user_id's dual role
