@@ -46,6 +46,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
 _SYSTEM_COLUMNS = {
     "id", "society_id", "user_id", "created_at", "updated_at",
     "password_hash", "pin_hash", "pattern_hash", "linked_id",
+    "created_by", "updated_by",
     # receivable-internal fields not shown in forms
     "interest_months_applied", "source_table", "source_id",
     # payment-internal
@@ -431,7 +432,13 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
     "events": {
         "open_to": "all",   # matches the DB column default; shown explicitly
                             # in the dropdown rather than left blank
-    }
+    },
+    "receipts": {
+        "mode": "cash",
+    },
+    "expenses": {
+        "mode": "cash",
+    },
 }
 
 

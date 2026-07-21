@@ -788,6 +788,14 @@ def render_profile_card(card_id: str, title: str, icon: str,
         )
 
     # ── Text fields rendered as 2-column grid cells ──────────────────────
+    _CONTACT_FIELDS = {
+        "email":          ("mailto:", "fa-envelope", "#1d74d8"),
+        "mobile":         ("tel:",     "fa-phone",    "#17976e"),
+        "phone":          ("tel:",     "fa-phone",    "#17976e"),
+        "contact_number": ("tel:",     "fa-phone",    "#17976e"),
+        "telephone":      ("tel:",     "fa-phone",    "#17976e"),
+    }
+
     def _field_cell(f: dict) -> html.Div:
         val = _display_value(f["field"], record_dict)
         fmt = f.get("format")
@@ -806,6 +814,19 @@ def render_profile_card(card_id: str, title: str, icon: str,
             val = _humanize_string(val)
         else:
             val = str(val)
+
+        contact_href, contact_icon, contact_color = _CONTACT_FIELDS.get(f.get("field"), ("", "", ""))
+        is_contact = bool(contact_href and isinstance(val, str) and val not in ("—", "", None))
+
+        if is_contact:
+            val = html.A(
+                [val, html.I(className=f"fas {contact_icon} ms-1",
+                             style={"fontSize": "10px", "color": contact_color})],
+                href=f"{contact_href}{val}",
+                style={"textDecoration": "none", "color": "inherit"},
+            )
+
+        cell_class = "profile-field-cell clickable" if is_contact else "profile-field-cell"
 
         return html.Div([
             html.Div([
@@ -826,7 +847,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
             "background": "rgba(248,251,255,0.6)",
             "borderRadius": "10px",
             "border": "1px solid rgba(200,215,235,0.35)",
-        })
+        }, className=cell_class)
 
     text_cells = [_field_cell(f) for f in text_fields]
 
@@ -1227,17 +1248,20 @@ def render_form_card(card_id: str, title: str, icon: str,
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         html.Div([
+            html.Div([
+                html.Div(form_rows),
+                dbc.Button(
+                    [html.I(className="fas fa-check me-2"), submit_label],
+                    id={"type": "form-submit", "entity": entity,
+                        "card_id": card_id},
+                    n_clicks=0, color="success", className="mt-3 w-100",
+                    style={"borderRadius": "12px", "fontWeight": "700"},
+                ),
+            ], style={"flex": "1", "minWidth": "260px"}),
             _payment_qr_banner(entity_plural, society_id, prefill),
-            html.Div(form_rows),
-            dbc.Button(
-                [html.I(className="fas fa-check me-2"), submit_label],
-                id={"type": "form-submit", "entity": entity,
-                    "card_id": card_id},
-                n_clicks=0, color="success", className="mt-3 w-100",
-                style={"borderRadius": "12px", "fontWeight": "700"},
-            ),
         ], style={"padding": "16px", "maxHeight": "520px",
-                  "overflowY": "auto"}),
+                  "overflowY": "auto", "display": "flex",
+                  "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
     ], style={
         "borderRadius": "16px", "border": f"1px solid {color}22",
         "boxShadow": f"0 10px 30px {color}18",
@@ -1275,7 +1299,7 @@ def _payment_qr_banner(entity_plural: str, society_id, prefill: dict) -> html.Di
                 "display": "block", "margin": "0 auto 14px", "maxWidth": "180px",
                 "borderRadius": "10px", "border": "1px solid #e2e8f0",
             }),
-        ])
+        ], style={"flex": "0 0 auto", "maxWidth": "220px"})
     except Exception as e:
         print(f"_payment_qr_banner error: {e}")
         return None

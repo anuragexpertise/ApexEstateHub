@@ -993,9 +993,9 @@ def register_drilldown_callbacks(app):
         #       Applied only when submitting a new receipt/expense form and the
         #       user left the date or account blank.
         if entity_singular in ("receipt", "expense") and "edit" not in card_id:
-            # Default date = today
-            if not merged.get("trx_date"):
-                merged["trx_date"] = datetime.today().strftime("%Y-%m-%d")
+            _date_field = "receipt_date" if entity_singular == "receipt" else "expense_date"
+            if not merged.get(_date_field):
+                merged[_date_field] = datetime.today().strftime("%Y-%m-%d")
 
             # Default account = first Cr/Dr account named 'Society Charges'
             if not merged.get("acc_id") and sid:

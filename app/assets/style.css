@@ -371,16 +371,34 @@ a {
 .kpi-card>div {
     transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease !important;
 }
-
 .kpi-card:hover .card,
 .kpi-row>.dnd-card:hover>.card,
 .kpi-card:hover>div {
     transform: translateY(-4px);
     border-color: rgba(var(--theme-dark-rgb), 0.55) !important;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(var(--theme-light-rgb), 0.55)) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.97),
+              rgba(var(--theme-light-rgb), 0.55)) !important;
     box-shadow:
         0 20px 44px rgba(15, 23, 42, 0.18),
         0 0 0 2px rgba(var(--theme-dark-rgb), 0.35) !important;
+}
+
+/* Profile field cell hover highlight — consistent with KPI hover */
+.profile-field-cell {
+    transition: transform 0.18s ease, box-shadow 0.18s ease,
+                border-color 0.18s ease, background 0.18s ease !important;
+}
+.profile-field-cell:hover {
+    transform: translateY(-2px);
+    border-color: rgba(var(--theme-dark-rgb), 0.45) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98),
+              rgba(var(--theme-light-rgb), 0.45)) !important;
+    box-shadow:
+        0 8px 20px rgba(15, 23, 42, 0.12),
+        0 0 0 2px rgba(var(--theme-dark-rgb), 0.25) !important;
+}
+.profile-field-cell.clickable {
+    cursor: pointer;
 }
 
 .kpi-row {
