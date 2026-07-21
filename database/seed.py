@@ -202,9 +202,9 @@ USERS = [
      "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening",
      "mobile": "9844444444", "service_description": "Best Gardener"},
     {"role": "security",  "email": "guard1@sunriseresidency.com",   "password": "Guard1@2024",
-     "name": "Ramu Singh",  "shift": "morning", "salary": 12000, "mobile": "9855555555"},
+     "name": "Ramu Singh",  "shift": "morning", "salary": 120, "mobile": "9855555555"},
     {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
-     "name": "Shyam Yadav", "shift": "night",   "salary": 13000, "mobile": "9866666666"},
+     "name": "Shyam Yadav", "shift": "night",   "salary": 130, "mobile": "9866666666"},
 ]
 
 EVENTS = [
