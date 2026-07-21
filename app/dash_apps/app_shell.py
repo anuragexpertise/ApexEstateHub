@@ -35,6 +35,7 @@ ROLE_CONFIG = {
         "tabs": [
             {"label": "Dashboard",   "href": "/dashboard/owner-portal",    "icon": "fa-th-large"},
             {"label": "Financials",  "href": "/dashboard/owner-financials", "icon": "fa-book"},
+            {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},
             {"label": "Events",      "href": "/dashboard/owner-events",     "icon": "fa-calendar-alt"},
             {"label": "Concerns",    "href": "/dashboard/owner-concerns",   "icon": "fa-hand-point-up"},
             {"label": "Settings",    "href": "/dashboard/owner-settings",   "icon": "fa-cog"},
