@@ -36,7 +36,7 @@ def register_form_autofill_callbacks(app):
         Output({"type": "form-field", "entity": MATCH, "field": "particulars"}, "value"),
         Input({"type": "form-field", "entity": MATCH, "field": "acc_id"}, "value"),
         State({"type": "form-field", "entity": MATCH, "field": "particulars"}, "value"),
-        prevent_initial_call=True,
+        prevent_initial_call=False,
     )
     def suggest_particulars(acc_id, current_particulars):
         if not acc_id:

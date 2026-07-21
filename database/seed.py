@@ -178,6 +178,9 @@ SOCIETY = {
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
     "calc_start_date":  "2026-04-01",
+    "payment_qr":       "sunrise_qr.png",
+    "logo":             "sunrise_logo.png",
+    "login_background": "sunrise_bg.jpg",
 }
 
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024"}
@@ -191,6 +194,11 @@ USERS = [
      "alt_address": "123, Main Street, Agra, UP - 282001",
      "apt_calc_start_date": "2026-04-01"},                 # rate-based history [req 4]
     {"role": "apartment", "email": "owner2@sunriseresidency.com",   "password": "Owner2@2024",
+     "name": "Rahul Dev",   "flat_number": "A-201", "apartment_size": 1200,
+     "mobile": "9821111111", "alt_mobile": "9821111112",
+     "alt_address": "12, Charles Street, Agra, UP - 282005",
+     "apt_calc_start_date": "2026-05-01"},
+    {"role": "apartment", "email": "owner3@sunriseresidency.com",   "password": "Owner3@2024",
      "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,
      "mobile": "9822222222", "alt_mobile": "9822222223",
      "alt_address": "456, Secondary Road, Agra, UP - 282001",
@@ -229,7 +237,7 @@ CONCERNS = [
 SIMPLE_ASSETS = [
     {"company_name": "Jackson",  "asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
      "purchase_date": "2026-05-15", "purchase_value": 500000, "acc_id": 2314},
-    {"company_name": "SSamsung", "asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
+    {"company_name": "Samsung", "asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
      "purchase_date": "2026-06-20", "purchase_value": 75000,  "acc_id": 62},
 ]
 
@@ -317,13 +325,15 @@ def seed_society(cur, conn) -> int:
     cur.execute(
         """INSERT INTO societies
            (id, name, PAN_number, address, email, phone, secretary_name,
-            secretary_phone, plan, plan_validity, calc_start_date)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            secretary_phone, plan, plan_validity, calc_start_date,
+            payment_qr, logo, login_background)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
          SOCIETY["secretary_phone"], SOCIETY["plan"], SOCIETY["plan_validity"],
-         SOCIETY["calc_start_date"]),
+         SOCIETY["calc_start_date"],
+         SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background")),
     )
     conn.commit()
     cur.execute(
@@ -384,11 +394,16 @@ def seed_master_admin(cur, conn) -> int:
 def seed_users(cur, conn, society_id: int):
     """Returns dict keyed by role/email -> {user_id, linked_id, ...}."""
     result = {}
+    admin_email = next((u["email"] for u in USERS if u["role"] == "admin"), None)
+    _existing_admin = _one(cur, "SELECT id FROM users WHERE email = %s", (admin_email,)) if admin_email else None
+    admin_uid = _existing_admin["id"] if _existing_admin else None
     for u in USERS:
         row = _one(cur, "SELECT id, linked_id FROM users WHERE email = %s", (u["email"],))
         if row:
             print(f"  · {u['email']} already exists — skipped.")
             result[u["email"]] = {"user_id": row["id"], "linked_id": row["linked_id"], "cfg": u}
+            if u["role"] == "admin":
+                admin_uid = row["id"]
             continue
 
         ph = generate_password_hash(u["password"])
@@ -398,14 +413,15 @@ def seed_users(cur, conn, society_id: int):
                 cur,
                 """INSERT INTO apartments
                    (society_id,flat_number,owner_name,mobile,alt_mobile,alt_address,
-                    apartment_size,apt_calc_start_date,active)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
+                    apartment_size,apt_calc_start_date,active,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
                    ON CONFLICT (society_id,flat_number) DO UPDATE
                      SET owner_name = EXCLUDED.owner_name
                    RETURNING id""",
                 (society_id, u["flat_number"], u["name"], u.get("mobile", ""),
                  u.get("alt_mobile", ""), u.get("alt_address", ""),
-                 u.get("apartment_size", 1000), u.get("apt_calc_start_date")),
+                 u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
+                 admin_uid),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -425,11 +441,12 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO vendors
-                   (society_id,business_name,name,service_type,mobile,service_description,active)
-                   VALUES (%s,%s,%s,%s,%s,%s,TRUE) RETURNING id""",
+                   (society_id,business_name,name,service_type,mobile,service_description,active,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id""",
                 (society_id, u.get("business_name", u["name"]), u["name"],
                  u.get("service_type", "General"), u.get("mobile", ""),
-                 u.get("service_description", "Best in town")),
+                 u.get("service_description", "Best in town"),
+                 admin_uid),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -449,10 +466,11 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO security_staff
-                   (society_id,name,mobile,shift,salary_per_shift,joining_date,active)
-                   VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,TRUE) RETURNING id""",
+                   (society_id,name,mobile,shift,salary_per_shift,joining_date,active,created_by)
+                   VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,TRUE,%s) RETURNING id""",
                 (society_id, u["name"], u.get("mobile", ""),
-                 u.get("shift", "morning"), u.get("salary", 10000)),
+                 u.get("shift", "morning"), u.get("salary", 10000),
+                 admin_uid),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -480,23 +498,27 @@ def seed_users(cur, conn, society_id: int):
             uid = row["id"] if row else None
             linked_id = None
             if uid:
+                admin_uid = uid
                 print(f"  ✓ Admin    {u['email']}  /  {u['password']}")
 
         # Re-fetch to normalize (covers both freshly-inserted and ON CONFLICT no-op cases)
         final = _one(cur, "SELECT id, linked_id FROM users WHERE email = %s", (u["email"],))
         result[u["email"]] = {"user_id": final["id"], "linked_id": final["linked_id"], "cfg": u}
+        if u["role"] == "admin" and admin_uid is None:
+            admin_uid = final["id"]
 
     return result
 
 
-def seed_events_and_concerns(cur, conn, society_id: int):
+def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None):
     for ev in EVENTS:
         if _one(cur, "SELECT id FROM events WHERE society_id=%s AND title=%s", (society_id, ev["title"])):
             continue
         cur.execute(
-            """INSERT INTO events (society_id,title,description,event_date,event_time,venue,open_to)
-               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-            (society_id, ev["title"], ev["description"], ev["date"], ev["time"], ev["venue"], ev["open_to"]),
+            """INSERT INTO events (society_id,title,description,event_date,event_time,venue,open_to,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (society_id, ev["title"], ev["description"], ev["date"], ev["time"], ev["venue"], ev["open_to"],
+             created_by),
         )
         conn.commit()
         print(f"  ✓ Event    '{ev['title']}' on {ev['date']}")
@@ -506,9 +528,10 @@ def seed_events_and_concerns(cur, conn, society_id: int):
                 (society_id, con["flat_number"], con["type"])):
             continue
         cur.execute(
-            """INSERT INTO concerns (society_id,flat_no,concern_type,description,status,assigned_to)
-               VALUES (%s,%s,%s,%s,%s,%s)""",
-            (society_id, con["flat_number"], con["type"], con["desc"], con["status"], con.get("assigned", "")),
+            """INSERT INTO concerns (society_id,flat_no,concern_type,description,status,assigned_to,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+            (society_id, con["flat_number"], con["type"], con["desc"], con["status"], con.get("assigned", ""),
+             created_by),
         )
         conn.commit()
         print(f"  ✓ Concern  [{con['flat_number']}] {con['type']} — {con['status']}")
@@ -850,7 +873,7 @@ def run_seed(conn):
     security_uid_2 = users["guard2@sunriseresidency.com"]["user_id"]
     security_lid_2 = users["guard2@sunriseresidency.com"]["linked_id"]
 
-    seed_events_and_concerns(cur, conn, society_id)
+    seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
     seed_apt_charge_histories(cur, conn, society_id, {"A-101": apt1_id, "B-202": apt2_id})
 
