@@ -1,0 +1,37 @@
+diff --git a/app/dash_apps/callbacks/drilldown_callbacks.py b/app/dash_apps/callbacks/drilldown_callbacks.py
+index f886e7d..4f219ae 100644
+--- a/app/dash_apps/callbacks/drilldown_callbacks.py
++++ b/app/dash_apps/callbacks/drilldown_callbacks.py
+@@ -966,6 +966,32 @@ def register_drilldown_callbacks(app):
+                 if _acc:
+                     merged["acc_id"] = _acc["id"]
+ 
++        # ── 6b. Row-level ownership enforcement for self-entity edits ──────────
++        # The Phase 4 #15 gate above checks "can this role edit this entity
++        # TYPE" but not "is this THEIR OWN row" — merged["id"] is just
++        # whatever the hidden id field on the form holds, which is an
++        # ordinary client-supplied value like any other. For apartment/
++        # vendor/security editing their own profile (apartments/vendors/
++        # security), that matters a lot more than it sounds: _save_user_entity
++        # also resets password_hash keyed off this exact same pk when a new
++        # password is submitted, so an unenforced pk here isn't just "edit
++        # someone else's mobile number" — it's an account-takeover path.
++        # Admin/master are exempt since legitimately editing arbitrary rows
++        # is their job.
++        if "edit" in card_id and _actor_role not in ("admin", "master"):
++            _own_pk = None
++            if entity_singular == "apartment":
++                _own_pk = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
++            elif entity_singular in ("vendor", "security"):
++                _own_pk = (auth or {}).get("user_id")
++            if _own_pk is not None:
++                _submitted_id = merged.get("id")
++                if _submitted_id and str(_submitted_id) != str(_own_pk):
++                    print(f"⚠️  Row-ownership mismatch: {_actor_role} user_id={(auth or {}).get('user_id')} "
++                          f"submitted id={_submitted_id!r} for own-entity edit of '{entity_singular}', "
++                          f"forced to own pk={_own_pk}")
++                merged["id"] = _own_pk
++
+         # ── 7. Call the appropriate save handler ──────────────────────────────
+         ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
+ 
