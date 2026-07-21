@@ -59,7 +59,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "concerns"):    {"view", "new"},
     ("apartment", "events"):      {"view"},
     ("apartment", "gate_logs"):   {"view"},
-    ("apartment", "receipts"):{"view"},
+    ("apartment", "receipts"):{"view", "new"},
     ("apartment", "cashbook"):    {"view"},
     ("apartment", "receivables"): {"view"},
     ("apartment", "payables"):    {"view"},

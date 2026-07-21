@@ -897,6 +897,16 @@ def register_drilldown_callbacks(app):
         elif not merged.get("user_id"):
             merged["user_id"] = (auth or {}).get("user_id")
 
+        # Owner-initiated receipts (Pay Dues) must always be attributed to
+        # the owner's own flat — never trust entity_id/role coming back from
+        # the form for this, since those are ordinary client-side inputs and
+        # an owner could otherwise submit a "payment" against someone else's
+        # apartment. Security keeps entity_id/role editable since they're
+        # legitimately recording someone else's payment.
+        if merged['caller_role'] == "apartment" and entity_singular == "receipt":
+            merged["entity_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+            merged["role"] = "apartment"
+
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
         #       Applied only when submitting a new receipt/expense form and the
         #       user left the date or account blank.
@@ -1515,9 +1525,11 @@ def _save_receipt_v3(db, d, sid):
     if not particulars:
         return False, "Particulars are required", None
 
-    # Path 2: security portal creates pending receipt (no immediate transaction)
+    # Path 2: security portal AND apartment-owner self-initiated payments
+    # create a pending receipt (no immediate transaction) — an admin must
+    # verify it via the existing verify_receipt action before it posts.
     caller_role = d.get("caller_role", "admin")
-    use_pending = caller_role == "security"
+    use_pending = caller_role in ("security", "apartment")
 
     fn_name = "fn_save_receipt_pending" if use_pending else "fn_save_receipt"
     n_params = 11 if not use_pending else 11
