@@ -229,6 +229,26 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "info",
         },
     ],
+
+    # ── EVENTS ──────────────────────────────────────────────────────────────
+    "events": [
+        {
+            "label": "Sell Tickets",       # admin sells to a chosen apartment
+            "action_id": "sell_event_ticket",
+            "target_card": "form_event_ticket_new",
+            "icon": "fa-ticket-alt",
+            "color": "success",
+            "roles": ["admin"],
+        },
+        {
+            "label": "Buy Tickets",        # apartment buys their own
+            "action_id": "buy_event_ticket",
+            "target_card": "form_event_ticket_new",
+            "icon": "fa-ticket-alt",
+            "color": "primary",
+            "roles": ["apartment"],
+        },
+    ],
 }
 
 

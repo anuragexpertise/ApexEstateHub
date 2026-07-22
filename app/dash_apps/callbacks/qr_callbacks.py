@@ -305,6 +305,23 @@ def register_qr_callbacks(app):
         State({"type": "form-entity-pk", "entity": "vendor_pass"}, "value"),
         prevent_initial_call=True,
     )
+    # 1C. Same toggle, for the Event Ticket form's Cheque No. / Payment
+    #     Gateway ID fields — separate Store/wrap ids so the two forms
+    #     never collide if both happen to render in the same nav stack.
+    clientside_callback(
+        """
+        function(mode, pk) {
+            var wrap = document.querySelector(
+                '[id*="et-noncash-wrap"][id*="' + pk + '"]');
+            if (wrap) wrap.style.display = (mode && mode !== 'cash') ? 'block' : 'none';
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("et-noncash-dummy", "data"),
+        Input({"type": "form-field", "entity": "event_ticket", "field": "mode"}, "value"),
+        State({"type": "form-entity-pk", "entity": "event_ticket"}, "value"),
+        prevent_initial_call=True,
+    )
     # ── 2. Generate user's static QR code (modal) ───────────────
     @app.callback(
         Output('qr-modal', 'is_open'),

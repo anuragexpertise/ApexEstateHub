@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS events (
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
+    ticket_price NUMERIC(10, 2) DEFAULT 0, -- per-ticket price when parent_account_id is a ticket (Cr) account
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users(id),
@@ -536,6 +537,27 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
         issued_date
     )
 );
+
+-- ── Event tickets ──────────────────────────────────────────────
+-- Tracks who bought tickets for which event; the money itself is
+-- recorded via the usual receipts/transactions pair (acc_id = the
+-- event's parent_account_id, e.g. "Holi" = 23191 under "Event
+-- Ticket" = 2319), same pattern as vendor_passes -> receipts.
+CREATE TABLE IF NOT EXISTS event_tickets (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    event_id INT NOT NULL REFERENCES events (id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users (id),
+    quantity INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    receipt_id INT REFERENCES receipts (id),
+    issued_date DATE DEFAULT CURRENT_DATE,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
+CREATE INDEX IF NOT EXISTS idx_event_tickets_user  ON event_tickets (user_id);
 
 -- ── Apartment charges / fines basis ───────────────────────────
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
@@ -1849,6 +1871,123 @@ END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
+-- SECTION 6b: EVENT TICKET SALE
+--
+-- fn_sell_event_ticket: Cr the event's own ticket sub-account
+-- (events.parent_account_id, e.g. "Holi" = 23191 under the
+-- "Event Ticket" = 2319 header) + Dr cash/bank paired side —
+-- same double-entry shape as fn_sell_vendor_pass, but the
+-- income account and per-unit price both come from the event
+-- row itself instead of a rate table.
+-- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
+    p_user_id      INT,
+    p_event_id     INT,
+    p_quantity     INT     DEFAULT 1,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_created_by   INT     DEFAULT NULL,
+    p_issued_date  DATE    DEFAULT CURRENT_DATE,
+    p_particulars  TEXT    DEFAULT NULL
+)
+RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id   INT;
+    v_apt_id       INT;
+    v_flat_number  VARCHAR;
+    v_event        RECORD;
+    v_acc_id       INT;
+    v_is_ticket_ac BOOLEAN;
+    v_amount       NUMERIC(10,2);
+    v_cash_acc     INT;
+    v_receipt_id   INT;
+    v_ticket_id    INT;
+    v_desc         TEXT;
+    v_journal_id   INT;
+BEGIN
+    IF p_quantity IS NULL OR p_quantity < 1 THEN
+        RAISE EXCEPTION 'Quantity must be at least 1';
+    END IF;
+
+    SELECT society_id, linked_id INTO v_society_id, v_apt_id
+    FROM users WHERE id = p_user_id AND role = 'apartment';
+    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment user not found'; END IF;
+
+    SELECT flat_number INTO v_flat_number FROM apartments WHERE id = v_apt_id;
+
+    SELECT e.* INTO v_event FROM events e
+    WHERE e.id = p_event_id AND e.society_id = v_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+
+    v_acc_id := v_event.parent_account_id;
+    IF v_acc_id IS NULL THEN
+        RAISE EXCEPTION 'This event has no ticket account set — tickets cannot be sold for it';
+    END IF;
+
+    -- Guard: the account must be the "Event Ticket" (2319) header itself,
+    -- or one of its direct children (e.g. Holi = 23191) — mirrors the
+    -- dropdown restriction on the New Event form.
+    SELECT (a.id = 2319 OR a.parent_account_id = 2319) INTO v_is_ticket_ac
+    FROM accounts a WHERE a.id = v_acc_id AND a.society_id = v_society_id;
+    IF v_is_ticket_ac IS NOT TRUE THEN
+        RAISE EXCEPTION 'Event''s account is not an Event Ticket (2319) account — tickets cannot be sold for it';
+    END IF;
+
+    v_amount := COALESCE(v_event.ticket_price, 0) * p_quantity;
+    v_desc := COALESCE(p_particulars,
+        'Event Ticket x' || p_quantity || ' - ' || COALESCE(v_event.title,'') ||
+        ' - ' || COALESCE(v_flat_number,''));
+
+    v_cash_acc   := fn_resolve_cash_account(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    IF v_amount > 0 THEN
+        INSERT INTO receipts(
+            society_id, user_id, entity_id, role,
+            receipt_date, acc_id, particulars, amount, mode,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_user_id, v_apt_id, 'apartment',
+            p_issued_date, v_acc_id, v_desc, v_amount, p_mode,
+            'confirmed', p_created_by, NOW(), NOW()
+        ) RETURNING id INTO v_receipt_id;
+
+        -- Cr: event ticket income account
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, p_issued_date, v_acc_id, v_apt_id, v_desc,
+            v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+        );
+
+        -- Dr: cash / bank paired side
+        IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_society_id, p_issued_date, v_cash_acc, v_apt_id,
+                'Cash received - ' || v_desc,
+                v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+            );
+        END IF;
+    END IF;
+
+    INSERT INTO event_tickets(
+        society_id, event_id, user_id, quantity, amount, receipt_id, issued_date, status, created_at
+    ) VALUES (
+        v_society_id, p_event_id, p_user_id, p_quantity, v_amount, v_receipt_id, p_issued_date, 'active', NOW()
+    ) RETURNING id INTO v_ticket_id;
+
+    RETURN QUERY SELECT v_receipt_id, v_ticket_id, v_amount, v_journal_id;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
 -- SECTION 7: ASSET PURCHASE / DISPOSAL  (double-entry)
 --
 -- fn_buy_asset:     Dr Asset account  +  Cr Cash/Bank (NO expense row).
@@ -3108,7 +3247,8 @@ CREATE OR REPLACE FUNCTION fn_events_list(
 )
 RETURNS TABLE (
     id INT, title VARCHAR(200), description TEXT, event_date DATE, event_time VARCHAR(20),
-    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT, created_at TIMESTAMP
+    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT, ticket_price NUMERIC(10,2),
+    created_at TIMESTAMP
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -3116,7 +3256,7 @@ BEGIN
     SELECT
         e.id::INT, e.title::VARCHAR(200), e.description::TEXT, e.event_date::DATE,
         e.event_time::VARCHAR(20), e.venue::VARCHAR(200), e.open_to::VARCHAR(20),
-        e.parent_account_id::INT, e.created_at::TIMESTAMP
+        e.parent_account_id::INT, e.ticket_price::NUMERIC(10,2), e.created_at::TIMESTAMP
     FROM events e
     WHERE e.society_id = p_society_id
       AND (p_search IS NULL OR e.title ILIKE '%'||p_search||'%')
@@ -3131,12 +3271,13 @@ CREATE OR REPLACE FUNCTION fn_event_profile(p_event_id INT)
 RETURNS TABLE (
     id INT, society_id INT, title VARCHAR(200), description TEXT, event_date DATE,
     event_time VARCHAR(20), venue VARCHAR(200), open_to VARCHAR(20),
-    parent_account_id INT, created_at TIMESTAMP, image TEXT, subtitle TEXT
+    parent_account_id INT, ticket_price NUMERIC(10,2), created_at TIMESTAMP, image TEXT, subtitle TEXT
 )
 LANGUAGE SQL STABLE AS $$
     SELECT id::INT, society_id::INT, title::VARCHAR(200), description::TEXT,
            event_date::DATE, event_time::VARCHAR(20), venue::VARCHAR(200),
-           open_to::VARCHAR(20), parent_account_id::INT, created_at::TIMESTAMP, image::TEXT,
+           open_to::VARCHAR(20), parent_account_id::INT, ticket_price::NUMERIC(10,2),
+           created_at::TIMESTAMP, image::TEXT,
            (event_date::TEXT||' '||COALESCE(event_time::TEXT,''))::TEXT
     FROM events WHERE id = p_event_id;
 $$;

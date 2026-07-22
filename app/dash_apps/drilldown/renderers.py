@@ -1170,6 +1170,36 @@ def render_form_card(card_id: str, title: str, icon: str,
                     },
                 ),
             ]
+        elif ftype == "account_dropdown_event_ticket":
+            # Only NULL, or the "Event Ticket" (2319) header itself, or one
+            # of its direct children (e.g. "Holi" = 23191) — an event isn't
+            # allowed to post to an unrelated account.
+            _acc_opts = [{"label": "— None —", "value": ""}]
+            if society_id:
+                try:
+                    _rows = db._execute(
+                        "SELECT id, name FROM accounts "
+                        "WHERE society_id=%s AND (id=2319 OR parent_account_id=2319) "
+                        "ORDER BY (id=2319) DESC, name",
+                        (society_id,),
+                        fetch_all=True,
+                    ) or []
+                    _acc_opts += [
+                        {"label": f"{r['id']} — {r['name']}", "value": r["id"]}
+                        for r in _rows
+                    ]
+                except Exception as _e:
+                    print(f"⚠️  event ticket account dropdown load error: {_e}")
+            _pre_acc = int(pre_val) if pre_val not in (None, "", "None") else None
+            ctrl = dcc.Dropdown(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                options=_acc_opts,
+                value=_pre_acc,
+                placeholder="Select Event Ticket account (optional)…",
+                clearable=False,
+                style={"fontSize": "13px"},
+                optionHeight=40,
+            )
         elif ftype in ("account_dropdown_receipt", "account_dropdown_expense"):
             # Cr accounts for receipts, Dr accounts for expenses
             _drcr = "Cr" if ftype == "account_dropdown_receipt" else "Dr"
@@ -1781,6 +1811,230 @@ def render_vendor_pass_card(
         "overflow":     "hidden",
     })
  
+
+# ════════════════════════════════════════════════════════════════════════════
+# EVENT TICKET CARD  — Sell Tickets (admin) / Buy Tickets (apartment)
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_event_ticket_card(
+    event_id,
+    event_title: str,
+    event_date,
+    ticket_price: float,
+    society_id=None,
+    apt_user_id=None,
+    flat_number: str = "",
+    owner_name: str = "",
+    apartment_options: list | None = None,
+    prefill_mode: str = "cash",
+    caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment" -> Buy Tickets
+) -> "html.Div":
+    """
+    Dedicated form card for Sell Event Ticket (admin) / Buy Event Ticket
+    (apartment) -- mirrors render_vendor_pass_card's Sell/Buy Pass shape.
+
+    entity name on all IDs = "event_ticket" -- matches _resolve_entity_singular
+    guard and _save_entity("event_ticket") -> _save_event_ticket() routing.
+
+    Ticket flow recorded in DB:
+      event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity, amount)
+      receipts       -> status='confirmed' (immediate) -- acc_id = events.parent_account_id
+      transactions   -> source_table='receipts', source_id=receipt.id
+    """
+    from datetime import date as _date
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+
+    color        = "#c8781f"
+    today        = _date.today().strftime("%Y-%m-%d")
+    is_admin     = caller_role in ("admin", "master")
+    action_label = "Sell Tickets" if is_admin else "Buy Tickets"
+    entity_name  = "event_ticket"   # MUST match _resolve_entity_singular guard
+
+    date_str = (
+        event_date.strftime("%d %b %Y")
+        if hasattr(event_date, "strftime")
+        else str(event_date or "")
+    )
+    price_display = f"{float(ticket_price or 0):,.2f}"
+
+    banner = dbc.Alert([
+        html.I(className="fas fa-ticket-alt me-2"),
+        (f"{date_str} — Rs.{price_display} per ticket" if ticket_price else
+         f"{date_str} — Free entry, no payment required"),
+    ], color="info", style={"fontSize": "12px", "borderRadius": "10px",
+                             "padding": "8px 14px", "marginBottom": "12px"})
+
+    # -- Buyer field: admin picks an apartment, apartment sees their own flat --
+    if is_admin:
+        buyer_field = dbc.Row([
+            dbc.Col(dbc.Label("Apartment *",
+                              style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                    width=4, style={"paddingTop": "6px"}),
+            dbc.Col(dcc.Dropdown(
+                id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
+                options=apartment_options or [],
+                value=None,
+                placeholder="Select apartment…",
+                clearable=False,
+                style={"fontSize": "13px"},
+                optionHeight=40,
+            ), width=8),
+        ], className="mb-2")
+        pk_for_wrap = str(event_id)
+    else:
+        buyer_field = html.Div(
+            f"Flat {flat_number} — {owner_name}",
+            style={"fontSize": "13px", "fontWeight": "600", "color": "#15304f",
+                   "marginBottom": "10px"},
+        )
+        pk_for_wrap = str(apt_user_id or event_id)
+
+    return html.Div([
+        html.Div(
+            html.Div([
+                html.Div(
+                    html.I(className="fas fa-ticket-alt",
+                           style={"color": "#fff", "fontSize": "16px"}),
+                    style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                           "background": f"linear-gradient(135deg,{color},{color}aa)",
+                           "display": "flex", "alignItems": "center",
+                           "justifyContent": "center", "marginRight": "12px"},
+                ),
+                html.Div([
+                    html.Strong(f"{action_label} — {event_title}",
+                                style={"fontSize": "14px"}),
+                    html.Div(date_str, style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        html.Div([
+          html.Div([
+            banner,
+
+            # -- Hidden identity fields --------------------------------------
+            dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "event_id"},
+                type="hidden", value=str(event_id or ""),
+            ),
+            dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "role"},
+                type="hidden", value="apartment",
+            ),
+            dcc.Input(
+                id={"type": "form-entity-pk", "entity": entity_name},
+                type="hidden", value=pk_for_wrap,
+            ),
+            # apartment's own user id -- hidden when buying for themselves
+            (dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
+                type="hidden", value=str(apt_user_id or ""),
+            ) if not is_admin else None),
+
+            buyer_field,
+
+            # -- Quantity -----------------------------------------------------
+            dbc.Row([
+                dbc.Col(dbc.Label("Quantity *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": entity_name, "field": "quantity"},
+                    type="number", value="1", min=1, step=1,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+
+            # -- Payment mode ---------------------------------------------------
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity_name, "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Cheque",        "value": "cheque"},
+                    ],
+                    value=prefill_mode,
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            # -- Dummy anchor for the non-cash-field clientside toggle -------
+            dcc.Store(id="et-noncash-dummy", data=None),
+            html.Div(
+                id={"type": "et-noncash-wrap", "pk": pk_for_wrap},
+                style={"display": "none"},
+                children=[
+                    dbc.Row([
+                        dbc.Col(dbc.Label("Cheque No.",
+                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                                width=4, style={"paddingTop": "6px"}),
+                        dbc.Col(dbc.Input(
+                            id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
+                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                        ), width=8),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col(dbc.Label("Payment Gateway ID",
+                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                                width=4, style={"paddingTop": "6px"}),
+                        dbc.Col(dbc.Input(
+                            id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
+                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                        ), width=8),
+                    ], className="mb-2"),
+                ],
+            ),
+            # -- Issue date -----------------------------------------------------
+            dbc.Row([
+                dbc.Col(dbc.Label("Issue Date",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
+                    type="text",
+                    value=_format_date_entry(today),
+                    placeholder="DD/MM/YYYY",
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+
+            # -- Submit -----------------------------------------------------------
+            dbc.Button(
+                [html.I(className="fas fa-ticket-alt me-2"), action_label],
+                id={"type": "form-submit", "entity": entity_name,
+                    "card_id": "form_event_ticket_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+
+            html.Hr(style={"margin": "16px 0 10px", "opacity": "0.15"}),
+            html.Div([
+                html.I(className="fas fa-info-circle me-2",
+                       style={"color": "#7d8ea3", "fontSize": "11px"}),
+                html.Span(
+                    "On submit: event_tickets row created — receipt confirmed — "
+                    "transaction posted to cashbook.",
+                    style={"fontSize": "10px", "color": "#aaa"},
+                ),
+            ]),
+          ], style={"flex": "1", "minWidth": "260px"}),
+          (render_payment_qr_widget(society_id) if not is_admin else None),
+        ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap",
+                  "gap": "16px", "alignItems": "flex-start"}),
+    ], style={
+        "borderRadius": "16px",
+        "border":       f"1px solid {color}22",
+        "boxShadow":    f"0 10px 30px {color}18",
+        "overflow":     "hidden",
+    })
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # NOC CARD  — rich-text editor with eligibility banner + Print/PDF/Email

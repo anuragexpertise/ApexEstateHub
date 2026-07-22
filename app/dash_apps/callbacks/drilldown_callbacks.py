@@ -685,6 +685,24 @@ def register_drilldown_callbacks(app):
                 )
                 hide_kpis = True
 
+            # ── Sell tickets (admin portal — from event profile) ──────────────────
+            elif action == "sell_event_ticket":
+                store = nav_state.navigate_to(
+                    store, "form_event_ticket_new", "Sell Tickets",
+                    prefill={"event_id": pk, "role": "admin"},
+                    entity_pk=pk,
+                )
+                hide_kpis = True
+
+            # ── Buy tickets (apartment portal — apartment buys their own) ─────────
+            elif action == "buy_event_ticket":
+                store = nav_state.navigate_to(
+                    store, "form_event_ticket_new", "Buy Tickets",
+                    prefill={"event_id": pk, "role": "apartment"},
+                    entity_pk=pk,
+                )
+                hide_kpis = True
+
             # ── Raise concern (apartment profile) ────────────────────────────────
             elif action == "new_concern":
                 record = loaders.load_profile(entity, pk, sid) or {}
@@ -851,6 +869,7 @@ def register_drilldown_callbacks(app):
             "pay_due": {"admin"}, "pay_dues": {"admin"},
             "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
+            "event_ticket": {"admin", "apartment"}, "event_ticket_new": {"admin", "apartment"},
         }
         _actor_role = (auth or {}).get("role", "admin")
         if entity_singular in _SPECIAL_ENTITY_ROLES:
@@ -1399,6 +1418,59 @@ def _render_card(
                 caller_role=caller_role,
             )
 
+        # ── Event Ticket form — dedicated renderer (bypasses to_singular mangling) ──
+        if card_id == "form_event_ticket_new":
+            event_id    = prefill.get("event_id")
+            sid_val     = filters.get("society_id")
+            caller_role = (auth or {}).get("role", "admin")
+            event = loaders.load_profile("event", event_id, sid_val) or {} \
+                    if event_id and sid_val else {}
+
+            apt_user_id = None
+            flat_number = ""
+            owner_name  = ""
+            apartment_options = []
+            if caller_role == "apartment":
+                # Buyer is the logged-in apartment — pull their own identity
+                # from auth, not from the event's pk (which is the event id).
+                apt_user_id = (auth or {}).get("user_id")
+                apt_id = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+                apt = loaders.load_profile("apartment", apt_id, sid_val) or {} \
+                      if apt_id and sid_val else {}
+                flat_number = apt.get("flat_number", "")
+                owner_name  = apt.get("owner_name", "")
+            elif sid_val:
+                # Admin needs to pick which apartment is buying — options are
+                # {users.id (role='apartment') : "Flat — Owner"}, since
+                # fn_sell_event_ticket takes p_user_id, not apartments.id.
+                try:
+                    rows = db._execute(
+                        "SELECT u.id, a.flat_number, a.owner_name "
+                        "FROM users u JOIN apartments a ON a.id = u.linked_id "
+                        "WHERE u.role='apartment' AND u.society_id=%s "
+                        "ORDER BY a.flat_number",
+                        (sid_val,), fetch_all=True,
+                    ) or []
+                    apartment_options = [
+                        {"label": f"{r['flat_number']} — {r['owner_name']}", "value": r["id"]}
+                        for r in rows
+                    ]
+                except Exception as _e:
+                    print(f"  ⚠️  event ticket apartment options: {_e}")
+
+            return renderers.render_event_ticket_card(
+                event_id=event_id,
+                event_title=event.get("title", "Event"),
+                event_date=event.get("event_date"),
+                ticket_price=float(event.get("ticket_price") or 0),
+                society_id=sid_val,
+                apt_user_id=apt_user_id,
+                flat_number=flat_number,
+                owner_name=owner_name,
+                apartment_options=apartment_options,
+                caller_role=caller_role,
+            )
+
         # ── Receipt Print — formatted receipt + Print/Save/Email (bypasses schema-driven form) ──
         if card_id == "form_receipt_print":
             receipt_id = prefill.get("receipt_id") or prefill.get("id")
@@ -1613,6 +1685,8 @@ def _save_entity(entity, card_id, data):
             return _save_asset_dispose(db, data, sid)
         if entity in ("vendor_pass", "vendor_pass_new"):
             return _save_vendor_pass(db, data, sid)
+        if entity in ("event_ticket", "event_ticket_new"):
+            return _save_event_ticket(db, data, sid)
         # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
@@ -1963,6 +2037,60 @@ def _save_vendor_pass(db, d, sid):
         return True, f"Pass sold — valid until {valid_until}", receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
+
+
+def _save_event_ticket(db, d, sid):
+    apt_user_id = d.get("apt_user_id")
+    event_id    = d.get("event_id")
+    created_by  = d.get("user_id")
+
+    if not apt_user_id:
+        return False, "Apartment is required", None
+    if not event_id:
+        return False, "Event is required", None
+
+    try:
+        quantity = int(d.get("quantity") or 1)
+        if quantity < 1:
+            raise ValueError
+    except (ValueError, TypeError):
+        return False, "Quantity must be a whole number ≥ 1", None
+
+    mode = d.get("mode", "cash")
+    if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
+        return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
+
+    particulars = d.get("particulars") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
+
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s)",
+            (
+                int(apt_user_id),
+                int(event_id),
+                quantity,
+                mode,
+                created_by,
+                d.get("issued_date") or dt_date.today().isoformat(),
+                particulars,
+            ),
+            fetch_one=True,
+        )
+        amount     = (r or {}).get("amount")
+        receipt_id = (r or {}).get("receipt_id")
+        qty_label  = f"{quantity} ticket" + ("s" if quantity != 1 else "")
+        amt_label  = f" — ₹{float(amount):,.2f}" if amount else " — free"
+        return True, f"{qty_label} issued{amt_label}", receipt_id
+    except Exception as e:
+        return False, _clean_pg_error(e), None
+
+
 def _save_asset(db, d, sid, is_edit, pk):
     if is_edit:
         db._execute(
