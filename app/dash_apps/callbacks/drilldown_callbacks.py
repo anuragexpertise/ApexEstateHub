@@ -1755,11 +1755,11 @@ def _save_receipt_v3(db, d, sid):
     if not particulars:
         return False, "Particulars are required", None
 
-    # Path 2: security portal AND apartment-owner self-initiated payments
+    # Path 2: security, vendor, and apartment-owner self-initiated payments
     # create a pending receipt (no immediate transaction) — an admin must
     # verify it via the existing verify_receipt action before it posts.
     caller_role = d.get("caller_role", "admin")
-    use_pending = caller_role in ("security", "apartment")
+    use_pending = caller_role in ("security", "apartment", "vendor")
 
     fn_name = "fn_save_receipt_pending" if use_pending else "fn_save_receipt"
     n_params = 11 if not use_pending else 11
