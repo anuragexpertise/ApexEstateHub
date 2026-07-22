@@ -374,7 +374,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     ),
     cheque_no VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'confirmed' CHECK (
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
             'pending',
             'confirmed',
@@ -419,7 +419,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     ),
     cheque_no VARCHAR(50),
     transaction_id VARCHAR(255),
-    status VARCHAR(20) NOT NULL DEFAULT 'confirmed' CHECK (
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
             'pending',
             'confirmed',
