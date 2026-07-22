@@ -8,7 +8,7 @@ set -e
 HOST="estatehub-28042026-anurag-bdd9.a.aivencloud.com"
 PORT="21207"
 USER="avnadmin"
-DB="defaultdb"
+DB="public"
 SQL_FILE="estatehub.sql"
 
 # Prompt for password securely
