@@ -1,0 +1,709 @@
+diff --git a/app/dash_apps/callbacks/drilldown_callbacks.py b/app/dash_apps/callbacks/drilldown_callbacks.py
+index aaf5e00..50fec37 100644
+--- a/app/dash_apps/callbacks/drilldown_callbacks.py
++++ b/app/dash_apps/callbacks/drilldown_callbacks.py
+@@ -685,6 +685,24 @@ def register_drilldown_callbacks(app):
+                 )
+                 hide_kpis = True
+ 
++            # ── Sell tickets (admin portal — from event profile) ──────────────────
++            elif action == "sell_event_ticket":
++                store = nav_state.navigate_to(
++                    store, "form_event_ticket_new", "Sell Tickets",
++                    prefill={"event_id": pk, "role": "admin"},
++                    entity_pk=pk,
++                )
++                hide_kpis = True
++
++            # ── Buy tickets (apartment portal — apartment buys their own) ─────────
++            elif action == "buy_event_ticket":
++                store = nav_state.navigate_to(
++                    store, "form_event_ticket_new", "Buy Tickets",
++                    prefill={"event_id": pk, "role": "apartment"},
++                    entity_pk=pk,
++                )
++                hide_kpis = True
++
+             # ── Raise concern (apartment profile) ────────────────────────────────
+             elif action == "new_concern":
+                 record = loaders.load_profile(entity, pk, sid) or {}
+@@ -851,6 +869,7 @@ def register_drilldown_callbacks(app):
+             "pay_due": {"admin"}, "pay_dues": {"admin"},
+             "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
+             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
++            "event_ticket": {"admin", "apartment"}, "event_ticket_new": {"admin", "apartment"},
+         }
+         _actor_role = (auth or {}).get("role", "admin")
+         if entity_singular in _SPECIAL_ENTITY_ROLES:
+@@ -1399,6 +1418,59 @@ def _render_card(
+                 caller_role=caller_role,
+             )
+ 
++        # ── Event Ticket form — dedicated renderer (bypasses to_singular mangling) ──
++        if card_id == "form_event_ticket_new":
++            event_id    = prefill.get("event_id")
++            sid_val     = filters.get("society_id")
++            caller_role = (auth or {}).get("role", "admin")
++            event = loaders.load_profile("event", event_id, sid_val) or {} \
++                    if event_id and sid_val else {}
++
++            apt_user_id = None
++            flat_number = ""
++            owner_name  = ""
++            apartment_options = []
++            if caller_role == "apartment":
++                # Buyer is the logged-in apartment — pull their own identity
++                # from auth, not from the event's pk (which is the event id).
++                apt_user_id = (auth or {}).get("user_id")
++                apt_id = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
++                apt = loaders.load_profile("apartment", apt_id, sid_val) or {} \
++                      if apt_id and sid_val else {}
++                flat_number = apt.get("flat_number", "")
++                owner_name  = apt.get("owner_name", "")
++            elif sid_val:
++                # Admin needs to pick which apartment is buying — options are
++                # {users.id (role='apartment') : "Flat — Owner"}, since
++                # fn_sell_event_ticket takes p_user_id, not apartments.id.
++                try:
++                    rows = db._execute(
++                        "SELECT u.id, a.flat_number, a.owner_name "
++                        "FROM users u JOIN apartments a ON a.id = u.linked_id "
++                        "WHERE u.role='apartment' AND u.society_id=%s "
++                        "ORDER BY a.flat_number",
++                        (sid_val,), fetch_all=True,
++                    ) or []
++                    apartment_options = [
++                        {"label": f"{r['flat_number']} — {r['owner_name']}", "value": r["id"]}
++                        for r in rows
++                    ]
++                except Exception as _e:
++                    print(f"  ⚠️  event ticket apartment options: {_e}")
++
++            return renderers.render_event_ticket_card(
++                event_id=event_id,
++                event_title=event.get("title", "Event"),
++                event_date=event.get("event_date"),
++                ticket_price=float(event.get("ticket_price") or 0),
++                society_id=sid_val,
++                apt_user_id=apt_user_id,
++                flat_number=flat_number,
++                owner_name=owner_name,
++                apartment_options=apartment_options,
++                caller_role=caller_role,
++            )
++
+         # ── Receipt Print — formatted receipt + Print/Save/Email (bypasses schema-driven form) ──
+         if card_id == "form_receipt_print":
+             receipt_id = prefill.get("receipt_id") or prefill.get("id")
+@@ -1613,6 +1685,8 @@ def _save_entity(entity, card_id, data):
+             return _save_asset_dispose(db, data, sid)
+         if entity in ("vendor_pass", "vendor_pass_new"):
+             return _save_vendor_pass(db, data, sid)
++        if entity in ("event_ticket", "event_ticket_new"):
++            return _save_event_ticket(db, data, sid)
+         # ────────────────────────────────────────────────────────────────
+         return False, f"No save handler for '{entity}'", None
+     except Exception as e:
+@@ -1963,6 +2037,60 @@ def _save_vendor_pass(db, d, sid):
+         return True, f"Pass sold — valid until {valid_until}", receipt_id
+     except Exception as e:
+         return False, _clean_pg_error(e), None
++
++
++def _save_event_ticket(db, d, sid):
++    apt_user_id = d.get("apt_user_id")
++    event_id    = d.get("event_id")
++    created_by  = d.get("user_id")
++
++    if not apt_user_id:
++        return False, "Apartment is required", None
++    if not event_id:
++        return False, "Event is required", None
++
++    try:
++        quantity = int(d.get("quantity") or 1)
++        if quantity < 1:
++            raise ValueError
++    except (ValueError, TypeError):
++        return False, "Quantity must be a whole number ≥ 1", None
++
++    mode = d.get("mode", "cash")
++    if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
++        return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
++
++    particulars = d.get("particulars") or ""
++    if mode != "cash":
++        ref_bits = []
++        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
++        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
++        if ref_bits:
++            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
++
++    try:
++        r = db._execute(
++            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s)",
++            (
++                int(apt_user_id),
++                int(event_id),
++                quantity,
++                mode,
++                created_by,
++                d.get("issued_date") or dt_date.today().isoformat(),
++                particulars,
++            ),
++            fetch_one=True,
++        )
++        amount     = (r or {}).get("amount")
++        receipt_id = (r or {}).get("receipt_id")
++        qty_label  = f"{quantity} ticket" + ("s" if quantity != 1 else "")
++        amt_label  = f" — ₹{float(amount):,.2f}" if amount else " — free"
++        return True, f"{qty_label} issued{amt_label}", receipt_id
++    except Exception as e:
++        return False, _clean_pg_error(e), None
++
++
+ def _save_asset(db, d, sid, is_edit, pk):
+     if is_edit:
+         db._execute(
+diff --git a/app/dash_apps/callbacks/qr_callbacks.py b/app/dash_apps/callbacks/qr_callbacks.py
+index de222c8..53ccbfb 100644
+--- a/app/dash_apps/callbacks/qr_callbacks.py
++++ b/app/dash_apps/callbacks/qr_callbacks.py
+@@ -305,6 +305,23 @@ def register_qr_callbacks(app):
+         State({"type": "form-entity-pk", "entity": "vendor_pass"}, "value"),
+         prevent_initial_call=True,
+     )
++    # 1C. Same toggle, for the Event Ticket form's Cheque No. / Payment
++    #     Gateway ID fields — separate Store/wrap ids so the two forms
++    #     never collide if both happen to render in the same nav stack.
++    clientside_callback(
++        """
++        function(mode, pk) {
++            var wrap = document.querySelector(
++                '[id*="et-noncash-wrap"][id*="' + pk + '"]');
++            if (wrap) wrap.style.display = (mode && mode !== 'cash') ? 'block' : 'none';
++            return window.dash_clientside.no_update;
++        }
++        """,
++        Output("et-noncash-dummy", "data"),
++        Input({"type": "form-field", "entity": "event_ticket", "field": "mode"}, "value"),
++        State({"type": "form-entity-pk", "entity": "event_ticket"}, "value"),
++        prevent_initial_call=True,
++    )
+     # ── 2. Generate user's static QR code (modal) ───────────────
+     @app.callback(
+         Output('qr-modal', 'is_open'),
+diff --git a/app/dash_apps/drilldown/profile_actions.py b/app/dash_apps/drilldown/profile_actions.py
+index cad34b3..0e741d4 100644
+--- a/app/dash_apps/drilldown/profile_actions.py
++++ b/app/dash_apps/drilldown/profile_actions.py
+@@ -229,6 +229,26 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "color": "info",
+         },
+     ],
++
++    # ── EVENTS ──────────────────────────────────────────────────────────────
++    "events": [
++        {
++            "label": "Sell Tickets",       # admin sells to a chosen apartment
++            "action_id": "sell_event_ticket",
++            "target_card": "form_event_ticket_new",
++            "icon": "fa-ticket-alt",
++            "color": "success",
++            "roles": ["admin"],
++        },
++        {
++            "label": "Buy Tickets",        # apartment buys their own
++            "action_id": "buy_event_ticket",
++            "target_card": "form_event_ticket_new",
++            "icon": "fa-ticket-alt",
++            "color": "primary",
++            "roles": ["apartment"],
++        },
++    ],
+ }
+ 
+ 
+diff --git a/app/dash_apps/drilldown/renderers.py b/app/dash_apps/drilldown/renderers.py
+index 105fb27..a83cde7 100644
+--- a/app/dash_apps/drilldown/renderers.py
++++ b/app/dash_apps/drilldown/renderers.py
+@@ -1170,6 +1170,36 @@ def render_form_card(card_id: str, title: str, icon: str,
+                     },
+                 ),
+             ]
++        elif ftype == "account_dropdown_event_ticket":
++            # Only NULL, or the "Event Ticket" (2319) header itself, or one
++            # of its direct children (e.g. "Holi" = 23191) — an event isn't
++            # allowed to post to an unrelated account.
++            _acc_opts = [{"label": "— None —", "value": ""}]
++            if society_id:
++                try:
++                    _rows = db._execute(
++                        "SELECT id, name FROM accounts "
++                        "WHERE society_id=%s AND (id=2319 OR parent_account_id=2319) "
++                        "ORDER BY (id=2319) DESC, name",
++                        (society_id,),
++                        fetch_all=True,
++                    ) or []
++                    _acc_opts += [
++                        {"label": f"{r['id']} — {r['name']}", "value": r["id"]}
++                        for r in _rows
++                    ]
++                except Exception as _e:
++                    print(f"⚠️  event ticket account dropdown load error: {_e}")
++            _pre_acc = int(pre_val) if pre_val not in (None, "", "None") else None
++            ctrl = dcc.Dropdown(
++                id={"type": "form-field", "entity": entity, "field": fid},
++                options=_acc_opts,
++                value=_pre_acc,
++                placeholder="Select Event Ticket account (optional)…",
++                clearable=False,
++                style={"fontSize": "13px"},
++                optionHeight=40,
++            )
+         elif ftype in ("account_dropdown_receipt", "account_dropdown_expense"):
+             # Cr accounts for receipts, Dr accounts for expenses
+             _drcr = "Cr" if ftype == "account_dropdown_receipt" else "Dr"
+@@ -1782,6 +1812,230 @@ def render_vendor_pass_card(
+     })
+  
+ 
++# ════════════════════════════════════════════════════════════════════════════
++# EVENT TICKET CARD  — Sell Tickets (admin) / Buy Tickets (apartment)
++# ════════════════════════════════════════════════════════════════════════════
++
++def render_event_ticket_card(
++    event_id,
++    event_title: str,
++    event_date,
++    ticket_price: float,
++    society_id=None,
++    apt_user_id=None,
++    flat_number: str = "",
++    owner_name: str = "",
++    apartment_options: list | None = None,
++    prefill_mode: str = "cash",
++    caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment" -> Buy Tickets
++) -> "html.Div":
++    """
++    Dedicated form card for Sell Event Ticket (admin) / Buy Event Ticket
++    (apartment) -- mirrors render_vendor_pass_card's Sell/Buy Pass shape.
++
++    entity name on all IDs = "event_ticket" -- matches _resolve_entity_singular
++    guard and _save_entity("event_ticket") -> _save_event_ticket() routing.
++
++    Ticket flow recorded in DB:
++      event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity, amount)
++      receipts       -> status='confirmed' (immediate) -- acc_id = events.parent_account_id
++      transactions   -> source_table='receipts', source_id=receipt.id
++    """
++    from datetime import date as _date
++    from dash import html, dcc
++    import dash_bootstrap_components as dbc
++
++    color        = "#c8781f"
++    today        = _date.today().strftime("%Y-%m-%d")
++    is_admin     = caller_role in ("admin", "master")
++    action_label = "Sell Tickets" if is_admin else "Buy Tickets"
++    entity_name  = "event_ticket"   # MUST match _resolve_entity_singular guard
++
++    date_str = (
++        event_date.strftime("%d %b %Y")
++        if hasattr(event_date, "strftime")
++        else str(event_date or "")
++    )
++    price_display = f"{float(ticket_price or 0):,.2f}"
++
++    banner = dbc.Alert([
++        html.I(className="fas fa-ticket-alt me-2"),
++        (f"{date_str} — Rs.{price_display} per ticket" if ticket_price else
++         f"{date_str} — Free entry, no payment required"),
++    ], color="info", style={"fontSize": "12px", "borderRadius": "10px",
++                             "padding": "8px 14px", "marginBottom": "12px"})
++
++    # -- Buyer field: admin picks an apartment, apartment sees their own flat --
++    if is_admin:
++        buyer_field = dbc.Row([
++            dbc.Col(dbc.Label("Apartment *",
++                              style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                    width=4, style={"paddingTop": "6px"}),
++            dbc.Col(dcc.Dropdown(
++                id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
++                options=apartment_options or [],
++                value=None,
++                placeholder="Select apartment…",
++                clearable=False,
++                style={"fontSize": "13px"},
++                optionHeight=40,
++            ), width=8),
++        ], className="mb-2")
++        pk_for_wrap = str(event_id)
++    else:
++        buyer_field = html.Div(
++            f"Flat {flat_number} — {owner_name}",
++            style={"fontSize": "13px", "fontWeight": "600", "color": "#15304f",
++                   "marginBottom": "10px"},
++        )
++        pk_for_wrap = str(apt_user_id or event_id)
++
++    return html.Div([
++        html.Div(
++            html.Div([
++                html.Div(
++                    html.I(className="fas fa-ticket-alt",
++                           style={"color": "#fff", "fontSize": "16px"}),
++                    style={"width": "38px", "height": "38px", "borderRadius": "10px",
++                           "background": f"linear-gradient(135deg,{color},{color}aa)",
++                           "display": "flex", "alignItems": "center",
++                           "justifyContent": "center", "marginRight": "12px"},
++                ),
++                html.Div([
++                    html.Strong(f"{action_label} — {event_title}",
++                                style={"fontSize": "14px"}),
++                    html.Div(date_str, style={"fontSize": "11px", "color": "#999"}),
++                ]),
++            ], style={"display": "flex", "alignItems": "center"}),
++            style={"padding": "12px 16px",
++                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
++        ),
++        html.Div([
++          html.Div([
++            banner,
++
++            # -- Hidden identity fields --------------------------------------
++            dcc.Input(
++                id={"type": "form-field", "entity": entity_name, "field": "event_id"},
++                type="hidden", value=str(event_id or ""),
++            ),
++            dcc.Input(
++                id={"type": "form-field", "entity": entity_name, "field": "role"},
++                type="hidden", value="apartment",
++            ),
++            dcc.Input(
++                id={"type": "form-entity-pk", "entity": entity_name},
++                type="hidden", value=pk_for_wrap,
++            ),
++            # apartment's own user id -- hidden when buying for themselves
++            (dcc.Input(
++                id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
++                type="hidden", value=str(apt_user_id or ""),
++            ) if not is_admin else None),
++
++            buyer_field,
++
++            # -- Quantity -----------------------------------------------------
++            dbc.Row([
++                dbc.Col(dbc.Label("Quantity *",
++                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                        width=4, style={"paddingTop": "6px"}),
++                dbc.Col(dbc.Input(
++                    id={"type": "form-field", "entity": entity_name, "field": "quantity"},
++                    type="number", value="1", min=1, step=1,
++                    style={"fontSize": "13px", "borderRadius": "10px"},
++                ), width=8),
++            ], className="mb-2"),
++
++            # -- Payment mode ---------------------------------------------------
++            dbc.Row([
++                dbc.Col(dbc.Label("Payment Mode *",
++                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                        width=4, style={"paddingTop": "6px"}),
++                dbc.Col(dcc.Dropdown(
++                    id={"type": "form-field", "entity": entity_name, "field": "mode"},
++                    options=[
++                        {"label": "Cash",          "value": "cash"},
++                        {"label": "UPI",           "value": "upi"},
++                        {"label": "Bank Transfer", "value": "bank_transfer"},
++                        {"label": "Cheque",        "value": "cheque"},
++                    ],
++                    value=prefill_mode,
++                    clearable=False,
++                    style={"fontSize": "13px"},
++                ), width=8),
++            ], className="mb-2"),
++            # -- Dummy anchor for the non-cash-field clientside toggle -------
++            dcc.Store(id="et-noncash-dummy", data=None),
++            html.Div(
++                id={"type": "et-noncash-wrap", "pk": pk_for_wrap},
++                style={"display": "none"},
++                children=[
++                    dbc.Row([
++                        dbc.Col(dbc.Label("Cheque No.",
++                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                                width=4, style={"paddingTop": "6px"}),
++                        dbc.Col(dbc.Input(
++                            id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
++                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
++                        ), width=8),
++                    ], className="mb-2"),
++                    dbc.Row([
++                        dbc.Col(dbc.Label("Payment Gateway ID",
++                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                                width=4, style={"paddingTop": "6px"}),
++                        dbc.Col(dbc.Input(
++                            id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
++                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
++                        ), width=8),
++                    ], className="mb-2"),
++                ],
++            ),
++            # -- Issue date -----------------------------------------------------
++            dbc.Row([
++                dbc.Col(dbc.Label("Issue Date",
++                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
++                        width=4, style={"paddingTop": "6px"}),
++                dbc.Col(dbc.Input(
++                    id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
++                    type="text",
++                    value=_format_date_entry(today),
++                    placeholder="DD/MM/YYYY",
++                    style={"fontSize": "13px", "borderRadius": "10px"},
++                ), width=8),
++            ], className="mb-2"),
++
++            # -- Submit -----------------------------------------------------------
++            dbc.Button(
++                [html.I(className="fas fa-ticket-alt me-2"), action_label],
++                id={"type": "form-submit", "entity": entity_name,
++                    "card_id": "form_event_ticket_new"},
++                n_clicks=0, color="success", className="mt-3 w-100",
++                style={"borderRadius": "12px", "fontWeight": "700"},
++            ),
++
++            html.Hr(style={"margin": "16px 0 10px", "opacity": "0.15"}),
++            html.Div([
++                html.I(className="fas fa-info-circle me-2",
++                       style={"color": "#7d8ea3", "fontSize": "11px"}),
++                html.Span(
++                    "On submit: event_tickets row created — receipt confirmed — "
++                    "transaction posted to cashbook.",
++                    style={"fontSize": "10px", "color": "#aaa"},
++                ),
++            ]),
++          ], style={"flex": "1", "minWidth": "260px"}),
++          (render_payment_qr_widget(society_id) if not is_admin else None),
++        ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap",
++                  "gap": "16px", "alignItems": "flex-start"}),
++    ], style={
++        "borderRadius": "16px",
++        "border":       f"1px solid {color}22",
++        "boxShadow":    f"0 10px 30px {color}18",
++        "overflow":     "hidden",
++    })
++
++
+ # ════════════════════════════════════════════════════════════════════════════
+ # NOC CARD  — rich-text editor with eligibility banner + Print/PDF/Email
+ # ════════════════════════════════════════════════════════════════════════════
+diff --git a/app/dash_apps/drilldown/schema_introspect.py b/app/dash_apps/drilldown/schema_introspect.py
+index 7583651..f5df21d 100644
+--- a/app/dash_apps/drilldown/schema_introspect.py
++++ b/app/dash_apps/drilldown/schema_introspect.py
+@@ -182,6 +182,7 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
+     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
+     ("payables",              "acc_id"):                 "account_dropdown_dr",
+     ("assets",        "acc_id"):                 "account_dropdown_asset",
++    ("events",                "parent_account_id"):      "account_dropdown_event_ticket",
+ }
+ 
+ # Preferred display columns when building FK option lists.
+diff --git a/database/estatehub.sql b/database/estatehub.sql
+index afe770d..0a66b3b 100644
+--- a/database/estatehub.sql
++++ b/database/estatehub.sql
+@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS events (
+     venue VARCHAR(200),
+     open_to VARCHAR(20) DEFAULT 'all',
+     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
++    ticket_price NUMERIC(10, 2) DEFAULT 0, -- per-ticket price when parent_account_id is a ticket (Cr) account
+     image TEXT,
+     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+     created_by INT REFERENCES users(id),
+@@ -537,6 +538,27 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
+     )
+ );
+ 
++-- ── Event tickets ──────────────────────────────────────────────
++-- Tracks who bought tickets for which event; the money itself is
++-- recorded via the usual receipts/transactions pair (acc_id = the
++-- event's parent_account_id, e.g. "Holi" = 23191 under "Event
++-- Ticket" = 2319), same pattern as vendor_passes -> receipts.
++CREATE TABLE IF NOT EXISTS event_tickets (
++    id SERIAL PRIMARY KEY,
++    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
++    event_id INT NOT NULL REFERENCES events (id) ON DELETE CASCADE,
++    user_id INT NOT NULL REFERENCES users (id),
++    quantity INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
++    amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
++    receipt_id INT REFERENCES receipts (id),
++    issued_date DATE DEFAULT CURRENT_DATE,
++    status VARCHAR(20) DEFAULT 'active',
++    created_at TIMESTAMP DEFAULT NOW()
++);
++
++CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
++CREATE INDEX IF NOT EXISTS idx_event_tickets_user  ON event_tickets (user_id);
++
+ -- ── Apartment charges / fines basis ───────────────────────────
+ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
+     id SERIAL PRIMARY KEY,
+@@ -1848,6 +1870,123 @@ BEGIN
+ END;
+ $$;
+ 
++-- ════════════════════════════════════════════════════════════════
++-- SECTION 6b: EVENT TICKET SALE
++--
++-- fn_sell_event_ticket: Cr the event's own ticket sub-account
++-- (events.parent_account_id, e.g. "Holi" = 23191 under the
++-- "Event Ticket" = 2319 header) + Dr cash/bank paired side —
++-- same double-entry shape as fn_sell_vendor_pass, but the
++-- income account and per-unit price both come from the event
++-- row itself instead of a rate table.
++-- ════════════════════════════════════════════════════════════════
++
++DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
++
++CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
++    p_user_id      INT,
++    p_event_id     INT,
++    p_quantity     INT     DEFAULT 1,
++    p_mode         VARCHAR DEFAULT 'cash',
++    p_created_by   INT     DEFAULT NULL,
++    p_issued_date  DATE    DEFAULT CURRENT_DATE,
++    p_particulars  TEXT    DEFAULT NULL
++)
++RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT)
++LANGUAGE plpgsql AS $$
++DECLARE
++    v_society_id   INT;
++    v_apt_id       INT;
++    v_flat_number  VARCHAR;
++    v_event        RECORD;
++    v_acc_id       INT;
++    v_is_ticket_ac BOOLEAN;
++    v_amount       NUMERIC(10,2);
++    v_cash_acc     INT;
++    v_receipt_id   INT;
++    v_ticket_id    INT;
++    v_desc         TEXT;
++    v_journal_id   INT;
++BEGIN
++    IF p_quantity IS NULL OR p_quantity < 1 THEN
++        RAISE EXCEPTION 'Quantity must be at least 1';
++    END IF;
++
++    SELECT society_id, linked_id INTO v_society_id, v_apt_id
++    FROM users WHERE id = p_user_id AND role = 'apartment';
++    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment user not found'; END IF;
++
++    SELECT flat_number INTO v_flat_number FROM apartments WHERE id = v_apt_id;
++
++    SELECT e.* INTO v_event FROM events e
++    WHERE e.id = p_event_id AND e.society_id = v_society_id;
++    IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
++
++    v_acc_id := v_event.parent_account_id;
++    IF v_acc_id IS NULL THEN
++        RAISE EXCEPTION 'This event has no ticket account set — tickets cannot be sold for it';
++    END IF;
++
++    -- Guard: the account must be the "Event Ticket" (2319) header itself,
++    -- or one of its direct children (e.g. Holi = 23191) — mirrors the
++    -- dropdown restriction on the New Event form.
++    SELECT (a.id = 2319 OR a.parent_account_id = 2319) INTO v_is_ticket_ac
++    FROM accounts a WHERE a.id = v_acc_id AND a.society_id = v_society_id;
++    IF v_is_ticket_ac IS NOT TRUE THEN
++        RAISE EXCEPTION 'Event''s account is not an Event Ticket (2319) account — tickets cannot be sold for it';
++    END IF;
++
++    v_amount := COALESCE(v_event.ticket_price, 0) * p_quantity;
++    v_desc := COALESCE(p_particulars,
++        'Event Ticket x' || p_quantity || ' - ' || COALESCE(v_event.title,'') ||
++        ' - ' || COALESCE(v_flat_number,''));
++
++    v_cash_acc   := fn_resolve_cash_account(v_society_id, p_mode);
++    v_journal_id := NEXTVAL('seq_transaction_number');
++
++    IF v_amount > 0 THEN
++        INSERT INTO receipts(
++            society_id, user_id, entity_id, role,
++            receipt_date, acc_id, particulars, amount, mode,
++            status, confirmed_by, confirmed_at, created_at
++        ) VALUES (
++            v_society_id, p_user_id, v_apt_id, 'apartment',
++            p_issued_date, v_acc_id, v_desc, v_amount, p_mode,
++            'confirmed', p_created_by, NOW(), NOW()
++        ) RETURNING id INTO v_receipt_id;
++
++        -- Cr: event ticket income account
++        INSERT INTO transactions(
++            society_id, trx_date, acc_id, entity_id, acc_particulars,
++            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
++        ) VALUES (
++            v_society_id, p_issued_date, v_acc_id, v_apt_id, v_desc,
++            v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
++        );
++
++        -- Dr: cash / bank paired side
++        IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
++            INSERT INTO transactions(
++                society_id, trx_date, acc_id, entity_id, acc_particulars,
++                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
++            ) VALUES (
++                v_society_id, p_issued_date, v_cash_acc, v_apt_id,
++                'Cash received - ' || v_desc,
++                v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
++            );
++        END IF;
++    END IF;
++
++    INSERT INTO event_tickets(
++        society_id, event_id, user_id, quantity, amount, receipt_id, issued_date, status, created_at
++    ) VALUES (
++        v_society_id, p_event_id, p_user_id, p_quantity, v_amount, v_receipt_id, p_issued_date, 'active', NOW()
++    ) RETURNING id INTO v_ticket_id;
++
++    RETURN QUERY SELECT v_receipt_id, v_ticket_id, v_amount, v_journal_id;
++END;
++$$;
++
+ -- ════════════════════════════════════════════════════════════════
+ -- SECTION 7: ASSET PURCHASE / DISPOSAL  (double-entry)
+ --
+@@ -3108,7 +3247,8 @@ CREATE OR REPLACE FUNCTION fn_events_list(
+ )
+ RETURNS TABLE (
+     id INT, title VARCHAR(200), description TEXT, event_date DATE, event_time VARCHAR(20),
+-    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT, created_at TIMESTAMP
++    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT, ticket_price NUMERIC(10,2),
++    created_at TIMESTAMP
+ )
+ LANGUAGE plpgsql STABLE AS $$
+ BEGIN
+@@ -3116,7 +3256,7 @@ BEGIN
+     SELECT
+         e.id::INT, e.title::VARCHAR(200), e.description::TEXT, e.event_date::DATE,
+         e.event_time::VARCHAR(20), e.venue::VARCHAR(200), e.open_to::VARCHAR(20),
+-        e.parent_account_id::INT, e.created_at::TIMESTAMP
++        e.parent_account_id::INT, e.ticket_price::NUMERIC(10,2), e.created_at::TIMESTAMP
+     FROM events e
+     WHERE e.society_id = p_society_id
+       AND (p_search IS NULL OR e.title ILIKE '%'||p_search||'%')
+@@ -3131,12 +3271,13 @@ CREATE OR REPLACE FUNCTION fn_event_profile(p_event_id INT)
+ RETURNS TABLE (
+     id INT, society_id INT, title VARCHAR(200), description TEXT, event_date DATE,
+     event_time VARCHAR(20), venue VARCHAR(200), open_to VARCHAR(20),
+-    parent_account_id INT, created_at TIMESTAMP, image TEXT, subtitle TEXT
++    parent_account_id INT, ticket_price NUMERIC(10,2), created_at TIMESTAMP, image TEXT, subtitle TEXT
+ )
+ LANGUAGE SQL STABLE AS $$
+     SELECT id::INT, society_id::INT, title::VARCHAR(200), description::TEXT,
+            event_date::DATE, event_time::VARCHAR(20), venue::VARCHAR(200),
+-           open_to::VARCHAR(20), parent_account_id::INT, created_at::TIMESTAMP, image::TEXT,
++           open_to::VARCHAR(20), parent_account_id::INT, ticket_price::NUMERIC(10,2),
++           created_at::TIMESTAMP, image::TEXT,
+            (event_date::TEXT||' '||COALESCE(event_time::TEXT,''))::TEXT
+     FROM events WHERE id = p_event_id;
+ $$;

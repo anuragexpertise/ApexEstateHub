@@ -182,6 +182,7 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
     ("payables",              "acc_id"):                 "account_dropdown_dr",
     ("assets",        "acc_id"):                 "account_dropdown_asset",
+    ("events",                "parent_account_id"):      "account_dropdown_event_ticket",
 }
 
 # Preferred display columns when building FK option lists.
