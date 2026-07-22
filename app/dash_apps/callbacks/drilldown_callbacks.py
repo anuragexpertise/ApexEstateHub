@@ -2261,6 +2261,16 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     return True, f"{role.title()} '{email}' created", linked_id
 
 def _save_event(db, d, sid, is_edit, pk):
+    # parent_account_id: "" (from the "— None —" dropdown option) must become
+    # NULL, not an empty-string cast to INT.
+    _acc_id = d.get("parent_account_id")
+    _acc_id = int(_acc_id) if _acc_id not in (None, "", "None") else None
+
+    try:
+        _ticket_price = float(d.get("ticket_price") or 0)
+    except (TypeError, ValueError):
+        _ticket_price = 0
+
     if is_edit:
         _img = d.get("image") or None
         _img_clause = ", image=%s" if _img else ""
@@ -2273,13 +2283,16 @@ def _save_event(db, d, sid, is_edit, pk):
             d.get("event_time"),
             d.get("venue"),
             d.get("open_to", "all"),
+            _acc_id,
+            _ticket_price,
         )
         if _img:
             _img_param += (_img,)
         _img_param += _upd_by_param + (pk, sid)
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
-            f"event_time=%s, venue=%s, open_to=%s{_img_clause}{_upd_by_clause} "
+            f"event_time=%s, venue=%s, open_to=%s, parent_account_id=%s, "
+            f"ticket_price=%s{_img_clause}{_upd_by_clause} "
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
@@ -2293,8 +2306,8 @@ def _save_event(db, d, sid, is_edit, pk):
         return False, "Title is required", None
     r = db._execute(
         "INSERT INTO events(society_id, title, description, event_date, "
-        "event_time, venue, open_to, image, created_at, created_by) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
+        "event_time, venue, open_to, parent_account_id, ticket_price, image, created_at, created_by) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
         (
             sid,
             title,
@@ -2303,6 +2316,8 @@ def _save_event(db, d, sid, is_edit, pk):
             d.get("event_time"),
             d.get("venue"),
             d.get("open_to", "all"),
+            _acc_id,
+            _ticket_price,
             d.get("image") or None,
             d.get("user_id"),
         ),

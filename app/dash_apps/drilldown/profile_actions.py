@@ -277,4 +277,10 @@ FIELD_VISIBILITY: dict[str, dict[str, set[str]]] = {
         "confirmed_by": {"admin", "master"},
         "confirmed_at": {"admin", "master"},
     },
+    "events": {
+        # Internal accounting linkage (which Event Ticket account this event
+        # posts to) — not meaningful to apartment/vendor/security portals,
+        # so treat it like the other admin-only internal fields above.
+        "parent_account_id": {"admin", "master"},
+    },
 }
