@@ -75,7 +75,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("vendor", "events"):         {"view"},
     ("vendor", "concerns"):       {"view"},
     ("vendor", "gate_logs"):      {"view"},
-    ("vendor", "receipts"):   {"view"},
+    ("vendor", "receipts"):   {"view", "new"},
     ("vendor", "cashbook"):       {"view"},
     ("vendor", "receivables"):    {"view"},
     ("vendor", "payables"):       {"view"},
