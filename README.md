@@ -861,7 +861,7 @@ A utility script `database/reset_database.py` is provided to perform a destructi
 ```bash
 python3 database/reset_database.py
 ```
-This script connects to the target database, drops the `defaultdb` schema CASCADE, recreates it, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
+This script connects to the target database, recreates the `public` schema CASCADE, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
 
 ### Database Migrations
 
@@ -874,6 +874,15 @@ Use `database/migrate.py` to auto-initialize the schema and seed mock accounts f
 ```bash
 python3 database/migrate.py --seed
 ```
+
+### Required PostgreSQL Extensions
+
+The application requires the `pgcrypto` extension for SHA-256 receipt hashing and chain verification. Setup scripts automatically create this extension if missing:
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+```
+
+All application tables, functions, triggers, and views live in the standard `public` schema. No custom schema or `search_path` overrides are required at runtime.
 
 ### VS Code / Pylance Setup
 

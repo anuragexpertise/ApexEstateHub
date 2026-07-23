@@ -101,6 +101,7 @@ def run_schema(conn):
     ok = 0
     err = 0
     with conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
         for stmt in stmts:
             stmt = stmt.strip()
             if not stmt:

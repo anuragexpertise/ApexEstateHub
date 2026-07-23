@@ -959,7 +959,7 @@ BEGIN
                 COALESCE(NEW.role,              ''),
                 COALESCE(NEW.particulars,       ''),
                 COALESCE(NEW.mode,              ''),
-                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(NEW.receipt_date::TEXT, ''),
                 COALESCE(v_entity_name,         ''),
                 v_prev_hash,
                 COALESCE(NEW.source_reference,  '')
@@ -1032,7 +1032,7 @@ BEGIN
                 COALESCE(NEW.role,              ''),
                 COALESCE(NEW.particulars,       ''),
                 COALESCE(NEW.mode,              ''),
-                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(NEW.receipt_date::TEXT, ''),
                 COALESCE(v_entity_name,         ''),
                 v_prev_hash,
                 COALESCE(NEW.source_reference,  '')
@@ -1053,147 +1053,30 @@ CREATE TRIGGER trg_receipt_hash_insert
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_insert();
 
--- Same for expenses: mirror the receipts hash-issue trigger.
+-- Same for expenses: placeholder no-op triggers (expense hash feature not yet fully implemented).
 DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue () CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE
-    v_number       VARCHAR(64);
-    v_entity_name  TEXT;
-    v_prev_hash    VARCHAR(64);
-    v_chain_seed   VARCHAR(64);
 BEGIN
-    IF NEW.status = 'confirmed' AND (OLD.status IS DISTINCT FROM NEW.status OR OLD.status IS NULL) THEN
-        IF NEW.confirmed_at IS NULL THEN
-            NEW.confirmed_at := NOW();
-        END IF;
-        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
-            IF NEW.role = 'apartment' THEN
-                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
-                  FROM apartments WHERE id = NEW.entity_id;
-            ELSIF NEW.role = 'vendor' THEN
-                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
-            ELSIF NEW.role = 'security' THEN
-                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
-            ELSE
-                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
-            END IF;
-
-            v_chain_seed := ENCODE(DIGEST(
-                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
-                'sha256'), 'hex');
-
-            SELECT receipt_number INTO v_prev_hash
-              FROM receipts
-             WHERE society_id = NEW.society_id
-               AND acc_id = NEW.acc_id
-               AND status = 'confirmed'
-               AND receipt_number IS NOT NULL
-               AND id <> NEW.id
-               AND confirmed_at < NEW.confirmed_at
-             ORDER BY confirmed_at DESC, id DESC
-             LIMIT 1;
-
-            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
-
-            v_number := fn_compute_receipt_hash(
-                NEW.society_id::TEXT,
-                COALESCE(NEW.acc_id::TEXT,      '0'),
-                COALESCE(NEW.amount::TEXT,      '0'),
-                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
-                COALESCE(NEW.entity_id::TEXT,   ''),
-                COALESCE(NEW.role,              ''),
-                COALESCE(NEW.particulars,       ''),
-                COALESCE(NEW.mode,              ''),
-                COALESCE(NEW.expense_date::TEXT,''),
-                COALESCE(v_entity_name,         ''),
-                v_prev_hash,
-                COALESCE(NEW.source_reference,  '')
-            );
-
-            NEW.receipt_number := v_number;
-            NEW.previous_hash  := v_prev_hash;
-        END IF;
-    END IF;
     RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
-
 CREATE TRIGGER trg_expense_hash_issue
     BEFORE UPDATE OF status ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expense_hash_issue();
 
 DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert () CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE
-    v_number       VARCHAR(64);
-    v_entity_name  TEXT;
-    v_prev_hash    VARCHAR(64);
-    v_chain_seed   VARCHAR(64);
 BEGIN
-    IF NEW.status = 'confirmed' THEN
-        IF NEW.confirmed_at IS NULL THEN
-            NEW.confirmed_at := NOW();
-        END IF;
-        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
-            IF NEW.role = 'apartment' THEN
-                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
-                  FROM apartments WHERE id = NEW.entity_id;
-            ELSIF NEW.role = 'vendor' THEN
-                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
-            ELSIF NEW.role = 'security' THEN
-                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
-            ELSE
-                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
-            END IF;
-
-            v_chain_seed := ENCODE(DIGEST(
-                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
-                'sha256'), 'hex');
-
-            SELECT receipt_number INTO v_prev_hash
-              FROM receipts
-             WHERE society_id = NEW.society_id
-               AND acc_id = NEW.acc_id
-               AND status = 'confirmed'
-               AND receipt_number IS NOT NULL
-               AND confirmed_at < NEW.confirmed_at
-             ORDER BY confirmed_at DESC, id DESC
-             LIMIT 1;
-
-            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
-
-            v_number := fn_compute_receipt_hash(
-                NEW.society_id::TEXT,
-                COALESCE(NEW.acc_id::TEXT,      '0'),
-                COALESCE(NEW.amount::TEXT,      '0'),
-                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
-                COALESCE(NEW.entity_id::TEXT,   ''),
-                COALESCE(NEW.role,              ''),
-                COALESCE(NEW.particulars,       ''),
-                COALESCE(NEW.mode,              ''),
-                COALESCE(NEW.expense_date::TEXT,''),
-                COALESCE(v_entity_name,         ''),
-                v_prev_hash,
-                COALESCE(NEW.source_reference,  '')
-            );
-
-            NEW.receipt_number := v_number;
-            NEW.previous_hash  := v_prev_hash;
-        END IF;
-    END IF;
     RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
-
 CREATE TRIGGER trg_expense_hash_insert
     BEFORE INSERT ON expenses
     FOR EACH ROW
@@ -4284,7 +4167,7 @@ BEGIN
            pg_get_function_arguments(p.oid)::TEXT,
            pg_get_functiondef(p.oid)::TEXT
     FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE p.proname LIKE 'fn_%' AND n.nspname = 'defaultdb'
+    WHERE p.proname LIKE 'fn_%' AND n.nspname = 'public'
     ORDER BY p.proname;
 END;
 $$ LANGUAGE plpgsql;
