@@ -330,7 +330,7 @@ Commands:
                 rows, _ = self.db.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
-                    WHERE table_schema = 'public'
+                    WHERE table_schema = 'defaultdb'
                     ORDER BY table_name
                 """)
                 if rows:

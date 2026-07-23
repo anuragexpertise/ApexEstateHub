@@ -12,8 +12,8 @@ Usage:
 
 Steps:
     1. Connect to PostgreSQL
-    2. Drop public schema CASCADE
-    3. Recreate public schema
+    2. Drop defaultdb schema CASCADE
+    3. Recreate defaultdb schema
     4. Execute estatehub.sql
     5. Verify tables/functions/views
 """
@@ -89,14 +89,14 @@ def validate(cursor):
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.tables
-        WHERE table_schema='public'
+        WHERE table_schema='defaultdb'
     """)
     table_count = cursor.fetchone()[0]
 
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.views
-        WHERE table_schema='public'
+        WHERE table_schema='defaultdb'
     """)
     view_count = cursor.fetchone()[0]
 
@@ -105,7 +105,7 @@ def validate(cursor):
         FROM pg_proc p
         JOIN pg_namespace n
             ON n.oid = p.pronamespace
-        WHERE n.nspname='public'
+        WHERE n.nspname='defaultdb'
     """)
     function_count = cursor.fetchone()[0]
 
@@ -116,7 +116,7 @@ def validate(cursor):
     cursor.execute("""
         SELECT table_name
         FROM information_schema.tables
-        WHERE table_schema='public'
+        WHERE table_schema='defaultdb'
         ORDER BY table_name
     """)
 
@@ -182,22 +182,22 @@ def main():
 
         print("\n✓ Connected")
 
-        print("\nDropping schema public...")
+        print("\nDropping schema defaultdb...")
 
         cur.execute("""
-            DROP SCHEMA IF EXISTS public CASCADE;
+            DROP SCHEMA IF EXISTS defaultdb CASCADE;
         """)
 
         cur.execute("""
-            CREATE SCHEMA public;
+            CREATE SCHEMA defaultdb;
         """)
 
         cur.execute(f"""
-            GRANT ALL ON SCHEMA public TO {DB_USER};
+            GRANT ALL ON SCHEMA defaultdb TO {DB_USER};
         """)
 
         cur.execute("""
-            GRANT ALL ON SCHEMA public TO public;
+            GRANT ALL ON SCHEMA defaultdb TO defaultdb;
         """)
 
         print("✓ Fresh schema created")
