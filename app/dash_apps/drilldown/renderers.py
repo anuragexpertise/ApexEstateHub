@@ -1840,7 +1840,7 @@ def render_event_ticket_card(
     guard and _save_entity("event_ticket") -> _save_event_ticket() routing.
 
     Ticket flow recorded in DB:
-      event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity, amount)
+      event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity_adult, quantity_child, amount)
       receipts       -> status='confirmed' (immediate) -- acc_id = events.parent_account_id
       transactions   -> source_table='receipts', source_id=receipt.id
     """
@@ -1948,17 +1948,27 @@ def render_event_ticket_card(
 
             buyer_field,
 
-            # -- Quantity -----------------------------------------------------
+            # -- Quantity (Adult / Child split) --
             dbc.Row([
-                dbc.Col(dbc.Label("Quantity *",
+                dbc.Col(dbc.Label("Adult Qty *",
                                   style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
                         width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dbc.Input(
-                    id={"type": "form-field", "entity": entity_name, "field": "quantity"},
-                    type="number", value="1", min=1, step=1,
+                    id={"type": "form-field", "entity": entity_name, "field": "quantity_adult"},
+                    type="number", value="1", min=0, step=1,
                     style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
+            (dbc.Row([
+                dbc.Col(dbc.Label("Child Qty",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": entity_name, "field": "quantity_child"},
+                    type="number", value="0", min=0, step=1,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2") if ticket_price2 and float(ticket_price2 or 0) > 0 else None),
 
             # -- Payment mode ---------------------------------------------------
             dbc.Row([

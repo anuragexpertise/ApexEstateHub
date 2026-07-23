@@ -2045,11 +2045,14 @@ def _save_event_ticket(db, d, sid):
         return False, "Event is required", None
 
     try:
-        quantity = int(d.get("quantity") or 1)
-        if quantity < 1:
+        quantity_adult = int(d.get("quantity_adult") or 0)
+        quantity_child = int(d.get("quantity_child") or 0)
+        if quantity_adult < 0 or quantity_child < 0:
+            raise ValueError
+        if quantity_adult + quantity_child < 1:
             raise ValueError
     except (ValueError, TypeError):
-        return False, "Quantity must be a whole number ≥ 1", None
+        return False, "Ticket quantities must be whole numbers ≥ 0, with at least 1 total", None
 
     mode = d.get("mode", "cash")
     if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
@@ -2065,11 +2068,12 @@ def _save_event_ticket(db, d, sid):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 int(apt_user_id),
                 int(event_id),
-                quantity,
+                quantity_adult,
+                quantity_child,
                 mode,
                 created_by,
                 d.get("issued_date") or dt_date.today().isoformat(),
@@ -2079,7 +2083,12 @@ def _save_event_ticket(db, d, sid):
         )
         amount     = (r or {}).get("amount")
         receipt_id = (r or {}).get("receipt_id")
-        qty_label  = f"{quantity} ticket" + ("s" if quantity != 1 else "")
+        parts = []
+        if quantity_adult > 0:
+            parts.append(f"{quantity_adult} adult")
+        if quantity_child > 0:
+            parts.append(f"{quantity_child} child")
+        qty_label  = " | ".join(parts) + " ticket" + ("s" if (quantity_adult + quantity_child) != 1 else "")
         amt_label  = f" — ₹{float(amount):,.2f}" if amount else " — free"
         return True, f"{qty_label} issued{amt_label}", receipt_id
     except Exception as e:

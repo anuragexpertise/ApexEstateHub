@@ -566,7 +566,8 @@ CREATE TABLE IF NOT EXISTS event_tickets (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     event_id INT NOT NULL REFERENCES events (id) ON DELETE CASCADE,
     user_id INT NOT NULL REFERENCES users (id),
-    quantity INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    quantity_adult INT NOT NULL DEFAULT 0 CHECK (quantity_adult >= 0),
+    quantity_child INT NOT NULL DEFAULT 0 CHECK (quantity_child >= 0),
     amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     receipt_id INT REFERENCES receipts (id),
     issued_date DATE DEFAULT CURRENT_DATE,
@@ -2268,11 +2269,12 @@ DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
 CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
     p_user_id      INT,
     p_event_id     INT,
-    p_quantity     INT     DEFAULT 1,
+    p_quantity_adult  INT DEFAULT 0,
+    p_quantity_child  INT DEFAULT 0,
     p_mode         VARCHAR DEFAULT 'cash',
-    p_created_by   INT     DEFAULT NULL,
-    p_issued_date  DATE    DEFAULT CURRENT_DATE,
-    p_particulars  TEXT    DEFAULT NULL
+    p_created_by   INT DEFAULT NULL,
+    p_issued_date  DATE DEFAULT CURRENT_DATE,
+    p_particulars  TEXT DEFAULT NULL
 )
 RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
@@ -2291,9 +2293,10 @@ DECLARE
     v_journal_id   INT;
     v_is_admin     BOOLEAN;
     v_status       VARCHAR(20);
+    v_total_qty    INT;
 BEGIN
-    IF p_quantity IS NULL OR p_quantity < 1 THEN
-        RAISE EXCEPTION 'Quantity must be at least 1';
+    IF (COALESCE(p_quantity_adult, 0) + COALESCE(p_quantity_child, 0)) < 1 THEN
+        RAISE EXCEPTION 'Total ticket quantity must be at least 1';
     END IF;
 
     SELECT society_id, linked_id INTO v_society_id, v_apt_id
@@ -2317,9 +2320,11 @@ BEGIN
         RAISE EXCEPTION 'Event''s account is not an Event Ticket (2319) account — tickets cannot be sold for it';
     END IF;
 
-    v_amount := COALESCE(v_event.ticket_price, 0) * p_quantity;
+    v_amount := COALESCE(v_event.ticket_price, 0) * COALESCE(p_quantity_adult, 0)
+             + COALESCE(v_event.ticket_price2, 0) * COALESCE(p_quantity_child, 0);
+    v_total_qty := COALESCE(p_quantity_adult, 0) + COALESCE(p_quantity_child, 0);
     v_desc := COALESCE(p_particulars,
-        'Event Ticket x' || p_quantity || ' - ' || COALESCE(v_event.title,'') ||
+        'Event Ticket x' || v_total_qty || ' - ' || COALESCE(v_event.title,'') ||
         ' - ' || COALESCE(v_flat_number,''));
 
     v_cash_acc   := fn_resolve_cash_account(v_society_id, p_mode);
@@ -2373,9 +2378,9 @@ BEGIN
     END IF;
 
     INSERT INTO event_tickets(
-        society_id, event_id, user_id, quantity, amount, receipt_id, issued_date, status, created_at
+        society_id, event_id, user_id, quantity_adult, quantity_child, amount, receipt_id, issued_date, status, created_at
     ) VALUES (
-        v_society_id, p_event_id, p_user_id, p_quantity, v_amount, v_receipt_id, p_issued_date, 'active', NOW()
+        v_society_id, p_event_id, p_user_id, COALESCE(p_quantity_adult, 0), COALESCE(p_quantity_child, 0), v_amount, v_receipt_id, p_issued_date, 'active', NOW()
     ) RETURNING id INTO v_ticket_id;
 
     receipt_id := v_receipt_id;
@@ -4688,6 +4693,11 @@ ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
 
 ALTER TABLE ven_charges_fines_basis
 ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+-- MIGRATION: split event_tickets.quantity into quantity_adult + quantity_child
+ALTER TABLE event_tickets DROP COLUMN IF EXISTS quantity;
+ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS quantity_adult INT NOT NULL DEFAULT 0 CHECK (quantity_adult >= 0);
+ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS quantity_child INT NOT NULL DEFAULT 0 CHECK (quantity_child >= 0);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
