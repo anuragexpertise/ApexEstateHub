@@ -769,9 +769,9 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Community Hall Booking Fee")):
         cur.execute(
-            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, 213, "Community Hall Booking Fee", 2000.00,
-             apt1_id, "apartment", "cash", "2026-07-10", admin_uid),
+             apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, None, None),
         )
         conn.commit()
         print("  ✓ Receipt (admin, CONFIRMED): Community Hall Booking Fee ₹2000")
@@ -780,9 +780,9 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Visitor Parking Fee (gate collection)")):
         cur.execute(
-            "SELECT * FROM fn_save_receipt_pending(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, 213, "Visitor Parking Fee (gate collection)", 300.00,
-             None, "other", "cash", "2026-07-16", security_user_id),
+             None, "other", "cash", "2026-07-16", security_user_id, None, None, None),
         )
         conn.commit()
         print("  ✓ Receipt (security, UNCONFIRMED/pending): Visitor Parking Fee ₹300")

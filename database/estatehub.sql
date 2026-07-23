@@ -227,7 +227,10 @@ CREATE TABLE IF NOT EXISTS events (
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
+    ticket_name VARCHAR(20) DEFAULT 'Adult',
     ticket_price NUMERIC(10, 2) DEFAULT 0, -- per-ticket price when parent_account_id is a ticket (Cr) account
+    ticket_name2 VARCHAR(20) DEFAULT 'Child',
+    ticket_price2 NUMERIC(10,2) DEFAULT 0,
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users(id),
@@ -382,10 +385,12 @@ CREATE TABLE IF NOT EXISTS receipts (
         )
     ),
     confirmed_by INT REFERENCES users (id),
-    confirmed_at TIMESTAMP DEFAULT NOW(),
+    confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
-    receipt_number VARCHAR(50) UNIQUE,
+    receipt_number VARCHAR(64) UNIQUE,
+    previous_hash VARCHAR(64),
+    source_reference VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -427,9 +432,11 @@ CREATE TABLE IF NOT EXISTS expenses (
         )
     ),
     confirmed_by INT REFERENCES users (id),
-    confirmed_at TIMESTAMP DEFAULT NOW(),
+    confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
+    previous_hash VARCHAR(64),
+    source_reference VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -508,7 +515,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     source_id INT,
     created_by INTEGER REFERENCES users (id),
     journal_id INT,
-    transaction_number VARCHAR(50) UNIQUE,
+    transaction_number VARCHAR(64) UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -750,23 +757,414 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (
 CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
 CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
 
-DROP FUNCTION IF EXISTS fn_trg_receipt_number() CASCADE;
-CREATE OR REPLACE FUNCTION fn_trg_receipt_number()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
+-- ── Chain hash helpers ─────────────────────────────────────────
+DROP FUNCTION IF EXISTS fn_compute_receipt_hash(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_compute_receipt_hash(
+    p_society_id       TEXT,
+    p_acc_id           TEXT,
+    p_amount           TEXT,
+    p_confirmed_at     TEXT,
+    p_entity_id        TEXT,
+    p_role             TEXT,
+    p_particulars      TEXT,
+    p_mode             TEXT,
+    p_receipt_date     TEXT,
+    p_entity_name      TEXT,
+    p_previous_hash    TEXT,
+    p_source_reference TEXT
+) RETURNS VARCHAR(64) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_input TEXT;
 BEGIN
-    IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
-        NEW.receipt_number := 'RCPT-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-' ||
-            LPAD(NEXTVAL('seq_receipt_number')::TEXT, 6, '0');
+    v_input :=
+        COALESCE(p_society_id,       '') || '|' ||
+        COALESCE(p_acc_id,           '') || '|' ||
+        LPAD(COALESCE(p_amount,      '0'), 20, ' ') || '|' ||
+        COALESCE(p_confirmed_at,     '') || '|' ||
+        COALESCE(p_entity_id,        '') || '|' ||
+        COALESCE(p_role,             '') || '|' ||
+        COALESCE(p_particulars,      '') || '|' ||
+        COALESCE(p_mode,             '') || '|' ||
+        COALESCE(p_receipt_date,     '') || '|' ||
+        COALESCE(p_entity_name,      '') || '|' ||
+        COALESCE(p_previous_hash,    '') || '|' ||
+        COALESCE(p_source_reference, '') || '|' ||
+        'APEX_RECEIPT_V1';
+
+    RETURN ENCODE(DIGEST(v_input, 'sha256'), 'hex');
+END;
+$$;
+
+-- Get the previous receipt hash in the same (society_id, acc_id) chain.
+DROP FUNCTION IF EXISTS fn_get_chain_previous_hash(INT, INT, TIMESTAMP) CASCADE;
+CREATE OR REPLACE FUNCTION fn_get_chain_previous_hash(
+    p_society_id   INT,
+    p_acc_id       INT,
+    p_confirmed_at TIMESTAMP
+) RETURNS VARCHAR(64) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_hash  VARCHAR(64);
+    v_seed  VARCHAR(64);
+BEGIN
+    -- Chain genesis for this (society, acc_id)
+    v_seed := ENCODE(DIGEST(
+        p_society_id::TEXT || '|' || COALESCE(p_acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+        'sha256'), 'hex');
+
+    SELECT receipt_number INTO v_hash
+      FROM receipts
+     WHERE society_id = p_society_id
+       AND acc_id = p_acc_id
+       AND status = 'confirmed'
+       AND receipt_number IS NOT NULL
+       AND confirmed_at < p_confirmed_at
+     ORDER BY confirmed_at DESC, id DESC
+     LIMIT 1;
+
+    RETURN COALESCE(v_hash, v_seed);
+END;
+$$;
+
+-- Issue the immutable SHA256 receipt_number for a confirmed receipt.
+DROP FUNCTION IF EXISTS fn_issue_receipt_hash_for_receipt(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_issue_receipt_hash_for_receipt(p_receipt_id INT)
+RETURNS VARCHAR(64) LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec         receipts%ROWTYPE;
+    v_entity_name TEXT;
+    v_prev_hash   VARCHAR(64);
+    v_number      VARCHAR(64);
+BEGIN
+    SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
+    IF NOT FOUND THEN RETURN NULL; END IF;
+    IF v_rec.status <> 'confirmed' THEN RETURN NULL; END IF;
+    IF v_rec.confirmed_at IS NULL THEN
+        v_rec.confirmed_at := NOW();
+    END IF;
+
+    -- Resolve entity_name for hash determinism
+    IF v_rec.role = 'apartment' THEN
+        SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+          FROM apartments WHERE id = v_rec.entity_id;
+    ELSIF v_rec.role = 'vendor' THEN
+        SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = v_rec.entity_id;
+    ELSIF v_rec.role = 'security' THEN
+        SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = v_rec.entity_id;
+    ELSE
+        v_entity_name := COALESCE(v_rec.entity_id::TEXT, '');
+    END IF;
+
+    v_prev_hash := fn_get_chain_previous_hash(v_rec.society_id, v_rec.acc_id, v_rec.confirmed_at);
+
+    v_number := fn_compute_receipt_hash(
+        v_rec.society_id::TEXT,
+        COALESCE(v_rec.acc_id::TEXT,      '0'),
+        COALESCE(v_rec.amount::TEXT,      '0'),
+        COALESCE(TO_CHAR(v_rec.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+        COALESCE(v_rec.entity_id::TEXT,   ''),
+        COALESCE(v_rec.role,              ''),
+        COALESCE(v_rec.particulars,       ''),
+        COALESCE(v_rec.mode,              ''),
+        COALESCE(v_rec.receipt_date::TEXT,''),
+        COALESCE(v_entity_name,           ''),
+        v_prev_hash,
+        COALESCE(v_rec.source_reference,  '')
+    );
+
+    UPDATE receipts
+       SET receipt_number = v_number,
+           previous_hash  = v_prev_hash,
+           confirmed_at   = v_rec.confirmed_at
+     WHERE id = p_receipt_id;
+
+    RETURN v_number;
+END;
+$$;
+
+-- BEFORE INSERT/UPDATE trigger: auto-issue receipt_number when status flips to 'confirmed'.
+DROP FUNCTION IF EXISTS fn_trg_receipt_hash_issue() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_issue()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_number       VARCHAR(64);
+    v_entity_name  TEXT;
+    v_prev_hash    VARCHAR(64);
+    v_chain_seed   VARCHAR(64);
+BEGIN
+    IF NEW.status = 'confirmed' AND (OLD.status IS DISTINCT FROM NEW.status OR OLD.status IS NULL) THEN
+        IF NEW.confirmed_at IS NULL THEN
+            NEW.confirmed_at := NOW();
+        END IF;
+        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
+            IF NEW.role = 'apartment' THEN
+                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+                  FROM apartments WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'vendor' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'security' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
+            ELSE
+                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
+            END IF;
+
+            v_chain_seed := ENCODE(DIGEST(
+                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+                'sha256'), 'hex');
+
+            SELECT receipt_number INTO v_prev_hash
+              FROM receipts
+             WHERE society_id = NEW.society_id
+               AND acc_id = NEW.acc_id
+               AND status = 'confirmed'
+               AND receipt_number IS NOT NULL
+               AND id <> NEW.id
+               AND confirmed_at < NEW.confirmed_at
+             ORDER BY confirmed_at DESC, id DESC
+             LIMIT 1;
+
+            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
+
+            v_number := fn_compute_receipt_hash(
+                NEW.society_id::TEXT,
+                COALESCE(NEW.acc_id::TEXT,      '0'),
+                COALESCE(NEW.amount::TEXT,      '0'),
+                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+                COALESCE(NEW.entity_id::TEXT,   ''),
+                COALESCE(NEW.role,              ''),
+                COALESCE(NEW.particulars,       ''),
+                COALESCE(NEW.mode,              ''),
+                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(v_entity_name,         ''),
+                v_prev_hash,
+                COALESCE(NEW.source_reference,  '')
+            );
+
+            NEW.receipt_number := v_number;
+            NEW.previous_hash  := v_prev_hash;
+        END IF;
     END IF;
     RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_receipt_number ON receipts;
-CREATE TRIGGER trg_receipt_number
+DROP TRIGGER IF EXISTS trg_receipt_hash_issue ON receipts;
+CREATE TRIGGER trg_receipt_hash_issue
+    BEFORE UPDATE OF status ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipt_hash_issue();
+
+-- Fallback BEFORE INSERT trigger: if a receipt is inserted already confirmed, issue number immediately.
+DROP FUNCTION IF EXISTS fn_trg_receipt_hash_insert() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_insert()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_number       VARCHAR(64);
+    v_entity_name  TEXT;
+    v_prev_hash    VARCHAR(64);
+    v_chain_seed   VARCHAR(64);
+BEGIN
+    IF NEW.status = 'confirmed' THEN
+        IF NEW.confirmed_at IS NULL THEN
+            NEW.confirmed_at := NOW();
+        END IF;
+        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
+            IF NEW.role = 'apartment' THEN
+                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+                  FROM apartments WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'vendor' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'security' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
+            ELSE
+                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
+            END IF;
+
+            v_chain_seed := ENCODE(DIGEST(
+                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+                'sha256'), 'hex');
+
+            SELECT receipt_number INTO v_prev_hash
+              FROM receipts
+             WHERE society_id = NEW.society_id
+               AND acc_id = NEW.acc_id
+               AND status = 'confirmed'
+               AND receipt_number IS NOT NULL
+               AND confirmed_at < NEW.confirmed_at
+             ORDER BY confirmed_at DESC, id DESC
+             LIMIT 1;
+
+            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
+
+            v_number := fn_compute_receipt_hash(
+                NEW.society_id::TEXT,
+                COALESCE(NEW.acc_id::TEXT,      '0'),
+                COALESCE(NEW.amount::TEXT,      '0'),
+                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+                COALESCE(NEW.entity_id::TEXT,   ''),
+                COALESCE(NEW.role,              ''),
+                COALESCE(NEW.particulars,       ''),
+                COALESCE(NEW.mode,              ''),
+                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(v_entity_name,         ''),
+                v_prev_hash,
+                COALESCE(NEW.source_reference,  '')
+            );
+
+            NEW.receipt_number := v_number;
+            NEW.previous_hash  := v_prev_hash;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_receipt_hash_insert ON receipts;
+CREATE TRIGGER trg_receipt_hash_insert
     BEFORE INSERT ON receipts
     FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_receipt_number();
+    EXECUTE FUNCTION fn_trg_receipt_hash_insert();
+
+-- Same for expenses: mirror the receipts hash-issue trigger.
+DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_expense_hash_issue()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_number       VARCHAR(64);
+    v_entity_name  TEXT;
+    v_prev_hash    VARCHAR(64);
+    v_chain_seed   VARCHAR(64);
+BEGIN
+    IF NEW.status = 'confirmed' AND (OLD.status IS DISTINCT FROM NEW.status OR OLD.status IS NULL) THEN
+        IF NEW.confirmed_at IS NULL THEN
+            NEW.confirmed_at := NOW();
+        END IF;
+        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
+            IF NEW.role = 'apartment' THEN
+                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+                  FROM apartments WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'vendor' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'security' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
+            ELSE
+                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
+            END IF;
+
+            v_chain_seed := ENCODE(DIGEST(
+                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+                'sha256'), 'hex');
+
+            SELECT receipt_number INTO v_prev_hash
+              FROM receipts
+             WHERE society_id = NEW.society_id
+               AND acc_id = NEW.acc_id
+               AND status = 'confirmed'
+               AND receipt_number IS NOT NULL
+               AND id <> NEW.id
+               AND confirmed_at < NEW.confirmed_at
+             ORDER BY confirmed_at DESC, id DESC
+             LIMIT 1;
+
+            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
+
+            v_number := fn_compute_receipt_hash(
+                NEW.society_id::TEXT,
+                COALESCE(NEW.acc_id::TEXT,      '0'),
+                COALESCE(NEW.amount::TEXT,      '0'),
+                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+                COALESCE(NEW.entity_id::TEXT,   ''),
+                COALESCE(NEW.role,              ''),
+                COALESCE(NEW.particulars,       ''),
+                COALESCE(NEW.mode,              ''),
+                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(v_entity_name,         ''),
+                v_prev_hash,
+                COALESCE(NEW.source_reference,  '')
+            );
+
+            NEW.receipt_number := v_number;
+            NEW.previous_hash  := v_prev_hash;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
+CREATE TRIGGER trg_expense_hash_issue
+    BEFORE UPDATE OF status ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expense_hash_issue();
+
+DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert() CASCADE;
+CREATE OR REPLACE FUNCTION fn_trg_expense_hash_insert()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_number       VARCHAR(64);
+    v_entity_name  TEXT;
+    v_prev_hash    VARCHAR(64);
+    v_chain_seed   VARCHAR(64);
+BEGIN
+    IF NEW.status = 'confirmed' THEN
+        IF NEW.confirmed_at IS NULL THEN
+            NEW.confirmed_at := NOW();
+        END IF;
+        IF NEW.receipt_number IS NULL OR TRIM(NEW.receipt_number) = '' THEN
+            IF NEW.role = 'apartment' THEN
+                SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+                  FROM apartments WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'vendor' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = NEW.entity_id;
+            ELSIF NEW.role = 'security' THEN
+                SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = NEW.entity_id;
+            ELSE
+                v_entity_name := COALESCE(NEW.entity_id::TEXT, '');
+            END IF;
+
+            v_chain_seed := ENCODE(DIGEST(
+                NEW.society_id::TEXT || '|' || COALESCE(NEW.acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+                'sha256'), 'hex');
+
+            SELECT receipt_number INTO v_prev_hash
+              FROM receipts
+             WHERE society_id = NEW.society_id
+               AND acc_id = NEW.acc_id
+               AND status = 'confirmed'
+               AND receipt_number IS NOT NULL
+               AND confirmed_at < NEW.confirmed_at
+             ORDER BY confirmed_at DESC, id DESC
+             LIMIT 1;
+
+            v_prev_hash := COALESCE(v_prev_hash, v_chain_seed);
+
+            v_number := fn_compute_receipt_hash(
+                NEW.society_id::TEXT,
+                COALESCE(NEW.acc_id::TEXT,      '0'),
+                COALESCE(NEW.amount::TEXT,      '0'),
+                COALESCE(TO_CHAR(NEW.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+                COALESCE(NEW.entity_id::TEXT,   ''),
+                COALESCE(NEW.role,              ''),
+                COALESCE(NEW.particulars,       ''),
+                COALESCE(NEW.mode,              ''),
+                COALESCE(NEW.expense_date::TEXT,''),
+                COALESCE(v_entity_name,         ''),
+                v_prev_hash,
+                COALESCE(NEW.source_reference,  '')
+            );
+
+            NEW.receipt_number := v_number;
+            NEW.previous_hash  := v_prev_hash;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
+CREATE TRIGGER trg_expense_hash_insert
+    BEFORE INSERT ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expense_hash_insert();
 
 DROP FUNCTION IF EXISTS fn_trg_transaction_number() CASCADE;
 CREATE OR REPLACE FUNCTION fn_trg_transaction_number()
@@ -1314,72 +1712,33 @@ END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 4C: PENDING RECEIPT SAVE + VERIFY (double-entry)
+-- SECTION 4C: UNIFIED RECEIPT SAVE + VERIFY (double-entry)
+-- fn_save_receipt determines status from creator role:
+--   admin/master -> 'confirmed' + transactions posted immediately
+--   anyone else  -> 'pending', no transactions yet
+-- fn_save_receipt_pending is removed; its logic is subsumed.
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_save_receipt_pending CASCADE;
-
-CREATE OR REPLACE FUNCTION fn_save_receipt_pending(
-    p_society_id   INT,
-    p_acc_id       INT,
-    p_particulars  TEXT,
-    p_amount       NUMERIC,
-    p_entity_id    INT     DEFAULT NULL,
-    p_role         VARCHAR DEFAULT 'other',
-    p_mode         VARCHAR DEFAULT 'cash',
-    p_receipt_date DATE    DEFAULT CURRENT_DATE,
-    p_created_by   INT     DEFAULT NULL,
-    p_cheque_no    VARCHAR DEFAULT NULL,
-    p_trx_id       VARCHAR DEFAULT NULL
-)
-RETURNS TABLE(receipt_id INT)
-LANGUAGE plpgsql AS $$
-DECLARE v_receipt_id INT; v_drcr VARCHAR(2);
-BEGIN
-    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
-    IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
-    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
-
-    SELECT drcr_account INTO v_drcr FROM accounts
-    WHERE id = p_acc_id AND society_id = p_society_id;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found', p_acc_id; END IF;
-    IF v_drcr = 'Dr' THEN
-        RAISE EXCEPTION 'Account % is a Dr account — use fn_save_expense', p_acc_id;
-    END IF;
-
-    INSERT INTO receipts(
-        society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
-        amount, mode, cheque_no, transaction_id, status, created_at
-    ) VALUES (
-        p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
-        p_amount, p_mode, p_cheque_no, p_trx_id, 'pending', NOW()
-    ) RETURNING id INTO v_receipt_id;
-
-    RETURN QUERY SELECT v_receipt_id;
-END;
-$$;
-
--- Admin verify: post pending receipt to transactions AND the cash/bank Dr side.
-DROP FUNCTION IF EXISTS fn_verify_receipt CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receipt(
     p_receipt_id   INT,
     p_confirmed_by INT,
     p_mode         VARCHAR DEFAULT NULL
 )
-RETURNS TEXT LANGUAGE plpgsql AS $$
+RETURNS TABLE(receipt_id INT, receipt_number VARCHAR(64), msg TEXT)
+LANGUAGE plpgsql AS $$
 DECLARE
     v_rec    receipts%ROWTYPE;
     v_trx_id INT;
     v_journal_id INT;
     v_cash_acc INT;
     v_mode VARCHAR(20);
+    v_number VARCHAR(64);
 BEGIN
     SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
-    IF NOT FOUND    THEN RETURN 'Error: Receipt not found'; END IF;
-    IF v_rec.status = 'confirmed'  THEN RETURN 'Already confirmed'; END IF;
-    IF v_rec.status = 'cancelled'  THEN RETURN 'Error: Receipt is cancelled'; END IF;
-    IF v_rec.acc_id IS NULL        THEN RETURN 'Error: No income account on this receipt'; END IF;
+    IF NOT FOUND    THEN receipt_id := p_receipt_id; receipt_number := NULL; msg := 'Error: Receipt not found'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.status = 'confirmed'  THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Already confirmed'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.status = 'cancelled'  THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Error: Receipt is cancelled'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.acc_id IS NULL        THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Error: No income account on this receipt'; RETURN NEXT; RETURN; END IF;
 
     v_mode := COALESCE(p_mode, v_rec.mode);
     v_cash_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
@@ -1415,7 +1774,78 @@ BEGIN
         confirmed_at = NOW()
     WHERE id = p_receipt_id;
 
-    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+    v_number := fn_issue_receipt_hash_for_receipt(p_receipt_id);
+
+    receipt_id := p_receipt_id;
+    receipt_number := v_number;
+    msg := 'Verified: transaction #' || v_trx_id::TEXT || ' receipt_number=' || COALESCE(v_number, 'N/A');
+    RETURN NEXT;
+END;
+$$;
+
+-- Verify a pending expense: posts Dr expense + Cr cash/bank, then issues hash.
+DROP FUNCTION IF EXISTS fn_verify_expense CASCADE;
+CREATE OR REPLACE FUNCTION fn_verify_expense(
+    p_expense_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT NULL
+)
+RETURNS TABLE(expense_id INT, receipt_number VARCHAR(64), msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec    expenses%ROWTYPE;
+    v_trx_id INT;
+    v_journal_id INT;
+    v_cash_acc INT;
+    v_mode VARCHAR(20);
+    v_number VARCHAR(64);
+BEGIN
+    SELECT * INTO v_rec FROM expenses WHERE id = p_expense_id FOR UPDATE;
+    IF NOT FOUND    THEN expense_id := p_expense_id; receipt_number := NULL; msg := 'Error: Expense not found'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.status = 'confirmed'  THEN expense_id := p_expense_id; receipt_number := v_rec.receipt_number; msg := 'Already confirmed'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.status = 'cancelled'  THEN expense_id := p_expense_id; receipt_number := v_rec.receipt_number; msg := 'Error: Expense is cancelled'; RETURN NEXT; RETURN; END IF;
+    IF v_rec.acc_id IS NULL        THEN expense_id := p_expense_id; receipt_number := v_rec.receipt_number; msg := 'Error: No expense account on this row'; RETURN NEXT; RETURN; END IF;
+
+    v_mode := COALESCE(p_mode, v_rec.mode);
+    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Dr: expense account
+    INSERT INTO transactions(
+        society_id, trx_date, acc_id, entity_id, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_rec.society_id, v_rec.expense_date, v_rec.acc_id, v_rec.entity_id,
+        v_rec.particulars,
+        v_rec.amount, v_mode, 'paid',
+        p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
+
+    -- Cr: cash / bank paired side
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+        INSERT INTO transactions(
+            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_rec.society_id, v_rec.expense_date, v_cash_acc, v_rec.entity_id,
+            'Cash paid - ' || v_rec.particulars,
+            v_rec.amount, v_mode, 'paid',
+            p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id
+        );
+    END IF;
+
+    UPDATE expenses
+    SET status       = 'confirmed',
+        confirmed_by = p_confirmed_by,
+        confirmed_at = NOW()
+    WHERE id = p_expense_id;
+
+    v_number := fn_issue_receipt_hash_for_receipt(p_expense_id);
+
+    expense_id := p_expense_id;
+    receipt_number := v_number;
+    msg := 'Verified: transaction #' || v_trx_id::TEXT || ' receipt_number=' || COALESCE(v_number, 'N/A');
+    RETURN NEXT;
 END;
 $$;
 
@@ -1762,7 +2192,7 @@ CREATE OR REPLACE FUNCTION fn_sell_vendor_pass(
     p_issued_date DATE    DEFAULT CURRENT_DATE,
     p_particulars TEXT    DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, pass_id INT, valid_until DATE, journal_id INT)
+RETURNS TABLE(receipt_id INT, pass_id INT, valid_until DATE, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id  INT;
@@ -1776,6 +2206,8 @@ DECLARE
     v_desc        TEXT;
     v_cash_acc    INT;
     v_journal_id  INT;
+    v_is_admin    BOOLEAN;
+    v_status      VARCHAR(20);
 BEGIN
     IF p_pass_type NOT IN ('1day','7day','1mth','free_1mth') THEN
         RAISE EXCEPTION 'Invalid pass_type %. Use 1day / 7day / 1mth / free_1mth', p_pass_type;
@@ -1827,37 +2259,53 @@ BEGIN
     v_cash_acc := fn_resolve_cash_account(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
+    SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
+      FROM users WHERE id = p_created_by;
+
+    IF v_is_admin OR p_pass_type = 'free_1mth' THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
     IF p_pass_type != 'free_1mth' THEN
         INSERT INTO receipts(
             society_id, user_id, entity_id, role,
             receipt_date, acc_id, particulars, amount, mode,
-            status, confirmed_by, confirmed_at, created_at
+            status, confirmed_by, confirmed_at, source_reference, created_at
         ) VALUES (
             v_society_id, p_user_id, v_vendor_id, 'vendor',
             p_issued_date, v_acc_id, v_desc, v_rate, p_mode,
-            'confirmed', p_created_by, NOW(), NOW()
+            v_status,
+            CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+            CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+            NULL, NOW()
         ) RETURNING id INTO v_receipt_id;
 
-        -- Cr: income account
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
-            v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
-        );
-
-        -- Dr: cash / bank paired side
-        IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+        IF v_status = 'confirmed' THEN
+            -- Cr: income account
             INSERT INTO transactions(
                 society_id, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_society_id, p_issued_date, v_cash_acc, v_vendor_id,
-                'Cash received - ' || v_desc,
+                v_society_id, p_issued_date, v_acc_id, v_vendor_id, v_desc,
                 v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
+
+            -- Dr: cash / bank paired side
+            IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+                INSERT INTO transactions(
+                    society_id, trx_date, acc_id, entity_id, acc_particulars,
+                    amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+                ) VALUES (
+                    v_society_id, p_issued_date, v_cash_acc, v_vendor_id,
+                    'Cash received - ' || v_desc,
+                    v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+                );
+            END IF;
         END IF;
+    ELSE
+        v_receipt_id := NULL;
     END IF;
 
     INSERT INTO vendor_passes(
@@ -1866,7 +2314,12 @@ BEGIN
         v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, 'active', NOW()
     ) RETURNING id INTO v_pass_id;
 
-    RETURN QUERY SELECT v_receipt_id, v_pass_id, v_valid_until, v_journal_id;
+    receipt_id := v_receipt_id;
+    pass_id := v_pass_id;
+    valid_until := v_valid_until;
+    journal_id := v_journal_id;
+    status := v_status;
+    RETURN NEXT;
 END;
 $$;
 
@@ -1892,7 +2345,7 @@ CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
     p_issued_date  DATE    DEFAULT CURRENT_DATE,
     p_particulars  TEXT    DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT)
+RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id   INT;
@@ -1907,6 +2360,8 @@ DECLARE
     v_ticket_id    INT;
     v_desc         TEXT;
     v_journal_id   INT;
+    v_is_admin     BOOLEAN;
+    v_status       VARCHAR(20);
 BEGIN
     IF p_quantity IS NULL OR p_quantity < 1 THEN
         RAISE EXCEPTION 'Quantity must be at least 1';
@@ -1927,9 +2382,6 @@ BEGIN
         RAISE EXCEPTION 'This event has no ticket account set — tickets cannot be sold for it';
     END IF;
 
-    -- Guard: the account must be the "Event Ticket" (2319) header itself,
-    -- or one of its direct children (e.g. Holi = 23191) — mirrors the
-    -- dropdown restriction on the New Event form.
     SELECT (a.id = 2319 OR a.parent_account_id = 2319) INTO v_is_ticket_ac
     FROM accounts a WHERE a.id = v_acc_id AND a.society_id = v_society_id;
     IF v_is_ticket_ac IS NOT TRUE THEN
@@ -1944,37 +2396,51 @@ BEGIN
     v_cash_acc   := fn_resolve_cash_account(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
+    SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
+      FROM users WHERE id = p_created_by;
+
+    IF v_is_admin THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
     IF v_amount > 0 THEN
         INSERT INTO receipts(
             society_id, user_id, entity_id, role,
             receipt_date, acc_id, particulars, amount, mode,
-            status, confirmed_by, confirmed_at, created_at
+            status, confirmed_by, confirmed_at, source_reference, created_at
         ) VALUES (
             v_society_id, p_user_id, v_apt_id, 'apartment',
             p_issued_date, v_acc_id, v_desc, v_amount, p_mode,
-            'confirmed', p_created_by, NOW(), NOW()
+            v_status,
+            CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+            CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+            NULL, NOW()
         ) RETURNING id INTO v_receipt_id;
 
-        -- Cr: event ticket income account
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_society_id, p_issued_date, v_acc_id, v_apt_id, v_desc,
-            v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
-        );
-
-        -- Dr: cash / bank paired side
-        IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+        IF v_status = 'confirmed' THEN
             INSERT INTO transactions(
                 society_id, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_society_id, p_issued_date, v_cash_acc, v_apt_id,
-                'Cash received - ' || v_desc,
+                v_society_id, p_issued_date, v_acc_id, v_apt_id, v_desc,
                 v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
+
+            IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+                INSERT INTO transactions(
+                    society_id, trx_date, acc_id, entity_id, acc_particulars,
+                    amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+                ) VALUES (
+                    v_society_id, p_issued_date, v_cash_acc, v_apt_id,
+                    'Cash received - ' || v_desc,
+                    v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+                );
+            END IF;
         END IF;
+    ELSE
+        v_receipt_id := NULL;
     END IF;
 
     INSERT INTO event_tickets(
@@ -1983,7 +2449,12 @@ BEGIN
         v_society_id, p_event_id, p_user_id, p_quantity, v_amount, v_receipt_id, p_issued_date, 'active', NOW()
     ) RETURNING id INTO v_ticket_id;
 
-    RETURN QUERY SELECT v_receipt_id, v_ticket_id, v_amount, v_journal_id;
+    receipt_id := v_receipt_id;
+    ticket_id := v_ticket_id;
+    amount := v_amount;
+    journal_id := v_journal_id;
+    status := v_status;
+    RETURN NEXT;
 END;
 $$;
 
@@ -2179,20 +2650,21 @@ $$;
 DROP FUNCTION IF EXISTS fn_save_receipt CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_save_receipt(
-    p_society_id   INT,
-    p_acc_id       INT,
-    p_particulars  TEXT,
-    p_amount       NUMERIC,
+    p_society_id       INT,
+    p_acc_id           INT,
+    p_particulars      TEXT,
+    p_amount           NUMERIC,
 
-    p_entity_id    INT DEFAULT NULL,
-    p_role         VARCHAR DEFAULT 'other',
-    p_mode         VARCHAR DEFAULT 'cash',
-    p_receipt_date DATE DEFAULT CURRENT_DATE,
-    p_created_by   INT DEFAULT NULL,
-    p_cheque_no    VARCHAR DEFAULT NULL,
-    p_trx_id       VARCHAR DEFAULT NULL
+    p_entity_id        INT     DEFAULT NULL,
+    p_role             VARCHAR DEFAULT 'other',
+    p_mode             VARCHAR DEFAULT 'cash',
+    p_receipt_date     DATE    DEFAULT CURRENT_DATE,
+    p_created_by       INT     DEFAULT NULL,
+    p_cheque_no        VARCHAR DEFAULT NULL,
+    p_trx_id           VARCHAR DEFAULT NULL,
+    p_source_reference VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT)
+RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
 DECLARE
     v_receipt_id INT;
@@ -2200,6 +2672,8 @@ DECLARE
     v_journal_id INT;
     v_cash_acc   INT;
     v_drcr       VARCHAR(2);
+    v_is_admin   BOOLEAN;
+    v_status     VARCHAR(20);
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
@@ -2211,59 +2685,81 @@ BEGIN
         RAISE EXCEPTION 'Account % is a Dr (expense) account — use fn_save_expense for expenses', p_acc_id;
     END IF;
 
+    SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
+      FROM users WHERE id = p_created_by;
+
+    IF v_is_admin THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
     INSERT INTO receipts(
         society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
-        amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at, created_at
+        amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
+        source_reference, created_at
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
-        p_amount, p_mode, p_cheque_no, p_trx_id, 'confirmed', p_created_by, NOW(), NOW()
+        p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
+        CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+        CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+        p_source_reference, NOW()
     ) RETURNING id INTO v_receipt_id;
 
-    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
-    v_journal_id := NEXTVAL('seq_transaction_number');
+    IF v_status = 'confirmed' THEN
+        v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+        v_journal_id := NEXTVAL('seq_transaction_number');
 
-    -- Cr: income account
-    INSERT INTO transactions(
-        society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-    ) VALUES (
-        p_society_id, p_receipt_date, p_acc_id, p_entity_id, p_particulars,
-        p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
-    ) RETURNING id INTO v_trx_id;
-
-    -- Dr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, p_receipt_date, v_cash_acc, p_entity_id,
-            'Cash received - ' || p_particulars,
+            p_society_id, p_receipt_date, p_acc_id, p_entity_id, p_particulars,
             p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
-        );
+        ) RETURNING id INTO v_trx_id;
+
+        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                p_society_id, p_receipt_date, v_cash_acc, p_entity_id,
+                'Cash received - ' || p_particulars,
+                p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
+            );
+        END IF;
+    ELSE
+        v_trx_id := NULL;
+        v_journal_id := NULL;
     END IF;
 
-    RETURN QUERY SELECT v_receipt_id, v_trx_id, v_journal_id;
+    status := v_status;
+    receipt_id := v_receipt_id;
+    transaction_id := v_trx_id;
+    journal_id := v_journal_id;
+
+    RETURN NEXT;
 END;
 $$;
 
 DROP FUNCTION IF EXISTS fn_save_expense CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_save_expense(
-    p_society_id   INT,
-    p_acc_id       INT,
-    p_particulars  TEXT,
-    p_amount       NUMERIC,
+    p_society_id       INT,
+    p_acc_id           INT,
+    p_particulars      TEXT,
+    p_amount           NUMERIC,
 
-    p_entity_id    INT DEFAULT NULL,
-    p_role         VARCHAR DEFAULT 'other',
-    p_mode         VARCHAR DEFAULT 'cash',
-    p_expense_date DATE DEFAULT CURRENT_DATE,
-    p_created_by   INT DEFAULT NULL,
-    p_cheque_no    VARCHAR DEFAULT NULL,
-    p_trx_id       VARCHAR DEFAULT NULL
+    p_entity_id        INT     DEFAULT NULL,
+    p_role             VARCHAR DEFAULT 'other',
+    p_mode             VARCHAR DEFAULT 'cash',
+    p_expense_date     DATE    DEFAULT CURRENT_DATE,
+    p_created_by       INT     DEFAULT NULL,
+    p_cheque_no        VARCHAR DEFAULT NULL,
+    p_trx_id           VARCHAR DEFAULT NULL,
+    p_source_reference VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT)
+RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
 DECLARE
     v_expense_id INT;
@@ -2271,6 +2767,8 @@ DECLARE
     v_journal_id INT;
     v_cash_acc   INT;
     v_drcr       VARCHAR(2);
+    v_is_admin   BOOLEAN;
+    v_status     VARCHAR(20);
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
@@ -2282,39 +2780,60 @@ BEGIN
         RAISE EXCEPTION 'Account % is a Cr (income) account — use fn_save_receipt for receipts', p_acc_id;
     END IF;
 
+    SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
+      FROM users WHERE id = p_created_by;
+
+    IF v_is_admin THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
-        amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at, created_at
+        amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
+        source_reference, created_at
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_expense_date, p_acc_id, p_particulars,
-        p_amount, p_mode, p_cheque_no, p_trx_id, 'confirmed', p_created_by, NOW(), NOW()
+        p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
+        CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+        CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+        p_source_reference, NOW()
     ) RETURNING id INTO v_expense_id;
 
-    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
-    v_journal_id := NEXTVAL('seq_transaction_number');
+    IF v_status = 'confirmed' THEN
+        v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+        v_journal_id := NEXTVAL('seq_transaction_number');
 
-    -- Dr: expense account
-    INSERT INTO transactions(
-        society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-    ) VALUES (
-        p_society_id, p_expense_date, p_acc_id, p_entity_id, p_particulars,
-        p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
-    ) RETURNING id INTO v_trx_id;
-
-    -- Cr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
         INSERT INTO transactions(
             society_id, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, p_expense_date, v_cash_acc, p_entity_id,
-            'Cash paid - ' || p_particulars,
+            p_society_id, p_expense_date, p_acc_id, p_entity_id, p_particulars,
             p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
-        );
+        ) RETURNING id INTO v_trx_id;
+
+        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                p_society_id, p_expense_date, v_cash_acc, p_entity_id,
+                'Cash paid - ' || p_particulars,
+                p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
+            );
+        END IF;
+    ELSE
+        v_trx_id := NULL;
+        v_journal_id := NULL;
     END IF;
 
-    RETURN QUERY SELECT v_expense_id, v_trx_id, v_journal_id;
+    status := v_status;
+    expense_id := v_expense_id;
+    transaction_id := v_trx_id;
+    journal_id := v_journal_id;
+
+    RETURN NEXT;
 END;
 $$;
 
@@ -3247,7 +3766,9 @@ CREATE OR REPLACE FUNCTION fn_events_list(
 )
 RETURNS TABLE (
     id INT, title VARCHAR(200), description TEXT, event_date DATE, event_time VARCHAR(20),
-    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT, ticket_price NUMERIC(10,2),
+    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT,
+    ticket_name VARCHAR(20), ticket_price NUMERIC(10,2),
+    ticket_name2 VARCHAR(20), ticket_price2 NUMERIC(10,2),
     created_at TIMESTAMP
 )
 LANGUAGE plpgsql STABLE AS $$
@@ -3256,7 +3777,10 @@ BEGIN
     SELECT
         e.id::INT, e.title::VARCHAR(200), e.description::TEXT, e.event_date::DATE,
         e.event_time::VARCHAR(20), e.venue::VARCHAR(200), e.open_to::VARCHAR(20),
-        e.parent_account_id::INT, e.ticket_price::NUMERIC(10,2), e.created_at::TIMESTAMP
+        e.parent_account_id::INT,
+        e.ticket_name::VARCHAR(20), e.ticket_price::NUMERIC(10,2),
+        e.ticket_name2::VARCHAR(20), e.ticket_price2::NUMERIC(10,2),
+        e.created_at::TIMESTAMP
     FROM events e
     WHERE e.society_id = p_society_id
       AND (p_search IS NULL OR e.title ILIKE '%'||p_search||'%')
@@ -3271,12 +3795,17 @@ CREATE OR REPLACE FUNCTION fn_event_profile(p_event_id INT)
 RETURNS TABLE (
     id INT, society_id INT, title VARCHAR(200), description TEXT, event_date DATE,
     event_time VARCHAR(20), venue VARCHAR(200), open_to VARCHAR(20),
-    parent_account_id INT, ticket_price NUMERIC(10,2), created_at TIMESTAMP, image TEXT, subtitle TEXT
+    parent_account_id INT,
+    ticket_name VARCHAR(20), ticket_price NUMERIC(10,2),
+    ticket_name2 VARCHAR(20), ticket_price2 NUMERIC(10,2),
+    created_at TIMESTAMP, image TEXT, subtitle TEXT
 )
 LANGUAGE SQL STABLE AS $$
     SELECT id::INT, society_id::INT, title::VARCHAR(200), description::TEXT,
            event_date::DATE, event_time::VARCHAR(20), venue::VARCHAR(200),
-           open_to::VARCHAR(20), parent_account_id::INT, ticket_price::NUMERIC(10,2),
+           open_to::VARCHAR(20), parent_account_id::INT,
+           ticket_name::VARCHAR(20), ticket_price::NUMERIC(10,2),
+           ticket_name2::VARCHAR(20), ticket_price2::NUMERIC(10,2),
            created_at::TIMESTAMP, image::TEXT,
            (event_date::TEXT||' '||COALESCE(event_time::TEXT,''))::TEXT
     FROM events WHERE id = p_event_id;
@@ -4145,7 +4674,7 @@ $$;
 -- NOT who verified/approved it — that's confirmed_by, set separately by
 -- fn_verify_receipt when an admin confirms a pending receipt. Left as
 -- `user_id` rather than renamed to `created_by`, since dozens of existing
--- call sites (fn_save_receipt, fn_save_receipt_pending, fn_verify_receipt,
+-- call sites (fn_save_receipt, fn_verify_receipt,
 -- every receipts list/report query) already depend on this exact name;
 -- renaming has no functional upside and meaningful regression risk.
 COMMENT ON COLUMN receipts.user_id IS
@@ -4166,3 +4695,255 @@ ALTER TABLE payables ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id
 ALTER TABLE vendor_passes ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 ALTER TABLE ven_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Verify a single confirmed receipt's hash and chain link.
+DROP FUNCTION IF EXISTS fn_verify_receipt_chain(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_verify_receipt_chain(
+    p_society_id INT,
+    p_acc_id     INT
+) RETURNS TABLE(
+    position       INT,
+    receipt_id     INT,
+    receipt_number VARCHAR(64),
+    is_valid       BOOLEAN,
+    break_reason   TEXT
+) LANGUAGE plpgsql AS $$
+DECLARE
+    v_prev_hash  VARCHAR(64);
+    v_chain_seed VARCHAR(64);
+    v_expected   VARCHAR(64);
+    v_pos        INT := 0;
+    v_entity_name TEXT;
+BEGIN
+    v_chain_seed := ENCODE(DIGEST(
+        p_society_id::TEXT || '|' || COALESCE(p_acc_id::TEXT,'0') || '|' || 'APEX_RECEIPT_V1',
+        'sha256'), 'hex');
+    v_prev_hash := v_chain_seed;
+
+    FOR r IN
+        SELECT id, receipt_number, previous_hash,
+               society_id, acc_id, amount, confirmed_at,
+               entity_id, role, particulars, mode, receipt_date,
+               source_reference
+          FROM receipts
+         WHERE society_id = p_society_id
+           AND acc_id = p_acc_id
+           AND status = 'confirmed'
+           AND receipt_number IS NOT NULL
+         ORDER BY confirmed_at ASC, id ASC
+    LOOP
+        v_pos := v_pos + 1;
+
+        -- Verify chain pointer
+        IF r.previous_hash IS DISTINCT FROM v_prev_hash THEN
+            is_valid := FALSE;
+            break_reason := FORMAT('Broken chain link at receipt %s (id=%s): expected previous_hash=%s, stored=%s',
+                                   r.receipt_number, r.id, v_prev_hash, r.previous_hash);
+            position := v_pos;
+            receipt_id := r.id;
+            receipt_number := r.receipt_number;
+            RETURN NEXT;
+            RETURN;
+        END IF;
+
+        -- Resolve entity_name for deterministic hash
+        IF r.role = 'apartment' THEN
+            SELECT COALESCE(flat_number || ' - ' || COALESCE(owner_name,''), '') INTO v_entity_name
+              FROM apartments WHERE id = r.entity_id;
+        ELSIF r.role = 'vendor' THEN
+            SELECT COALESCE(name,'') INTO v_entity_name FROM vendors WHERE id = r.entity_id;
+        ELSIF r.role = 'security' THEN
+            SELECT COALESCE(name,'') INTO v_entity_name FROM security_staff WHERE id = r.entity_id;
+        ELSE
+            v_entity_name := COALESCE(r.entity_id::TEXT, '');
+        END IF;
+
+        -- Recompute expected hash
+        v_expected := fn_compute_receipt_hash(
+            r.society_id::TEXT,
+            COALESCE(r.acc_id::TEXT,      '0'),
+            COALESCE(r.amount::TEXT,      '0'),
+            COALESCE(TO_CHAR(r.confirmed_at,'YYYY-MM-DD HH24:MI:SS.US'), ''),
+            COALESCE(r.entity_id::TEXT,   ''),
+            COALESCE(r.role,              ''),
+            COALESCE(r.particulars,       ''),
+            COALESCE(r.mode,              ''),
+            COALESCE(r.receipt_date::TEXT,''),
+            COALESCE(v_entity_name,       ''),
+            r.previous_hash,
+            COALESCE(r.source_reference,  '')
+        );
+
+        IF v_expected IS DISTINCT FROM r.receipt_number THEN
+            is_valid := FALSE;
+            break_reason := FORMAT('Tampered receipt %s (id=%s): stored=%s, computed=%s',
+                                   r.receipt_number, r.id, r.receipt_number, v_expected);
+            position := v_pos;
+            receipt_id := r.id;
+            receipt_number := r.receipt_number;
+            RETURN NEXT;
+            RETURN;
+        END IF;
+
+        v_prev_hash := r.receipt_number;
+        is_valid := TRUE;
+        break_reason := NULL;
+        position := v_pos;
+        receipt_id := r.id;
+        receipt_number := r.receipt_number;
+        RETURN NEXT;
+    END LOOP;
+END;
+$$;
+
+-- Verify ALL parallel chains for a society.
+DROP FUNCTION IF EXISTS fn_verify_all_receipt_chains(INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_verify_all_receipt_chains(p_society_id INT)
+RETURNS TABLE(
+    account_id    INT,
+    account_name  TEXT,
+    receipt_count INT,
+    is_valid      BOOLEAN,
+    break_point   TEXT
+) LANGUAGE plpgsql AS $$
+DECLARE
+    v_break TEXT;
+BEGIN
+    FOR r IN
+        SELECT DISTINCT acc_id FROM receipts
+         WHERE society_id = p_society_id AND status = 'confirmed' AND receipt_number IS NOT NULL
+    LOOP
+        SELECT COUNT(*) INTO receipt_count FROM receipts
+         WHERE society_id = p_society_id AND acc_id = r.acc_id
+           AND status = 'confirmed' AND receipt_number IS NOT NULL;
+
+        SELECT a.name INTO account_name FROM accounts a WHERE a.id = r.acc_id;
+        account_id := r.acc_id;
+
+        is_valid := TRUE;
+        break_point := NULL;
+
+        FOR v IN SELECT * FROM fn_verify_receipt_chain(p_society_id, r.acc_id) LOOP
+            IF NOT v.is_valid THEN
+                is_valid := FALSE;
+                break_point := v.break_reason;
+                EXIT;
+            END IF;
+        END LOOP;
+
+        RETURN NEXT;
+    END LOOP;
+END;
+$$;
+
+-- Reconcile receipts in a chain (society, acc_id) against their transaction lines.
+DROP FUNCTION IF EXISTS fn_reconcile_receipt_chain(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_reconcile_receipt_chain(
+    p_society_id INT,
+    p_acc_id     INT
+) RETURNS TABLE(
+    receipt_id        INT,
+    receipt_number    VARCHAR(64),
+    receipt_amount    NUMERIC(15,2),
+    receipt_status    VARCHAR(20),
+    transaction_count INT,
+    transaction_total NUMERIC(15,2),
+    match             BOOLEAN,
+    discrepancy       NUMERIC(15,2)
+) LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        r.id::INT,
+        r.receipt_number::VARCHAR(64),
+        r.amount::NUMERIC(15,2),
+        r.status::VARCHAR(20),
+        COUNT(t.id)::INT,
+        COALESCE(SUM(t.amount), 0)::NUMERIC(15,2),
+        (r.status = 'confirmed' AND COUNT(t.id) >= 2
+         AND COALESCE(SUM(t.amount), 0) = r.amount * 2)::BOOLEAN,
+        (COALESCE(SUM(t.amount), 0) - r.amount * 2)::NUMERIC(15,2)
+    FROM receipts r
+    LEFT JOIN transactions t ON t.source_table = 'receipts' AND t.source_id = r.id
+    WHERE r.society_id = p_society_id
+      AND r.acc_id = p_acc_id
+    GROUP BY r.id, r.receipt_number, r.amount, r.status
+    ORDER BY r.confirmed_at ASC, r.id ASC;
+END;
+$$;
+
+-- Auditor helper: full integrity report for one (society, acc_id) chain.
+DROP FUNCTION IF EXISTS fn_audit_receipt_chain(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_audit_receipt_chain(
+    p_society_id INT,
+    p_acc_id     INT
+) RETURNS TABLE(
+    check_name   TEXT,
+    passed       BOOLEAN,
+    details      TEXT
+) LANGUAGE plpgsql AS $$
+DECLARE
+    v_count INT;
+    v_break TEXT;
+BEGIN
+    -- 1. Chain hash integrity
+    FOR v IN SELECT * FROM fn_verify_receipt_chain(p_society_id, p_acc_id) LOOP
+        IF NOT v.is_valid THEN
+            check_name := 'chain_integrity';
+            passed := FALSE;
+            details := FORMAT('FAIL at %s: %s', v.receipt_number, v.break_reason);
+            RETURN NEXT;
+            RETURN;
+        END IF;
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM receipts
+     WHERE society_id = p_society_id AND acc_id = p_acc_id AND status = 'confirmed';
+    check_name := 'chain_integrity';
+    passed := TRUE;
+    details := FORMAT('OK: %d confirmed receipts verified', v_count);
+    RETURN NEXT;
+
+    -- 2. Double-entry reconciliation
+    FOR v IN SELECT * FROM fn_reconcile_receipt_chain(p_society_id, p_acc_id)
+             WHERE NOT match LOOP
+        check_name := 'double_entry';
+        passed := FALSE;
+        details := FORMAT('Mismatch receipt %s: expected txn total=%s, actual=%s',
+                          v.receipt_number, v.receipt_amount * 2, v.transaction_total);
+        RETURN NEXT;
+        RETURN;
+    END LOOP;
+
+    check_name := 'double_entry';
+    passed := TRUE;
+    details := 'OK: all confirmed receipts have matching double-entry transactions';
+    RETURN NEXT;
+
+    -- 3. Sequential confirmed_at check (no back-dated confirms after newer ones)
+    SELECT COUNT(*) INTO v_count FROM receipts r1
+     WHERE r1.society_id = p_society_id AND r1.acc_id = p_acc_id AND r1.status = 'confirmed'
+       AND EXISTS (
+           SELECT 1 FROM receipts r2
+           WHERE r2.society_id = r1.society_id AND r2.acc_id = r1.acc_id
+             AND r2.status = 'confirmed'
+             AND r2.confirmed_at > r1.confirmed_at
+             AND r2.id < r1.id
+       );
+
+    IF v_count > 0 THEN
+        check_name := 'temporal_order';
+        passed := FALSE;
+        details := FORMAT('FAIL: %d receipts confirmed out of chronological order', v_count);
+    ELSE
+        check_name := 'temporal_order';
+        passed := TRUE;
+        details := 'OK: all receipts confirmed in chronological order';
+    END IF;
+    RETURN NEXT;
+END;
+$$;

@@ -417,10 +417,10 @@ Navigate to **Admin → Customize → KPI Audit** and click **Run Full Audit**:
 ### fn_save_receipt / fn_save_expense — Correct Argument Order
 
 ```python
-# CORRECT call order (p_society_id, p_acc_id, p_particulars, p_amount, p_entity_id, ...)
+# CORRECT call order (p_society_id, p_acc_id, p_particulars, p_amount, entity_id, role, mode, date, user_id, cheque_no, trx_id, source_reference)
 db._execute(
-    "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-    (sid, acc_id, particulars, amt, entity_id, role, mode, date, user_id, cheque_no, trx_id)
+    "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+    (sid, acc_id, particulars, amt, entity_id, role, mode, date, user_id, cheque_no, trx_id, source_reference)
 )
 # NOTE: entity_id and role come AFTER amount, not before acc_id
 ```
@@ -470,12 +470,13 @@ kpi_apartments_dues (DRILLDOWN_MAP → list_apartments, filter: has_dues=True)
 ```
 Security creates receipt (receipts → New)
   → _save_receipt_v3 detects caller_role="security"
-    → fn_save_receipt_pending (status='pending', no transaction yet)
+    → fn_save_receipt (status='pending', no transaction yet)
 
 Admin: list_receipts → profile_receipt_entry
   → [Verify & Post] button (profile_actions.py: action_id="verify_receipt", roles=["admin"])
     → loaders.verify_receipt → fn_verify_receipt
       → INSERT into transactions + UPDATE receipts SET status='confirmed'
+      → BEFORE UPDATE trigger issues SHA256 receipt_number
 ```
 
 > Security portal cannot create `partial` receipts — blocked in `_save_receipt_v3`.
@@ -672,11 +673,11 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | `fn_pay_apartment_dues_fifo(apt_id, amount, mode, confirmed_by, particulars)` | FIFO payment → marks receivables paid → creates receipt + transaction |
 | `fn_verify_receivable(receivable_id, confirmed_by, mode)` | Posts pending receivable to transactions |
 | `fn_verify_payment(payment_id, confirmed_by, mode)` | Posts pending salary payment to transactions |
-| `fn_save_receipt(society_id, acc_id, particulars, amount, entity_id, role, mode, date, created_by, cheque_no, trx_id)` | Creates confirmed receipt + transaction |
-| `fn_save_receipt_pending(...)` | Creates receipt with `status='pending'` — no transaction yet |
-| `fn_verify_receipt(receipt_id, confirmed_by, mode)` | Promotes pending→confirmed, posts to transactions |
-| `fn_save_expense(society_id, acc_id, particulars, amount, entity_id, role, mode, date, created_by, cheque_no, trx_id)` | Creates confirmed expense + transaction |
-| `fn_sell_vendor_pass(user_id, pass_type, acc_id, mode, created_by, issued_date, particulars)` | Creates vendor pass + receipt + transaction |
+| `fn_save_receipt(society_id, acc_id, particulars, amount, entity_id, role, mode, date, created_by, cheque_no, trx_id, source_reference)` | Self-determining: admin→confirmed+transactions, others→pending. Issues SHA256 receipt_number on confirmation. |
+| `fn_verify_receipt(receipt_id, confirmed_by, mode)` | Promotes pending→confirmed, posts double-entry transactions, issues SHA256 receipt_number |
+| `fn_save_expense(society_id, acc_id, particulars, amount, entity_id, role, mode, date, created_by, cheque_no, trx_id, source_reference)` | Self-determining: admin→confirmed+transactions, others→pending. |
+| `fn_verify_expense(expense_id, confirmed_by, mode)` | Promotes pending→confirmed, posts double-entry transactions, issues SHA256 receipt_number |
+| `fn_sell_vendor_pass(user_id, pass_type, acc_id, mode, created_by, issued_date, particulars)` | Creates vendor pass + receipt (pending/confirmed by role) + transaction |
 | `fn_buy_asset(society_id, name, type, value, acc_id, date, mode, user_id, particulars)` | Purchases asset + expense + transaction |
 | `fn_dispose_asset(asset_id, sale_value, mode, user_id, date, particulars)` | Disposes asset + receipt + transaction |
 | `fn_check_noc_eligibility(apartment_id)` | Returns `{eligible, reason, outstanding}` |

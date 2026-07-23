@@ -1362,11 +1362,34 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
     """Admin verifies a pending receipt (created by security) → posts to transactions."""
     try:
         r = db._execute(
-            "SELECT fn_verify_receipt(%s,%s,%s) AS msg",
+            "SELECT * FROM fn_verify_receipt(%s,%s,%s)",
             (receipt_id, confirmed_by, mode),
             fetch_one=True,
         )
         msg = (r or {}).get("msg", "Done")
+        receipt_number = (r or {}).get("receipt_number")
+        if receipt_number:
+            msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
+        return not str(msg).lower().startswith("error"), msg
+    except Exception as e:
+        return False, str(e)
+
+# ════════════════════════════════════════════════════════════════════════════════
+# VERIFY EXPENSE
+# ════════════════════════════════════════════════════════════════════════════════
+
+def verify_expense(expense_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
+    """Admin verifies a pending expense → posts to transactions."""
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_verify_expense(%s,%s,%s)",
+            (expense_id, confirmed_by, mode),
+            fetch_one=True,
+        )
+        msg = (r or {}).get("msg", "Done")
+        receipt_number = (r or {}).get("receipt_number")
+        if receipt_number:
+            msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
         return not str(msg).lower().startswith("error"), msg
     except Exception as e:
         return False, str(e)

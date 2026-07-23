@@ -196,6 +196,17 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             # per the view-only _PORTAL_PERMS entries) can print/save/email it.
         },
     ],
+    # ── EXPENSES ────────────────────────────────────────────────────────────
+    "expenses": [
+        {
+            "label": "Verify & Post",
+            "action_id": "verify_expense",
+            "target_card": None,        # server-side only
+            "icon": "fa-check-double",
+            "color": "success",
+            "roles": ["admin"],
+        },
+    ],
     # ── ASSETS ───────────────────────────────────────────────────────────────
     "assets": [
         {
