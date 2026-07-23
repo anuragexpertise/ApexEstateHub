@@ -101,18 +101,25 @@ CREATE TABLE IF NOT EXISTS accounts (
 -- and every bank account (ICICI, SBI, etc). ALTER, not inline on CREATE
 -- TABLE, so it still applies on databases where accounts already exists
 -- (CREATE TABLE IF NOT EXISTS is a no-op there).
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS
-    is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE accounts
+ADD COLUMN IF NOT EXISTS is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- One-time backfill guess for existing rows (review after running — this
 -- is a convenience seed, not a guarantee). Uses the same name patterns
 -- fn_resolve_cash_account already relies on.
 UPDATE accounts
-   SET is_cash_or_bank = TRUE
- WHERE is_cash_or_bank = FALSE
-   AND drcr_account = 'Dr'
-   AND (name ILIKE '%cash-in-hand%' OR name ILIKE '%cash in hand%'
-        OR name ILIKE '%bank%' OR name ILIKE '%SBI%' OR name ILIKE '%ICICI%');
+SET
+    is_cash_or_bank = TRUE
+WHERE
+    is_cash_or_bank = FALSE
+    AND drcr_account = 'Dr'
+    AND (
+        name ILIKE '%cash-in-hand%'
+        OR name ILIKE '%cash in hand%'
+        OR name ILIKE '%bank%'
+        OR name ILIKE '%SBI%'
+        OR name ILIKE '%ICICI%'
+    );
 
 -- ════════════════════════════════════════════════════════════════
 -- accounts.bf_amount / accounts.drcr_bf(*) retirement
@@ -155,7 +162,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_by INT REFERENCES users (id),
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
@@ -174,7 +181,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_by INT REFERENCES users (id)
 );
 
@@ -191,7 +198,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_by INT REFERENCES users (id)
 );
 
@@ -212,7 +219,7 @@ CREATE TABLE IF NOT EXISTS assets (
     sale_acc_id INT REFERENCES accounts (id), -- Selling Asset income account (e.g. 212)
     disposed_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -230,13 +237,17 @@ CREATE TABLE IF NOT EXISTS events (
     ticket_name VARCHAR(20) DEFAULT 'Adult',
     ticket_price NUMERIC(10, 2) DEFAULT 0, -- per-ticket price when parent_account_id is a ticket (Cr) account
     ticket_name2 VARCHAR(20) DEFAULT 'Child',
-    ticket_price2 NUMERIC(10,2) DEFAULT 0,
+    ticket_price2 NUMERIC(10, 2) DEFAULT 0,
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
+-- Migrate existing events table to support dual ticket pricing
+ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_name VARCHAR(20) DEFAULT 'Adult';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_price2 NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_name2 VARCHAR(20) DEFAULT 'Child';
 
 CREATE TABLE IF NOT EXISTS concerns (
     id SERIAL PRIMARY KEY,
@@ -249,7 +260,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     assigned_to VARCHAR(100),
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users(id),
+    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -564,7 +575,8 @@ CREATE TABLE IF NOT EXISTS event_tickets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
-CREATE INDEX IF NOT EXISTS idx_event_tickets_user  ON event_tickets (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_event_tickets_user ON event_tickets (user_id);
 
 -- ── Apartment charges / fines basis ───────────────────────────
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
@@ -627,11 +639,15 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id),
-    CONSTRAINT uq_bf_society_fy_acc UNIQUE (society_id, financial_year, acc_id)
+    CONSTRAINT uq_bf_society_fy_acc UNIQUE (
+        society_id,
+        financial_year,
+        acc_id
+    )
 );
- 
+
 CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
- 
+
 CREATE TABLE IF NOT EXISTS role_permissions (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
@@ -730,7 +746,12 @@ CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_id, rol
 
 CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables (due_date);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_entity_status_date ON receivables (entity_id, role, status, due_date);
+CREATE INDEX IF NOT EXISTS idx_receivables_entity_status_date ON receivables (
+    entity_id,
+    role,
+    status,
+    due_date
+);
 
 CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
 
@@ -755,10 +776,12 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (
 -- Auto-generate human-friendly receipt_number / transaction_number.
 -- ════════════════════════════════════════════════════════════════
 CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
+
 CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
 
 -- ── Chain hash helpers ─────────────────────────────────────────
 DROP FUNCTION IF EXISTS fn_compute_receipt_hash(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_compute_receipt_hash(
     p_society_id       TEXT,
     p_acc_id           TEXT,
@@ -796,7 +819,8 @@ END;
 $$;
 
 -- Get the previous receipt hash in the same (society_id, acc_id) chain.
-DROP FUNCTION IF EXISTS fn_get_chain_previous_hash(INT, INT, TIMESTAMP) CASCADE;
+DROP FUNCTION IF EXISTS fn_get_chain_previous_hash (INT, INT, TIMESTAMP) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_get_chain_previous_hash(
     p_society_id   INT,
     p_acc_id       INT,
@@ -826,7 +850,8 @@ END;
 $$;
 
 -- Issue the immutable SHA256 receipt_number for a confirmed receipt.
-DROP FUNCTION IF EXISTS fn_issue_receipt_hash_for_receipt(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_issue_receipt_hash_for_receipt (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_issue_receipt_hash_for_receipt(p_receipt_id INT)
 RETURNS VARCHAR(64) LANGUAGE plpgsql AS $$
 DECLARE
@@ -882,7 +907,8 @@ END;
 $$;
 
 -- BEFORE INSERT/UPDATE trigger: auto-issue receipt_number when status flips to 'confirmed'.
-DROP FUNCTION IF EXISTS fn_trg_receipt_hash_issue() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_receipt_hash_issue () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -948,13 +974,15 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_receipt_hash_issue ON receipts;
+
 CREATE TRIGGER trg_receipt_hash_issue
     BEFORE UPDATE OF status ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_issue();
 
 -- Fallback BEFORE INSERT trigger: if a receipt is inserted already confirmed, issue number immediately.
-DROP FUNCTION IF EXISTS fn_trg_receipt_hash_insert() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_receipt_hash_insert () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -1019,13 +1047,15 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_receipt_hash_insert ON receipts;
+
 CREATE TRIGGER trg_receipt_hash_insert
     BEFORE INSERT ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_insert();
 
 -- Same for expenses: mirror the receipts hash-issue trigger.
-DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -1091,12 +1121,14 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
+
 CREATE TRIGGER trg_expense_hash_issue
     BEFORE UPDATE OF status ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expense_hash_issue();
 
-DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -1161,12 +1193,14 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
+
 CREATE TRIGGER trg_expense_hash_insert
     BEFORE INSERT ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expense_hash_insert();
 
-DROP FUNCTION IF EXISTS fn_trg_transaction_number() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_transaction_number () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_transaction_number()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1179,6 +1213,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_transaction_number ON transactions;
+
 CREATE TRIGGER trg_transaction_number
     BEFORE INSERT ON transactions
     FOR EACH ROW
@@ -1239,7 +1274,8 @@ CREATE TRIGGER trg_apartment_active_guard
     EXECUTE FUNCTION fn_trg_apartment_active_guard();
 
 -- Generic updated_at stamping trigger factory
-DROP FUNCTION IF EXISTS fn_trg_set_updated_at() CASCADE;
+DROP FUNCTION IF EXISTS fn_trg_set_updated_at () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1249,42 +1285,49 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_vendors_updated ON vendors;
+
 CREATE TRIGGER trg_vendors_updated
     BEFORE UPDATE ON vendors
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_security_updated ON security_staff;
+
 CREATE TRIGGER trg_security_updated
     BEFORE UPDATE ON security_staff
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_assets_updated ON assets;
+
 CREATE TRIGGER trg_assets_updated
     BEFORE UPDATE ON assets
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_events_updated ON events;
+
 CREATE TRIGGER trg_events_updated
     BEFORE UPDATE ON events
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
+
 CREATE TRIGGER trg_concerns_updated
     BEFORE UPDATE ON concerns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_apt_charges_updated ON apt_charges_fines_basis;
+
 CREATE TRIGGER trg_apt_charges_updated
     BEFORE UPDATE ON apt_charges_fines_basis
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_ven_charges_updated ON ven_charges_fines_basis;
+
 CREATE TRIGGER trg_ven_charges_updated
     BEFORE UPDATE ON ven_charges_fines_basis
     FOR EACH ROW
@@ -1554,7 +1597,6 @@ BEGIN
 END;
 $$;
 
-
 -- Applies SIMPLE INTEREST monthly on overdue residual.
 DROP FUNCTION IF EXISTS fn_apply_receivable_interest (INT) CASCADE;
 
@@ -1683,7 +1725,8 @@ $$;
 --   mode='bank' → SBI A/c - Society (6311) if present, else first Dr account
 --   otherwise   → Cash-in-hand (633) if present, else first Dr account
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_resolve_cash_account(INT, VARCHAR) CASCADE;
+DROP FUNCTION IF EXISTS fn_resolve_cash_account (INT, VARCHAR) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_resolve_cash_account(p_society_id INT, p_mode VARCHAR)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -1718,6 +1761,8 @@ $$;
 --   anyone else  -> 'pending', no transactions yet
 -- fn_save_receipt_pending is removed; its logic is subsumed.
 -- ════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_verify_receipt CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receipt(
     p_receipt_id   INT,
@@ -1785,6 +1830,7 @@ $$;
 
 -- Verify a pending expense: posts Dr expense + Cr cash/bank, then issues hash.
 DROP FUNCTION IF EXISTS fn_verify_expense CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_verify_expense(
     p_expense_id   INT,
     p_confirmed_by INT,
@@ -3175,8 +3221,8 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy(INT, INT, SMALLINT) CASCADE;
- 
+DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy (INT, INT, SMALLINT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_resolve_bf_amount_fy(
     p_society_id     INT,
     p_account_id     INT,
@@ -3220,16 +3266,16 @@ BEGIN
     RETURN COALESCE(v_bf, 0);
 END;
 $$;
- 
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 4: DEPRECIATION CALCULATION
 -- Full-year depreciation on brought-forward WDV; half-year depreciation
 -- on assets purchased on/after 1-Sep of the financial year (per spec:
 -- "Half depreciation if asset date > 1 Sep of the year").
 -- ════════════════════════════════════════════════════════════════
- 
-DROP FUNCTION IF EXISTS fn_account_depreciation(INT, INT, SMALLINT) CASCADE;
- 
+
+DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, SMALLINT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_account_depreciation(
     p_society_id     INT,
     p_account_id     INT,
@@ -3273,13 +3319,13 @@ BEGIN
     RETURN ROUND(v_dep_opening + v_dep_additions, 2);
 END;
 $$;
- 
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 5: LEDGER v2 — FY-aware BF + depreciation-aware closing
 -- ════════════════════════════════════════════════════════════════
- 
-DROP FUNCTION IF EXISTS fn_account_ledger_fy(INT, INT, SMALLINT) CASCADE;
- 
+
+DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, SMALLINT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_society_id     INT,
     p_account_id     INT,
@@ -3402,7 +3448,7 @@ $$;
 -- Used everywhere a view/function needs "today's" BF without the
 -- caller having to pass one in explicitly.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_current_financial_year() CASCADE;
+DROP FUNCTION IF EXISTS fn_current_financial_year () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_current_financial_year()
 RETURNS SMALLINT LANGUAGE SQL STABLE AS $$
@@ -3423,7 +3469,14 @@ $$;
 -- columns by transaction mode, and includes rc_acc_id/pc_acc_id (ledger
 -- folio) columns. Now the only cashbook function — loaders.py and
 -- cashbook_export.py both call this.
-DROP FUNCTION IF EXISTS fn_cashbook_paired_v2(INT, INT, TEXT, TEXT, DATE, DATE) CASCADE;
+DROP FUNCTION IF EXISTS fn_cashbook_paired_v2 (
+    INT,
+    INT,
+    TEXT,
+    TEXT,
+    DATE,
+    DATE
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_cashbook_paired_v2(
     p_society_id  INT,
@@ -3985,31 +4038,57 @@ SELECT
     a.apartment_size,
     a.active,
     COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending','partial')),
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+        ),
         0
     ) AS pending_dues,
     COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending','partial') AND r.due_date < CURRENT_DATE),
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+                AND r.due_date < CURRENT_DATE
+        ),
         0
     ) AS overdue_dues,
     COALESCE(apd.gate_pass, TRUE) AS gate_pass,
     COALESCE(apd.noc_eligible, TRUE) AS noc_eligible,
     (
         SELECT MAX(vp.valid_until)
-        FROM vendor_passes vp
-        JOIN users vu ON vu.id = vp.user_id AND vu.role = 'vendor'
-        WHERE vu.linked_id = a.id AND vp.status = 'active'
+        FROM
+            vendor_passes vp
+            JOIN users vu ON vu.id = vp.user_id
+            AND vu.role = 'vendor'
+        WHERE
+            vu.linked_id = a.id
+            AND vp.status = 'active'
     ) AS gate_pass_valid_until,
     (
-        SELECT COALESCE(SUM(r2.amount - r2.paid_amount), 0)
+        SELECT COALESCE(
+                SUM(r2.amount - r2.paid_amount), 0
+            )
         FROM receivables r2
-        WHERE r2.entity_id = a.id AND r2.role = 'apartment' AND r2.status = 'credit'
+        WHERE
+            r2.entity_id = a.id
+            AND r2.role = 'apartment'
+            AND r2.status = 'credit'
     ) AS advance_credit
-FROM apartments a
-LEFT JOIN receivables r ON r.entity_id = a.id AND r.role = 'apartment'
-LEFT JOIN v_apartment_dues apd ON apd.apartment_id = a.id
-GROUP BY a.id, a.society_id, a.flat_number, a.owner_name, a.mobile,
-         a.apartment_size, a.active, apd.gate_pass, apd.noc_eligible;
+FROM
+    apartments a
+    LEFT JOIN receivables r ON r.entity_id = a.id
+    AND r.role = 'apartment'
+    LEFT JOIN v_apartment_dues apd ON apd.apartment_id = a.id
+GROUP BY
+    a.id,
+    a.society_id,
+    a.flat_number,
+    a.owner_name,
+    a.mobile,
+    a.apartment_size,
+    a.active,
+    apd.gate_pass,
+    apd.noc_eligible;
 
 -- ── v_financial_trial_balance: every account with Dr/Cr split ──
 CREATE OR REPLACE VIEW v_financial_trial_balance AS
@@ -4205,7 +4284,7 @@ BEGIN
            pg_get_function_arguments(p.oid)::TEXT,
            pg_get_functiondef(p.oid)::TEXT
     FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE p.proname LIKE 'fn_%' AND n.nspname = 'public'
+    WHERE p.proname LIKE 'fn_%' AND n.nspname = 'defaultdb'
     ORDER BY p.proname;
 END;
 $$ LANGUAGE plpgsql;
@@ -4239,7 +4318,8 @@ $$ LANGUAGE plpgsql;
 -- ════════════════════════════════════════════════════════════════
 
 -- Trial balance: all accounts with current Dr/Cr balances.
-DROP FUNCTION IF EXISTS fn_trial_balance(INT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS fn_trial_balance (INT, TEXT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trial_balance(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (
     account_id INT, account_name VARCHAR(100), drcr_account VARCHAR(2),
@@ -4272,7 +4352,8 @@ END;
 $$;
 
 -- Income & expenditure over a date range.
-DROP FUNCTION IF EXISTS fn_income_expenditure(INT, DATE, DATE) CASCADE;
+DROP FUNCTION IF EXISTS fn_income_expenditure (INT, DATE, DATE) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_income_expenditure(
     p_society_id INT,
     p_start_date DATE DEFAULT NULL,
@@ -4302,7 +4383,8 @@ END;
 $$;
 
 -- Balance sheet as of a date.
-DROP FUNCTION IF EXISTS fn_balance_sheet(INT, DATE) CASCADE;
+DROP FUNCTION IF EXISTS fn_balance_sheet (INT, DATE) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_balance_sheet(
     p_society_id INT,
     p_as_of      DATE DEFAULT CURRENT_DATE
@@ -4337,7 +4419,8 @@ END;
 $$;
 
 -- Dashboard stats for a society.
-DROP FUNCTION IF EXISTS fn_dashboard_stats(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_dashboard_stats (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_dashboard_stats(p_society_id INT)
 RETURNS TABLE (
     total_receivables NUMERIC(15,2),
@@ -4390,7 +4473,8 @@ $$;
 -- SECTION 22: VENDOR LEDGER
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_vendor_ledger(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_vendor_ledger (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_vendor_ledger(p_society_id INT, p_vendor_id INT)
 RETURNS TABLE (
     ledger_type VARCHAR(20),
@@ -4448,7 +4532,8 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 
 -- Apartments with no owning user row (orphan apartments).
-DROP FUNCTION IF EXISTS fn_check_orphan_apartments(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_orphan_apartments (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_orphan_apartments(p_society_id INT)
 RETURNS TABLE (apartment_id INT, flat_number VARCHAR(20), issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT a.id, a.flat_number, 'No linked apartment user account'::TEXT
@@ -4461,7 +4546,8 @@ RETURNS TABLE (apartment_id INT, flat_number VARCHAR(20), issue TEXT) LANGUAGE S
 $$;
 
 -- Ledger entries (transactions) referencing accounts/users that no longer exist.
-DROP FUNCTION IF EXISTS fn_check_orphan_ledger_entries(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_orphan_ledger_entries (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_orphan_ledger_entries(p_society_id INT)
 RETURNS TABLE (transaction_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT t.id, 'Transaction references missing account'::TEXT
@@ -4478,7 +4564,8 @@ RETURNS TABLE (transaction_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
 $$;
 
 -- Receipts whose acc_id (income account) no longer exists.
-DROP FUNCTION IF EXISTS fn_check_orphan_receipts(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_orphan_receipts (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_orphan_receipts(p_society_id INT)
 RETURNS TABLE (receipt_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT r.id, 'Receipt references missing income account'::TEXT
@@ -4489,7 +4576,8 @@ RETURNS TABLE (receipt_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
 $$;
 
 -- Vendors with no linked user account.
-DROP FUNCTION IF EXISTS fn_check_orphan_vendors(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_orphan_vendors (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_orphan_vendors(p_society_id INT)
 RETURNS TABLE (vendor_id INT, business_name VARCHAR(100), issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT v.id, v.business_name, 'No linked vendor user account'::TEXT
@@ -4502,7 +4590,8 @@ RETURNS TABLE (vendor_id INT, business_name VARCHAR(100), issue TEXT) LANGUAGE S
 $$;
 
 -- Receivables pointing at a missing apartment/vendor/security entity.
-DROP FUNCTION IF EXISTS fn_check_orphan_receivables(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_orphan_receivables (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_orphan_receivables(p_society_id INT)
 RETURNS TABLE (receivable_id INT, role VARCHAR(20), entity_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT r.id, r.role, r.entity_id, 'Receivable references missing entity'::TEXT
@@ -4525,7 +4614,8 @@ RETURNS TABLE (receivable_id INT, role VARCHAR(20), entity_id INT, issue TEXT) L
 $$;
 
 -- Duplicate receivable rows for the same entity/role/period_month.
-DROP FUNCTION IF EXISTS fn_check_duplicate_receivables(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_duplicate_receivables (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_duplicate_receivables(p_society_id INT)
 RETURNS TABLE (entity_id INT, role VARCHAR(20), period_month DATE, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT r.entity_id, r.role, r.period_month, COUNT(*) AS dup_count,
@@ -4537,7 +4627,8 @@ RETURNS TABLE (entity_id INT, role VARCHAR(20), period_month DATE, dup_count BIG
 $$;
 
 -- Journal ids that do not have exactly one Dr and one Cr line (unbalanced).
-DROP FUNCTION IF EXISTS fn_check_duplicate_journals(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_duplicate_journals (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_duplicate_journals(p_society_id INT)
 RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(15,2), cr_sum NUMERIC(15,2), issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT t.journal_id,
@@ -4557,7 +4648,8 @@ RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(
 $$;
 
 -- Broken foreign keys across the major tables.
-DROP FUNCTION IF EXISTS fn_check_broken_fks(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_check_broken_fks (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_check_broken_fks(p_society_id INT)
 RETURNS TABLE (table_name TEXT, row_id INT, column_name TEXT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT 'receivables'::TEXT, r.id, 'acc_id'::TEXT, 'Missing account FK'::TEXT
@@ -4600,8 +4692,8 @@ $$;
 -- p_financial_year + 1. p_overwrite=FALSE (default) never touches a row
 -- that already exists — protects manual admin overrides. Pass TRUE to
 -- force a recompute.
-DROP FUNCTION IF EXISTS fn_close_financial_year(INT, SMALLINT, BOOLEAN) CASCADE;
- 
+DROP FUNCTION IF EXISTS fn_close_financial_year (INT, SMALLINT, BOOLEAN) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_close_financial_year(
     p_society_id     INT,
     p_financial_year SMALLINT,
@@ -4663,8 +4755,6 @@ BEGIN
 END;
 $$;
 
-
-
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- DOCUMENTATION: clarify receipts.user_id's dual role
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -4677,42 +4767,64 @@ $$;
 -- call sites (fn_save_receipt, fn_verify_receipt,
 -- every receipts list/report query) already depend on this exact name;
 -- renaming has no functional upside and meaningful regression risk.
-COMMENT ON COLUMN receipts.user_id IS
-    'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
+COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- MIGRATION: add created_by columns missing from initial schema
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-ALTER TABLE societies ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE security_roster ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE receivables ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE expenses ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE payables ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE vendor_passes ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
-ALTER TABLE ven_charges_fines_basis ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+ALTER TABLE societies
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE accounts
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE security_roster
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE receivables
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE receipts
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE expenses
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE payables
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE vendor_passes
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE apt_charges_fines_basis
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
+
+ALTER TABLE ven_charges_fines_basis
+ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Verify a single confirmed receipt's hash and chain link.
-DROP FUNCTION IF EXISTS fn_verify_receipt_chain(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_verify_receipt_chain (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_verify_receipt_chain(
     p_society_id INT,
     p_acc_id     INT
 ) RETURNS TABLE(
-    position       INT,
-    receipt_id     INT,
-    receipt_number VARCHAR(64),
-    is_valid       BOOLEAN,
-    break_reason   TEXT
+    chain_position  INT,
+    receipt_id      INT,
+    receipt_number  VARCHAR(64),
+    is_valid        BOOLEAN,
+    break_reason    TEXT
 ) LANGUAGE plpgsql AS $$
 DECLARE
+    r           RECORD;
     v_prev_hash  VARCHAR(64);
     v_chain_seed VARCHAR(64);
     v_expected   VARCHAR(64);
@@ -4743,7 +4855,7 @@ BEGIN
             is_valid := FALSE;
             break_reason := FORMAT('Broken chain link at receipt %s (id=%s): expected previous_hash=%s, stored=%s',
                                    r.receipt_number, r.id, v_prev_hash, r.previous_hash);
-            position := v_pos;
+            chain_position := v_pos;
             receipt_id := r.id;
             receipt_number := r.receipt_number;
             RETURN NEXT;
@@ -4782,7 +4894,7 @@ BEGIN
             is_valid := FALSE;
             break_reason := FORMAT('Tampered receipt %s (id=%s): stored=%s, computed=%s',
                                    r.receipt_number, r.id, r.receipt_number, v_expected);
-            position := v_pos;
+            chain_position := v_pos;
             receipt_id := r.id;
             receipt_number := r.receipt_number;
             RETURN NEXT;
@@ -4792,7 +4904,7 @@ BEGIN
         v_prev_hash := r.receipt_number;
         is_valid := TRUE;
         break_reason := NULL;
-        position := v_pos;
+        chain_position := v_pos;
         receipt_id := r.id;
         receipt_number := r.receipt_number;
         RETURN NEXT;
@@ -4801,7 +4913,8 @@ END;
 $$;
 
 -- Verify ALL parallel chains for a society.
-DROP FUNCTION IF EXISTS fn_verify_all_receipt_chains(INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_verify_all_receipt_chains (INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_verify_all_receipt_chains(p_society_id INT)
 RETURNS TABLE(
     account_id    INT,
@@ -4811,7 +4924,9 @@ RETURNS TABLE(
     break_point   TEXT
 ) LANGUAGE plpgsql AS $$
 DECLARE
-    v_break TEXT;
+    r           RECORD;
+    v           RECORD;
+    v_break     TEXT;
 BEGIN
     FOR r IN
         SELECT DISTINCT acc_id FROM receipts
@@ -4841,7 +4956,8 @@ END;
 $$;
 
 -- Reconcile receipts in a chain (society, acc_id) against their transaction lines.
-DROP FUNCTION IF EXISTS fn_reconcile_receipt_chain(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_reconcile_receipt_chain (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_reconcile_receipt_chain(
     p_society_id INT,
     p_acc_id     INT
@@ -4877,7 +4993,8 @@ END;
 $$;
 
 -- Auditor helper: full integrity report for one (society, acc_id) chain.
-DROP FUNCTION IF EXISTS fn_audit_receipt_chain(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_audit_receipt_chain (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_audit_receipt_chain(
     p_society_id INT,
     p_acc_id     INT
@@ -4887,8 +5004,9 @@ CREATE OR REPLACE FUNCTION fn_audit_receipt_chain(
     details      TEXT
 ) LANGUAGE plpgsql AS $$
 DECLARE
-    v_count INT;
-    v_break TEXT;
+    v           RECORD;
+    v_count     INT;
+    v_break     TEXT;
 BEGIN
     -- 1. Chain hash integrity
     FOR v IN SELECT * FROM fn_verify_receipt_chain(p_society_id, p_acc_id) LOOP

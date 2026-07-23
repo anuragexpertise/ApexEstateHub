@@ -8,7 +8,7 @@ set -e
 HOST="estatehub-28042026-anurag-bdd9.a.aivencloud.com"
 PORT="21207"
 USER="avnadmin"
-DB="public"
+DB="defaultdb"
 SQL_FILE="estatehub.sql"
 
 # Prompt for password securely
@@ -49,12 +49,12 @@ echo "✅ Schema imported successfully"
 # ─────────────────────────────────────────────
 # STEP 4 — Verify schema + tables
 # ─────────────────────────────────────────────
-echo "🔍 Verifying tables in schema 'public'..."
+echo "🔍 Verifying tables in schema 'defaultdb'..."
 
 psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
 SELECT table_schema, table_name
 FROM information_schema.tables
-WHERE table_schema = 'public'
+WHERE table_schema = 'defaultdb'
 ORDER BY table_name;
 "
 
@@ -77,7 +77,7 @@ EOF
 )
 
     psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
-    UPDATE public.users
+    UPDATE defaultdb.users
     SET password_hash = '$HASH'
     WHERE email = 'master@estatehub.com';
     "

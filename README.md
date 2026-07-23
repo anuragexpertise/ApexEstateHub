@@ -861,7 +861,7 @@ A utility script `database/reset_database.py` is provided to perform a destructi
 ```bash
 python3 database/reset_database.py
 ```
-This script connects to the target database, drops the `public` schema CASCADE, recreates it, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
+This script connects to the target database, drops the `defaultdb` schema CASCADE, recreates it, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
 
 ### Database Migrations
 
