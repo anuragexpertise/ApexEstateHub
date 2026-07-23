@@ -9,7 +9,7 @@ HOST="estatehub-28042026-anurag-bdd9.a.aivencloud.com"
 PORT="21207"
 USER="avnadmin"
 DB="defaultdb"
-SQL_FILE="estatehub.sql"
+SQL_FILE="database/estatehub.sql"
 
 # Prompt for password securely
 read -s -p "Enter Aiven DB Password: " PGPASSWORD
@@ -42,19 +42,22 @@ echo "✅ Connection successful"
 # ─────────────────────────────────────────────
 echo "📦 Importing schema from $SQL_FILE..."
 
-psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -f "$SQL_FILE"
+{ 
+  echo "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+  cat "$SQL_FILE"
+} | psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB"
 
 echo "✅ Schema imported successfully"
 
 # ─────────────────────────────────────────────
 # STEP 4 — Verify schema + tables
 # ─────────────────────────────────────────────
-echo "🔍 Verifying tables in schema 'defaultdb'..."
+echo "🔍 Verifying tables in schema 'public'..."
 
 psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
 SELECT table_schema, table_name
 FROM information_schema.tables
-WHERE table_schema = 'defaultdb'
+WHERE table_schema = 'public'
 ORDER BY table_name;
 "
 
@@ -77,7 +80,7 @@ EOF
 )
 
     psql "sslmode=require host=$HOST port=$PORT user=$USER dbname=$DB" -c "
-    UPDATE defaultdb.users
+    UPDATE users
     SET password_hash = '$HASH'
     WHERE email = 'master@estatehub.com';
     "

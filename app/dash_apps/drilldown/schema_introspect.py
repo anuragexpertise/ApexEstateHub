@@ -211,7 +211,7 @@ _SCHEMA_CACHE: dict | None = None
 
 def _load_schema_batch() -> dict:
     """
-    One-shot introspection of every table in the 'defaultdb' schema: 4 total
+    One-shot introspection of every table in the 'public' schema: 4 total
     queries (columns / PKs / FKs / check-constraints) instead of 4 queries
     PER table. Raises on failure — callers decide how to handle that; this
     function never partially-populates the cache.
@@ -219,7 +219,7 @@ def _load_schema_batch() -> dict:
     cols_raw = db._execute(
         "SELECT table_name, column_name, data_type, is_nullable, column_default "
         "FROM information_schema.columns "
-        "WHERE table_schema='defaultdb' ORDER BY table_name, ordinal_position",
+        "WHERE table_schema='public' ORDER BY table_name, ordinal_position",
         (), fetch_all=True,
     ) or []
 
@@ -228,7 +228,7 @@ def _load_schema_batch() -> dict:
         "FROM information_schema.table_constraints tc "
         "JOIN information_schema.key_column_usage kcu "
         "  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema "
-        "WHERE tc.table_schema='defaultdb' AND tc.constraint_type='PRIMARY KEY'",
+        "WHERE tc.table_schema='public' AND tc.constraint_type='PRIMARY KEY'",
         (), fetch_all=True,
     ) or []
 
@@ -239,7 +239,7 @@ def _load_schema_batch() -> dict:
         "  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema "
         "JOIN information_schema.constraint_column_usage ccu "
         "  ON tc.constraint_name=ccu.constraint_name AND tc.table_schema=ccu.table_schema "
-        "WHERE tc.table_schema='defaultdb' AND tc.constraint_type='FOREIGN KEY'",
+        "WHERE tc.table_schema='public' AND tc.constraint_type='FOREIGN KEY'",
         (), fetch_all=True,
     ) or []
 
@@ -248,7 +248,7 @@ def _load_schema_batch() -> dict:
         "FROM information_schema.check_constraints cc "
         "JOIN information_schema.constraint_column_usage ccu "
         "  ON cc.constraint_name=ccu.constraint_name AND cc.constraint_schema=ccu.constraint_schema "
-        "WHERE ccu.table_schema='defaultdb'",
+        "WHERE ccu.table_schema='public'",
         (), fetch_all=True,
     ) or []
 

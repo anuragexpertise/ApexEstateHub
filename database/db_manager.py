@@ -145,7 +145,7 @@ class DatabaseManager:
         finally:
             self._pool.putconn(conn)
 
-    # ── defaultdb execute ────────────────────────────────────────────────────────
+    # ── public execute ────────────────────────────────────────────────────────
 
     def execute(
         self,

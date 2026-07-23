@@ -12,10 +12,8 @@ Usage:
 
 Steps:
     1. Connect to PostgreSQL
-    2. Drop defaultdb schema CASCADE
-    3. Recreate defaultdb schema
-    4. Execute estatehub.sql
-    5. Verify tables/functions/views
+    2. Execute estatehub.sql (idempotent)
+    3. Verify tables/functions/views
 """
 
 import os
@@ -74,6 +72,7 @@ def execute_sql_file(cursor, sql_file):
         sql = f.read()
 
     print("\nRunning schema file...")
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
     cursor.execute(sql)
     print("✓ Schema executed")
 
@@ -89,14 +88,14 @@ def validate(cursor):
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.tables
-        WHERE table_schema='defaultdb'
+        WHERE table_schema='public'
     """)
     table_count = cursor.fetchone()[0]
 
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.views
-        WHERE table_schema='defaultdb'
+        WHERE table_schema='public'
     """)
     view_count = cursor.fetchone()[0]
 
@@ -105,7 +104,7 @@ def validate(cursor):
         FROM pg_proc p
         JOIN pg_namespace n
             ON n.oid = p.pronamespace
-        WHERE n.nspname='defaultdb'
+        WHERE n.nspname='public'
     """)
     function_count = cursor.fetchone()[0]
 
@@ -116,7 +115,7 @@ def validate(cursor):
     cursor.execute("""
         SELECT table_name
         FROM information_schema.tables
-        WHERE table_schema='defaultdb'
+        WHERE table_schema='public'
         ORDER BY table_name
     """)
 
@@ -182,25 +181,17 @@ def main():
 
         print("\n✓ Connected")
 
-        print("\nDropping schema defaultdb...")
+        print("\nDropping public schema objects...")
 
         cur.execute("""
-            DROP SCHEMA IF EXISTS defaultdb CASCADE;
-        """)
-
-        cur.execute("""
-            CREATE SCHEMA defaultdb;
-        """)
-
-        cur.execute(f"""
-            GRANT ALL ON SCHEMA defaultdb TO {DB_USER};
+            DROP SCHEMA public CASCADE;
         """)
 
         cur.execute("""
-            GRANT ALL ON SCHEMA defaultdb TO defaultdb;
+            CREATE SCHEMA public AUTHORIZATION CURRENT_USER;
         """)
 
-        print("✓ Fresh schema created")
+        print("✓ Fresh public schema created")
 
         execute_sql_file(cur, sql_file)
 
