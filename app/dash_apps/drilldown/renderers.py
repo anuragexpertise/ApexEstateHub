@@ -1820,7 +1820,10 @@ def render_event_ticket_card(
     event_id,
     event_title: str,
     event_date,
-    ticket_price: float,
+    ticket_name: str = "",
+    ticket_name2: str = "",
+    ticket_price: float = 0.0,
+    ticket_price2: float = 0.0,
     society_id=None,
     apt_user_id=None,
     flat_number: str = "",
@@ -1857,11 +1860,21 @@ def render_event_ticket_card(
         else str(event_date or "")
     )
     price_display = f"{float(ticket_price or 0):,.2f}"
+    price_display2 = f"{float(ticket_price2 or 0):,.2f}"
+
+    if ticket_price2 and float(ticket_price2 or 0) > 0:
+        price_line = (
+            f"{date_str} — {ticket_name}: Rs.{price_display}, "
+            f"{ticket_name2}: Rs.{price_display2} per ticket"
+        )
+    elif ticket_price and float(ticket_price or 0) > 0:
+        price_line = f"{date_str} — Rs.{price_display} ({ticket_name}) per ticket"
+    else:
+        price_line = f"{date_str} — Free entry, no payment required"
 
     banner = dbc.Alert([
         html.I(className="fas fa-ticket-alt me-2"),
-        (f"{date_str} — Rs.{price_display} per ticket" if ticket_price else
-         f"{date_str} — Free entry, no payment required"),
+        price_line,
     ], color="info", style={"fontSize": "12px", "borderRadius": "10px",
                              "padding": "8px 14px", "marginBottom": "12px"})
 

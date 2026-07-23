@@ -588,6 +588,19 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
+            # ── Verify expense (admin only, from expenses list) ────────────────────
+            elif action == "verify_expense":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
+                    return store, content, bc, {"display": "none"}, toast
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                ok, msg = loaders.verify_expense(int(pk), confirmed_by=user_id)
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
             # ── Toggle Duty (security profile — manual clock in/out) ──────────────
             elif action == "toggle_duty":
                 ok, msg = loaders.toggle_security_duty(int(pk), sid)
@@ -1462,7 +1475,10 @@ def _render_card(
                 event_id=event_id,
                 event_title=event.get("title", "Event"),
                 event_date=event.get("event_date"),
+                ticket_name=event.get("ticket_name", "Adult"),
+                ticket_name2=event.get("ticket_name2", "Child"),
                 ticket_price=float(event.get("ticket_price") or 0),
+                ticket_price2=float(event.get("ticket_price2") or 0),
                 society_id=sid_val,
                 apt_user_id=apt_user_id,
                 flat_number=flat_number,
@@ -1755,58 +1771,32 @@ def _save_receipt_v3(db, d, sid):
     if not particulars:
         return False, "Particulars are required", None
 
-    # Path 2: security, vendor, and apartment-owner self-initiated payments
-    # create a pending receipt (no immediate transaction) — an admin must
-    # verify it via the existing verify_receipt action before it posts.
-    caller_role = d.get("caller_role", "admin")
-    use_pending = caller_role in ("security", "apartment", "vendor")
-
-    fn_name = "fn_save_receipt_pending" if use_pending else "fn_save_receipt"
-    n_params = 11 if not use_pending else 11
-
     try:
-        if use_pending:
-            r = db._execute(
-                "SELECT * FROM fn_save_receipt_pending(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    sid,            # p_society_id
-                    acc_id,         # p_acc_id        ← FIXED ORDER
-                    particulars,    # p_particulars   ← FIXED ORDER
-                    amt,            # p_amount        ← FIXED ORDER
-                    d.get("entity_id"),
-                    d.get("role", "other"),
-                    d.get("mode", "cash"),
-                    d.get("receipt_date") or dt_date.today().isoformat(),
-                    d.get("user_id"),
-                    d.get("cheque_no"),
-                    d.get("transaction_id"),
-                ),
-                fetch_one=True,
-            )
-            receipt_id = (r or {}).get("receipt_id")
-            _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=True)
-            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
-        else:
-            r = db._execute(
-                "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    sid,            # p_society_id
-                    acc_id,         # p_acc_id        ← FIXED ORDER
-                    particulars,    # p_particulars   ← FIXED ORDER
-                    amt,            # p_amount        ← FIXED ORDER
-                    d.get("entity_id"),
-                    d.get("role", "other"),
-                    d.get("mode", "cash"),
-                    d.get("receipt_date") or dt_date.today().isoformat(),
-                    d.get("user_id"),
-                    d.get("cheque_no"),
-                    d.get("transaction_id"),
-                ),
-                fetch_one=True,
-            )
-            receipt_id = (r or {}).get("receipt_id")
-            _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=False)
+        r = db._execute(
+            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                sid,            # p_society_id
+                acc_id,         # p_acc_id
+                particulars,    # p_particulars
+                amt,            # p_amount
+                d.get("entity_id"),
+                d.get("role", "other"),
+                d.get("mode", "cash"),
+                d.get("receipt_date") or dt_date.today().isoformat(),
+                d.get("user_id"),
+                d.get("cheque_no"),
+                d.get("transaction_id"),
+                d.get("source_reference"),
+            ),
+            fetch_one=True,
+        )
+        receipt_id = (r or {}).get("receipt_id")
+        receipt_status = (r or {}).get("status", "unknown")
+        _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=(receipt_status == 'pending'))
+        if receipt_status == 'confirmed':
             return True, f"Receipt of ₹{amt:,.2f} saved and confirmed", receipt_id
+        else:
+            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -1843,7 +1833,7 @@ def _save_expense_v3(db, d, sid):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 acc_id,
@@ -1856,11 +1846,16 @@ def _save_expense_v3(db, d, sid):
                 d.get("user_id"),
                 d.get("cheque_no"),
                 d.get("transaction_id"),
+                d.get("source_reference"),
             ),
             fetch_one=True,
         )
         expense_id = (r or {}).get("expense_id")
-        return True, f"Expense of ₹{amt:,.2f} recorded", expense_id
+        expense_status = (r or {}).get("status", "unknown")
+        if expense_status == 'confirmed':
+            return True, f"Expense of ₹{amt:,.2f} recorded and confirmed", expense_id
+        else:
+            return True, f"Expense of ₹{amt:,.2f} recorded — pending admin verification", expense_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -2261,8 +2256,6 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     return True, f"{role.title()} '{email}' created", linked_id
 
 def _save_event(db, d, sid, is_edit, pk):
-    # parent_account_id: "" (from the "— None —" dropdown option) must become
-    # NULL, not an empty-string cast to INT.
     _acc_id = d.get("parent_account_id")
     _acc_id = int(_acc_id) if _acc_id not in (None, "", "None") else None
 
@@ -2270,6 +2263,14 @@ def _save_event(db, d, sid, is_edit, pk):
         _ticket_price = float(d.get("ticket_price") or 0)
     except (TypeError, ValueError):
         _ticket_price = 0
+
+    try:
+        _ticket_price2 = float(d.get("ticket_price2") or 0)
+    except (TypeError, ValueError):
+        _ticket_price2 = 0
+
+    _ticket_name = (d.get("ticket_name") or "Adult").strip()
+    _ticket_name2 = (d.get("ticket_name2") or "Child").strip()
 
     if is_edit:
         _img = d.get("image") or None
@@ -2284,7 +2285,10 @@ def _save_event(db, d, sid, is_edit, pk):
             d.get("venue"),
             d.get("open_to", "all"),
             _acc_id,
+            _ticket_name,
             _ticket_price,
+            _ticket_name2,
+            _ticket_price2,
         )
         if _img:
             _img_param += (_img,)
@@ -2292,7 +2296,8 @@ def _save_event(db, d, sid, is_edit, pk):
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
             f"event_time=%s, venue=%s, open_to=%s, parent_account_id=%s, "
-            f"ticket_price=%s{_img_clause}{_upd_by_clause} "
+            f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s"
+            f"{_img_clause}{_upd_by_clause} "
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
@@ -2306,8 +2311,10 @@ def _save_event(db, d, sid, is_edit, pk):
         return False, "Title is required", None
     r = db._execute(
         "INSERT INTO events(society_id, title, description, event_date, "
-        "event_time, venue, open_to, parent_account_id, ticket_price, image, created_at, created_by) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
+        "event_time, venue, open_to, parent_account_id, "
+        "ticket_name, ticket_price, ticket_name2, ticket_price2, "
+        "image, created_at, created_by) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
         (
             sid,
             title,
@@ -2317,7 +2324,10 @@ def _save_event(db, d, sid, is_edit, pk):
             d.get("venue"),
             d.get("open_to", "all"),
             _acc_id,
+            _ticket_name,
             _ticket_price,
+            _ticket_name2,
+            _ticket_price2,
             d.get("image") or None,
             d.get("user_id"),
         ),

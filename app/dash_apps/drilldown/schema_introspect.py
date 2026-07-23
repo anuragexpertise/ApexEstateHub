@@ -433,6 +433,8 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
     "events": {
         "open_to": "all",   # matches the DB column default; shown explicitly
                             # in the dropdown rather than left blank
+        "ticket_name": "Adult",
+        "ticket_name2": "Child",
     },
     "receipts": {
         "mode": "cash",
