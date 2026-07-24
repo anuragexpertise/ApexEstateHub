@@ -1,0 +1,387 @@
+ 
+Repo  is updated. https://github.com/anuragexpertise/ApexEstateHub/tree/master
+
+All reciepts/ expenses should generate print/email file  with QR code {payload <society_id>-<'EVT'>-<event_ticket_id>} .  Event Ticket text to be created like noc- Society Name, Event_name,  Event_date, Event_time, Event_Venue, Tickets_Name, Ticket_adult_quantity, Ticket_name2, Tickets_child_quantity, Amount, Ticket_number(ie separate QR codes n= quantity_Adult (n), quantity_child(n))  Ticket QR codes can be scanned on event entry like QR scanning done by security. <'EVT'> in payload = event.
+
+Suggest improvements on implementation. do not write code.
+
+Another Issue. Make Visitor management system. Create a Predefined visitor list for the day, created by apartment owners, generating QR codes {payload <society_id> V <apartment_id> <vistor_id>} .
+
+Based on my analysis of the ApexEstateHub codebase, here is a comprehensive implementation plan for your QR scanning system.
+
+---
+
+## Current State Analysis
+
+### Existing QR System
+The app already has a working QR system in `app/services/qr_service.py`:
+
+- **Payload format**: `entity_id|role_code|society_id` (e.g. `42|O|1`)
+- **Role codes**: A=admin, O=owner/apartment, V=vendor, S=security
+- **Validation**: `validate_qr_code()` looks up `users.id`, then delegates to `fn_evaluate_gate_pass()` for role-specific rules
+- **Gate access**: `gate_access` table logs entry/exit with `time_in` / `time_out`
+
+### Existing Relevant Tables
+| Table | Role | Has QR? |
+|-------|------|---------|
+| `event_tickets` | EVT | No QR field yet |
+| `vendor_passes` | VND | No QR field yet |
+| `gate_access` | SEC/ADM/OWN | Used for attendance, not ticketed |
+| `events` | Parent of EVT | Already has ticket pricing |
+
+### Missing for Your Requirements
+| Feature | Missing |
+|---------|---------|
+| Visitor Management (VST) | No `visitors` table, no visitor QR, no walk-in flow |
+| Patrol Locations (PTL) | No `patrol_locations` table, no schedule-based QR scan |
+| Event Ticket QR (EVT) | `event_tickets` has no QR payload field; no entry-scan logic |
+| New QR payload format | Current delimiter is `|`, you want ` - ` separator |
+
+---
+
+## Recommended Implementation Plan
+
+### Phase 1: Database Schema Changes
+
+Add three new DDL blocks to `database/estatehub.sql` (after the `event_tickets` section):
+
+```sql
+-- ============================================================
+-- VISITORS (VST)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS visitors (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    apartment_id    INT REFERENCES apartments(id) ON DELETE SET NULL, -- requested by owner
+    name            VARCHAR(100) NOT NULL,
+    mobile          VARCHAR(15),
+    email           VARCHAR(100),
+    id_proof_type   VARCHAR(50),        -- Aadhar, PAN, DL, etc.
+    id_proof_number VARCHAR(50),
+    id_proof_photo  TEXT,                -- base64 or URL
+    photo           TEXT,                -- base64 or URL (security capture)
+    purpose         VARCHAR(200),        -- Purpose of visit
+    vehicle_number  VARCHAR(20),
+    visit_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+    visit_time_from TIME,
+    visit_time_to   TIME,
+    qr_payload      VARCHAR(255),        -- NEW FORMAT payload
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+                        status IN ('pending','approved','denied','entered','exited','expired')
+                    ),
+    approved_by     INT REFERENCES users(id),
+    approved_at     TIMESTAMP,
+    security_user_id INT REFERENCES users(id), -- who admitted
+    entered_at      TIMESTAMP,
+    exited_at       TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP,
+    created_by      INT REFERENCES users(id),
+    updated_by      INT REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_visitors_society ON visitors(society_id, visit_date);
+CREATE INDEX IF NOT EXISTS idx_visitors_apartment ON visitors(apartment_id);
+CREATE INDEX IF NOT EXISTS idx_visitors_status ON visitors(society_id, status);
+
+-- ============================================================
+-- PATROL LOCATIONS (PTL)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS patrol_locations (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_name   VARCHAR(100) NOT NULL,
+    description     TEXT,
+    qr_payload      VARCHAR(255),        -- e.g. "1 - PTL 1"
+    schedule_start  TIME,                -- first scan time of day
+    schedule_end    TIME,                 -- last scan time of day
+    scan_interval   INT DEFAULT 120,      -- minutes between required scans
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP,
+    created_by      INT REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS patrol_scans (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_id     INT NOT NULL REFERENCES patrol_locations(id) ON DELETE CASCADE,
+    security_user_id INT NOT NULL REFERENCES users(id),
+    scanned_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    qr_payload      VARCHAR(255),
+    notes           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_patrol_scans_location ON patrol_scans(location_id, scanned_at);
+CREATE INDEX IF NOT EXISTS idx_patrol_scans_security ON patrol_scans(security_user_id, scanned_at);
+```
+
+### Phase 2: QR Service Refactor
+
+Update `app/services/qr_service.py` to support the new format and roles:
+
+```python
+ROLE_CODE_MAP = {
+    "ADM": "admin",
+    "OWN": "apartment",
+    "VND": "vendor",
+    "SEC": "security",
+    "VST": "visitor",
+    "EVT": "event_ticket",
+    "PTL": "patrol_location",
+}
+
+def parse_qr_payload(qr_data: str) -> dict:
+    parts = qr_data.strip().split(" - ")
+    if len(parts) == 3:
+        society_id, role_code, entity_id = parts
+        return {
+            "society_id": int(society_id),
+            "role_code": role_code.strip(),
+            "role": ROLE_CODE_MAP.get(role_code.strip()),
+            "entity_id": int(entity_id.strip()),
+        }
+    return {"error": "Invalid format. Expected: society_id - ROLE entity_id"}
+
+def generate_qr(society_id: int, role_code: str, entity_id: int):
+    payload = f"{society_id} - {role_code} {entity_id}"
+    # same qrcode generation...
+    return img_base64, payload
+
+def validate_qr_code(qr_data: str, society_id=None) -> dict:
+    parsed = parse_qr_payload(qr_data)
+    if "error" in parsed:
+        return {"status": "FAIL", "reason": parsed["error"], "gate_action": "deny"}
+
+    if society_id and parsed["society_id"] != society_id:
+        return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
+
+    role = parsed["role"]
+    entity_id = parsed["entity_id"]
+
+    # Dispatch to role-specific validators
+    if role == "event_ticket":
+        return validate_event_ticket_qr(entity_id, society_id)
+    elif role == "visitor":
+        return validate_visitor_qr(entity_id, society_id)
+    elif role == "patrol_location":
+        return validate_patrol_qr(entity_id, society_id)
+    else:
+        return validate_standard_user_qr(entity_id, role, society_id)
+```
+
+### Phase 3: Role-Specific Validation
+
+Add to `qr_service.py`:
+
+```python
+def validate_event_ticket_qr(event_ticket_id: int, society_id: int) -> dict:
+    """Check event_tickets row + events event_date vs today + used/unused."""
+    row = db._execute("""
+        SELECT et.*, e.title, e.event_date, e.venue,
+               s.name as society_name
+          FROM event_tickets et
+          JOIN events e ON e.id = et.event_id
+          JOIN societies s ON s.id = et.society_id
+         WHERE et.id = %s AND et.society_id = %s
+           AND et.status = 'active'
+    """, (event_ticket_id, society_id), fetch_one=True)
+    if not row:
+        return {"status": "FAIL", "reason": "Ticket not found or already used", "gate_action": "deny"}
+    if row["event_date"] != datetime.now().date():
+        return {"status": "FAIL", "reason": f"Ticket valid only on {row['event_date']}", "gate_action": "deny"}
+    # Optional: expiry (e.g. event_time + 3 hours)
+    return {
+        "status": "PASS",
+        "user": {"name": f"Event Ticket #{event_ticket_id}", "role": "event_ticket", ...},
+        "gate_action": "allow",
+    }
+
+def validate_visitor_qr(visitor_id: int, society_id: int) -> dict:
+    """Check visitor is approved, within time window, not already entered."""
+    row = db._execute("""
+        SELECT v.*, a.flat_number, u.name as apt_owner_name
+          FROM visitors v
+          LEFT JOIN apartments a ON a.id = v.apartment_id
+          LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
+         WHERE v.id = %s AND v.society_id = %s
+    """, (visitor_id, society_id), fetch_one=True)
+    if not row:
+        return {"status": "FAIL", "reason": "Visitor pass not found", "gate_action": "deny"}
+    if row["status"] != 'approved':
+        return {"status": "FAIL", "reason": f"Visitor status: {row['status']}", "gate_action": "deny"}
+    now = datetime.now()
+    if row["visit_date"] != now.date():
+        return {"status": "FAIL", "reason": "Pass valid only on scheduled date", "gate_action": "deny"}
+    if row["entered_at"] is not None:
+        return {"status": "FAIL", "reason": "Visitor already inside", "gate_action": "deny"}
+    # Mark as entered
+    db._execute("UPDATE visitors SET entered_at = NOW(), status = 'entered' WHERE id = %s", (visitor_id,))
+    return { ... "gate_action": "allow", "message": f"Visitor: {row['name']} (Flat {row['flat_number']})" }
+
+def validate_patrol_qr(location_id: int, society_id: int) -> dict:
+    """Log patrol scan, check if within schedule window."""
+    row = db._execute("""
+        SELECT * FROM patrol_locations WHERE id = %s AND society_id = %s AND active = TRUE
+    """, (location_id, society_id), fetch_one=True)
+    if not row:
+        return {"status": "FAIL", "reason": "Patrol location not found", "gate_action": "deny"}
+    # Record scan
+    db._execute("""
+        INSERT INTO patrol_scans (society_id, location_id, security_user_id, scanned_at)
+        VALUES (%s, %s, %s, NOW())
+    """, (society_id, location_id, current_security_user_id))
+    # Evaluate schedule compliance (compare to previous scan interval)
+    last = db._execute("""
+        SELECT scanned_at FROM patrol_scans
+         WHERE location_id = %s
+         ORDER BY scanned_at DESC LIMIT 1
+    """, (location_id,), fetch_one=True)
+    complaint = None
+    if last and (datetime.now() - last["scanned_at"]).total_seconds() > (row["scan_interval"]*60):
+        complaint = { ... }
+    return { "status": "PASS", "gate_action": "allow", "message": "Patrol scan logged", "compliance": complaint }
+```
+
+### Phase 4: UI Pages / Cards
+
+Add to `app/dash_apps/drilldown/renderers.py`:
+
+1. **`render_visitor_form()`** - Owner creates presumptive visitor entries with name, date, purpose, ID proof upload
+2. **`render_visitor_list_card()`** - Security sees today's approved visitors, can admit them manually (photograph)
+3. **`render_patrol_location_form()`** - Admin creates patrol points with QR suffix
+4. **`render_patrol_log_card()`** - Security sees scan history per location
+
+### Phase 5: Backend Routes
+
+Add to `app/routes/api.py`:
+
+```python
+@api_bp.route('/visitors', methods=['GET', 'POST'])
+@token_required
+def visitors_api(current_user):
+    # List / create visitors
+    ...
+
+@api_bp.route('/visitors/<int:visitor_id>/approve', methods=['POST'])
+@token_required
+def approve_visitor(current_user, visitor_id):
+    # Owner or admin approves
+    ...
+
+@api_bp.route('/patrol-locations', methods=['GET', 'POST'])
+@token_required
+def patrol_locations_api(current_user):
+    ...
+
+@api_bp.route('/patrol-scans', methods=['GET', 'POST'])
+@token_required
+def patrol_scans_api(current_user):
+    ...
+```
+
+### Phase 6: Gate Scan Workflow Updates
+
+Update `app/dash_apps/callbacks/qr_callbacks.py`:
+
+- `validate_qr_scanned` callback should dispatch based on parsed role code (`VST`, `EVT`, `PTL`)
+- For VST/EVT: update `visitors.entered_at` or `event_tickets.status` after successful scan
+- For PTL: redirect to patrol scan confirmation display
+
+### Phase 7: Dashboard / Reporting
+
+Add views for:
+- Visitor attendance log (who entered, time, confirmed by)
+- Patrol compliance dashboard (missed scan intervals, late scans)
+- Event revenue vs ticket count
+
+---
+
+## Key Decision Points
+
+### QR Payload Human-Readability
+Your proposed format `1-EVT-42` is more readable than `42|EVT|1`. The `-` separator is a good choice because:
+- It matches your role abbreviations exactly
+- It survives printing/stains better (shorter payload)
+
+### Visitor Walk-in vs Presumptive
+I recommend two status flows:
+```
+PRESUMPTIVE (owner-issued): pending -> approved -> entered -> exited
+WALK-IN (security-issued):    pending -> owner_confirm -> entered -> exited
+```
+Both produce a QR, but walk-ins have a `security_captured_photo` and require real-time owner confirmation.
+
+### Event Ticket QR Scope
+Consider limiting ticket QR validity:
+- Date only (entire event day)
+- Optional 3-hour window from `event_time`
+- Mark `status='used'` after first scan so QR cannot be duplicated
+
+### Patrol QR
+Bulletproof design:
+- `patrol_locations.qr_payload` is fixed (e.g. `1-PTL-5`)
+- Security scans it at every shift change and mid-point
+- Backend alerts when `time since last scan > scan_interval`
+- Patrol performance = % of required scans completed on time
+
+---
+
+Would you like me to proceed with implementing any specific phase of this plan, or would you prefer to discuss the design decisions first?
+
+QR code payload format: <society_id>-<ADM/OWN/VND/SEC/VST/EVT/PTL>-<entity_id>. It is easier to type.
+all your suggestion are ok to implement.
+For Visitors: Implement 'School Bus' Alert, 'Taxi Alert'. Apartment owners create "SchoolBus.Name" which  self and other apartment owners  can subscribe. When school bus arrives, security presses the KPI card (SchoolBus Name/number), Push Notification generated  and KPI card color turns Green to subscribers(Apartments). Simlarlly, "Taxi Alert.Name" created by Apartment owner subscribed by self, when security presses the KPI card (with Taxi /name/Number, Apartment OwnerName, Flat no), push notification generated to subscriber(Apartment) and KPI card turns Orange. On Pressing again calls the apartment owner. For visitors from Presumptive Visitor list, Security Presses the KPI (Visitor name, VisitorID or scans QRcode from visitor mobile) KPI turns Orange. on Pressing again calls apartment owner for verbal confirmation, can turn green PASS on confirmation from Owners portal when owner sees and clicks Visitor push notification
+
+
+I wasn't able to pull the live tree — GitHub blocks automated fetches on that repo (likely private, so the search index doesn't have it either). I'll work from the architecture you've already described and what's in our prior session context (schema-introspection drilldown system, `qr_service.py`, `gate_access`, `visitors`, `push_service.py`). If you want me to actually diff against current code, paste the specific files (`qr_service.py`, `push_service.py`, `visitors` table DDL) and I'll review them directly.
+
+Here are my suggestions on the School Bus / Taxi / Visitor KPI-alert system, design-only:
+
+## 1. Treat this as one generic "Subscribable Alert" system, not three features
+
+School Bus, Taxi, and Visitor confirmation all follow the same shape: **an entity has subscribers → a trigger event fires → subscribers get pushed a notification → a KPI card changes color → a second action (press/click) either escalates or resolves it.** If you build three separate tables and three separate callback trees, you'll be maintaining triplicate logic forever. I'd model:
+
+- `alert_channels` — one row per School Bus or Taxi (`channel_type` = 'school_bus'|'taxi', `name`, `number`, `created_by_apartment_id`, `society_id`, `active`)
+- `alert_subscriptions` — `channel_id`, `apartment_id` (who subscribed)
+- `alert_events` — one row per press/trigger (`channel_id` or `visitor_id`, `state`, `triggered_by_user_id`, `triggered_at`, `resolved_at`, `resolved_by_user_id`)
+
+Visitor confirmation reuses the same `alert_events` pattern but points at `visitor_id` instead of `channel_id` — same state machine, different foreign key.
+
+## 2. State machine per alert type
+
+**School Bus:** `idle → arrived (green)`. This is announcement-only, no second escalation needed. Auto-expire back to idle after N minutes (configurable, e.g. 10–15) so the card doesn't stay green all day — otherwise tomorrow's bus arrival won't be visually distinguishable from yesterday's. Auto-expire is a background job or a TTL check on render, not a security action.
+
+**Taxi:** `idle → arrived (orange) → [second press] → calling`. The second press shouldn't just change color — it should initiate the actual call. Since you're on a phone-based platform, "calling the owner" from security's device most naturally means launching a `tel:` link with the owner's registered mobile number, not a VoIP bridge (unless you already have Twilio/similar wired in, which would be a bigger lift). Worth confirming which you intend, since it changes the KPI card's second-press behavior meaningfully — a client-side deep link vs. a backend telephony call.
+
+**Visitor (presumptive list):** `pending → security_flagged (orange) → [second press or owner click] → confirmed (green) / denied`. This one is genuinely two-actor: security's second press should represent "I attempted verbal confirmation" (a log entry, maybe with a note field), not the actual approval. The approval authority stays with the owner clicking their push notification. This distinction matters for liability — you don't want security's UI to have a path that admits a visitor without an owner ever having acted.
+
+## 3. Who can flip the card back, and what happens to no-response
+
+Decide upfront what happens if:
+- Owner never opens the push (phone off, app backgrounded). Does the visitor entry sit "orange" indefinitely, or timeout to `denied` after a threshold? I'd suggest a timeout to `denied`/`pending_recheck` after e.g. 5–10 minutes, with security able to re-trigger.
+- Multiple apartment owners are linked to one flat (spouse + owner both have login) — either should be able to confirm; first click wins, second click should show "already confirmed by X" rather than erroring.
+- Security presses the KPI a third time after "calling" state — decide if that's a no-op, a re-call, or an escalation to admin. I'd make it a no-op with a toast ("already escalated") to avoid duplicate calls.
+
+## 4. KPI card rendering — piggyback on your existing dynamic KPI system
+
+You already have `_kpi_row_dynamic()` and `society_id`-threaded KPI infrastructure from the customization work. I'd extend that same mechanism rather than building bespoke cards:
+- Add `kpi_active_school_bus_alerts`, `kpi_active_taxi_alerts` as new KPI types that query `alert_channels` joined to the latest `alert_events` row per channel, colored by state.
+- This gets you layout customization, portal filtering, and permission scoping for free instead of reinventing it for this feature.
+
+## 5. Push notification targeting
+
+Your `push_service.py` already has `get_notification_targets()`. Extend its targeting logic to resolve "all apartments subscribed to channel X" as a first-class target type, alongside whatever role/apartment targeting it already supports. Keep the notification **creation** (which you fixed to always run unconditionally before push delivery) as the audit trail — even if push fails, the in-app notification/KPI state should still update, since color-state and push are two separate concerns that shouldn't be coupled to the same success/failure path.
+
+## 6. Race conditions on the second press
+
+Multiple security guards could theoretically be logged in on shared devices at the gate. Use a conditional update (`WHERE state = 'arrived'` in the UPDATE clause, checking rowcount) rather than read-then-write, so two simultaneous "call" presses don't both fire duplicate calls or double-log events.
+
+## 7. Reuse your existing QR flow for visitor mobile scan-in
+
+You mentioned security can either press the KPI or scan the visitor's QR from their phone. Since `qr_service.py` already dispatches on the `V` role code to `validate_visitor_qr`, the QR scan path and the KPI-press path should converge on the **same** state-transition function (something like `flag_visitor_for_confirmation(visitor_id)`), rather than duplicating the orange-transition logic in two places. The QR scan just becomes an alternate *entry point* into the same state machine as the manual KPI press.
+
+## 8. Open decision I'd nail down before building
+
+Do you want Taxi/School Bus channels to be **per-apartment recurring** (owner sets up "Blue Bird Bus #12" once, it persists across days) or **per-day, like the presumptive visitor list** (recreated each morning)? Recurring channels need an `active` toggle and a way to prevent stale subscriptions accumulating; per-day channels need bulk cleanup/archival. Your description ("subscribed by self and other owners") sounds recurring, but worth confirming since it changes the seed/cleanup story.
+
