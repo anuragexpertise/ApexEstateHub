@@ -1,6 +1,7 @@
 # app/services/event_service.py
 
 import logging
+from datetime import date
 from database.db_manager import db
 from app.services.qr_service import generate_qr_code
 
@@ -14,17 +15,30 @@ def create_event(
     venue: str = None,
     description: str = None,
     event_time: str = None,
-    adult_price: float = 0.0,
-    child_price: float = 0.0,
+    ticket_price: float = 0.0,
+    ticket_price2: float = 0.0,
+    ticket_name: str = "Adult",
+    ticket_name2: str = "Child",
+    parent_account_id: int = None,
+    open_to: str = "all",
+    image: str = None,
     created_by: int = None,
 ):
     """Create an event in society."""
     try:
         row = db._execute("""
-            INSERT INTO events (society_id, title, description, venue, event_date, event_time, adult_price, child_price, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO events (
+                society_id, title, description, venue, event_date, event_time,
+                open_to, parent_account_id, ticket_name, ticket_price,
+                ticket_name2, ticket_price2, image, created_at, created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
             RETURNING id
-        """, (society_id, title, description, venue, event_date, event_time, adult_price, child_price, created_by), fetch_one=True)
+        """, (
+            society_id, title, description, venue, event_date, event_time,
+            open_to, parent_account_id, ticket_name, ticket_price,
+            ticket_name2, ticket_price2, image, created_by,
+        ), fetch_one=True)
         return row["id"], "Event created successfully"
     except Exception as e:
         logger.error(f"Error creating event: {e}")
@@ -35,36 +49,40 @@ def book_event_tickets(
     society_id: int,
     event_id: int,
     user_id: int,
-    adult_quantity: int = 0,
-    child_quantity: int = 0,
-    apartment_id: int = None,
+    quantity_adult: int = 0,
+    quantity_child: int = 0,
+    mode: str = "cash",
+    created_by: int = None,
+    issued_date: str = None,
+    particulars: str = None,
 ):
     """
-    Book event tickets and generate N individual ticket item QRs (<society_id>-EVT-<ticket_item_id>).
+    Book event tickets via fn_sell_event_ticket and generate N individual
+    ticket item QRs (<society_id>-EVT-<ticket_item_id>).
     """
     try:
-        evt = db._execute("SELECT * FROM events WHERE id = %s AND society_id = %s", (event_id, society_id), fetch_one=True)
-        if not evt:
-            return None, "Event not found"
+        r = db._execute(
+            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                int(user_id),
+                int(event_id),
+                int(quantity_adult),
+                int(quantity_child),
+                mode,
+                created_by,
+                issued_date or date.today().isoformat(),
+                particulars,
+            ),
+            fetch_one=True,
+        )
+        ticket_id = (r or {}).get("ticket_id")
+        if not ticket_id:
+            return None, "Failed to book tickets"
 
-        adult_price = float(evt.get("adult_price") or 0.0)
-        child_price = float(evt.get("child_price") or 0.0)
-        total_amount = (adult_quantity * adult_price) + (child_quantity * child_price)
-
-        booking_ref = f"EVT-REF-{society_id}-{user_id}-{event_id}"
-
-        # Create master booking record
-        ticket_row = db._execute("""
-            INSERT INTO event_tickets (society_id, event_id, user_id, apartment_id, adult_quantity, child_quantity, total_amount, booking_reference, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'active')
-            RETURNING id
-        """, (society_id, event_id, user_id, apartment_id, adult_quantity, child_quantity, total_amount, booking_ref), fetch_one=True)
-
-        event_ticket_id = ticket_row["id"]
+        event_ticket_id = ticket_id
         created_items = []
 
-        # Generate N Adult ticket items
-        for i in range(adult_quantity):
+        for i in range(quantity_adult):
             item_row = db._execute("""
                 INSERT INTO event_ticket_items (event_ticket_id, society_id, ticket_type, qr_payload, status)
                 VALUES (%s, %s, 'ADULT', 'TEMP_QR', 'active')
@@ -75,10 +93,14 @@ def book_event_tickets(
             qr_img, payload = generate_qr_code(society_id, "EVT", item_id)
 
             db._execute("UPDATE event_ticket_items SET qr_payload = %s WHERE id = %s", (payload, item_id))
-            created_items.append({"item_id": item_id, "ticket_type": "ADULT", "qr_payload": payload, "qr_img": qr_img})
+            created_items.append({
+                "item_id": item_id,
+                "ticket_type": "ADULT",
+                "qr_payload": payload,
+                "qr_img": qr_img,
+            })
 
-        # Generate N Child ticket items
-        for i in range(child_quantity):
+        for i in range(quantity_child):
             item_row = db._execute("""
                 INSERT INTO event_ticket_items (event_ticket_id, society_id, ticket_type, qr_payload, status)
                 VALUES (%s, %s, 'CHILD', 'TEMP_QR', 'active')
@@ -89,12 +111,18 @@ def book_event_tickets(
             qr_img, payload = generate_qr_code(society_id, "EVT", item_id)
 
             db._execute("UPDATE event_ticket_items SET qr_payload = %s WHERE id = %s", (payload, item_id))
-            created_items.append({"item_id": item_id, "ticket_type": "CHILD", "qr_payload": payload, "qr_img": qr_img})
+            created_items.append({
+                "item_id": item_id,
+                "ticket_type": "CHILD",
+                "qr_payload": payload,
+                "qr_img": qr_img,
+            })
 
+        booking_ref = f"EVT-REF-{society_id}-{user_id}-{event_id}"
         return {
             "event_ticket_id": event_ticket_id,
             "booking_reference": booking_ref,
-            "total_amount": total_amount,
+            "total_amount": float((r or {}).get("amount") or 0),
             "items": created_items,
         }, "Tickets booked successfully"
 
@@ -140,7 +168,7 @@ def get_user_event_tickets(society_id: int, user_id: int):
                 "event_date": str(b["event_date"]),
                 "event_time": str(b.get("event_time") or ""),
                 "venue": b.get("venue") or "",
-                "total_amount": float(b["total_amount"]),
+                "total_amount": float(b["amount"]),
                 "booking_reference": b["booking_reference"],
                 "status": b["status"],
                 "items": item_list,
