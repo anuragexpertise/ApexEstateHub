@@ -235,7 +235,7 @@ CONCERNS = [
      "desc": "Water leakage from bathroom ceiling — needs urgent attention."},
     {"flat_number": "B-202", "type": "electrical", "status": "in_progress",
      "desc": "Main corridor light flickering near staircase. Sparks observed twice.",
-     "assigned": "Speedy Electricals"},
+     "assign_role": "SEC", "assign_name": "Ramu Singh"},
 ]
 
 # Non-depreciation-ledger demo assets (kept from migrate.py, purchased via
@@ -530,17 +530,46 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
         print(f"  ✓ Event    '{ev['title']}' on {ev['date']}")
 
     for con in CONCERNS:
-        if _one(cur, "SELECT id FROM concerns WHERE society_id=%s AND flat_no=%s AND concern_type=%s",
-                (society_id, con["flat_number"], con["type"])):
+        existing = _one(cur, "SELECT id FROM concerns WHERE society_id=%s AND flat_no=%s AND concern_type=%s",
+                        (society_id, con["flat_number"], con["type"]))
+        if existing:
             continue
-        cur.execute(
-            """INSERT INTO concerns (society_id,flat_no,concern_type,description,status,assigned_to,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-            (society_id, con["flat_number"], con["type"], con["desc"], con["status"], con.get("assigned", ""),
-             created_by),
+        row = _one(
+            cur,
+            """INSERT INTO concerns (society_id,flat_no,concern_type,description,status,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (society_id, con["flat_number"], con["type"], con["desc"], con["status"], created_by),
         )
         conn.commit()
+        concern_id = row["id"] if row else None
         print(f"  ✓ Concern  [{con['flat_number']}] {con['type']} — {con['status']}")
+
+        assign_role = con.get("assign_role")
+        assign_name = con.get("assign_name")
+        if concern_id and assign_role and assign_name:
+            entity_id = None
+            if assign_role == "ADM":
+                r = _one(cur, "SELECT id FROM users WHERE society_id=%s AND role='admin' AND name=%s",
+                         (society_id, assign_name))
+                entity_id = r["id"] if r else None
+            elif assign_role == "VND":
+                r = _one(cur, "SELECT id FROM vendors WHERE society_id=%s AND business_name=%s",
+                         (society_id, assign_name))
+                entity_id = r["id"] if r else None
+            elif assign_role == "SEC":
+                r = _one(cur, "SELECT id FROM security_staff WHERE society_id=%s AND name=%s",
+                         (society_id, assign_name))
+                entity_id = r["id"] if r else None
+
+            if entity_id:
+                cur.execute(
+                    """INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT (concern_id, role, entity_id) DO NOTHING""",
+                    (concern_id, society_id, assign_role, entity_id, created_by),
+                )
+                conn.commit()
+                print(f"    ↳ Assigned to {assign_role} '{assign_name}'")
 
 
 # ── req 4: apt charge histories ───────────────────────────────────────────
