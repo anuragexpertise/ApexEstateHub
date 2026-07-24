@@ -120,6 +120,55 @@ def run_schema(conn):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# INCREMENTAL MIGRATIONS — safe ALTER for existing installations
+# (tables created by older schema versions that need column/constraint updates)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def migrate_v2(conn):
+    """
+    v2 additions for Channels & Visitor features:
+    - alert_channels: add 'visitor' to channel_type CHECK
+    - alert_events:   add 'pending' to state CHECK
+    - visitors: ensure host_apartment_id column exists (older schema used apartment_id)
+    Each ALTER is wrapped in its own savepoint so one failure doesn't block others.
+    """
+    alterations = [
+        # Drop old channel_type CHECK and recreate with 'visitor'
+        "ALTER TABLE alert_channels DROP CONSTRAINT IF EXISTS alert_channels_channel_type_check",
+        "ALTER TABLE alert_channels ADD CONSTRAINT alert_channels_channel_type_check "
+        "CHECK (channel_type IN ('school_bus', 'taxi', 'visitor'))",
+
+        # Drop old state CHECK on alert_events and recreate with 'pending'
+        "ALTER TABLE alert_events DROP CONSTRAINT IF EXISTS alert_events_state_check",
+        "ALTER TABLE alert_events ADD CONSTRAINT alert_events_state_check "
+        "CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied'))",
+
+        # Ensure visitors.host_apartment_id exists (some old schemas used apartment_id only)
+        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_apartment_id INT REFERENCES apartments(id)",
+    ]
+
+    ok = 0
+    skipped = 0
+    with conn.cursor() as cur:
+        for sql in alterations:
+            try:
+                cur.execute("SAVEPOINT v2_alter")
+                cur.execute(sql)
+                cur.execute("RELEASE SAVEPOINT v2_alter")
+                conn.commit()
+                ok += 1
+            except Exception as exc:
+                cur.execute("ROLLBACK TO SAVEPOINT v2_alter")
+                conn.commit()
+                skipped += 1
+                snippet = sql[:80]
+                print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
+    print(f"  ✓ v2 alterations: {ok} applied, {skipped} skipped")
+
+
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # DEMO / SEED DATA — moved to database/seed.py (see --seed below).
 # ACCOUNTS, SOCIETY, USERS, EVENTS, CONCERNS, ASSETS and all idempotent
 # demo-data seeding now live in seed.run_seed(conn), using the same
@@ -167,6 +216,10 @@ def main():
 
     ok, err = run_schema(conn)
     print(f"  ✓ DDL: {ok} ok, {err} skipped")
+
+    # ── v2 incremental alterations (idempotent) ──────────────────────────────
+    print("  ⟳ Running v2 incremental alterations…")
+    migrate_v2(conn)
 
     # ── Seed decision ────────────────────────────────────────────────────
     if args.no_seed:
