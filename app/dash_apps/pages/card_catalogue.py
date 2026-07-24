@@ -873,7 +873,7 @@ DEFAULT_LAYOUTS = {
             "kpi_payables_total",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
-            
+            "kpi_channels_total",
         ],
         "enroll": [
             "kpi_apartments_total",
