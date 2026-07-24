@@ -15,6 +15,20 @@ import dash_bootstrap_components as dbc
 logger = logging.getLogger(__name__)
 
 
+def render_channels_page(society_id: int, auth: dict) -> html.Div:
+    """
+    Re-render the owner channels page after an approve/deny action.
+    Returns the same content as portal_pages.py's owner-channels tab.
+    """
+    from app.services.alert_service import list_channels, get_active_alerts
+    from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+
+    apartment_id = (auth or {}).get("apartment_id")
+    channels = list_channels(society_id or 1, apartment_id=apartment_id, is_admin=False)
+    alerts = get_active_alerts(society_id or 1)
+    return render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apartment_id)
+
+
 def register_channel_callbacks(app):
 
     # ── 1. Admin: Create Channel ─────────────────────────────────────────────
@@ -117,7 +131,49 @@ def register_channel_callbacks(app):
             logger.error(f"toggle_subscription callback error: {e}")
             return {"message": str(e), "color": "danger"}, no_update
 
-    # ── 3. View Subscriber Profiles ──────────────────────────────────────────
+    # ── 4. Owner: Approve / Deny Pending Alert ────────────────────────────────
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("channels-page-refresh", "children", allow_duplicate=True),
+        Input({"type": "owner-approve-alert-btn", "alert_event_id": ALL}, "n_clicks"),
+        Input({"type": "owner-deny-alert-btn", "alert_event_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def owner_respond_to_alert(approve_clicks, deny_clicks, auth):
+        auth = auth or {}
+        role = auth.get("role", "")
+        if role != "apartment":
+            return {"message": "Only apartment owners can respond to alerts.", "color": "danger"}, no_update
+
+        if not ctx.triggered:
+            return no_update, no_update
+
+        triggered = ctx.triggered_id
+        if not triggered:
+            return no_update, no_update
+
+        alert_event_id = triggered.get("alert_event_id")
+        action = "approve" if triggered.get("type") == "owner-approve-alert-btn" else "deny"
+
+        if not alert_event_id:
+            return no_update, no_update
+
+        user_id = auth.get("user_id")
+        society_id = auth.get("society_id") or auth.get("linked_id")
+
+        try:
+            from app.services.alert_service import respond_to_alert
+            ok, msg = respond_to_alert(alert_event_id, user_id, action)
+            if ok:
+                action_label = "Approved (PASS)" if action == "approve" else "Denied"
+                return {"message": f"Alert {action_label}.", "color": "success"}, render_channels_page(society_id, auth)
+            return {"message": msg or "Action failed.", "color": "danger"}, no_update
+        except Exception as e:
+            logger.error(f"owner_respond_to_alert error: {e}")
+            return {"message": str(e), "color": "danger"}, no_update
+
+    # ── 5. View Subscriber Profiles ──────────────────────────────────────────
     @app.callback(
         Output("subscribers-modal-container", "children"),
         Input({"type": "view-subscribers-btn", "channel_id": ALL}, "n_clicks"),

@@ -779,6 +779,44 @@ KPI_CARDS = {
         "icon": "fa-check-circle", "color": "#17976e",
         "title": "Completed Shifts", "group": "done",
     },
+
+    "kpi_presumed_visitor": {
+        "query": """
+            SELECT COUNT(*) AS v FROM visitors
+            WHERE society_id=%s AND visit_date=CURRENT_DATE AND status='pending'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-user-clock", "color": "#e59620",
+        "title": "Presumed Visitors", "group": "awaiting owner",
+    },
+
+    "kpi_channels_pending_bus": {
+        "query": """
+            SELECT COUNT(*) AS v FROM alert_events
+            WHERE society_id=%s AND state='pending'
+              AND channel_id IN (
+                  SELECT id FROM alert_channels WHERE channel_type='school_bus'
+              )
+              AND (expires_at IS NULL OR expires_at > NOW())
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-bus", "color": "#e59620",
+        "title": "Pending Bus Alerts", "group": "channels",
+    },
+
+    "kpi_channels_pending_taxi": {
+        "query": """
+            SELECT COUNT(*) AS v FROM alert_events
+            WHERE society_id=%s AND state='pending'
+              AND channel_id IN (
+                  SELECT id FROM alert_channels WHERE channel_type='taxi'
+              )
+              AND (expires_at IS NULL OR expires_at > NOW())
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-taxi", "color": "#e59620",
+        "title": "Pending Taxi Alerts", "group": "channels",
+    },
  
     "kpi_apartment_date": {
         "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND active=TRUE",
@@ -964,6 +1002,9 @@ DEFAULT_LAYOUTS = {
         "pass_evaluation": [
             "kpi_events_total",
             "kpi_channels_pending",
+            "kpi_channels_pending_bus",
+            "kpi_channels_pending_taxi",
+            "kpi_presumed_visitor",
             "kpi_security_on_duty",
         ],
     },

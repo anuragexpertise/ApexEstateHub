@@ -2371,6 +2371,20 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
     from dash import html
     import dash_bootstrap_components as dbc
 
+    # For owner view, filter alerts to only show their apartment's alerts
+    if not is_admin and apartment_id:
+        # Get flat number for this apartment to match against alerts
+        apt_row = db._execute(
+            "SELECT flat_number FROM apartments WHERE id=%s",
+            (apartment_id,), fetch_one=True
+        )
+        owner_flat = (apt_row or {}).get("flat_number", "") if apt_row else ""
+        filtered_alerts = [
+            a for a in active_alerts
+            if (a.get("flat_number") or "") == owner_flat
+        ]
+        active_alerts = filtered_alerts
+
     kpi_cards = []
     for alert in active_alerts:
         color_map = {
@@ -2383,6 +2397,29 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
         cstyle = color_map.get(alert["color"], color_map["gray"])
         phone = alert.get("owner_phone") or ""
         state_label = cstyle["label"]
+        alert_type = alert.get("type", "")
+        alert_event_id = alert.get("alert_event_id")
+        state = alert.get("state", "pending")
+
+        # Owner action buttons (Approve / Deny) for pending alerts
+        owner_actions = None
+        if not is_admin and state in ("pending", "calling") and alert_event_id:
+            owner_actions = html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-check me-1"), "PASS"],
+                    id={"type": "owner-approve-alert-btn", "alert_event_id": alert_event_id},
+                    color="success",
+                    size="sm",
+                    style={"borderRadius": "8px", "fontSize": "11px", "fontWeight": "700", "marginRight": "6px"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-times me-1"), "Deny"],
+                    id={"type": "owner-deny-alert-btn", "alert_event_id": alert_event_id},
+                    color="danger",
+                    size="sm",
+                    style={"borderRadius": "8px", "fontSize": "11px"},
+                ),
+            ], className="mt-2")
 
         kpi_cards.append(
             dbc.Col([
@@ -2400,6 +2437,7 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
                             className="btn btn-sm btn-warning w-100 mt-2 text-dark",
                             style={"borderRadius": "8px", "fontWeight": "700"}
                         ) if phone and alert.get("state") in ("pending", "calling") else None,
+                        owner_actions,
                     ], style={"padding": "12px"})
                 ], style={"borderRadius": "12px", "background": cstyle["bg"], "border": f"2px solid {cstyle['border']}"}),
             ], width=12, md=6, lg=4, className="mb-3")

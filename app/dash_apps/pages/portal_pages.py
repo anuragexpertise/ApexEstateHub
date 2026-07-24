@@ -469,7 +469,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus & Taxi alerts"),
             _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS),
             _divider(),
-            render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id),
+            html.Div(id="channels-page-refresh", children=render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id)),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -693,6 +693,8 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
 # ════════════════════════════════════════════════════════════════════════════
 
 def _evaluate_pass_page(sid=None) -> html.Div:
+    from app.dash_apps.callbacks.security_callbacks import render_gate_alerts_section
+
     return html.Div([
         _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
                     "Entry IN / Exit OUT — fn_evaluate_gate_pass drives pass/fail reason"),
@@ -700,6 +702,9 @@ def _evaluate_pass_page(sid=None) -> html.Div:
             "security", "pass_evaluation", sid,
             cols=KPI_GRID_COLS,
         ),
+        _divider(),
+        html.Div(id="gate-alert-toast"),
+        html.Div(id="gate-alerts-refresh", children=render_gate_alerts_section(society_id=sid)),
         _divider(),
         html.Div([
             # ── Left: Scanner ──────────────────────────────────────────────
