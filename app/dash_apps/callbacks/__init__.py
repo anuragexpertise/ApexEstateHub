@@ -136,6 +136,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ bulk_enroll_callbacks failed: {e}")
 
+    # 14b. Assign-To modal (concern assignment to admins/vendors/security)
+    #     Requires "assign-to-modal" + "assign-to-store" in app_shell.py.
+    try:
+        from .assign_to_callbacks import register_assign_to_callbacks
+        register_assign_to_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ assign_to_callbacks failed: {e}")
+
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks

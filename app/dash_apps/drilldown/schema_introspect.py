@@ -416,6 +416,9 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
         "assigned_by",   # always stamped from the logged-in admin, see
                          # "Always stamp user_id from auth" in drilldown_callbacks.py
     },
+    "concerns": {
+        "assigned_to",   # managed via concerns_assigns table + assign-to modal
+    },
 }
 
 
