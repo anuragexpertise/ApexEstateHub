@@ -136,10 +136,11 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ bulk_enroll_callbacks failed: {e}")
 
-    # NOTE: security_callbacks.py and owner_callbacks.py are intentionally
-    # NOT registered — they reference component IDs that don't exist in any
-    # portal layout and caused NonExistentIdException at startup.
-    # Gate scanning is covered by qr_callbacks.py; payment processing by
-    # the drilldown form system.
+    # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
+    try:
+        from .channel_callbacks import register_channel_callbacks
+        register_channel_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ channel_callbacks failed: {e}")
 
     print("✅ All callbacks registered")

@@ -167,7 +167,7 @@ def _breadcrumb(pathname):
     return items
 
 
-def _portal_content(role, society_id, pathname):
+def _portal_content(role, society_id, pathname, auth=None):
     from app.dash_apps.pages.portal_pages import (
         master_portal_page, admin_portal_page, owner_portal_page,
         vendor_portal_page, security_portal_page,
@@ -200,7 +200,7 @@ def _portal_content(role, society_id, pathname):
         )
         return admin_portal_page(tab, sid=society_id)
     if role == "apartment":
-        apt_id = (auth or {}).get("apartment_id")
+        apt_id = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
         tab = (
             "financials" if "/owner-financials" in p else
             "receivables" if "/owner-receivables" in p else
@@ -505,7 +505,7 @@ def register_shell_callbacks(app):
         avatar = (user_name or "?")[0].upper()
 
         return (
-            _portal_content(role, society_id, pathname),
+            _portal_content(role, society_id, pathname, auth=auth),
             {"rendered": True},
             _make_nav_items(role, society_id, pathname),
             _breadcrumb(pathname),

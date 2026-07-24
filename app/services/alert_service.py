@@ -370,3 +370,20 @@ def get_channel_subscribers_with_profile(channel_id: int):
         logger.error(f"Error fetching channel subscribers: {e}")
         return []
 
+
+def get_channel_subscribers(channel_id: int, society_id: int = None):
+    """
+    Alias wrapper around get_channel_subscribers_with_profile.
+    Returns dict: {channel_name: str, subscribers: list}
+    """
+    try:
+        ch = db._execute(
+            "SELECT name FROM alert_channels WHERE id = %s",
+            (channel_id,), fetch_one=True
+        )
+        channel_name = ch["name"] if ch else "Channel"
+        subs = get_channel_subscribers_with_profile(channel_id)
+        return {"channel_name": channel_name, "subscribers": subs}
+    except Exception as e:
+        logger.error(f"get_channel_subscribers error: {e}")
+        return {"channel_name": "Channel", "subscribers": []}

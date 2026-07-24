@@ -591,7 +591,7 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
     c = _C["security"]
 
     if active_tab == "pass_evaluation":
-        return _evaluate_pass_page()
+        return _evaluate_pass_page(sid=sid)
 
     if active_tab == "attendance":
         return html.Div([
@@ -692,10 +692,15 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
 # GATE PASS EVALUATION PAGE  (security portal, unchanged structure)
 # ════════════════════════════════════════════════════════════════════════════
 
-def _evaluate_pass_page() -> html.Div:
+def _evaluate_pass_page(sid=None) -> html.Div:
     return html.Div([
         _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
                     "Entry IN / Exit OUT — fn_evaluate_gate_pass drives pass/fail reason"),
+        _kpi_row_dynamic(
+            "security", "pass_evaluation", sid,
+            cols=KPI_GRID_COLS,
+        ),
+        _divider(),
         html.Div([
             # ── Left: Scanner ──────────────────────────────────────────────
             html.Div(

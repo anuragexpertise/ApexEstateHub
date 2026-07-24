@@ -2290,3 +2290,272 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
         ], style={"padding": "16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# EVENT MOBILE TICKET PASS VIEW & SUBSCRIBABLE ALERTS RENDERERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_event_mobile_ticket_view(booking: dict) -> "html.Div":
+    """
+    Renders an in-app, mobile-responsive view of an event booking ticket pass.
+    Includes individual scannable QR ticket items (Adult & Child) for gate entry.
+    """
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+
+    event_title = booking.get("event_title", "Event Pass")
+    event_date = booking.get("event_date", "—")
+    event_time = booking.get("event_time", "—")
+    venue = booking.get("venue", "—")
+    ref = booking.get("booking_reference", "—")
+    total_amount = booking.get("total_amount", 0.0)
+    items = booking.get("items", [])
+
+    item_cards = []
+    for idx, item in enumerate(items, start=1):
+        ttype = item.get("ticket_type", "TICKET")
+        status = (item.get("status") or "active").lower()
+        qr_img = item.get("qr_img") or ""
+        payload = item.get("qr_payload") or ""
+
+        status_badge = (
+            html.Span("USED", className="badge bg-secondary ms-2")
+            if status == "used"
+            else html.Span("VALID PASS", className="badge bg-success ms-2")
+        )
+
+        item_cards.append(
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.Strong(f"Pass #{idx}: {ttype} Ticket", style={"fontSize": "14px", "color": "#1d74d8"}),
+                        status_badge,
+                    ], className="d-flex justify-content-between align-items-center mb-2"),
+                    html.Div([
+                        html.Img(src=qr_img, style={"width": "160px", "height": "160px", "borderRadius": "8px", "border": "1px solid #ddd"})
+                    ], className="text-center my-2") if qr_img else None,
+                    html.Div(f"Payload: {payload}", style={"fontSize": "11px", "color": "#7d8ea3", "fontFamily": "monospace", "textAlign": "center"}),
+                ], style={"padding": "12px"})
+            ], className="mb-3", style={"borderRadius": "12px", "border": "1px dashed #1d74d855", "background": "#f8fafd"})
+        )
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="fas fa-ticket-alt me-2", style={"fontSize": "20px", "color": "#1d74d8"}),
+                html.Strong(event_title, style={"fontSize": "16px", "color": "#1e293b"}),
+            ], className="d-flex align-items-center"),
+            html.Span(f"Ref: {ref}", style={"fontSize": "12px", "color": "#64748b"}),
+        ], className="d-flex justify-content-between align-items-center", style={"background": "#e0f2fe"}),
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([html.Small("Date & Time", className="text-muted d-block"), html.Span(f"{event_date} {event_time}", style={"fontWeight": "600"})], width=6),
+                dbc.Col([html.Small("Venue", className="text-muted d-block"), html.Span(venue, style={"fontWeight": "600"})], width=6),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([html.Small("Total Amount Paid", className="text-muted d-block"), html.Span(f"₹{total_amount:,.2f}", style={"fontWeight": "700", "color": "#16a34a"})], width=12),
+            ], className="mb-3 pb-2", style={"borderBottom": "1px solid #e2e8f0"}),
+            html.H6("Individual Entry QR Tickets", style={"fontWeight": "700", "fontSize": "13px", "marginBottom": "12px"}),
+            html.Div(item_cards),
+        ]),
+    ], style={"borderRadius": "16px", "boxShadow": "0 4px 16px rgba(0,0,0,0.08)"})
+
+
+def render_subscribable_alert_manager(channels: list, active_alerts: list, is_admin: bool = False, apartment_id=None) -> "html.Div":
+    """
+    Renders Subscribable Alert Manager + Gate KPI Alert Cards.
+    Admin: active + inactive channels. Owner: active only + subscribe toggle.
+    apartment_id: apartments.id of the logged-in owner.
+    """
+    from dash import html
+    import dash_bootstrap_components as dbc
+
+    kpi_cards = []
+    for alert in active_alerts:
+        color_map = {
+            "yellow": {"bg": "#fef9c3", "border": "#eab308", "text": "#854d0e", "label": "PENDING"},
+            "green":  {"bg": "#dcfce7", "border": "#22c55e", "text": "#15803d", "label": "PASS / ALLOWED"},
+            "red":    {"bg": "#fee2e2", "border": "#ef4444", "text": "#b91c1c", "label": "DENIED"},
+            "orange": {"bg": "#ffedd5", "border": "#f97316", "text": "#c2410c", "label": "CALLING OWNER"},
+            "gray":   {"bg": "#f1f5f9", "border": "#94a3b8", "text": "#475569", "label": "INACTIVE"},
+        }
+        cstyle = color_map.get(alert["color"], color_map["gray"])
+        phone = alert.get("owner_phone") or ""
+        state_label = cstyle["label"]
+
+        kpi_cards.append(
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.H6(alert["title"], style={"fontWeight": "700", "color": cstyle["text"], "margin": 0}),
+                            html.Span(state_label, className="badge", style={"background": cstyle["border"], "color": "#fff", "fontSize": "11px"}),
+                        ], className="d-flex justify-content-between align-items-center mb-2"),
+                        html.Div(f"Identifier/Flat: {alert.get('identifier') or alert.get('flat_number') or '—'}", style={"fontSize": "12px", "color": "#475569"}),
+                        html.Div(f"Owner: {alert.get('owner_name') or 'N/A'}", style={"fontSize": "12px", "color": "#64748b"}) if alert.get("owner_name") else None,
+                        html.A(
+                            [html.I(className="fas fa-phone-alt me-2"), f"Call Owner for Verbal Confirm ({phone})"],
+                            href=f"tel:{phone}",
+                            className="btn btn-sm btn-warning w-100 mt-2 text-dark",
+                            style={"borderRadius": "8px", "fontWeight": "700"}
+                        ) if phone and alert.get("state") in ("pending", "calling") else None,
+                    ], style={"padding": "12px"})
+                ], style={"borderRadius": "12px", "background": cstyle["bg"], "border": f"2px solid {cstyle['border']}"}),
+            ], width=12, md=6, lg=4, className="mb-3")
+        )
+
+    # Channel Record KPI Cards
+    channel_kpi_cards = []
+    for ch in channels:
+        ch_id = ch["id"]
+        ch_type = ch.get("channel_type", "").replace("_", " ").title()
+        ch_name = ch.get("name", "")
+        identifier = ch.get("identifier", "")
+        is_rec = ch.get("is_recurring")
+        is_inactive = ch.get("is_inactive", False)
+        sub_count = ch.get("subscriber_count", 0)
+        subscribed = ch.get("is_subscribed")
+
+        border_color = "#94a3b8" if is_inactive else "#1d74d8"
+        bg_color = "#f8fafc" if is_inactive else "#ffffff"
+
+        channel_kpi_cards.append(
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.H6(ch_name, style={"fontWeight": "700", "color": "#1e293b", "margin": 0}),
+                            dbc.Badge("Recurring" if is_rec else "One-Time", color="info" if is_rec else "warning", style={"fontSize": "10px"}),
+                        ], className="d-flex justify-content-between align-items-center mb-2"),
+                        html.Div(f"Type: {ch_type} | Ref: {identifier or '—'}", style={"fontSize": "12px", "color": "#64748b"}),
+                        html.Div([
+                            html.Span(f"👥 {sub_count} Subscribers", style={"fontWeight": "600", "fontSize": "12px", "color": "#1d74d8"}),
+                            dbc.Button(
+                                "Subscribed" if subscribed else "Subscribe",
+                                id={"type": "alert-sub-btn", "channel_id": ch_id},
+                                color="success" if subscribed else "outline-primary",
+                                size="sm",
+                                style={"fontSize": "11px", "borderRadius": "6px", "padding": "2px 8px"}
+                            ) if not is_admin and not is_inactive else None,
+                        ], className="d-flex justify-content-between align-items-center mt-3"),
+                        dbc.Button(
+                            [html.I(className="fas fa-users me-1"), "View Subscriber Profiles & Status"],
+                            id={"type": "view-subscribers-btn", "channel_id": ch_id},
+                            color="link",
+                            className="p-0 mt-2 text-decoration-none",
+                            style={"fontSize": "11px", "fontWeight": "600"}
+                        ),
+                    ], style={"padding": "14px"})
+                ], style={"borderRadius": "12px", "background": bg_color, "border": f"2px solid {border_color}", "boxShadow": "0 2px 8px rgba(0,0,0,0.04)"})
+            ], width=12, md=6, lg=4, className="mb-3")
+        )
+
+    # Create Channel Form (admin only)
+    create_channel_card = dbc.Card([
+        dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Channel Type"),
+                    dbc.Select(id="channel-type-input", options=[
+                        {"label": "School Bus", "value": "school_bus"},
+                        {"label": "Taxi", "value": "taxi"},
+                        {"label": "Visitor", "value": "visitor"},
+                    ], value="school_bus"),
+                ], width=4),
+                dbc.Col([
+                    dbc.Label("Channel Name"),
+                    dbc.Input(id="channel-name-input", placeholder="e.g. DPS Bus #12 or Uber Taxi"),
+                ], width=5),
+                dbc.Col([
+                    dbc.Label("Identifier (Reg # / Flat #)"),
+                    dbc.Input(id="channel-identifier-input", placeholder="e.g. MH-02-1234"),
+                ], width=3),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id="channel-recurring-switch",
+                        label="Recurring Channel (ON = Daily Recurring | OFF = One-Time / Per-Day)",
+                        value=True,
+                    ),
+                ], width=8),
+                dbc.Col([
+                    dbc.Button("Create Channel", id="channel-create-btn", color="primary", className="w-100",
+                               style={"borderRadius": "8px", "fontWeight": "600"}),
+                ], width=4),
+            ]),
+        ]),
+    ], className="mb-4", style={"borderRadius": "12px", "boxShadow": "0 2px 8px rgba(0,0,0,0.05)"})
+
+    return html.Div([
+        create_channel_card if is_admin else None,
+        html.H5("Gate Entry Pass Status (Yellow = Pending | Green = PASS | Red = Denied)",
+                style={"fontWeight": "700", "marginBottom": "14px"}),
+        dbc.Row(kpi_cards) if kpi_cards else html.Div("No active gate entries evaluating.", className="text-muted mb-4"),
+        html.H5("Channel Records (Click to View Subscribers & Status Profiles)",
+                style={"fontWeight": "700", "marginTop": "20px", "marginBottom": "14px"}),
+        dbc.Row(channel_kpi_cards) if channel_kpi_cards else html.Div("No channel records found.", className="text-muted"),
+        html.Div(id="subscribers-modal-container"),
+    ])
+
+
+def render_channel_subscriber_profiles(channel_name: str, subscribers: list) -> "html.Div":
+    """
+    Renders subscriber profile cards for a channel.
+    Border color indicates arrival status:
+      Green (#22c55e): Approved / Arrived
+      Yellow (#eab308): Pending
+      Red (#ef4444): Denied
+    """
+    from dash import html
+    import dash_bootstrap_components as dbc
+
+    profile_cards = []
+    for sub in subscribers:
+        color = sub["border_color"]
+        status_label = sub["status_label"]
+
+        profile_cards.append(
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.Strong(f"Flat {sub['flat_number']}", style={"fontSize": "15px", "color": "#1e293b"}),
+                            html.Span(status_label, className="badge", style={"background": color, "color": "#fff", "fontSize": "10px"}),
+                        ], className="d-flex justify-content-between align-items-center mb-2"),
+                        html.Div([
+                            html.I(className="fas fa-user me-2", style={"color": "#64748b"}),
+                            html.Span(sub["owner_name"], style={"fontWeight": "600"}),
+                        ], className="mb-1", style={"fontSize": "13px"}),
+                        html.Div([
+                            html.I(className="fas fa-phone-alt me-2", style={"color": "#64748b"}),
+                            html.A(sub["phone"], href=f"tel:{sub['phone']}", style={"color": "#1d74d8", "textDecoration": "none"}),
+                        ], className="mb-1", style={"fontSize": "12px"}),
+                        html.Div([
+                            html.I(className="fas fa-envelope me-2", style={"color": "#64748b"}),
+                            html.Span(sub["email"], style={"color": "#64748b"}),
+                        ], style={"fontSize": "12px"}),
+                    ], style={"padding": "14px"})
+                ], style={
+                    "borderRadius": "10px",
+                    "borderLeft": f"6px solid {color}",
+                    "borderTop": "1px solid #e2e8f0",
+                    "borderRight": "1px solid #e2e8f0",
+                    "borderBottom": "1px solid #e2e8f0",
+                    "background": "#ffffff",
+                    "boxShadow": "0 2px 6px rgba(0,0,0,0.04)"
+                })
+            ], width=12, md=6, className="mb-3")
+        )
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Strong(f"Subscribers for Channel: {channel_name}", style={"fontSize": "16px"}),
+            html.Span(f"Total: {len(subscribers)} subscribers", className="badge bg-secondary ms-2"),
+        ], className="d-flex justify-content-between align-items-center", style={"background": "#f1f5f9"}),
+        dbc.CardBody([
+            dbc.Row(profile_cards) if profile_cards else html.Div("No subscribers found for this channel.", className="text-muted")
+        ])
+    ], className="mt-3", style={"borderRadius": "12px", "border": "1px solid #cbd5e1"})

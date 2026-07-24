@@ -961,11 +961,11 @@ DEFAULT_LAYOUTS = {
         "security_receipts": ["kpi_security_receipts"],
         "security_events": ["kpi_events_total"],
         "security_concerns": ["kpi_concerns_open"],
-        "settings": [
-            "kpi_security_date",
-            "kpi_security_salary_per_shift",
+        "pass_evaluation": [
+            "kpi_events_total",
+            "kpi_channels_pending",
+            "kpi_security_on_duty",
         ],
-        "pass_evaluation": [],
     },
 }
 
