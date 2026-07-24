@@ -4961,35 +4961,27 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
+--
+-- NOTE (reconciliation): `events` and `event_tickets` were previously
+-- (re)defined here with a second, incompatible column set
+-- (adult_price/child_price, adult_quantity/child_quantity/
+-- total_amount/booking_reference). Because both blocks used
+-- CREATE TABLE IF NOT EXISTS, the ORIGINAL definitions further up
+-- this file (events ~line 227, event_tickets ~line 564) always won
+-- on any real database, silently no-op'ing this block. That left
+-- app/services/event_service.py writing to columns that never
+-- existed. The canonical tables are the original ones — this
+-- section now only ADDS the one column actually still needed for
+-- the QR-ticket-item feature (booking_reference) via ALTER TABLE.
+-- app/services/event_service.py must be updated to use the
+-- canonical column names: events.ticket_price / ticket_price2
+-- (not adult_price/child_price), and event_tickets.quantity_adult /
+-- quantity_child / amount (not adult_quantity/child_quantity/
+-- total_amount). apartment_id is derivable via users.linked_id for
+-- the ticket's user_id, so it is not duplicated here.
 -- ════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS events (
-    id            SERIAL PRIMARY KEY,
-    society_id    INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    title         VARCHAR(150) NOT NULL,
-    description   TEXT,
-    venue         VARCHAR(150),
-    event_date    DATE NOT NULL,
-    event_time    TIME,
-    adult_price   NUMERIC(10, 2) DEFAULT 0.00,
-    child_price   NUMERIC(10, 2) DEFAULT 0.00,
-    created_at    TIMESTAMP DEFAULT NOW(),
-    created_by    INT REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS event_tickets (
-    id                 SERIAL PRIMARY KEY,
-    society_id         INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    event_id           INT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    user_id            INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    apartment_id       INT REFERENCES apartments(id) ON DELETE SET NULL,
-    adult_quantity     INT NOT NULL DEFAULT 0,
-    child_quantity     INT NOT NULL DEFAULT 0,
-    total_amount       NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-    status             VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'completed')),
-    booking_reference  VARCHAR(50),
-    created_at         TIMESTAMP DEFAULT NOW()
-);
+ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS booking_reference VARCHAR(50);
 
 CREATE TABLE IF NOT EXISTS event_ticket_items (
     id               SERIAL PRIMARY KEY,

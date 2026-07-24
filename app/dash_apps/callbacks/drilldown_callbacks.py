@@ -53,6 +53,7 @@ from pathlib import Path
 from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 from database.db_manager import db
+from app.services import event_service
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
     to_singular,
@@ -2067,22 +2068,22 @@ def _save_event_ticket(db, d, sid):
             particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
 
     try:
-        r = db._execute(
-            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                int(apt_user_id),
-                int(event_id),
-                quantity_adult,
-                quantity_child,
-                mode,
-                created_by,
-                d.get("issued_date") or dt_date.today().isoformat(),
-                particulars,
-            ),
-            fetch_one=True,
+        result, msg = event_service.book_event_tickets(
+            society_id=sid,
+            event_id=event_id,
+            user_id=apt_user_id,
+            quantity_adult=quantity_adult,
+            quantity_child=quantity_child,
+            mode=mode,
+            created_by=created_by,
+            issued_date=d.get("issued_date") or dt_date.today().isoformat(),
+            particulars=particulars,
         )
-        amount     = (r or {}).get("amount")
-        receipt_id = (r or {}).get("receipt_id")
+        if not result:
+            return False, msg, None
+
+        amount = result.get("total_amount")
+        receipt_id = result.get("event_ticket_id")
         parts = []
         if quantity_adult > 0:
             parts.append(f"{quantity_adult} adult")
@@ -2318,36 +2319,31 @@ def _save_event(db, d, sid, is_edit, pk):
     title = (d.get("title") or "").strip()
     if not title:
         return False, "Title is required", None
-    r = db._execute(
-        "INSERT INTO events(society_id, title, description, event_date, "
-        "event_time, venue, open_to, parent_account_id, "
-        "ticket_name, ticket_price, ticket_name2, ticket_price2, "
-        "image, created_at, created_by) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s) RETURNING id",
-        (
-            sid,
-            title,
-            d.get("description"),
-            d.get("event_date"),
-            d.get("event_time"),
-            d.get("venue"),
-            d.get("open_to", "all"),
-            _acc_id,
-            _ticket_name,
-            _ticket_price,
-            _ticket_name2,
-            _ticket_price2,
-            d.get("image") or None,
-            d.get("user_id"),
-        ),
-        fetch_one=True,
+
+    event_id, msg = event_service.create_event(
+        society_id=sid,
+        title=title,
+        event_date=d.get("event_date"),
+        venue=d.get("venue"),
+        description=d.get("description"),
+        event_time=d.get("event_time"),
+        ticket_price=_ticket_price,
+        ticket_price2=_ticket_price2,
+        ticket_name=_ticket_name,
+        ticket_name2=_ticket_name2,
+        parent_account_id=_acc_id,
+        open_to=d.get("open_to", "all"),
+        image=d.get("image"),
+        created_by=d.get("user_id"),
     )
-    new_id = (r or {}).get("id")
+    if not event_id:
+        return False, msg, None
+
     try:
         PushService.notify_event_created(sid, title, d.get("open_to", "all"), d.get("event_date"))
     except Exception as e:
         print(f"⚠️  notify_event_created failed: {e}")
-    return True, f"Event '{title}' created", new_id
+    return True, f"Event '{title}' created", event_id
 
 
 def _save_concern(db, d, sid, is_edit, pk):
