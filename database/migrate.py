@@ -166,6 +166,73 @@ def migrate_v2(conn):
     print(f"  ✓ v2 alterations: {ok} applied, {skipped} skipped")
 
 
+def migrate_v3(conn):
+    """
+    v3 additions for Concern Assignments:
+    - concerns_assigns: new table for structured concern assignments
+    - Backfill from concerns.assigned_to text column
+    """
+    alterations = [
+        "CREATE TABLE IF NOT EXISTS concerns_assigns (
+            id SERIAL PRIMARY KEY,
+            concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
+            society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+            role VARCHAR(10) NOT NULL CHECK (role IN ('ADM', 'VND', 'SEC')),
+            entity_id INT NOT NULL,
+            assigned_by INT REFERENCES users (id),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (concern_id, role, entity_id)
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id)",
+        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id)",
+        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id)",
+    ]
+
+    ok = 0
+    skipped = 0
+    with conn.cursor() as cur:
+        for sql in alterations:
+            try:
+                cur.execute("SAVEPOINT v3_alter")
+                cur.execute(sql)
+                cur.execute("RELEASE SAVEPOINT v3_alter")
+                conn.commit()
+                ok += 1
+            except Exception as exc:
+                cur.execute("ROLLBACK TO SAVEPOINT v3_alter")
+                conn.commit()
+                skipped += 1
+                snippet = sql[:80]
+                print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
+
+    # Backfill from assigned_to text column
+    backfilled = 0
+    with conn.cursor() as cur:
+        try:
+            cur.execute("SAVEPOINT v3_backfill")
+            cur.execute("""
+                INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, created_at)
+                SELECT c.id, c.society_id, 'ADM', u.id, c.assigned_by, c.created_at
+                FROM concerns c
+                JOIN users u ON u.email = c.assigned_to AND u.society_id = c.society_id
+                WHERE c.assigned_to IS NOT NULL
+                  AND c.assigned_to <> ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM concerns_assigns ca
+                      WHERE ca.concern_id = c.id AND ca.role = 'ADM' AND ca.entity_id = u.id
+                  )
+                ON CONFLICT (concern_id, role, entity_id) DO NOTHING
+            """)
+            backfilled = cur.rowcount
+            cur.execute("RELEASE SAVEPOINT v3_backfill")
+            conn.commit()
+        except Exception as exc:
+            cur.execute("ROLLBACK TO SAVEPOINT v3_backfill")
+            conn.commit()
+            print(f"  ⚠️  v3 backfill skipped: {exc!s:.60}")
+
+    print(f"  ✓ v3 alterations: {ok} applied, {skipped} skipped, {backfilled} rows backfilled")
+
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -220,6 +287,10 @@ def main():
     # ── v2 incremental alterations (idempotent) ──────────────────────────────
     print("  ⟳ Running v2 incremental alterations…")
     migrate_v2(conn)
+
+    # ── v3 incremental alterations (idempotent) ──────────────────────────────
+    print("  ⟳ Running v3 incremental alterations…")
+    migrate_v3(conn)
 
     # ── Seed decision ────────────────────────────────────────────────────
     if args.no_seed:

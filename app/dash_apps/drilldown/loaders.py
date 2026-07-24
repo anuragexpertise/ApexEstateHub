@@ -48,6 +48,66 @@ def _eid(f): return f.get("entity_id")
 def _sec_id(f): return f.get("security_id")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# CONCERN ASSIGNMENTS — helpers for the assign-to modal
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_concern_assignments(concern_id: int) -> list[dict]:
+    """Return structured assignment rows for a concern."""
+    try:
+        return db._execute(
+            "SELECT * FROM fn_concern_assignments(%s)", (concern_id,), fetch_all=True
+        ) or []
+    except Exception:
+        return []
+
+
+def list_assignable_admins(society_id: int, search: str | None = None) -> list[dict]:
+    """List admin users assignable to concerns."""
+    sql = "SELECT id, name, email FROM users WHERE society_id=%s AND role='admin' AND active=TRUE"
+    params: list = [society_id]
+    if search:
+        sql += " AND (name ILIKE %s OR email ILIKE %s)"
+        params += [f"%{search}%", f"%{search}%"]
+    sql += " ORDER BY name"
+    return db._execute(sql, tuple(params), fetch_all=True) or []
+
+
+def list_assignable_vendors(society_id: int, search: str | None = None) -> list[dict]:
+    """List vendors assignable to concerns."""
+    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
+    params: list = [society_id]
+    if search:
+        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
+        params += [f"%{search}%", f"%{search}%"]
+    sql += " ORDER BY business_name"
+    return db._execute(sql, tuple(params), fetch_all=True) or []
+
+
+def list_assignable_security(society_id: int, search: str | None = None) -> list[dict]:
+    """List security staff assignable to concerns."""
+    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
+    params: list = [society_id]
+    if search:
+        sql += " AND name ILIKE %s"
+        params.append(f"%{search}%")
+    sql += " ORDER BY name"
+    return db._execute(sql, tuple(params), fetch_all=True) or []
+
+
+def humanize_assignment(row: dict) -> str:
+    """Return human-readable label for an assignment row."""
+    role = row.get("role", "")
+    name = row.get("entity_name", "")
+    if role == "ADM":
+        return f"Admin: {name}"
+    if role == "VND":
+        return f"Vendor: {name}"
+    if role == "SEC":
+        return f"Security: {name}"
+    return name or f"{row.get('role')}-{row.get('entity_id')}"
+
+
 def _current_fy() -> int:
     """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
     fn_current_financial_year() in estatehub.sql — keep both in sync."""
@@ -132,7 +192,19 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     # ── CONCERNS ────────────────────────────────────────────────────────
     if entity == "concerns":
         extra, params = "", [sid]
-        if apt_id:
+        creator_id = filters.get("concern_creator_id")
+        assigned_vnd_id = filters.get("assigned_vnd_id")
+        assigned_sec_id = filters.get("assigned_sec_id")
+        if creator_id:
+            extra += " AND c.created_by=%s"
+            params.append(creator_id)
+        elif assigned_vnd_id:
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)"
+            params.append(assigned_vnd_id)
+        elif assigned_sec_id:
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
+            params.append(assigned_sec_id)
+        elif apt_id:
             flat_r = db._execute(
                 "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
                 (apt_id, sid), fetch_one=True,
@@ -439,7 +511,19 @@ def load_list(
         # ── CONCERNS ────────────────────────────────────────────────────────
         if entity == "concerns":
             extra, params = "", [sid]
-            if apt_id:
+            creator_id = filters.get("concern_creator_id")
+            assigned_vnd_id = filters.get("assigned_vnd_id")
+            assigned_sec_id = filters.get("assigned_sec_id")
+            if creator_id:
+                extra += " AND c.created_by=%s"
+                params.append(creator_id)
+            elif assigned_vnd_id:
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)"
+                params.append(assigned_vnd_id)
+            elif assigned_sec_id:
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
+                params.append(assigned_sec_id)
+            elif apt_id:
                 flat_r = db._execute(
                     "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
                     (apt_id, sid), fetch_one=True,
@@ -448,10 +532,6 @@ def load_list(
                 if flat_no:
                     extra = " AND c.flat_no=%s"
                     params.append(flat_no)
-            creator_id = filters.get("concern_creator_id")
-            if creator_id:
-                extra += " AND c.created_by=%s"
-                params.append(creator_id)
             if s:
                 extra += " AND (c.flat_no ILIKE %s OR c.concern_type ILIKE %s)"
                 params += [f"%{s}%", f"%{s}%"]
@@ -904,7 +984,16 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── CONCERN ──────────────────────────────────────────────────────────
         if entity_singular == "concern":
             r = db._execute("SELECT * FROM fn_concern_profile(%s)", (pk,), fetch_one=True)
-            return dict(r) if r else None
+            profile = dict(r) if r else None
+            if profile and pk:
+                try:
+                    assigns = db._execute(
+                        "SELECT * FROM fn_concern_assignments(%s)", (pk,), fetch_all=True
+                    ) or []
+                    profile["_assignments"] = assigns
+                except Exception:
+                    profile["_assignments"] = []
+            return profile
 
         # ── SOCIETY ──────────────────────────────────────────────────────────
         if entity_singular == "society":

@@ -529,6 +529,14 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── Assign concern — opens the assign-to modal ─────────────────────────
+            if action == "assign" and entity == "concern":
+                trigger_data = {
+                    "action": "open_assign_modal",
+                    "params": {"concern_id": int(pk) if pk else None},
+                }
+                return no_update, no_update, no_update, no_update, trigger_data
+
             # ── Verify receivable — server action only, no navigation ─────────────
             elif action == "verify_receivable":
                 if not _require_admin(auth):
@@ -2348,20 +2356,41 @@ def _save_event(db, d, sid, is_edit, pk):
 
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
+        new_status = d.get("status", "open")
+
+        # ── Status guard: only Admin or concern creator may set status='resolved' ──
+        if new_status == "resolved":
+            from app.security.audit_context import get_current_user_role
+            actor_role = get_current_user_role()
+            actor_user_id = d.get("user_id")
+
+            # Require a server-side session for this security-sensitive operation
+            if not actor_role:
+                return False, "Session expired — please log in again", pk
+
+            if actor_role != "admin":
+                creator_row = db._execute(
+                    "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                    (pk, sid), fetch_one=True,
+                )
+                if not creator_row or creator_row.get("created_by") != actor_user_id:
+                    return False, (
+                        "Only Admin and the concern creator can mark a concern as resolved"
+                    ), pk
+
         _upd_by_clause = ", updated_by=%s"
         db._execute(
-            "UPDATE concerns SET status=%s, assigned_to=%s"
+            "UPDATE concerns SET status=%s"
             + (", image=%s" if d.get("image") else "")
             + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
-                (d.get("status", "open"), d.get("assigned_to"), d.get("image"), d.get("user_id"), pk, sid)
+                (new_status, d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
-                else (d.get("status", "open"), d.get("assigned_to"), d.get("user_id"), pk, sid)
+                else (new_status, d.get("user_id"), pk, sid)
             ),
         )
         try:
-            new_status = d.get("status", "open")
             if new_status in ("in_progress", "resolved"):
                 concern_row = db._execute(
                     "SELECT flat_no, concern_type FROM concerns WHERE id=%s AND society_id=%s",
@@ -2832,6 +2861,10 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         apt_id = auth.get("apartment_id") or auth.get("linked_id")
         if apt_id:
             f["apartment_id"] = apt_id
+        # Owner portal: show concerns created by this owner (concern creator)
+        owner_user_id = auth.get("user_id")
+        if owner_user_id:
+            f["concern_creator_id"] = owner_user_id
     elif role == "vendor":
         # A vendor's `linked_id` (auth.linked_id) points at vendors.id, but
         # fn_vendors_list returns users.id as its `id` column, and that's
@@ -2841,9 +2874,10 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         vendor_user_id = auth.get("user_id")
         if vendor_user_id:
             f["vendor_id"] = vendor_user_id
-            # concerns.created_by is stamped with users.id regardless of
-            # role, so a vendor should only see concerns they raised.
-            f["concern_creator_id"] = vendor_user_id
+        # Vendor portal: show concerns assigned to this vendor (via concerns_assigns)
+        vendor_linked_id = auth.get("linked_id")
+        if vendor_linked_id:
+            f["assigned_vnd_id"] = vendor_linked_id
     elif role == "security":
         # linked_id for security = security_staff.id
         # fn_security_list returns users.id as `id`
@@ -2855,5 +2889,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         sec_user_id = auth.get("user_id") or auth.get("id")
         if sec_user_id:
             f["user_id"] = sec_user_id
-            f["concern_creator_id"] = sec_user_id
+        # Security portal: show concerns assigned to this security person (via concerns_assigns)
+        if sec_staff_id:
+            f["assigned_sec_id"] = sec_staff_id
     return f

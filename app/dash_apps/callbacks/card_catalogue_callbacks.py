@@ -131,10 +131,10 @@ def register_card_catalogue_callbacks(app):
                         (apt_id,),
                     ),
                     "kpi_concerns_open": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns c "
-                        "JOIN apartments a ON a.flat_number=c.flat_no "
-                        "WHERE a.id=%s AND c.status IN ('open','in_progress')",
-                        (apt_id,),
+                        "SELECT COUNT(*)::INT AS v FROM concerns "
+                        "WHERE society_id=%s AND created_by=%s "
+                        "AND status IN ('open','in_progress')",
+                        (sid, own_user_id),
                     ),
                     "kpi_gate_logs": (
                         # FIX: gate_access rows for apartment owners are
@@ -157,6 +157,18 @@ def register_card_catalogue_callbacks(app):
                 return overrides.get(card_id)
 
             if role == "vendor" and vendor_id:
+                vendor_assigned_name = None
+                try:
+                    v_row = db._execute(
+                        "SELECT business_name, name FROM vendors "
+                        "WHERE id=%s AND society_id=%s",
+                        (vendor_id, sid), fetch_one=True,
+                    )
+                    if v_row:
+                        vendor_assigned_name = v_row.get("business_name") or v_row.get("name")
+                except Exception:
+                    pass
+
                 overrides = {
                     "kpi_receipts_month": (
                         "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
@@ -188,10 +200,29 @@ def register_card_catalogue_callbacks(app):
                         "WHERE entity_id=%s AND role='v' AND time_in::DATE=CURRENT_DATE",
                         (own_user_id,),
                     ),
+                    "kpi_concerns_open": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns c "
+                        "WHERE c.society_id=%s AND c.status IN ('open','in_progress') "
+                        "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
+                        "WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)",
+                        (sid, vendor_id),
+                    ) if vendor_id else None,
                 }
                 return overrides.get(card_id)
 
             if role == "security" and sec_id:
+                security_assigned_name = None
+                try:
+                    s_row = db._execute(
+                        "SELECT name FROM security_staff "
+                        "WHERE id=%s AND society_id=%s",
+                        (sec_id, sid), fetch_one=True,
+                    )
+                    if s_row:
+                        security_assigned_name = s_row.get("name")
+                except Exception:
+                    pass
+
                 overrides = {
                     "kpi_security_shift_count": (
                         "SELECT COUNT(*)::INT AS v FROM attendance "
@@ -215,6 +246,13 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE",
                         (sid,),
                     ),
+                    "kpi_concerns_open": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns c "
+                        "WHERE c.society_id=%s AND c.status IN ('open','in_progress') "
+                        "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
+                        "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)",
+                        (sid, sec_id),
+                    ) if sec_id else None,
                 }
                 return overrides.get(card_id)
 

@@ -379,6 +379,97 @@ def _bulk_enroll_modal() -> dbc.Modal:
     )
 
 
+# ── Assign-To modal ─────────────────────────────────────────────────────────────
+# File-Explorer style modal for assigning concerns to admins/vendors/security.
+# Three entity-type cards at the top; clicking loads the respective list below.
+# Multi-select with checkboxes; Submit writes to concerns_assigns.
+
+def _assign_to_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Assign Concern To"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    # ── Entity-type selector cards ──────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-user-shield me-2"), "ADM"],
+                                id={"type": "assign-card", "role": "ADM"},
+                                color="primary", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-truck me-2"), "VND"],
+                                id={"type": "assign-card", "role": "VND"},
+                                color="success", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-shield-alt me-2"), "SEC"],
+                                id={"type": "assign-card", "role": "SEC"},
+                                color="warning", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                    ], className="mb-3"),
+
+                    # ── Search + view toggle ────────────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Input(
+                                id="assign-search", type="text",
+                                placeholder="Search…",
+                                size="sm", className="mb-2",
+                            ),
+                        ], width=8),
+                        dbc.Col([
+                            dbc.ButtonGroup([
+                                dbc.Button(
+                                    html.I(className="fas fa-list"),
+                                    id={"type": "assign-view-toggle", "view": "list"},
+                                    color="primary", outline=True, size="sm",
+                                ),
+                                dbc.Button(
+                                    html.I(className="fas fa-th-large"),
+                                    id={"type": "assign-view-toggle", "view": "grid"},
+                                    color="primary", outline=True, size="sm",
+                                ),
+                            ], className="mb-2"),
+                        ], width=4),
+                    ]),
+
+                    # ── List / grid container ───────────────────────────────────
+                    html.Div(id="assign-list-container", children=[
+                        html.P("Select an entity type above to browse assignable people.",
+                               className="text-muted text-center", style={"padding": "30px 0"}),
+                    ]),
+
+                    # ── Selected summary ────────────────────────────────────────
+                    html.Div(id="assign-selected-summary", className="mt-3"),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Clear All", id="assign-clear-btn", color="secondary", size="sm", outline=True),
+                dbc.Button("Submit Assignments", id="assign-submit-btn", color="success"),
+            ]),
+        ],
+        id="assign-to-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
 # ── QR modal ──────────────────────────────────────────────────────────────────
 
 def _qr_modal() -> dbc.Modal:
@@ -470,6 +561,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
             dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
+            dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}}),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
@@ -564,5 +656,8 @@ def shell_layout() -> html.Div:
 
             # ── Bulk Enroll modal ────────────────────────────────────────────────
             _bulk_enroll_modal(),
+
+            # ── Assign-To modal ──────────────────────────────────────────────────
+            _assign_to_modal(),
         ]
     )

@@ -265,6 +265,21 @@ CREATE TABLE IF NOT EXISTS concerns (
     updated_by INT REFERENCES users (id)
 );
 
+CREATE TABLE IF NOT EXISTS concerns_assigns (
+    id SERIAL PRIMARY KEY,
+    concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    role VARCHAR(10) NOT NULL CHECK (role IN ('ADM', 'VND', 'SEC')),
+    entity_id INT NOT NULL,
+    assigned_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (concern_id, role, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
+
 -- ── security_roster & attendance (needed before payables FK) ──
 CREATE TABLE IF NOT EXISTS security_roster (
     id SERIAL PRIMARY KEY,
@@ -3761,13 +3776,54 @@ RETURNS TABLE (
     preferred_time VARCHAR(20), days_open BIGINT, created_at TIMESTAMP, image TEXT, subtitle TEXT
 )
 LANGUAGE SQL STABLE AS $$
-    SELECT id::INT, society_id::INT, flat_no::VARCHAR(20), concern_type::VARCHAR(50),
-           description::TEXT, status::VARCHAR(20), assigned_to::VARCHAR(100),
-           preferred_time::VARCHAR(20),
-           EXTRACT(DAY FROM AGE(CURRENT_DATE, created_at))::BIGINT,
-           created_at::TIMESTAMP, image::TEXT,
-           ('Flat '||flat_no||' - '||concern_type)::TEXT
-    FROM concerns WHERE id = p_concern_id;
+    SELECT c.id::INT, c.society_id::INT, c.flat_no::VARCHAR(20), c.concern_type::VARCHAR(50),
+           c.description::TEXT, c.status::VARCHAR(20),
+           COALESCE(
+               (SELECT string_agg(
+                    CASE ca.role
+                        WHEN 'ADM' THEN COALESCE(u.name, u.email, 'Admin')
+                        WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
+                        WHEN 'SEC' THEN COALESCE(s.name, 'Security')
+                    END, ', '
+                )
+                FROM concerns_assigns ca
+                LEFT JOIN users u ON u.id = ca.entity_id AND ca.role = 'ADM'
+                LEFT JOIN vendors v ON v.id = ca.entity_id AND ca.role = 'VND'
+                LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
+                WHERE ca.concern_id = c.id
+               ),
+               c.assigned_to
+           )::VARCHAR(100) AS assigned_to,
+           c.preferred_time::VARCHAR(20),
+           EXTRACT(DAY FROM AGE(CURRENT_DATE, c.created_at))::BIGINT,
+           c.created_at::TIMESTAMP, c.image::TEXT,
+           ('Flat '||c.flat_no||' - '||c.concern_type)::TEXT
+    FROM concerns c
+    WHERE c.id = p_concern_id;
+$$;
+
+DROP FUNCTION IF EXISTS fn_concern_assignments CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_concern_assignments(p_concern_id INT)
+RETURNS TABLE (
+    id INT, concern_id INT, society_id INT, role VARCHAR(10),
+    entity_id INT, assigned_by INT, created_at TIMESTAMP,
+    entity_name TEXT
+)
+LANGUAGE SQL STABLE AS $$
+    SELECT ca.id, ca.concern_id, ca.society_id, ca.role, ca.entity_id,
+           ca.assigned_by, ca.created_at,
+           CASE ca.role
+               WHEN 'ADM' THEN COALESCE(u.name, u.email, 'Admin')
+               WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
+               WHEN 'SEC' THEN COALESCE(s.name, 'Security')
+           END
+    FROM concerns_assigns ca
+    LEFT JOIN users u ON u.id = ca.entity_id AND ca.role = 'ADM'
+    LEFT JOIN vendors v ON v.id = ca.entity_id AND ca.role = 'VND'
+    LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
+    WHERE ca.concern_id = p_concern_id
+    ORDER BY ca.role, ca.created_at;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
