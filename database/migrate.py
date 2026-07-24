@@ -169,8 +169,7 @@ def migrate_v2(conn):
 def migrate_v3(conn):
     """
     v3 additions for Concern Assignments:
-    - concerns_assigns: new table for structured concern assignments
-    - Backfill from concerns.assigned_to text column
+    - concerns_assigns: structured table for concern assignments (ADM/VND/SEC)
     """
     alterations = [
         """CREATE TABLE IF NOT EXISTS concerns_assigns (
@@ -205,73 +204,7 @@ def migrate_v3(conn):
                 snippet = sql[:80]
                 print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
 
-    # Backfill from the legacy concerns.assigned_to free-text column.
-    # concerns has no assigned_by column of its own — the closest available
-    # proxy for "who made the assignment" is whoever last touched the row
-    # (updated_by), falling back to the concern's creator (created_by).
-    # assigned_to is free text and was never restricted to admin emails
-    # (see seed.py, which stores a vendor business name like
-    # "Speedy Electricals"), so we try to resolve it against admins
-    # (name/email), vendors (business_name/name), and security staff (name)
-    # in turn — same as the assign-to modal's 3 entity types (ADM/VND/SEC).
-    backfill_queries = [
-        ("ADM", """
-            INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, created_at)
-            SELECT c.id, c.society_id, 'ADM', u.id,
-                   COALESCE(c.updated_by, c.created_by), c.created_at
-            FROM concerns c
-            JOIN users u ON u.society_id = c.society_id
-                AND u.role = 'admin'
-                AND (LOWER(u.email) = LOWER(c.assigned_to) OR LOWER(u.name) = LOWER(c.assigned_to))
-            WHERE c.assigned_to IS NOT NULL AND c.assigned_to <> ''
-              AND NOT EXISTS (
-                  SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id = c.id
-              )
-            ON CONFLICT (concern_id, role, entity_id) DO NOTHING
-        """),
-        ("VND", """
-            INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, created_at)
-            SELECT c.id, c.society_id, 'VND', v.id,
-                   COALESCE(c.updated_by, c.created_by), c.created_at
-            FROM concerns c
-            JOIN vendors v ON v.society_id = c.society_id
-                AND (LOWER(v.business_name) = LOWER(c.assigned_to) OR LOWER(v.name) = LOWER(c.assigned_to))
-            WHERE c.assigned_to IS NOT NULL AND c.assigned_to <> ''
-              AND NOT EXISTS (
-                  SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id = c.id
-              )
-            ON CONFLICT (concern_id, role, entity_id) DO NOTHING
-        """),
-        ("SEC", """
-            INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, created_at)
-            SELECT c.id, c.society_id, 'SEC', s.id,
-                   COALESCE(c.updated_by, c.created_by), c.created_at
-            FROM concerns c
-            JOIN security_staff s ON s.society_id = c.society_id
-                AND LOWER(s.name) = LOWER(c.assigned_to)
-            WHERE c.assigned_to IS NOT NULL AND c.assigned_to <> ''
-              AND NOT EXISTS (
-                  SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id = c.id
-              )
-            ON CONFLICT (concern_id, role, entity_id) DO NOTHING
-        """),
-    ]
-
-    backfilled = 0
-    with conn.cursor() as cur:
-        for role_label, query in backfill_queries:
-            try:
-                cur.execute("SAVEPOINT v3_backfill")
-                cur.execute(query)
-                backfilled += cur.rowcount
-                cur.execute("RELEASE SAVEPOINT v3_backfill")
-                conn.commit()
-            except Exception as exc:
-                cur.execute("ROLLBACK TO SAVEPOINT v3_backfill")
-                conn.commit()
-                print(f"  ⚠️  v3 backfill ({role_label}) skipped: {exc!s:.60}")
-
-    print(f"  ✓ v3 alterations: {ok} applied, {skipped} skipped, {backfilled} rows backfilled")
+    print(f"  ✓ v3 alterations: {ok} applied, {skipped} skipped")
 
 
 

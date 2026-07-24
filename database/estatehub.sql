@@ -257,7 +257,6 @@ CREATE TABLE IF NOT EXISTS concerns (
     description TEXT,
     preferred_time VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'open',
-    assigned_to VARCHAR(100),
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id),
@@ -3778,21 +3777,18 @@ RETURNS TABLE (
 LANGUAGE SQL STABLE AS $$
     SELECT c.id::INT, c.society_id::INT, c.flat_no::VARCHAR(20), c.concern_type::VARCHAR(50),
            c.description::TEXT, c.status::VARCHAR(20),
-           COALESCE(
-               (SELECT string_agg(
-                    CASE ca.role
-                        WHEN 'ADM' THEN COALESCE(u.name, u.email, 'Admin')
-                        WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
-                        WHEN 'SEC' THEN COALESCE(s.name, 'Security')
-                    END, ', '
-                )
-                FROM concerns_assigns ca
-                LEFT JOIN users u ON u.id = ca.entity_id AND ca.role = 'ADM'
-                LEFT JOIN vendors v ON v.id = ca.entity_id AND ca.role = 'VND'
-                LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
-                WHERE ca.concern_id = c.id
-               ),
-               c.assigned_to
+           (SELECT string_agg(
+                CASE ca.role
+                    WHEN 'ADM' THEN COALESCE(u.name, u.email, 'Admin')
+                    WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
+                    WHEN 'SEC' THEN COALESCE(s.name, 'Security')
+                END, ', '
+            )
+            FROM concerns_assigns ca
+            LEFT JOIN users u ON u.id = ca.entity_id AND ca.role = 'ADM'
+            LEFT JOIN vendors v ON v.id = ca.entity_id AND ca.role = 'VND'
+            LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
+            WHERE ca.concern_id = c.id
            )::VARCHAR(100) AS assigned_to,
            c.preferred_time::VARCHAR(20),
            EXTRACT(DAY FROM AGE(CURRENT_DATE, c.created_at))::BIGINT,
