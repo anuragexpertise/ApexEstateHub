@@ -17,7 +17,7 @@ def create_alert_channel(
     is_recurring: bool = True,
 ):
     """
-    Create a new alert channel (e.g. School Bus or Taxi).
+    Create a new alert channel (School Bus, Taxi, or Visitor).
     `is_recurring` determines if channel persists across days.
     """
     try:
@@ -72,18 +72,13 @@ def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = Fa
     """
     List alert channels.
     If is_admin=False: Only active channels are shown to apartment owners.
-    If is_admin=True: Active and inactive channels are returned (inactive flagged for gray border display).
-    apartment_id: the apartments.id (linked_id) of the current user — used to
-                  determine is_subscribed. Pass None for admin (subscription check
-                  is irrelevant; falls back to 0 so the LEFT JOIN returns FALSE cleanly).
+    If is_admin=True: Active and inactive channels are returned.
     """
     try:
         where_clause = "ac.society_id = %s"
         if not is_admin:
             where_clause += " AND ac.active = TRUE"
 
-        # apartment_id may be None for admin views — fall back to 0 so the
-        # LEFT JOIN produces FALSE (no row) rather than a NULL comparison.
         apt_id_param = apartment_id or 0
 
         rows = db._execute(f"""
@@ -106,10 +101,22 @@ def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = Fa
 
 def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
     """
-    Trigger a School Bus, Taxi, or Visitor alert via Guard 'Entry IN' button.
-    First press: Sets state to 'pending' (Yellow badge), sends push notification to subscribed owners.
-                 Security CANNOT force PASS.
-    Second press while 'pending': Triggers calling phone dialer to apartment owner for verbal confirmation.
+    Trigger a School Bus, Taxi, or Visitor alert.
+
+    Flow per channel_type:
+      school_bus:
+        - Push notification sent to ALL subscribed owners.
+        - State immediately set to 'resolved' (auto-PASS). No owner confirmation needed.
+      taxi:
+        - Push notification sent to the channel owner.
+        - State set to 'pending' (Yellow).
+        - Second press while pending escalates to 'calling' (phone dialer).
+        - ONLY the owner can approve/deny. Security CANNOT PASS.
+      visitor:
+        - Push notification sent to the visitor's apartment owner.
+        - State set to 'pending' (Yellow).
+        - Second press while pending escalates to 'calling'.
+        - ONLY the owner can approve/deny. Security CANNOT PASS.
     """
     try:
         channel = db._execute("""
@@ -144,17 +151,10 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
                 "action": "call",
                 "phone": channel.get("owner_phone"),
                 "state": "calling",
+                "alert_event_id": existing["id"],
             }
 
-        # First Press -> Set State = pending (Yellow badge)
-        expires_at = datetime.now() + timedelta(minutes=30)
-        event_row = db._execute("""
-            INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
-            VALUES (%s, %s, 'pending', %s, NOW(), %s)
-            RETURNING id
-        """, (society_id, channel_id, triggered_by_user_id, expires_at), fetch_one=True)
-
-        # Dispatch Push Notifications
+        # --- School Bus: push to all subscribers + auto-resolve ---
         if channel_type == "school_bus":
             sub_users = db._execute("""
                 SELECT DISTINCT u.id
@@ -163,16 +163,42 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
                  WHERE sub.channel_id = %s
             """, (channel_id,))
             title = f"🚌 School Bus Arrived: {name}"
-            body = f"School Bus {name} ({identifier}) is at the gate. Please confirm entry."
+            body = f"School Bus {name} ({identifier}) is at the gate."
             for u in (sub_users or []):
                 send_push_notification(u["id"], title, body, society_id=society_id)
-        else:
-            if channel["owner_user_id"]:
-                title = f"🚖 Channel Alert: {name}"
-                body = f"{name} ({identifier}) for Flat {channel.get('flat_number', '')} is at the gate. Tap to Approve/Deny."
-                send_push_notification(channel["owner_user_id"], title, body, society_id=society_id)
 
-        return True, "Entry IN initiated: Pending owner approval (Yellow)", {"state": "pending", "event_id": event_row["id"]}
+            event_row = db._execute("""
+                INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
+                VALUES (%s, %s, 'resolved', %s, NOW(), %s)
+                RETURNING id
+            """, (society_id, channel_id, triggered_by_user_id,
+                  datetime.now() + timedelta(minutes=30)), fetch_one=True)
+
+            return True, "School Bus notified: subscribers alerted (auto-PASS)", {
+                "state": "resolved",
+                "event_id": event_row["id"],
+            }
+
+        # --- Taxi / Visitor: push to owner + pending ---
+        if channel.get("owner_user_id"):
+            title = f"🚖 {name} at Gate" if channel_type == "taxi" else f"👤 Visitor: {name}"
+            body = (
+                f"{name} ({identifier}) for Flat {channel.get('flat_number', '')} is at the gate. "
+                "Tap to Approve or Deny."
+            )
+            send_push_notification(channel["owner_user_id"], title, body, society_id=society_id)
+
+        expires_at = datetime.now() + timedelta(minutes=30)
+        event_row = db._execute("""
+            INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
+            VALUES (%s, %s, 'pending', %s, NOW(), %s)
+            RETURNING id
+        """, (society_id, channel_id, triggered_by_user_id, expires_at), fetch_one=True)
+
+        return True, "Entry IN initiated: Pending owner approval (Yellow)", {
+            "state": "pending",
+            "event_id": event_row["id"],
+        }
     except Exception as e:
         logger.error(f"Error triggering channel alert: {e}")
         return False, str(e), None
@@ -180,17 +206,14 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
 
 def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
     """
-    Owner responds to alert push notification / app prompt:
-    action = 'approve' -> State set to 'resolved' (Green / PASS)
-    action = 'deny'    -> State set to 'denied' (Red / Denied)
-    If non-recurring channel, deactivates channel upon completion.
+    Owner responds to a Taxi or Visitor alert:
+      action = 'approve' -> State set to 'resolved' (Green / PASS)
+      action = 'deny'    -> State set to 'denied' (Red / Denied)
 
-    Note: DB CHECK on alert_events.state allows:
-      idle | pending | arrived | calling | resolved | denied
-    'approved' is intentionally mapped to 'resolved' here to satisfy the constraint.
+    SECURITY: Security staff CANNOT call this function to PASS or DENY.
+    This function is restricted to apartment-owner users only.
     """
     try:
-        # Map 'approve' -> 'resolved' (DB CHECK does not include 'approved').
         new_state = "resolved" if action == "approve" else "denied"
 
         event = db._execute("""
@@ -203,14 +226,23 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
         if not event:
             return False, "Alert event not found"
 
-        # Update event state (alert_events has no resolved_at/resolved_by cols)
+        # Verify caller is the owner of this channel's apartment
+        channel = db._execute("""
+            SELECT ac.apartment_id, u.id as owner_user_id
+              FROM alert_channels ac
+              LEFT JOIN users u ON u.linked_id = ac.apartment_id AND u.role = 'apartment'
+             WHERE ac.id = %s
+        """, (event["channel_id"],), fetch_one=True)
+
+        if channel and channel.get("owner_user_id") != owner_user_id:
+            return False, "Only the apartment owner can respond to this alert"
+
         db._execute("""
             UPDATE alert_events
                SET state = %s
              WHERE id = %s
         """, (new_state, alert_event_id))
 
-        # If non-recurring channel, set active = FALSE after event resolution
         if event.get("channel_id") and event.get("is_recurring") is False:
             db._execute("UPDATE alert_channels SET active = FALSE WHERE id = %s", (event["channel_id"],))
 
@@ -220,14 +252,142 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
         return False, str(e)
 
 
+def create_walk_in_visitor(society_id: int, name: str, mobile: str, purpose: str,
+                           apartment_id: int = None, vehicle_number: str = None,
+                           photo: str = None, security_user_id: int = None):
+    """
+    Create a walk-in visitor record from the security portal.
+    Security fills visitor details, then triggers notification to owner.
+    """
+    try:
+        row = db._execute("""
+            INSERT INTO visitors (society_id, apartment_id, name, mobile, purpose,
+                                  vehicle_number, visit_date, status, security_user_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE, 'pending', %s, NOW())
+            RETURNING id
+        """, (society_id, apartment_id, name, mobile, purpose, vehicle_number, security_user_id),
+           fetch_one=True)
+
+        visitor_id = row["id"]
+        return visitor_id, "Walk-in visitor created"
+    except Exception as e:
+        logger.error(f"Error creating walk-in visitor: {e}")
+        return None, str(e)
+
+
+def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id: int = None):
+    """
+    Trigger a visitor alert (for both presumed and walk-in visitors).
+    Sends push to owner, sets state to 'pending'.
+    Second press escalates to 'calling'.
+    """
+    try:
+        visitor = db._execute("""
+            SELECT v.*, a.flat_number, u.id as owner_user_id, u.phone as owner_phone
+              FROM visitors v
+              LEFT JOIN apartments a ON a.id = v.apartment_id
+              LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
+             WHERE v.id = %s
+        """, (visitor_id,), fetch_one=True)
+
+        if not visitor:
+            return False, "Visitor not found", None
+
+        society_id = visitor["society_id"]
+        name = visitor["name"]
+
+        # Check existing active alert event for this visitor
+        existing = db._execute("""
+            SELECT * FROM alert_events
+             WHERE visitor_id = %s AND (expires_at IS NULL OR expires_at > NOW())
+             ORDER BY triggered_at DESC LIMIT 1
+        """, (visitor_id,), fetch_one=True)
+
+        if existing and existing["state"] == "pending":
+            db._execute("""
+                UPDATE alert_events SET state = 'calling' WHERE id = %s
+            """, (existing["id"],))
+            return True, "Calling owner for verbal confirmation", {
+                "action": "call",
+                "phone": visitor.get("owner_phone"),
+                "state": "calling",
+                "alert_event_id": existing["id"],
+            }
+
+        # First press: pending
+        expires_at = datetime.now() + timedelta(minutes=30)
+        event_row = db._execute("""
+            INSERT INTO alert_events (society_id, channel_id, visitor_id, state, triggered_by, triggered_at, expires_at)
+            VALUES (%s, %s, %s, 'pending', %s, NOW(), %s)
+            RETURNING id
+        """, (society_id, channel_id, visitor_id, triggered_by_user_id, expires_at), fetch_one=True)
+
+        if visitor.get("owner_user_id"):
+            title = f"👤 Visitor Arrived: {name}"
+            body = f"Visitor {name} is at the gate for Flat {visitor.get('flat_number', '')}. Tap to Approve or Deny."
+            send_push_notification(visitor["owner_user_id"], title, body, society_id=society_id)
+
+        return True, "Visitor alert sent: Pending owner approval (Yellow)", {
+            "state": "pending",
+            "event_id": event_row["id"],
+        }
+    except Exception as e:
+        logger.error(f"Error triggering visitor alert: {e}")
+        return False, str(e), None
+
+
+def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
+    """
+    Owner responds to a visitor alert:
+      action = 'approve' -> visitor.status = 'entered', alert state = 'resolved'
+      action = 'deny'    -> visitor.status = 'denied', alert state = 'denied'
+
+    SECURITY: Security staff CANNOT call this function.
+    """
+    try:
+        new_state = "resolved" if action == "approve" else "denied"
+        visitor_status = "entered" if action == "approve" else "denied"
+
+        visitor = db._execute("""
+            SELECT v.*, a.id as apartment_id
+              FROM visitors v
+              LEFT JOIN apartments a ON a.id = v.apartment_id
+             WHERE v.id = %s
+        """, (visitor_id,), fetch_one=True)
+
+        if not visitor:
+            return False, "Visitor not found"
+
+        # Verify caller is the owner of this visitor's apartment
+        owner_check = db._execute("""
+            SELECT u.id as owner_user_id
+              FROM users u
+             WHERE u.linked_id = %s AND u.role = 'apartment'
+        """, (visitor["apartment_id"],), fetch_one=True)
+
+        if owner_check and owner_check.get("owner_user_id") != owner_user_id:
+            return False, "Only the apartment owner can respond to this visitor alert"
+
+        # Update visitor status
+        db._execute("""
+            UPDATE visitors SET status = %s, approved_by = %s, entered_at = NOW()
+             WHERE id = %s
+        """, (visitor_status, owner_user_id, visitor_id))
+
+        # Update alert event state
+        db._execute("""
+            UPDATE alert_events SET state = %s WHERE visitor_id = %s AND (expires_at IS NULL OR expires_at > NOW())
+        """, (new_state, visitor_id))
+
+        return True, f"Visitor alert response recorded: {new_state.upper()}"
+    except Exception as e:
+        logger.error(f"Error responding to visitor alert: {e}")
+        return False, str(e)
+
+
 def get_active_alerts(society_id: int):
     """
     Fetch all active alerts for gate security and dashboard KPI cards.
-    Color rules:
-      - 'pending': Yellow (#eab308 / yellow)
-      - 'approved' / 'entered' / 'resolved': Green (#22c55e / green)
-      - 'denied': Red (#ef4444 / red)
-      - 'calling': Orange (#f97316 / orange)
     """
     try:
         channel_alerts = db._execute("""
@@ -318,13 +478,74 @@ def get_active_alerts(society_id: int):
         return []
 
 
+def get_presumed_visitors(society_id: int):
+    """
+    Fetch presumed visitors (status='pending') for the current day.
+    These are visitors from the visitors table that have not yet been processed.
+    """
+    try:
+        rows = db._execute("""
+            SELECT v.id as visitor_id, v.name, v.mobile, v.purpose, v.vehicle_number,
+                   v.visit_date, v.visit_time_from, v.visit_time_to, v.status,
+                   a.flat_number, u.phone as owner_phone, u.name as owner_name
+              FROM visitors v
+              LEFT JOIN apartments a ON a.id = v.apartment_id
+              LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
+             WHERE v.society_id = %s
+               AND v.visit_date = CURRENT_DATE
+               AND v.status = 'pending'
+             ORDER BY v.created_at DESC
+        """, (society_id,))
+        return rows or []
+    except Exception as e:
+        logger.error(f"Error fetching presumed visitors: {e}")
+        return []
+
+
+def get_pending_owner_alerts(society_id: int, apartment_id: int):
+    """
+    Fetch pending alerts for a specific apartment owner.
+    Returns channel alerts + visitor alerts that need owner action.
+    """
+    try:
+        alerts = db._execute("""
+            SELECT ae.id as alert_event_id, ae.state, ae.triggered_at,
+                   ac.id as channel_id, ac.channel_type, ac.name, ac.identifier,
+                   a.flat_number
+              FROM alert_events ae
+              JOIN alert_channels ac ON ac.id = ae.channel_id
+              LEFT JOIN apartments a ON a.id = ac.apartment_id
+             WHERE ae.society_id = %s
+               AND a.id = %s
+               AND ae.state IN ('pending', 'calling')
+               AND (ae.expires_at IS NULL OR ae.expires_at > NOW())
+             ORDER BY ae.triggered_at DESC
+        """, (society_id, apartment_id))
+
+        visitor_alerts = db._execute("""
+            SELECT v.id as visitor_id, v.name as visitor_name, v.purpose,
+                   ae.id as alert_event_id, ae.state, ae.triggered_at
+              FROM visitors v
+              LEFT JOIN alert_events ae ON ae.visitor_id = v.id AND (ae.expires_at IS NULL OR ae.expires_at > NOW())
+             WHERE v.society_id = %s
+               AND v.apartment_id = %s
+               AND v.status = 'pending'
+               AND v.visit_date = CURRENT_DATE
+             ORDER BY v.created_at DESC
+        """, (society_id, apartment_id))
+
+        return {
+            "channel_alerts": alerts or [],
+            "visitor_alerts": visitor_alerts or [],
+        }
+    except Exception as e:
+        logger.error(f"Error fetching pending owner alerts: {e}")
+        return {"channel_alerts": [], "visitor_alerts": []}
+
+
 def get_channel_subscribers_with_profile(channel_id: int):
     """
     Fetch subscribers for a channel along with their user profile details and arrival status.
-    Returns list of subscriber profile dicts with border_color indicating status:
-      - 'approved' -> #22c55e (Green)
-      - 'pending'  -> #eab308 (Yellow)
-      - 'denied'   -> #ef4444 (Red)
     """
     try:
         rows = db._execute("""
@@ -344,13 +565,13 @@ def get_channel_subscribers_with_profile(channel_id: int):
         for r in (rows or []):
             st = (r.get("arrival_status") or "pending").lower()
             if st in ("approved", "entered", "resolved", "arrived"):
-                border_color = "#22c55e"  # Green
+                border_color = "#22c55e"
                 status_label = "APPROVED / ARRIVED"
             elif st == "denied":
-                border_color = "#ef4444"  # Red
+                border_color = "#ef4444"
                 status_label = "DENIED"
             else:
-                border_color = "#eab308"  # Yellow
+                border_color = "#eab308"
                 status_label = "PENDING"
 
             subscribers.append({
@@ -374,7 +595,6 @@ def get_channel_subscribers_with_profile(channel_id: int):
 def get_channel_subscribers(channel_id: int, society_id: int = None):
     """
     Alias wrapper around get_channel_subscribers_with_profile.
-    Returns dict: {channel_name: str, subscribers: list}
     """
     try:
         ch = db._execute(

@@ -121,13 +121,19 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_vendor_other_charges", "vendor", "charges", "Charges"),
     ("kpi_events_total", "vendor", "events", "Events"),
     ("kpi_vendor_date", "vendor", "settings", "Profile"),
-    # SECURITY PORTAL - Dashboard
+    # SECURITY - Dashboard
     ("kpi_apartments_total", "security", "dashboard", "Users"),
     ("kpi_vendors_total", "security", "dashboard", "Users"),
     ("kpi_security_total", "security", "dashboard", "Users"),
     ("kpi_security_shift_count", "security", "dashboard", "Users"),
     ("kpi_receivables_total", "security", "dashboard", "Cash"),
     ("kpi_gate_logs", "security", "dashboard", "Gate"),
+    # SECURITY - pass_evaluation
+    ("kpi_channels_pending", "security", "pass_evaluation", "Channels"),
+    ("kpi_channels_pending_bus", "security", "pass_evaluation", "Channels"),
+    ("kpi_channels_pending_taxi", "security", "pass_evaluation", "Channels"),
+    ("kpi_presumed_visitor", "security", "pass_evaluation", "Visitors"),
+    ("kpi_security_on_duty", "security", "pass_evaluation", "Security"),
     # SECURITY - Cashbook / Charges / payables / Events / Receipt / Settings
     ("kpi_receivables_total", "security", "cashbook", "payables"),
     ("kpi_payables_total", "security", "cashbook", "payables"),
