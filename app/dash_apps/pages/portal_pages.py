@@ -338,6 +338,20 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    # ── Channels ──────────────────────────────────────────────────────────────
+    if active_tab in ("channels", "admin_channels"):
+        from app.services.alert_service import list_channels, get_active_alerts
+        from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+        channels = list_channels(sid or 1, is_admin=True)
+        alerts = get_active_alerts(sid or 1)
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
+            _kpi_row_dynamic("admin", "channels", sid, cols=KPI_GRID_COLS),
+            _divider(),
+            render_subscribable_alert_manager(channels, alerts, is_admin=True),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
     # ── Settings ──────────────────────────────────────────────────────────────
     if active_tab == "settings":
         return html.Div([
@@ -366,7 +380,7 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
 # OWNER (APARTMENT) PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
-def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
+def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> html.Div:
     c = _C["apartment"]
 
     if active_tab == "dashboard":
@@ -443,6 +457,19 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
         return html.Div([
             _page_title("fa-hand-point-up", c, "Concerns"),
             _kpi_row_dynamic("owner", "concerns", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("channels", "owner_channels", "owner-channels"):
+        from app.services.alert_service import list_channels, get_active_alerts
+        from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+        channels = list_channels(sid or 1, apartment_id=apt_id, is_admin=False)
+        alerts = get_active_alerts(sid or 1)
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus & Taxi alerts"),
+            _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS),
+            _divider(),
+            render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id),
             _divider(), _drill_panel(),
         ], className="portal-page")
 

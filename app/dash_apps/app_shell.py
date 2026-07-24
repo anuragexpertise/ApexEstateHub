@@ -19,6 +19,7 @@ ROLE_CONFIG = {
         "tabs": [
             {"label": "Dashboard",     "href": "/dashboard/admin-portal",  "icon": "fa-th-large"},
             {"label": "Financials",    "href": "/dashboard/financials",     "icon": "fa-book"},
+            {"label": "Channels",      "href": "/dashboard/channels",       "icon": "fa-bullhorn"},
             {"label": "Enroll",        "href": "/dashboard/enroll",         "icon": "fa-user-plus"},
             {"label": "Assets",        "href": "/dashboard/assets",         "icon": "fa-building"},
             {"label": "Events",        "href": "/dashboard/events",         "icon": "fa-calendar-alt"},
@@ -35,6 +36,7 @@ ROLE_CONFIG = {
         "tabs": [
             {"label": "Dashboard",   "href": "/dashboard/owner-portal",    "icon": "fa-th-large"},
             {"label": "Financials",  "href": "/dashboard/owner-financials", "icon": "fa-book"},
+            {"label": "Channels",    "href": "/dashboard/owner-channels",   "icon": "fa-bullhorn"},
             {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},
             {"label": "Events",      "href": "/dashboard/owner-events",     "icon": "fa-calendar-alt"},
             {"label": "Concerns",    "href": "/dashboard/owner-concerns",   "icon": "fa-hand-point-up"},

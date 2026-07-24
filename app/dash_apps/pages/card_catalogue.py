@@ -46,6 +46,33 @@ KPI_CARDS = {
         "title": "Total Receivables", "group": "pending dues",
     },
 
+    "kpi_channels_total": {
+        "query": """
+            SELECT COUNT(*) AS v FROM alert_channels WHERE society_id=%s
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-bullhorn", "color": "#1d74d8",
+        "title": "Alert Channels", "group": "channels",
+    },
+
+    "kpi_channels_active": {
+        "query": """
+            SELECT COUNT(*) AS v FROM alert_channels WHERE society_id=%s AND active=TRUE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-check-circle", "color": "#17976e",
+        "title": "Active Channels", "group": "channels",
+    },
+
+    "kpi_channels_pending": {
+        "query": """
+            SELECT COUNT(*) AS v FROM alert_events WHERE society_id=%s AND state='pending' AND (expires_at IS NULL OR expires_at > NOW())
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-hourglass-half", "color": "#e59620",
+        "title": "Pending Gate Approvals", "group": "channels",
+    },
+
     "kpi_receivables_overdue": {
         "query": """
             SELECT COALESCE(SUM(amount - paid_amount), 0) AS v
@@ -859,6 +886,11 @@ DEFAULT_LAYOUTS = {
             "kpi_apt_charges_count",
             "kpi_ven_charges_count",
         ],
+        "channels": [
+            "kpi_channels_total",
+            "kpi_channels_active",
+            "kpi_channels_pending",
+        ],
     },
     "owner": {
         "dashboard": [
@@ -866,6 +898,11 @@ DEFAULT_LAYOUTS = {
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
             "kpi_gate_logs",
+        ],
+        "channels": [
+            "kpi_channels_total",
+            "kpi_channels_active",
+            "kpi_channels_pending",
         ],
         "financials": [
             "kpi_cash_in_hand",

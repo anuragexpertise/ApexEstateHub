@@ -192,6 +192,7 @@ def _portal_content(role, society_id, pathname):
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
             "assets"        if "/assets"        in p else
+            "channels"      if "/channels"      in p else
             "evaluate_pass" if "/evaluate-pass" in p else
             "customize"     if "/customize"     in p else
             "settings"      if "/settings"      in p else
@@ -199,6 +200,7 @@ def _portal_content(role, society_id, pathname):
         )
         return admin_portal_page(tab, sid=society_id)
     if role == "apartment":
+        apt_id = (auth or {}).get("apartment_id")
         tab = (
             "financials" if "/owner-financials" in p else
             "receivables" if "/owner-receivables" in p else
@@ -207,10 +209,11 @@ def _portal_content(role, society_id, pathname):
             "charges"  if "/owner-charges"  in p else
             "events"   if "/owner-events"   in p or "/events"   in p else
             "concerns" if "/owner-concerns" in p or "/concerns" in p else
+            "channels" if "/channels" in p else
             "settings" if "/owner-settings" in p or "/settings" in p else
             "dashboard"
         )
-        return owner_portal_page(tab, sid=society_id)
+        return owner_portal_page(tab, sid=society_id, apt_id=apt_id)
     if role == "vendor":
         tab = (
             "financials" if "/vendor-financials" in p else

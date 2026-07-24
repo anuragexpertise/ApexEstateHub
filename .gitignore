@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+EHenv/
 .idea/
 .vscode/
 *.egg-info/
@@ -13,5 +14,4 @@ app/static/uploads/
 generate_vapid_keys.py
 *.db
 migrations/
-
-
+*.log

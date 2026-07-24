@@ -4958,3 +4958,124 @@ BEGIN
     RETURN NEXT;
 END;
 $$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
+-- ════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS events (
+    id            SERIAL PRIMARY KEY,
+    society_id    INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    title         VARCHAR(150) NOT NULL,
+    description   TEXT,
+    venue         VARCHAR(150),
+    event_date    DATE NOT NULL,
+    event_time    TIME,
+    adult_price   NUMERIC(10, 2) DEFAULT 0.00,
+    child_price   NUMERIC(10, 2) DEFAULT 0.00,
+    created_at    TIMESTAMP DEFAULT NOW(),
+    created_by    INT REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS event_tickets (
+    id                 SERIAL PRIMARY KEY,
+    society_id         INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    event_id           INT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id            INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    apartment_id       INT REFERENCES apartments(id) ON DELETE SET NULL,
+    adult_quantity     INT NOT NULL DEFAULT 0,
+    child_quantity     INT NOT NULL DEFAULT 0,
+    total_amount       NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    status             VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'completed')),
+    booking_reference  VARCHAR(50),
+    created_at         TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_ticket_items (
+    id               SERIAL PRIMARY KEY,
+    event_ticket_id  INT NOT NULL REFERENCES event_tickets(id) ON DELETE CASCADE,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    ticket_type      VARCHAR(20) NOT NULL CHECK (ticket_type IN ('ADULT', 'CHILD')),
+    qr_payload       VARCHAR(255) UNIQUE NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'cancelled')),
+    scanned_at       TIMESTAMP,
+    scanned_by       INT REFERENCES users(id),
+    created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_ticket_items_qr ON event_ticket_items(qr_payload);
+
+CREATE TABLE IF NOT EXISTS visitors (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    apartment_id     INT REFERENCES apartments(id) ON DELETE SET NULL,
+    name             VARCHAR(100) NOT NULL,
+    mobile           VARCHAR(15),
+    purpose          VARCHAR(200),
+    vehicle_number   VARCHAR(20),
+    visit_date       DATE NOT NULL DEFAULT CURRENT_DATE,
+    visit_time_from  TIME,
+    visit_time_to    TIME,
+    qr_payload       VARCHAR(255) UNIQUE,
+    status           VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','entered','exited')),
+    approved_by      INT REFERENCES users(id),
+    security_user_id INT REFERENCES users(id),
+    entered_at       TIMESTAMP,
+    exited_at        TIMESTAMP,
+    created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors(society_id, visit_date);
+
+CREATE TABLE IF NOT EXISTS alert_channels (
+    id           SERIAL PRIMARY KEY,
+    society_id   INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    channel_type VARCHAR(30) NOT NULL CHECK (channel_type IN ('school_bus', 'taxi', 'visitor')),
+    name         VARCHAR(100) NOT NULL,
+    identifier   VARCHAR(50),
+    apartment_id INT REFERENCES apartments(id),
+    is_recurring BOOLEAN NOT NULL DEFAULT TRUE,
+    active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS alert_subscriptions (
+    id           SERIAL PRIMARY KEY,
+    channel_id   INT NOT NULL REFERENCES alert_channels(id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
+    created_at   TIMESTAMP DEFAULT NOW(),
+    UNIQUE(channel_id, apartment_id)
+);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    id             SERIAL PRIMARY KEY,
+    society_id     INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    channel_id     INT REFERENCES alert_channels(id) ON DELETE CASCADE,
+    visitor_id     INT REFERENCES visitors(id) ON DELETE CASCADE,
+    state          VARCHAR(30) NOT NULL CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied')),
+    triggered_by   INT REFERENCES users(id),
+    triggered_at   TIMESTAMP DEFAULT NOW(),
+    expires_at     TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS patrol_locations (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_name   VARCHAR(100) NOT NULL,
+    description     TEXT,
+    qr_payload      VARCHAR(255) UNIQUE NOT NULL,
+    schedule_start  TIME,
+    schedule_end    TIME,
+    scan_interval   INT DEFAULT 120,
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS patrol_scans (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_id      INT NOT NULL REFERENCES patrol_locations(id) ON DELETE CASCADE,
+    security_user_id INT NOT NULL REFERENCES users(id),
+    scanned_at       TIMESTAMP DEFAULT NOW(),
+    notes            TEXT
+);

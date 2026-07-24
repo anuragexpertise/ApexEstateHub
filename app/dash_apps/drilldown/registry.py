@@ -37,6 +37,7 @@ PK_MAP: dict = {
     "assets": "id",
     "security_roster": "id",
     "ledger": "row_date",
+    "channels": "id",
 }
 
 
@@ -63,6 +64,7 @@ ENTITY_MAP: dict = {
     "assets": "asset",
     "security_roster": "security_roster",
     "ledger": "ledger",
+    "channels": "channel",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -85,6 +87,10 @@ ROLE_FILTERS: dict = {
 # ══════════════════════════════════════════════════════════════════════════════
 DRILLDOWN_MAP: dict = {
     # ── KPI → LIST ────────────────────────────────────────────────────────────
+    "kpi_channels_total": {"target": "list_channels", "label": "All Channels"},
+    "kpi_channels_active": {"target": "list_channels", "label": "Active Channels", "filter": {"active": True}},
+    "kpi_channels_pending": {"target": "list_channels", "label": "Pending Gate Approvals", "filter": {"state": "pending"}},
+
     "kpi_apartments_total": {
         "target": "list_apartments",
         "label": "All Apartments"
