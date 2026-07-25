@@ -296,16 +296,26 @@ def register_assign_to_callbacks(app):
             ) or []
             prior_keys = {f"{r['role']}-{r['entity_id']}" for r in prior_rows}
 
-            # Clear existing assignments and re-insert selected
-            db._execute(
-                "DELETE FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
-                (concern_id, society_id),
-            )
+            selected_keys = {k for k, v in selected.items() if v}
+            to_delete = prior_keys - selected_keys
+            to_insert = selected_keys - prior_keys
+
+            for key in to_delete:
+                parts = key.split("-", 1)
+                role = parts[0]
+                try:
+                    entity_id = int(parts[1])
+                except (IndexError, ValueError):
+                    continue
+                db._execute(
+                    "DELETE FROM concerns_assigns "
+                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+                    (concern_id, society_id, role, entity_id),
+                )
+
             inserted = 0
             newly_assigned = []
-            for key, is_selected in selected.items():
-                if not is_selected:
-                    continue
+            for key in to_insert:
                 parts = key.split("-", 1)
                 role = parts[0]
                 try:
@@ -318,12 +328,9 @@ def register_assign_to_callbacks(app):
                     (concern_id, society_id, role, entity_id, actor_user_id),
                 )
                 inserted += 1
-                if key not in prior_keys:
-                    newly_assigned.append((role, entity_id))
+                newly_assigned.append((role, entity_id))
 
-            # A concern moves from 'open' to 'pending' the moment it has at
-            # least one assignee. Never downgrade from 'in_progress'/'resolved'.
-            if inserted:
+            if selected_keys:
                 db._execute(
                     "UPDATE concerns SET status='in_progress', updated_by=%s "
                     "WHERE id=%s AND society_id=%s AND status='open'",

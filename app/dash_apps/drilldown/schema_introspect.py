@@ -416,6 +416,9 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
         "assigned_by",   # always stamped from the logged-in admin, see
                          # "Always stamp user_id from auth" in drilldown_callbacks.py
     },
+    "concerns": {
+        "status",
+    },
 }
 
 
@@ -429,6 +432,9 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
         "sale_value": 0,
         "sale_acc_id": None,
         "disposed_by": None,
+    },
+    "concerns": {
+        "status": "open",
     },
     "events": {
         "open_to": "all",   # matches the DB column default; shown explicitly
