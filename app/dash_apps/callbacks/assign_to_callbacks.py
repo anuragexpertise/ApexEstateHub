@@ -325,7 +325,7 @@ def register_assign_to_callbacks(app):
             # least one assignee. Never downgrade from 'in_progress'/'resolved'.
             if inserted:
                 db._execute(
-                    "UPDATE concerns SET status='pending', updated_by=%s "
+                    "UPDATE concerns SET status='in_progress', updated_by=%s "
                     "WHERE id=%s AND society_id=%s AND status='open'",
                     (actor_user_id, concern_id, society_id),
                 )

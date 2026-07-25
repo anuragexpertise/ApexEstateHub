@@ -196,7 +196,8 @@ def notify_concern_created(society_id, flat_no, concern_type):
     targets = get_notification_targets(society_id, roles=["admin"])
     if not targets:
         return 0, 0
-    body = f"New concern from Flat {flat_no}: {concern_type.replace('_',' ').title()}"
+    flat_label = f"Flat {flat_no}" if flat_no else "A concern"
+    body = f"{flat_label}: {concern_type.replace('_',' ').title()}"
     return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns", society_id=society_id)
 
 

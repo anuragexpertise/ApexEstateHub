@@ -2380,14 +2380,19 @@ def _save_concern(db, d, sid, is_edit, pk):
 
         _upd_by_clause = ", updated_by=%s"
         db._execute(
-            "UPDATE concerns SET status=%s"
+            "UPDATE concerns SET flat_no=%s, concern_type=%s, description=%s, "
+            "preferred_time=%s, status=%s"
             + (", image=%s" if d.get("image") else "")
             + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
-                (new_status, d.get("image"), d.get("user_id"), pk, sid)
+                (d.get("flat_no"), d.get("concern_type", "other"),
+                 d.get("description"), d.get("preferred_time"),
+                 new_status, d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
-                else (new_status, d.get("user_id"), pk, sid)
+                else (d.get("flat_no"), d.get("concern_type", "other"),
+                       d.get("description"), d.get("preferred_time"),
+                       new_status, d.get("user_id"), pk, sid)
             ),
         )
         try:

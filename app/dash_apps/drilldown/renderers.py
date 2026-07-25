@@ -59,7 +59,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # Settings) — FIELD_VISIBILITY still restricts *which* columns a form
     # exposes to this role, this only grants the action itself.
     ("apartment", "apartments"):  {"view", "edit"},
-    ("apartment", "concerns"):    {"view", "new"},
+    ("apartment", "concerns"):    {"view", "new", "edit"},
     ("apartment", "events"):      {"view"},
     ("apartment", "gate_logs"):   {"view"},
     ("apartment", "receipts"):{"view", "new"},
