@@ -200,6 +200,43 @@ def notify_concern_created(society_id, flat_no, concern_type):
     return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns", society_id=society_id)
 
 
+def notify_concern_assigned(society_id, concern_id, concern_type, assignments):
+    """
+    Notify each newly-assigned admin/vendor/security entity that a concern
+    has been assigned to them.
+
+    `assignments` is a list of (role, entity_id) tuples using the
+    concerns_assigns role codes: 'ADM' | 'VND' | 'SEC'. For 'ADM', entity_id
+    is already users.id. For 'VND'/'SEC', entity_id is vendors.id /
+    security_staff.id and must be translated to the linked users.id.
+    """
+    from database.db_manager import db
+    sent, failed = 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"A concern ({label}) has been assigned to you"
+    role_lookup = {"VND": "vendor", "SEC": "security"}
+    for role, entity_id in assignments:
+        user_id = None
+        if role == "ADM":
+            user_id = entity_id  # concerns_assigns.entity_id IS users.id for admins
+        elif role in role_lookup:
+            row = db._execute(
+                "SELECT id FROM users WHERE linked_id=%s AND role=%s AND society_id=%s",
+                (entity_id, role_lookup[role], society_id), fetch_one=True,
+            )
+            user_id = row["id"] if row else None
+        if not user_id:
+            failed += 1
+            continue
+        ok, _ = send_push_notification(
+            user_id, "🧰 Concern Assigned", body,
+            url="/dashboard/concerns", society_id=society_id,
+        )
+        sent += 1 if ok else 0
+        failed += 0 if ok else 1
+    return sent, failed
+
+
 def notify_concern_status_change(user_id, concern_type, new_status):
     """Notify the resident who raised a concern when its status changes."""
     if not user_id:

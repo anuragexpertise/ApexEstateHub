@@ -936,6 +936,9 @@ DEFAULT_LAYOUTS = {
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
             "kpi_gate_logs",
+            "kpi_concerns_open",
+            "kpi_events_total",
+            "kpi_channels_total",
         ],
         "channels": [
             "kpi_channels_total",
@@ -964,6 +967,9 @@ DEFAULT_LAYOUTS = {
         "dashboard": [
             "kpi_my_pass_expiry",
             "kpi_gate_logs",
+            "kpi_concerns_open",
+            "kpi_events_total",
+            "kpi_channels_total",
         ],
         "financials": [
             "kpi_cash_in_hand",
@@ -1001,6 +1007,8 @@ DEFAULT_LAYOUTS = {
         "security_concerns": ["kpi_concerns_open"],
         "pass_evaluation": [
             "kpi_events_total",
+            "kpi_concerns_open",
+            "kpi_channels_total",
             "kpi_channels_pending",
             "kpi_channels_pending_bus",
             "kpi_channels_pending_taxi",
