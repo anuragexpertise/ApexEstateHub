@@ -315,12 +315,6 @@ ALTER TABLE concerns_assigns
 
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
 
-DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
-CREATE TRIGGER trg_concerns_assigns_updated
-    BEFORE UPDATE ON concerns_assigns
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
 -- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
 CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
 RETURNS VOID
@@ -1315,6 +1309,12 @@ DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
 
 CREATE TRIGGER trg_concerns_updated
     BEFORE UPDATE ON concerns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
+CREATE TRIGGER trg_concerns_assigns_updated
+    BEFORE UPDATE ON concerns_assigns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
