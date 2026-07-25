@@ -29,6 +29,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_expenses_month", "admin", "dashboard", "Cashbook"),
     ("kpi_cash_in_hand", "admin", "dashboard", "Cashbook"),
     ("kpi_bank_balance", "admin", "dashboard", "Cashbook"),
+    ("kpi_channels_total", "admin", "dashboard", "Channels"),
     # ADMIN - Enroll tab
     ("kpi_apartments_total", "admin", "enroll", "Entities"),
     ("kpi_vendors_total", "admin", "enroll", "Entities"),
@@ -91,6 +92,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_apartments_dues", "apartment", "dashboard", "Account"),
     ("kpi_concerns_open", "apartment", "dashboard", "Concerns"),
     ("kpi_events_total", "apartment", "dashboard", "Events"),
+    ("kpi_channels_total", "apartment", "dashboard", "Channels"),
     ("kpi_gate_logs", "apartment", "dashboard", "Gate"),
     ("kpi_receipts_month", "apartment", "dashboard", "payables"),
     ("kpi_receivables_total", "apartment", "dashboard", "payables"),
@@ -111,6 +113,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # VENDOR PORTAL - Dashboard
     ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
     ("kpi_events_total", "vendor", "dashboard", "Events"),
+    ("kpi_channels_total", "vendor", "dashboard", "Channels"),
     ("kpi_receivables_total", "vendor", "dashboard", "payables"),
     ("kpi_receipts_month", "vendor", "dashboard", "payables"),
     ("kpi_gate_logs", "vendor", "dashboard", "Gate"),
@@ -128,7 +131,11 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_security_shift_count", "security", "dashboard", "Users"),
     ("kpi_receivables_total", "security", "dashboard", "Cash"),
     ("kpi_gate_logs", "security", "dashboard", "Gate"),
-    # SECURITY - pass_evaluation
+    # SECURITY - pass_evaluation (the portal's actual default/landing tab —
+    # see shell_callbacks.py, "dashboard" here is the Users roster page)
+    ("kpi_events_total", "security", "pass_evaluation", "Events"),
+    ("kpi_concerns_open", "security", "pass_evaluation", "Concerns"),
+    ("kpi_channels_total", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending_bus", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending_taxi", "security", "pass_evaluation", "Channels"),

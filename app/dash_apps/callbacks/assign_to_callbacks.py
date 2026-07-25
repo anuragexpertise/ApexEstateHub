@@ -287,12 +287,22 @@ def register_assign_to_callbacks(app):
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
 
         try:
+            # Fetch prior assignments first so we can tell which of the
+            # selected entities are newly assigned (only those get a push —
+            # resubmitting an unchanged assignment shouldn't re-notify).
+            prior_rows = db._execute(
+                "SELECT role, entity_id FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
+                (concern_id, society_id), fetch_all=True,
+            ) or []
+            prior_keys = {f"{r['role']}-{r['entity_id']}" for r in prior_rows}
+
             # Clear existing assignments and re-insert selected
             db._execute(
                 "DELETE FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
                 (concern_id, society_id),
             )
             inserted = 0
+            newly_assigned = []
             for key, is_selected in selected.items():
                 if not is_selected:
                     continue
@@ -308,6 +318,33 @@ def register_assign_to_callbacks(app):
                     (concern_id, society_id, role, entity_id, actor_user_id),
                 )
                 inserted += 1
+                if key not in prior_keys:
+                    newly_assigned.append((role, entity_id))
+
+            # A concern moves from 'open' to 'pending' the moment it has at
+            # least one assignee. Never downgrade from 'in_progress'/'resolved'.
+            if inserted:
+                db._execute(
+                    "UPDATE concerns SET status='pending', updated_by=%s "
+                    "WHERE id=%s AND society_id=%s AND status='open'",
+                    (actor_user_id, concern_id, society_id),
+                )
+
+            # Push-notify only the newly-assigned entities.
+            if newly_assigned:
+                try:
+                    from app.services.push_service import notify_concern_assigned
+                    concern_row = db._execute(
+                        "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                        (concern_id, society_id), fetch_one=True,
+                    )
+                    notify_concern_assigned(
+                        society_id, concern_id,
+                        (concern_row or {}).get("concern_type", "other"),
+                        newly_assigned,
+                    )
+                except Exception as e:
+                    print(f"⚠️  notify_concern_assigned failed: {e}")
 
             # Refresh the concern list/profile
             from app.dash_apps.callbacks.drilldown_callbacks import _render_current

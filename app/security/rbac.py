@@ -42,6 +42,7 @@ class RBACManager:
             "kpi_security_on_duty": {Permission.VIEW},
             "kpi_events_total": {Permission.VIEW},
             "kpi_concerns_open": {Permission.VIEW},
+            "kpi_channels_total": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
             "kpi_expenses_month": {Permission.VIEW},
@@ -95,6 +96,7 @@ class RBACManager:
             "kpi_apartments_dues": {Permission.VIEW},
             "kpi_concerns_open": {Permission.VIEW},
             "kpi_events_total": {Permission.VIEW},
+            "kpi_channels_total": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
             "kpi_bank_balance": {Permission.VIEW},
@@ -117,6 +119,7 @@ class RBACManager:
             "kpi_vendors_dues": {Permission.VIEW},
             "kpi_events_total": {Permission.VIEW},
             "kpi_concerns_open": {Permission.VIEW},
+            "kpi_channels_total": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
             "kpi_bank_balance": {Permission.VIEW},
@@ -133,6 +136,9 @@ class RBACManager:
         "security": {
             # Gate Pass Evaluation (all access)
             "kpi_gate_logs": {Permission.VIEW},
+            "kpi_events_total": {Permission.VIEW},
+            "kpi_concerns_open": {Permission.VIEW},
+            "kpi_channels_total": {Permission.VIEW},
             
             # Attendance
             "list_attendance": {Permission.VIEW},
