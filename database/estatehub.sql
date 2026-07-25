@@ -279,6 +279,107 @@ CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (con
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
 
+-- ════════════════════════════════════════════════════════════════════════
+-- CONCERNS WORKFLOW OVERHAUL (2026-07)
+-- Moves the per-assignee lifecycle status off `concerns.status` and onto
+-- `concerns_assigns.status`, so many-to-many delegation (multiple vendors
+-- bidding/working the same concern) can track independent states. Also
+-- adds concerns_assigns.bid_amount for vendor bidding.
+--
+-- concerns.status is KEPT (existing code, KPIs, and the
+-- idx_concerns_society_status index all depend on it), but it now becomes
+-- a read-only aggregate cache automatically synced by a trigger from the
+-- concerns_assigns rows underneath it — application code should stop
+-- writing concerns.status directly for anything except the initial INSERT
+-- ('open').
+--
+-- Aggregate rule (see fn_sync_concern_status below):
+--   no concerns_assigns rows for this concern_id       -> concerns.status='open'
+--   all rows status='closed'                           -> 'closed'
+--   all rows status IN ('resolved','closed')           -> 'resolved'
+--   any row status IN ('assigned','resolved','closed')  -> 'assigned'
+--   otherwise                                           -> 'open'
+-- ════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE concerns_assigns
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'assigned',
+    ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+
+-- Re-add the CHECK constraint idempotently (Postgres has no
+-- ADD CONSTRAINT IF NOT EXISTS, so drop-then-add).
+ALTER TABLE concerns_assigns DROP CONSTRAINT IF EXISTS concerns_assigns_status_check;
+ALTER TABLE concerns_assigns
+    ADD CONSTRAINT concerns_assigns_status_check
+    CHECK (status IN ('open', 'assigned', 'resolved', 'closed'));
+
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
+
+DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
+CREATE TRIGGER trg_concerns_assigns_updated
+    BEFORE UPDATE ON concerns_assigns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+-- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
+CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
+RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_closed INT;
+    v_resolved_or_closed INT;
+    v_touched INT;
+    v_new_status VARCHAR(20);
+BEGIN
+    SELECT COUNT(*),
+           COUNT(*) FILTER (WHERE status = 'closed'),
+           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed')),
+           COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed'))
+      INTO v_total, v_closed, v_resolved_or_closed, v_touched
+      FROM concerns_assigns
+     WHERE concern_id = p_concern_id;
+
+    IF v_total = 0 THEN
+        v_new_status := 'open';
+    ELSIF v_closed = v_total THEN
+        v_new_status := 'closed';
+    ELSIF v_resolved_or_closed = v_total THEN
+        v_new_status := 'resolved';
+    ELSIF v_touched > 0 THEN
+        v_new_status := 'assigned';
+    ELSE
+        v_new_status := 'open';
+    END IF;
+
+    UPDATE concerns
+       SET status = v_new_status,
+           updated_at = NOW()
+     WHERE id = p_concern_id
+       AND status IS DISTINCT FROM v_new_status;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_trg_sync_concern_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        PERFORM fn_sync_concern_status(OLD.concern_id);
+        RETURN OLD;
+    ELSE
+        PERFORM fn_sync_concern_status(NEW.concern_id);
+        RETURN NEW;
+    END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
+CREATE TRIGGER trg_concerns_assigns_sync_status
+    AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_sync_concern_status();
+
 -- ── security_roster & attendance (needed before payables FK) ──
 CREATE TABLE IF NOT EXISTS security_roster (
     id SERIAL PRIMARY KEY,
@@ -3807,7 +3908,7 @@ CREATE OR REPLACE FUNCTION fn_concern_assignments(p_concern_id INT)
 RETURNS TABLE (
     id INT, concern_id INT, society_id INT, role VARCHAR(10),
     entity_id INT, assigned_by INT, created_at TIMESTAMP,
-    entity_name TEXT
+    entity_name TEXT, status VARCHAR(20), bid_amount NUMERIC(10,2)
 )
 LANGUAGE SQL STABLE AS $$
     SELECT ca.id, ca.concern_id, ca.society_id, ca.role, ca.entity_id,
@@ -3816,7 +3917,8 @@ LANGUAGE SQL STABLE AS $$
                WHEN 'ADM' THEN COALESCE(u.name, u.email, 'Admin')
                WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
                WHEN 'SEC' THEN COALESCE(s.name, 'Security')
-           END
+           END,
+           ca.status::VARCHAR(20), ca.bid_amount::NUMERIC(10,2)
     FROM concerns_assigns ca
     LEFT JOIN users u ON u.id = ca.entity_id AND ca.role = 'ADM'
     LEFT JOIN vendors v ON v.id = ca.entity_id AND ca.role = 'VND'

@@ -362,11 +362,25 @@ KPI_CARDS = {
     "kpi_concerns_open": {
         "query": """
             SELECT COUNT(*) AS v FROM concerns
-            WHERE society_id=%s AND status IN ('open','in_progress')
+            WHERE society_id=%s AND status='open'
         """,
         "params": 1, "format": "number",
         "icon": "fa-hand-point-up", "color": "#de5c52",
         "title": "Open Concerns", "group": "pending issues",
+    },
+
+    # Vendor-only: count of concerns_assigns rows currently assigned to
+    # THIS vendor and not yet resolved/closed. Society-wide default query
+    # below is a harmless fallback (0 for non-vendor entity_ids); the real
+    # count is supplied via the vendor override in card_catalogue_callbacks.py.
+    "kpi_concerns_assigned": {
+        "query": """
+            SELECT COUNT(*) AS v FROM concerns_assigns
+            WHERE society_id=%s AND role='VND' AND status='assigned'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-tools", "color": "#e59620",
+        "title": "Assigned To Me", "group": "pending issues",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -968,6 +982,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pass_expiry",
             "kpi_gate_logs",
             "kpi_concerns_open",
+            "kpi_concerns_assigned",
             "kpi_events_total",
             "kpi_channels_total",
         ],
@@ -981,7 +996,7 @@ DEFAULT_LAYOUTS = {
         ],
         "vendor_receipts": ["kpi_receipts_total"],
         "cashbook": ["kpi_cash_in_hand"],
-        "concerns": ["kpi_concerns_open"],
+        "concerns": ["kpi_concerns_open", "kpi_concerns_assigned"],
         "charges": ["kpi_ven_charges_count", "kpi_vendor_other_charges"],
         "events": ["kpi_events_total"],
         "settings": ["kpi_vendor_date"],

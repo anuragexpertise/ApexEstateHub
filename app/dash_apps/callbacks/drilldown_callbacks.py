@@ -537,6 +537,68 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── Save Bid (vendor) — opens the bid-entry modal, no navigation ──────
+            elif action == "save_bid" and entity == "concern":
+                trigger_data = {
+                    "action": "open_bid_modal",
+                    "params": {"concern_id": int(pk) if pk else None},
+                }
+                return no_update, no_update, no_update, no_update, trigger_data
+
+            # ── Resolved (vendor) — mark the vendor's own assignment resolved ─────
+            elif action == "vendor_resolve" and entity == "concern":
+                role = (auth or {}).get("role")
+                vendor_entity_id = (auth or {}).get("linked_id")
+                if role != "vendor" or not vendor_entity_id:
+                    toast = {"_toast": {"type": "error", "message": "Only the assigned vendor can resolve this"}}
+                    return store, content, bc, {"display": "none"}, toast
+                ok, msg = loaders.resolve_concern_assignment(int(pk), sid, "VND", int(vendor_entity_id))
+                if ok:
+                    try:
+                        concern_row = db._execute(
+                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        if concern_row:
+                            PushService.notify_concern_resolved_by_vendor(
+                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                            )
+                    except Exception as e:
+                        print(f"⚠️  notify_concern_resolved_by_vendor failed: {e}")
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Closed (Admin/Owner) — close a concern for every assignee row ──────
+            elif action == "close_concern" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role not in ("admin", "apartment"):
+                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                concern_row = db._execute(
+                    "SELECT apartment_id, concern_type, created_by FROM concerns WHERE id=%s AND society_id=%s",
+                    (pk, sid), fetch_one=True,
+                ) or {}
+                if role == "apartment" and concern_row.get("created_by") != (auth or {}).get("user_id"):
+                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                ok, msg = loaders.close_concern(int(pk), sid)
+                if ok:
+                    try:
+                        assignees = loaders.get_concern_assignments(int(pk))
+                        PushService.notify_concern_closed(
+                            sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), assignees,
+                        )
+                    except Exception as e:
+                        print(f"⚠️  notify_concern_closed failed: {e}")
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
             # ── Verify receivable — server action only, no navigation ─────────────
             elif action == "verify_receivable":
                 if not _require_admin(auth):

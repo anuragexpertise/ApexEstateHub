@@ -192,19 +192,27 @@ def notify_event_created(society_id, event_title, open_to="all", event_date=None
 
 
 def notify_concern_created(society_id, apartment_id, concern_type):
-    """Notify all admins in the society when a new concern is raised."""
+    """Notify all admins in the society, plus the apartment owner (if the
+    concern wasn't raised by the owner themself, e.g. admin raised it on
+    their behalf), when a new concern is raised."""
     from database.db_manager import db
-    targets = get_notification_targets(society_id, roles=["admin"])
-    if not targets:
-        return 0, 0
+    targets = list(get_notification_targets(society_id, roles=["admin"]))
     if apartment_id:
         apt = db._execute(
             "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
             (apartment_id, society_id), fetch_one=True,
         )
         flat_label = f"Flat {apt['flat_number']}" if apt else "A concern"
+        owner = db._execute(
+            "SELECT id AS user_id FROM users WHERE linked_id=%s AND role='apartment' AND society_id=%s",
+            (apartment_id, society_id), fetch_one=True,
+        )
+        if owner and owner.get("user_id") and owner["user_id"] not in targets:
+            targets.append(owner["user_id"])
     else:
         flat_label = "A concern"
+    if not targets:
+        return 0, 0
     body = f"{flat_label}: {concern_type.replace('_',' ').title()}"
     return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns", society_id=society_id)
 
@@ -254,6 +262,70 @@ def notify_concern_status_change(user_id, concern_type, new_status):
     title = "✅ Concern Resolved" if new_status == "resolved" else "🔧 Concern Update"
     body = f"Your concern ({concern_type.replace('_',' ').title()}) is now: {status_label}"
     return send_push_notification(user_id, title, body, url="/dashboard/owner-concerns")
+
+
+def _concern_notify_targets(society_id, apartment_id):
+    """Common target set for concern lifecycle events: all admins + the
+    apartment owner (if apartment_id is known)."""
+    from database.db_manager import db
+    targets = list(get_notification_targets(society_id, roles=["admin"]))
+    if apartment_id:
+        owner = db._execute(
+            "SELECT id AS user_id FROM users WHERE linked_id=%s AND role='apartment' AND society_id=%s",
+            (apartment_id, society_id), fetch_one=True,
+        )
+        if owner and owner.get("user_id") and owner["user_id"] not in targets:
+            targets.append(owner["user_id"])
+    return targets
+
+
+def notify_concern_bid_saved(society_id, apartment_id, concern_type, vendor_label=None):
+    """Vendor saved/updated a bid — notify admin + the concern's creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    who = f" by {vendor_label}" if vendor_label else ""
+    body = f"A bid was submitted{who} for: {label}"
+    return send_bulk_push(targets, "💰 Concern Bid Submitted", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_resolved_by_vendor(society_id, apartment_id, concern_type):
+    """Vendor marked their assignment resolved — notify admin + creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"A vendor marked the concern as resolved: {label}"
+    return send_bulk_push(targets, "✅ Concern Resolved By Vendor", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_closed(society_id, apartment_id, concern_type, assignments=None):
+    """Admin/Owner closed a concern — notify admin, the creator apartment,
+    and every assignee. `assignments` is the list of rows returned by
+    loaders.get_concern_assignments() (each with role/entity_id)."""
+    from database.db_manager import db
+    targets = _concern_notify_targets(society_id, apartment_id)
+    role_lookup = {"VND": "vendor", "SEC": "security"}
+    for a in (assignments or []):
+        role, entity_id = a.get("role"), a.get("entity_id")
+        if role == "ADM":
+            user_id = entity_id
+        elif role in role_lookup:
+            row = db._execute(
+                "SELECT id FROM users WHERE linked_id=%s AND role=%s AND society_id=%s",
+                (entity_id, role_lookup[role], society_id), fetch_one=True,
+            )
+            user_id = row["id"] if row else None
+        else:
+            user_id = None
+        if user_id and user_id not in targets:
+            targets.append(user_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"Concern closed: {label}"
+    return send_bulk_push(targets, "🔒 Concern Closed", body, url="/dashboard/concerns", society_id=society_id)
 
 
 def notify_payment_received(user_id, amount, particulars=None):

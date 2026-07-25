@@ -119,6 +119,7 @@ class RBACManager:
             "kpi_vendors_dues": {Permission.VIEW},
             "kpi_events_total": {Permission.VIEW},
             "kpi_concerns_open": {Permission.VIEW},
+            "kpi_concerns_assigned": {Permission.VIEW},
             "kpi_channels_total": {Permission.VIEW},
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},

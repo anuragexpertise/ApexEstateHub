@@ -1289,6 +1289,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                 ),
             ], style={"flex": "1", "minWidth": "260px"}),
             _payment_qr_banner(entity_plural, society_id, prefill),
+            _concern_wait_banner(entity_plural, prefill),
         ], style={"padding": "16px", "maxHeight": "520px",
                   "overflowY": "auto", "display": "flex",
                   "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
@@ -1307,6 +1308,25 @@ def render_form_card(card_id: str, title: str, icon: str,
 # Ticket" account collecting entry fees) — see _account_is_credit() below
 # for the narrower per-record check.
 _QR_BANNER_ENTITIES = {"receipts", "events"}
+
+
+def _concern_wait_banner(entity_plural: str, prefill: dict) -> html.Div | None:
+    """
+    Shows a short heads-up on the NEW concern form (Admin's 'Flat No' picker
+    and Owner's self-service form both funnel through form_concern_new) so
+    the person raising it knows the next step is bidding, not an instant fix.
+    Not shown on Edit (prefill has an "id").
+    """
+    if entity_plural != "concerns" or prefill.get("id"):
+        return None
+    return dbc.Alert(
+        [
+            html.I(className="fas fa-hourglass-half me-2"),
+            "Submitted — please wait for bids from vendors/security, then assign one.",
+        ],
+        color="info",
+        style={"fontSize": "13px", "fontWeight": "600", "flex": "0 0 auto", "maxWidth": "260px"},
+    )
 
 
 def _account_is_credit(acc_id, society_id) -> bool:

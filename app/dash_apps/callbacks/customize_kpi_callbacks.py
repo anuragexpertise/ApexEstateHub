@@ -112,6 +112,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_apartment_date", "apartment", "settings", "Profile"),
     # VENDOR PORTAL - Dashboard
     ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
+    ("kpi_concerns_assigned", "vendor", "dashboard", "Jobs"),
     ("kpi_events_total", "vendor", "dashboard", "Events"),
     ("kpi_channels_total", "vendor", "dashboard", "Channels"),
     ("kpi_receivables_total", "vendor", "dashboard", "payables"),
