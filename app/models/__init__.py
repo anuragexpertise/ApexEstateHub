@@ -346,7 +346,7 @@ class Event:
 class Concern:
     id: int
     society_id: int
-    flat_no: str
+    apartment_id: int
     concern_type: str
     description: Optional[str] = None
     preferred_time: Optional[str] = None

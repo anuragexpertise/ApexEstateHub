@@ -378,7 +378,7 @@ DRILLDOWN_MAP: dict = {
             # apartment's "o" — see role_code_map in qr_callbacks.py).
             "new_concern": {
                 "target": "form_concern_new",
-                "prefill": {"flat_no": "flat_number"},
+                "prefill": {"apartment_id": "id"},
             },
             "edit": {"target": "form_apartment_edit", "prefill": {"*": "*"}},
         }

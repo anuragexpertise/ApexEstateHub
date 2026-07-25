@@ -191,12 +191,20 @@ def notify_event_created(society_id, event_title, open_to="all", event_date=None
     return send_bulk_push(targets, "📅 New Event", body, url="/dashboard/events", society_id=society_id)
 
 
-def notify_concern_created(society_id, flat_no, concern_type):
+def notify_concern_created(society_id, apartment_id, concern_type):
     """Notify all admins in the society when a new concern is raised."""
+    from database.db_manager import db
     targets = get_notification_targets(society_id, roles=["admin"])
     if not targets:
         return 0, 0
-    flat_label = f"Flat {flat_no}" if flat_no else "A concern"
+    if apartment_id:
+        apt = db._execute(
+            "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
+            (apartment_id, society_id), fetch_one=True,
+        )
+        flat_label = f"Flat {apt['flat_number']}" if apt else "A concern"
+    else:
+        flat_label = "A concern"
     body = f"{flat_label}: {concern_type.replace('_',' ').title()}"
     return send_bulk_push(targets, "🔔 New Concern Raised", body, url="/dashboard/concerns", society_id=society_id)
 

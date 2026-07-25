@@ -1575,7 +1575,7 @@ def _label_for(entity_plural: str, record: dict) -> str:
         "vendors": ("name", "email"),
         "security": ("name", "email"),
         "events": ("title",),
-        "concerns": ("flat_no", "concern_type"),
+        "concerns": ("apartment_id", "concern_type"),
         "societies": ("name",),
         "receipts": ("acc_particulars",),
         "expenses": ("acc_particulars",),
@@ -2380,17 +2380,17 @@ def _save_concern(db, d, sid, is_edit, pk):
 
         _upd_by_clause = ", updated_by=%s"
         db._execute(
-            "UPDATE concerns SET flat_no=%s, concern_type=%s, description=%s, "
+            "UPDATE concerns SET apartment_id=%s, concern_type=%s, description=%s, "
             "preferred_time=%s, status=%s"
             + (", image=%s" if d.get("image") else "")
             + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
-                (d.get("flat_no"), d.get("concern_type", "other"),
+                (d.get("apartment_id"), d.get("concern_type", "other"),
                  d.get("description"), d.get("preferred_time"),
                  new_status, d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
-                else (d.get("flat_no"), d.get("concern_type", "other"),
+                else (d.get("apartment_id"), d.get("concern_type", "other"),
                        d.get("description"), d.get("preferred_time"),
                        new_status, d.get("user_id"), pk, sid)
             ),
@@ -2398,15 +2398,15 @@ def _save_concern(db, d, sid, is_edit, pk):
         try:
             if new_status in ("in_progress", "resolved"):
                 concern_row = db._execute(
-                    "SELECT flat_no, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                    "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
                     (pk, sid), fetch_one=True,
                 )
-                if concern_row and concern_row.get("flat_no"):
+                if concern_row and concern_row.get("apartment_id"):
                     owner = db._execute(
                         "SELECT u.id AS user_id FROM users u "
                         "JOIN apartments a ON a.id = u.linked_id "
-                        "WHERE a.flat_number = %s AND a.society_id = %s AND u.role='apartment'",
-                        (concern_row["flat_no"], sid), fetch_one=True,
+                        "WHERE a.id = %s AND a.society_id = %s AND u.role='apartment'",
+                        (concern_row["apartment_id"], sid), fetch_one=True,
                     )
                     if owner:
                         PushService.notify_concern_status_change(
@@ -2419,12 +2419,12 @@ def _save_concern(db, d, sid, is_edit, pk):
     if not desc:
         return False, "Description is required", None
     r = db._execute(
-        "INSERT INTO concerns(society_id, flat_no, concern_type, description, "
+        "INSERT INTO concerns(society_id, apartment_id, concern_type, description, "
         "preferred_time, status, image, created_at, created_by) "
         "VALUES(%s,%s,%s,%s,%s,'open',%s,NOW(),%s) RETURNING id",
         (
             sid,
-            d.get("flat_no"),
+            d.get("apartment_id"),
             d.get("concern_type", "other"),
             desc,
             d.get("preferred_time", "anytime"),
@@ -2434,10 +2434,11 @@ def _save_concern(db, d, sid, is_edit, pk):
         fetch_one=True,
     )
     new_id = (r or {}).get("id")
-    try:
-        PushService.notify_concern_created(sid, d.get("flat_no"), d.get("concern_type", "other"))
-    except Exception as e:
-        print(f"⚠️  notify_concern_created failed: {e}")
+    if new_id:
+        try:
+            PushService.notify_concern_created(sid, d.get("apartment_id"), d.get("concern_type", "other"))
+        except Exception as e:
+            print(f"⚠️  notify_concern_created failed: {e}")
     return True, "Concern submitted", new_id
 
 

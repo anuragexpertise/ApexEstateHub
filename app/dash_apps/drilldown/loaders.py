@@ -205,19 +205,15 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
             params.append(assigned_sec_id)
         elif apt_id:
-            flat_r = db._execute(
-                "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
-                (apt_id, sid), fetch_one=True,
-            )
-            flat_no = (flat_r or {}).get("flat_number")
-            if flat_no:
-                extra = " AND c.flat_no=%s"
-                params.append(flat_no)
+            extra += " AND c.apartment_id=%s"
+            params.append(apt_id)
         if s:
-            extra += " AND (c.flat_no ILIKE %s OR c.concern_type ILIKE %s)"
+            extra += " AND (a.flat_number ILIKE %s OR c.concern_type ILIKE %s)"
             params += [f"%{s}%", f"%{s}%"]
         return (
-            "SELECT c.* FROM concerns c WHERE c.society_id=%s "
+            "SELECT c.*, a.flat_number FROM concerns c "
+            "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
+            "WHERE c.society_id=%s "
             "AND c.status IN ('open','in_progress')" + extra +
             " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
             tuple(params) + (page_size, offset),
@@ -524,25 +520,23 @@ def load_list(
                 extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
                 params.append(assigned_sec_id)
             elif apt_id:
-                flat_r = db._execute(
-                    "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s",
-                    (apt_id, sid), fetch_one=True,
-                )
-                flat_no = (flat_r or {}).get("flat_number")
-                if flat_no:
-                    extra = " AND c.flat_no=%s"
-                    params.append(flat_no)
+                extra += " AND c.apartment_id=%s"
+                params.append(apt_id)
             if s:
-                extra += " AND (c.flat_no ILIKE %s OR c.concern_type ILIKE %s)"
+                extra += " AND (a.flat_number ILIKE %s OR c.concern_type ILIKE %s)"
                 params += [f"%{s}%", f"%{s}%"]
             rows = db._execute(
-                "SELECT c.* FROM concerns c WHERE c.society_id=%s "
+                "SELECT c.*, a.flat_number FROM concerns c "
+                "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
+                "WHERE c.society_id=%s "
                 "AND c.status IN ('open','in_progress')" + extra +
                 " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
                 params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM concerns c WHERE c.society_id=%s "
+                "SELECT COUNT(*) AS n FROM concerns c "
+                "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
+                "WHERE c.society_id=%s "
                 "AND c.status IN ('open','in_progress')" + extra, params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
