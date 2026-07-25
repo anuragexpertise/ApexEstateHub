@@ -347,19 +347,18 @@ def register_assign_to_callbacks(app):
                 except (IndexError, ValueError):
                     continue
                 db._execute(
-                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by) "
-                    "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (concern_id, role, entity_id) DO NOTHING",
+                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
+                    "VALUES (%s, %s, %s, %s, %s, 'assigned') "
+                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='assigned'",
                     (concern_id, society_id, role, entity_id, actor_user_id),
                 )
                 inserted += 1
                 newly_assigned.append((role, entity_id))
 
-            if selected_keys:
-                db._execute(
-                    "UPDATE concerns SET status='in_progress', updated_by=%s "
-                    "WHERE id=%s AND society_id=%s AND status='open'",
-                    (actor_user_id, concern_id, society_id),
-                )
+            # concerns.status is now kept in sync automatically by
+            # trg_concerns_assigns_sync_status (see estatehub.sql) whenever
+            # concerns_assigns rows are inserted/updated/deleted above — no
+            # manual UPDATE concerns SET status=... needed here anymore.
 
             # Push-notify only the newly-assigned entities.
             if newly_assigned:

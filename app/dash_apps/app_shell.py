@@ -470,6 +470,42 @@ def _assign_to_modal() -> dbc.Modal:
     )
 
 
+# ── Concern Bid modal ────────────────────────────────────────────────────────
+# Vendor's "Save Bid" action on a concern profile. Small single-field modal —
+# doesn't need the full schema-driven form engine, mirrors _assign_to_modal's
+# structure at a much smaller scale.
+
+def _concern_bid_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Save Your Bid"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    html.P(
+                        "Enter the amount you're bidding to resolve this concern.",
+                        className="text-muted", style={"fontSize": "13px"},
+                    ),
+                    dbc.InputGroup([
+                        dbc.InputGroupText("₹"),
+                        dbc.Input(
+                            id="concern-bid-amount-input", type="number",
+                            min=0, step=1, placeholder="Bid amount",
+                        ),
+                    ]),
+                    html.Div(id="concern-bid-error", className="text-danger mt-2", style={"fontSize": "13px"}),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-concern-bid-modal", color="secondary", size="sm", outline=True),
+                dbc.Button("Save Bid", id="concern-bid-submit-btn", color="primary"),
+            ]),
+        ],
+        id="concern-bid-modal",
+        size="sm", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
 # ── QR modal ──────────────────────────────────────────────────────────────────
 
 def _qr_modal() -> dbc.Modal:
@@ -562,6 +598,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
+            dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
@@ -659,5 +696,8 @@ def shell_layout() -> html.Div:
 
             # ── Assign-To modal ──────────────────────────────────────────────────
             _assign_to_modal(),
+
+            # ── Concern Bid modal (vendor: Save Bid action) ───────────────────────
+            _concern_bid_modal(),
         ]
     )

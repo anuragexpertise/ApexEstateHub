@@ -127,7 +127,14 @@ DRILLDOWN_MAP: dict = {
         "filter": {"on_duty": True},
     },
     "kpi_events_total": {"target": "list_events", "label": "Upcoming Events"},
-    "kpi_concerns_open": {"target": "list_concerns", "label": "Open Concerns"},
+    "kpi_concerns_open": {
+        "target": "list_concerns", "label": "Open Concerns",
+        "filter": {"status": "open"},
+    },
+    "kpi_concerns_assigned": {
+        "target": "list_concerns", "label": "Assigned To Me",
+        "filter": {"assigned_status": "assigned"},
+    },
     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
     "kpi_receipts_month": {
         "target": "list_receipts",
@@ -397,14 +404,10 @@ DRILLDOWN_MAP: dict = {
     },
     "profile_concern": {
         "actions": {
-            "assign": {
-                "target": "form_concern_edit",
-                "prefill": {"*": "*", "status": "_const_in_progress"},
-            },
-            "resolve": {
-                "target": "form_concern_edit",
-                "prefill": {"*": "*", "status": "_const_resolved"},
-            },
+            # "assign", "save_bid", "vendor_resolve", "close_concern" are all
+            # intercepted directly in drilldown_callbacks.py before this map
+            # is consulted (server-side actions / the assign-to modal /
+            # the bid modal) — no target_card mapping needed here.
         }
     },
     "profile_event": {

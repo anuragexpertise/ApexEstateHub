@@ -108,6 +108,67 @@ def humanize_assignment(row: dict) -> str:
     return name or f"{row.get('role')}-{row.get('entity_id')}"
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# CONCERNS WORKFLOW — bid / resolve / close
+# concerns.status is now a trigger-synced aggregate of concerns_assigns.status
+# (see fn_sync_concern_status in estatehub.sql) — these helpers only ever
+# write concerns_assigns.status, never concerns.status directly.
+# ════════════════════════════════════════════════════════════════════════════
+
+def save_concern_bid(concern_id: int, society_id: int, vendor_entity_id: int, bid_amount) -> tuple[bool, str]:
+    """Vendor fills/updates their bid_amount on their own concerns_assigns row."""
+    try:
+        bid = float(bid_amount)
+        if bid < 0:
+            return False, "Bid amount must be positive"
+    except (TypeError, ValueError):
+        return False, "Enter a valid bid amount"
+    row = db._execute(
+        "UPDATE concerns_assigns SET bid_amount=%s "
+        "WHERE concern_id=%s AND society_id=%s AND role='VND' AND entity_id=%s "
+        "RETURNING id",
+        (bid, concern_id, society_id, vendor_entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "You are not assigned to this concern"
+    return True, "Bid saved"
+
+
+def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
+    """Mark the caller's own concerns_assigns row as resolved (e.g. vendor
+    marking their work done). The concerns.status aggregate ('resolved' once
+    every assignee row is resolved/closed) is updated automatically by the
+    trg_concerns_assigns_sync_status trigger."""
+    row = db._execute(
+        "UPDATE concerns_assigns SET status='resolved' "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status != 'closed' "
+        "RETURNING id",
+        (concern_id, society_id, role, entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "No active assignment found for you on this concern"
+    return True, "Marked resolved"
+
+
+def close_concern(concern_id: int, society_id: int) -> tuple[bool, str]:
+    """Admin/Owner action: close a concern for ALL assignees at once.
+    Sets status='closed' on every concerns_assigns row for this concern;
+    the sync trigger then rolls concerns.status up to 'closed' too."""
+    rows = db._execute(
+        "UPDATE concerns_assigns SET status='closed' "
+        "WHERE concern_id=%s AND society_id=%s RETURNING id",
+        (concern_id, society_id), fetch_all=True,
+    )
+    if not rows:
+        # No assignees yet (still 'open') — close the concern directly.
+        db._execute(
+            "UPDATE concerns SET status='closed', updated_at=NOW() "
+            "WHERE id=%s AND society_id=%s",
+            (concern_id, society_id),
+        )
+    return True, "Concern closed"
+
+
 def _current_fy() -> int:
     """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
     fn_current_financial_year() in estatehub.sql — keep both in sync."""
@@ -195,26 +256,47 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         creator_id = filters.get("concern_creator_id")
         assigned_vnd_id = filters.get("assigned_vnd_id")
         assigned_sec_id = filters.get("assigned_sec_id")
+        # assigned_status: filter concerns_assigns.status for the
+        # currently-scoped vendor/security row (e.g. 'assigned' for the
+        # vendor's "kpi_concerns_assigned" drilldown). Only meaningful
+        # alongside assigned_vnd_id / assigned_sec_id.
+        assigned_status = filters.get("assigned_status")
         if creator_id:
             extra += " AND c.created_by=%s"
             params.append(creator_id)
         elif assigned_vnd_id:
-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)"
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
             params.append(assigned_vnd_id)
+            if assigned_status:
+                extra += " AND ca.status=%s"
+                params.append(assigned_status)
+            extra += ")"
         elif assigned_sec_id:
-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
             params.append(assigned_sec_id)
+            if assigned_status:
+                extra += " AND ca.status=%s"
+                params.append(assigned_status)
+            extra += ")"
         elif apt_id:
             extra += " AND c.apartment_id=%s"
             params.append(apt_id)
         if s:
             extra += " AND (a.flat_number ILIKE %s OR c.concern_type ILIKE %s)"
             params += [f"%{s}%", f"%{s}%"]
+        # Top-level concerns.status filter (e.g. {"status": "open"} for the
+        # kpi_concerns_open drilldown). Defaults to "everything not closed"
+        # so plain browsing still hides closed concerns.
+        status_filter = filters.get("status")
+        if status_filter:
+            extra += " AND c.status=%s"
+            params.append(status_filter)
+        else:
+            extra += " AND c.status != 'closed'"
         return (
             "SELECT c.*, a.flat_number FROM concerns c "
             "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
-            "WHERE c.society_id=%s "
-            "AND c.status IN ('open','in_progress')" + extra +
+            "WHERE c.society_id=%s" + extra +
             " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
             tuple(params) + (page_size, offset),
         )
@@ -510,34 +592,47 @@ def load_list(
             creator_id = filters.get("concern_creator_id")
             assigned_vnd_id = filters.get("assigned_vnd_id")
             assigned_sec_id = filters.get("assigned_sec_id")
+            assigned_status = filters.get("assigned_status")
             if creator_id:
                 extra += " AND c.created_by=%s"
                 params.append(creator_id)
             elif assigned_vnd_id:
-                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)"
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
                 params.append(assigned_vnd_id)
+                if assigned_status:
+                    extra += " AND ca.status=%s"
+                    params.append(assigned_status)
+                extra += ")"
             elif assigned_sec_id:
-                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
                 params.append(assigned_sec_id)
+                if assigned_status:
+                    extra += " AND ca.status=%s"
+                    params.append(assigned_status)
+                extra += ")"
             elif apt_id:
                 extra += " AND c.apartment_id=%s"
                 params.append(apt_id)
             if s:
                 extra += " AND (a.flat_number ILIKE %s OR c.concern_type ILIKE %s)"
                 params += [f"%{s}%", f"%{s}%"]
+            status_filter = filters.get("status")
+            if status_filter:
+                extra += " AND c.status=%s"
+                params.append(status_filter)
+            else:
+                extra += " AND c.status != 'closed'"
             rows = db._execute(
                 "SELECT c.*, a.flat_number FROM concerns c "
                 "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
-                "WHERE c.society_id=%s "
-                "AND c.status IN ('open','in_progress')" + extra +
+                "WHERE c.society_id=%s" + extra +
                 " ORDER BY c.created_at DESC LIMIT %s OFFSET %s",
                 params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM concerns c "
                 "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
-                "WHERE c.society_id=%s "
-                "AND c.status IN ('open','in_progress')" + extra, params, fetch_one=True,
+                "WHERE c.society_id=%s" + extra, params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 

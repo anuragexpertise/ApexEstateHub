@@ -132,8 +132,7 @@ def register_card_catalogue_callbacks(app):
                     ),
                     "kpi_concerns_open": (
                         "SELECT COUNT(*)::INT AS v FROM concerns "
-                        "WHERE society_id=%s AND created_by=%s "
-                        "AND status IN ('open','in_progress')",
+                        "WHERE society_id=%s AND created_by=%s AND status='open'",
                         (sid, own_user_id),
                     ),
                     "kpi_gate_logs": (
@@ -202,9 +201,14 @@ def register_card_catalogue_callbacks(app):
                     ),
                     "kpi_concerns_open": (
                         "SELECT COUNT(*)::INT AS v FROM concerns c "
-                        "WHERE c.society_id=%s AND c.status IN ('open','in_progress') "
+                        "WHERE c.society_id=%s AND c.status='open' "
                         "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
                         "WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)",
+                        (sid, vendor_id),
+                    ) if vendor_id else None,
+                    "kpi_concerns_assigned": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='assigned'",
                         (sid, vendor_id),
                     ) if vendor_id else None,
                 }
@@ -248,7 +252,7 @@ def register_card_catalogue_callbacks(app):
                     ),
                     "kpi_concerns_open": (
                         "SELECT COUNT(*)::INT AS v FROM concerns c "
-                        "WHERE c.society_id=%s AND c.status IN ('open','in_progress') "
+                        "WHERE c.society_id=%s AND c.status='open' "
                         "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
                         "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)",
                         (sid, sec_id),

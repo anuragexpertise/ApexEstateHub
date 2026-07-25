@@ -134,13 +134,31 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": "form_concern_edit",
             "icon": "fa-user-check",
             "color": "warning",
+            "roles": ["admin", "apartment"],   # Admin portal + Owner portal
         },
         {
-            "label": "Resolve",
-            "action_id": "resolve",
-            "target_card": "form_concern_edit",
+            "label": "Save Bid",
+            "action_id": "save_bid",
+            "target_card": None,          # opens the bid-entry modal — no navigation
+            "icon": "fa-hand-holding-usd",
+            "color": "primary",
+            "roles": ["vendor"],
+        },
+        {
+            "label": "Resolved",
+            "action_id": "vendor_resolve",
+            "target_card": None,          # server-side only — no navigation
             "icon": "fa-check",
             "color": "success",
+            "roles": ["vendor"],
+        },
+        {
+            "label": "Closed",
+            "action_id": "close_concern",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-lock",
+            "color": "dark",
+            "roles": ["admin", "apartment"],   # Admin portal + Owner portal
         },
     ],
 

@@ -144,6 +144,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ assign_to_callbacks failed: {e}")
 
+    # 14c. Concern Bid modal (vendor "Save Bid" action on a concern)
+    #     Requires "concern-bid-modal" + "concern-bid-store" in app_shell.py.
+    try:
+        from .concern_bid_callbacks import register_concern_bid_callbacks
+        register_concern_bid_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ concern_bid_callbacks failed: {e}")
+
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks
