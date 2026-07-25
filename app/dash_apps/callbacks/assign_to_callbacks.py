@@ -53,7 +53,12 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
         color = "#e59620"
 
     rid = row.get("id")
-    item_id = f"assign-item-{role}-{rid}"
+    # NOTE: must be the pattern-matching dict id, not a plain string —
+    # the toggle_selection callback below listens on
+    # Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks")
+    # and a plain string id ("assign-item-ADM-3") never matches that pattern,
+    # so clicks silently went nowhere and selections never reached the store.
+    item_id = {"type": "assign-item", "role": role, "entity_id": rid}
 
     if view == "grid":
         inner = dbc.Card([
@@ -76,7 +81,7 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
                 dbc.Checkbox(
                     id={"type": "assign-check", "role": role, "entity_id": rid},
                     value=selected,
-                    style={"marginRight": "10px"},
+                    style={"marginRight": "10px", "pointerEvents": "none"},
                 ),
                 html.I(className=f"{icon} me-2", style={"color": color, "width": "20px", "textAlign": "center"}),
                 html.Div([
@@ -85,7 +90,11 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
                 ]),
             ], className="d-flex align-items-center"),
-        ], action=True, id=item_id, style={"cursor": "pointer"})
+        ], action=True, id=item_id, style={
+            "cursor": "pointer",
+            "border": f"2px solid {color}" if selected else None,
+            "backgroundColor": f"{color}10" if selected else None,
+        })
 
     return html.Div(inner, className="mb-1")
 
@@ -123,7 +132,7 @@ def register_assign_to_callbacks(app):
                         selected[f"{role}-{eid}"] = True
             except Exception:
                 pass
-        return True, {"concern_id": int(concern_id), "selected": selected}
+        return True, {"concern_id": int(concern_id), "selected": selected, "active_role": None}
 
     # ── 2. Close modal ────────────────────────────────────────────────────────
     @app.callback(
@@ -136,33 +145,49 @@ def register_assign_to_callbacks(app):
             raise PreventUpdate
         return False
 
-    # ── 3. Entity-type card click → load list ────────────────────────────────
+    # ── 3. Entity-type card click OR search change → (re)load list ────────────
+    # `assign-search` is a real Input here (not just a State read at click
+    # time), and the currently-active role is tracked in assign-to-store, so
+    # typing in the search box re-runs the query for whichever role list is
+    # currently open. Previously the search box was only a State, and a
+    # separate callback zeroed out the cards' n_clicks on every keystroke to
+    # "force" a reload — but that zeroing made every n_clicks falsy, so the
+    # `if not any(...)` guard here would immediately PreventUpdate and the
+    # list never actually refreshed.
     @app.callback(
         Output("assign-list-container", "children"),
         Output({"type": "assign-card", "role": ALL}, "color"),
         Output({"type": "assign-card", "role": ALL}, "outline"),
+        Output("assign-to-store", "data", allow_duplicate=True),
         Input({"type": "assign-card", "role": ALL}, "n_clicks"),
+        Input("assign-search", "value"),
         State("assign-to-store", "data"),
         State("auth-store", "data"),
-        State("assign-search", "value"),
         prevent_initial_call=True,
     )
-    def load_assign_list(n_clicks_list, store, auth, search):
-        if not any(n for n in (n_clicks_list or []) if n):
-            raise PreventUpdate
+    def load_assign_list(n_clicks_list, search, store, auth):
+        store = dict(store or {})
         triggered = ctx.triggered_id
-        if not triggered or not isinstance(triggered, dict):
-            raise PreventUpdate
-        role = triggered.get("role")
-        if role not in ("ADM", "VND", "SEC"):
+
+        if triggered == "assign-search":
+            # Re-filtering whatever list is already open; if no card has
+            # been picked yet there's nothing to filter.
+            role = store.get("active_role")
+            if role not in ("ADM", "VND", "SEC"):
+                raise PreventUpdate
+        elif isinstance(triggered, dict) and triggered.get("type") == "assign-card":
+            role = triggered.get("role")
+            if role not in ("ADM", "VND", "SEC"):
+                raise PreventUpdate
+            store["active_role"] = role
+        else:
             raise PreventUpdate
 
-        store = store or {}
         selected = store.get("selected", {})
 
         society_id = (auth or {}).get("society_id")
         if not society_id:
-            return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update
+            return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
 
         s = (search or "").strip() or None
         try:
@@ -173,31 +198,30 @@ def register_assign_to_callbacks(app):
             else:
                 rows = list_assignable_security(society_id, s)
         except Exception as e:
-            return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update
+            return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
 
-        if not rows:
-            return html.P(f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"}), no_update, no_update
-
-        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
-        colors = [
-            {"color": "primary", "outline": False} if r.get("role") == "ADM" else
-            {"color": "success", "outline": False} if r.get("role") == "VND" else
-            {"color": "warning", "outline": False}
-            for r in rows
-        ]
-
-        # Highlight active card
+        # Card highlight reflects the active role directly, not accumulated
+        # n_clicks — with n_clicks, once two cards had each been clicked at
+        # least once in the session, both stayed highlighted forever.
         card_colors = []
         card_outlines = []
-        for card_n_clicks in (n_clicks_list or []):
-            if card_n_clicks:
+        for card_role in ("ADM", "VND", "SEC"):
+            if card_role == role:
                 card_colors.append("primary" if role == "ADM" else "success" if role == "VND" else "warning")
                 card_outlines.append(False)
             else:
                 card_colors.append("secondary")
                 card_outlines.append(True)
 
-        return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines
+        if not rows:
+            empty = html.P(
+                f"No {PORTAL_ROLE_LABEL[role].lower()}s found.",
+                className="text-muted text-center", style={"padding": "30px"},
+            )
+            return empty, card_colors, card_outlines, store
+
+        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+        return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
 
     # ── 4. Toggle selection on item click ────────────────────────────────────
     @app.callback(
@@ -365,15 +389,5 @@ def register_assign_to_callbacks(app):
             )
         except Exception as e:
             return False, {"type": "error", "message": str(e)}, no_update, no_update, no_update
-
-    # ── 7. Search filter ─────────────────────────────────────────────────────
-    @app.callback(
-        Output({"type": "assign-card", "role": ALL}, "n_clicks", allow_duplicate=True),
-        Input("assign-search", "value"),
-        prevent_initial_call=True,
-    )
-    def reset_card_clicks_on_search(search):
-        # Reset all card n_clicks when search changes so the list reloads
-        return [0, 0, 0]
 
     print("  ✓ Assign-to callbacks registered")

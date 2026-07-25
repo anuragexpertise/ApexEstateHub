@@ -561,7 +561,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
             dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
-            dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}}),
+            dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
