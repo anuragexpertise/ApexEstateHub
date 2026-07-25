@@ -252,7 +252,7 @@ ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_name2 VARCHAR(20) DEFAULT 'Ch
 CREATE TABLE IF NOT EXISTS concerns (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    flat_no VARCHAR(20),
+    apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL,
     concern_type VARCHAR(50),
     description TEXT,
     preferred_time VARCHAR(20),
@@ -3770,12 +3770,13 @@ DROP FUNCTION IF EXISTS fn_concern_profile CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT)
 RETURNS TABLE (
-    id INT, society_id INT, flat_no VARCHAR(20), concern_type VARCHAR(50),
+    id INT, society_id INT, apartment_id INT, concern_type VARCHAR(50),
     description TEXT, status VARCHAR(20), assigned_to VARCHAR(100),
-    preferred_time VARCHAR(20), days_open BIGINT, created_at TIMESTAMP, image TEXT, subtitle TEXT
+    preferred_time VARCHAR(20), days_open BIGINT, created_at TIMESTAMP, image TEXT, subtitle TEXT,
+    flat_number VARCHAR(20)
 )
 LANGUAGE SQL STABLE AS $$
-    SELECT c.id::INT, c.society_id::INT, c.flat_no::VARCHAR(20), c.concern_type::VARCHAR(50),
+    SELECT c.id::INT, c.society_id::INT, c.apartment_id::INT, c.concern_type::VARCHAR(50),
            c.description::TEXT, c.status::VARCHAR(20),
            (SELECT string_agg(
                 CASE ca.role
@@ -3793,8 +3794,10 @@ LANGUAGE SQL STABLE AS $$
            c.preferred_time::VARCHAR(20),
            EXTRACT(DAY FROM AGE(CURRENT_DATE, c.created_at))::BIGINT,
            c.created_at::TIMESTAMP, c.image::TEXT,
-           ('Flat '||c.flat_no||' - '||c.concern_type)::TEXT
+           ('Flat '||COALESCE(a.flat_number, c.apartment_id::TEXT)||' - '||c.concern_type)::TEXT,
+           a.flat_number::VARCHAR(20)
     FROM concerns c
+    LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id
     WHERE c.id = p_concern_id;
 $$;
 

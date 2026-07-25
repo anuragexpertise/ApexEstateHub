@@ -530,15 +530,18 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
         print(f"  ✓ Event    '{ev['title']}' on {ev['date']}")
 
     for con in CONCERNS:
-        existing = _one(cur, "SELECT id FROM concerns WHERE society_id=%s AND flat_no=%s AND concern_type=%s",
-                        (society_id, con["flat_number"], con["type"]))
+        apt_row = _one(cur, "SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s",
+                        (society_id, con["flat_number"]))
+        apt_id = (apt_row or {}).get("id")
+        existing = _one(cur, "SELECT id FROM concerns WHERE society_id=%s AND apartment_id=%s AND concern_type=%s",
+                        (society_id, apt_id, con["type"]))
         if existing:
             continue
         row = _one(
             cur,
-            """INSERT INTO concerns (society_id,flat_no,concern_type,description,status,created_by)
+            """INSERT INTO concerns (society_id,apartment_id,concern_type,description,status,created_by)
                VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-            (society_id, con["flat_number"], con["type"], con["desc"], con["status"], created_by),
+            (society_id, apt_id, con["type"], con["desc"], con["status"], created_by),
         )
         conn.commit()
         concern_id = row["id"] if row else None
