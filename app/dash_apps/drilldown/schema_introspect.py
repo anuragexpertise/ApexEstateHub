@@ -40,6 +40,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "attendance":   "gate_access",              # ← added (security shifts)
     "security_roster": "security_roster",
     "ledger":       "accounts",
+    "polls":        "polls",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
