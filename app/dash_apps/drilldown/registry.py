@@ -38,6 +38,7 @@ PK_MAP: dict = {
     "security_roster": "id",
     "ledger": "row_date",
     "channels": "id",
+    "polls": "id",
 }
 
 
@@ -65,6 +66,7 @@ ENTITY_MAP: dict = {
     "security_roster": "security_roster",
     "ledger": "ledger",
     "channels": "channel",
+    "polls": "poll",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -90,7 +92,9 @@ DRILLDOWN_MAP: dict = {
     "kpi_channels_total": {"target": "list_channels", "label": "All Channels"},
     "kpi_channels_active": {"target": "list_channels", "label": "Active Channels", "filter": {"active": True}},
     "kpi_channels_pending": {"target": "list_channels", "label": "Pending Gate Approvals", "filter": {"state": "pending"}},
-
+    "kpi_polls_total": {"target": "list_polls", "label": "All Polls"},
+    "kpi_polls_active": {"target": "list_polls", "label": "Active Polls", "filter": {"active": True}},
+    "kpi_polls_votes": {"target": "list_polls", "label": "Polls With Votes", "filter": {"votes_count": {"gt": 0}}},
     "kpi_apartments_total": {
         "target": "list_apartments",
         "label": "All Apartments"
@@ -372,6 +376,10 @@ DRILLDOWN_MAP: dict = {
     "list_receivables": {
         "target": "profile_receivable",
         "label": "Receivable Details"
+    },
+    "list_polls": {
+        "target": "profile_poll",
+        "label": "Poll Details"
     },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
