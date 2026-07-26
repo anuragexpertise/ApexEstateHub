@@ -10,6 +10,8 @@ from decimal import Decimal
 from typing import Optional, List
 from enum import Enum
 
+from app.models.poll import Poll, PollVote
+
 # ════════════════════════════════════════════════════════════════
 # ENUMS
 # ════════════════════════════════════════════════════════════════
@@ -423,3 +425,15 @@ def dict_to_concern(row: dict) -> Concern:
         except ValueError:
             pass
     return Concern(**data)
+
+# ════════════════════════════════════════════════════════════════
+# POLLING
+# ════════════════════════════════════════════════════════════════
+
+def dict_to_poll(row: dict) -> Poll:
+    """Convert DB row to Poll model"""
+    return Poll(**{k: v for k, v in row.items() if k in Poll.__annotations__})
+
+def dict_to_poll_vote(row: dict) -> PollVote:
+    """Convert DB row to PollVote model"""
+    return PollVote(**{k: v for k, v in row.items() if k in PollVote.__annotations__})

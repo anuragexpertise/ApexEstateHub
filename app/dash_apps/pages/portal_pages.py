@@ -326,6 +326,23 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    # ── Polls ──────────────────────────────────────────────────────────
+    if active_tab in ("polls", "admin_polls"):
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="admin", active_tab="polls")
+
+    if active_tab == "poll_detail":
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="admin", active_tab="poll_detail")
+
+    if active_tab == "create_poll":
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="admin", active_tab="create_poll")
+
+    if active_tab == "poll_results":
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="admin", active_tab="poll_results")
+
     # ── Assets (NEW) ──────────────────────────────────────────────────────────
     if active_tab == "assets":
         return html.Div([
@@ -459,6 +476,15 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic("owner", "concerns", sid, cols=KPI_GRID_COLS),
             _divider(), _drill_panel(),
         ], className="portal-page")
+
+    # ── Polls ──────────────────────────────────────────────────
+    if active_tab in ("polls", "owner_polls"):
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="apartment", active_tab="polls")
+
+    if active_tab == "poll_detail":
+        from app.dash_apps.pages.poll_page import render_poll_page
+        return render_poll_page(sid, user_id=None, role="apartment", active_tab="poll_detail")
 
     if active_tab in ("channels", "owner_channels", "owner-channels"):
         from app.services.alert_service import list_channels, get_active_alerts
