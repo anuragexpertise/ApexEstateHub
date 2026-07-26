@@ -159,4 +159,11 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ channel_callbacks failed: {e}")
 
+    # 16. Poll callbacks (owner voting, admin CRUD, server-side user.id auth)
+    try:
+        from .poll_callbacks import register_poll_callbacks
+        register_poll_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ poll_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

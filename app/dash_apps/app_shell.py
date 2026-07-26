@@ -24,6 +24,7 @@ ROLE_CONFIG = {
             {"label": "Assets",        "href": "/dashboard/assets",         "icon": "fa-building"},
             {"label": "Events",        "href": "/dashboard/events",         "icon": "fa-calendar-alt"},
             {"label": "Concerns",      "href": "/dashboard/concerns",        "icon": "fa-hand-point-up"},
+            {"label": "Polls",         "href": "/dashboard/polls",         "icon": "fa-poll"},
             {"label": "Evaluate Pass", "href": "/dashboard/evaluate-pass",  "icon": "fa-qrcode"},
             {"label": "Customize",     "href": "/dashboard/customize",      "icon": "fa-edit"},
             {"label": "Settings",      "href": "/dashboard/settings",       "icon": "fa-cog"},
@@ -40,6 +41,7 @@ ROLE_CONFIG = {
             {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},
             {"label": "Events",      "href": "/dashboard/owner-events",     "icon": "fa-calendar-alt"},
             {"label": "Concerns",    "href": "/dashboard/owner-concerns",   "icon": "fa-hand-point-up"},
+            {"label": "Polls",       "href": "/dashboard/owner-polls",     "icon": "fa-poll"},
             {"label": "Settings",    "href": "/dashboard/owner-settings",   "icon": "fa-cog"},
         ],
     },
@@ -599,6 +601,8 @@ def shell_layout() -> html.Div:
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
+            dcc.Store(id="poll-action-store",          storage_type="memory", data=None),
+            dcc.Store(id="poll-detail-store",          storage_type="memory", data=None),
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
@@ -606,6 +610,18 @@ def shell_layout() -> html.Div:
             dcc.Input(id="dnd-order-capture", value="",
                       debounce=False,                style={"display": "none"}),
             dcc.Interval(id="notifications-interval", interval=30_000, n_intervals=0),
+
+            html.Div(
+                id="customize-placeholder",
+                style={"display": "none"},
+                children=[
+                    dcc.Dropdown(id="layout-portal-select", options=[], value=None),
+                    dcc.Dropdown(id="layout-tab-select", options=[], value=None),
+                    html.Div(id="dnd-active-zone"),
+                    html.Div(id="dnd-palette-zone"),
+                    dbc.Badge(id="active-count-badge", children="0 / 12 active"),
+                ],
+            ),
 
             # ── Login modals ───────────────────────────────────────────────────
             _login_modal(),

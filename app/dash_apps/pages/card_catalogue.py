@@ -383,6 +383,32 @@ KPI_CARDS = {
         "title": "Assigned To Me", "group": "pending issues",
     },
 
+    # ════════════════════════════════════════════════════════════════
+    # POLLING
+    # ════════════════════════════════════════════════════════════════
+
+    "kpi_polls_total": {
+        "query": "SELECT COUNT(*) AS v FROM polls WHERE society_id=%s",
+        "params": 1, "format": "number",
+        "icon": "fa-poll", "color": "#1859b8",
+        "title": "Total Polls", "group": "polling",
+    },
+
+    "kpi_polls_active": {
+        "query": "SELECT COUNT(*) AS v FROM polls WHERE society_id=%s AND status='active'",
+        "params": 1, "format": "number",
+        "icon": "fa-circle-check", "color": "#2ecc71",
+        "title": "Active Polls", "group": "polling",
+    },
+
+    "kpi_polls_votes": {
+        "query": "SELECT COUNT(*) AS v FROM poll_votes pv JOIN polls p ON p.id=pv.poll_id WHERE p.society_id=%s",
+        "params": 1, "format": "number",
+        "icon": "fa-check-to-slot", "color": "#18794e",
+        "title": "Total Votes Cast", "group": "polling",
+    },
+
+
     # ══════════════════════════════════════════════════════════════════════
     # GATE LOGS
     # ══════════════════════════════════════════════════════════════════════
@@ -911,6 +937,7 @@ DEFAULT_LAYOUTS = {
         ],
         "events": ["kpi_events_total"],
         "concerns": ["kpi_concerns_open"],
+        "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
         "assets": ["kpi_assets_count", "kpi_assets_value"],
         "receipts": [
             "kpi_receipts_month",
@@ -975,6 +1002,7 @@ DEFAULT_LAYOUTS = {
         "charges": ["kpi_maintainence_charges", "kpi_apt_charges_count"],
         "concerns": ["kpi_concerns_open"],
         "events": ["kpi_events_total"],
+        "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
         "settings": ["kpi_owner_member_since"],
     },
     "vendor": {

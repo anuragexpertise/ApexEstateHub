@@ -5227,4 +5227,275 @@ CREATE TABLE IF NOT EXISTS patrol_scans (
     security_user_id INT NOT NULL REFERENCES users(id),
     scanned_at       TIMESTAMP DEFAULT NOW(),
     notes            TEXT
-);
+);
+-- ════════════════════════════════════════════════════════════════
+-- POLLING SYSTEM
+-- ════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS polls (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    created_by INT REFERENCES users (id),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN ('active', 'closed', 'results_declared')
+    ),
+    choice_count SMALLINT NOT NULL CHECK (choice_count BETWEEN 2 AND 5),
+    choice_1 VARCHAR(100) NOT NULL,
+    choice_2 VARCHAR(100) NOT NULL,
+    choice_3 VARCHAR(100),
+    choice_4 VARCHAR(100),
+    choice_5 VARCHAR(100),
+    results_announced_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
+CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id SERIAL PRIMARY KEY,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users (id),
+    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
+    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (poll_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_user ON poll_votes (poll_id, user_id);
+
+-- ════════════════════════════════════════════════════════════════
+-- POLLING SYSTEM FUNCTIONS
+-- ════════════════════════════════════════════════════════════════
+
+-- fn_create_poll: Admin creates a new poll
+CREATE OR REPLACE FUNCTION fn_create_poll(
+    p_society_id   INT,
+    p_created_by   INT,
+    p_title        VARCHAR(200),
+    p_description  TEXT DEFAULT NULL,
+    p_choice_count SMALLINT DEFAULT 2,
+    p_choice_1     VARCHAR(100) DEFAULT '',
+    p_choice_2     VARCHAR(100) DEFAULT '',
+    p_choice_3     VARCHAR(100) DEFAULT NULL,
+    p_choice_4     VARCHAR(100) DEFAULT NULL,
+    p_choice_5     VARCHAR(100) DEFAULT NULL
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll_id INT;
+BEGIN
+    IF p_choice_count < 2 OR p_choice_count > 5 THEN
+        RAISE EXCEPTION 'choice_count must be between 2 and 5';
+    END IF;
+
+    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5)
+    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5)
+    RETURNING id INTO v_poll_id;
+
+    RETURN v_poll_id;
+END;
+$$;
+
+-- fn_get_polls: List active polls for a society (owner portal)
+CREATE OR REPLACE FUNCTION fn_get_polls(p_society_id INT)
+RETURNS TABLE (
+    id              INT,
+    title           VARCHAR(200),
+    description     TEXT,
+    status          VARCHAR(20),
+    choice_count    SMALLINT,
+    choice_1        VARCHAR(100),
+    choice_2        VARCHAR(100),
+    choice_3        VARCHAR(100),
+    choice_4        VARCHAR(100),
+    choice_5        VARCHAR(100),
+    results_announced_at TIMESTAMP,
+    created_at      TIMESTAMP,
+    total_votes     BIGINT,
+    has_voted       BOOLEAN
+) LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        p.id,
+        p.title,
+        p.description,
+        p.status,
+        p.choice_count,
+        p.choice_1,
+        p.choice_2,
+        p.choice_3,
+        p.choice_4,
+        p.choice_5,
+        p.results_announced_at,
+        p.created_at,
+        COALESCE(v.total_votes, 0)::BIGINT,
+        FALSE AS has_voting
+    FROM polls p
+    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
+        ON v.poll_id = p.id
+    WHERE p.society_id = p_society_id
+      AND p.status = 'active'
+    ORDER BY p.created_at DESC;
+END;
+$$;
+
+-- fn_get_poll_detail: Get a single poll with vote counts per choice
+CREATE OR REPLACE FUNCTION fn_get_poll_detail(p_poll_id INT, p_user_id INT)
+RETURNS TABLE (
+    id              INT,
+    title           VARCHAR(200),
+    description     TEXT,
+    status          VARCHAR(20),
+    choice_count    SMALLINT,
+    choice_1        VARCHAR(100),
+    choice_2        VARCHAR(100),
+    choice_3        VARCHAR(100),
+    choice_4        VARCHAR(100),
+    choice_5        VARCHAR(100),
+    results_announced_at TIMESTAMP,
+    created_at      TIMESTAMP,
+    total_votes     BIGINT,
+    has_voted       BOOLEAN,
+    user_vote       SMALLINT,
+    vote_counts     JSONB
+) LANGUAGE plpgsql AS $$
+DECLARE
+    v_total_votes BIGINT;
+    v_has_voted   BOOLEAN;
+    v_user_vote   SMALLINT;
+BEGIN
+    SELECT
+        p.id,
+        p.title,
+        p.description,
+        p.status,
+        p.choice_count,
+        p.choice_1,
+        p.choice_2,
+        p.choice_3,
+        p.choice_4,
+        p.choice_5,
+        p.results_announced_at,
+        p.created_at,
+        COALESCE((SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id), 0)::BIGINT,
+        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
+        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id)
+    INTO
+        id, title, description, status, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
+        results_announced_at, created_at, total_votes, v_has_voted, v_user_vote;
+
+    vote_counts := (
+        SELECT jsonb_object_agg(
+            'choice_' || v.choice,
+            v.cnt
+        )
+        FROM (
+            SELECT choice, COUNT(*) AS cnt
+            FROM poll_votes
+            WHERE poll_id = p_poll_id
+            GROUP BY choice
+        ) v
+    );
+
+    has_voted := v_has_voted;
+    user_vote := v_user_vote;
+
+    RETURN NEXT;
+END;
+$$;
+
+-- fn_cast_vote: User casts a vote (server-side auth via p_user_id)
+CREATE OR REPLACE FUNCTION fn_cast_vote(
+    p_poll_id  INT,
+    p_user_id  INT,
+    p_choice   SMALLINT
+) RETURNS TABLE (success BOOLEAN, message TEXT, total_votes BIGINT) LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll      polls%ROWTYPE;
+    v_existing  INT;
+    v_total     BIGINT;
+BEGIN
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT FALSE, 'Poll not found'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    IF v_poll.status <> 'active' THEN
+        RETURN QUERY SELECT FALSE, 'This poll is no longer active'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    IF p_choice < 1 OR p_choice > v_poll.choice_count THEN
+        RETURN QUERY SELECT FALSE, format('Invalid choice. Please select between 1 and %s', v_poll.choice_count)::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    SELECT id INTO v_existing FROM poll_votes WHERE poll_id = p_poll_id AND user_id = p_user_id;
+    IF v_existing IS NOT NULL THEN
+        RETURN QUERY SELECT FALSE, 'You have already voted in this poll'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    INSERT INTO poll_votes (poll_id, user_id, choice)
+    VALUES (p_poll_id, p_user_id, p_choice);
+
+    SELECT COUNT(*) INTO v_total FROM poll_votes WHERE poll_id = p_poll_id;
+
+    RETURN QUERY SELECT TRUE, 'Vote cast successfully'::TEXT, v_total;
+END;
+$$;
+
+-- fn_declare_results: Admin declares results at a specified time
+CREATE OR REPLACE FUNCTION fn_declare_results(p_poll_id INT, p_user_id INT)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll polls%ROWTYPE;
+BEGIN
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    UPDATE polls
+       SET status = 'results_declared',
+           results_announced_at = NOW(),
+           updated_at = NOW()
+     WHERE id = p_poll_id;
+
+    RETURN TRUE;
+END;
+$$;
+
+-- fn_close_poll: Admin closes a poll
+CREATE OR REPLACE FUNCTION fn_close_poll(p_poll_id INT, p_user_id INT)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE polls
+       SET status = 'closed',
+           updated_at = NOW()
+     WHERE id = p_poll_id;
+
+    RETURN FOUND;
+END;
+$$;
+
+-- fn_poll_vote_count_kpi: Returns total votes cast across all active polls in a society
+CREATE OR REPLACE FUNCTION fn_poll_vote_count_kpi(p_society_id INT)
+RETURNS BIGINT LANGUAGE SQL STABLE AS $$
+    SELECT COUNT(*)::BIGINT FROM poll_votes pv
+    JOIN polls p ON p.id = pv.poll_id
+    WHERE p.society_id = p_society_id;
+$$;
+
+-- fn_poll_total_count_kpi: Returns total number of polls in a society
+CREATE OR REPLACE FUNCTION fn_poll_total_count_kpi(p_society_id INT)
+RETURNS BIGINT LANGUAGE SQL STABLE AS $$
+    SELECT COUNT(*)::BIGINT FROM polls WHERE society_id = p_society_id;
+$$;

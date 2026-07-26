@@ -136,10 +136,13 @@ _PATH_LABELS = {
     "owner-concerns":    "Concerns",
     "vendor-concerns":   "Concerns",
     "security-concerns": "Concerns",
+    "polls":             "Polls",
+    "owner-polls":       "Polls",
     "attendance":        "Attendance",
     "security-receipts":  "Receipts",
     "security-receipt":   "New Receipt",
     "security-users":    "Users",
+    "create-poll":       "Create Poll",
 }
 
 
@@ -191,6 +194,8 @@ def _portal_content(role, society_id, pathname, auth=None):
             "enroll"        if "/enroll"        in p else
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
+            "polls"         if "/polls"         in p else
+            "create_poll"   if "/create-poll"   in p else
             "assets"        if "/assets"        in p else
             "channels"      if "/channels"      in p else
             "evaluate_pass" if "/evaluate-pass" in p else
@@ -209,6 +214,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "charges"  if "/owner-charges"  in p else
             "events"   if "/owner-events"   in p or "/events"   in p else
             "concerns" if "/owner-concerns" in p or "/concerns" in p else
+            "polls"    if "/owner-polls"    in p else
             "channels" if "/channels" in p else
             "settings" if "/owner-settings" in p or "/settings" in p else
             "dashboard"
