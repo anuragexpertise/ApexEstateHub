@@ -103,6 +103,12 @@ def _create_poll_form(sid, user_id, role):
             ]),
             dbc.Row([
                 dbc.Col([
+                    dbc.Label("Poll Ends At (optional)", html_for="poll-ends-at"),
+                    dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="YYYY-MM-DDTHH:MM"),
+                ], width=4, className="mb-3"),
+            ]),
+            dbc.Row([
+                dbc.Col([
                     dbc.Label("Number of Choices", html_for="poll-choice-count"),
                     dcc.Dropdown(
                         id="poll-choice-count",
@@ -140,7 +146,7 @@ def _create_poll_form(sid, user_id, role):
                     dbc.Label("Choice 5 (optional)", html_for="poll-choice-5"),
                     dbc.Input(id="poll-choice-5", type="text", placeholder="Option 5 (optional)", maxLength=100),
                 ], width=4, className="mb-3"),
-            ]),
+            ], id="poll-extra-choices"),
             dbc.Row([
                 dbc.Col([
                     dbc.Button([html.I(className="fas fa-plus me-2"), "Create Poll"],

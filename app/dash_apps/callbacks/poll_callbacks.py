@@ -3,9 +3,38 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from datetime import datetime
 from database.db_manager import db
+import app.services.push_service as PushService
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _check_poll_ending_soon(society_id):
+    try:
+        soon_rows = db._execute(
+            "SELECT * FROM fn_get_polls_ending_soon(%s, %s)",
+            (society_id, 15), fetch_all=True
+        )
+        if soon_rows:
+            targets = PushService.get_notification_targets(society_id, roles=["apartment"])
+            if targets:
+                for soon in soon_rows:
+                    try:
+                        PushService.send_bulk_push(
+                            targets,
+                            "⏰ Poll Ending Soon",
+                            f"Poll '{soon['title']}' ends at {soon['ends_at']}",
+                            url="/dashboard/polls",
+                            society_id=society_id,
+                        )
+                        db._execute(
+                            "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
+                            (soon["id"],)
+                        )
+                    except Exception as e:
+                        logger.error(f"Ending soon push notify failed: {e}")
+    except Exception as e:
+        logger.error(f"Poll ending soon check failed: {e}")
 
 
 def _get_user_from_auth(auth_data):
@@ -51,12 +80,38 @@ def register_poll_callbacks(app):
             return auth_error
         role = auth_data.get("role") if auth_data else None
         try:
+            db._execute("SELECT fn_declare_expired_polls()")
             rows = db._execute(
                 "SELECT id, title, description, status, choice_count, choice_1, choice_2, "
-                "choice_3, choice_4, choice_5, results_announced_at, created_at "
+                "choice_3, choice_4, choice_5, results_announced_at, created_at, ends_at "
                 "FROM polls WHERE society_id = %s AND status = 'active' ORDER BY created_at DESC",
                 (society_id,), fetch_all=True
             )
+            try:
+                soon_rows = db._execute(
+                    "SELECT * FROM fn_get_polls_ending_soon(%s, %s)",
+                    (society_id, 15), fetch_all=True
+                )
+                if soon_rows:
+                    targets = PushService.get_notification_targets(society_id, roles=["apartment"])
+                    if targets:
+                        for soon in soon_rows:
+                            try:
+                                PushService.send_bulk_push(
+                                    targets,
+                                    "⏰ Poll Ending Soon",
+                                    f"Poll '{soon['title']}' ends at {soon['ends_at']}",
+                                    url="/dashboard/polls",
+                                    society_id=society_id,
+                                )
+                                db._execute(
+                                    "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
+                                    (soon["id"],)
+                                )
+                            except Exception as e:
+                                logger.error(f"Ending soon push notify failed: {e}")
+            except Exception as e:
+                logger.error(f"Poll ending soon check failed: {e}")
             if not rows:
                 return html.Div([
                     html.Div([
@@ -74,16 +129,21 @@ def register_poll_callbacks(app):
                 choice_count = row["choice_count"]
                 choices = [row.get(f"choice_{i}") for i in range(1, choice_count + 1) if row.get(f"choice_{i}")]
                 results_announced = row.get("results_announced_at")
+                ends_at = row.get("ends_at")
 
                 status_badge = dbc.Badge("Active", color="success", style={"fontSize": "11px"})
                 if results_announced:
                     status_badge = dbc.Badge("Results Declared", color="info", style={"fontSize": "11px"})
 
+                badges = [status_badge]
+                if ends_at:
+                    badges.append(dbc.Badge(f"Ends: {ends_at.strftime('%Y-%m-%d %H:%M') if hasattr(ends_at, 'strftime') else str(ends_at)}", color="warning", style={"fontSize": "11px"}))
+
                 card = dbc.Card([
                     dbc.CardBody([
                         html.Div([
                             html.H6(title, className="mb-1", style={"fontWeight": "700", "fontSize": "15px"}),
-                            html.Div([status_badge], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
+                            html.Div(badges, style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
                         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
                         html.Hr(style={"margin": "10px 0", "opacity": "0.12"}),
                         html.P(description[:120] + ("…" if len(description) > 120 else ""),
@@ -139,9 +199,11 @@ def register_poll_callbacks(app):
             return no_update
 
         try:
+            db._execute("SELECT fn_declare_expired_polls()")
+            _check_poll_ending_soon(society_id)
             row = db._execute(
                 "SELECT id, title, description, status, choice_count, choice_1, choice_2, "
-                "choice_3, choice_4, choice_5, results_announced_at, created_at "
+                "choice_3, choice_4, choice_5, results_announced_at, created_at, ends_at "
                 "FROM polls WHERE id = %s AND society_id = %s",
                 (poll_id, society_id), fetch_one=True
             )
@@ -168,6 +230,7 @@ def register_poll_callbacks(app):
                 "choices": [row.get(f"choice_{i}") for i in range(1, row["choice_count"] + 1)],
                 "results_announced_at": str(row.get("results_announced_at")) if row.get("results_announced_at") else None,
                 "created_at": str(row.get("created_at")) if row.get("created_at") else None,
+                "ends_at": str(row.get("ends_at")) if row.get("ends_at") else None,
                 "total_votes": total_votes,
                 "user_vote": user_vote,
             }
@@ -203,6 +266,15 @@ def register_poll_callbacks(app):
         total_votes = store_data.get("total_votes", 0)
         user_vote = store_data.get("user_vote")
         results_announced = store_data.get("results_announced_at")
+        ends_at = store_data.get("ends_at")
+
+        if ends_at:
+            try:
+                ends_dt = datetime.fromisoformat(ends_at)
+                if status == "active" and ends_dt <= datetime.now():
+                    status = "results_declared"
+            except (ValueError, TypeError):
+                pass
 
         status_color = "success" if status == "active" else "info" if status == "results_declared" else "secondary"
         status_label = status.replace("_", " ").title()
@@ -210,6 +282,12 @@ def register_poll_callbacks(app):
         title_out = title
         status_out = dbc.Badge(status_label, color=status_color, style={"fontSize": "11px"})
         desc_out = html.P(description, style={"color": "#555", "fontSize": "14px"}) if description else ""
+
+        if ends_at:
+            desc_out = html.Div([
+                desc_out,
+                html.Small(f"Poll ends: {ends_at}", style={"color": "#e67e22", "fontSize": "12px", "fontWeight": "600"}),
+            ])
 
         choices_out = []
         for i, choice_text in enumerate(choices, start=1):
@@ -296,6 +374,17 @@ def register_poll_callbacks(app):
         return no_update, no_update, no_update
 
     @app.callback(
+        Output("poll-extra-choices", "style"),
+        Input("poll-choice-count", "value"),
+        prevent_initial_call=False,
+    )
+    def toggle_extra_choices(choice_count):
+        choice_count = choice_count or 2
+        if choice_count >= 3:
+            return {"display": "flex"}
+        return {"display": "none"}
+
+    @app.callback(
         Output("url", "pathname", allow_duplicate=True),
         Input("create-poll-btn", "n_clicks"),
         prevent_initial_call=True,
@@ -316,10 +405,11 @@ def register_poll_callbacks(app):
         State("poll-choice-3", "value"),
         State("poll-choice-4", "value"),
         State("poll-choice-5", "value"),
+        State("poll-ends-at", "value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def create_poll(n_clicks, title, description, choice_count, c1, c2, c3, c4, c5, auth_data):
+    def create_poll(n_clicks, title, description, choice_count, c1, c2, c3, c4, c5, ends_at, auth_data):
         user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
         if auth_error:
             return auth_error
@@ -331,12 +421,16 @@ def register_poll_callbacks(app):
             result = db._execute(
                 "SELECT fn_create_poll(%s::INT, %s::INT, %s::VARCHAR(200), %s::TEXT, "
                 "%s::SMALLINT, %s::VARCHAR(100), %s::VARCHAR(100), %s::VARCHAR(100), "
-                "%s::VARCHAR(100), %s::VARCHAR(100)) AS poll_id",
+                "%s::VARCHAR(100), %s::VARCHAR(100), %s::TIMESTAMP) AS poll_id",
                 (society_id, user_id, title, description, choice_count,
-                 choices[0], choices[1], choices[2], choices[3], choices[4]),
+                 choices[0], choices[1], choices[2], choices[3], choices[4], ends_at),
                 fetch_one=True
             )
             poll_id = result["poll_id"] if result else None
+            try:
+                PushService.notify_poll_created(society_id, title)
+            except Exception as e:
+                logger.error(f"Poll creation push notify failed: {e}")
             return html.Div([
                 html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                 f"Poll '{title}' created successfully! (ID: {poll_id})",
@@ -397,10 +491,12 @@ def register_poll_callbacks(app):
         if auth_error:
             return auth_error
         try:
+            db._execute("SELECT fn_declare_expired_polls()")
+            _check_poll_ending_soon(society_id)
             rows = db._execute(
                 "SELECT p.id, p.title, p.description, p.status, p.choice_count, "
                 "p.choice_1, p.choice_2, p.choice_3, p.choice_4, p.choice_5, "
-                "p.results_announced_at, p.created_at, "
+                "p.results_announced_at, p.created_at, p.ends_at, "
                 "COALESCE(v.total_votes, 0) AS total_votes "
                 "FROM polls p "
                 "LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v "
@@ -419,12 +515,16 @@ def register_poll_callbacks(app):
                 status = row["status"]
                 total_votes = row["total_votes"]
                 results_announced = row.get("results_announced_at")
+                ends_at = row.get("ends_at")
                 choice_count = row["choice_count"]
                 choices = [row.get(f"choice_{i}") for i in range(1, choice_count + 1) if row.get(f"choice_{i}")]
 
                 status_badge = dbc.Badge(status.replace("_", " ").title(),
                                          color="info" if status == "results_declared" else "secondary",
                                          style={"fontSize": "11px"})
+                badges = [status_badge]
+                if ends_at:
+                    badges.append(dbc.Badge(f"Ends: {ends_at.strftime('%Y-%m-%d %H:%M') if hasattr(ends_at, 'strftime') else str(ends_at)}", color="warning", style={"fontSize": "11px"}))
 
                 vote_details = []
                 if results_announced or status == "closed":
@@ -459,7 +559,7 @@ def register_poll_callbacks(app):
                         dbc.CardBody([
                             html.Div([
                                 html.H6(title, className="mb-1", style={"fontWeight": "700", "fontSize": "15px"}),
-                                html.Div([status_badge], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
+                                html.Div(badges, style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
                             ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
                             html.Hr(style={"margin": "10px 0", "opacity": "0.12"}),
                             html.Div(vote_details),

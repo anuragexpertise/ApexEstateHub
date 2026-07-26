@@ -20,6 +20,8 @@ class Poll:
     results_announced_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    reminder_sent_at: Optional[datetime] = None
 
     def to_dict(self, include_calculated: bool = False):
         data = asdict(self)
