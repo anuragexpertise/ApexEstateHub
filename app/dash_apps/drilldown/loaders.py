@@ -250,6 +250,11 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         return ("SELECT * FROM fn_events_list(%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset))
 
+    # ── POLLS ──────────────────────────────────────────────────────
+    if entity == "polls":
+        return ("SELECT * FROM fn_polls_list(%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, filters.get("status"), page_size, offset))
+
     # ── CONCERNS ────────────────────────────────────────────────────────
     if entity == "concerns":
         extra, params = "", [sid]
@@ -582,6 +587,19 @@ def load_list(
             ) or []
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM events WHERE society_id=%s AND event_date>=CURRENT_DATE",
+                (sid,), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
+        # ── POLLS ──────────────────────────────────────────────────────
+        if entity == "polls":
+            p_status = filters.get("status")
+            rows = db._execute(
+                "SELECT * FROM fn_polls_list(%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM polls WHERE society_id=%s",
                 (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
@@ -1070,6 +1088,13 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
             r = db._execute("SELECT * FROM fn_event_profile(%s)", (pk,), fetch_one=True)
             return dict(r) if r else None
 
+        # ── POLL ───────────────────────────────────────────────────────────────
+        if entity_singular == "poll":
+            r = db._execute(
+                "SELECT * FROM fn_get_poll_detail(%s, NULL)", (pk,), fetch_one=True
+            )
+            return dict(r) if r else None
+
         # ── CONCERN ──────────────────────────────────────────────────────────
         if entity_singular == "concern":
             r = db._execute("SELECT * FROM fn_concern_profile(%s)", (pk,), fetch_one=True)
@@ -1318,6 +1343,10 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
         if entity_plural == "events":
             db._execute("DELETE FROM events WHERE id=%s AND society_id=%s", (pk, society_id))
             return True, "Event deleted"
+
+        if entity_plural == "polls":
+            db._execute("DELETE FROM polls WHERE id=%s AND society_id=%s", (pk, society_id))
+            return True, "Poll deleted"
 
         if entity_plural == "concerns":
             db._execute(

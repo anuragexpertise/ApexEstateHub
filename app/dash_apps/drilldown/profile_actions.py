@@ -237,6 +237,34 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
 
+    # ── POLLS ──────────────────────────────────────────────────────────
+    "polls": [
+        {
+            "label": "Vote",
+            "action_id": "cast_vote",
+            "target_card": "form_poll_vote",
+            "icon": "fa-check-square",
+            "color": "primary",
+            "roles": ["admin", "apartment", "vendor", "security"],
+        },
+        {
+            "label": "Declare Results",
+            "action_id": "declare_results",
+            "target_card": None,
+            "icon": "fa-check-circle",
+            "color": "success",
+            "roles": ["admin"],
+        },
+        {
+            "label": "Close Poll",
+            "action_id": "close_poll",
+            "target_card": None,
+            "icon": "fa-lock",
+            "color": "dark",
+            "roles": ["admin"],
+        },
+    ],
+
     # ── APT CHARGES ──────────────────────────────────────────────────────────
     "apt_charges": [
         {
