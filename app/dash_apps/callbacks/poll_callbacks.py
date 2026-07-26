@@ -48,6 +48,7 @@ def register_poll_callbacks(app):
         user_id, society_id, auth_error = _require_auth(auth_data)
         if auth_error:
             return auth_error
+        role = auth_data.get("role") if auth_data else None
         try:
             rows = db._execute(
                 "SELECT id, title, description, status, choice_count, choice_1, choice_2, "
@@ -94,6 +95,18 @@ def register_poll_callbacks(app):
                             id={"type": "poll-view-btn", "poll_id": poll_id},
                             color="primary", size="sm", style={"borderRadius": "8px"},
                         ),
+                        *([
+                            dbc.Button(
+                                [html.I(className="fas fa-check me-1"), "Declare Results"],
+                                id={"type": "poll-action-btn", "poll_id": poll_id, "action": "declare_results"},
+                                color="info", size="sm", style={"borderRadius": "8px", "marginLeft": "4px"},
+                            ),
+                            dbc.Button(
+                                [html.I(className="fas fa-lock me-1"), "Close Poll"],
+                                id={"type": "poll-action-btn", "poll_id": poll_id, "action": "close_poll"},
+                                color="secondary", size="sm", style={"borderRadius": "8px", "marginLeft": "4px"},
+                            ),
+                        ] if role == "admin" else []),
                     ]),
                 ], style={"borderRadius": "12px", "boxShadow": "0 2px 8px rgba(0,0,0,0.06)", "marginBottom": "12px"})
                 cards.append(card)

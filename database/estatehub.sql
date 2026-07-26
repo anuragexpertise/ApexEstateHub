@@ -5300,6 +5300,38 @@ BEGIN
 END;
 $$;
 
+-- fn_polls_list: List polls for a society with vote counts
+DROP FUNCTION IF EXISTS fn_polls_list CASCADE;
+CREATE OR REPLACE FUNCTION fn_polls_list(
+    p_society_id INT, p_search TEXT DEFAULT NULL, p_status VARCHAR DEFAULT NULL
+)
+RETURNS TABLE (
+    id              INT,
+    title           VARCHAR(200),
+    description     TEXT,
+    status          VARCHAR(20),
+    choice_count    SMALLINT,
+    choice_1        VARCHAR(100),
+    choice_2        VARCHAR(100),
+    choice_3        VARCHAR(100),
+    choice_4        VARCHAR(100),
+    choice_5        VARCHAR(100),
+    total_votes     BIGINT,
+    created_at      TIMESTAMP
+) LANGUAGE sql STABLE AS $$
+    SELECT
+        p.id, p.title, p.description, p.status, p.choice_count,
+        p.choice_1, p.choice_2, p.choice_3, p.choice_4, p.choice_5,
+        COALESCE(v.total_votes, 0)::BIGINT, p.created_at
+    FROM polls p
+    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
+        ON v.poll_id = p.id
+    WHERE p.society_id = p_society_id
+      AND (p_search IS NULL OR p.title ILIKE '%' || p_search || '%')
+      AND (p_status IS NULL OR p.status = p_status)
+    ORDER BY p.created_at DESC;
+$$;
+
 -- fn_get_polls: List active polls for a society (owner portal)
 CREATE OR REPLACE FUNCTION fn_get_polls(p_society_id INT)
 RETURNS TABLE (

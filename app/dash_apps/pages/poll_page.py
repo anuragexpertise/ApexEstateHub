@@ -22,6 +22,12 @@ def _polls_list(sid, user_id, role):
             html.Small("View and vote in community polls", style={"color": "#aaa", "fontSize": "12px"}),
         ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"}),
         html.Div(id="polls-kpi-row", children=_kpi_row_dynamic(portal, "polls", sid)),
+        html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
+        html.Div(id="drill-content", children=[
+            html.Div("Click a KPI to explore data →",
+                     className="text-muted text-center", style={"padding": "6px 2px"}),
+        ]),
+        html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
         html.Div([
             html.Div([
                 html.Span("Active Polls", style={"fontWeight": "700", "fontSize": "14px", "color": "#15304f"}),
@@ -32,6 +38,23 @@ def _polls_list(sid, user_id, role):
             ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "12px"}),
             html.Div(id="polls-list-container", children=[
                 html.Div("Loading polls…", className="text-muted text-center", style={"padding": "40px 0"}),
+            ]),
+            html.Div(id="poll-detail-section", children=[
+                html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+                html.H5("Poll Details", style={"fontWeight": "700", "color": "#15304f"}),
+                html.H4(id="poll-detail-title", style={"fontWeight": "800", "color": "#15304f"}),
+                html.Small(id="poll-detail-status", style={"color": "#aaa", "fontSize": "12px"}),
+                html.Div(id="poll-detail-description", className="mb-3", style={"color": "#555", "fontSize": "14px"}),
+                html.Div(id="poll-detail-choices", className="mb-3"),
+                html.Div(id="poll-detail-vote-result", className="mb-3"),
+                html.Small(id="poll-detail-total-votes", className="text-muted", style={"fontSize": "12px"}),
+            ]),
+            html.Div(id="poll-results-section", children=[
+                html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+                html.H5("Poll Results", style={"fontWeight": "700", "color": "#15304f"}),
+                html.Div(id="poll-results-container", children=[
+                    html.Div("No results to display.", className="text-muted text-center", style={"padding": "20px 0"}),
+                ]),
             ]),
         ]),
         html.Div(id="poll-toast-container"),
