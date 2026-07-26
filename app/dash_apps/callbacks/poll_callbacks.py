@@ -1,4 +1,5 @@
-from dash import Input, Output, State, html, no_update, callback_context, ALL, PreventUpdate
+from dash import Input, Output, State, html, no_update, callback_context, ALL
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from datetime import datetime
 from database.db_manager import db
@@ -269,7 +270,7 @@ def register_poll_callbacks(app):
 
         try:
             result = db._execute(
-                "SELECT fn_cast_vote(%s, %s, %s) AS success",
+                "SELECT fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT) AS success",
                 (poll_id, user_id, choice), fetch_one=True
             )
             if result and result.get("success"):
@@ -324,10 +325,15 @@ def register_poll_callbacks(app):
             return auth_error
         if not n_clicks or not title:
             return no_update
+        choice_count = choice_count or 2
+        choices = [c1 or '', c2 or '', c3 or '', c4 or '', c5 or '']
         try:
             result = db._execute(
-                "SELECT fn_create_poll(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS poll_id",
-                (society_id, user_id, title, description, choice_count, c1, c2, c3, c4, c5),
+                "SELECT fn_create_poll(%s::INT, %s::INT, %s::VARCHAR(200), %s::TEXT, "
+                "%s::SMALLINT, %s::VARCHAR(100), %s::VARCHAR(100), %s::VARCHAR(100), "
+                "%s::VARCHAR(100), %s::VARCHAR(100)) AS poll_id",
+                (society_id, user_id, title, description, choice_count,
+                 choices[0], choices[1], choices[2], choices[3], choices[4]),
                 fetch_one=True
             )
             poll_id = result["poll_id"] if result else None
@@ -365,13 +371,13 @@ def register_poll_callbacks(app):
         try:
             if action == "declare_results":
                 db._execute(
-                    "SELECT fn_declare_results(%s, %s) AS success",
+                    "SELECT fn_declare_results(%s::INT, %s::INT) AS success",
                     (poll_id, user_id), fetch_one=True
                 )
                 return {"action": "declare_results", "poll_id": poll_id, "success": True}
             elif action == "close_poll":
                 db._execute(
-                    "SELECT fn_close_poll(%s, %s) AS success",
+                    "SELECT fn_close_poll(%s::INT, %s::INT) AS success",
                     (poll_id, user_id), fetch_one=True
                 )
                 return {"action": "close_poll", "poll_id": poll_id, "success": True}
