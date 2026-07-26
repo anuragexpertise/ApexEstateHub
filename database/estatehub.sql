@@ -5249,7 +5249,9 @@ CREATE TABLE IF NOT EXISTS polls (
     choice_5 VARCHAR(100),
     results_announced_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP
+    updated_at TIMESTAMP,
+    ends_at TIMESTAMP,
+    reminder_sent_at TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
@@ -5283,7 +5285,8 @@ CREATE OR REPLACE FUNCTION fn_create_poll(
     p_choice_2     VARCHAR(100) DEFAULT '',
     p_choice_3     VARCHAR(100) DEFAULT NULL,
     p_choice_4     VARCHAR(100) DEFAULT NULL,
-    p_choice_5     VARCHAR(100) DEFAULT NULL
+    p_choice_5     VARCHAR(100) DEFAULT NULL,
+    p_ends_at      TIMESTAMP DEFAULT NULL
 ) RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
     v_poll_id INT;
@@ -5292,8 +5295,8 @@ BEGIN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
     END IF;
 
-    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5)
-    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5)
+    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at)
+    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at)
     RETURNING id INTO v_poll_id;
 
     RETURN v_poll_id;
@@ -5317,12 +5320,13 @@ RETURNS TABLE (
     choice_4        VARCHAR(100),
     choice_5        VARCHAR(100),
     total_votes     BIGINT,
-    created_at      TIMESTAMP
+    created_at      TIMESTAMP,
+    ends_at         TIMESTAMP
 ) LANGUAGE sql STABLE AS $$
     SELECT
         p.id, p.title, p.description, p.status, p.choice_count,
         p.choice_1, p.choice_2, p.choice_3, p.choice_4, p.choice_5,
-        COALESCE(v.total_votes, 0)::BIGINT, p.created_at
+        COALESCE(v.total_votes, 0)::BIGINT, p.created_at, p.ends_at
     FROM polls p
     LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
         ON v.poll_id = p.id
@@ -5348,7 +5352,8 @@ RETURNS TABLE (
     results_announced_at TIMESTAMP,
     created_at      TIMESTAMP,
     total_votes     BIGINT,
-    has_voted       BOOLEAN
+    has_voted       BOOLEAN,
+    ends_at         TIMESTAMP
 ) LANGUAGE plpgsql AS $$
 BEGIN
     RETURN QUERY
@@ -5366,7 +5371,8 @@ BEGIN
         p.results_announced_at,
         p.created_at,
         COALESCE(v.total_votes, 0)::BIGINT,
-        FALSE AS has_voting
+        FALSE AS has_voting,
+        p.ends_at
     FROM polls p
     LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
         ON v.poll_id = p.id
@@ -5394,7 +5400,8 @@ RETURNS TABLE (
     total_votes     BIGINT,
     has_voted       BOOLEAN,
     user_vote       SMALLINT,
-    vote_counts     JSONB
+    vote_counts     JSONB,
+    ends_at         TIMESTAMP
 ) LANGUAGE plpgsql AS $$
 DECLARE
     v_total_votes BIGINT;
@@ -5416,10 +5423,11 @@ BEGIN
         p.created_at,
         COALESCE((SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id), 0)::BIGINT,
         EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
-        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id)
+        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
+        p.ends_at
     INTO
         id, title, description, status, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
-        results_announced_at, created_at, total_votes, v_has_voted, v_user_vote;
+        results_announced_at, created_at, total_votes, v_has_voted, v_user_vote, ends_at;
 
     vote_counts := (
         SELECT jsonb_object_agg(
@@ -5461,6 +5469,12 @@ BEGIN
 
     IF v_poll.status <> 'active' THEN
         RETURN QUERY SELECT FALSE, 'This poll is no longer active'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    IF v_poll.ends_at IS NOT NULL AND v_poll.ends_at <= NOW() THEN
+        PERFORM fn_declare_expired_polls();
+        RETURN QUERY SELECT FALSE, 'This poll has ended'::TEXT, 0::BIGINT;
         RETURN;
     END IF;
 
@@ -5512,10 +5526,48 @@ BEGIN
     UPDATE polls
        SET status = 'closed',
            updated_at = NOW()
-     WHERE id = p_poll_id;
+      WHERE id = p_poll_id;
 
     RETURN FOUND;
 END;
+$$;
+
+-- fn_declare_expired_polls: Auto-declare results for polls that have passed their end time
+CREATE OR REPLACE FUNCTION fn_declare_expired_polls()
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE polls
+       SET status = 'results_declared',
+           results_announced_at = NOW(),
+           updated_at = NOW()
+     WHERE status = 'active'
+       AND ends_at IS NOT NULL
+       AND ends_at <= NOW();
+END;
+$$;
+
+-- fn_get_polls_ending_soon: Find active polls ending within the given minutes
+CREATE OR REPLACE FUNCTION fn_get_polls_ending_soon(
+    p_society_id INT,
+    p_minutes INT DEFAULT 15
+)
+RETURNS TABLE (
+    id INT,
+    title VARCHAR(200),
+    ends_at TIMESTAMP
+) LANGUAGE sql STABLE AS $$
+    SELECT
+        p.id,
+        p.title,
+        p.ends_at
+    FROM polls p
+    WHERE p.society_id = p_society_id
+      AND p.status = 'active'
+      AND p.ends_at IS NOT NULL
+      AND p.ends_at > NOW()
+      AND p.ends_at <= NOW() + (p_minutes || ' minutes')::INTERVAL
+      AND p.reminder_sent_at IS NULL
+    ORDER BY p.ends_at ASC;
 $$;
 
 -- fn_poll_vote_count_kpi: Returns total votes cast across all active polls in a society
