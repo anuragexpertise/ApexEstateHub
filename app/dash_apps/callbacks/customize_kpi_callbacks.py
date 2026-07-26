@@ -57,6 +57,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_events_total", "admin", "events", "Events"),
     # ADMIN - Concerns tab
     ("kpi_concerns_open", "admin", "concerns", "Concerns"),
+    # ADMIN - Polls tab
+    ("kpi_polls_total", "admin", "polls", "Polling"),
+    ("kpi_polls_active", "admin", "polls", "Polling"),
+    ("kpi_polls_votes", "admin", "polls", "Polling"),
     # ADMIN - Settings tab
     ("kpi_societies_calc_start_date", "admin", "settings", "Settings"),
     ("kpi_plan_validity", "admin", "settings", "Settings"),
@@ -109,6 +113,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # APARTMENT - Events / Concerns / Settings
     ("kpi_events_total", "apartment", "events", "Events"),
     ("kpi_concerns_open", "apartment", "concerns", "Concerns"),
+    # APARTMENT - Polls tab
+    ("kpi_polls_total", "apartment", "polls", "Polling"),
+    ("kpi_polls_active", "apartment", "polls", "Polling"),
+    ("kpi_polls_votes", "apartment", "polls", "Polling"),
     ("kpi_apartment_date", "apartment", "settings", "Profile"),
     # VENDOR PORTAL - Dashboard
     ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
