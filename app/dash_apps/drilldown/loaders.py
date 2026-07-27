@@ -1012,17 +1012,20 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         if entity_singular == "apartment":
             try:
                 r = db._execute(
-                    "SELECT a.*, d.pending_dues, d.overdue_dues, d.gate_pass, d.noc_eligible "
+                    "SELECT a.*, u.email, d.pending_dues, d.overdue_dues, d.gate_pass, d.noc_eligible "
                     "FROM apartments a "
                     "JOIN v_apartment_dues d ON d.apartment_id=a.id "
+                    "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "
                     "WHERE a.id=%s AND a.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             except Exception:
                 r = db._execute(
-                    "SELECT a.*, 0 AS pending_dues, 0 AS overdue_dues, "
+                    "SELECT a.*, u.email, 0 AS pending_dues, 0 AS overdue_dues, "
                     "FALSE AS gate_pass, FALSE AS noc_eligible "
-                    "FROM apartments a WHERE a.id=%s AND a.society_id=%s",
+                    "FROM apartments a "
+                    "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "
+                    "WHERE a.id=%s AND a.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             return dict(r) if r else None
