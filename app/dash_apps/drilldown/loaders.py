@@ -1031,57 +1031,63 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
             return dict(r) if r else None
  
         # ── VENDOR ─────────────────────────────────────────────────────
+        # pk here is vendors.id (matches fn_vendors_list.id, receivables/
+        # payables/receipts/expenses.entity_id for role='vendor'). The
+        # linked login's users.id is exposed separately as `user_id` for
+        # the handful of places that need the login identity specifically
+        # (QR encoding, vendor_passes.user_id).
         if entity_singular == "vendor":
             try:
                 r = db._execute(
-                    "SELECT u.id, u.email, u.society_id, "
+                    "SELECT v.id, u.id AS user_id, u.email, v.society_id, "
                     "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
                     "  v.active, v.logo, v.license, v.photo, v.service_description, v.created_at, "
                     "  vp.pass_expiry, vp.gate_pass "
-                    "FROM users u "
-                    "JOIN vendors v ON v.id=u.linked_id "
-                    "JOIN v_vendor_pass_status vp ON vp.user_id=u.id "
-                    "WHERE u.id=%s AND u.society_id=%s",
+                    "FROM vendors v "
+                    "LEFT JOIN users u ON u.linked_id=v.id AND u.role='vendor' "
+                    "LEFT JOIN v_vendor_pass_status vp ON vp.user_id=u.id "
+                    "WHERE v.id=%s AND v.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             except Exception:
                 r = db._execute(
-                    "SELECT u.id, u.email, u.society_id, "
+                    "SELECT v.id, u.id AS user_id, u.email, v.society_id, "
                     "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
                     "  v.active, v.logo, v.license, v.photo, v.created_at, "
                     "  NULL AS pass_expiry, FALSE AS gate_pass "
-                    "FROM users u "
-                    "JOIN vendors v ON v.id=u.linked_id "
-                    "WHERE u.id=%s AND u.society_id=%s",
+                    "FROM vendors v "
+                    "LEFT JOIN users u ON u.linked_id=v.id AND u.role='vendor' "
+                    "WHERE v.id=%s AND v.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             return dict(r) if r else None
  
         # ── SECURITY ───────────────────────────────────────────────────
+        # pk here is security_staff.id, same reasoning as vendor above.
         if entity_singular == "security":
             try:
                 r = db._execute(
-                    "SELECT u.id, u.email, u.society_id, "
+                    "SELECT s.id, u.id AS user_id, u.email, s.society_id, "
                     "  s.id AS staff_id, s.name, s.mobile, s.shift, "
                     "  s.active, s.joining_date, s.salary_per_shift, "
                     "  s.photo, s.id_proof, s.created_at, "
                     "  vs.shift_count, vs.gate_pass "
-                    "FROM users u "
-                    "JOIN security_staff s ON s.id=u.linked_id "
-                    "JOIN v_security_status vs ON vs.user_id=u.id "
-                    "WHERE u.id=%s AND u.society_id=%s",
+                    "FROM security_staff s "
+                    "LEFT JOIN users u ON u.linked_id=s.id AND u.role='security' "
+                    "LEFT JOIN v_security_status vs ON vs.user_id=u.id "
+                    "WHERE s.id=%s AND s.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             except Exception:
                 r = db._execute(
-                    "SELECT u.id, u.email, u.society_id, "
+                    "SELECT s.id, u.id AS user_id, u.email, s.society_id, "
                     "  s.id AS staff_id, s.name, s.mobile, s.shift, "
                     "  s.active, s.joining_date, s.salary_per_shift, "
                     "  s.photo, s.id_proof, s.created_at, "
                     "  0 AS shift_count, FALSE AS gate_pass "
-                    "FROM users u "
-                    "JOIN security_staff s ON s.id=u.linked_id "
-                    "WHERE u.id=%s AND u.society_id=%s",
+                    "FROM security_staff s "
+                    "LEFT JOIN users u ON u.linked_id=s.id AND u.role='security' "
+                    "WHERE s.id=%s AND s.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
             return dict(r) if r else None
@@ -1328,17 +1334,17 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
             return True, "Apartment deactivated"
 
         if entity_plural == "vendors":
+            # pk is now vendors.id directly — no join needed.
             db._execute(
-                "UPDATE vendors v SET active=FALSE, updated_by=%s FROM users u "
-                "WHERE v.id=u.linked_id AND u.id=%s AND u.society_id=%s",
+                "UPDATE vendors SET active=FALSE, updated_by=%s WHERE id=%s AND society_id=%s",
                 (_upd_by, pk, society_id),
             )
             return True, "Vendor deactivated"
 
         if entity_plural == "security":
+            # pk is now security_staff.id directly — no join needed.
             db._execute(
-                "UPDATE security_staff s SET active=FALSE, updated_by=%s FROM users u "
-                "WHERE s.id=u.linked_id AND u.id=%s AND u.society_id=%s",
+                "UPDATE security_staff SET active=FALSE, updated_by=%s WHERE id=%s AND society_id=%s",
                 (_upd_by, pk, society_id),
             )
             return True, "Security staff deactivated"
@@ -1627,9 +1633,8 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
         if role == "vendors":
             rows = db._execute(
-                "SELECT u.id, v.name, v.service_type FROM users u "
-                "JOIN vendors v ON v.id=u.linked_id "
-                "WHERE u.society_id=%s AND u.role='vendor' AND v.active=TRUE ORDER BY v.name",
+                "SELECT v.id, v.name, v.service_type FROM vendors v "
+                "WHERE v.society_id=%s AND v.active=TRUE ORDER BY v.name",
                 (society_id,), fetch_all=True,
             ) or []
             return [
@@ -1639,9 +1644,8 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
         if role == "security":
             rows = db._execute(
-                "SELECT u.id, s.name, s.shift FROM users u "
-                "JOIN security_staff s ON s.id=u.linked_id "
-                "WHERE u.society_id=%s AND u.role='security' AND s.active=TRUE ORDER BY s.name",
+                "SELECT s.id, s.name, s.shift FROM security_staff s "
+                "WHERE s.society_id=%s AND s.active=TRUE ORDER BY s.name",
                 (society_id,), fetch_all=True,
             ) or []
             return [

@@ -503,17 +503,16 @@ def register_drilldown_callbacks(app):
                 # QR entity_id must always be users.id (see qr_service.py —
                 # validate_qr_code() looks the scanned user up by u.id and
                 # derives the role-specific id, e.g. apartments.id via
-                # linked_id, from that row). For vendor/security, `pk` from
-                # load_profile is already users.id, so it's used as-is.
-                # For apartments, `pk` is apartments.id (the profile's own
-                # PK) — it must be translated to the owning user's users.id
-                # via linked_id, or the QR would encode the wrong id and
-                # every scan of an apartment-profile-generated pass would
-                # fail "User not found".
-                if entity == "apartment":
+                # linked_id, from that row). `pk` for apartment/vendor/
+                # security is each entity's own domain-table id (fn_*_list
+                # convention), never users.id — it must always be
+                # translated to the owning user's users.id via linked_id,
+                # or the QR would encode the wrong id and every scan of a
+                # profile-generated pass would fail "User not found".
+                if entity in ("apartment", "vendor", "security"):
                     owner_user = db._execute(
-                        "SELECT id FROM users WHERE linked_id = %s AND role = 'apartment' AND society_id = %s",
-                        (pk, sid), fetch_one=True,
+                        "SELECT id FROM users WHERE linked_id = %s AND role = %s AND society_id = %s",
+                        (pk, entity, sid), fetch_one=True,
                     )
                     if not owner_user:
                         return no_update, no_update, no_update, no_update, no_update
@@ -674,7 +673,19 @@ def register_drilldown_callbacks(app):
 
             # ── Toggle Duty (security profile — manual clock in/out) ──────────────
             elif action == "toggle_duty":
-                ok, msg = loaders.toggle_security_duty(int(pk), sid)
+                # toggle_security_duty needs users.id (matches
+                # gate_access.entity_id for role='s'), but pk here is
+                # security_staff.id (fn_security_list convention) — resolve
+                # via linked_id, same pattern as show_qr above.
+                sec_user = db._execute(
+                    "SELECT id FROM users WHERE linked_id=%s AND role='security' AND society_id=%s",
+                    (pk, sid), fetch_one=True,
+                )
+                if not sec_user:
+                    toast = {"_toast": {"type": "error", "message": "No login found for this security staff member"}}
+                    content, bc, db_err = _render_current(store, auth)
+                    return store, content, bc, {"display": "none"}, toast
+                ok, msg = loaders.toggle_security_duty(sec_user["id"], sid)
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
@@ -746,7 +757,10 @@ def register_drilldown_callbacks(app):
                 store = nav_state.navigate_to(
                     store, "form_vendor_pass_new", "Sell Vendor Pass",
                     prefill={
-                        "vendor_user_id": pk,          # vendor's users.id — separate from admin's user_id
+                        # pk is now vendors.id (fn_vendors_list convention);
+                        # fn_sell_vendor_pass needs the login's users.id,
+                        # which load_profile now exposes as user_id.
+                        "vendor_user_id": record.get("user_id"),
                         "entity_id":      record.get("vendor_id", pk),
                         "role":           "vendor",
                         # user_id NOT set here — handle_form_submit stamps admin's user_id from auth
@@ -761,7 +775,7 @@ def register_drilldown_callbacks(app):
                 store = nav_state.navigate_to(
                     store, "form_vendor_pass_new", "Buy Vendor Pass",
                     prefill={
-                        "vendor_user_id": pk,
+                        "vendor_user_id": record.get("user_id"),
                         "entity_id":      record.get("vendor_id", pk),
                         "role":           "vendor",
                     },
@@ -1464,17 +1478,23 @@ def _render_card(
             vendor_user_id = prefill.get("vendor_user_id") or prefill.get("user_id")
             sid_val        = filters.get("society_id")
             caller_role    = (auth or {}).get("role", "admin")
-            record = loaders.load_profile("vendor", vendor_user_id, sid_val) or {} \
-                     if vendor_user_id else {}
+
+            # load_profile("vendor", ...) now expects vendors.id (see
+            # fix_vendor_security_pk.sql), so resolve it from the login's
+            # users.id up front — reused below for the rates lookup too.
+            ven_id = None
+            if vendor_user_id and sid_val:
+                u = db._execute(
+                    "SELECT linked_id FROM users WHERE id=%s AND society_id=%s",
+                    (vendor_user_id, sid_val), fetch_one=True,
+                )
+                ven_id = (u or {}).get("linked_id")
+
+            record = loaders.load_profile("vendor", ven_id, sid_val) or {} if ven_id else {}
             # Load pass rates from ven_charges_fines_basis
             rates = {"1day": 0.0, "7day": 0.0, "1mth": 0.0, "free_1mth": 0.0}
-            if vendor_user_id and sid_val:
+            if sid_val:
                 try:
-                    u = db._execute(
-                        "SELECT linked_id FROM users WHERE id=%s AND society_id=%s",
-                        (vendor_user_id, sid_val), fetch_one=True,
-                    )
-                    ven_id = (u or {}).get("linked_id")
                     row = db._execute(
                         "SELECT vendor_1day, vendor_7day, vendor_1mth "
                         "FROM ven_charges_fines_basis "
@@ -2312,42 +2332,48 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         _move_temp_images("apartment", apt_id, sid, d)
         return True, f"Apartment '{flat}' created", apt_id
 
-    # ── VENDOR / SECURITY (unchanged) ───────────────────────────────────
-    # Here pk IS users.id — fn_vendors_list.id / fn_security_list.id are
-    # both u.id (the list is built FROM users), so edit lookups go straight
-    # against the users table and join out to vendors/security_staff via
-    # linked_id.
+    # ── VENDOR / SECURITY ────────────────────────────────────────────────
+    # pk is now vendors.id / security_staff.id (matches fn_vendors_list.id /
+    # fn_security_list.id, and receivables/payables/receipts/expenses
+    # .entity_id for these roles). The linked login lives in `users`,
+    # resolved via linked_id — same pattern as the apartment branch above.
+    domain_table = "security_staff" if role == "security" else "vendors"
+
     if is_edit:
         email = (d.get("email") or "").strip()
-        db._execute(
-            "UPDATE users SET email=%s WHERE id=%s AND society_id=%s", (email, pk, sid)
-        )
+        pw = (d.get("password") or "").strip()
+        if email or pw:
+            set_parts, params = [], []
+            if email:
+                set_parts.append("email=%s"); params.append(email)
+            if pw:
+                set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
+            params += [pk, role, sid]
+            db._execute(
+                f"UPDATE users SET {', '.join(set_parts)} "
+                "WHERE linked_id=%s AND role=%s AND society_id=%s",
+                params,
+            )
         if role == "security":
             db._execute(
-                "UPDATE security_staff s SET name=%s,mobile=%s,shift=%s,"
+                "UPDATE security_staff SET name=%s,mobile=%s,shift=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
                 "updated_by=%s "
-                "FROM users u WHERE s.id=u.linked_id AND u.id=%s RETURNING s.id",
+                "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
-                 d.get("photo"), d.get("id_proof"), d.get("user_id"), pk),
+                 d.get("photo"), d.get("id_proof"), d.get("user_id"), pk, sid),
             )
-        elif role == "vendor":
+        else:
             db._execute(
-                "UPDATE vendors v SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
+                "UPDATE vendors SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
                 "license=COALESCE(NULLIF(%s, ''), license),"
                 "updated_by=%s "
-                "FROM users u WHERE v.id=u.linked_id AND u.id=%s RETURNING v.id",
+                "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
-                 d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"), pk),
-            )
-        pw = (d.get("password") or "").strip()
-        if pw:
-            db._execute(
-                "UPDATE users SET password_hash=%s WHERE id=%s AND society_id=%s",
-                (generate_password_hash(pw), pk, sid),
+                 d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"), pk, sid),
             )
         return True, f"{role.title()} updated", pk
 
@@ -2359,32 +2385,41 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         return False, "Password is required", None
     if role == "vendor" and not (d.get("business_name") or "").strip():
         return False, "Business Name is required", None
-    ur = db._execute(
-        "INSERT INTO users(society_id,email,password_hash,role,login_method,created_by) "
-        "VALUES(%s,%s,%s,%s,'password',%s) RETURNING id",
-        (sid, email, generate_password_hash(pw), role, d.get("user_id")), fetch_one=True,
-    )
-    user_id = ur["id"]
-    if role == "vendor":
-        vr = db._execute(
-            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
-            (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
-             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id")), fetch_one=True,
-        )
-        db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (vr["id"], user_id))
-        linked_id = vr["id"]
-    else:
-        sr = db._execute(
+
+    # domain row FIRST, then users — same reasoning as apartment above: if
+    # the users insert then fails (e.g. duplicate email), roll back the
+    # vendor/security_staff row rather than leaving an orphan with no login.
+    if role == "security":
+        dr = db._execute(
             "INSERT INTO security_staff(society_id,name,mobile,shift,photo,id_proof,active,created_by) "
             "VALUES(%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
             (sid, d.get("name"), d.get("mobile"), d.get("shift"),
              d.get("photo"), d.get("id_proof"), d.get("user_id")), fetch_one=True,
         )
-        db._execute("UPDATE users SET linked_id=%s WHERE id=%s", (sr["id"], user_id))
-        linked_id = sr["id"]
-    _move_temp_images(role, linked_id, sid, d)
-    return True, f"{role.title()} '{email}' created", linked_id
+    else:
+        dr = db._execute(
+            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
+             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id")), fetch_one=True,
+        )
+    domain_id = dr["id"] if dr else None
+    if not domain_id:
+        return False, f"{role.title()} insert failed", None
+
+    try:
+        db._execute(
+            "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
+            "VALUES(%s,%s,%s,%s,'password',%s,%s) RETURNING id",
+            (sid, email, generate_password_hash(pw), role, domain_id, d.get("user_id")),
+            fetch_one=True,
+        )
+    except Exception as e:
+        db._execute(f"DELETE FROM {domain_table} WHERE id=%s AND society_id=%s", (domain_id, sid))
+        return False, f"User account creation failed ({role} rolled back): {_clean_pg_error(e)}", None
+
+    _move_temp_images(role, domain_id, sid, d)
+    return True, f"{role.title()} '{email}' created", domain_id
 
 def _save_event(db, d, sid, is_edit, pk):
     _acc_id = d.get("parent_account_id")
@@ -2985,22 +3020,21 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if owner_user_id:
             f["concern_creator_id"] = owner_user_id
     elif role == "vendor":
-        # A vendor's `linked_id` (auth.linked_id) points at vendors.id, but
-        # fn_vendors_list returns users.id as its `id` column, and that's
-        # what vendor-scoped list/receipt/payable queries filter against.
-        # So the correct scoping value here is auth.user_id, NOT linked_id
-        # — confirmed against fn_vendors_list's actual return columns.
-        vendor_user_id = auth.get("user_id")
-        if vendor_user_id:
-            f["vendor_id"] = vendor_user_id
-        # Vendor portal: show concerns assigned to this vendor (via concerns_assigns)
+        # A vendor's `linked_id` (auth.linked_id) points at vendors.id, and
+        # fn_vendors_list now returns vendors.id as its `id` column (matches
+        # receivables/payables/receipts/expenses.entity_id for role='vendor'
+        # too), so that's the correct scoping value for vendor-scoped
+        # list/receipt/payable queries.
         vendor_linked_id = auth.get("linked_id")
         if vendor_linked_id:
+            f["vendor_id"] = vendor_linked_id
+            # Vendor portal: show concerns assigned to this vendor (via concerns_assigns)
             f["assigned_vnd_id"] = vendor_linked_id
     elif role == "security":
-        # linked_id for security = security_staff.id
-        # fn_security_list returns users.id as `id`
-        # but attendance/payables use security_staff.id = linked_id
+        # linked_id for security = security_staff.id, and fn_security_list
+        # now returns security_staff.id as `id` too (previously returned
+        # users.id, which meant this filter never actually matched
+        # anything — see fix_vendor_security_pk.sql).
         sec_staff_id = auth.get("linked_id")
         if sec_staff_id:
             f["security_id"] = sec_staff_id
