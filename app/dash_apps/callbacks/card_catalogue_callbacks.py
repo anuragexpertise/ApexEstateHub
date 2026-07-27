@@ -138,14 +138,14 @@ def register_card_catalogue_callbacks(app):
                     "kpi_gate_logs": (
                         # FIX: gate_access rows for apartment owners are
                         # inserted by qr_callbacks.py's validate_qr_scanned
-                        # with entity_id=users.id and role='o' (see
-                        # role_code_map = {"apartment": "o", ...}). The
+                        # with entity_id=users.id and role='APT' (see
+                        # role_code_map = {"apartment": "APT", ...}). The
                         # previous version filtered entity_id=apt_id
-                        # (apartments.id, a linked_id) and role='a' (admin's
+                        # (apartments.id, a linked_id) and role='ADM' (admin's
                         # code) — neither ever matches a real row, so this
                         # KPI always showed 0.
                         "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='o' AND time_in::DATE=CURRENT_DATE",
+                        "WHERE entity_id=%s AND role='APT' AND time_in::DATE=CURRENT_DATE",
                         (own_user_id,),
                     ),
                     "kpi_owner_member_since": (
@@ -196,7 +196,7 @@ def register_card_catalogue_callbacks(app):
                         # is linked_id (vendors.id), but gate_access.entity_id
                         # is always users.id.
                         "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='v' AND time_in::DATE=CURRENT_DATE",
+                        "WHERE entity_id=%s AND role='VND' AND time_in::DATE=CURRENT_DATE",
                         (own_user_id,),
                     ),
                     "kpi_concerns_open": (

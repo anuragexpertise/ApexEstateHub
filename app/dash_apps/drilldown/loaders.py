@@ -481,8 +481,8 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         return (
             "SELECT g.*, COALESCE(s.name,'') AS staff_name "
             "FROM gate_access g "
-            "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='s' "
-            "WHERE g.society_id=%s AND g.role='s'" + extra_sql +
+            "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='SEC' "
+            "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql +
             " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
             tuple([sid] + extra_params + [page_size, offset]),
         )
@@ -985,14 +985,14 @@ def load_list(
             rows = db._execute(
                 "SELECT g.*, COALESCE(s.name,'') AS staff_name "
                 "FROM gate_access g "
-                "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='s' "
-                "WHERE g.society_id=%s AND g.role='s'" + extra_sql +
+                "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='SEC' "
+                "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql +
                 " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
                 [sid] + extra_params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM gate_access "
-                "WHERE society_id=%s AND role='s'" + extra_sql,
+                "WHERE society_id=%s AND role='SEC'" + extra_sql,
                 [sid] + extra_params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
@@ -1497,7 +1497,7 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
     "Toggle Duty" action button.
 
     `user_id` is users.id — the same id gate_access.entity_id stores for
-    role='s' rows (see fn_security_list / fn_evaluate_gate_pass).
+    role='SEC' rows (see fn_security_list / fn_evaluate_gate_pass).
 
     Clock IN  → opens a gate_access row (time_out NULL). While this row is
                 open, fn_evaluate_gate_pass() / fn_security_list's
@@ -1513,7 +1513,7 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
         _upd_by = get_current_user_id()
         open_row = db._execute(
             "SELECT id FROM gate_access "
-            "WHERE entity_id=%s AND role='s' AND time_out IS NULL AND society_id=%s "
+            "WHERE entity_id=%s AND role='SEC' AND time_out IS NULL AND society_id=%s "
             "ORDER BY time_in DESC LIMIT 1",
             (user_id, society_id), fetch_one=True,
         )
@@ -1526,7 +1526,7 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
         else:
             db._execute(
                 "INSERT INTO gate_access(society_id, entity_id, role, time_in, created_by) "
-                "VALUES(%s,%s,'s',NOW(),%s)",
+                "VALUES(%s,%s,'SEC',NOW(),%s)",
                 (society_id, user_id, _upd_by),
             )
             return True, "Marked ON duty — shift started"

@@ -680,7 +680,7 @@ def register_drilldown_callbacks(app):
             # ── Toggle Duty (security profile — manual clock in/out) ──────────────
             elif action == "toggle_duty":
                 # toggle_security_duty needs users.id (matches
-                # gate_access.entity_id for role='s'), but pk here is
+                # gate_access.entity_id for role='SEC'), but pk here is
                 # security_staff.id (fn_security_list convention) — resolve
                 # via linked_id, same pattern as show_qr above.
                 sec_user = db._execute(

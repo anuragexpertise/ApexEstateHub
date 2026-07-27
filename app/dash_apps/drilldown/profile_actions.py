@@ -108,7 +108,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
         {
             # Manual on/off-duty clock toggle. Clocking IN opens a
-            # gate_access row (role='s', time_out NULL), which is exactly
+            # gate_access row (role='SEC', time_out NULL), which is exactly
             # what fn_evaluate_gate_pass() / fn_security_list's "gate_pass"
             # column checks to treat the guard as on duty for gate scans.
             # Clocking OUT stamps time_out=NOW() on that row. Shift/payroll

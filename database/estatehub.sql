@@ -1368,7 +1368,7 @@ BEGIN
     ELSIF p_role = 'security' THEN
         SELECT EXISTS(
             SELECT 1 FROM gate_access
-            WHERE entity_id = p_entity_id AND role = 's' AND time_out IS NULL
+            WHERE entity_id = p_entity_id AND role = 'SEC' AND time_out IS NULL
         ) INTO v_on_duty;
         IF NOT v_on_duty THEN
             RETURN QUERY SELECT FALSE, 'Not currently on duty'::TEXT, 0::NUMERIC(15,2);
@@ -2146,7 +2146,7 @@ BEGIN
         JOIN users u2 ON u2.linked_id = sr.security_id AND u2.role = 'security'
         JOIN gate_access ga
              ON ga.entity_id = u2.id
-            AND ga.role = 's'
+            AND ga.role = 'SEC'
             AND ga.time_in::DATE = sr.roster_date
             AND ga.time_out IS NOT NULL
         WHERE sr.society_id = p_society_id
@@ -3008,7 +3008,7 @@ BEGIN
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
         COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
-        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='s' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
+        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
     FROM security_staff s
     LEFT JOIN users u ON u.linked_id = s.id AND u.role = 'security'
     LEFT JOIN pay_sum ps ON ps.staff_id = s.id
@@ -3645,9 +3645,9 @@ BEGIN
     SELECT
         g.id::INT, g.society_id::INT, g.role::VARCHAR(1), g.entity_id::INT,
         CASE
-            WHEN g.role = 'a' THEN COALESCE(ap.flat_number||' — '||COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
-            WHEN g.role = 'v' THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), 'Vendor #'||g.entity_id::TEXT)
-            WHEN g.role = 's' THEN COALESCE(ss.name||COALESCE(' ('||ss.shift||')',''), 'Security #'||g.entity_id::TEXT)
+            WHEN g.role = 'ADM' THEN COALESCE(ap.flat_number||' — '||COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
+            WHEN g.role = 'VND' THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), 'Vendor #'||g.entity_id::TEXT)
+            WHEN g.role = 'SEC' THEN COALESCE(ss.name||COALESCE(' ('||ss.shift||')',''), 'Security #'||g.entity_id::TEXT)
             ELSE 'Unknown #'||g.entity_id::TEXT
         END::TEXT,
         g.time_in::TIMESTAMP, g.time_out::TIMESTAMP,
@@ -3655,16 +3655,16 @@ BEGIN
              THEN EXTRACT(EPOCH FROM (g.time_out - g.time_in))::INT / 60
              ELSE NULL END::INT
     FROM gate_access g
-    LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'a'
-    LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'v'
-    LEFT JOIN users         su ON su.id = g.entity_id AND g.role = 's'
+    LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'ADM'
+    LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'VND'
+    LEFT JOIN users         su ON su.id = g.entity_id AND g.role = 'SEC'
     LEFT JOIN security_staff ss ON ss.id = su.linked_id
     WHERE g.society_id = p_society_id
       AND (p_date   IS NULL OR g.time_in::DATE = p_date)
       AND (p_search IS NULL OR CASE
-           WHEN g.role='a' THEN ap.flat_number||' '||COALESCE(ap.owner_name,'')
-           WHEN g.role='v' THEN v.name
-           WHEN g.role='s' THEN ss.name
+           WHEN g.role='ADM' THEN ap.flat_number||' '||COALESCE(ap.owner_name,'')
+           WHEN g.role='VND' THEN v.name
+           WHEN g.role='SEC' THEN ss.name
            ELSE '' END ILIKE '%'||p_search||'%')
     ORDER BY g.time_in DESC;
 END;
@@ -4054,7 +4054,7 @@ SELECT
     s.id AS security_id,
     COUNT(ga.id) FILTER (
         WHERE
-            ga.role = 's'
+            ga.role = 'SEC'
             AND ga.time_out IS NOT NULL
     ) AS shift_count,
     EXISTS (
@@ -4062,14 +4062,14 @@ SELECT
         FROM gate_access ga2
         WHERE
             ga2.entity_id = u.id
-            AND ga2.role = 's'
+            AND ga2.role = 'SEC'
             AND ga2.time_out IS NULL
     ) AS gate_pass
 FROM
     users u
     JOIN security_staff s ON s.id = u.linked_id
     LEFT JOIN gate_access ga ON ga.entity_id = u.id
-    AND ga.role = 's'
+    AND ga.role = 'SEC'
 WHERE
     u.role = 'security'
 GROUP BY
@@ -4729,7 +4729,7 @@ RETURNS TABLE (table_name TEXT, row_id INT, column_name TEXT, issue TEXT) LANGUA
     UNION ALL
     SELECT 'gate_access'::TEXT, g.id, 'entity_id'::TEXT, 'Missing user FK for gate_access'::TEXT
     FROM gate_access g
-    WHERE g.society_id = p_society_id AND g.role = 's'
+    WHERE g.society_id = p_society_id AND g.role = 'SEC'
       AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = g.entity_id);
 $$;
 

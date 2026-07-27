@@ -87,9 +87,9 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # MASTER PORTAL - Dashboard
     ("kpi_societies_total", "master", "dashboard", "Master"),
     ("kpi_societies_free", "master", "dashboard", "Master"),
-    ("kpi_societies_9Apts", "master", "dashboard", "Master"),
-    ("kpi_societies_99Apts", "master", "dashboard", "Master"),
-    ("kpi_societies_999Apts", "master", "dashboard", "Master"),
+    ("kpi_societies_9apts", "master", "dashboard", "Master"),
+    ("kpi_societies_99apts", "master", "dashboard", "Master"),
+    ("kpi_societies_999apts", "master", "dashboard", "Master"),
     ("kpi_societies_unlimited", "master", "dashboard", "Master"),
     ("kpi_master_apartments_total", "master", "dashboard", "Master"),
     ("kpi_master_vendors_total", "master", "dashboard", "Master"),
@@ -109,7 +109,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_receivables_total", "apartment", "payables", "Dues"),
     ("kpi_apartments_dues", "apartment", "payables", "Dues"),
     # APARTMENT - Charges
-    ("kpi_maintainence_charges", "apartment", "charges", "Charges"),
+    ("kpi_maintenance_charges", "apartment", "charges", "Charges"),
     ("kpi_apartment_fines", "apartment", "charges", "Charges"),
     ("kpi_apartment_other_charges", "apartment", "charges", "Charges"),
     # APARTMENT - Events / Concerns / Settings
@@ -119,7 +119,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_polls_total", "apartment", "polls", "Polling"),
     ("kpi_polls_active", "apartment", "polls", "Polling"),
     ("kpi_polls_votes", "apartment", "polls", "Polling"),
-    ("kpi_apartment_date", "apartment", "settings", "Profile"),
+    ("kpi_apartments_date", "apartment", "settings", "Profile"),
     # VENDOR PORTAL - Dashboard
     ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
     ("kpi_concerns_assigned", "vendor", "dashboard", "Jobs"),
@@ -134,7 +134,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_vendor_fines", "vendor", "charges", "Charges"),
     ("kpi_vendor_other_charges", "vendor", "charges", "Charges"),
     ("kpi_events_total", "vendor", "events", "Events"),
-    ("kpi_vendor_date", "vendor", "settings", "Profile"),
+    ("kpi_vendors_date", "vendor", "settings", "Profile"),
     # SECURITY - Dashboard
     ("kpi_apartments_total", "security", "dashboard", "Users"),
     ("kpi_vendors_total", "security", "dashboard", "Users"),

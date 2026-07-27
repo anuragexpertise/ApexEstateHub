@@ -421,7 +421,7 @@ def register_qr_callbacks(app):
         log = list(scan_log or [])
         
         # Map role to gate_access code
-        role_code_map = {"admin": "a", "apartment": "o", "vendor": "v", "security": "s"}
+        role_code_map = {"admin": "ADM", "apartment": "APT", "vendor": "VND", "security": "SEC"}
         
         # ════════════════════════════════════════════════════════
         # ENTRY MODE: Only PASS allowed
@@ -434,7 +434,7 @@ def register_qr_callbacks(app):
                 role = user.get("role", "")
                 flat = user.get("flat_number", "")
                 
-                role_code = role_code_map.get(role, "a")
+                role_code = role_code_map.get(role, "ADM")
                 
                 # Create time_in gate log
                 try:
@@ -520,7 +520,7 @@ def register_qr_callbacks(app):
             user_name = user.get("name", "Unknown") if user else "Unknown"
             role = user.get("role", "") if user else ""
             
-            role_code = role_code_map.get(role, "v") if role else "v"
+            role_code = role_code_map.get(role, "VND") if role else "VND"
             
             # Update time_out (even if validation failed)
             try:

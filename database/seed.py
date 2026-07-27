@@ -29,7 +29,7 @@ old migrate.py demo so existing logins keep working):
           but still in use (disposed = FALSE)
         - year-end journal: Dr Depreciation / Cr Instruments
         - transfer journal: Dr Income & Expenditure / Cr Depreciation
-  * Security roster + gate_access role='s' attendance rows, producing
+  * Security roster + gate_access role='SEC' attendance rows, producing
     a mix of on-duty (time_out IS NULL) / off-duty (time_out set) rows
     for the `gate_pass` / v_security_status "on duty" indicator.      [req 5]
   * Receipts: one admin-created CONFIRMED receipt, one security-created
@@ -626,7 +626,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         print("  ✓ Vendor charge basis added")
 
 
-# ── req 5: security roster + gate_access role='s' attendance ─────────────
+# ── req 5: security roster + gate_access role='SEC' attendance ─────────────
 
 def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list):
     """guards: list of dicts {user_id, linked_id (security_staff.id)}"""
@@ -644,11 +644,11 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
             )
             conn.commit()
 
-            # gate_access role='s' — closed (off-duty) shift for all but the
+            # gate_access role='SEC' — closed (off-duty) shift for all but the
             # most recent day, which is left open (on-duty) — req 5.
             is_latest = (i == len(roster_dates) - 1)
             if not _one(cur, """SELECT 1 FROM gate_access
-                                 WHERE society_id=%s AND entity_id=%s AND role='s'
+                                 WHERE society_id=%s AND entity_id=%s AND role='SEC'
                                    AND time_in::DATE=%s""",
                         (society_id, uid, d)):
                 if is_latest:

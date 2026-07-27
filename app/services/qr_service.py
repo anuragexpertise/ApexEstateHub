@@ -14,6 +14,11 @@ ROLE_CODE_MAP = {
     "VST": "visitor",
     "EVT": "event_ticket",
     "PTL": "patrol_location",
+    "CON": "concern",
+    "RPT": "receipt",
+    "EXP": "expense",
+    "AST": "asset",
+    "ATD": "attendance_entry",
     # Legacy short codes for mapping compatibility
     "A": "admin",
     "O": "apartment",
@@ -29,6 +34,11 @@ ROLE_CODE_MAP_REV = {
     "visitor": "VST",
     "event_ticket": "EVT",
     "patrol_location": "PTL",
+    "concern": "CON",
+    "receipt": "RPT",
+    "expense": "EXP",
+    "asset": "AST",
+    "attendance_entry": "ATD",
 }
 
 
