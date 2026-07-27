@@ -91,7 +91,13 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
             "shift_date_from": today.replace(day=1).isoformat(),
             "shift_date_to": today.isoformat(),
         }
-    
+
+    if card_id == "kpi_receivables_this_month":
+        return {
+            "date_from": today.replace(day=1).isoformat(),
+            "date_to": today.isoformat(),
+        }
+
     return {}
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService

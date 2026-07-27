@@ -46,14 +46,16 @@ class RBACManager:
             "kpi_gate_logs": {Permission.VIEW},
             "kpi_receipts_month": {Permission.VIEW},
             "kpi_expenses_month": {Permission.VIEW},
+            "kpi_payables_this_month": {Permission.VIEW},
+            "kpi_receivables_this_month": {Permission.VIEW},
             "kpi_bank_balance": {Permission.VIEW},
             "kpi_cash_in_hand": {Permission.VIEW},
             
             # Enroll Tab
             "kpi_accounts_count": {Permission.VIEW},
             "kpi_ledger_open": {Permission.VIEW},
-            "kpi_apt_charges": {Permission.VIEW},
-            "kpi_ven_charges": {Permission.VIEW},
+            "kpi_apt_charges_count": {Permission.VIEW},
+            "kpi_ven_charges_count": {Permission.VIEW},
 
             # Lists
             "list_apartments": {Permission.VIEW, Permission.EDIT, Permission.DELETE},
@@ -88,8 +90,8 @@ class RBACManager:
             "form_event_edit": {Permission.EDIT},
             "form_concern_new": {Permission.CREATE},
             "form_concern_edit": {Permission.EDIT},
-            "form_receipt_entry_new": {Permission.CREATE},
-            "form_expense_entry_new": {Permission.CREATE},
+            "form_receipt_new": {Permission.CREATE},
+            "form_expense_new": {Permission.CREATE},
         },
         "apartment": {
             # Owner Dashboard
@@ -111,7 +113,7 @@ class RBACManager:
             "profile_apartment": {Permission.VIEW},
             
             # Forms
-            "form_receipt_entry_new": {Permission.CREATE},
+            "form_receipt_new": {Permission.CREATE},
             "form_concern_new": {Permission.CREATE},
         },
         "vendor": {
@@ -132,7 +134,7 @@ class RBACManager:
             "kpi_vendors_dues": {Permission.VIEW},
             
             # Forms
-            "form_receipt_entry_new": {Permission.CREATE},
+            "form_receipt_new": {Permission.CREATE},
         },
         "security": {
             # Gate Pass Evaluation (all access)
@@ -151,7 +153,7 @@ class RBACManager:
             "list_users_society": {Permission.VIEW},
             
             # Forms
-            "form_receipt_entry_new": {Permission.CREATE},
+            "form_receipt_new": {Permission.CREATE},
         },
     }
 

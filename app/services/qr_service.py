@@ -8,7 +8,7 @@ from database.db_manager import db
 
 ROLE_CODE_MAP = {
     "ADM": "admin",
-    "OWN": "apartment",  # Owner
+    "APT": "apartment",  # Apartment / Owner
     "VND": "vendor",
     "SEC": "security",
     "VST": "visitor",
@@ -23,7 +23,7 @@ ROLE_CODE_MAP = {
 
 ROLE_CODE_MAP_REV = {
     "admin": "ADM",
-    "apartment": "OWN",
+    "apartment": "APT",
     "vendor": "VND",
     "security": "SEC",
     "visitor": "VST",
@@ -35,7 +35,7 @@ ROLE_CODE_MAP_REV = {
 def parse_qr_payload(qr_data: str) -> dict:
     """
     Parses QR string in format: <society_id>-<ROLE_CODE>-<entity_id>
-    Example: 1-EVT-1001 or 1-OWN-42
+    Example: 1-EVT-1001 or 1-APT-42
     """
     try:
         raw = qr_data.strip()
@@ -95,7 +95,7 @@ def generate_static_qr_code(entity_id: int, role: str, society_id: int):
     """
     Wrapper for user/apartment static QR generation using updated format.
     """
-    role_code = ROLE_CODE_MAP_REV.get(role, "OWN")
+    role_code = ROLE_CODE_MAP_REV.get(role, "APT")
     return generate_qr_code(society_id, role_code, entity_id)
 
 

@@ -213,6 +213,30 @@ KPI_CARDS = {
         "title": "Expenses (Month)", "group": "manual debits",
     },
 
+    "kpi_payables_this_month": {
+        "query": """
+            SELECT COALESCE(SUM(p.amount), 0) AS v
+            FROM payables p
+            WHERE p.society_id=%s AND p.status='verified'
+              AND p.shift_date >= DATE_TRUNC('month', CURRENT_DATE)
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-money-check-alt", "color": "#e59620",
+        "title": "Payables (This Month)", "group": "monthly payables",
+    },
+
+    "kpi_receivables_this_month": {
+        "query": """
+            SELECT COALESCE(SUM(r.amount), 0) AS v
+            FROM receivables r
+            WHERE r.society_id=%s AND r.status IN ('pending','partial')
+              AND r.period_month >= DATE_TRUNC('month', CURRENT_DATE)
+        """,
+        "params": 1, "format": "currency",
+        "icon": "fa-hand-holding-usd", "color": "#de5c52",
+        "title": "Receivables (This Month)", "group": "monthly receivables",
+    },
+
     "kpi_expenses_total": {
         "query": """
             SELECT COALESCE(SUM(e.amount), 0) AS v
@@ -941,6 +965,7 @@ DEFAULT_LAYOUTS = {
         "assets": ["kpi_assets_count", "kpi_assets_value"],
         "receipts": [
             "kpi_receipts_month",
+            "kpi_receivables_this_month",
             "kpi_receipts_total",
             "kpi_receivables_total",
             "kpi_maintenance_due",
@@ -951,6 +976,7 @@ DEFAULT_LAYOUTS = {
         ],
         "expenses": [
             "kpi_expenses_month",
+            "kpi_payables_this_month",
             "kpi_expenses_total",
             "kpi_payables_total",
             "kpi_security_salaries_due",
@@ -996,8 +1022,9 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
+            "kpi_receivables_this_month",
         ],
-        "cashbook": ["kpi_cash_in_hand"],
+        "cashbook": ["kpi_cash_in_hand", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "owner_receipts": ["kpi_receipts_total"],
         "charges": ["kpi_maintainence_charges", "kpi_apt_charges_count"],
         "concerns": ["kpi_concerns_open"],
@@ -1043,7 +1070,7 @@ DEFAULT_LAYOUTS = {
             "kpi_security_paid_for_month",
             "kpi_security_shifts_pending",
         ],
-        "cashbook": ["kpi_receipts_month", "kpi_expenses_month"],
+        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "security_receipt": ["kpi_receipts_month"],
         "security_receipts": ["kpi_security_receipts"],
         "security_events": ["kpi_events_total"],
