@@ -95,7 +95,7 @@ BEGIN
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
         COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
-        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='s' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
+        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
     FROM security_staff s
     LEFT JOIN users u ON u.linked_id = s.id AND u.role = 'security'
     LEFT JOIN pay_sum ps ON ps.staff_id = s.id

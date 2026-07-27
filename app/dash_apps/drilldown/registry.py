@@ -208,7 +208,7 @@ DRILLDOWN_MAP: dict = {
         "label": "Security Salaries Paid",
     },
     "kpi_amc_due": {"target": "list_expenses", "label": "AMC Due"},
-    "kpi_maintainence_charges": {
+    "kpi_maintenance_charges": {
         "target": "list_apt_charges",
         "label": "Maintenance Charges",
     },
@@ -249,17 +249,17 @@ DRILLDOWN_MAP: dict = {
     },
     # MASTER PORTAL KPIs
     "kpi_societies_total": {"target": "list_societies", "label": "All Societies"},
-    "kpi_societies_9Apts": {
+    "kpi_societies_9apts": {
         "target": "list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "9Apts"},
     },
-    "kpi_societies_99Apts": {
+    "kpi_societies_99apts": {
         "target": "list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "99Apts"},
     },
-    "kpi_societies_999Apts": {
+    "kpi_societies_999apts": {
         "target": "list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "999Apts"},
@@ -291,9 +291,9 @@ DRILLDOWN_MAP: dict = {
     "kpi_master_vendors_total": {"target": "list_vendors", "label": "All Vendors"},
     "kpi_master_security_total": {"target": "list_security", "label": "Security Staff"},
     # OWNER PORTAL KPIs
-    "kpi_apartment_date": {"target": "list_apartments", "label": "Managed Apartments"},
+    "kpi_apartments_date": {"target": "list_apartments", "label": "Managed Apartments"},
     # VENDOR PORTAL KPIs
-    "kpi_vendor_date": {"target": "list_vendors", "label": "Managed Vendors"},
+    "kpi_vendors_date": {"target": "list_vendors", "label": "Managed Vendors"},
     # SECURITY PORTAL KPIs
     "kpi_security_date": {"target": "list_security", "label": "Managed Security"},
     "kpi_security_salary_per_shift": {
@@ -407,8 +407,8 @@ DRILLDOWN_MAP: dict = {
             # route_drilldown() in drilldown_callbacks.py intercepts with
             # an early return before DRILLDOWN_MAP is ever consulted. A
             # "gate_pass" entry here was dead code, and its role constant
-            # was also wrong (_const_a maps to admin's gate code "a", not
-            # apartment's "o" — see role_code_map in qr_callbacks.py).
+            # was also wrong (_const_a maps to admin's gate code "ADM", not
+            # apartment's "APT" — see role_code_map in qr_callbacks.py).
             "new_concern": {
                 "target": "form_concern_new",
                 "prefill": {"apartment_id": "id"},

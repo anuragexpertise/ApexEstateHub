@@ -339,7 +339,7 @@ KPI_CARDS = {
     "kpi_security_on_duty": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
-            WHERE society_id=%s AND role='s' AND time_out IS NULL
+            WHERE society_id=%s AND role='SEC' AND time_out IS NULL
         """,
         "params": 1, "format": "number",
         "icon": "fa-shield-alt", "color": "#691b1b",
@@ -350,7 +350,7 @@ KPI_CARDS = {
         "query": """
             SELECT GREATEST(
                 (SELECT COUNT(*) FROM security_staff WHERE society_id=%s AND active=TRUE) -
-                (SELECT COUNT(*) FROM gate_access WHERE society_id=%s AND role='s' AND time_out IS NULL),
+                (SELECT COUNT(*) FROM gate_access WHERE society_id=%s AND role='SEC' AND time_out IS NULL),
                 0
             ) AS v
         """,
@@ -523,9 +523,9 @@ KPI_CARDS = {
 
     "kpi_societies_total":    {"query": "SELECT COUNT(*) AS v FROM societies",                  "params": 0, "format": "number",   "icon": "fa-building",            "color": "#c96a19", "title": "Total Societies",  "group": "platform"},
     "kpi_societies_free":     {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='Free'", "params": 0, "format": "number",   "icon": "fa-circle",              "color": "#7d8ea3", "title": "Free Plans",       "group": "total"},
-    "kpi_societies_9Apts":    {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='9Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "9Apts Plans", "group": "active"},
-    "kpi_societies_99Apts":   {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='99Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "99Apts Plans", "group": "active"},
-    "kpi_societies_999Apts":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='999Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "999Apts Plans", "group": "active"},
+    "kpi_societies_9apts":    {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='9Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "9Apts Plans", "group": "active"},
+    "kpi_societies_99apts":   {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='99Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "99Apts Plans", "group": "active"},
+    "kpi_societies_999apts":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='999Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "999Apts Plans", "group": "active"},
     "kpi_societies_unlimited":{"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='unlimited' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "Unlimited Plans", "group": "active"},
     "kpi_societies_expired":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan_validity<CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-exclamation-triangle", "color": "#de5c52", "title": "Expired Plans", "group": "renewal needed"},
     "kpi_societies_expiring_soon": {
@@ -581,7 +581,7 @@ KPI_CARDS = {
         "title": "My Overdue Dues", "group": "overdue",
     },
 
-    "kpi_maintainence_charges": {
+    "kpi_maintenance_charges": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#e59620",
@@ -595,7 +595,7 @@ KPI_CARDS = {
     "kpi_security_shift_count": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
-            WHERE society_id=%s AND role='s' AND time_out IS NULL
+            WHERE society_id=%s AND role='SEC' AND time_out IS NULL
         """,
         "params": 1, "format": "number",
         "icon": "fa-hand-point-up", "color": "#de5c52",
@@ -631,7 +631,7 @@ KPI_CARDS = {
     # VENDOR PORTAL
     # ══════════════════════════════════════════════════════════════════════
 
-    "kpi_vendor_date": {
+    "kpi_vendors_date": {
         "query": "SELECT created_at::DATE AS v FROM vendors WHERE society_id=%s AND active=TRUE LIMIT 1",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#de5c52",
@@ -673,7 +673,7 @@ KPI_CARDS = {
     "kpi_attendance_count": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
-            WHERE society_id=%s AND role='s'
+            WHERE society_id=%s AND role='SEC'
               AND time_in >= DATE_TRUNC('month', CURRENT_DATE)
         """,
         "params": 1, "format": "number",
@@ -837,7 +837,7 @@ KPI_CARDS = {
     "kpi_security_shift": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
-            WHERE society_id=%s AND role='s' AND time_out IS NOT NULL
+            WHERE society_id=%s AND role='SEC' AND time_out IS NOT NULL
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#17976e",
@@ -882,7 +882,7 @@ KPI_CARDS = {
         "title": "Pending Taxi Alerts", "group": "channels",
     },
  
-    "kpi_apartment_date": {
+    "kpi_apartments_date": {
         "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#18794e",
@@ -909,9 +909,9 @@ DEFAULT_LAYOUTS = {
         "dashboard": [
             "kpi_societies_total",
             "kpi_societies_free",
-            "kpi_societies_9Apts",
-            "kpi_societies_99Apts",
-            "kpi_societies_999Apts",
+            "kpi_societies_9apts",
+            "kpi_societies_99apts",
+            "kpi_societies_999apts",
             "kpi_societies_unlimited",
             "kpi_societies_expired",
             "kpi_master_apartments_total",
@@ -1016,7 +1016,7 @@ DEFAULT_LAYOUTS = {
             "kpi_cash_in_hand",
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
-            "kpi_maintainence_charges",
+            "kpi_maintenance_charges",
         ],
         "receivables": [
             "kpi_my_pending_dues",
@@ -1026,7 +1026,7 @@ DEFAULT_LAYOUTS = {
         ],
         "cashbook": ["kpi_cash_in_hand", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "owner_receipts": ["kpi_receipts_total"],
-        "charges": ["kpi_maintainence_charges", "kpi_apt_charges_count"],
+        "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
         "concerns": ["kpi_concerns_open"],
         "events": ["kpi_events_total"],
         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
@@ -1054,7 +1054,7 @@ DEFAULT_LAYOUTS = {
         "concerns": ["kpi_concerns_open", "kpi_concerns_assigned"],
         "charges": ["kpi_ven_charges_count", "kpi_vendor_other_charges"],
         "events": ["kpi_events_total"],
-        "settings": ["kpi_vendor_date"],
+        "settings": ["kpi_vendors_date"],
     },
     "security": {
         # NOTE: "dashboard" is what the sidebar's "Users" link renders

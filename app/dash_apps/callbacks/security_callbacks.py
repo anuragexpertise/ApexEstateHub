@@ -604,7 +604,7 @@ def register_security_callbacks(app):
         if button_id == "clock-in-btn":
             already_in = db._execute(
                 """SELECT id FROM gate_access
-                   WHERE society_id = %s AND entity_id = %s AND role = 's'
+                   WHERE society_id = %s AND entity_id = %s AND role = 'SEC'
                      AND time_out IS NULL
                    ORDER BY time_in DESC LIMIT 1""",
                 (society_id, user_id), fetch_one=True
@@ -628,7 +628,7 @@ def register_security_callbacks(app):
                 """UPDATE gate_access SET time_out = NOW(), updated_by = %s
                    WHERE id = (
                        SELECT id FROM gate_access
-                       WHERE society_id = %s AND entity_id = %s AND role = 's'
+                       WHERE society_id = %s AND entity_id = %s AND role = 'SEC'
                          AND time_out IS NULL
                        ORDER BY time_in DESC LIMIT 1
                    )
