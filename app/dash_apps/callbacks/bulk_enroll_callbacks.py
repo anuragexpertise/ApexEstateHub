@@ -18,8 +18,13 @@ Without a users row there is:
   - No owner-portal login
   - No push notifications / receivables link to the owner
 
-So apartments are enrolled exactly like vendors/security:
-  users row first → apartments row → users.linked_id = apartments.id
+So all three are enrolled in the same order: domain row first (apartments
+/ vendors / security_staff), then users row with linked_id set inline.
+Domain-row-first means a failed users insert (duplicate email, etc.) rolls
+back the domain row too, rather than leaving an orphan with no login.
+`id` returned by fn_apartments_list / fn_vendors_list / fn_security_list
+is always the domain table's own id — never users.id (see
+fix_vendor_security_pk.sql for the vendor/security part of this).
 
 CSV column contract (header row required, case-insensitive, extra columns ignored):
 
@@ -294,9 +299,12 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
 def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each CSV row:
-      1. Insert into users (role='vendor')
-      2. Insert into vendors
-      3. Set users.linked_id = vendors.id
+      1. Insert into vendors
+      2. Insert into users (role='vendor', linked_id=vendors.id set inline)
+      If step 2 fails, roll back the vendors row so the row can be retried
+      cleanly rather than leaving an orphan with no login — same reasoning
+      as apartments above, and matches fn_vendors_list.id = vendors.id
+      (see fix_vendor_security_pk.sql) rather than users.id.
     """
     required = _BULK_TEMPLATES["vendors"]["required"]
     success  = 0
@@ -313,21 +321,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
         name     = row["name"].strip()
         biz_name = (row.get("business_name") or name or email).strip()
 
-        # ── 1. users row ────────────────────────────────────────────────────
-        try:
-            usr_r = db._execute(
-                "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method) "
-                "VALUES (%s,%s,%s,'vendor','password') RETURNING id",
-                (sid, email, generate_password_hash(password)),
-                fetch_one=True,
-            )
-            user_id_vendor = usr_r["id"]
-        except Exception as e:
-            failed.append((i, f"User account creation failed: {e}"))
-            continue
-
-        # ── 2. vendors row ───────────────────────────────────────────────────
+        # ── 1. vendors row ───────────────────────────────────────────────────
         try:
             ven_r = db._execute(
                 "INSERT INTO vendors"
@@ -345,24 +339,26 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
             )
             ven_id = ven_r["id"]
         except Exception as e:
+            failed.append((i, f"Vendor record insert failed: {e}"))
+            continue
+
+        # ── 2. users row (linked_id set inline) ────────────────────────────────
+        try:
+            db._execute(
+                "INSERT INTO users"
+                "(society_id, email, password_hash, role, login_method, linked_id) "
+                "VALUES (%s,%s,%s,'vendor','password',%s)",
+                (sid, email, generate_password_hash(password), ven_id),
+            )
+        except Exception as e:
             try:
                 db._execute(
-                    "DELETE FROM users WHERE id=%s AND society_id=%s",
-                    (user_id_vendor, sid),
+                    "DELETE FROM vendors WHERE id=%s AND society_id=%s",
+                    (ven_id, sid),
                 )
             except Exception:
                 pass
-            failed.append((i, f"Vendor record insert failed (user row rolled back): {e}"))
-            continue
-
-        # ── 3. link ─────────────────────────────────────────────────────────
-        try:
-            db._execute(
-                "UPDATE users SET linked_id=%s WHERE id=%s",
-                (ven_id, user_id_vendor),
-            )
-        except Exception as e:
-            failed.append((i, f"Linking failed (records exist but unlinked): {e}"))
+            failed.append((i, f"User account creation failed (vendor rolled back): {e}"))
             continue
 
         success += 1
@@ -373,9 +369,10 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
 def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each CSV row:
-      1. Insert into users (role='security')
-      2. Insert into security_staff
-      3. Set users.linked_id = security_staff.id
+      1. Insert into security_staff
+      2. Insert into users (role='security', linked_id=security_staff.id set inline)
+      If step 2 fails, roll back the security_staff row — same reasoning as
+      vendors/apartments above.
     """
     required = _BULK_TEMPLATES["security"]["required"]
     success  = 0
@@ -391,21 +388,7 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
         password = row["password"].strip()
         name     = row["name"].strip()
 
-        # ── 1. users row ────────────────────────────────────────────────────
-        try:
-            usr_r = db._execute(
-                "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method) "
-                "VALUES (%s,%s,%s,'security','password') RETURNING id",
-                (sid, email, generate_password_hash(password)),
-                fetch_one=True,
-            )
-            user_id_sec = usr_r["id"]
-        except Exception as e:
-            failed.append((i, f"User account creation failed: {e}"))
-            continue
-
-        # ── 2. security_staff row ────────────────────────────────────────────
+        # ── 1. security_staff row ────────────────────────────────────────────
         try:
             sec_r = db._execute(
                 "INSERT INTO security_staff"
@@ -423,24 +406,26 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
             )
             sec_id = sec_r["id"]
         except Exception as e:
+            failed.append((i, f"Security staff record insert failed: {e}"))
+            continue
+
+        # ── 2. users row (linked_id set inline) ────────────────────────────────
+        try:
+            db._execute(
+                "INSERT INTO users"
+                "(society_id, email, password_hash, role, login_method, linked_id) "
+                "VALUES (%s,%s,%s,'security','password',%s)",
+                (sid, email, generate_password_hash(password), sec_id),
+            )
+        except Exception as e:
             try:
                 db._execute(
-                    "DELETE FROM users WHERE id=%s AND society_id=%s",
-                    (user_id_sec, sid),
+                    "DELETE FROM security_staff WHERE id=%s AND society_id=%s",
+                    (sec_id, sid),
                 )
             except Exception:
                 pass
-            failed.append((i, f"Security staff record failed (user row rolled back): {e})"))
-            continue
-
-        # ── 3. link ─────────────────────────────────────────────────────────
-        try:
-            db._execute(
-                "UPDATE users SET linked_id=%s WHERE id=%s",
-                (sec_id, user_id_sec),
-            )
-        except Exception as e:
-            failed.append((i, f"Linking failed (records exist but unlinked): {e})"))
+            failed.append((i, f"User account creation failed (security staff rolled back): {e}"))
             continue
 
         success += 1
