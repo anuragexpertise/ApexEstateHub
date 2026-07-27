@@ -35,7 +35,7 @@ class TestQRAndAlerts(unittest.TestCase):
 
     def test_role_codes(self):
         self.assertEqual(ROLE_CODE_MAP.get("ADM"), "admin")
-        self.assertEqual(ROLE_CODE_MAP.get("OWN"), "apartment")
+        self.assertEqual(ROLE_CODE_MAP.get("APT"), "apartment")
         self.assertEqual(ROLE_CODE_MAP.get("EVT"), "event_ticket")
         self.assertEqual(ROLE_CODE_MAP.get("VST"), "visitor")
         self.assertEqual(ROLE_CODE_MAP.get("PTL"), "patrol_location")

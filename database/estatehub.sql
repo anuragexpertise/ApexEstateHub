@@ -3026,7 +3026,8 @@ DROP FUNCTION IF EXISTS fn_receivables_named CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_receivables_named(
     p_society_id  INT, p_search TEXT DEFAULT NULL, p_status TEXT DEFAULT NULL,
-    p_entity_id   INT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL
+    p_entity_id   INT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL,
+    p_date_from   DATE DEFAULT NULL, p_date_to DATE DEFAULT NULL
 )
 RETURNS TABLE (
     id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
@@ -3070,6 +3071,8 @@ BEGIN
       AND (p_entity_id   IS NULL OR r.entity_id = p_entity_id)
       AND (p_entity_role IS NULL OR r.role = p_entity_role)
       AND (p_search IS NULL OR r.description ILIKE '%'||p_search||'%' OR a.name ILIKE '%'||p_search||'%')
+      AND (p_date_from IS NULL OR r.period_month >= p_date_from)
+      AND (p_date_to IS NULL OR r.period_month <= p_date_to)
     ORDER BY r.due_date ASC, r.created_at DESC;
 END;
 $$;
@@ -3079,7 +3082,8 @@ DROP FUNCTION IF EXISTS fn_payables_named CASCADE;
 CREATE OR REPLACE FUNCTION fn_payables_named(
     p_society_id  INT, p_search TEXT DEFAULT NULL,
     p_status      TEXT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL,
-    p_entity_id   INT  DEFAULT NULL
+    p_entity_id   INT  DEFAULT NULL,
+    p_shift_date_from DATE DEFAULT NULL, p_shift_date_to DATE DEFAULT NULL
 )
 RETURNS TABLE (
     id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
@@ -3108,6 +3112,8 @@ BEGIN
       AND (p_entity_role IS NULL OR p.role = p_entity_role)
       AND (p_entity_id   IS NULL OR p.entity_id = p_entity_id)
       AND (p_search IS NULL OR p.description ILIKE '%'||p_search||'%' OR a.name ILIKE '%'||p_search||'%')
+      AND (p_shift_date_from IS NULL OR p.shift_date >= p_shift_date_from)
+      AND (p_shift_date_to IS NULL OR p.shift_date <= p_shift_date_to)
     ORDER BY p.due_date ASC, p.created_at DESC;
 END;
 $$;

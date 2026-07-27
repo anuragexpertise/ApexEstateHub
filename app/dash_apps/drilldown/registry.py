@@ -52,8 +52,8 @@ ENTITY_MAP: dict = {
     "events": "event",
     "concerns": "concern",
     "gate_logs": "gate_log",
-    "receipts": "receipt_entry",
-    "expenses": "expense_entry",
+    "receipts": "receipt",
+    "expenses": "expense",
     "cashbook": "transaction",
     "societies": "society",
     "accounts": "account",
@@ -337,6 +337,16 @@ DRILLDOWN_MAP: dict = {
 
     "kpi_late_fees_due": {"target": "list_receivables", "label": "Late Fees Due"},
     "kpi_maintenance_due": {"target": "list_receivables", "label": "Maintenance Due"},
+    "kpi_payables_this_month": {
+        "target": "list_payables",
+        "label": "Payables This Month",
+        "filter": {},
+    },
+    "kpi_receivables_this_month": {
+        "target": "list_receivables",
+        "label": "Receivables This Month",
+        "filter": {},
+    },
     # ── LIST → PROFILE ────────────────────────────────────────────────────────
     "list_apartments": {"target": "profile_apartment", "label": "Apartment Profile"},
     "list_vendors": {"target": "profile_vendor", "label": "Vendor Profile"},
@@ -345,11 +355,11 @@ DRILLDOWN_MAP: dict = {
     "list_concerns": {"target": "profile_concern", "label": "Concern Details"},
     "list_gate_logs": {"target": "profile_gate_log", "label": "Gate Log Details"},
     "list_receipts": {
-        "target": "profile_receipt_entry",
+        "target": "profile_receipt",
         "label": "Receipt Details",
     },
     "list_expenses": {
-        "target": "profile_expense_entry",
+        "target": "profile_expense",
         "label": "Expense Details",
     },
     "list_cashbook": {"target": "profile_transaction", "label": "Transaction Details"},
@@ -380,6 +390,14 @@ DRILLDOWN_MAP: dict = {
     "list_polls": {
         "target": "profile_poll",
         "label": "Poll Details"
+    },
+    "list_channels": {
+        "target": "profile_channel",
+        "label": "Channel Details",
+    },
+    "list_payables": {
+        "target": "profile_payment",
+        "label": "Payment Details",
     },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {

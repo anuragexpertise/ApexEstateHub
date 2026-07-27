@@ -395,8 +395,19 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_etype  = (
             "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
         ) if not eid else None
-        return ("SELECT * FROM fn_receivables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_eid, p_etype, page_size, offset))
+        date_from = filters.get("date_from")
+        date_to   = filters.get("date_to")
+        base_params = [sid, s, p_status, p_eid, p_etype]
+        if date_from:
+            base_params.append(date_from)
+        else:
+            base_params.append(None)
+        if date_to:
+            base_params.append(date_to)
+        else:
+            base_params.append(None)
+        return ("SELECT * FROM fn_receivables_named(%s,%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                tuple(base_params + [page_size, offset]))
 
     # ── PAYABLES ────────────────────────────────────────────────────────
     if entity == "payables":
@@ -405,13 +416,24 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_etype = filters.get("role") or (
             "vendor" if ven_id else "security" if sec_id else None
         )
+        shift_date_from = filters.get("shift_date_from")
+        shift_date_to   = filters.get("shift_date_to")
+        base_params = [sid, s, p_status, p_etype, p_eid]
+        if shift_date_from:
+            base_params.append(shift_date_from)
+        else:
+            base_params.append(None)
+        if shift_date_to:
+            base_params.append(shift_date_to)
+        else:
+            base_params.append(None)
         # Defense-in-depth: if no entity scoping is present (e.g. apartment
         # role somehow reached payables), return empty result rather than
         # leaking all society payables.
         if not p_eid and not p_etype:
             return "SELECT 1 WHERE FALSE", ()
-        return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_etype, p_eid, page_size, offset))
+        return ("SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                tuple(base_params + [page_size, offset]))
 
     # ── ASSETS ──────────────────────────────────────────────────────────
     if entity == "assets":
@@ -793,13 +815,15 @@ def load_list(
             p_etype  = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
             ) if not eid else None
+            date_from = filters.get("date_from")
+            date_to   = filters.get("date_to")
             rows = db._execute(
-                "SELECT * FROM fn_receivables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_eid, p_etype, page_size, offset), fetch_all=True,
+                "SELECT * FROM fn_receivables_named(%s,%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_eid, p_etype, date_from, date_to, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_receivables_named(%s,NULL,%s,%s,%s)",
-                (sid, p_status, p_eid, p_etype), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_receivables_named(%s,NULL,%s,%s,%s,%s,%s)",
+                (sid, p_status, p_eid, p_etype, date_from, date_to), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
@@ -823,13 +847,15 @@ def load_list(
             p_etype = filters.get("role") or (
                 "vendor" if ven_id else "security" if sec_id else None
             )
+            shift_date_from = filters.get("shift_date_from")
+            shift_date_to   = filters.get("shift_date_to")
             rows = db._execute(
-                "SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, p_status, p_etype, p_eid, page_size, offset), fetch_all=True,
+                "SELECT * FROM fn_payables_named(%s,%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                (sid, s, p_status, p_etype, p_eid, shift_date_from, shift_date_to, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_payables_named(%s,NULL,%s,%s,%s)",
-                (sid, p_status, p_etype, p_eid), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_payables_named(%s,NULL,%s,%s,%s,%s,%s)",
+                (sid, p_status, p_etype, p_eid, shift_date_from, shift_date_to), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
@@ -1184,7 +1210,7 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── RECEIVABLE (read-only profile) ───────────────────────────────────
         if entity_singular == "receivable":
             r = db._execute(
-                "SELECT * FROM fn_receivables_named(%s,NULL,NULL,NULL,NULL) WHERE id=%s",
+                "SELECT * FROM fn_receivables_named(%s,NULL,NULL,NULL,NULL,NULL,NULL) WHERE id=%s",
                 (society_id, pk), fetch_one=True,
             )
             if not r:
@@ -1199,7 +1225,7 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── PAYMENT (read-only profile) ──────────────────────────────────────
         if entity_singular == "payment":
             r = db._execute(
-                "SELECT * FROM fn_payables_named(%s,NULL,NULL,NULL) WHERE id=%s",
+                "SELECT * FROM fn_payables_named(%s,NULL,NULL,NULL,NULL,NULL,NULL) WHERE id=%s",
                 (society_id, pk), fetch_one=True,
             )
             if not r:
