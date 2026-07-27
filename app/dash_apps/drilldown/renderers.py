@@ -45,6 +45,13 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
     ("admin", "ledger"):       {"view"},
+    # Cashbook rows are derived/paired display of `transactions`, which
+    # loaders.delete_entity() already refuses to touch ("Transactions are
+    # immutable — cashbook is read-only"). Without this explicit entry,
+    # admin fell through to ("admin","*") = full CRUD, which showed
+    # Edit/Delete buttons that would only ever fail. "new" is kept — it's
+    # the "+ New" shortcut into the receipt form, a deliberate convenience.
+    ("admin", "cashbook"):     {"view", "new"},
     ("admin", "accounts"):     {"view", "edit", "delete", "new"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
@@ -355,6 +362,14 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     # ── Resolve permissions for this role × entity ─────────────────────────
     allowed = _perms_for(role, entity)
+    # cashbook/ledger rows are paired display constructs from
+    # fn_cashbook_paired_v2 / fn_account_ledger_fy — they carry no single
+    # `id` column, so a per-row View/Edit/Delete button would resolve to
+    # pk="0" for every row and silently open the same (wrong) profile
+    # each time. These two are read-only reports; row-level actions never
+    # made sense for them. `allowed` (unmodified) still drives header-level
+    # actions like the "New" shortcut on cashbook.
+    row_actions_allowed = allowed if entity not in ("cashbook", "ledger") else set()
     hidden = _context_hidden_fields(filters)
     visible_columns = [
         c for c in columns
@@ -415,7 +430,7 @@ def render_list_card(card_id: str, title: str, icon: str,
             style={"padding": "4px 6px", "background": "#f4f7fb"},
         ))
 
-    if allowed:
+    if row_actions_allowed:
         header_cells.append(html.Th("Actions", style={
             "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
             "padding": "10px 8px",
@@ -459,7 +474,7 @@ def render_list_card(card_id: str, title: str, icon: str,
             }))
 
         # ── Action buttons scoped by portal permissions ──────────────────
-        if allowed:
+        if row_actions_allowed:
             action_btns = []
 
             # "view" button is always shown when an actions column is present —
@@ -474,7 +489,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                        "borderRadius": "7px"},
             ))
 
-            if "edit" in allowed:
+            if "edit" in row_actions_allowed:
                 action_btns.append(dbc.Button(
                     html.I(className="fas fa-edit"),
                     id={"type": "list-edit", "entity": entity, "pk": pk_val},
@@ -484,7 +499,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                            "borderRadius": "7px"},
                 ))
 
-            if "delete" in allowed:
+            if "delete" in row_actions_allowed:
                 action_btns.append(dbc.Button(
                     html.I(className="fas fa-trash-alt"),
                     id={"type": "list-delete", "entity": entity, "pk": pk_val},
@@ -518,25 +533,31 @@ def render_list_card(card_id: str, title: str, icon: str,
             )
         )
 
-    # Ledger row highlighting: BF in yellow, closing in green, negative balance in red
+    # Ledger row highlighting: BF in yellow, closing in green, negative balance in red.
+    # fn_account_ledger_fy returns row_type ('bf' | 'txn' | 'depreciation' | 'closing')
+    # and particulars like 'Balance B/F' / 'Balance C/F -> X' — NOT an is_closing
+    # boolean or the literal string 'Brought Forward' that this block checked for
+    # previously, which meant the highlighting never actually fired.
     if entity == "ledger" and rows:
         for i, row in enumerate(rows):
             if i >= len(body_rows):
                 break
             row_dict = (row.to_dict(include_calculated=True)
                         if hasattr(row, "to_dict") else dict(row))
-            is_closing = bool(row_dict.get("is_closing"))
+            row_type = row_dict.get("row_type")
             balance = float(row_dict.get("balance") or 0)
-            if is_closing:
+            if row_type == "closing":
                 body_rows[i].style = {"backgroundColor": "#d4edda", "fontWeight": "700"}
             elif balance < 0:
                 body_rows[i].style = {"backgroundColor": "#f8d7da"}
-            elif row_dict.get("particulars") == "Brought Forward":
+            elif row_type == "bf":
                 body_rows[i].style = {"backgroundColor": "#fff3cd"}
+            elif row_type == "depreciation":
+                body_rows[i].style = {"backgroundColor": "#e2e3ff"}
         
 
     if not body_rows:
-        span = len(columns) + (1 if allowed else 0)
+        span = len(columns) + (1 if row_actions_allowed else 0)
         body_rows = [html.Tr(html.Td(
             html.Div([
                 html.I(className="fas fa-inbox me-2",

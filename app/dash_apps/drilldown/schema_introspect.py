@@ -160,8 +160,14 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     ],
 }
 
-# Auth fields injected into vendor/security forms (from users table, not visible to introspection).
+# Auth fields injected into apartment/vendor/security forms (from users
+# table, not visible to introspection since users isn't the base table for
+# any of these three entities).
 _AUTH_FIELDS: dict[str, list[dict]] = {
+    "apartments": [
+        {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
+        {"id": "password", "label": "Password",       "type": "password", "required": True},
+    ],
     "vendors": [
         {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
         {"id": "password", "label": "Password",       "type": "password", "required": True},

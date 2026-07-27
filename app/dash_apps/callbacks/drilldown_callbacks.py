@@ -1749,7 +1749,7 @@ def _save_entity(entity, card_id, data):
     is_edit = "edit" in card_id
     pk      = data.get("id")
     try:
-        if entity == "apartment":       return _save_apartment(db, data, sid, is_edit, pk)
+        if entity == "apartment":       return _save_user_entity(db, data, sid, "apartment", is_edit, pk)
         if entity == "vendor":          return _save_user_entity(db, data, sid, "vendor",   is_edit, pk)
         if entity == "security":        return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":           return _save_event(db, data, sid, is_edit, pk)
@@ -2220,52 +2220,103 @@ def _save_asset(db, d, sid, is_edit, pk):
     except Exception as e:
         return False, _clean_pg_error(e), None
 
-def _save_apartment(db, d, sid, is_edit, pk):
-    if is_edit:
-        r = db._execute(
-            "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
-            "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
-            "owner_photo=COALESCE(NULLIF(%s, ''), owner_photo),"
-            "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
-            "updated_by=%s "
-            "WHERE id=%s AND society_id=%s RETURNING id",
-            (
-                d.get("owner_name"),
-                d.get("mobile"),
-                d.get("apartment_size") or 0,
-                d.get("alt_mobile"),
-                d.get("alt_address"),
-                d.get("apt_calc_start_date"),
-                d.get("active", True),
-                d.get("owner_photo"),
-                d.get("id_proof"),
-                d.get("user_id"),
-                pk,
-                sid,
-            ),
-            fetch_one=True,
-        )
-        return True, "Apartment updated", r["id"] if r else None
-
-    flat = (d.get("flat_number") or "").strip()
-    if not flat:
-        return False, "Flat number is required", None
-    r = db._execute(
-        "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-        "apartment_size,owner_photo,id_proof,active,created_by) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
-        (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
-         d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
-        fetch_one=True,
-    )
-    new_id = r["id"] if r else None
-    if new_id:
-        _move_temp_images("apartment", new_id, sid, d)
-    return True, f"Apartment '{flat}' created", new_id
-
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
 
+    # ── APARTMENT ────────────────────────────────────────────────────────
+    # Unlike vendor/security, `pk` here is apartments.id, not users.id.
+    # That's not an arbitrary choice — fn_apartments_list.id, every
+    # receivables/receipts/gate_access.entity_id row for role='apartment',
+    # and _apt_id(filters) throughout loaders.py all already use
+    # apartments.id as THE identifier for an apartment. Re-pointing that at
+    # users.id to match vendor/security's convention would mean touching
+    # dues generation, gate-pass evaluation, and every apartment-scoped
+    # query in the app — out of scope for this merge. So apartment gets its
+    # own branch here instead of sharing vendor/security's pk assumption,
+    # while still sharing the "create/update a paired users login" logic.
+    if role == "apartment":
+        if is_edit:
+            email = (d.get("email") or "").strip()
+            pw = (d.get("password") or "").strip()
+            # Only touch `users` if a value was actually given — apartments
+            # created before this merge (or via a path that predates it)
+            # may have no linked login yet, and a blank edit shouldn't wipe
+            # an existing email.
+            if email or pw:
+                set_parts, params = [], []
+                if email:
+                    set_parts.append("email=%s"); params.append(email)
+                if pw:
+                    set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
+                params += [pk, sid]
+                db._execute(
+                    f"UPDATE users SET {', '.join(set_parts)} "
+                    "WHERE linked_id=%s AND role='apartment' AND society_id=%s",
+                    params,
+                )
+            r = db._execute(
+                "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
+                "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
+                "owner_photo=COALESCE(NULLIF(%s, ''), owner_photo),"
+                "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
+                "updated_by=%s "
+                "WHERE id=%s AND society_id=%s RETURNING id",
+                (
+                    d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
+                    d.get("alt_mobile"), d.get("alt_address"), d.get("apt_calc_start_date"),
+                    d.get("active", True), d.get("owner_photo"), d.get("id_proof"),
+                    d.get("user_id"), pk, sid,
+                ),
+                fetch_one=True,
+            )
+            return True, "Apartment updated", r["id"] if r else None
+
+        flat = (d.get("flat_number") or "").strip()
+        if not flat:
+            return False, "Flat number is required", None
+        email = (d.get("email") or "").strip()
+        if not email:
+            return False, "Email is required", None
+        pw = d.get("password", "")
+        if not pw:
+            return False, "Password is required", None
+
+        # apartments row FIRST, then users — the reverse of vendor/security
+        # below. flat_number is the natural key here (not email), and if
+        # the users insert then fails we roll back the apartments row so
+        # the flat slot is freed for retry. Mirrors _bulk_insert_apartments'
+        # documented reasoning in bulk_enroll_callbacks.py.
+        r = db._execute(
+            "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
+            "apartment_size,owner_photo,id_proof,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
+             d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
+            fetch_one=True,
+        )
+        apt_id = r["id"] if r else None
+        if not apt_id:
+            return False, "Apartment insert failed", None
+
+        try:
+            db._execute(
+                "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
+                "VALUES(%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                (sid, email, generate_password_hash(pw), apt_id, d.get("user_id")),
+                fetch_one=True,
+            )
+        except Exception as e:
+            db._execute("DELETE FROM apartments WHERE id=%s AND society_id=%s", (apt_id, sid))
+            return False, f"User account creation failed (apartment rolled back): {_clean_pg_error(e)}", None
+
+        _move_temp_images("apartment", apt_id, sid, d)
+        return True, f"Apartment '{flat}' created", apt_id
+
+    # ── VENDOR / SECURITY (unchanged) ───────────────────────────────────
+    # Here pk IS users.id — fn_vendors_list.id / fn_security_list.id are
+    # both u.id (the list is built FROM users), so edit lookups go straight
+    # against the users table and join out to vendors/security_staff via
+    # linked_id.
     if is_edit:
         email = (d.get("email") or "").strip()
         db._execute(

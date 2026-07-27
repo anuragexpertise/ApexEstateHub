@@ -97,7 +97,13 @@ END;
 $$;
 
 -- ────────────────────────────────────────────────────────────────
--- fn_verify_receipt — single-sided write (Cr only) + TDS/GST split legs
+-- fn_verify_receipt — Cr income row always. Cash mode: that's the only
+-- row (matches your CiH sheet, which has no per-transaction entries).
+-- Non-cash mode: ALSO writes a real Dr leg to the mode-resolved bank
+-- account, net of TDS/GST — this is what makes the bank account's own
+-- ledger (fn_account_ledger_fy) itemized, matching your ICICI sheet,
+-- and keeps kpi_bank_balance/kpi_cash_in_hand correct since they sum
+-- real transactions rows.
 -- ────────────────────────────────────────────────────────────────
 DROP FUNCTION IF EXISTS fn_verify_receipt CASCADE;
 
@@ -122,6 +128,8 @@ DECLARE
     v_gst        NUMERIC(12,2) := 0;
     v_tds_acc    INT;
     v_gst_acc    INT;
+    v_bank_acc   INT;
+    v_bank_leg   NUMERIC(12,2);
 BEGIN
     SELECT * INTO v_rec FROM receipts WHERE id = p_receipt_id FOR UPDATE;
     IF NOT FOUND    THEN receipt_id := p_receipt_id; receipt_number := NULL; msg := 'Error: Receipt not found'; RETURN NEXT; RETURN; END IF;
@@ -137,7 +145,6 @@ BEGIN
     v_tds_pc := 10.00;
     v_gst_pc := 8.00;
 
-    -- TDS/GST only ever apply to non-cash receipts on accounts flagged for it.
     IF NOT v_is_cash AND v_acc.applies_tds THEN
         v_tds := ROUND(v_rec.amount * v_tds_pc / 100, 2);
         v_tds_acc := fn_resolve_split_account(v_rec.society_id, 'tds');
@@ -147,8 +154,7 @@ BEGIN
         v_gst_acc := fn_resolve_split_account(v_rec.society_id, 'gst');
     END IF;
 
-    -- Cr: the full income amount, on its own side. This is the ONLY row
-    -- for a plain cash/no-deduction receipt.
+    -- Cr: the full income amount, on its own side.
     INSERT INTO transactions(
         society_id, trx_date, acc_id, entity_id, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id,
@@ -161,31 +167,47 @@ BEGIN
         'Cr', v_tds_pc, v_tds, v_gst_pc, v_gst
     ) RETURNING id INTO v_trx_id;
 
-    -- Dr split leg: TDS actually withheld and routed to the TDS-recoverable
-    -- account. Same journal, same date — a real second posting, not a
-    -- cashbook display convention.
-    IF v_tds > 0 AND v_tds_acc IS NOT NULL THEN
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id,
-            journal_id, entry_side
-        ) VALUES (
-            v_rec.society_id, v_rec.receipt_date, v_tds_acc, v_rec.entity_id,
-            'TDS deducted - ' || v_rec.particulars,
-            v_tds, v_mode, 'paid', p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id, 'Dr'
-        );
-    END IF;
+    IF NOT v_is_cash THEN
+        v_bank_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+        v_bank_leg := v_rec.amount - v_tds - v_gst;
 
-    IF v_gst > 0 AND v_gst_acc IS NOT NULL THEN
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id,
-            journal_id, entry_side
-        ) VALUES (
-            v_rec.society_id, v_rec.receipt_date, v_gst_acc, v_rec.entity_id,
-            'GST - ' || v_rec.particulars,
-            v_gst, v_mode, 'paid', p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id, 'Dr'
-        );
+        -- Dr: net amount actually received into the bank/settlement account.
+        IF v_bank_acc IS NOT NULL AND v_bank_leg > 0 THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id,
+                journal_id, entry_side
+            ) VALUES (
+                v_rec.society_id, v_rec.receipt_date, v_bank_acc, v_rec.entity_id,
+                'Received - ' || v_rec.particulars,
+                v_bank_leg, v_mode, 'paid', p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id, 'Dr'
+            );
+        END IF;
+
+        -- Dr: TDS withheld, routed to the TDS-recoverable account.
+        IF v_tds > 0 AND v_tds_acc IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id,
+                journal_id, entry_side
+            ) VALUES (
+                v_rec.society_id, v_rec.receipt_date, v_tds_acc, v_rec.entity_id,
+                'TDS deducted - ' || v_rec.particulars,
+                v_tds, v_mode, 'paid', p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id, 'Dr'
+            );
+        END IF;
+
+        IF v_gst > 0 AND v_gst_acc IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id,
+                journal_id, entry_side
+            ) VALUES (
+                v_rec.society_id, v_rec.receipt_date, v_gst_acc, v_rec.entity_id,
+                'GST - ' || v_rec.particulars,
+                v_gst, v_mode, 'paid', p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id, 'Dr'
+            );
+        END IF;
     END IF;
 
     UPDATE receipts
@@ -206,12 +228,13 @@ END;
 $$;
 
 -- ────────────────────────────────────────────────────────────────
--- fn_verify_expense — single-sided write (Dr only) + GST-on-purchase split
--- (fixed the pre-existing v_rec.receipt_number bug: expenses has no such
--- column; expenses don't get a receipt_number, only a hash via
--- previous_hash — kept expense_number generation out of scope here since
--- your spec didn't ask for it, just returns NULL where the old code would
--- have failed to compile.)
+-- fn_verify_expense — Dr expense row always. Cash mode: that's the
+-- only row. Non-cash mode: ALSO writes a real Cr leg to the
+-- mode-resolved bank account (money actually leaving the bank),
+-- net of any GST input-credit split. Mirrors fn_verify_receipt.
+-- (Also fixes a pre-existing bug: the old code referenced
+-- v_rec.receipt_number against expenses%ROWTYPE, but `expenses` has no
+-- such column — only `receipts` does — which would fail to compile.)
 -- ────────────────────────────────────────────────────────────────
 DROP FUNCTION IF EXISTS fn_verify_expense CASCADE;
 
@@ -232,6 +255,8 @@ DECLARE
     v_gst_pc     NUMERIC(5,2);
     v_gst        NUMERIC(12,2) := 0;
     v_gst_acc    INT;
+    v_bank_acc   INT;
+    v_bank_leg   NUMERIC(12,2);
 BEGIN
     SELECT * INTO v_rec FROM expenses WHERE id = p_expense_id FOR UPDATE;
     IF NOT FOUND    THEN expense_id := p_expense_id; receipt_number := NULL; msg := 'Error: Expense not found'; RETURN NEXT; RETURN; END IF;
@@ -245,8 +270,6 @@ BEGIN
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     v_gst_pc := 8.00;
-    -- GST charged to you on a non-cash purchase from a GST-flagged expense
-    -- account (input GST — split out for input-credit tracking).
     IF NOT v_is_cash AND v_acc.applies_gst THEN
         v_gst := ROUND(v_rec.amount * v_gst_pc / 100, 2);
         v_gst_acc := fn_resolve_split_account(v_rec.society_id, 'gst');
@@ -265,16 +288,34 @@ BEGIN
         'Dr', v_gst_pc, v_gst
     ) RETURNING id INTO v_trx_id;
 
-    IF v_gst > 0 AND v_gst_acc IS NOT NULL THEN
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id,
-            journal_id, entry_side
-        ) VALUES (
-            v_rec.society_id, v_rec.expense_date, v_gst_acc, v_rec.entity_id,
-            'GST - ' || v_rec.particulars,
-            v_gst, v_mode, 'paid', p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id, 'Cr'
-        );
+    IF NOT v_is_cash THEN
+        v_bank_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+        v_bank_leg := v_rec.amount - v_gst;
+
+        -- Cr: net amount actually paid out of the bank/settlement account.
+        IF v_bank_acc IS NOT NULL AND v_bank_leg > 0 THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id,
+                journal_id, entry_side
+            ) VALUES (
+                v_rec.society_id, v_rec.expense_date, v_bank_acc, v_rec.entity_id,
+                'Paid - ' || v_rec.particulars,
+                v_bank_leg, v_mode, 'paid', p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id, 'Cr'
+            );
+        END IF;
+
+        IF v_gst > 0 AND v_gst_acc IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id,
+                journal_id, entry_side
+            ) VALUES (
+                v_rec.society_id, v_rec.expense_date, v_gst_acc, v_rec.entity_id,
+                'GST - ' || v_rec.particulars,
+                v_gst, v_mode, 'paid', p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id, 'Cr'
+            );
+        END IF;
     END IF;
 
     UPDATE expenses
@@ -528,19 +569,14 @@ END;
 $$;
 
 -- ────────────────────────────────────────────────────────────────
--- fn_cashbook_paired_v2 — keyed off entry_side. Two kinds of row:
---   (a) REAL rows: every transactions row that isn't the cash/bank
---       settlement account itself (this includes TDS/GST split legs,
---       which now land on the payment side for free since they're
---       entry_side='Dr').
---   (b) SYNTHESIZED remainder rows: for a non-cash journal, whatever
---       portion of the amount ISN'T already accounted for by real
---       split legs gets one extra passthrough row into the
---       mode-resolved cash/bank account, on the opposite side — this
---       is what makes Chq(H) == Chq(O) without storing a second
---       ledger posting for a plain non-cash entry.
--- Cash-mode entries never get a synthesized counterpart — they show on
--- their own side only, per your spec.
+-- fn_cashbook_paired_v2 — keyed off entry_side (instead of joining
+-- accounts.drcr_account). Real Cr/Dr legs sharing a journal_id are
+-- paired by row order within that journal — this naturally lines up
+-- TDS/GST split legs, and the real bank-passthrough leg written by
+-- fn_verify_receipt/fn_verify_expense for non-cash entries, against
+-- the receipt/expense they came from. A plain cash entry has no
+-- counterpart leg at all (by design — see fn_verify_receipt), so it
+-- simply occupies a slot on its own side.
 -- ────────────────────────────────────────────────────────────────
 DROP FUNCTION IF EXISTS fn_cashbook_paired_v2 (
     INT, INT, TEXT, TEXT, DATE, DATE
@@ -588,7 +624,7 @@ BEGIN
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
                COALESCE(t.acc_particulars,'')::TEXT AS particulars
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.is_cash_or_bank = FALSE
+        JOIN accounts a ON a.id = t.acc_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
@@ -626,10 +662,7 @@ BEGIN
         SELECT jid, trx_date, gs AS rn
         FROM slot_counts, LATERAL generate_series(1, max_rn) AS gs
     ),
-    real_rows AS (
-        -- Real slots: each existing Cr row paired with the Dr row (if any)
-        -- sharing its rn within the journal — lines up TDS/GST split legs
-        -- against the receipt they came from.
+    paired AS (
         SELECT
             sl.trx_date AS cb_date,
             cr.acc_id AS rc_acc_id, cr.account_name AS rc_account_name,
@@ -645,62 +678,11 @@ BEGIN
         LEFT JOIN dr_rows dr ON COALESCE(dr.journal_id, -dr.id) = sl.jid AND dr.rn = sl.rn
         WHERE cr.id IS NOT NULL OR dr.id IS NOT NULL
     ),
-    cr_journal_totals AS (
-        SELECT COALESCE(journal_id, -id) AS jid, MAX(trx_date) AS trx_date,
-               MAX(mode) AS mode, MAX(entity_name) AS entity_name, MAX(particulars) AS particulars,
-               SUM(amount) AS cr_total
-        FROM cr_rows WHERE mode <> 'cash' GROUP BY COALESCE(journal_id, -id)
-    ),
-    dr_journal_totals AS (
-        SELECT COALESCE(journal_id, -id) AS jid, MAX(trx_date) AS trx_date,
-               MAX(mode) AS mode, MAX(entity_name) AS entity_name, MAX(particulars) AS particulars,
-               SUM(amount) AS dr_total
-        FROM dr_rows WHERE mode <> 'cash' GROUP BY COALESCE(journal_id, -id)
-    ),
-    cr_remainder AS (
-        -- Non-cash Cr journals: portion unclaimed by real Dr legs (TDS/GST
-        -- splits) gets one synthesized passthrough row into cash/bank.
-        SELECT c.trx_date AS cb_date,
-               NULL::INT AS rc_acc_id, NULL::TEXT AS rc_account_name,
-               NULL::TEXT AS rc_entity_name, NULL::TEXT AS rc_particulars,
-               0::NUMERIC AS rc_cash, 0::NUMERIC AS rc_chq,
-               fn_resolve_cash_account(p_society_id, c.mode) AS pc_acc_id,
-               (SELECT name FROM accounts WHERE id = fn_resolve_cash_account(p_society_id, c.mode))::TEXT AS pc_account_name,
-               c.entity_name AS pc_entity_name, c.particulars AS pc_particulars,
-               0::NUMERIC AS pc_cash,
-               (c.cr_total - COALESCE(d.dr_total, 0))::NUMERIC AS pc_chq
-        FROM cr_journal_totals c
-        LEFT JOIN dr_journal_totals d ON d.jid = c.jid
-        WHERE (c.cr_total - COALESCE(d.dr_total, 0)) > 0
-    ),
-    dr_remainder AS (
-        -- Non-cash Dr journals (a straight bank/UPI/cheque-mode expense
-        -- with no Cr leg at all): synthesized passthrough on receipt side.
-        SELECT d.trx_date AS cb_date,
-               fn_resolve_cash_account(p_society_id, d.mode) AS rc_acc_id,
-               (SELECT name FROM accounts WHERE id = fn_resolve_cash_account(p_society_id, d.mode))::TEXT AS rc_account_name,
-               d.entity_name AS rc_entity_name, d.particulars AS rc_particulars,
-               0::NUMERIC AS rc_cash,
-               (d.dr_total - COALESCE(c.cr_total, 0))::NUMERIC AS rc_chq,
-               NULL::INT AS pc_acc_id, NULL::TEXT AS pc_account_name,
-               NULL::TEXT AS pc_entity_name, NULL::TEXT AS pc_particulars,
-               0::NUMERIC AS pc_cash, 0::NUMERIC AS pc_chq
-        FROM dr_journal_totals d
-        LEFT JOIN cr_journal_totals c ON c.jid = d.jid
-        WHERE (d.dr_total - COALESCE(c.cr_total, 0)) > 0
-    ),
-    paired AS (
-        SELECT * FROM real_rows
-        UNION ALL
-        SELECT * FROM cr_remainder
-        UNION ALL
-        SELECT * FROM dr_remainder
-    ),
     day_totals AS (
         -- Cash-only, matching the workbook's own running-balance formula
         -- (I6=I5+G6, P6=P5+N6 — G/N are the CASH columns; the Chq columns
         -- H/O are audit-trail only and never feed the running total. Bank
-        -- position is tracked separately in its own account ledger).
+        -- position is tracked separately in its own account's ledger).
         SELECT pd.cb_date,
                SUM(COALESCE(pd.rc_cash,0)) AS day_rc,
                SUM(COALESCE(pd.pc_cash,0)) AS day_pc
