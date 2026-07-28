@@ -157,7 +157,6 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_payables_total", "security", "cashbook", "payables"),
     ("kpi_receipts_month", "security", "cashbook", "payables"),
     ("kpi_expenses_month", "security", "cashbook", "payables"),
-    ("kpi_security_fines", "security", "charges", "Charges"),
     ("kpi_security_other_charges", "security", "charges", "Charges"),
     ("kpi_receipts_in_hand_total", "security", "charges", "Cash"),
     ("kpi_security_salary_due", "security", "payables", "Salary"),
