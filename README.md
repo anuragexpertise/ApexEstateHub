@@ -740,7 +740,8 @@ ApexEstateHub/
 ├── database/
 │   ├── db_manager.py                         ← db._execute() → NeonDB/Aiven
 │   ├── estatehub.sql                         ← Full schema + all fn_* functions
-│   ├── migrate.py                            ← Account seeding + schema initialization
+│   ├── migrate.py                            ← Schema initialization (delegates demo seeding to seed.py)
+│   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns)
 │   └── reset_database.py                     ← Destructive DB reset and schema reload utility
 │
 ├── cleanup.py                                ← Cleanup script for removing redundant files
@@ -862,6 +863,31 @@ A utility script `database/reset_database.py` is provided to perform a destructi
 python3 database/reset_database.py
 ```
 This script connects to the target database, recreates the `public` schema CASCADE, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
+
+### Demo / Seed Data (`database/seed.py`)
+
+`database/migrate.py --seed` delegates to `database/seed.py`, which idempotently
+seeds a single demo society ("Sunrise Residency", `society_id = 1`) with:
+
+| Entity | Count | Notes |
+|---|---|---|
+| Master admin | 1 | `master@estatehub.com` |
+| Society admin | 1 | `admin@sunriseresidency.com` |
+| Apartment owners | 13 | Flats across A/B/C blocks; mix of rate-based and fixed-amount maintenance charge histories |
+| Vendors | 12 | 12 distinct service types (Plumbing, Gardening, Electrical, Carpentry, Painting, Pest Control, Housekeeping, CCTV & Security, AC Repair, Elevator Maintenance, Catering, Landscaping) |
+| Security staff | 12 | Mixed morning/evening/night shifts, roster + gate-log attendance for the first two guards |
+| Events | 12 | Spread across the demo financial year, all `open_to = 'all'` |
+| Concerns | 12 | Mixed types/statuses (`open`, `in_progress`, `resolved`, `closed`); several pre-assigned to a vendor or security guard via `concerns_assigns` |
+| Chart-of-accounts | 50 | Identical to the legacy `migrate.py` account tree |
+
+Re-running the seed is safe — every insert is guarded by an existence check
+(`ON CONFLICT` or a `SELECT ... WHERE NOT EXISTS`-style guard), so it will
+only fill in missing rows rather than duplicate demo data.
+
+```bash
+python3 database/seed.py                 # standalone
+python3 database/migrate.py --seed       # schema init + seed in one step
+```
 
 ### Database Migrations
 

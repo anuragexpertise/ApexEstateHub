@@ -1362,38 +1362,6 @@ CREATE TRIGGER trg_assets_qr
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_assets_qr();
 
-CREATE OR REPLACE FUNCTION fn_trg_visitors_qr()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
-        NEW.qr_payload := NEW.society_id || '-VST-' || NEW.id;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
-CREATE TRIGGER trg_visitors_qr
-    BEFORE INSERT ON visitors
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_visitors_qr();
-
-CREATE OR REPLACE FUNCTION fn_trg_patrol_locations_qr()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
-        NEW.qr_payload := NEW.society_id || '-PTL-' || NEW.id;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
-CREATE TRIGGER trg_patrol_locations_qr
-    BEFORE INSERT ON patrol_locations
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_patrol_locations_qr();
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3B: GATE-PASS EVALUATION
 -- ════════════════════════════════════════════════════════════════
@@ -5185,6 +5153,22 @@ CREATE TABLE IF NOT EXISTS visitors (
 
 CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors(society_id, visit_date);
 
+CREATE OR REPLACE FUNCTION fn_trg_visitors_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-VST-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
+CREATE TRIGGER trg_visitors_qr
+    BEFORE INSERT ON visitors
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_visitors_qr();
+
 CREATE TABLE IF NOT EXISTS alert_channels (
     id           SERIAL PRIMARY KEY,
     society_id   INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
@@ -5228,6 +5212,22 @@ CREATE TABLE IF NOT EXISTS patrol_locations (
     active          BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMP DEFAULT NOW()
 );
+
+CREATE OR REPLACE FUNCTION fn_trg_patrol_locations_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-PTL-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
+CREATE TRIGGER trg_patrol_locations_qr
+    BEFORE INSERT ON patrol_locations
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_patrol_locations_qr();
 
 CREATE TABLE IF NOT EXISTS patrol_scans (
     id               SERIAL PRIMARY KEY,
