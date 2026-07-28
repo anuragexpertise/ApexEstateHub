@@ -224,6 +224,9 @@ CREATE TABLE IF NOT EXISTS assets (
     updated_by INT REFERENCES users (id)
 );
 
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets(qr_payload);
+
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -263,6 +266,9 @@ CREATE TABLE IF NOT EXISTS concerns (
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
+
+ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
 
 CREATE TABLE IF NOT EXISTS concerns_assigns (
     id SERIAL PRIMARY KEY,
@@ -514,6 +520,9 @@ CREATE TABLE IF NOT EXISTS receipts (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts(qr_payload);
+
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
 CREATE TABLE IF NOT EXISTS expenses (
     id SERIAL PRIMARY KEY,
@@ -559,6 +568,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     source_reference VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses(qr_payload);
 
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
@@ -1333,6 +1345,107 @@ CREATE TRIGGER trg_ven_charges_updated
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
 -- ════════════════════════════════════════════════════════════════
+-- QR PAYLOAD AUTO-GENERATION TRIGGERS
+-- Ensures every entity row carries a canonical <society_id>-<XXX>-<id> QR
+-- ════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION fn_trg_concerns_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-CON-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_concerns_qr ON concerns;
+CREATE TRIGGER trg_concerns_qr
+    BEFORE INSERT ON concerns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_concerns_qr();
+
+CREATE OR REPLACE FUNCTION fn_trg_receipts_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-RPT-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_receipts_qr ON receipts;
+CREATE TRIGGER trg_receipts_qr
+    BEFORE INSERT ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipts_qr();
+
+CREATE OR REPLACE FUNCTION fn_trg_expenses_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-EXP-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_expenses_qr ON expenses;
+CREATE TRIGGER trg_expenses_qr
+    BEFORE INSERT ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expenses_qr();
+
+CREATE OR REPLACE FUNCTION fn_trg_assets_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-AST-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_assets_qr ON assets;
+CREATE TRIGGER trg_assets_qr
+    BEFORE INSERT ON assets
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_assets_qr();
+
+CREATE OR REPLACE FUNCTION fn_trg_visitors_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-VST-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
+CREATE TRIGGER trg_visitors_qr
+    BEFORE INSERT ON visitors
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_visitors_qr();
+
+CREATE OR REPLACE FUNCTION fn_trg_patrol_locations_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
+        NEW.qr_payload := NEW.society_id || '-PTL-' || NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
+CREATE TRIGGER trg_patrol_locations_qr
+    BEFORE INSERT ON patrol_locations
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_patrol_locations_qr();
+
+-- ════════════════════════════════════════════════════════════════
 -- SECTION 3B: GATE-PASS EVALUATION
 -- ════════════════════════════════════════════════════════════════
 
@@ -1356,8 +1469,12 @@ BEGIN
         END IF;
 
     ELSIF p_role = 'vendor' THEN
-        SELECT MAX(valid_until) INTO v_pass_expiry
-        FROM vendor_passes WHERE user_id = p_entity_id AND status = 'active';
+        SELECT MAX(vp.valid_until) INTO v_pass_expiry
+        FROM vendor_passes vp
+        JOIN users u ON u.id = vp.user_id
+        WHERE u.linked_id = p_entity_id
+          AND u.role = 'vendor'
+          AND vp.status = 'active';
         IF v_pass_expiry IS NULL OR v_pass_expiry < CURRENT_DATE THEN
             RETURN QUERY SELECT FALSE, 'No active vendor pass'::TEXT, 0::NUMERIC(15,2);
         ELSE
@@ -3008,7 +3125,7 @@ BEGIN
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
         COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
-        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=u.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
+        EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=s.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
     FROM security_staff s
     LEFT JOIN users u ON u.linked_id = s.id AND u.role = 'security'
     LEFT JOIN pay_sum ps ON ps.staff_id = s.id
@@ -3657,8 +3774,8 @@ BEGIN
     FROM gate_access g
     LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'ADM'
     LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'VND'
-    LEFT JOIN users         su ON su.id = g.entity_id AND g.role = 'SEC'
-    LEFT JOIN security_staff ss ON ss.id = su.linked_id
+    LEFT JOIN security_staff ss ON ss.id = g.entity_id AND g.role = 'SEC'
+    LEFT JOIN users su ON su.id = g.entity_id AND g.role = 'SEC'
     WHERE g.society_id = p_society_id
       AND (p_date   IS NULL OR g.time_in::DATE = p_date)
       AND (p_search IS NULL OR CASE

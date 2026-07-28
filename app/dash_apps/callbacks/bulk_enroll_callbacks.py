@@ -7,10 +7,9 @@ cards (list_apartments, list_vendors, list_security).
 
 WHY APARTMENTS NEED email + password
 --------------------------------------
-The gate-pass / QR system identifies every entity through users.id:
-  • generate_static_qr_code() encodes users.id in the QR payload
-  • validate_qr_code() looks up users.id → users.linked_id (= apartments.id)
-    → passes apartments.id to fn_evaluate_gate_pass('apartment', ...)
+The gate-pass / QR system identifies every entity through its domain-table id:
+  • generate_static_qr_code() encodes apartments.id / vendors.id / security_staff.id
+  • validate_qr_code() looks up users.linked_id to find the owner login row
   • The apartment owner portal login also uses the users row.
 
 Without a users row there is:
@@ -225,8 +224,8 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
       3. Set users.linked_id = apartments.id
 
     This is the ONLY order that gives the owner:
-      • A gate-pass QR (encoded as users.id → fn_evaluate_gate_pass uses
-        apartments.id via linked_id)
+      • A gate-pass QR (encoded as apartments.id → fn_evaluate_gate_pass uses
+        apartments.id directly)
       • An owner-portal login
       • Push-notification / receivables linkage
 

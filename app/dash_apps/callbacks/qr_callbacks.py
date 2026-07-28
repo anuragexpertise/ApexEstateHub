@@ -373,14 +373,14 @@ def register_qr_callbacks(app):
             return True, src, payload, entity_store, False  # interval enabled
 
         if ctx.triggered_id == 'hdr-avatar':
-            # Logged-in user's QR
+            # Logged-in user's QR — encode domain entity ID, not users.id
             src, payload = generate_static_qr_code(
-                auth_data.get('user_id'),
+                auth_data.get('linked_id'),
                 auth_data.get('role'),
                 auth_data.get('society_id')
             )
             entity_store = {
-                'entity_id': auth_data.get('user_id'),
+                'entity_id': auth_data.get('linked_id'),
                 'role': auth_data.get('role'),
                 'society_id': auth_data.get('society_id'),
                 'name': auth_data.get('name', 'User'),
