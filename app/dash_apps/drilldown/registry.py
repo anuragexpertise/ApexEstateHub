@@ -120,11 +120,6 @@ DRILLDOWN_MAP: dict = {
         "filter": {"pending_dues": {"eq":0.0}},
     },
     "kpi_vendors_total": {"target": "list_vendors", "label": "All Vendors"},
-    "kpi_vendors_dues": {
-        "target": "list_vendors",
-        "label": "Vendors With Dues",
-        "filter": {"has_dues": True},
-    },
     "kpi_vendors_passes": {
         "target": "list_vendors",
         "label": "Vendors With Passes",
@@ -238,7 +233,6 @@ DRILLDOWN_MAP: dict = {
         "label": "Other Charges",
     },
 
-    "kpi_security_fines": {"target": "list_payables", "label": "Security Fines"},
     "kpi_security_other_charges": {
         "target": "list_payables",
         "label": "Other Charges",
@@ -288,11 +282,6 @@ DRILLDOWN_MAP: dict = {
         "target": "list_societies",
         "label": "Free Plan Societies",
         "filter": {"plan": "Free"},
-    },
-    "kpi_societies_paid": {
-        "target": "list_societies",
-        "label": "All Paid Plans",
-        "filter": {"plans": ["9Apts", "99Apts", "999Apts", "unlimited"]},
     },
     "kpi_societies_expired": {
         "target": "list_societies",
