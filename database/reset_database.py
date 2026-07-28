@@ -67,14 +67,33 @@ def connect():
 # Execute SQL Script
 # ------------------------------------------------------------------
 
-def execute_sql_file(cursor, sql_file):
+def execute_sql_file(conn, sql_file):
     with open(sql_file, "r", encoding="utf-8") as f:
         sql = f.read()
 
     print("\nRunning schema file...")
-    cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    cursor.execute(sql)
-    print("✓ Schema executed")
+    import sqlparse
+    stmts = sqlparse.split(sql)
+    ok = 0
+    err = 0
+    with conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        conn.commit()
+        for stmt in stmts:
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            try:
+                cur.execute(stmt)
+                conn.commit()
+                ok += 1
+            except Exception as exc:
+                conn.rollback()
+                snippet = stmt[:120].replace("\n", " ")
+                print(f"\nFAILED:\n{snippet}")
+                print(exc)
+                err += 1
+    print(f"✓ DDL: {ok} ok, {err} skipped")
 
 
 # ------------------------------------------------------------------
@@ -183,21 +202,17 @@ def main():
 
         print("\nDropping public schema objects...")
 
-        cur.execute("""
-            DROP SCHEMA public CASCADE;
-        """)
+        cur.execute("DROP SCHEMA public CASCADE;")
+        conn.commit()
 
-        cur.execute("""
-            CREATE SCHEMA public AUTHORIZATION CURRENT_USER;
-        """)
+        cur.execute("CREATE SCHEMA public AUTHORIZATION CURRENT_USER;")
+        conn.commit()
 
         print("✓ Fresh public schema created")
 
-        execute_sql_file(cur, sql_file)
+        execute_sql_file(conn, sql_file)
 
         validate(cur)
-
-        conn.commit()
 
         print("\n" + "=" * 70)
         print("DATABASE RESET SUCCESSFUL")

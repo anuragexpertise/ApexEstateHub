@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS societies (
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users (id)
+    created_by INT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users (id)
 );
+
+ALTER TABLE societies ADD CONSTRAINT societies_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
 
 -- ── accounts ──────────────────────────────────────────────────
 -- `tab_name` is reserved for future per-tab Excel/ledger export (AccEstate sheet
@@ -347,7 +349,6 @@ CREATE TABLE IF NOT EXISTS receipts (
     confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
-    receipt_number VARCHAR(64) UNIQUE,
     receipt_number VARCHAR(64) UNIQUE,
     previous_hash VARCHAR(64),
     source_reference VARCHAR(255),
