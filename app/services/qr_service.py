@@ -225,6 +225,104 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
         return {"status": "FAIL", "reason": f"Patrol scan error: {str(e)}", "gate_action": "deny"}
 
 
+def validate_concern_qr(concern_id: int, society_id: int, security_user_id: int = None) -> dict:
+    try:
+        concern = db._execute(
+            "SELECT id, concern_type, status FROM concerns WHERE id = %s AND society_id = %s",
+            (concern_id, society_id), fetch_one=True,
+        )
+        if not concern:
+            return {"status": "FAIL", "reason": "Concern not found", "gate_action": "deny"}
+        return {
+            "status": "PASS",
+            "user": {
+                "id": concern_id,
+                "name": f"Concern: {concern.get('concern_type', 'Unknown')} ({concern.get('status', '')})",
+                "role": "concern",
+                "society_id": society_id,
+            },
+            "message": "Valid Concern",
+            "gate_action": "allow",
+        }
+    except Exception as e:
+        return {"status": "FAIL", "reason": f"Concern validation error: {str(e)}", "gate_action": "deny"}
+
+
+def validate_receipt_qr(receipt_id: int, society_id: int, security_user_id: int = None) -> dict:
+    try:
+        receipt = db._execute(
+            "SELECT id, particulars, amount, status FROM receipts WHERE id = %s AND society_id = %s",
+            (receipt_id, society_id), fetch_one=True,
+        )
+        if not receipt:
+            return {"status": "FAIL", "reason": "Receipt not found", "gate_action": "deny"}
+        return {
+            "status": "PASS",
+            "user": {
+                "id": receipt_id,
+                "name": f"Receipt: {receipt.get('particulars', 'Unknown')}",
+                "role": "receipt",
+                "society_id": society_id,
+                "amount": receipt.get("amount"),
+                "status": receipt.get("status"),
+            },
+            "message": f"Valid Receipt — {receipt.get('status', '')}",
+            "gate_action": "allow",
+        }
+    except Exception as e:
+        return {"status": "FAIL", "reason": f"Receipt validation error: {str(e)}", "gate_action": "deny"}
+
+
+def validate_expense_qr(expense_id: int, society_id: int, security_user_id: int = None) -> dict:
+    try:
+        expense = db._execute(
+            "SELECT id, particulars, amount, status FROM expenses WHERE id = %s AND society_id = %s",
+            (expense_id, society_id), fetch_one=True,
+        )
+        if not expense:
+            return {"status": "FAIL", "reason": "Expense not found", "gate_action": "deny"}
+        return {
+            "status": "PASS",
+            "user": {
+                "id": expense_id,
+                "name": f"Expense: {expense.get('particulars', 'Unknown')}",
+                "role": "expense",
+                "society_id": society_id,
+                "amount": expense.get("amount"),
+                "status": expense.get("status"),
+            },
+            "message": f"Valid Expense — {expense.get('status', '')}",
+            "gate_action": "allow",
+        }
+    except Exception as e:
+        return {"status": "FAIL", "reason": f"Expense validation error: {str(e)}", "gate_action": "deny"}
+
+
+def validate_asset_qr(asset_id: int, society_id: int, security_user_id: int = None) -> dict:
+    try:
+        asset = db._execute(
+            "SELECT id, asset_name, purchase_value, disposed FROM assets WHERE id = %s AND society_id = %s",
+            (asset_id, society_id), fetch_one=True,
+        )
+        if not asset:
+            return {"status": "FAIL", "reason": "Asset not found", "gate_action": "deny"}
+        return {
+            "status": "PASS",
+            "user": {
+                "id": asset_id,
+                "name": f"Asset: {asset.get('asset_name', 'Unknown')}",
+                "role": "asset",
+                "society_id": society_id,
+                "purchase_value": asset.get("purchase_value"),
+                "disposed": asset.get("disposed"),
+            },
+            "message": f"Valid Asset — {'Disposed' if asset.get('disposed') else 'Active'}",
+            "gate_action": "allow",
+        }
+    except Exception as e:
+        return {"status": "FAIL", "reason": f"Asset validation error: {str(e)}", "gate_action": "deny"}
+
+
 ATTENDANCE_QR_EXPIRY_SECONDS = 60
 
 
@@ -322,20 +420,55 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             # entity_id here is the epoch issued_at, not a row id
             return validate_attendance_qr(entity_id, qr_society_id, security_user_id)
 
-        # Standard User lookup (admin, apartment, vendor, security)
-        user_row = db._execute(
-            """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
-               FROM users u
-               WHERE u.id = %s AND u.society_id = %s""",
-            (entity_id, qr_society_id),
-            fetch_one=True,
-        )
+        elif role == "concern":
+            return validate_concern_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "receipt":
+            return validate_receipt_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "expense":
+            return validate_expense_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "asset":
+            return validate_asset_qr(entity_id, qr_society_id, security_user_id)
+
+        if role == "apartment":
+            user_row = db._execute(
+                """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
+                   FROM users u
+                   WHERE u.linked_id = %s AND u.role = 'apartment' AND u.society_id = %s""",
+                (entity_id, qr_society_id),
+                fetch_one=True,
+            )
+        elif role == "vendor":
+            user_row = db._execute(
+                """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
+                   FROM users u
+                   WHERE u.linked_id = %s AND u.role = 'vendor' AND u.society_id = %s""",
+                (entity_id, qr_society_id),
+                fetch_one=True,
+            )
+        elif role == "security":
+            user_row = db._execute(
+                """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
+                   FROM users u
+                   WHERE u.linked_id = %s AND u.role = 'security' AND u.society_id = %s""",
+                (entity_id, qr_society_id),
+                fetch_one=True,
+            )
+        elif role in ("admin", "master"):
+            user_row = db._execute(
+                """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
+                   FROM users u
+                   WHERE u.id = %s AND u.society_id = %s""",
+                (entity_id, qr_society_id),
+                fetch_one=True,
+            )
+        else:
+            user_row = None
 
         if not user_row:
             return {"status": "FAIL", "reason": "User not found", "gate_action": "deny"}
 
         base_user = {
-            "id": user_row["id"],
+            "id": user_row["linked_id"] or user_row["id"],
             "name": user_row.get("name", role.title()),
             "email": user_row.get("email"),
             "role": user_row["role"],
@@ -351,18 +484,13 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 "gate_action": "allow",
             }
 
+        gate_entity_id = user_row.get("linked_id") or user_row["id"]
         if role == "apartment":
-            gate_entity_id = user_row.get("linked_id")
-            if not gate_entity_id:
-                return {"status": "FAIL", "reason": "No linked apartment for this user",
-                         "user": base_user, "gate_action": "deny"}
             flat = db._execute(
                 "SELECT flat_number FROM apartments WHERE id = %s",
                 (gate_entity_id,), fetch_one=True,
             )
             base_user["flat_number"] = (flat or {}).get("flat_number", "")
-        else:
-            gate_entity_id = user_row["id"]
 
         from app.dash_apps.drilldown.loaders import evaluate_gate_pass
 

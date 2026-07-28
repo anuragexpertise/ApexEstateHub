@@ -1315,8 +1315,8 @@ def evaluate_gate_pass(role: str, entity_id: int) -> dict:
     role: 'apartment' | 'vendor' | 'security'
     entity_id:
       apartment → apartments.id
-      vendor    → users.id  (the vendor login row)
-      security  → users.id  (the security login row)
+      vendor    → vendors.id  (resolved to users.id via linked_id inside fn_evaluate_gate_pass)
+      security  → security_staff.id  (checked directly against gate_access.entity_id)
     """
     try:
         r = db._execute(
