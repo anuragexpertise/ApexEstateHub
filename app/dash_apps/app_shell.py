@@ -527,6 +527,12 @@ def _qr_modal() -> dbc.Modal:
                                  style={"marginTop": "10px", "minHeight": "54px",
                                         "fontSize": "22px", "fontFamily": "monospace",
                                         "resize": "none", "textAlign": "center"}),
+                    # ATD-only — ticks every 1s while the modal is open so
+                    # qr-modal-validity can show a live countdown; the
+                    # refresh callback itself only regenerates a new QR
+                    # every 60th tick (see refresh_atd_qr in qr_callbacks.py).
+                    dcc.Interval(id="qr-atd-refresh-interval", interval=1000,
+                                 n_intervals=0, disabled=True),
                 ])
             ),
             dbc.ModalFooter(

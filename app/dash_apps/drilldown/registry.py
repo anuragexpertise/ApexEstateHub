@@ -92,6 +92,16 @@ DRILLDOWN_MAP: dict = {
     "kpi_channels_total": {"target": "list_channels", "label": "All Channels"},
     "kpi_channels_active": {"target": "list_channels", "label": "Active Channels", "filter": {"active": True}},
     "kpi_channels_pending": {"target": "list_channels", "label": "Pending Gate Approvals", "filter": {"state": "pending"}},
+    "kpi_channels_pending_bus": {
+        "target": "list_channels",
+        "label": "Pending Bus Alerts",
+        "filter": {"channel_type": "school_bus", "state": "pending"},
+    },
+    "kpi_channels_pending_taxi": {
+        "target": "list_channels",
+        "label": "Pending Taxi Alerts",
+        "filter": {"channel_type": "taxi", "state": "pending"},
+    },
     "kpi_polls_total": {"target": "list_polls", "label": "All Polls"},
     "kpi_polls_active": {"target": "list_polls", "label": "Active Polls", "filter": {"active": True}},
     "kpi_polls_votes": {"target": "list_polls", "label": "Polls With Votes", "filter": {"votes_count": {"gt": 0}}},
@@ -129,6 +139,11 @@ DRILLDOWN_MAP: dict = {
         "target": "list_security",
         "label": "Security On Duty",
         "filter": {"on_duty": True},
+    },
+    "kpi_security_off_duty": {
+        "target": "list_security",
+        "label": "Security Off Duty",
+        "filter": {"on_duty": False},
     },
     "kpi_events_total": {"target": "list_events", "label": "Upcoming Events"},
     "kpi_concerns_open": {
@@ -283,6 +298,11 @@ DRILLDOWN_MAP: dict = {
         "target": "list_societies",
         "label": "Expired Plans",
         "filter": {"status": "expired"},
+    },
+    "kpi_societies_expiring_soon": {
+        "target": "list_societies",
+        "label": "Expiring Soon",
+        "filter": {"status": "expiring_soon"},
     },
     "kpi_master_apartments_total": {
         "target": "list_apartments",

@@ -329,7 +329,8 @@ def register_qr_callbacks(app):
         Output('qr-modal-img', 'src'),
         Output('qr-modal-text', 'value'),
         Output('qr-entity-store', 'data'),
-        
+        Output('qr-atd-refresh-interval', 'disabled'),
+
         Input('hdr-avatar', 'n_clicks'),
         Input('show-qr-btn', 'n_clicks'),
         Input('close-qr-modal', 'n_clicks'),
@@ -343,18 +344,34 @@ def register_qr_callbacks(app):
         from dash import ctx
         
         if ctx.triggered_id == 'qr-modal-logout-btn':
-            return False, no_update, no_update, no_update
+            return False, no_update, no_update, no_update, True
         
         if ctx.triggered_id == 'close-qr-modal':
-            return False, no_update, no_update, no_update
+            return False, no_update, no_update, no_update, True
         
         if not auth_data or not auth_data.get('authenticated'):
-            return False, no_update, no_update, no_update
+            return False, no_update, no_update, no_update, True
         
-        from app.services.qr_service import generate_static_qr_code
+        from app.services.qr_service import generate_static_qr_code, generate_time_qr
 
         entity_store = {}
-        
+
+        if ctx.triggered_id == 'profile-action-trigger' \
+                and profile_action \
+                and profile_action.get('action') == 'open_time_qr':
+            # ATD dynamic QR — Security/Admin Settings tab punch-clock
+            society_id = profile_action.get('society_id') or auth_data.get('society_id')
+            src, payload, issued_at, expires_at = generate_time_qr(society_id)
+            entity_store = {
+                'role': 'attendance_entry',
+                'society_id': society_id,
+                'issued_at': issued_at,
+                'expires_at': expires_at,
+            }
+            if not src:
+                return True, "", f"Error: {payload}", no_update, True
+            return True, src, payload, entity_store, False  # interval enabled
+
         if ctx.triggered_id == 'hdr-avatar':
             # Logged-in user's QR
             src, payload = generate_static_qr_code(
@@ -389,12 +406,42 @@ def register_qr_callbacks(app):
                 'name': entity_name,
             }
         else:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
         
         if not src:
-            return True, "", f"Error: {payload}", no_update
+            return True, "", f"Error: {payload}", no_update, True
         
-        return True, src, payload, entity_store
+        return True, src, payload, entity_store, True  # static QR — interval stays off
+
+    # ── 2b. ATD QR auto-refresh + live countdown (Settings tab) ────────────
+    @app.callback(
+        Output('qr-modal-img', 'src', allow_duplicate=True),
+        Output('qr-modal-text', 'value', allow_duplicate=True),
+        Output('qr-modal-validity', 'children'),
+        Output('qr-entity-store', 'data', allow_duplicate=True),
+        Input('qr-atd-refresh-interval', 'n_intervals'),
+        State('qr-entity-store', 'data'),
+        prevent_initial_call=True,
+    )
+    def refresh_atd_qr(n_intervals, entity_store):
+        if not entity_store or entity_store.get('role') != 'attendance_entry':
+            raise PreventUpdate
+
+        from app.services.qr_service import generate_time_qr, ATTENDANCE_QR_EXPIRY_SECONDS
+        import time as _time
+
+        remaining = int(entity_store.get('expires_at', 0) - _time.time())
+
+        # Regenerate a fresh QR once the current one has (or is about to)
+        # expire — this ticks every second purely for the countdown label,
+        # but only calls generate_time_qr() roughly once every 60s.
+        if remaining <= 0:
+            society_id = entity_store.get('society_id')
+            src, payload, issued_at, expires_at = generate_time_qr(society_id)
+            new_store = {**entity_store, 'issued_at': issued_at, 'expires_at': expires_at}
+            return src, payload, f"Valid for {ATTENDANCE_QR_EXPIRY_SECONDS}s", new_store
+
+        return no_update, no_update, f"Valid for {remaining}s", no_update
     # ── 3. Validate scanned QR (Entry/Exit with different rules)
     @app.callback(
         Output("qr-result", "children"),
@@ -417,7 +464,8 @@ def register_qr_callbacks(app):
         from database.db_manager import db
         
         society_id = (auth_data or {}).get("society_id")
-        result = validate_qr_code(qr_payload.strip(), society_id)
+        scanning_user_id = (auth_data or {}).get("user_id")
+        result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id)
         now_s = datetime.now().strftime("%H:%M:%S")
         log = list(scan_log or [])
         
