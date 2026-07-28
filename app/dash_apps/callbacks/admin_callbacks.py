@@ -46,7 +46,8 @@ def register_admin_callbacks(app):
         try:
             from app.services.qr_service import validate_qr_code
             society_id = (auth_data or {}).get("society_id")
-            result = validate_qr_code(qr_data, society_id)
+            scanning_user_id = (auth_data or {}).get("user_id")
+            result = validate_qr_code(qr_data, society_id, scanning_user_id)
             if result.get("status") == "PASS":
                 return (
                     html.Div([

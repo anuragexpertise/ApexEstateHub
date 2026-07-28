@@ -429,6 +429,12 @@ def register_drilldown_callbacks(app):
         # ── KPI click → list ──────────────────────────────────────────────
         if trig_type in ("kpi-card-div", "kpi-card"):
             card_id = id_dict.get("card_id", "")
+
+            # ── ATD QR (Settings tab) — does NOT navigate, fires trigger ────
+            if card_id == "kpi_time_qr":
+                trigger_data = {"action": "open_time_qr", "society_id": sid}
+                return no_update, no_update, no_update, no_update, trigger_data
+
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target = nav_info.get("target")
             if not target:

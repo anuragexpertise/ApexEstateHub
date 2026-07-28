@@ -225,6 +225,75 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
         return {"status": "FAIL", "reason": f"Patrol scan error: {str(e)}", "gate_action": "deny"}
 
 
+ATTENDANCE_QR_EXPIRY_SECONDS = 60
+
+
+def generate_time_qr(society_id: int):
+    """
+    Generate a 1-minute time-boxed attendance QR for the Security/Admin
+    Settings tab. Payload: <society_id>-ATD-<epoch_seconds>.
+    Epoch (not ISO) is used deliberately — parse_qr_payload() splits on
+    '-', and an ISO timestamp would break that split.
+    Returns (img_src_b64, payload, issued_at_epoch, expires_at_epoch) so
+    the UI can drive its own 60s auto-refresh countdown.
+    """
+    issued_at = int(datetime.utcnow().timestamp())
+    img_src, payload = generate_qr_code(society_id, "ATD", issued_at)
+    return img_src, payload, issued_at, issued_at + ATTENDANCE_QR_EXPIRY_SECONDS
+
+
+def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: int = None) -> dict:
+    """
+    Validate a time-boxed ATD QR and toggle the SCANNING guard's own duty
+    status (clock in if not on duty, clock out if already on duty).
+    `security_user_id` must be the scanning guard's own users.id, taken
+    from their authenticated session — not an audit-only field here.
+    """
+    now = int(datetime.utcnow().timestamp())
+    age = now - issued_at
+
+    if age > ATTENDANCE_QR_EXPIRY_SECONDS:
+        return {"status": "FAIL", "reason": "QR expired — ask for a fresh code", "gate_action": "deny"}
+    if age < -5:  # small clock-skew allowance
+        return {"status": "FAIL", "reason": "QR not yet valid", "gate_action": "deny"}
+    if not security_user_id:
+        return {"status": "FAIL", "reason": "Attendance QR must be scanned from a logged-in security account", "gate_action": "deny"}
+
+    user_row = db._execute(
+        "SELECT id, linked_id FROM users WHERE id=%s AND society_id=%s AND role='security'",
+        (security_user_id, society_id), fetch_one=True,
+    )
+    if not user_row or not user_row.get("linked_id"):
+        return {"status": "FAIL", "reason": "Attendance QR can only be scanned by security staff", "gate_action": "deny"}
+
+    staff_id = user_row["linked_id"]  # security_staff.id — matches gate_access.entity_id
+
+    open_row = db._execute(
+        """SELECT id FROM gate_access
+           WHERE society_id=%s AND entity_id=%s AND role='SEC' AND time_out IS NULL
+           ORDER BY time_in DESC LIMIT 1""",
+        (society_id, staff_id), fetch_one=True,
+    )
+
+    if open_row:
+        db._execute("UPDATE gate_access SET time_out=NOW(), updated_by=%s WHERE id=%s",
+                    (security_user_id, open_row["id"]))
+        action, msg = "clock_out", "Clocked out"
+    else:
+        db._execute(
+            """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
+               VALUES (%s, 'SEC', %s, NOW(), %s)""",
+            (society_id, staff_id, security_user_id),
+        )
+        action, msg = "clock_in", "Clocked in"
+
+    return {
+        "status": "PASS", "action": action,
+        "user": {"id": staff_id, "role": "security", "society_id": society_id},
+        "message": msg, "gate_action": "allow",
+    }
+
+
 def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None) -> dict:
     """
     Server-side validation with standard hyphenated format (<society_id>-<ROLE_CODE>-<entity_id>).
@@ -249,6 +318,9 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             return validate_visitor_qr(entity_id, qr_society_id, security_user_id)
         elif role == "patrol_location":
             return validate_patrol_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "attendance_entry":
+            # entity_id here is the epoch issued_at, not a row id
+            return validate_attendance_qr(entity_id, qr_society_id, security_user_id)
 
         # Standard User lookup (admin, apartment, vendor, security)
         user_row = db._execute(

@@ -558,6 +558,16 @@ KPI_CARDS = {
         "title": "My Pending Dues", "group": "to pay",
     },
 
+    "kpi_time_qr": {
+        # Live clock display; click intercepted in drilldown_callbacks.py
+        # (same early-return pattern as "show_qr") to open the 1-min ATD
+        # QR modal instead of routing through DRILLDOWN_MAP.
+        "query": "SELECT NOW()::TIME(0) AS v",
+        "params": 0, "format": "time",
+        "icon": "fa-qrcode", "color": "#1859b8",
+        "title": "Attendance QR", "group": "gate punch-clock",
+    },
+
     "kpi_owner_member_since": {
         # Fallback (society-wide) query — the real per-apartment value is
         # supplied via the "apartment" scoped override in
@@ -990,6 +1000,7 @@ DEFAULT_LAYOUTS = {
             "kpi_accounts_count",
             "kpi_apt_charges_count",
             "kpi_ven_charges_count",
+            "kpi_time_qr",
         ],
         "channels": [
             "kpi_channels_total",
@@ -1085,6 +1096,10 @@ DEFAULT_LAYOUTS = {
             "kpi_presumed_visitor",
             "kpi_security_on_duty",
         ],
+        # NEW — security portal had no "settings" tab before this. Needs a
+        # matching route added in shell_callbacks.py (see admin's /admin-settings
+        # -> tab "settings" mapping for the pattern) before this will render.
+        "settings": ["kpi_time_qr"],
     },
 }
 
