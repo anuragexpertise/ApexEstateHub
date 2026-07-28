@@ -11,8 +11,8 @@ What it does
      • 1 master admin
      • 1 society  (Sunrise Residency)
      • 50 Chart-of-Accounts entries
-     • 1 admin, 2 apartment owners, 2 vendors, 2 security staff
-     • 2 concerns, 2 events, 2 gate-log entries, 2 assets
+     • 1 admin, 13 apartment owners, 12 vendors, 12 security staff
+     • 12 concerns, 12 events, 2 gate-log entries, 2 assets
 
 All passwords stored with werkzeug generate_password_hash so
 auth_service.check_password_hash() can verify them.
@@ -288,8 +288,8 @@ def main():
     else:
         print()
         print("  First run — no societies found.")
-        print("  Seed demo data?  (1 society, 7 users, 50 accounts,")
-        print("  2 events, 2 concerns, 2 gate logs, 2 assets)")
+        print("  Seed demo data?  (1 society, 39 users, 50 accounts,")
+        print("  12 events, 12 concerns, 2 gate logs, 2 assets)")
         print()
         try:
             ans = input("  Seed demo data? [Y/n]: ").strip().lower()

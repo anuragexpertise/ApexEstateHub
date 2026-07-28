@@ -205,7 +205,7 @@ DRILLDOWN_MAP: dict = {
     },
 
     "kpi_payables_total": {"target": "list_payables", "label": "Payables Total"},
-    "kpi_vendor_payables_due": {
+    "kpi_vendors_payables_due": {
         "target": "list_payables",
         "label": "Vendor Payables Due",
     },
@@ -222,13 +222,13 @@ DRILLDOWN_MAP: dict = {
         "target": "list_apt_charges",
         "label": "Maintenance Charges",
     },
-    "kpi_apartment_fines": {"target": "list_receivables", "label": "Apartment Fines"},
-    "kpi_apartment_other_charges": {
+    "kpi_apartments_fines": {"target": "list_receivables", "label": "Apartment Fines"},
+    "kpi_apartments_other_charges": {
         "target": "list_apt_charges",
         "label": "Other Charges",
     },
-    "kpi_vendor_fines": {"target": "list_receipts", "label": "Vendor Fines"},
-    "kpi_vendor_other_charges": {
+    "kpi_vendors_fines": {"target": "list_receipts", "label": "Vendor Fines"},
+    "kpi_vendors_other_charges": {
         "target": "list_ven_charges",
         "label": "Other Charges",
     },

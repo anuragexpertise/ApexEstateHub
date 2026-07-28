@@ -47,7 +47,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_receivables_total", "admin", "receipts", "Cashbook"),
     ("kpi_maintenance_due", "admin", "receipts", "Cashbook"),
     ("kpi_late_fees_due", "admin", "receipts", "Cashbook"),
-    ("kpi_vendor_payables_due", "admin", "receipts", "Cashbook"),
+    ("kpi_vendors_payables_due", "admin", "receipts", "Cashbook"),
     # ADMIN - Expenses tab
     ("kpi_expenses_month", "admin", "expenses", "Cashbook"),
     ("kpi_payables_total", "admin", "expenses", "Cashbook"),
@@ -110,8 +110,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_apartments_dues", "apartment", "payables", "Dues"),
     # APARTMENT - Charges
     ("kpi_maintenance_charges", "apartment", "charges", "Charges"),
-    ("kpi_apartment_fines", "apartment", "charges", "Charges"),
-    ("kpi_apartment_other_charges", "apartment", "charges", "Charges"),
+    ("kpi_apartments_fines", "apartment", "charges", "Charges"),
+    ("kpi_apartments_other_charges", "apartment", "charges", "Charges"),
     # APARTMENT - Events / Concerns / Settings
     ("kpi_events_total", "apartment", "events", "Events"),
     ("kpi_concerns_open", "apartment", "concerns", "Concerns"),
@@ -131,8 +131,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # VENDOR - Cashbook / Charges / Events / Settings
     ("kpi_receivables_total", "vendor", "cashbook", "payables"),
     ("kpi_receipts_month", "vendor", "cashbook", "payables"),
-    ("kpi_vendor_fines", "vendor", "charges", "Charges"),
-    ("kpi_vendor_other_charges", "vendor", "charges", "Charges"),
+    ("kpi_vendors_fines", "vendor", "charges", "Charges"),
+    ("kpi_vendors_other_charges", "vendor", "charges", "Charges"),
     ("kpi_events_total", "vendor", "events", "Events"),
     ("kpi_vendors_date", "vendor", "settings", "Profile"),
     # SECURITY - Dashboard

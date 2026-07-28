@@ -726,7 +726,7 @@ KPI_CARDS = {
         "title": "Late Fees Due", "group": "interest",
     },
  
-    "kpi_vendor_payables_due": {
+    "kpi_vendors_payables_due": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM payables
@@ -752,7 +752,7 @@ KPI_CARDS = {
         "title": "AMC Expenses", "group": "maintenance",
     },
  
-    "kpi_apartment_fines": {
+    "kpi_apartments_fines": {
         "query": """
             SELECT COALESCE(SUM(interest_amount), 0) AS v
             FROM receivables
@@ -765,7 +765,7 @@ KPI_CARDS = {
         "title": "Interest Accrued", "group": "fines",
     },
  
-    "kpi_apartment_other_charges": {
+    "kpi_apartments_other_charges": {
         "query": """
             SELECT COUNT(*) AS v
             FROM apt_charges_fines_basis
@@ -776,7 +776,7 @@ KPI_CARDS = {
         "title": "Apt Other Charges", "group": "all rules",
     },
  
-    "kpi_vendor_fines": {
+    "kpi_vendors_fines": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM receipts
@@ -789,7 +789,7 @@ KPI_CARDS = {
         "title": "Vendor Pass Income", "group": "fines",
     },
  
-    "kpi_vendor_other_charges": {
+    "kpi_vendors_other_charges": {
         "query": """
             SELECT COUNT(*) AS v
             FROM ven_charges_fines_basis
@@ -980,7 +980,7 @@ DEFAULT_LAYOUTS = {
             "kpi_receivables_total",
             "kpi_maintenance_due",
             "kpi_late_fees_due",
-            "kpi_vendor_payables_due",
+            "kpi_vendors_payables_due",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
         ],
@@ -1063,7 +1063,7 @@ DEFAULT_LAYOUTS = {
         "vendor_receipts": ["kpi_receipts_total"],
         "cashbook": ["kpi_cash_in_hand"],
         "concerns": ["kpi_concerns_open", "kpi_concerns_assigned"],
-        "charges": ["kpi_ven_charges_count", "kpi_vendor_other_charges"],
+        "charges": ["kpi_ven_charges_count", "kpi_vendors_other_charges"],
         "events": ["kpi_events_total"],
         "settings": ["kpi_vendors_date"],
     },
