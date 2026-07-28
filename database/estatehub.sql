@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS societies (
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INT REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -67,7 +68,8 @@ CREATE TABLE IF NOT EXISTS users (
     push_token TEXT,
     push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INT REFERENCES users (id)
 );
 
 -- ── accounts ──────────────────────────────────────────────────
@@ -90,62 +92,12 @@ CREATE TABLE IF NOT EXISTS accounts (
     drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
     bf_amount NUMERIC(12, 2) DEFAULT 0.00,
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
-    is_depreciable BOOLEAN DEFAULT FALSE,
+    is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
-
--- is_cash_or_bank: explicit flag so cashbook logic doesn't have to guess
--- account identity from name/header text matching. Set TRUE on Cash-in-Hand
--- and every bank account (ICICI, SBI, etc). ALTER, not inline on CREATE
--- TABLE, so it still applies on databases where accounts already exists
--- (CREATE TABLE IF NOT EXISTS is a no-op there).
-ALTER TABLE accounts
-ADD COLUMN IF NOT EXISTS is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE;
-
--- One-time backfill guess for existing rows (review after running — this
--- is a convenience seed, not a guarantee). Uses the same name patterns
--- fn_resolve_cash_account already relies on.
-UPDATE accounts
-SET
-    is_cash_or_bank = TRUE
-WHERE
-    is_cash_or_bank = FALSE
-    AND drcr_account = 'Dr'
-    AND (
-        name ILIKE '%cash-in-hand%'
-        OR name ILIKE '%cash in hand%'
-        OR name ILIKE '%bank%'
-        OR name ILIKE '%SBI%'
-        OR name ILIKE '%ICICI%'
-    );
-
--- ════════════════════════════════════════════════════════════════
--- accounts.bf_amount / accounts.drcr_bf(*) retirement
---
--- *** RUN THIS ONLY AFTER CONFIRMING brought_forward IS SEEDED ***
--- fn_seed_brought_forward_from_accounts() (the one-time copy helper)
--- has already been removed from this script on the assumption its job
--- is done. If you have NOT yet run it against this database, DO NOT
--- run the DROP COLUMN below — you will permanently lose any BF values
--- still sitting only in accounts.bf_amount. Instead, run this first:
---
---   INSERT INTO brought_forward
---       (society_id, financial_year, acc_id, drcr_bf, bf_amount,
---        is_auto_calculated, remarks, created_at)
---   SELECT society_id, <your_financial_year>, id, drcr_bf,
---          COALESCE(bf_amount, 0), FALSE, 'Manual pre-drop seed', NOW()
---   FROM accounts WHERE has_bf = TRUE
---   ON CONFLICT (society_id, financial_year, acc_id) DO NOTHING;
---
--- Once you've confirmed brought_forward has the rows you expect,
--- uncomment the line below (or run it separately) to drop the column.
--- Left commented rather than active, since this script may be re-run
--- against a database that hasn't been checked yet.
---
--- ALTER TABLE accounts DROP COLUMN IF EXISTS bf_amount;
--- ════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
@@ -221,10 +173,10 @@ CREATE TABLE IF NOT EXISTS assets (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id)
+    updated_by INT REFERENCES users (id),
+    qr_payload VARCHAR(255)
 );
 
-ALTER TABLE assets ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets(qr_payload);
 
 CREATE TABLE IF NOT EXISTS events (
@@ -238,7 +190,7 @@ CREATE TABLE IF NOT EXISTS events (
     open_to VARCHAR(20) DEFAULT 'all',
     parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
     ticket_name VARCHAR(20) DEFAULT 'Adult',
-    ticket_price NUMERIC(10, 2) DEFAULT 0, -- per-ticket price when parent_account_id is a ticket (Cr) account
+    ticket_price NUMERIC(10, 2) DEFAULT 0,
     ticket_name2 VARCHAR(20) DEFAULT 'Child',
     ticket_price2 NUMERIC(10, 2) DEFAULT 0,
     image TEXT,
@@ -247,10 +199,6 @@ CREATE TABLE IF NOT EXISTS events (
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
--- Migrate existing events table to support dual ticket pricing
-ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_name VARCHAR(20) DEFAULT 'Adult';
-ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_price2 NUMERIC(10,2) DEFAULT 0;
-ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_name2 VARCHAR(20) DEFAULT 'Child';
 
 CREATE TABLE IF NOT EXISTS concerns (
     id SERIAL PRIMARY KEY,
@@ -264,10 +212,10 @@ CREATE TABLE IF NOT EXISTS concerns (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id)
+    updated_by INT REFERENCES users (id),
+    qr_payload VARCHAR(255)
 );
 
-ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
 
 CREATE TABLE IF NOT EXISTS concerns_assigns (
@@ -277,7 +225,10 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     role VARCHAR(10) NOT NULL CHECK (role IN ('ADM', 'VND', 'SEC')),
     entity_id INT NOT NULL,
     assigned_by INT REFERENCES users (id),
+    status VARCHAR(20) NOT NULL DEFAULT 'assigned' CHECK (status IN ('open', 'assigned', 'resolved', 'closed')),
+    bid_amount NUMERIC(10, 2),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
     UNIQUE (concern_id, role, entity_id)
 );
 
@@ -306,18 +257,6 @@ CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (soci
 --   any row status IN ('assigned','resolved','closed')  -> 'assigned'
 --   otherwise                                           -> 'open'
 -- ════════════════════════════════════════════════════════════════════════
-
-ALTER TABLE concerns_assigns
-    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'assigned',
-    ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2),
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
-
--- Re-add the CHECK constraint idempotently (Postgres has no
--- ADD CONSTRAINT IF NOT EXISTS, so drop-then-add).
-ALTER TABLE concerns_assigns DROP CONSTRAINT IF EXISTS concerns_assigns_status_check;
-ALTER TABLE concerns_assigns
-    ADD CONSTRAINT concerns_assigns_status_check
-    CHECK (status IN ('open', 'assigned', 'resolved', 'closed'));
 
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
 
@@ -391,6 +330,7 @@ CREATE TABLE IF NOT EXISTS security_roster (
     ),
     assigned_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
     UNIQUE (
         society_id,
         security_id,
@@ -466,7 +406,8 @@ CREATE TABLE IF NOT EXISTS receivables (
     ),
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month)
@@ -515,12 +456,14 @@ CREATE TABLE IF NOT EXISTS receipts (
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
     receipt_number VARCHAR(64) UNIQUE,
+    receipt_number VARCHAR(64) UNIQUE,
     previous_hash VARCHAR(64),
     source_reference VARCHAR(255),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    qr_payload VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id)
 );
 
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts(qr_payload);
 
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
@@ -566,10 +509,11 @@ CREATE TABLE IF NOT EXISTS expenses (
     last_emailed_at TIMESTAMP,
     previous_hash VARCHAR(64),
     source_reference VARCHAR(255),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    qr_payload VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id)
 );
 
-ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses(qr_payload);
 
 -- ════════════════════════════════════════════════════════════════
@@ -615,6 +559,7 @@ CREATE TABLE IF NOT EXISTS payables (
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
     CONSTRAINT uq_payment_roster UNIQUE (roster_id)
 );
 
@@ -670,6 +615,7 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     valid_until DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
     UNIQUE (
         society_id,
         user_id,
@@ -691,6 +637,7 @@ CREATE TABLE IF NOT EXISTS event_tickets (
     quantity_child INT NOT NULL DEFAULT 0 CHECK (quantity_child >= 0),
     amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     receipt_id INT REFERENCES receipts (id),
+    booking_reference VARCHAR(50),
     issued_date DATE DEFAULT CURRENT_DATE,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW()
@@ -713,6 +660,7 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     apt_interest_pct NUMERIC(5, 2) DEFAULT 1.75,
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -731,6 +679,7 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     vendor_1mth NUMERIC(10, 2) DEFAULT 0,
     ven_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
@@ -4937,48 +4886,6 @@ $$;
 COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- MIGRATION: add created_by columns missing from initial schema
--- ═══════════════════════════════════════════════════════════════════════════════
-
-ALTER TABLE societies
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE accounts
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE security_roster
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE receivables
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE receipts
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE expenses
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE payables
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE vendor_passes
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE apt_charges_fines_basis
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
-ALTER TABLE ven_charges_fines_basis
-ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users (id);
-
--- MIGRATION: split event_tickets.quantity into quantity_adult + quantity_child
-ALTER TABLE event_tickets DROP COLUMN IF EXISTS quantity;
-ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS quantity_adult INT NOT NULL DEFAULT 0 CHECK (quantity_adult >= 0);
-ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS quantity_child INT NOT NULL DEFAULT 0 CHECK (quantity_child >= 0);
-
--- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
 -- ═══════════════════════════════════════════════════════════════════════════════
 
@@ -5240,27 +5147,7 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
---
--- NOTE (reconciliation): `events` and `event_tickets` were previously
--- (re)defined here with a second, incompatible column set
--- (adult_price/child_price, adult_quantity/child_quantity/
--- total_amount/booking_reference). Because both blocks used
--- CREATE TABLE IF NOT EXISTS, the ORIGINAL definitions further up
--- this file (events ~line 227, event_tickets ~line 564) always won
--- on any real database, silently no-op'ing this block. That left
--- app/services/event_service.py writing to columns that never
--- existed. The canonical tables are the original ones — this
--- section now only ADDS the one column actually still needed for
--- the QR-ticket-item feature (booking_reference) via ALTER TABLE.
--- app/services/event_service.py must be updated to use the
--- canonical column names: events.ticket_price / ticket_price2
--- (not adult_price/child_price), and event_tickets.quantity_adult /
--- quantity_child / amount (not adult_quantity/child_quantity/
--- total_amount). apartment_id is derivable via users.linked_id for
--- the ticket's user_id, so it is not duplicated here.
 -- ════════════════════════════════════════════════════════════════
-
-ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS booking_reference VARCHAR(50);
 
 CREATE TABLE IF NOT EXISTS event_ticket_items (
     id               SERIAL PRIMARY KEY,
