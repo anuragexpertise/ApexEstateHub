@@ -381,7 +381,7 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
         ], className="portal-page")
 
     if active_tab == "evaluate_pass":
-        return _evaluate_pass_page()
+        return _evaluate_pass_page(sid=sid)
 
     if active_tab == "customize":
         from app.dash_apps.pages.portal_pages import _customize_page
@@ -875,9 +875,6 @@ def _evaluate_pass_page(sid=None) -> html.Div:
                 dbc.Button("Close", id="close-call-modal", color="secondary", n_clicks=0)
             ),
         ], id="call-admin-modal", centered=True, size="sm"),
-        html.Div(id="kpi-row",          style={"display": "none"}),
-        html.Div(id="drill-breadcrumb", style={"display": "none"}),
-        html.Div(id="drill-content",    style={"display": "none"}),
     ], className="portal-page")
 
 
