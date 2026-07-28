@@ -599,8 +599,8 @@ def register_security_callbacks(app):
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
         society_id = (auth_data or {}).get("society_id")
         user_id = (auth_data or {}).get("user_id")
-        staff_id = (auth_data or {}).get("security_id")
-        if not user_id or not society_id or not staff_id:
+        staff_id = (auth_data or {}).get("user_id")
+        if not user_id or not society_id:
             return no_update, {"type": "error", "message": "Session expired — please log in again"}
 
         now_str = datetime.now().strftime("%I:%M %p")

@@ -35,9 +35,9 @@ def _build_auth(row: dict) -> dict | None:
         "role":              role,
         "society_id":        row.get("society_id"),
         "linked_id":         row.get("linked_id"),
-        "security_id":       row.get("id") if row.get("role") == "security" else None,
-        "apartment_id":      row.get("id") if row.get("role") == "apartment" else None,
-        "vendor_id":         row.get("id") if row.get("role") == "vendor" else None,
+        "security_id":       row.get("linked_id") if row.get("role") == "security" else None,
+        "apartment_id":      row.get("linked_id") if row.get("role") == "apartment" else None,
+        "vendor_id":         row.get("linked_id") if row.get("role") == "vendor" else None,
         "token":             secrets.token_hex(32),
         "push_subscription": row.get("push_subscription"),
     }

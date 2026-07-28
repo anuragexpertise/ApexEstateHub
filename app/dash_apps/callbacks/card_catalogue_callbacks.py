@@ -170,6 +170,20 @@ def register_card_catalogue_callbacks(app):
                         "AND status='credit'",
                         (apt_id,),
                     ),
+                    "kpi_my_pending_dues": (
+                        "SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
+                        "FROM receivables "
+                        "WHERE society_id=%s AND entity_id=%s AND role='apartment' "
+                        "AND status IN ('pending','partial')",
+                        (sid, apt_id),
+                    ),
+                    "kpi_my_overdue_dues": (
+                        "SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
+                        "FROM receivables "
+                        "WHERE society_id=%s AND entity_id=%s AND role='apartment' "
+                        "AND status IN ('pending','partial') AND due_date<CURRENT_DATE",
+                        (sid, apt_id),
+                    ),
                     "kpi_receipts_month": (
                         "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
                         "WHERE entity_id=%s AND role='apartment' AND status='confirmed' "
