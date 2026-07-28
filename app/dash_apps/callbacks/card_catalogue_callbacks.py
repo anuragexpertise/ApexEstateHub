@@ -2,11 +2,55 @@
 
 from datetime import date, datetime
 from dash import Input, Output, State, html, dcc, no_update, ALL
-import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
 from database.db_manager import db
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ── KPI Cache ────────────────────────────────────────────────────────────────
+# Per-process session cache keyed by "society_id:role:card_id".
+# Cuts redundant DB round-trips when switching tabs or re-rendering the same portal.
+_KPI_CACHE: dict[str, tuple[str, float]] = {}
+_CACHE_TTL_SECONDS = 180.0
 
 
+def _cache_key(society_id, role, card_id):
+    return f"{society_id}:{role}:{card_id}"
+
+
+def _get_cached(key):
+    entry = _KPI_CACHE.get(key)
+    if not entry:
+        return None
+    value, ts = entry
+    if time.time() - ts > _CACHE_TTL_SECONDS:
+        _KPI_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _set_cached(key, value):
+    _KPI_CACHE[key] = (value, time.time())
+
+
+def invalidate_kpi_cache(card_id=None):
+    """Invalidate the entire KPI cache or a single card_id."""
+    if card_id is None:
+        _KPI_CACHE.clear()
+    else:
+        for key in list(_KPI_CACHE.keys()):
+            if key.endswith(f":{card_id}"):
+                _KPI_CACHE.pop(key, None)
+
+
+# ── Duplicate Guard ─────────────────────────────────────────────────────────
+_LAST_REFRESH_FP = [None]
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
 def format_kpi_value(value, fmt: str) -> str:
     if value is None or value == "":
         return "—"
@@ -69,11 +113,28 @@ def register_card_catalogue_callbacks(app):
         Input("url", "pathname"),
         Input("auth-store", "data"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
+        State("kpi-row", "style"),
         prevent_initial_call="initial_duplicate",
     )
-    def refresh_kpi_values(pathname, auth_data, kpi_ids):
+    def refresh_kpi_values(pathname, auth_data, kpi_ids, kpi_row_style):
         if not kpi_ids:
             raise PreventUpdate
+
+        # Skip refresh entirely when KPIs are hidden (e.g. in drill-down mode).
+        kpi_row_style = kpi_row_style or {}
+        if kpi_row_style.get("display") == "none":
+            raise PreventUpdate
+
+        # ── Duplicate guard ────────────────────────────────────────────────────
+        fp = (
+            pathname,
+            (auth_data or {}).get("society_id"),
+            (auth_data or {}).get("role"),
+            (auth_data or {}).get("authenticated"),
+        )
+        if fp == _LAST_REFRESH_FP[0]:
+            raise PreventUpdate
+        _LAST_REFRESH_FP[0] = fp
 
         if not auth_data or not auth_data.get("authenticated"):
             return ["—"] * len(kpi_ids), no_update
@@ -264,6 +325,8 @@ def register_card_catalogue_callbacks(app):
 
         results   = []
         first_err = None
+        cache_hits = 0
+        active_groups = set()
 
         for id_dict in kpi_ids:
             card_id = id_dict.get("card_id")
@@ -275,6 +338,17 @@ def register_card_catalogue_callbacks(app):
 
             fmt   = cfg.get("format", "number")
             query = cfg.get("query", "")
+            group = cfg.get("group", "")
+            if group:
+                active_groups.add(group)
+
+            # ── Check cache before hitting DB ─────────────────────────────────
+            ckey = _cache_key(sid, role, card_id)
+            cached = _get_cached(ckey)
+            if cached is not None:
+                results.append(cached)
+                cache_hits += 1
+                continue
 
             # Try portal-scoped override first
             override = _scoped_override(card_id)
@@ -283,7 +357,9 @@ def register_card_catalogue_callbacks(app):
                 try:
                     row = db._execute(ov_query, ov_params, fetch_one=True)
                     raw = (row or {}).get("v")
-                    results.append(format_kpi_value(raw, fmt))
+                    value = format_kpi_value(raw, fmt)
+                    _set_cached(ckey, value)
+                    results.append(value)
                 except Exception as exc:
                     err_msg = f"KPI [{card_id}] scoped: {str(exc)[:120]}"
                     print(f"  ❌ {err_msg}")
@@ -305,13 +381,24 @@ def register_card_catalogue_callbacks(app):
             try:
                 row = db._execute(query, params, fetch_one=True)
                 raw = (row or {}).get("v")
-                results.append(format_kpi_value(raw, fmt))
+                value = format_kpi_value(raw, fmt)
+                _set_cached(ckey, value)
+                results.append(value)
             except Exception as exc:
                 err_msg = f"KPI [{card_id}]: {str(exc)[:120]}"
                 print(f"  ❌ {err_msg}")
                 results.append("ERR")
                 if first_err is None:
                     first_err = err_msg
+
+        if cache_hits:
+            print(
+                f"  ✓ KPI cache hits {cache_hits}/{len(results)} (groups: {', '.join(sorted(active_groups)) or '-'}) portal={pathname}"
+            )
+        elif results:
+            print(
+                f"  ⟳ KPI full refresh {len(results)} cards (groups: {', '.join(sorted(active_groups)) or '-'}) portal={pathname}"
+            )
 
         toast = _err_toast(first_err) if first_err else no_update
         return results, toast
