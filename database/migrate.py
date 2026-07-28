@@ -7,7 +7,9 @@ What it does
 ============
 1. Connects to Aiven PostgreSQL (DATABASE_URL or PG* env vars).
 2. Creates / updates the full schema (idempotent — uses IF NOT EXISTS).
-3. On first run (no societies), asks whether to seed demo data:
+3. Applies incremental alterations for existing installations
+   (columns, constraints, tables that newer schema versions add).
+4. On first run (no societies), asks whether to seed demo data:
      • 1 master admin
      • 1 society  (Sunrise Residency)
      • 50 Chart-of-Accounts entries
@@ -120,58 +122,30 @@ def run_schema(conn):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# INCREMENTAL MIGRATIONS — safe ALTER for existing installations
+# INCREMENTAL ALTERATIONS — safe ALTER for existing installations
 # (tables created by older schema versions that need column/constraint updates)
 # ═════════════════════════════════════════════════════════════════════════════
 
-def migrate_v2(conn):
+def run_migrations(conn):
     """
-    v2 additions for Channels & Visitor features:
-    - alert_channels: add 'visitor' to channel_type CHECK
-    - alert_events:   add 'pending' to state CHECK
-    - visitors: ensure host_apartment_id column exists (older schema used apartment_id)
+    Apply all incremental schema changes needed by existing databases.
     Each ALTER is wrapped in its own savepoint so one failure doesn't block others.
     """
     alterations = [
-        # Drop old channel_type CHECK and recreate with 'visitor'
+        # alert_channels: add 'visitor' to channel_type CHECK
         "ALTER TABLE alert_channels DROP CONSTRAINT IF EXISTS alert_channels_channel_type_check",
         "ALTER TABLE alert_channels ADD CONSTRAINT alert_channels_channel_type_check "
         "CHECK (channel_type IN ('school_bus', 'taxi', 'visitor'))",
 
-        # Drop old state CHECK on alert_events and recreate with 'pending'
+        # alert_events: add 'pending' to state CHECK
         "ALTER TABLE alert_events DROP CONSTRAINT IF EXISTS alert_events_state_check",
         "ALTER TABLE alert_events ADD CONSTRAINT alert_events_state_check "
         "CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied'))",
 
-        # Ensure visitors.host_apartment_id exists (some old schemas used apartment_id only)
+        # visitors: ensure host_apartment_id column exists (older schema used apartment_id)
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_apartment_id INT REFERENCES apartments(id)",
-    ]
 
-    ok = 0
-    skipped = 0
-    with conn.cursor() as cur:
-        for sql in alterations:
-            try:
-                cur.execute("SAVEPOINT v2_alter")
-                cur.execute(sql)
-                cur.execute("RELEASE SAVEPOINT v2_alter")
-                conn.commit()
-                ok += 1
-            except Exception as exc:
-                cur.execute("ROLLBACK TO SAVEPOINT v2_alter")
-                conn.commit()
-                skipped += 1
-                snippet = sql[:80]
-                print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
-    print(f"  ✓ v2 alterations: {ok} applied, {skipped} skipped")
-
-
-def migrate_v3(conn):
-    """
-    v3 additions for Concern Assignments:
-    - concerns_assigns: structured table for concern assignments (ADM/VND/SEC)
-    """
-    alterations = [
+        # concerns_assigns: structured table for concern assignments (ADM/VND/SEC)
         """CREATE TABLE IF NOT EXISTS concerns_assigns (
             id SERIAL PRIMARY KEY,
             concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
@@ -185,6 +159,14 @@ def migrate_v3(conn):
         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id)",
         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id)",
         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id)",
+
+        # qr_payload columns for tables that existed before this column was introduced
+        "ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
+        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
+        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
+        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
+        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE",
+        "ALTER TABLE patrol_locations ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
     ]
 
     ok = 0
@@ -192,20 +174,19 @@ def migrate_v3(conn):
     with conn.cursor() as cur:
         for sql in alterations:
             try:
-                cur.execute("SAVEPOINT v3_alter")
+                cur.execute("SAVEPOINT migration_alter")
                 cur.execute(sql)
-                cur.execute("RELEASE SAVEPOINT v3_alter")
+                cur.execute("RELEASE SAVEPOINT migration_alter")
                 conn.commit()
                 ok += 1
             except Exception as exc:
-                cur.execute("ROLLBACK TO SAVEPOINT v3_alter")
+                cur.execute("ROLLBACK TO SAVEPOINT migration_alter")
                 conn.commit()
                 skipped += 1
                 snippet = sql[:80]
                 print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
 
-    print(f"  ✓ v3 alterations: {ok} applied, {skipped} skipped")
-
+    print(f"  ✓ Migrations applied: {ok} ok, {skipped} skipped")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -215,6 +196,7 @@ def migrate_v3(conn):
 # society_id=1 identity and the same hardcoded accounts/users migrate.py
 # used to seed.
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN
@@ -257,15 +239,11 @@ def main():
     ok, err = run_schema(conn)
     print(f"  ✓ DDL: {ok} ok, {err} skipped")
 
-    # ── v2 incremental alterations (idempotent) ──────────────────────────────
-    print("  ⟳ Running v2 incremental alterations…")
-    migrate_v2(conn)
+    # ── Incremental alterations for existing databases ────────────────────
+    print("  ⟳ Running incremental migrations…")
+    run_migrations(conn)
 
-    # ── v3 incremental alterations (idempotent) ──────────────────────────────
-    print("  ⟳ Running v3 incremental alterations…")
-    migrate_v3(conn)
-
-    # ── Seed decision ────────────────────────────────────────────────────
+    # ── Seed decision ─────────────────────────────────────────────────────
     if args.no_seed:
         print("  Seed skipped (--no-seed).")
         conn.close()
