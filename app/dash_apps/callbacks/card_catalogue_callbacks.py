@@ -46,10 +46,6 @@ def invalidate_kpi_cache(card_id=None):
                 _KPI_CACHE.pop(key, None)
 
 
-# ── Duplicate Guard ─────────────────────────────────────────────────────────
-_LAST_REFRESH_FP = [None]
-
-
 # ── Helpers ─────────────────────────────────────────────────────────────────
 def format_kpi_value(value, fmt: str) -> str:
     if value is None or value == "":
@@ -124,17 +120,6 @@ def register_card_catalogue_callbacks(app):
         kpi_row_style = kpi_row_style or {}
         if kpi_row_style.get("display") == "none":
             raise PreventUpdate
-
-        # ── Duplicate guard ────────────────────────────────────────────────────
-        fp = (
-            pathname,
-            (auth_data or {}).get("society_id"),
-            (auth_data or {}).get("role"),
-            (auth_data or {}).get("authenticated"),
-        )
-        if fp == _LAST_REFRESH_FP[0]:
-            raise PreventUpdate
-        _LAST_REFRESH_FP[0] = fp
 
         if not auth_data or not auth_data.get("authenticated"):
             return ["—"] * len(kpi_ids), no_update
