@@ -3,6 +3,7 @@
 from dash import Input, Output, State, dcc, html, no_update, clientside_callback
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+import base64
 from datetime import datetime
 
 # ════════════════════════════════════════════════════════════════
@@ -632,8 +633,11 @@ def register_qr_callbacks(app):
             entity_id = entity_data.get('entity_id', 'qr')
             role = entity_data.get('role', 'entity')
             filename = f"Gate_Pass_{entity_id}_{role}.png"
-            
-            return dcc.send_data_url(img_src, filename)
+
+            b64_data = img_src.split(',', 1)[1]
+            img_bytes = base64.b64decode(b64_data)
+
+            return dcc.send_bytes(img_bytes, filename)
         except Exception as e:
             print(f"QR PNG save error: {e}")
             raise PreventUpdate
