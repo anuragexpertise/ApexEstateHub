@@ -102,6 +102,7 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService
 from app.security.audit_context import get_current_user_id
+from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 DB_ERROR_KEYWORDS = [
     "no database connection",
     "error in processing",
@@ -189,6 +190,8 @@ def _handle_list_delete(entity, pk, sid, store, auth):
         ok, msg = loaders.delete_entity(entity, pk, sid)
     except Exception as e:
         ok, msg = False, f"Delete error: {e}"
+    if ok:
+        invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
@@ -231,6 +234,8 @@ def _handle_list_confirm(entity, pk, sid, store, auth):
         ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
     except Exception as e:
         ok, msg = False, f"Confirm error: {e}"
+    if ok:
+        invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
@@ -1156,6 +1161,15 @@ def register_drilldown_callbacks(app):
 
         # ── 7. Call the appropriate save handler ──────────────────────────────
         ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
+
+        if ok:
+            # KPI cards read counts/sums derived from whatever this save just
+            # touched (receivables, transactions, concerns, assets, …) — the
+            # in-memory KPI cache has no other invalidation hook (see
+            # card_catalogue_callbacks.py), so without this every KPI on
+            # screen could keep showing pre-save numbers for up to
+            # _CACHE_TTL_SECONDS after a successful write.
+            invalidate_kpi_cache()
 
         if not ok:
             # Persist what the user typed so the form re-fills on re-render
