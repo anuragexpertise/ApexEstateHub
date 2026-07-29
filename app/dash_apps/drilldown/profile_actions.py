@@ -129,6 +129,14 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
     # ── CONCERNS ─────────────────────────────────────────────────────────────
     "concerns": [
         {
+        "label": "Invite",
+        "action_id": "invite",
+        "target_card": None,          # opens the invite-to modal — no navigation
+        "icon": "fa-envelope",
+        "color": "info",
+        "roles": ["admin", "apartment"],   # Admin portal + Owner portal
+        },
+        {
             "label": "Assign",
             "action_id": "assign",
             "target_card": "form_concern_edit",

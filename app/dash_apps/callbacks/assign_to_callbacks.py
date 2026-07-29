@@ -16,6 +16,7 @@ UI flow:
 from __future__ import annotations
 
 from dash import Input, Output, State, no_update, html, ctx, ALL, MATCH
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.loaders import (

@@ -337,6 +337,40 @@ def notify_concern_closed(society_id, apartment_id, concern_type, assignments=No
     return send_bulk_push(targets, "🔒 Concern Closed", body, url="/dashboard/concerns", society_id=society_id)
 
 
+def notify_concern_invited(society_id, concern_id, concern_type, assignments):
+    """Admin/Owner invited vendors/security to bid — notify the invited entities."""
+    from database.db_manager import db
+    targets = []
+    role_lookup = {"VND": "vendor", "SEC": "security"}
+    for role, entity_id in (assignments or []):
+        user_id = None
+        if role in role_lookup:
+            row = db._execute(
+                "SELECT id FROM users WHERE linked_id=%s AND role=%s AND society_id=%s",
+                (entity_id, role_lookup[role], society_id), fetch_one=True,
+            )
+            user_id = row["id"] if row else None
+        if not user_id:
+            continue
+        targets.append(user_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"You've been invited to bid on: {label}"
+    return send_bulk_push(targets, "📨 Concern Invitation", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_invite_bid_saved(society_id, apartment_id, concern_type, vendor_label=None):
+    """Vendor submitted a bid on an invite — notify admin + the concern's creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    who = f" by {vendor_label}" if vendor_label else ""
+    body = f"A bid was submitted{who} for: {label}"
+    return send_bulk_push(targets, "💰 Concern Bid Submitted", body, url="/dashboard/concerns", society_id=society_id)
+
+
 def notify_payment_received(user_id, amount, particulars=None):
     """Confirm to the payer that their payment was recorded."""
     if not user_id:

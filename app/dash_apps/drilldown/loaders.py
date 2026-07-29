@@ -109,6 +109,103 @@ def humanize_assignment(row: dict) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# CONCERNS INVITE — pre-assignment bid solicitation
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_concern_invites(concern_id: int) -> list[dict]:
+    """Return invite rows for a concern."""
+    try:
+        return db._execute(
+            "SELECT * FROM fn_concern_invite_profile(%s)", (concern_id,), fetch_all=True
+        ) or []
+    except Exception:
+        return []
+
+
+def list_invitable_vendors(society_id: int, search: str | None = None) -> list[dict]:
+    """List vendors that can be invited to bid on concerns."""
+    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
+    params: list = [society_id]
+    if search:
+        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
+        params += [f"%{search}%", f"%{search}%"]
+    sql += " ORDER BY business_name"
+    return db._execute(sql, tuple(params), fetch_all=True) or []
+
+
+def list_invitable_security(society_id: int, search: str | None = None) -> list[dict]:
+    """List security staff that can be invited to bid on concerns."""
+    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
+    params: list = [society_id]
+    if search:
+        sql += " AND name ILIKE %s"
+        params.append(f"%{search}%")
+    sql += " ORDER BY name"
+    return db._execute(sql, tuple(params), fetch_all=True) or []
+
+
+def save_concern_invite(concern_id: int, society_id: int, role: str, entity_id: int, invited_by: int) -> tuple[bool, str]:
+    """Invite a vendor or security staff to submit a bid."""
+    try:
+        db._execute(
+            "INSERT INTO concerns_invite (concern_id, society_id, role, entity_id, bid_amount, status, invited_by) "
+            "VALUES (%s, %s, %s, %s, NULL, 'invited', %s) "
+            "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='invited', bid_amount=NULL, updated_at=NOW() "
+            "RETURNING id",
+            (concern_id, society_id, role, entity_id, invited_by), fetch_one=True,
+        )
+        return True, "Invitation sent"
+    except Exception as e:
+        return False, str(e)
+
+
+def update_concern_invite_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
+    """Vendor/security submits or updates their bid on an invite."""
+    try:
+        bid = float(bid_amount)
+        if bid < 0:
+            return False, "Bid amount must be positive"
+    except (TypeError, ValueError):
+        return False, "Enter a valid bid amount"
+    row = db._execute(
+        "UPDATE concerns_invite SET bid_amount=%s, status='bid_submitted', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status != 'closed' "
+        "RETURNING id",
+        (bid, concern_id, society_id, role, entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "No active invitation found for you on this concern"
+    return True, "Bid submitted"
+
+
+def resolve_concern_invite(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
+    """Mark an invite as assigned (vendor accepted the invite)."""
+    row = db._execute(
+        "UPDATE concerns_invite SET status='assigned', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='bid_submitted' "
+        "RETURNING id",
+        (concern_id, society_id, role, entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "No bid-submitted invitation found for you on this concern"
+    return True, "Invitation accepted"
+
+
+def close_concern_invites(concern_id: int, society_id: int) -> tuple[bool, str]:
+    """Close all invites for a concern (when concern is closed)."""
+    try:
+        db._execute(
+            "UPDATE concerns_invite SET status='closed', updated_at=NOW() "
+            "WHERE concern_id=%s AND society_id=%s AND status != 'closed' "
+            "RETURNING id",
+            (concern_id, society_id), fetch_all=True,
+        )
+        return True, "Invites closed"
+    except Exception as e:
+        return False, str(e)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # CONCERNS WORKFLOW — bid / resolve / close
 # concerns.status is now a trigger-synced aggregate of concerns_assigns.status
 # (see fn_sync_concern_status in estatehub.sql) — these helpers only ever
@@ -151,21 +248,20 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
 
 
 def close_concern(concern_id: int, society_id: int) -> tuple[bool, str]:
-    """Admin/Owner action: close a concern for ALL assignees at once.
-    Sets status='closed' on every concerns_assigns row for this concern;
-    the sync trigger then rolls concerns.status up to 'closed' too."""
-    rows = db._execute(
+    """Admin/Owner action: close a concern for ALL assignees and invites.
+    Sets status='closed' on every concerns_assigns row and every
+    concerns_invite row for this concern; the sync triggers then
+    roll concerns.status up to 'closed' too."""
+    db._execute(
         "UPDATE concerns_assigns SET status='closed' "
         "WHERE concern_id=%s AND society_id=%s RETURNING id",
         (concern_id, society_id), fetch_all=True,
     )
-    if not rows:
-        # No assignees yet (still 'open') — close the concern directly.
-        db._execute(
-            "UPDATE concerns SET status='closed', updated_at=NOW() "
-            "WHERE id=%s AND society_id=%s",
-            (concern_id, society_id),
-        )
+    db._execute(
+        "UPDATE concerns_invite SET status='closed' "
+        "WHERE concern_id=%s AND society_id=%s RETURNING id",
+        (concern_id, society_id), fetch_all=True,
+    )
     return True, "Concern closed"
 
 
@@ -298,6 +394,37 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             params.append(status_filter)
         else:
             extra += " AND c.status != 'closed'"
+        # Vendor portal: include concerns assigned to this vendor AND
+        # concerns they've been invited to (via concerns_invite).
+        invited_vnd_id = filters.get("invited_vnd_id")
+        assigned_vnd_id = filters.get("assigned_vnd_id")
+        if invited_vnd_id:
+            extra += " AND (EXISTS (SELECT 1 FROM concerns_invite ci WHERE ci.concern_id=c.id AND ci.role='VND' AND ci.entity_id=%s AND ci.status != 'closed')"
+            params.append(invited_vnd_id)
+            if assigned_vnd_id:
+                extra += " OR EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed'))"
+                params.append(assigned_vnd_id)
+            else:
+                extra += ")"
+        elif assigned_vnd_id:
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed')"
+            params.append(assigned_vnd_id)
+
+        # Security portal: include concerns assigned to this security person AND
+        # concerns they've been invited to (via concerns_invite).
+        invited_sec_id = filters.get("invited_sec_id")
+        assigned_sec_id = filters.get("assigned_sec_id")
+        if invited_sec_id:
+            extra += " AND (EXISTS (SELECT 1 FROM concerns_invite ci WHERE ci.concern_id=c.id AND ci.role='SEC' AND ci.entity_id=%s AND ci.status != 'closed')"
+            params.append(invited_sec_id)
+            if assigned_sec_id:
+                extra += " OR EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed'))"
+                params.append(assigned_sec_id)
+            else:
+                extra += ")"
+        elif assigned_sec_id:
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed')"
+            params.append(assigned_sec_id)
         return (
             "SELECT c.*, a.flat_number FROM concerns c "
             "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "

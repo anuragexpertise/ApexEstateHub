@@ -78,9 +78,13 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
     # "edit" here is self-service profile editing, same rationale as above.
+    # Vendors can view concerns, invite/bid on them (server-side actions),
+    # and resolve their own assignments — the _PORTAL_PERMS "view" entry
+    # controls which UI actions appear; the actual server-side action
+    # guards are in the callback handlers.
     ("vendor", "vendors"):        {"view", "edit"},
     ("vendor", "events"):         {"view"},
-    ("vendor", "concerns"):       {"view"},
+    ("vendor", "concerns"):       {"view", "new"},
     ("vendor", "gate_logs"):      {"view"},
     ("vendor", "receipts"):   {"view", "new"},
     ("vendor", "cashbook"):       {"view"},
