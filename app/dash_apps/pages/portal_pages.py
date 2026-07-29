@@ -37,7 +37,8 @@ KPI_GRID_COLS = "repeat(auto-fit, minmax(190px, 215px))"
 # INTERNAL HELPERS
 # ════════════════════════════════════════════════════════════════════════════
 
-def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "") -> html.Div:
+def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
+         value: str = "—") -> html.Div:
     return html.Div(
         html.Div(
             [
@@ -52,7 +53,7 @@ def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "") ->
                 html.I(className=f"fas {icon}", style={
                     "color": color, "fontSize": "20px", "marginBottom": "8px", "display": "block",
                 }),
-                html.Div("—", id={"type": "kpi-value", "card_id": card_id}, style={
+                html.Div(value, id={"type": "kpi-value", "card_id": card_id}, style={
                     "fontSize": "24px", "fontWeight": "800", "color": "#15304f", "lineHeight": "1",
                 }),
                 html.Div(label, style={
@@ -116,7 +117,7 @@ def _kpi_row(*kpis, cols: str = KPI_GRID_COLS) -> html.Div:
     )
 
 
-def _kpi_from_id(card_id: str) -> html.Div:
+def _kpi_from_id(card_id: str, value: str = "—") -> html.Div:
     """
     Render a single _kpi() card purely from a card_id, pulling icon/color/
     title/group straight from KPI_CARDS metadata (card_catalogue.py) instead
@@ -133,11 +134,18 @@ def _kpi_from_id(card_id: str) -> html.Div:
         cfg.get("color", "#3498db"),
         cfg.get("title", card_id),
         cfg.get("group", ""),
+        value=value,
     )
 
 
+_PORTAL_TO_ROLE = {
+    "master": "master", "admin": "admin", "owner": "apartment",
+    "vendor": "vendor", "security": "security",
+}
+
+
 def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
-                      cols: str = KPI_GRID_COLS) -> html.Div:
+                      cols: str = KPI_GRID_COLS, entity_id=None) -> html.Div:
     """
     THE FIX for "customization isn't working": the Customize tab's Save
     button (customize_callbacks.py's save_layout()) has always correctly
@@ -158,6 +166,14 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
         _kpi_row_dynamic("admin", "dashboard", sid, cols=...)
     (the KPI card_ids come from DEFAULT_LAYOUTS automatically via
     _kpi_from_id; icon/color/title/group are pulled from KPI_CARDS).
+
+    entity_id: the viewing apartment/vendor/security id, when known (e.g.
+    owner_portal_page already receives apt_id). Used only to seed
+    personalised cards (kpi_my_pending_dues etc.) from cache at render time;
+    generic cards seed correctly regardless since they don't need it — see
+    resolve_seed_kpi_value()'s docstring for why this matters (fixes KPIs
+    rendering blank on a cache-hit tab switch, since the DOM no longer has
+    to start at "—" and wait for the callback to overwrite it).
     """
     if not default_kpi_ids:
         default_kpi_ids = tuple(DEFAULT_LAYOUTS.get(portal, {}).get(tab, []))
@@ -178,7 +194,21 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
                     ids = saved
         except Exception as e:
             print(f"_kpi_row_dynamic layout load error ({portal}/{tab}): {e}")
-    return _kpi_row(*[_kpi_from_id(cid) for cid in ids], cols=cols)
+
+    role = _PORTAL_TO_ROLE.get(portal, portal)
+    try:
+        from app.dash_apps.callbacks.card_catalogue_callbacks import resolve_seed_kpi_value
+        seeded = {
+            cid: resolve_seed_kpi_value(sid, role, cid, entity_id) for cid in ids
+        }
+    except Exception as e:
+        print(f"_kpi_row_dynamic KPI cache seed error ({portal}/{tab}): {e}")
+        seeded = {}
+
+    return _kpi_row(
+        *[_kpi_from_id(cid, value=seeded.get(cid) or "—") for cid in ids],
+        cols=cols,
+    )
 
 
 def _drill_panel() -> html.Div:
@@ -407,6 +437,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "dashboard", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -418,6 +449,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "financials", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -429,6 +461,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "receivables", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -439,6 +472,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "owner_receipts", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -449,6 +483,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "cashbook", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -459,6 +494,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "charges", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -466,14 +502,14 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
     if active_tab in ("events", "owner_events"):
         return html.Div([
             _page_title("fa-calendar-alt", c, "Events"),
-            _kpi_row_dynamic("owner", "events", sid, cols=KPI_GRID_COLS),
+            _kpi_row_dynamic("owner", "events", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
     if active_tab == "concerns":
         return html.Div([
             _page_title("fa-hand-point-up", c, "Concerns"),
-            _kpi_row_dynamic("owner", "concerns", sid, cols=KPI_GRID_COLS),
+            _kpi_row_dynamic("owner", "concerns", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -493,7 +529,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
         alerts = get_active_alerts(sid or 1)
         return html.Div([
             _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus & Taxi alerts"),
-            _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS),
+            _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
             _divider(),
             html.Div(id="channels-page-refresh", children=render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id)),
             _divider(), _drill_panel(),
@@ -505,6 +541,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _kpi_row_dynamic(
                 "owner", "settings", sid,
                 cols=KPI_GRID_COLS,
+                entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
         ], className="portal-page")

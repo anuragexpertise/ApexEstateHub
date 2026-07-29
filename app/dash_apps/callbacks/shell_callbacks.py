@@ -26,6 +26,7 @@ Fixes in this version
 """
 
 import dash
+import time
 from dash import Input, Output, State, html, dcc, no_update, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -465,9 +466,22 @@ def register_shell_callbacks(app):
         prevent_initial_call=False,
     )
     def route_page(pathname, auth):
+        # NOTE on the two dicts below: this store exists purely to let
+        # downstream callbacks (refresh_kpi_values, load_polls_list) chain
+        # off "portal-content has just been rebuilt" instead of racing the
+        # same Input("url","pathname") route_page itself listens on. That
+        # only works if this store's *value* actually changes on every
+        # navigation — a literal, unchanging {"rendered": True} on every
+        # call is treated by Dash's client as "no change", so those
+        # downstream callbacks fired exactly once (the true initial page
+        # load) and never again on any subsequent client-side navigation
+        # (sidebar clicks, in-portal tabs, etc.) — this WAS the "KPIs go
+        # blank after changing tabs and never recover" bug. The "ts" field
+        # guarantees a distinct value every time so Dash always detects the
+        # change and re-fires every downstream dependent.
         _BLANK = (
             html.Div("Please log in", className="text-muted text-center mt-5"),
-            {"rendered": False},
+            {"rendered": False, "ts": time.time()},
             [], [], "", {}, "—", "—", "?", "User", "?",
             "EstateHub", "/static/assets/EH_logo.png",
         )
@@ -512,7 +526,7 @@ def register_shell_callbacks(app):
 
         return (
             _portal_content(role, society_id, pathname, auth=auth),
-            {"rendered": True},
+            {"rendered": True, "ts": time.time()},
             _make_nav_items(role, society_id, pathname),
             _breadcrumb(pathname),
             cfg["label"], portal_style,
