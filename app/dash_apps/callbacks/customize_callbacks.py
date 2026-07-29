@@ -235,7 +235,7 @@ def register_customize_callbacks(app):
         # so a KPI appearing in both is fine — dragging it relocates it.
         available_ids = list(palette_ids)
  
-        values    = _fetch_kpi_values(society_id)
+        values    = _fetch_kpi_values(society_id, set(active_ids) | set(available_ids))
         layout    = {"active": active_ids, "available": available_ids}
         badge_txt = f"{len(active_ids)} / 12 active"
         signal    = (f"loaded-{len(active_ids)}-"
@@ -328,7 +328,7 @@ def register_customize_callbacks(app):
         ) or palette_ids[:4]
         active_ids    = default_active[:12]
         available_ids = list(palette_ids)
-        values        = _fetch_kpi_values(sid)
+        values        = _fetch_kpi_values(sid, set(active_ids) | set(available_ids))
         layout        = {"active": active_ids, "available": available_ids}
  
         return (
@@ -388,35 +388,85 @@ def register_customize_callbacks(app):
  
 # ── Helpers ───────────────────────────────────────────────────────────────────
  
-def _fetch_kpi_values(society_id) -> dict:
+def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
+    """
+    Fetch display values for KPI cards on the Customize page.
+
+    needed_ids: optional iterable of card_ids actually shown (active +
+    palette for the current portal/tab). Previously this ran one DB query
+    per card for EVERY card in the entire KPI_CARDS registry (70+ queries)
+    on every Customize tab load, even though only a dozen or so of those
+    values were ever displayed. Now it only fetches what's needed, reuses
+    the same in-memory KPI cache the live dashboards use (keyed per
+    society, role-agnostic since Customize is admin/master-only and shows
+    unscoped values), and fetches every cache miss in a single batched
+    round trip instead of one query per card.
+    """
     if not society_id:
         return {}
+
+    from database.db_manager import db
+    from app.dash_apps.callbacks.card_catalogue_callbacks import (
+        format_kpi_value, _cache_key, _get_cached, _set_cached,
+    )
+
+    card_ids = list(needed_ids) if needed_ids is not None else list(KPI_CARDS.keys())
+
     values: dict = {}
-    try:
-        from database.db_manager import db
-        from app.dash_apps.callbacks.card_catalogue_callbacks import (
-            format_kpi_value,
-        )
-        for card_id, cfg in KPI_CARDS.items():
-            query    = cfg.get("query")
-            n_params = cfg.get("params", 0)
-            if not query:
-                continue
-            try:
-                params = (
-                    () if n_params == 0
-                    else tuple(society_id for _ in range(n_params))
-                )
-                row = db._execute(query, params, fetch_one=True)
-                raw = (row or {}).get("v")
-                values[card_id] = format_kpi_value(
-                    raw, cfg.get("format", "number")
-                )
-            except Exception as e:
-                print(f"KPI value error [{card_id}]: {e}")
-                values[card_id] = "—"
-    except Exception as e:
-        print(f"_fetch_kpi_values DB error: {e}")
+    pending = []  # (card_id, query, params, fmt, ckey)
+
+    for card_id in card_ids:
+        cfg = KPI_CARDS.get(card_id)
+        if not cfg:
+            continue
+        query = cfg.get("query")
+        if not query:
+            continue
+        fmt = cfg.get("format", "number")
+
+        ckey = _cache_key(society_id, "customize", card_id)
+        cached = _get_cached(ckey)
+        if cached is not None:
+            values[card_id] = cached
+            continue
+
+        n_params = cfg.get("params", 0)
+        params = () if n_params == 0 else tuple(society_id for _ in range(n_params))
+        pending.append((card_id, query, params, fmt, ckey))
+
+    if pending:
+        select_parts = []
+        batch_params: list = []
+        # Cast every branch to ::text — same reasoning as the batch builder
+        # in card_catalogue_callbacks.py's refresh_kpi_values: cards return
+        # mixed underlying types (NUMERIC vs DATE, etc.) and Postgres
+        # requires one common type across all UNION branches.
+        for slot, (card_id, query, params, fmt, ckey) in enumerate(pending):
+            select_parts.append(f"SELECT {slot} AS slot, ({query})::text AS v")
+            batch_params.extend(params)
+
+        batch_sql = " UNION ALL ".join(select_parts)
+        try:
+            rows = db._execute(batch_sql, tuple(batch_params), fetch_all=True)
+            value_by_slot = {r["slot"]: r.get("v") for r in (rows or [])}
+            for slot, (card_id, query, params, fmt, ckey) in enumerate(pending):
+                raw = value_by_slot.get(slot)
+                value = format_kpi_value(raw, fmt)
+                _set_cached(ckey, value)
+                values[card_id] = value
+        except Exception as exc:
+            print(f"KPI batch value error, falling back per-card: {exc}")
+            for card_id, query, params, fmt, ckey in pending:
+                try:
+                    row = db._execute(query, params, fetch_one=True)
+                    raw = (row or {}).get("v")
+                    value = format_kpi_value(raw, fmt)
+                    _set_cached(ckey, value)
+                    values[card_id] = value
+                except Exception as e:
+                    print(f"KPI value error [{card_id}]: {e}")
+                    values[card_id] = "—"
+
     return values
  
  
