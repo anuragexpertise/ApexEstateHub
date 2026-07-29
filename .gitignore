@@ -15,3 +15,4 @@ generate_vapid_keys.py
 *.db
 migrations/
 *.log
+*.diff
