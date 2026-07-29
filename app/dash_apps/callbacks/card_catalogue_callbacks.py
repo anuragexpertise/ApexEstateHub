@@ -63,6 +63,56 @@ def invalidate_kpi_cache(card_id=None):
                 _KPI_CACHE.pop(key, None)
 
 
+# Card_ids that _scoped_override() (below) personalises per-entity, grouped by
+# role. Mirrors the "overrides" dict keys inside _scoped_override exactly —
+# kept in sync manually since that function is a closure defined inside
+# refresh_kpi_values() and isn't importable on its own. Used by
+# resolve_seed_kpi_value() so portal_pages.py can compute the SAME cache key
+# refresh_kpi_values() would use, without duplicating any SQL here.
+SCOPED_CARD_IDS = {
+    "apartment": {
+        "kpi_apartments_dues", "kpi_receivables_total", "kpi_advance_credits",
+        "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_receipts_month",
+        "kpi_concerns_open", "kpi_gate_logs", "kpi_owner_member_since",
+    },
+    "vendor": {
+        "kpi_receipts_month", "kpi_receivables_total", "kpi_my_pass_expiry",
+        "kpi_gate_logs", "kpi_concerns_open", "kpi_concerns_assigned",
+    },
+    "security": {
+        "kpi_security_shift_count", "kpi_security_salary_due",
+        "kpi_receipts_month", "kpi_gate_logs", "kpi_concerns_open",
+    },
+}
+
+
+def resolve_seed_kpi_value(sid, role, card_id, entity_id=None):
+    """
+    Look up a KPI's cached value (never hits the DB) so the server can render
+    the real number on first paint instead of a hardcoded "—" placeholder.
+
+    This is what the "blank on cache hit" bug needed: kpi-value elements were
+    always created with children="—" (see portal_pages.py's _kpi()), and on a
+    tab switch that lands on a cache hit, refresh_kpi_values() runs so fast
+    there's effectively no visible gap between the placeholder mounting and
+    the real value landing — but relying on that round trip at all was the
+    fragile part. Seeding the real value here means a cache-hit tab never
+    shows "—" in the first place; the callback becomes a pure top-up for
+    genuine cache misses, same as before.
+
+    entity_id should be the apartment/vendor/security id when known (needed
+    to look up personalised cards correctly) — pass None if not applicable
+    or not yet available; personalised cards will just seed as unresolved
+    (None) and fall back to "—" until refresh_kpi_values fills them in, same
+    as previously for every card.
+    """
+    if not sid:
+        return None
+    is_scoped = card_id in SCOPED_CARD_IDS.get(role, ())
+    key = _cache_key(sid, role, card_id, entity_id if is_scoped else None)
+    return _get_cached(key)
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 def format_kpi_value(value, fmt: str) -> str:
     if value is None or value == "":
@@ -137,11 +187,16 @@ def register_card_catalogue_callbacks(app):
         # more deterministic than a click-triggered race.
         #
         # Fix: depend on "portal-content-store" instead — route_page()
-        # only writes {"rendered": True} to it AFTER portal-content's
-        # children (and the new kpi-value elements) are in place, which
-        # forces Dash to run this callback strictly after that rebuild.
-        # (poll_callbacks.py's load_polls_list already uses this exact
-        # pattern for the same reason.)
+        # writes to it AFTER portal-content's children (and the new
+        # kpi-value elements) are in place, which forces Dash to run this
+        # callback strictly after that rebuild. (poll_callbacks.py's
+        # load_polls_list already uses this exact pattern for the same
+        # reason.) IMPORTANT: this alone wasn't sufficient — route_page()
+        # was writing the literal same {"rendered": True} dict on every
+        # navigation, which Dash's client treated as "unchanged" and simply
+        # never re-fired this Input past the very first page load. Fixed in
+        # shell_callbacks.py by stamping that store with a changing
+        # timestamp on every call.
         Input("portal-content-store", "data"),
         Input("auth-store", "data"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
