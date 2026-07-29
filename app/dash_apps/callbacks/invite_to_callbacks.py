@@ -1,15 +1,17 @@
-# app/dash_apps/callbacks/assign_to_callbacks.py
+# app/dash_apps/callbacks/invite_to_callbacks.py
 """
-Assign-To Modal Callbacks
-=========================
-File-Explorer style modal for assigning concerns to admins / vendors / security.
+Invite-To Modal Callbacks
+==========================
+Admin/Owner's "Invite" action on a concern profile. Similar to the
+assign-to modal but targets the concerns_invite table — vendors and
+security staff submit bids on invites before being formally assigned.
 
 UI flow:
-  1. User clicks "Assign" on concern profile → modal opens
-  2. Modal shows 3 cards: ADM, VND, SEC
+  1. Admin/Owner clicks "Invite" on a concern profile -> modal opens
+  2. Modal shows 2 cards: VND, SEC (no ADM — admins are auto-assigned)
   3. Clicking a card loads the respective entity list below
   4. User toggles selection on items (checkboxes / card click)
-  5. Submit writes to concerns_assigns table
+  5. Submit writes to concerns_invite table
   6. Modal closes, concern list/profile refreshes
 """
 
@@ -20,29 +22,23 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.loaders import (
-    get_concern_assignments,
-    list_assignable_admins,
-    list_assignable_vendors,
-    list_assignable_security,
+    get_concern_invites,
+    list_invitable_vendors,
+    list_invitable_security,
     humanize_assignment,
 )
 from app.security.audit_context import get_current_user_id
 
+
 PORTAL_ROLE_LABEL = {
-    "ADM": "Admin",
     "VND": "Vendor",
     "SEC": "Security",
 }
 
 
-def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
-    """Render a single assignable entity item."""
-    if role == "ADM":
-        label = row.get("name") or row.get("email", "Admin")
-        sub = row.get("email", "")
-        icon = "fas fa-user-shield"
-        color = "#1d74d8"
-    elif role == "VND":
+def _render_invite_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
+    """Render a single inviteable entity item."""
+    if role == "VND":
         label = row.get("business_name") or row.get("name", "Vendor")
         sub = row.get("mobile", "")
         icon = "fas fa-truck"
@@ -54,12 +50,7 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
         color = "#e59620"
 
     rid = row.get("id")
-    # NOTE: must be the pattern-matching dict id, not a plain string —
-    # the toggle_selection callback below listens on
-    # Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks")
-    # and a plain string id ("assign-item-ADM-3") never matches that pattern,
-    # so clicks silently went nowhere and selections never reached the store.
-    item_id = {"type": "assign-item", "role": role, "entity_id": rid}
+    item_id = {"type": "invite-item", "role": role, "entity_id": rid}
 
     if view == "grid":
         inner = dbc.Card([
@@ -80,7 +71,7 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
         inner = dbc.ListGroupItem([
             html.Div([
                 dbc.Checkbox(
-                    id={"type": "assign-check", "role": role, "entity_id": rid},
+                    id={"type": "invite-check", "role": role, "entity_id": rid},
                     value=selected,
                     style={"marginRight": "10px", "pointerEvents": "none"},
                 ),
@@ -100,22 +91,22 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
     return html.Div(inner, className="mb-1")
 
 
-def register_assign_to_callbacks(app):
-    """Register all assign-to modal callbacks."""
+def register_invite_to_callbacks(app):
+    """Register all invite-to modal callbacks."""
 
-    # ── 1. Open modal from concern profile action ────────────────────────────
+    # ── 1. Open modal from concern profile action ──────────────────────────
     @app.callback(
-        Output("assign-to-modal", "is_open", allow_duplicate=True),
-        Output("assign-to-store", "data", allow_duplicate=True),
+        Output("invite-to-modal", "is_open", allow_duplicate=True),
+        Output("invite-to-store", "data", allow_duplicate=True),
         Input("profile-action-trigger", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def open_assign_modal(trigger_data, auth):
+    def open_invite_modal(trigger_data, auth):
         if not trigger_data or not isinstance(trigger_data, dict):
             raise PreventUpdate
         action = trigger_data.get("action")
-        if action != "open_assign_modal":
+        if action != "open_invite_modal":
             raise PreventUpdate
         params = trigger_data.get("params") or {}
         concern_id = params.get("concern_id")
@@ -125,8 +116,8 @@ def register_assign_to_callbacks(app):
         selected = {}
         if society_id and concern_id:
             try:
-                assigns = get_concern_assignments(int(concern_id))
-                for a in assigns:
+                invites = get_concern_invites(int(concern_id))
+                for a in invites:
                     role = a.get("role")
                     eid = a.get("entity_id")
                     if role and eid:
@@ -135,80 +126,64 @@ def register_assign_to_callbacks(app):
                 pass
         return True, {"concern_id": int(concern_id), "selected": selected, "active_role": None}
 
-    # ── 2. Close modal ────────────────────────────────────────────────────────
+    # ── 2. Close modal ──────────────────────────────────────────────────────
     @app.callback(
-        Output("assign-to-modal", "is_open", allow_duplicate=True),
-        Input("close-assign-to-modal", "n_clicks"),
+        Output("invite-to-modal", "is_open", allow_duplicate=True),
+        Input("close-invite-to-modal", "n_clicks"),
         prevent_initial_call=True,
     )
-    def close_assign_modal(n_clicks):
+    def close_invite_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate
         return False
 
-    # ── 3. Entity-type card click OR search change → (re)load list ────────────
-    # `assign-search` is a real Input here (not just a State read at click
-    # time), and the currently-active role is tracked in assign-to-store, so
-    # typing in the search box re-runs the query for whichever role list is
-    # currently open. Previously the search box was only a State, and a
-    # separate callback zeroed out the cards' n_clicks on every keystroke to
-    # "force" a reload — but that zeroing made every n_clicks falsy, so the
-    # `if not any(...)` guard here would immediately PreventUpdate and the
-    # list never actually refreshed.
+    # ── 3. Entity-type card click OR search change → (re)load list ─────────
     @app.callback(
-        Output("assign-list-container", "children"),
-        Output({"type": "assign-card", "role": ALL}, "color"),
-        Output({"type": "assign-card", "role": ALL}, "outline"),
-        Output("assign-to-store", "data", allow_duplicate=True),
-        Input({"type": "assign-card", "role": ALL}, "n_clicks"),
-        Input("assign-search", "value"),
-        State("assign-to-store", "data"),
+        Output("invite-list-container", "children"),
+        Output({"type": "invite-card", "role": ALL}, "color"),
+        Output({"type": "invite-card", "role": ALL}, "outline"),
+        Output("invite-to-store", "data", allow_duplicate=True),
+        Input({"type": "invite-card", "role": ALL}, "n_clicks"),
+        Input("invite-search", "value"),
+        State("invite-to-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def load_assign_list(n_clicks_list, search, store, auth):
+    def load_invite_list(n_clicks_list, search, store, auth):
         store = dict(store or {})
         triggered = ctx.triggered_id
 
-        if triggered == "assign-search":
-            # Re-filtering whatever list is already open; if no card has
-            # been picked yet there's nothing to filter.
+        if triggered == "invite-search":
             role = store.get("active_role")
-            if role not in ("ADM", "VND", "SEC"):
+            if role not in ("VND", "SEC"):
                 raise PreventUpdate
-        elif isinstance(triggered, dict) and triggered.get("type") == "assign-card":
+        elif isinstance(triggered, dict) and triggered.get("type") == "invite-card":
             role = triggered.get("role")
-            if role not in ("ADM", "VND", "SEC"):
+            if role not in ("VND", "SEC"):
                 raise PreventUpdate
             store["active_role"] = role
         else:
             raise PreventUpdate
 
         selected = store.get("selected", {})
-
         society_id = (auth or {}).get("society_id")
         if not society_id:
             return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
 
         s = (search or "").strip() or None
         try:
-            if role == "ADM":
-                rows = list_assignable_admins(society_id, s)
-            elif role == "VND":
-                rows = list_assignable_vendors(society_id, s)
+            if role == "VND":
+                rows = list_invitable_vendors(society_id, s)
             else:
-                rows = list_assignable_security(society_id, s)
+                rows = list_invitable_security(society_id, s)
         except Exception as e:
             return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
 
-        # Card highlight reflects the active role directly, not accumulated
-        # n_clicks — with n_clicks, once two cards had each been clicked at
-        # least once in the session, both stayed highlighted forever.
         card_colors = []
         card_outlines = []
-        for card_role in ("ADM", "VND", "SEC"):
+        for card_role in ("VND", "SEC"):
             if card_role == role:
-                card_colors.append("primary" if role == "ADM" else "success" if role == "VND" else "warning")
+                card_colors.append("success" if role == "VND" else "warning")
                 card_outlines.append(False)
             else:
                 card_colors.append("secondary")
@@ -221,18 +196,18 @@ def register_assign_to_callbacks(app):
             )
             return empty, card_colors, card_outlines, store
 
-        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+        items = [_render_invite_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
         return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
 
     # ── 4. Toggle selection on item click ────────────────────────────────────
     @app.callback(
-        Output("assign-to-store", "data", allow_duplicate=True),
-        Output("assign-selected-summary", "children"),
-        Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks"),
-        State("assign-to-store", "data"),
+        Output("invite-to-store", "data", allow_duplicate=True),
+        Output("invite-selected-summary", "children"),
+        Input({"type": "invite-item", "role": ALL, "entity_id": ALL}, "n_clicks"),
+        State("invite-to-store", "data"),
         prevent_initial_call=True,
     )
-    def toggle_selection(n_clicks_list, store):
+    def toggle_invite_selection(n_clicks_list, store):
         if not any(n for n in (n_clicks_list or []) if n):
             raise PreventUpdate
         triggered = ctx.triggered_id
@@ -249,7 +224,6 @@ def register_assign_to_callbacks(app):
         selected[key] = not selected.get(key, False)
         store["selected"] = selected
 
-        # Build summary
         badges = []
         for k, v in selected.items():
             if not v:
@@ -261,43 +235,43 @@ def register_assign_to_callbacks(app):
             badges.append(
                 dbc.Badge(
                     label,
-                    color="primary" if r == "ADM" else "success" if r == "VND" else "warning",
+                    color="success" if r == "VND" else "warning",
                     className="me-1",
                     style={"fontSize": "11px"},
                 )
             )
-        summary = html.Div(badges) if badges else html.Small("No assignments selected.", className="text-muted")
+        summary = html.Div(badges) if badges else html.Small("No invitations selected.", className="text-muted")
         return store, summary
 
-    # ── 5. Clear all selections ──────────────────────────────────────────────
+    # ── 5. Clear all selections ──────────────────────────────────────────
     @app.callback(
-        Output("assign-to-store", "data", allow_duplicate=True),
-        Output("assign-selected-summary", "children", allow_duplicate=True),
-        Input("assign-clear-btn", "n_clicks"),
-        State("assign-to-store", "data"),
+        Output("invite-to-store", "data", allow_duplicate=True),
+        Output("invite-selected-summary", "children", allow_duplicate=True),
+        Input("invite-clear-btn", "n_clicks"),
+        State("invite-to-store", "data"),
         prevent_initial_call=True,
     )
-    def clear_selections(n_clicks, store):
+    def clear_invite_selections(n_clicks, store):
         if not n_clicks:
             raise PreventUpdate
         store = dict(store or {})
         store["selected"] = {}
-        return store, html.Small("No assignments selected.", className="text-muted")
+        return store, html.Small("No invitations selected.", className="text-muted")
 
-    # ── 6. Submit assignments ────────────────────────────────────────────────
+    # ── 6. Submit invitations ────────────────────────────────────────────────
     @app.callback(
-        Output("assign-to-modal", "is_open", allow_duplicate=True),
+        Output("invite-to-modal", "is_open", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Output("drilldown-store", "data", allow_duplicate=True),
         Output("drill-content", "children", allow_duplicate=True),
         Output("drill-breadcrumb", "children", allow_duplicate=True),
-        Input("assign-submit-btn", "n_clicks"),
-        State("assign-to-store", "data"),
+        Input("invite-submit-btn", "n_clicks"),
+        State("invite-to-store", "data"),
         State("auth-store", "data"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
-    def submit_assignments(n_clicks, store, auth, drill_store):
+    def submit_invitations(n_clicks, store, auth, drill_store):
         if not n_clicks:
             raise PreventUpdate
         store = store or {}
@@ -312,11 +286,9 @@ def register_assign_to_callbacks(app):
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
 
         try:
-            # Fetch prior assignments first so we can tell which of the
-            # selected entities are newly assigned (only those get a push —
-            # resubmitting an unchanged assignment shouldn't re-notify).
+            # Fetch prior invites so we can tell which are newly invited.
             prior_rows = db._execute(
-                "SELECT role, entity_id FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
+                "SELECT role, entity_id FROM concerns_invite WHERE concern_id=%s AND society_id=%s",
                 (concern_id, society_id), fetch_all=True,
             ) or []
             prior_keys = {f"{r['role']}-{r['entity_id']}" for r in prior_rows}
@@ -333,13 +305,13 @@ def register_assign_to_callbacks(app):
                 except (IndexError, ValueError):
                     continue
                 db._execute(
-                    "DELETE FROM concerns_assigns "
+                    "DELETE FROM concerns_invite "
                     "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
                     (concern_id, society_id, role, entity_id),
                 )
 
             inserted = 0
-            newly_assigned = []
+            newly_invited = []
             for key in to_insert:
                 parts = key.split("-", 1)
                 role = parts[0]
@@ -348,41 +320,37 @@ def register_assign_to_callbacks(app):
                 except (IndexError, ValueError):
                     continue
                 db._execute(
-                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
-                    "VALUES (%s, %s, %s, %s, %s, 'assigned') "
-                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='assigned'",
-                    (concern_id, society_id, role, entity_id, actor_user_id),
+                    "INSERT INTO concerns_invite (concern_id, society_id, role, entity_id, bid_amount, status, invited_by) "
+                    "VALUES (%s, %s, %s, %s, NULL, 'invited', %s) "
+                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='invited', bid_amount=NULL, updated_at=NOW() "
+                    "RETURNING id",
+                    (concern_id, society_id, role, entity_id, actor_user_id), fetch_one=True,
                 )
                 inserted += 1
-                newly_assigned.append((role, entity_id))
+                newly_invited.append((role, entity_id))
 
-            # concerns.status is now kept in sync automatically by
-            # trg_concerns_assigns_sync_status (see estatehub.sql) whenever
-            # concerns_assigns rows are inserted/updated/deleted above — no
-            # manual UPDATE concerns SET status=... needed here anymore.
-
-            # Push-notify only the newly-assigned entities.
-            if newly_assigned:
+            # Push-notify only the newly-invited entities.
+            if newly_invited:
                 try:
-                    from app.services.push_service import notify_concern_assigned
+                    from app.services.push_service import notify_concern_invited
                     concern_row = db._execute(
                         "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
                         (concern_id, society_id), fetch_one=True,
                     )
-                    notify_concern_assigned(
+                    notify_concern_invited(
                         society_id, concern_id,
                         (concern_row or {}).get("concern_type", "other"),
-                        newly_assigned,
+                        newly_invited,
                     )
                 except Exception as e:
-                    print(f"⚠️  notify_concern_assigned failed: {e}")
+                    print(f"⚠️  notify_concern_invited failed: {e}")
 
             # Refresh the concern list/profile
             from app.dash_apps.callbacks.drilldown_callbacks import _render_current
             content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})
             return (
                 False,
-                {"type": "success", "message": f"Assignments updated: {inserted} assignee(s)."},
+                {"type": "success", "message": f"Invitations sent: {inserted} invitee(s)."},
                 no_update,
                 content,
                 breadcrumb,
@@ -390,4 +358,4 @@ def register_assign_to_callbacks(app):
         except Exception as e:
             return False, {"type": "error", "message": str(e)}, no_update, no_update, no_update
 
-    print("  ✓ Assign-to callbacks registered")
+    print("  ✓ Invite-to callbacks registered")

@@ -42,6 +42,7 @@ class ReceivableStatus(str, Enum):
 
 class ConcernStatus(str, Enum):
     OPEN = "open"
+    INVITE = "invite"
     IN_PROGRESS = "in_progress"
     RESOLVED = "resolved"
 
@@ -425,6 +426,28 @@ def dict_to_concern(row: dict) -> Concern:
         except ValueError:
             pass
     return Concern(**data)
+
+@dataclass
+class ConcernInvite:
+    id: int
+    concern_id: int
+    society_id: int
+    role: str
+    entity_id: int
+    bid_amount: Optional[Decimal] = None
+    status: str = "invited"
+    invited_by: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    entity_name: Optional[str] = None
+
+    def to_dict(self, include_calculated: bool = False) -> dict:
+        data = asdict(self)
+        return data
+
+def dict_to_concern_invite(row: dict) -> ConcernInvite:
+    """Convert DB row to ConcernInvite model"""
+    return ConcernInvite(**{k: v for k, v in row.items() if k in ConcernInvite.__annotations__})
 
 # ════════════════════════════════════════════════════════════════
 # POLLING

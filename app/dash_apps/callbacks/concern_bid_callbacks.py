@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
+from dash.exceptions import PreventUpdate
 from database.db_manager import db
 from app.dash_apps.drilldown import loaders
 

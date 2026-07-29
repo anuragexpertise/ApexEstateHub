@@ -152,6 +152,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"  ⚠️ concern_bid_callbacks failed: {e}")
 
+    # 14d. Invite-To modal (admin/owner invites vendors/security to bid)
+    #     Requires "invite-to-modal" + "invite-to-store" in app_shell.py.
+    try:
+        from .invite_to_callbacks import register_invite_to_callbacks
+        register_invite_to_callbacks(app)
+    except Exception as e:
+        print(f"  ⚠️ invite_to_callbacks failed: {e}")
+
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks

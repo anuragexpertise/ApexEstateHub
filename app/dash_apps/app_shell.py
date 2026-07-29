@@ -472,6 +472,74 @@ def _assign_to_modal() -> dbc.Modal:
     )
 
 
+# ── Concern Invite modal ─────────────────────────────────────────────
+# Admin/Owner's "Invite" action on a concern profile. Similar to the
+# assign-to modal but targets concerns_invite — vendors/security
+# submit bids on invites before being formally assigned.
+
+def _concern_invite_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Invite to Bid"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    html.P(
+                        "Invite a vendor or security staff to submit a bid.",
+                        className="text-muted", style={"fontSize": "13px"},
+                    ),
+                    # ── Role selector cards ──────────────────────────────
+                    html.Div([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.I(className="fas fa-truck fa-2x mb-2",
+                                       style={"color": "#17976e"}),
+                                html.H6("Vendor", style={"fontWeight": "600", "fontSize": "13px"}),
+                                html.Small("Invite a vendor to bid",
+                                           style={"color": "#64748b", "fontSize": "11px"}),
+                            ], className="text-center"),
+                        ], id={"type": "invite-card", "role": "VND"},
+                           style={"cursor": "pointer", "border": "1px solid #e2e8f0",
+                                  "borderRadius": "10px", "padding": "12px",
+                                  "backgroundColor": "#fff", "textAlign": "center"}),
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.I(className="fas fa-shield-alt fa-2x mb-2",
+                                       style={"color": "#e59620"}),
+                                html.H6("Security", style={"fontWeight": "600", "fontSize": "13px"}),
+                                html.Small("Invite security to bid",
+                                           style={"color": "#64748b", "fontSize": "11px"}),
+                            ], className="text-center"),
+                        ], id={"type": "invite-card", "role": "SEC"},
+                           style={"cursor": "pointer", "border": "1px solid #e2e8f0",
+                                  "borderRadius": "10px", "padding": "12px",
+                                  "backgroundColor": "#fff", "textAlign": "center"}),
+                    ], className="d-flex gap-2 mb-3", style={"justifyContent": "center"}),
+                    # ── Search ───────────────────────────────────────────
+                    dbc.InputGroup([
+                        dbc.InputGroupText([
+                            html.I(className="fas fa-search"),
+                        ]),
+                        dbc.Input(id="invite-search", placeholder="Search…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    # ── Selected summary ─────────────────────────────────
+                    html.Div(id="invite-selected-summary", className="mt-2"),
+                    # ── Entity list ──────────────────────────────────────
+                    html.Div(id="invite-list-container",
+                             style={"maxHeight": "400px", "overflowY": "auto"}),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Clear All", id="invite-clear-btn", color="secondary", size="sm", outline=True),
+                dbc.Button("Send Invitations", id="invite-submit-btn", color="info"),
+            ]),
+        ],
+        id="invite-to-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
 # ── Concern Bid modal ────────────────────────────────────────────────────────
 # Vendor's "Save Bid" action on a concern profile. Small single-field modal —
 # doesn't need the full schema-driven form engine, mirrors _assign_to_modal's
@@ -607,6 +675,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
+            dcc.Store(id="invite-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="poll-action-store",          storage_type="memory", data=None),
             dcc.Store(id="poll-detail-store",          storage_type="memory", data=None),
 

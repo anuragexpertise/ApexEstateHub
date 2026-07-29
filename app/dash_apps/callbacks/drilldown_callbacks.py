@@ -530,8 +530,16 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── Invite vendor/security — opens the invite-to modal ────────────────
+            if action == "invite" and entity == "concern":
+                trigger_data = {
+                    "action": "open_invite_modal",
+                    "params": {"concern_id": int(pk) if pk else None},
+                }
+                return no_update, no_update, no_update, no_update, trigger_data
+
             # ── Assign concern — opens the assign-to modal ─────────────────────────
-            if action == "assign" and entity == "concern":
+            elif action == "assign" and entity == "concern":
                 trigger_data = {
                     "action": "open_assign_modal",
                     "params": {"concern_id": int(pk) if pk else None},
@@ -2571,6 +2579,12 @@ def _save_concern(db, d, sid, is_edit, pk):
                         PushService.notify_concern_status_change(
                             owner["user_id"], concern_row["concern_type"], new_status
                         )
+            if new_status in ("resolved", "closed"):
+                db._execute(
+                    "UPDATE concerns_invite SET status='closed', updated_at=NOW() "
+                    "WHERE concern_id=%s AND society_id=%s AND status != 'closed'",
+                    (pk, sid),
+                )
         except Exception as e:
             print(f"⚠️  notify_concern_status_change failed: {e}")
         return True, "Concern updated", pk
@@ -3040,7 +3054,9 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if vendor_linked_id:
             f["vendor_id"] = vendor_linked_id
             # Vendor portal: show concerns assigned to this vendor (via concerns_assigns)
+            # AND concerns they've been invited to (via concerns_invite).
             f["assigned_vnd_id"] = vendor_linked_id
+            f["invited_vnd_id"] = vendor_linked_id
     elif role == "security":
         # linked_id for security = security_staff.id, and fn_security_list
         # now returns security_staff.id as `id` too (previously returned
@@ -3054,6 +3070,8 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if sec_user_id:
             f["user_id"] = sec_user_id
         # Security portal: show concerns assigned to this security person (via concerns_assigns)
+        # AND concerns they've been invited to (via concerns_invite).
         if sec_staff_id:
             f["assigned_sec_id"] = sec_staff_id
+            f["invited_sec_id"] = sec_staff_id
     return f

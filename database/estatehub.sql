@@ -240,6 +240,88 @@ CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (soc
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
 
 -- ════════════════════════════════════════════════════════════════════════
+-- CONCERNS INVITE — pre-assignment bid solicitation
+-- Admin/Owner invites vendors/security to submit a bid before formally
+-- assigning them. The invite tracks bid_amount and status independently.
+-- ════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS concerns_invite (
+    id SERIAL PRIMARY KEY,
+    concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    role VARCHAR(10) NOT NULL CHECK (role IN ('VND', 'SEC')),
+    entity_id INT NOT NULL,
+    bid_amount NUMERIC(10, 2),
+    status VARCHAR(20) NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'bid_submitted', 'assigned', 'closed')),
+    invited_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    UNIQUE (concern_id, role, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_concerns_invite_concern ON concerns_invite (concern_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_invite_society ON concerns_invite (society_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_invite_lookup ON concerns_invite (society_id, role, entity_id);
+
+-- ── fn_sync_concern_invite_status: aggregate concerns_invite.status -> concerns.status ──
+-- When all invites for a concern are closed, the concern becomes 'closed'.
+-- When any invite is bid_submitted or assigned, the concern becomes 'assigned'.
+-- When no invites exist yet (concern just created), status stays 'open'.
+CREATE OR REPLACE FUNCTION fn_sync_concern_invite_status(p_concern_id INT)
+RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_closed INT;
+    v_bid_or_assigned INT;
+    v_new_status VARCHAR(20);
+BEGIN
+    SELECT COUNT(*),
+           COUNT(*) FILTER (WHERE status = 'closed'),
+           COUNT(*) FILTER (WHERE status IN ('bid_submitted', 'assigned'))
+      INTO v_total, v_closed, v_bid_or_assigned
+      FROM concerns_invite
+     WHERE concern_id = p_concern_id;
+
+    IF v_total = 0 THEN
+        v_new_status := 'open';
+    ELSIF v_closed = v_total THEN
+        v_new_status := 'closed';
+    ELSIF v_bid_or_assigned > 0 THEN
+        v_new_status := 'assigned';
+    ELSE
+        v_new_status := 'open';
+    END IF;
+
+    UPDATE concerns
+       SET status = v_new_status,
+           updated_at = NOW()
+     WHERE id = p_concern_id
+       AND status IS DISTINCT FROM v_new_status;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_trg_sync_concern_invite_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        PERFORM fn_sync_concern_invite_status(OLD.concern_id);
+        RETURN OLD;
+    ELSE
+        PERFORM fn_sync_concern_invite_status(NEW.concern_id);
+        RETURN NEW;
+    END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_concerns_invite_sync_status ON concerns_invite;
+CREATE TRIGGER trg_concerns_invite_sync_status
+    AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_invite
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_sync_concern_invite_status();
+
+-- ════════════════════════════════════════════════════════════════════════
 -- CONCERNS WORKFLOW OVERHAUL (2026-07)
 -- Moves the per-assignee lifecycle status off `concerns.status` and onto
 -- `concerns_assigns.status`, so many-to-many delegation (multiple vendors
@@ -3998,6 +4080,54 @@ LANGUAGE SQL STABLE AS $$
     LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
     WHERE ca.concern_id = p_concern_id
     ORDER BY ca.role, ca.created_at;
+$$;
+
+DROP FUNCTION IF EXISTS fn_concern_invite_profile CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_concern_invite_profile(p_concern_id INT)
+RETURNS TABLE (
+    id INT, concern_id INT, society_id INT, role VARCHAR(10),
+    entity_id INT, bid_amount NUMERIC(10,2), status VARCHAR(20),
+    invited_by INT, created_at TIMESTAMP, updated_at TIMESTAMP,
+    entity_name TEXT
+)
+LANGUAGE SQL STABLE AS $$
+    SELECT ci.id, ci.concern_id, ci.society_id, ci.role, ci.entity_id,
+           ci.bid_amount::NUMERIC(10,2), ci.status::VARCHAR(20),
+           ci.invited_by, ci.created_at, ci.updated_at,
+           CASE ci.role
+               WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
+               WHEN 'SEC' THEN COALESCE(s.name, 'Security')
+           END
+      FROM concerns_invite ci
+      LEFT JOIN vendors v ON v.id = ci.entity_id AND ci.role = 'VND'
+      LEFT JOIN security_staff s ON s.id = ci.entity_id AND ci.role = 'SEC'
+     WHERE ci.concern_id = p_concern_id
+     ORDER BY ci.role, ci.created_at;
+$$;
+
+DROP FUNCTION IF EXISTS fn_concern_invite_assignments CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_concern_invite_assignments(p_concern_id INT)
+RETURNS TABLE (
+    id INT, concern_id INT, society_id INT, role VARCHAR(10),
+    entity_id INT, bid_amount NUMERIC(10,2), status VARCHAR(20),
+    invited_by INT, created_at TIMESTAMP, updated_at TIMESTAMP,
+    entity_name TEXT
+)
+LANGUAGE SQL STABLE AS $$
+    SELECT ci.id, ci.concern_id, ci.society_id, ci.role, ci.entity_id,
+           ci.bid_amount::NUMERIC(10,2), ci.status::VARCHAR(20),
+           ci.invited_by, ci.created_at, ci.updated_at,
+           CASE ci.role
+               WHEN 'VND' THEN COALESCE(v.business_name, v.name, 'Vendor')
+               WHEN 'SEC' THEN COALESCE(s.name, 'Security')
+           END
+      FROM concerns_invite ci
+      LEFT JOIN vendors v ON v.id = ci.entity_id AND ci.role = 'VND'
+      LEFT JOIN security_staff s ON s.id = ci.entity_id AND ci.role = 'SEC'
+     WHERE ci.concern_id = p_concern_id
+     ORDER BY ci.role, ci.created_at;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
