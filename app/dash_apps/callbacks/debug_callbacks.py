@@ -99,7 +99,7 @@ def register_debug_callbacks(app):
     try:
         from app.dash_apps.pages.card_catalogue import KPI_CARDS
     except ImportError:
-        print("  ⚠️  KPI_CARDS not available — debug callbacks skipped")
+        print("⚠️  KPI_CARDS not available — debug callbacks skipped")
         return
 
     @app.callback(

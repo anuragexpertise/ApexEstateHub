@@ -195,7 +195,7 @@ class DatabaseManager:
                 _elapsed = time.monotonic() - _t0
                 # Stale pooled connection — rebuild pool once
                 if attempt < retries:
-                    print(f"  ⚠️  DB operational error (attempt {attempt + 1}, {_elapsed:.2f}s elapsed): {exc}")
+                    print(f"⚠️  DB operational error (attempt {attempt + 1}, {_elapsed:.2f}s elapsed): {exc}")
                     self._pool = None
                     self._init_pool()
                     time.sleep(0.5)

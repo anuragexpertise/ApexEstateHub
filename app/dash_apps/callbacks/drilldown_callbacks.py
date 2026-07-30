@@ -1065,7 +1065,7 @@ def register_drilldown_callbacks(app):
                         _f.write(_webp_bytes)
                     form_data[field] = _fname
                 except Exception as _cam_err:
-                    print(f"  ⚠️  Camera image save error [{field}]: {_cam_err}")
+                    print(f"⚠️  Camera image save error [{field}]: {_cam_err}")
                     del form_data[field]
         # ── 5. Merge with prefill from store ──────────────────────────────────
         #       prefill supplies defaults (entity pk, context ids, etc.)
@@ -1529,7 +1529,7 @@ def _render_card(
                         "free_1mth": 0.0,
                     }
                 except Exception as _e:
-                    print(f"  ⚠️  vendor pass rates: {_e}")
+                    print(f"⚠️  vendor pass rates: {_e}")
             return renderers.render_vendor_pass_card(
                 user_id=vendor_user_id,
                 vendor_name=record.get("name", "Vendor"),
@@ -1579,7 +1579,7 @@ def _render_card(
                         for r in rows
                     ]
                 except Exception as _e:
-                    print(f"  ⚠️  event ticket apartment options: {_e}")
+                    print(f"⚠️  event ticket apartment options: {_e}")
 
             return renderers.render_event_ticket_card(
                 event_id=event_id,
@@ -1680,7 +1680,7 @@ def _label_for(entity_plural: str, record: dict) -> str:
         "societies": ("name",),
         "receipts": ("acc_particulars",),
         "expenses": ("acc_particulars",),
-        "gate_logs": ("entity_id",),
+        "gate_logs": ("entity_id",),  #to do
         "accounts": ("name",),
     }
     for f in _LABEL_FIELDS.get(entity_plural, ("id",)):
@@ -2525,8 +2525,8 @@ def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
         new_status = d.get("status", "open")
 
-        # ── Status guard: only Admin or concern creator may set status='resolved' ──
-        if new_status == "resolved":
+        # ── Status guard: only Admin or concern creator may set status='closed' ──
+        if new_status == "closed":
             from app.security.audit_context import get_current_user_role
             actor_role = get_current_user_role()
             actor_user_id = d.get("user_id")
@@ -2542,7 +2542,7 @@ def _save_concern(db, d, sid, is_edit, pk):
                 )
                 if not creator_row or creator_row.get("created_by") != actor_user_id:
                     return False, (
-                        "Only Admin and the concern creator can mark a concern as resolved"
+                        "Only Admin and the concern creator can mark a concern as closed"
                     ), pk
 
         _upd_by_clause = ", updated_by=%s"
