@@ -788,6 +788,9 @@ def shell_layout() -> html.Div:
             # ── Assign-To modal ──────────────────────────────────────────────────
             _assign_to_modal(),
 
+            # ── Invite-To modal (admin/owner: Invite action on a concern) ─────────
+            _concern_invite_modal(),
+
             # ── Concern Bid modal (vendor: Save Bid action) ───────────────────────
             _concern_bid_modal(),
         ]

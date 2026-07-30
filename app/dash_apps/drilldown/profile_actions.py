@@ -131,7 +131,12 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {
         "label": "Invite",
         "action_id": "invite",
-        "target_card": None,          # opens the invite-to modal — no navigation
+        "target_card": "modal_invite",  # opens the invite-to modal — no navigation;
+                                         # this value is never looked up for routing
+                                         # (action=="invite" is intercepted directly
+                                         # in drilldown_callbacks.py's route_drilldown,
+                                         # same as "show_qr"->"modal_qr" below), it's
+                                         # just descriptive id metadata instead of ""
         "icon": "fa-envelope",
         "color": "info",
         "roles": ["admin", "apartment"],   # Admin portal + Owner portal
@@ -161,7 +166,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "roles": ["vendor"],
         },
         {
-            "label": "Closed",
+            "label": "Close",
             "action_id": "close_concern",
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-lock",

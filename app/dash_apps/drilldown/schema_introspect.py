@@ -424,7 +424,7 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
                          # "Always stamp user_id from auth" in drilldown_callbacks.py
     },
     "concerns": {
-        "status",
+        "status", "qr_payload",
     },
 }
 

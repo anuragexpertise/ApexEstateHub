@@ -756,6 +756,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         f for f in fields
         if f.get("field") not in hidden
         and _field_visible(entity_plural, f.get("field"), role)
+        and not (entity == "concern" and f.get("field") == "qr_payload")
     ]
     image_fields = [
         f for f in visible_fields
@@ -763,8 +764,53 @@ def render_profile_card(card_id: str, title: str, icon: str,
     ]
     text_fields  = [f for f in visible_fields if f not in image_fields]
 
+    # ── Concern QR code — rendered live from the stored qr_payload (society-
+    # scoped "<society_id>-CON-<id>" string), not shown as a raw text field.
+    # Scans dispatch to validate_concern_qr() in qr_service.py.
+    concern_qr_section = []
+    if entity == "concern" and pk_val:
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_society_id = record_dict.get("society_id") or society_id
+            qr_img, qr_payload = generate_qr_code(qr_society_id, "CON", pk_val)
+            if qr_img:
+                concern_qr_section.append(
+                    html.Div([
+                        html.Div([
+                            html.I(className="fas fa-qrcode",
+                                   style={"color": "#aaa", "fontSize": "10px",
+                                          "marginRight": "5px"}),
+                            html.Span("Concern QR",
+                                      style={"color": "#7d8ea3", "fontSize": "10px",
+                                             "fontWeight": "600",
+                                             "textTransform": "uppercase"}),
+                        ], style={"marginBottom": "5px"}),
+                        html.Img(
+                            src=qr_img,
+                            style={
+                                "maxWidth": "160px", "maxHeight": "160px",
+                                "borderRadius": "8px",
+                                "border": "1px solid rgba(0,0,0,0.08)",
+                                "objectFit": "contain", "background": "#fff",
+                                "padding": "4px", "display": "block",
+                            },
+                        ),
+                        html.Div(qr_payload, style={
+                            "fontSize": "10px", "color": "#7d8ea3",
+                            "fontFamily": "monospace", "marginTop": "4px",
+                        }),
+                    ], style={
+                        "marginBottom": "12px", "padding": "10px",
+                        "background": "rgba(248,251,255,0.7)",
+                        "borderRadius": "10px",
+                        "border": "1px solid rgba(200,215,235,0.4)",
+                    })
+                )
+        except Exception as e:
+            print(f"⚠️  concern QR render failed: {e}")
+
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
-    image_section = []
+    image_section = list(concern_qr_section)
     for f in image_fields:
         image_path = record_dict.get(f["field"])
         if not image_path or str(image_path).strip() in ("", "None"):
@@ -983,6 +1029,38 @@ def render_form_card(card_id: str, title: str, icon: str,
           dcc.Input(id={"type":"form-entity-pk","entity":entity},
                     type="hidden", value=str(prefill.get("id",""))),
       ]
+
+    # ── Concern QR — Edit form only, never New (concern has no id yet, and
+    # qr_payload isn't generated until _save_concern's INSERT completes) ──
+    if entity == "concern" and prefill.get("id"):
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_society_id = prefill.get("society_id") or society_id
+            qr_img, qr_payload = generate_qr_code(qr_society_id, "CON", prefill["id"])
+            if qr_img:
+                form_rows.append(html.Div([
+                    html.Div([
+                        html.I(className="fas fa-qrcode",
+                               style={"color": "#aaa", "fontSize": "10px", "marginRight": "5px"}),
+                        html.Span("Concern QR", style={"color": "#7d8ea3", "fontSize": "10px",
+                                                        "fontWeight": "600", "textTransform": "uppercase"}),
+                    ], style={"marginBottom": "5px"}),
+                    html.Img(src=qr_img, style={
+                        "maxWidth": "140px", "maxHeight": "140px", "borderRadius": "8px",
+                        "border": "1px solid rgba(0,0,0,0.08)", "objectFit": "contain",
+                        "background": "#fff", "padding": "4px", "display": "block",
+                    }),
+                    html.Div(qr_payload, style={
+                        "fontSize": "10px", "color": "#7d8ea3",
+                        "fontFamily": "monospace", "marginTop": "4px",
+                    }),
+                ], style={
+                    "marginBottom": "14px", "padding": "10px",
+                    "background": "rgba(248,251,255,0.7)", "borderRadius": "10px",
+                    "border": "1px solid rgba(200,215,235,0.4)",
+                }))
+        except Exception as e:
+            print(f"⚠️  concern QR render failed on edit form: {e}")
 
     for f in fields:
         fid      = f["id"]
