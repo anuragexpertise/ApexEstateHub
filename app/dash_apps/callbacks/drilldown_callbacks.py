@@ -2523,78 +2523,44 @@ def _save_event(db, d, sid, is_edit, pk):
 
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
-        new_status = d.get("status", "open")
-
-        # ── Status guard: only Admin or concern creator may set status='closed' ──
-        if new_status == "closed":
-            from app.security.audit_context import get_current_user_role
-            actor_role = get_current_user_role()
-            actor_user_id = d.get("user_id")
-
-            # Require a server-side session for this security-sensitive operation
-            if not actor_role:
-                return False, "Session expired — please log in again", pk
-
-            if actor_role != "admin":
-                creator_row = db._execute(
-                    "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
-                    (pk, sid), fetch_one=True,
-                )
-                if not creator_row or creator_row.get("created_by") != actor_user_id:
-                    return False, (
-                        "Only Admin and the concern creator can mark a concern as closed"
-                    ), pk
-
+        # concerns.status is a read-only aggregate synced by
+        # trg_concerns_assigns_sync_status from concerns_assigns rows (see
+        # fn_sync_concern_status in estatehub.sql) — this generic edit form
+        # only ever touches the concern's own descriptive fields
+        # (apartment/type/description/preferred_time/image) and must NEVER
+        # write status itself.
+        #
+        # It previously did: new_status = d.get("status", "open") and wrote
+        # that into the UPDATE below. But "status" is hidden from this form's
+        # fields (_HIDDEN_ON_FORM["concerns"] in schema_introspect.py), so
+        # d.get("status", "open") always fell through to the "open" default —
+        # meaning EVERY edit via the auto-added "Edit" button (profile_concern
+        # is not in NO_EDIT_ACTION, so it gets one) silently reset an
+        # assigned/resolved/closed concern's status back to 'open', only for
+        # the aggregate trigger to correct it again on the next concerns_assigns
+        # change. Real status transitions belong to their own dedicated
+        # actions instead: Invite (invite_to_callbacks.py), Assign
+        # (assign_to_callbacks.py), Resolved (loaders.resolve_concern_assignment
+        # via the "vendor_resolve" action), and Closed (loaders.close_concern
+        # via the "close_concern" action) — none of which go through this
+        # function's edit branch at all.
         _upd_by_clause = ", updated_by=%s"
         db._execute(
             "UPDATE concerns SET apartment_id=%s, concern_type=%s, description=%s, "
-            "preferred_time=%s, status=%s"
+            "preferred_time=%s"
             + (", image=%s" if d.get("image") else "")
             + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
                 (d.get("apartment_id"), d.get("concern_type", "other"),
                  d.get("description"), d.get("preferred_time"),
-                 new_status, d.get("image"), d.get("user_id"), pk, sid)
+                 d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
                 else (d.get("apartment_id"), d.get("concern_type", "other"),
                        d.get("description"), d.get("preferred_time"),
-                       new_status, d.get("user_id"), pk, sid)
+                       d.get("user_id"), pk, sid)
             ),
         )
-        try:
-            if new_status in ("in_progress", "resolved"):
-                concern_row = db._execute(
-                    "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
-                    (pk, sid), fetch_one=True,
-                )
-                if concern_row and concern_row.get("apartment_id"):
-                    owner = db._execute(
-                        "SELECT u.id AS user_id FROM users u "
-                        "JOIN apartments a ON a.id = u.linked_id "
-                        "WHERE a.id = %s AND a.society_id = %s AND u.role='apartment'",
-                        (concern_row["apartment_id"], sid), fetch_one=True,
-                    )
-                    if owner:
-                        PushService.notify_concern_status_change(
-                            owner["user_id"], concern_row["concern_type"], new_status
-                        )
-            if new_status == "closed":
-                # NOTE: this form directly overwrites concerns.status (new_status
-                # comes straight from the edit form), which bypasses the
-                # trg_concerns_assigns_sync_status aggregate trigger entirely —
-                # a pre-existing inconsistency this migration doesn't fully
-                # resolve. This keeps concerns_assigns in step with that direct
-                # write so the two don't visibly disagree, but the real fix is
-                # to stop writing concerns.status here and instead call
-                # loaders.close_concern(pk, sid), letting the trigger own it.
-                db._execute(
-                    "UPDATE concerns_assigns SET status='closed', updated_at=NOW() "
-                    "WHERE concern_id=%s AND society_id=%s AND status != 'closed'",
-                    (pk, sid),
-                )
-        except Exception as e:
-            print(f"⚠️  notify_concern_status_change failed: {e}")
         return True, "Concern updated", pk
     desc = (d.get("description") or "").strip()
     if not desc:
@@ -2615,6 +2581,11 @@ def _save_concern(db, d, sid, is_edit, pk):
         fetch_one=True,
     )
     new_id = (r or {}).get("id")
+    # NOTE: qr_payload is NOT set here — trg_concerns_qr (a BEFORE INSERT
+    # trigger on concerns, see estatehub.sql) already stamps it atomically
+    # as part of the INSERT itself ("<society_id>-CON-<id>"), the same
+    # instant new_id is assigned. Redoing it here with a second UPDATE would
+    # just duplicate that value at best, and race it at worst.
     if new_id:
         try:
             PushService.notify_concern_created(sid, d.get("apartment_id"), d.get("concern_type", "other"))
