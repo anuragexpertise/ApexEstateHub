@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_by INT REFERENCES users (id)
 );
 
+
+ALTER TABLE societies DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 ALTER TABLE societies ADD CONSTRAINT societies_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
 
 -- ── accounts ──────────────────────────────────────────────────
