@@ -2,14 +2,18 @@
 """
 Concern Bid Modal Callbacks
 ============================
-Vendor's "Save Bid" action on a concern profile. Small single-field modal
-(concern-bid-modal / concern-bid-store in app_shell.py) — writes
-concerns_assigns.bid_amount for the CURRENT vendor's own assignment row.
+Vendor/security's "Save Bid" action on a concern profile — the BID stage
+of the unified concerns_assigns lifecycle (invited -> bid_submitted ->
+assigned -> resolved -> closed). Small single-field modal (concern-bid-modal
+/ concern-bid-store in app_shell.py) — writes concerns_assigns.bid_amount
+and advances status for the CURRENT user's own 'invited' assignment row.
 
 UI flow:
-  1. Vendor clicks "Save Bid" on a concern profile -> modal opens
-  2. Vendor enters an amount -> Submit
-  3. Writes concerns_assigns.bid_amount via loaders.save_concern_bid()
+  1. Vendor/security clicks "Save Bid" on a concern profile -> modal opens
+  2. They enter an amount -> Submit
+  3. Writes concerns_assigns.bid_amount + status='bid_submitted' via
+     loaders.submit_concern_bid() — only succeeds if their row is currently
+     'invited'
   4. Push-notifies admin + the concern's creator apartment
   5. Modal closes, concern list/profile refreshes
 """
@@ -18,9 +22,11 @@ from __future__ import annotations
 
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
-from dash.exceptions import PreventUpdate
 from database.db_manager import db
 from app.dash_apps.drilldown import loaders
+
+# Maps auth-store "role" values to the role codes used in concerns_assigns.
+BID_ROLE_CODE = {"vendor": "VND", "security": "SEC"}
 
 
 def register_concern_bid_callbacks(app):
@@ -46,14 +52,15 @@ def register_concern_bid_callbacks(app):
         if not concern_id:
             return False, no_update, no_update, no_update
 
-        # Pre-fill with the vendor's existing bid, if any.
-        vendor_entity_id = (auth or {}).get("linked_id")
+        # Pre-fill with the caller's existing bid, if any.
+        role_code = BID_ROLE_CODE.get((auth or {}).get("role"))
+        entity_id = (auth or {}).get("linked_id")
         existing = None
-        if vendor_entity_id:
+        if role_code and entity_id:
             row = db._execute(
                 "SELECT bid_amount FROM concerns_assigns "
-                "WHERE concern_id=%s AND role='VND' AND entity_id=%s",
-                (int(concern_id), int(vendor_entity_id)), fetch_one=True,
+                "WHERE concern_id=%s AND role=%s AND entity_id=%s",
+                (int(concern_id), role_code, int(entity_id)), fetch_one=True,
             )
             existing = (row or {}).get("bid_amount")
         return True, {"concern_id": int(concern_id)}, existing, ""
@@ -93,11 +100,12 @@ def register_concern_bid_callbacks(app):
             return False, "", {"type": "warning", "message": "No concern selected."}, no_update, no_update, no_update
 
         society_id = (auth or {}).get("society_id")
-        vendor_entity_id = (auth or {}).get("linked_id")
-        if not society_id or (auth or {}).get("role") != "vendor" or not vendor_entity_id:
-            return False, "", {"type": "error", "message": "Only an assigned vendor can bid."}, no_update, no_update, no_update
+        role_code = BID_ROLE_CODE.get((auth or {}).get("role"))
+        entity_id = (auth or {}).get("linked_id")
+        if not society_id or not role_code or not entity_id:
+            return False, "", {"type": "error", "message": "Only an invited vendor or security staff can bid."}, no_update, no_update, no_update
 
-        ok, msg = loaders.save_concern_bid(concern_id, society_id, vendor_entity_id, bid_amount)
+        ok, msg = loaders.submit_concern_bid(concern_id, society_id, role_code, entity_id, bid_amount)
         if not ok:
             return True, msg, no_update, no_update, no_update, no_update
 
@@ -107,14 +115,21 @@ def register_concern_bid_callbacks(app):
                 "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
                 (concern_id, society_id), fetch_one=True,
             )
-            v_row = db._execute(
-                "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
-                (vendor_entity_id, society_id), fetch_one=True,
-            )
-            vendor_label = (v_row or {}).get("business_name") or (v_row or {}).get("name")
+            if role_code == "VND":
+                e_row = db._execute(
+                    "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
+                    (entity_id, society_id), fetch_one=True,
+                )
+                bidder_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
+            else:
+                e_row = db._execute(
+                    "SELECT name FROM security_staff WHERE id=%s AND society_id=%s",
+                    (entity_id, society_id), fetch_one=True,
+                )
+                bidder_label = (e_row or {}).get("name")
             if concern_row:
                 notify_concern_bid_saved(
-                    society_id, concern_row.get("apartment_id"), concern_row.get("concern_type"), vendor_label,
+                    society_id, concern_row.get("apartment_id"), concern_row.get("concern_type"), bidder_label,
                 )
         except Exception as e:
             print(f"⚠️  notify_concern_bid_saved failed: {e}")

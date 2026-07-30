@@ -473,9 +473,9 @@ def _assign_to_modal() -> dbc.Modal:
 
 
 # ── Concern Invite modal ─────────────────────────────────────────────
-# Admin/Owner's "Invite" action on a concern profile. Similar to the
-# assign-to modal but targets concerns_invite — vendors/security
-# submit bids on invites before being formally assigned.
+# Admin/Owner's "Invite" action on a concern profile. Writes into the same
+# concerns_assigns table as the Assign modal, at the 'invited' stage —
+# vendors/security submit bids before being formally assigned.
 
 def _concern_invite_modal() -> dbc.Modal:
     return dbc.Modal(
