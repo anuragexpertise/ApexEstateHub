@@ -2579,9 +2579,17 @@ def _save_concern(db, d, sid, is_edit, pk):
                         PushService.notify_concern_status_change(
                             owner["user_id"], concern_row["concern_type"], new_status
                         )
-            if new_status in ("resolved", "closed"):
+            if new_status == "closed":
+                # NOTE: this form directly overwrites concerns.status (new_status
+                # comes straight from the edit form), which bypasses the
+                # trg_concerns_assigns_sync_status aggregate trigger entirely —
+                # a pre-existing inconsistency this migration doesn't fully
+                # resolve. This keeps concerns_assigns in step with that direct
+                # write so the two don't visibly disagree, but the real fix is
+                # to stop writing concerns.status here and instead call
+                # loaders.close_concern(pk, sid), letting the trigger own it.
                 db._execute(
-                    "UPDATE concerns_invite SET status='closed', updated_at=NOW() "
+                    "UPDATE concerns_assigns SET status='closed', updated_at=NOW() "
                     "WHERE concern_id=%s AND society_id=%s AND status != 'closed'",
                     (pk, sid),
                 )
@@ -3053,10 +3061,10 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         vendor_linked_id = auth.get("linked_id")
         if vendor_linked_id:
             f["vendor_id"] = vendor_linked_id
-            # Vendor portal: show concerns assigned to this vendor (via concerns_assigns)
-            # AND concerns they've been invited to (via concerns_invite).
-            f["assigned_vnd_id"] = vendor_linked_id
-            f["invited_vnd_id"] = vendor_linked_id
+            # Vendor portal: show every concerns_assigns row for this vendor
+            # at any lifecycle stage (invited/bid_submitted/assigned/
+            # resolved), not just formally-assigned ones.
+            f["vnd_assignee_id"] = vendor_linked_id
     elif role == "security":
         # linked_id for security = security_staff.id, and fn_security_list
         # now returns security_staff.id as `id` too (previously returned
@@ -3069,9 +3077,9 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         sec_user_id = auth.get("user_id") or auth.get("id")
         if sec_user_id:
             f["user_id"] = sec_user_id
-        # Security portal: show concerns assigned to this security person (via concerns_assigns)
-        # AND concerns they've been invited to (via concerns_invite).
+        # Security portal: show every concerns_assigns row for this security
+        # staff member at any lifecycle stage (invited/bid_submitted/
+        # assigned/resolved), not just formally-assigned ones.
         if sec_staff_id:
-            f["assigned_sec_id"] = sec_staff_id
-            f["invited_sec_id"] = sec_staff_id
+            f["sec_assignee_id"] = sec_staff_id
     return f

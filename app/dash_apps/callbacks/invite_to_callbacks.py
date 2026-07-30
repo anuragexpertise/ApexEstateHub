@@ -2,16 +2,17 @@
 """
 Invite-To Modal Callbacks
 ==========================
-Admin/Owner's "Invite" action on a concern profile. Similar to the
-assign-to modal but targets the concerns_invite table — vendors and
-security staff submit bids on invites before being formally assigned.
+Admin/Owner's "Invite" action on a concern profile. Writes into the same
+concerns_assigns table as the Assign modal, at the 'invited' stage of the
+unified per-assignee lifecycle (invited -> bid_submitted -> assigned ->
+resolved -> closed) — concerns_invite has been retired.
 
 UI flow:
   1. Admin/Owner clicks "Invite" on a concern profile -> modal opens
   2. Modal shows 2 cards: VND, SEC (no ADM — admins are auto-assigned)
   3. Clicking a card loads the respective entity list below
   4. User toggles selection on items (checkboxes / card click)
-  5. Submit writes to concerns_invite table
+  5. Submit writes to concerns_assigns (status='invited')
   6. Modal closes, concern list/profile refreshes
 """
 
@@ -22,7 +23,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.loaders import (
-    get_concern_invites,
+    get_concern_assignments,
     list_invitable_vendors,
     list_invitable_security,
     humanize_assignment,
@@ -116,11 +117,11 @@ def register_invite_to_callbacks(app):
         selected = {}
         if society_id and concern_id:
             try:
-                invites = get_concern_invites(int(concern_id))
-                for a in invites:
+                assignments = get_concern_assignments(int(concern_id))
+                for a in assignments:
                     role = a.get("role")
                     eid = a.get("entity_id")
-                    if role and eid:
+                    if role in ("VND", "SEC") and eid:
                         selected[f"{role}-{eid}"] = True
             except Exception:
                 pass
@@ -286,18 +287,26 @@ def register_invite_to_callbacks(app):
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
 
         try:
-            # Fetch prior invites so we can tell which are newly invited.
+            # Fetch prior VND/SEC assignee rows (any lifecycle stage) so we
+            # only touch what actually needs to change.
             prior_rows = db._execute(
-                "SELECT role, entity_id FROM concerns_invite WHERE concern_id=%s AND society_id=%s",
+                "SELECT role, entity_id, status FROM concerns_assigns "
+                "WHERE concern_id=%s AND society_id=%s AND role IN ('VND', 'SEC')",
                 (concern_id, society_id), fetch_all=True,
             ) or []
-            prior_keys = {f"{r['role']}-{r['entity_id']}" for r in prior_rows}
+            prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
+            prior_keys = set(prior_by_key.keys())
 
             selected_keys = {k for k, v in selected.items() if v}
             to_delete = prior_keys - selected_keys
             to_insert = selected_keys - prior_keys
 
+            # Only remove rows still sitting at 'invited' — once someone has
+            # submitted a bid or been assigned/resolved/closed, unchecking
+            # them here must not silently wipe that progress.
             for key in to_delete:
+                if prior_by_key.get(key) != "invited":
+                    continue
                 parts = key.split("-", 1)
                 role = parts[0]
                 try:
@@ -305,8 +314,8 @@ def register_invite_to_callbacks(app):
                 except (IndexError, ValueError):
                     continue
                 db._execute(
-                    "DELETE FROM concerns_invite "
-                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+                    "DELETE FROM concerns_assigns "
+                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited'",
                     (concern_id, society_id, role, entity_id),
                 )
 
@@ -320,9 +329,11 @@ def register_invite_to_callbacks(app):
                 except (IndexError, ValueError):
                     continue
                 db._execute(
-                    "INSERT INTO concerns_invite (concern_id, society_id, role, entity_id, bid_amount, status, invited_by) "
-                    "VALUES (%s, %s, %s, %s, NULL, 'invited', %s) "
-                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='invited', bid_amount=NULL, updated_at=NOW() "
+                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
+                    "VALUES (%s, %s, %s, %s, %s, 'invited', NULL) "
+                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                    "  status='invited', bid_amount=NULL, invited_by=EXCLUDED.invited_by, updated_at=NOW() "
+                    "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
                     "RETURNING id",
                     (concern_id, society_id, role, entity_id, actor_user_id), fetch_one=True,
                 )

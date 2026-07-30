@@ -109,18 +109,16 @@ def humanize_assignment(row: dict) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# CONCERNS INVITE — pre-assignment bid solicitation
+# CONCERNS WORKFLOW — unified per-assignee lifecycle (2026-07)
+#
+#   invited -> bid_submitted -> assigned -> resolved -> closed
+#
+# All six stages (CREATE/INVITE/BID/ASSIGN/RESOLVE/CLOSE) now live on the
+# single concerns_assigns table — concerns_invite has been retired.
+# concerns.status is a trigger-synced aggregate of concerns_assigns.status
+# (see fn_sync_concern_status in estatehub.sql) — these helpers only ever
+# write concerns_assigns.status, never concerns.status directly.
 # ════════════════════════════════════════════════════════════════════════════
-
-def get_concern_invites(concern_id: int) -> list[dict]:
-    """Return invite rows for a concern."""
-    try:
-        return db._execute(
-            "SELECT * FROM fn_concern_invite_profile(%s)", (concern_id,), fetch_all=True
-        ) or []
-    except Exception:
-        return []
-
 
 def list_invitable_vendors(society_id: int, search: str | None = None) -> list[dict]:
     """List vendors that can be invited to bid on concerns."""
@@ -144,23 +142,31 @@ def list_invitable_security(society_id: int, search: str | None = None) -> list[
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
-def save_concern_invite(concern_id: int, society_id: int, role: str, entity_id: int, invited_by: int) -> tuple[bool, str]:
-    """Invite a vendor or security staff to submit a bid."""
-    try:
-        db._execute(
-            "INSERT INTO concerns_invite (concern_id, society_id, role, entity_id, bid_amount, status, invited_by) "
-            "VALUES (%s, %s, %s, %s, NULL, 'invited', %s) "
-            "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='invited', bid_amount=NULL, updated_at=NOW() "
-            "RETURNING id",
-            (concern_id, society_id, role, entity_id, invited_by), fetch_one=True,
-        )
-        return True, "Invitation sent"
-    except Exception as e:
-        return False, str(e)
+def invite_concern_assignee(concern_id: int, society_id: int, role: str, entity_id: int, invited_by: int) -> tuple[bool, str]:
+    """INVITE stage: invite a vendor or security staff to submit a bid.
+    role must be 'VND' or 'SEC' — admins (role='ADM') are auto-assigned via
+    assign_concern() and never go through invite/bid.
+    Safe to call again on an existing row as long as that row hasn't already
+    progressed to resolved/closed (re-inviting resets it to 'invited')."""
+    if role not in ("VND", "SEC"):
+        return False, "Only vendors or security staff can be invited"
+    row = db._execute(
+        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
+        "VALUES (%s, %s, %s, %s, %s, 'invited', NULL) "
+        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+        "  status='invited', bid_amount=NULL, invited_by=EXCLUDED.invited_by, updated_at=NOW() "
+        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
+        "RETURNING id",
+        (concern_id, society_id, role, entity_id, invited_by), fetch_one=True,
+    )
+    if not row:
+        return False, "Already resolved/closed for this concern — cannot re-invite"
+    return True, "Invitation sent"
 
 
-def update_concern_invite_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
-    """Vendor/security submits or updates their bid on an invite."""
+def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
+    """BID stage: the invited vendor/security submits their bid_amount.
+    Only valid from status='invited'; moves the row to 'bid_submitted'."""
     try:
         bid = float(bid_amount)
         if bid < 0:
@@ -168,98 +174,59 @@ def update_concern_invite_bid(concern_id: int, society_id: int, role: str, entit
     except (TypeError, ValueError):
         return False, "Enter a valid bid amount"
     row = db._execute(
-        "UPDATE concerns_invite SET bid_amount=%s, status='bid_submitted', updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status != 'closed' "
+        "UPDATE concerns_assigns SET bid_amount=%s, status='bid_submitted', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited' "
         "RETURNING id",
         (bid, concern_id, society_id, role, entity_id), fetch_one=True,
     )
     if not row:
-        return False, "No active invitation found for you on this concern"
+        return False, "No pending invitation found for you on this concern"
     return True, "Bid submitted"
 
 
-def resolve_concern_invite(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
-    """Mark an invite as assigned (vendor accepted the invite)."""
+def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, assigned_by: int) -> tuple[bool, str]:
+    """ASSIGN stage: formally assign an entity to the concern. Works both as
+    'accept the bid' (promotes an existing invited/bid_submitted row to
+    'assigned') and as a direct shortcut that skips invite/bid entirely
+    (e.g. admin auto-assign, or price already agreed offline). Never
+    downgrades a resolved/closed row."""
     row = db._execute(
-        "UPDATE concerns_invite SET status='assigned', updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='bid_submitted' "
+        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
+        "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
+        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+        "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
+        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
         "RETURNING id",
-        (concern_id, society_id, role, entity_id), fetch_one=True,
+        (concern_id, society_id, role, entity_id, assigned_by), fetch_one=True,
     )
     if not row:
-        return False, "No bid-submitted invitation found for you on this concern"
-    return True, "Invitation accepted"
-
-
-def close_concern_invites(concern_id: int, society_id: int) -> tuple[bool, str]:
-    """Close all invites for a concern (when concern is closed)."""
-    try:
-        db._execute(
-            "UPDATE concerns_invite SET status='closed', updated_at=NOW() "
-            "WHERE concern_id=%s AND society_id=%s AND status != 'closed' "
-            "RETURNING id",
-            (concern_id, society_id), fetch_all=True,
-        )
-        return True, "Invites closed"
-    except Exception as e:
-        return False, str(e)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# CONCERNS WORKFLOW — bid / resolve / close
-# concerns.status is now a trigger-synced aggregate of concerns_assigns.status
-# (see fn_sync_concern_status in estatehub.sql) — these helpers only ever
-# write concerns_assigns.status, never concerns.status directly.
-# ════════════════════════════════════════════════════════════════════════════
-
-def save_concern_bid(concern_id: int, society_id: int, vendor_entity_id: int, bid_amount) -> tuple[bool, str]:
-    """Vendor fills/updates their bid_amount on their own concerns_assigns row."""
-    try:
-        bid = float(bid_amount)
-        if bid < 0:
-            return False, "Bid amount must be positive"
-    except (TypeError, ValueError):
-        return False, "Enter a valid bid amount"
-    row = db._execute(
-        "UPDATE concerns_assigns SET bid_amount=%s "
-        "WHERE concern_id=%s AND society_id=%s AND role='VND' AND entity_id=%s "
-        "RETURNING id",
-        (bid, concern_id, society_id, vendor_entity_id), fetch_one=True,
-    )
-    if not row:
-        return False, "You are not assigned to this concern"
-    return True, "Bid saved"
+        return False, "Already resolved/closed for this concern — cannot reassign"
+    return True, "Assigned"
 
 
 def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
-    """Mark the caller's own concerns_assigns row as resolved (e.g. vendor
-    marking their work done). The concerns.status aggregate ('resolved' once
-    every assignee row is resolved/closed) is updated automatically by the
-    trg_concerns_assigns_sync_status trigger."""
+    """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
+    (e.g. vendor marking their work done). Only valid from status='assigned'.
+    The concerns.status aggregate ('resolved' once every assignee row is
+    resolved/closed) is updated automatically by the sync trigger."""
     row = db._execute(
-        "UPDATE concerns_assigns SET status='resolved' "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status != 'closed' "
+        "UPDATE concerns_assigns SET status='resolved', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='assigned' "
         "RETURNING id",
         (concern_id, society_id, role, entity_id), fetch_one=True,
     )
     if not row:
-        return False, "No active assignment found for you on this concern"
+        return False, "No active (assigned) assignment found for you on this concern"
     return True, "Marked resolved"
 
 
 def close_concern(concern_id: int, society_id: int) -> tuple[bool, str]:
-    """Admin/Owner action: close a concern for ALL assignees and invites.
-    Sets status='closed' on every concerns_assigns row and every
-    concerns_invite row for this concern; the sync triggers then
-    roll concerns.status up to 'closed' too."""
+    """CLOSE stage — admin/owner action: close a concern for ALL assignees
+    at once, whatever stage each one is at. The sync trigger then rolls
+    concerns.status up to 'closed' too."""
     db._execute(
-        "UPDATE concerns_assigns SET status='closed' "
-        "WHERE concern_id=%s AND society_id=%s RETURNING id",
-        (concern_id, society_id), fetch_all=True,
-    )
-    db._execute(
-        "UPDATE concerns_invite SET status='closed' "
-        "WHERE concern_id=%s AND society_id=%s RETURNING id",
+        "UPDATE concerns_assigns SET status='closed', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND status != 'closed' RETURNING id",
         (concern_id, society_id), fetch_all=True,
     )
     return True, "Concern closed"
@@ -394,37 +361,20 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             params.append(status_filter)
         else:
             extra += " AND c.status != 'closed'"
-        # Vendor portal: include concerns assigned to this vendor AND
-        # concerns they've been invited to (via concerns_invite).
-        invited_vnd_id = filters.get("invited_vnd_id")
-        assigned_vnd_id = filters.get("assigned_vnd_id")
-        if invited_vnd_id:
-            extra += " AND (EXISTS (SELECT 1 FROM concerns_invite ci WHERE ci.concern_id=c.id AND ci.role='VND' AND ci.entity_id=%s AND ci.status != 'closed')"
-            params.append(invited_vnd_id)
-            if assigned_vnd_id:
-                extra += " OR EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed'))"
-                params.append(assigned_vnd_id)
-            else:
-                extra += ")"
-        elif assigned_vnd_id:
+        # Vendor portal: show every concern this vendor has any row for
+        # (invited, bid_submitted, assigned, or resolved), at any lifecycle
+        # stage — concerns_assigns is now the single source (concerns_invite
+        # retired 2026-07).
+        vnd_assignee_id = filters.get("vnd_assignee_id")
+        if vnd_assignee_id:
             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed')"
-            params.append(assigned_vnd_id)
+            params.append(vnd_assignee_id)
 
-        # Security portal: include concerns assigned to this security person AND
-        # concerns they've been invited to (via concerns_invite).
-        invited_sec_id = filters.get("invited_sec_id")
-        assigned_sec_id = filters.get("assigned_sec_id")
-        if invited_sec_id:
-            extra += " AND (EXISTS (SELECT 1 FROM concerns_invite ci WHERE ci.concern_id=c.id AND ci.role='SEC' AND ci.entity_id=%s AND ci.status != 'closed')"
-            params.append(invited_sec_id)
-            if assigned_sec_id:
-                extra += " OR EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed'))"
-                params.append(assigned_sec_id)
-            else:
-                extra += ")"
-        elif assigned_sec_id:
+        # Security portal: same, for security staff.
+        sec_assignee_id = filters.get("sec_assignee_id")
+        if sec_assignee_id:
             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed')"
-            params.append(assigned_sec_id)
+            params.append(sec_assignee_id)
         return (
             "SELECT c.*, a.flat_number FROM concerns c "
             "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "

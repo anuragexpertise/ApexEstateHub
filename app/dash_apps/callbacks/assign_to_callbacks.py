@@ -315,17 +315,25 @@ def register_assign_to_callbacks(app):
             # Fetch prior assignments first so we can tell which of the
             # selected entities are newly assigned (only those get a push —
             # resubmitting an unchanged assignment shouldn't re-notify).
+            # This table now also carries invited/bid_submitted/resolved/
+            # closed rows (unified 2026-07), so status comes along too.
             prior_rows = db._execute(
-                "SELECT role, entity_id FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
+                "SELECT role, entity_id, status FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
                 (concern_id, society_id), fetch_all=True,
             ) or []
-            prior_keys = {f"{r['role']}-{r['entity_id']}" for r in prior_rows}
+            prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
+            prior_keys = set(prior_by_key.keys())
 
             selected_keys = {k for k, v in selected.items() if v}
             to_delete = prior_keys - selected_keys
             to_insert = selected_keys - prior_keys
 
+            # Unchecking someone must not silently erase a resolved/closed
+            # assignment's history — only rows still in-flight (invited,
+            # bid_submitted, assigned) can be removed here.
             for key in to_delete:
+                if prior_by_key.get(key) in ("resolved", "closed"):
+                    continue
                 parts = key.split("-", 1)
                 role = parts[0]
                 try:
@@ -334,7 +342,8 @@ def register_assign_to_callbacks(app):
                     continue
                 db._execute(
                     "DELETE FROM concerns_assigns "
-                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
+                    "AND status NOT IN ('resolved', 'closed')",
                     (concern_id, society_id, role, entity_id),
                 )
 
@@ -350,7 +359,9 @@ def register_assign_to_callbacks(app):
                 db._execute(
                     "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
                     "VALUES (%s, %s, %s, %s, %s, 'assigned') "
-                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET status='assigned'",
+                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                    "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
+                    "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
                     (concern_id, society_id, role, entity_id, actor_user_id),
                 )
                 inserted += 1
