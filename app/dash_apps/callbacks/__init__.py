@@ -30,7 +30,7 @@ def register_callbacks(app):
         from .drilldown_callbacks import register_drilldown_callbacks
         register_drilldown_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ drilldown_callbacks failed: {e}")
+        print(f"⚠️ drilldown_callbacks failed: {e}")
         import traceback; traceback.print_exc()
 
     # 4. Card catalogue (KPI refresh + list loaders)
@@ -38,49 +38,49 @@ def register_callbacks(app):
         from .card_catalogue_callbacks import register_card_catalogue_callbacks
         register_card_catalogue_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ card_catalogue_callbacks failed: {e}")
+        print(f"⚠️ card_catalogue_callbacks failed: {e}")
 
     # 5. Customize (DnD layout editor)
     try:
         from .customize_callbacks import register_customize_callbacks
         register_customize_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ customize_callbacks failed: {e}")
+        print(f"⚠️ customize_callbacks failed: {e}")
 
     # 6. QR gate pass callbacks
     try:
         from .qr_callbacks import register_qr_callbacks
         register_qr_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ qr_callbacks failed: {e}")
+        print(f"⚠️ qr_callbacks failed: {e}")
 
     # 7. Camera capture (clientside JS injection)
     try:
         from .camera_callbacks import register_camera_callbacks
         register_camera_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ camera_callbacks failed: {e}")
+        print(f"⚠️ camera_callbacks failed: {e}")
 
     # 8. KPI Inspector callbacks (Customize → KPI Inspector tab)
     try:
         from .customize_kpi_callbacks import register_customize_kpi_callbacks
         register_customize_kpi_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ customize_kpi_callbacks failed: {e}")
+        print(f"⚠️ customize_kpi_callbacks failed: {e}")
 
     # 8b. List Inspector callbacks (Customize → List Inspector tab)
     try:
         from .list_inspector_callbacks import register_list_inspector_callbacks
         register_list_inspector_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ list_inspector_callbacks failed: {e}")
+        print(f"⚠️ list_inspector_callbacks failed: {e}")
 
     # 9. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
     try:
         from .debug_callbacks import register_debug_callbacks
         register_debug_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ debug_callbacks failed: {e}")
+        print(f"⚠️ debug_callbacks failed: {e}")
 
     # 10. NOC card buttons (Print / PDF / Email — clientside JS)
     #     Requires dcc.Store(id='noc-action-store') in app_shell.py layout.
@@ -88,7 +88,7 @@ def register_callbacks(app):
         from .noc_callbacks import register_noc_callbacks
         register_noc_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ noc_callbacks failed: {e}")
+        print(f"⚠️ noc_callbacks failed: {e}")
 
     # 11. Admin callbacks — pruned to just validate_qr_code_admin (manual
     #     paste-and-validate QR entry). update_society_count,
@@ -107,7 +107,7 @@ def register_callbacks(app):
         from .admin_callbacks import register_admin_callbacks
         register_admin_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ admin_callbacks failed: {e}")
+        print(f"⚠️ admin_callbacks failed: {e}")
 
     # 12. Form autofill — particulars auto-suggestion for Receipts/Expenses
     #     forms (implements the previously-unwired PARTICULARS_TEMPLATES
@@ -116,7 +116,7 @@ def register_callbacks(app):
         from .form_autofill_callbacks import register_form_autofill_callbacks
         register_form_autofill_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ form_autofill_callbacks failed: {e}")
+        print(f"⚠️ form_autofill_callbacks failed: {e}")
 
     # 13. Receipt Print / Save / Email buttons (receipt-action-store dummy
     #     Output — requires that store added to app_shell.py).
@@ -124,7 +124,7 @@ def register_callbacks(app):
         from .receipt_callbacks import register_receipt_callbacks
         register_receipt_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ receipt_callbacks failed: {e}")
+        print(f"⚠️ receipt_callbacks failed: {e}")
 
     # 14. Bulk Enroll (CSV upload for apartments/vendors/security on the
     #     Admin/Enroll tab). Requires "bulk-enroll-modal" +
@@ -134,7 +134,7 @@ def register_callbacks(app):
         from .bulk_enroll_callbacks import register_bulk_enroll_callbacks
         register_bulk_enroll_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ bulk_enroll_callbacks failed: {e}")
+        print(f"⚠️ bulk_enroll_callbacks failed: {e}")
 
     # 14b. Assign-To modal (concern assignment to admins/vendors/security)
     #     Requires "assign-to-modal" + "assign-to-store" in app_shell.py.
@@ -142,7 +142,7 @@ def register_callbacks(app):
         from .assign_to_callbacks import register_assign_to_callbacks
         register_assign_to_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ assign_to_callbacks failed: {e}")
+        print(f"⚠️ assign_to_callbacks failed: {e}")
 
     # 14c. Concern Bid modal (vendor "Save Bid" action on a concern)
     #     Requires "concern-bid-modal" + "concern-bid-store" in app_shell.py.
@@ -150,7 +150,7 @@ def register_callbacks(app):
         from .concern_bid_callbacks import register_concern_bid_callbacks
         register_concern_bid_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ concern_bid_callbacks failed: {e}")
+        print(f"⚠️ concern_bid_callbacks failed: {e}")
 
     # 14d. Invite-To modal (admin/owner invites vendors/security to bid)
     #     Requires "invite-to-modal" + "invite-to-store" in app_shell.py.
@@ -158,20 +158,20 @@ def register_callbacks(app):
         from .invite_to_callbacks import register_invite_to_callbacks
         register_invite_to_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ invite_to_callbacks failed: {e}")
+        print(f"⚠️ invite_to_callbacks failed: {e}")
 
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks
         register_channel_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ channel_callbacks failed: {e}")
+        print(f"⚠️ channel_callbacks failed: {e}")
 
     # 16. Poll callbacks (owner voting, admin CRUD, server-side user.id auth)
     try:
         from .poll_callbacks import register_poll_callbacks
         register_poll_callbacks(app)
     except Exception as e:
-        print(f"  ⚠️ poll_callbacks failed: {e}")
+        print(f"⚠️ poll_callbacks failed: {e}")
 
     print("✅ All callbacks registered")

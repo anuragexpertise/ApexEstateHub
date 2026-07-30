@@ -167,7 +167,7 @@ def register_card_catalogue_callbacks(app):
     try:
         from app.dash_apps.pages.card_catalogue import KPI_CARDS
     except ImportError:
-        print("  ⚠️  Cannot import KPI_CARDS — KPI refresh skipped")
+        print("⚠️  Cannot import KPI_CARDS — KPI refresh skipped")
         KPI_CARDS = {}
 
     @app.callback(
@@ -487,7 +487,7 @@ def register_card_catalogue_callbacks(app):
                 batch_ok = True
             except Exception as exc:
                 err_msg = f"KPI batch query failed, falling back per-card: {str(exc)[:160]}"
-                print(f"  ⚠️  {err_msg}")
+                print(f"⚠️  {err_msg}")
 
             if batch_ok:
                 for slot, (idx, card_id, q, params, fmt, ckey, is_scoped) in enumerate(pending):

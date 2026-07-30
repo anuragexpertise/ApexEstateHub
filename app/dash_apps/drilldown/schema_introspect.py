@@ -488,8 +488,8 @@ _LEDGER_LIST_COLUMNS = [
     {"name": "Debit",        "field": "debit",            "sortable": True, "format": "currency"},
     {"name": "Credit",       "field": "credit",           "sortable": True, "format": "currency"},
     {"name": "Balance",      "field": "balance",          "sortable": True, "format": "currency"},
-    {"name": "Row Type",     "field": "row_type",         "sortable": False},
-    {"name": "Parent",       "field": "parent_name",      "sortable": False},
+    {"name": "Row Type",     "field": "row_type",         "sortable": False}, # to do: hide this in the UI, only for internal use
+    {"name": "Parent",       "field": "parent_name",      "sortable": False}, # to do: hide this in the UI, only for internal use
 ]
 
 

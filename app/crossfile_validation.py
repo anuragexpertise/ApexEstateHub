@@ -51,7 +51,7 @@ for name, path in files.items():
     # Rule 4: app_shell must have refresh=False on dcc.Location
     if name == "app_shell.py":
         if 'refresh=False' in src and 'dcc.Location' in src:
-            print("  ✅ dcc.Location has refresh=False")
+            print("✅ dcc.Location has refresh=False")
         else:
             print("  ❌ dcc.Location missing refresh=False")
             all_ok = False
@@ -59,7 +59,7 @@ for name, path in files.items():
     # Rule 5: auth-store must be 'local' not 'session'
     if name == "app_shell.py":
         if '"auth-store"' in src and 'storage_type="local"' in src:
-            print("  ✅ auth-store uses localStorage")
+            print("✅ auth-store uses localStorage")
         else:
             print("  ❌ auth-store not set to localStorage")
             all_ok = False
@@ -67,7 +67,7 @@ for name, path in files.items():
     # Rule 6: guard_modal must exist in shell_callbacks
     if name == "shell_callbacks.py":
         if "guard_modal" in src and "initial_duplicate" in src:
-            print("  ✅ guard_modal callback with initial_duplicate present")
+            print("✅ guard_modal callback with initial_duplicate present")
         else:
             print("  ❌ guard_modal / initial_duplicate missing")
             all_ok = False
@@ -75,13 +75,13 @@ for name, path in files.items():
     # Rule 7: dcc.Link in shell_callbacks (not html.A for nav)
     if name == "shell_callbacks.py":
         if "dcc.Link" in src:
-            print("  ✅ dcc.Link used for nav items")
+            print("✅ dcc.Link used for nav items")
         else:
             print("  ❌ dcc.Link missing — nav still uses html.A")
             all_ok = False
 
     if all_ok:
-        print("  ✅ No violations found")
+        print("✅ No violations found")
 
 print(f"\n{'='*50}")
 print("OVERALL:", "✅ ALL CLEAN" if all_ok else "❌ VIOLATIONS FOUND — see above")

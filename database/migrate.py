@@ -293,7 +293,7 @@ def main():
 def _summary():
     print()
     print("═" * 62)
-    print("  ✅ Migration complete")
+    print("✅ Migration complete")
     print("═" * 62)
     print()
 
