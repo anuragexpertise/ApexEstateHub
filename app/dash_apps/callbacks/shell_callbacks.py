@@ -258,17 +258,18 @@ def register_shell_callbacks(app):
     print("  → Registering shell callbacks…")
 
     # ── 0. SOCIETY DROPDOWN ───────────────────────────────────────────────────
-    # Trigger: url.pathname (fires on initial mount with prevent_initial_call=False)
-    # No allow_duplicate outputs → no Dash validation issue.
-    # Using pathname instead of login-modal.is_open avoids a race condition
-    # with guard_modal which also writes login-modal.is_open.
+    # Trigger: url.pathname (fires on initial mount).
+    # allow_duplicate=True on society-dropdown.disabled because Flash Auth
+    # (flash_auth_callbacks.py) also writes to that Output.
+    # prevent_initial_call='initial_duplicate' allows both allow_duplicate AND
+    # the initial call to fire on page load.
     @app.callback(
         Output("society-dropdown", "options"),
-        Output("society-dropdown", "disabled"),
+        Output("society-dropdown", "disabled", allow_duplicate=True),
         Output("login-db-error",   "children"),
         Output("login-db-error",   "style"),
         Input("url", "pathname"),
-        prevent_initial_call=False,   # fires on initial page load — no allow_duplicate here
+        prevent_initial_call='initial_duplicate',
     )
     def load_societies(pathname):
         print(f"\n🔍 load_societies — pathname={pathname}")
@@ -293,7 +294,7 @@ def register_shell_callbacks(app):
         try:
             rows = _db()._execute(
                 "SELECT id, name FROM societies ORDER BY name",
-                (), fetch_all=True,
+                None, fetch_all=True,
             ) or []
         except Exception as exc:
             print(f"❌ societies query error: {exc}")
