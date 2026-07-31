@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from database.db_manager import db
 from app.models.user import User
-from app.utils.network_check import check_internet, check_database
+from app.utils.flash_auth import check_internet, check_database
 import jwt, os, time
 from datetime import datetime, timedelta
 
