@@ -225,14 +225,21 @@ def register_assign_to_callbacks(app):
         return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
 
     # ── 4. Toggle selection on item click ────────────────────────────────────
+    # NOTE: previously only wrote assign-to-store + the summary badges — the
+    # clicked row itself never re-rendered, so its checkbox/border never
+    # visually updated (same latent bug as the invite modal shared this code
+    # with). Now also re-renders the visible list on toggle.
     @app.callback(
         Output("assign-to-store", "data", allow_duplicate=True),
         Output("assign-selected-summary", "children"),
+        Output("assign-list-container", "children", allow_duplicate=True),
         Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks"),
         State("assign-to-store", "data"),
+        State("assign-search", "value"),
+        State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def toggle_selection(n_clicks_list, store):
+    def toggle_selection(n_clicks_list, store, search, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             raise PreventUpdate
         triggered = ctx.triggered_id
@@ -267,7 +274,28 @@ def register_assign_to_callbacks(app):
                 )
             )
         summary = html.Div(badges) if badges else html.Small("No assignments selected.", className="text-muted")
-        return store, summary
+
+        # Re-render the currently-visible list so the clicked row shows its
+        # new checked/border state immediately.
+        list_children = no_update
+        society_id = (auth or {}).get("society_id")
+        if role in ("ADM", "VND", "SEC") and society_id:
+            s = (search or "").strip() or None
+            try:
+                if role == "ADM":
+                    rows = list_assignable_admins(society_id, s)
+                elif role == "VND":
+                    rows = list_assignable_vendors(society_id, s)
+                else:
+                    rows = list_assignable_security(society_id, s)
+                items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+                list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
+                    f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
+                )
+            except Exception:
+                pass
+
+        return store, summary, list_children
 
     # ── 5. Clear all selections ──────────────────────────────────────────────
     @app.callback(

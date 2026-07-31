@@ -355,6 +355,31 @@ def load_fk_options(ref_table: str) -> list[dict]:
         return []
 
 
+def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dict]:
+    """Resolve a field["dynamic_options"] marker into concrete dropdown
+    options at render time — unlike _EXPLICIT_SELECT_OPTIONS these are
+    per-society and DB-driven, so they can't be baked in at import time."""
+    if marker == "vendor_service_types":
+        opts: list[dict] = []
+        if society_id:
+            try:
+                rows = db._execute(
+                    "SELECT DISTINCT service_type FROM vendors "
+                    "WHERE society_id=%s AND active=TRUE "
+                    "AND service_type IS NOT NULL AND TRIM(service_type) != '' "
+                    "ORDER BY service_type",
+                    (society_id,), fetch_all=True,
+                ) or []
+                opts = [{"label": r["service_type"], "value": r["service_type"]} for r in rows]
+            except Exception as e:
+                print(f"⚠️  load_dynamic_select_options(vendor_service_types): {e}")
+        # Always offer "Other" — covers new societies with no vendors yet,
+        # and concerns that genuinely don't match any onboarded vendor type.
+        opts.append({"label": "Other", "value": "other"})
+        return opts
+    return []
+
+
 # Explicit dropdown options for columns that are plain VARCHAR (no CHECK
 # constraint for _extract_check_options to pick up) but should still render
 # as a select, not free text. Scoped per (table, col) — do NOT apply
@@ -386,6 +411,16 @@ def _build_field(col: dict) -> dict:
     elif (table, name) in _EXPLICIT_SELECT_OPTIONS:
         field["type"] = "select"
         field["options"] = _EXPLICIT_SELECT_OPTIONS[(table, name)]
+
+    elif (table, name) == ("concerns", "concern_type"):
+        # Options aren't static/global like _EXPLICIT_SELECT_OPTIONS — they're
+        # the society's own vendors.service_type values (so "Type" on a
+        # concern lines up with who can actually be invited to fix it), plus
+        # a constant "Other" fallback. That's per-society and DB-driven, so
+        # it can't be resolved at import time here; renderers.py resolves
+        # this marker live when the form is actually built.
+        field["type"] = "select"
+        field["dynamic_options"] = "vendor_service_types"
 
     elif col["check_options"]:
         field["type"] = "select"

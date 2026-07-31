@@ -17,6 +17,16 @@ import dash_bootstrap_components as dbc
 
 from app.dash_apps.pages.card_catalogue import DEFAULT_LAYOUTS
 
+
+def _manual_qr_card(scope: str, **kwargs):
+    """Thin wrapper around qr_callbacks.render_manual_qr_card — imported
+    lazily (not at module top) since qr_callbacks.py is a callbacks module,
+    and portal_pages.py is imported early during page-layout construction;
+    a top-level import here risks a circular-import ordering issue."""
+    from app.dash_apps.callbacks.qr_callbacks import render_manual_qr_card
+    return render_manual_qr_card(scope, **kwargs)
+
+
 _C = {
     "master":    "#c96a19",
     "admin":     "#1859b8",
@@ -613,6 +623,21 @@ def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
         return html.Div([
             _page_title("fa-hand-point-up", c, "My Concerns"),
             _kpi_row_dynamic("vendor", "concerns", sid, cols=KPI_GRID_COLS),
+            # QR / manual lookup — jump straight to a concern by its QR code
+            # (e.g. printed at the site of the issue) or by typing its code
+            # (e.g. "1-CON-13") manually. Concerns only, no gate-pass Entry/
+            # Exit chrome — vendors aren't scanning people through a gate
+            # here. Modular: this is the same render_manual_qr_card /
+            # validate_manual_qr_scoped building block Pass Evaluation uses
+            # (scope="pass_evaluation" there), just scoped separately so the
+            # two never collide.
+            _manual_qr_card(
+                "vendor_concern_lookup",
+                title="Find a Concern",
+                subtitle="scan or type a concern's QR code to open it",
+                placeholder="e.g. 1-CON-13",
+                color=c,
+            ),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -868,41 +893,12 @@ def _evaluate_pass_page(sid=None) -> html.Div:
         ], style={"display": "flex", "gap": "20px", "flexWrap": "wrap"}),
 
         # ── Manual QR Entry — paste/type a QR payload without the camera ──────
-        # ids (manual-qr-input / validate-qr-btn / qr-validation-result) are
-        # deliberately distinct from the camera pipeline's hidden
-        # qr-scan-input / qr-scan-mode / qr-validate-btn above — this page is
-        # shared by both the admin and security portals, so reusing those ids
-        # for a second, visible field would be a duplicate-component-ID error.
-        # Wired to admin_callbacks.py's validate_qr_code_admin.
-        dbc.Card([
-            dbc.CardHeader(html.Div([
-                html.I(className="fas fa-keyboard me-2", style={"color": "#1859b8"}),
-                html.Strong("Manual QR Entry"),
-                html.Small("  — paste a QR payload if the camera isn't available",
-                           style={"color": "#999", "fontSize": "11px", "marginLeft": "6px"}),
-            ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "10px 14px"}),
-            dbc.CardBody([
-                html.Div([
-                    dbc.Input(
-                        id="manual-qr-input",
-                        type="text",
-                        placeholder="e.g. 42|O|1",
-                        style={"fontSize": "13px", "fontFamily": "monospace"},
-                    ),
-                    dbc.Button(
-                        [html.I(className="fas fa-check me-1"), "Validate"],
-                        id="validate-qr-btn", n_clicks=0, color="primary", size="sm",
-                        style={"flexShrink": "0"},
-                    ),
-                ], style={"display": "flex", "gap": "8px"}),
-                dcc.Loading(
-                    html.Div(id="qr-validation-result", style={"marginTop": "10px"}),
-                    type="circle",
-                ),
-            ], style={"padding": "14px"}),
-        ], style={"borderRadius": "18px", "boxShadow": "0 10px 28px rgba(24,89,184,0.1)",
-                  "marginTop": "16px"}),
+        # Modular (render_manual_qr_card, qr_callbacks.py) — this exact
+        # widget is also used on the Vendor portal's Concerns tab
+        # (scope="vendor_concern_lookup") via the single pattern-matched
+        # validate_manual_qr_scoped callback. scope="pass_evaluation" here
+        # keeps ids distinct from that instance and any others.
+        _manual_qr_card("pass_evaluation", subtitle="paste a QR payload if the camera isn't available"),
 
         # Call admin modal
         dbc.Modal([
