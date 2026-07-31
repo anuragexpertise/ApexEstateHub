@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from database.db_manager import db
 from app.models.user import User
+from app.utils.network_check import check_internet, check_database
 import jwt, os, time
 from datetime import datetime, timedelta
 
@@ -13,7 +14,7 @@ JWT_ACCESS_TOKEN_EXPIRES  = int(os.environ.get('JWT_ACCESS_TOKEN_EXPIRES',  3600
 JWT_REFRESH_TOKEN_EXPIRES = int(os.environ.get('JWT_REFRESH_TOKEN_EXPIRES', 2592000))
 
 
-# ── Token helpers ─────────────────────────────────────────────────────────────
+# ── Token helpers ─────────────────────────────────────────────
 
 def generate_tokens(user_id, email, role):
     now = int(time.time())
@@ -44,10 +45,23 @@ def _redirect_url(role, society_id):
     return '/dashboard/'
 
 
-# ── Login ─────────────────────────────────────────────────────────────────────
+def _check_network():
+    """Return (ok, error_message).  Checks internet + database."""
+    if not check_internet():
+        return False, 'No internet connection'
+    if not check_database():
+        return False, 'Database unreachable'
+    return True, None
+
+
+# ── Login ─────────────────────────────────────────────────────
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
+    ok, err = _check_network()
+    if not ok:
+        return jsonify({'success': False, 'message': err}), 503
+
     data       = request.json or {}
     email      = data.get('email')
     password   = data.get('password')
@@ -94,10 +108,14 @@ def login():
     })
 
 
-# ── Token refresh ─────────────────────────────────────────────────────────────
+# ── Token refresh ─────────────────────────────────────────────
 
 @auth_bp.route('/refresh', methods=['POST'])
 def refresh_token():
+    ok, err = _check_network()
+    if not ok:
+        return jsonify({'success': False, 'message': err}), 503
+
     data  = request.json or {}
     token = data.get('refresh_token')
     if not token:
@@ -120,7 +138,7 @@ def refresh_token():
         return jsonify({'success': False, 'message': str(e)}), 401
 
 
-# ── Logout ────────────────────────────────────────────────────────────────────
+# ── Logout ────────────────────────────────────────────────────
 
 @auth_bp.route('/logout', methods=['POST'])
 @login_required
@@ -130,7 +148,7 @@ def logout():
     return jsonify({'success': True, 'message': 'Logged out'})
 
 
-# ── Auth check ────────────────────────────────────────────────────────────────
+# ── Auth check ─────────────────────────────────────────────────
 
 @auth_bp.route('/check-auth', methods=['GET'])
 def check_auth():
@@ -139,7 +157,7 @@ def check_auth():
     return jsonify({'authenticated': False}), 401
 
 
-# ── Society list (used by society_select page) ────────────────────────────────
+# ── Society list (used by society_select page) ────────────────
 
 @auth_bp.route('/societies', methods=['GET'])
 def get_societies_list():
@@ -153,8 +171,7 @@ def get_societies_list():
         return jsonify({'error': str(e)}), 500
 
 
-# ── Push notification subscription ───────────────────────────────────────────
-# Called by app/static/js/push.js
+# ── Push notification subscription ─────────────────────────────
 
 @auth_bp.route('/subscribe-push', methods=['POST'])
 @login_required

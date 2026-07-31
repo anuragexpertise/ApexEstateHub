@@ -1,6 +1,6 @@
 # app/dash_apps/pages/login_system.py
 """
-Login page layouts.
+Login page layouts with network status indicator.
 
 society_select_layout() → Stage 1: choose society
 login_layout(society_name) → Stage 2: email/password + PIN + pattern tabs
@@ -10,7 +10,55 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 
-# ── Stage 1: Society selection ────────────────────────────────────────────────
+def _network_indicator(status: dict | None = None) -> html.Div:
+    """Small badge showing network / database reachability."""
+    if status is None:
+        status = {"internet": None, "database": None}
+
+    internet_ok = status.get("internet")
+    database_ok = status.get("database")
+
+    def _dot(color: str, label: str) -> html.Span:
+        return html.Span(
+            [
+                html.Span(
+                    "",
+                    style={
+                        "display": "inline-block",
+                        "width": "8px",
+                        "height": "8px",
+                        "borderRadius": "50%",
+                        "backgroundColor": color,
+                        "marginRight": "4px",
+                        "verticalAlign": "middle",
+                    },
+                ),
+                html.Span(label, style={"fontSize": "11px", "color": "#888"}),
+            ],
+            style={"display": "inline-flex", "alignItems": "center", "marginRight": "10px"},
+        )
+
+    return html.Div(
+        [
+            _dot(
+                "#28a745" if internet_ok is True else ("#dc3545" if internet_ok is False else "#ffc107"),
+                "Internet" if internet_ok is not None else ("Checking…"),
+            ),
+            _dot(
+                "#28a745" if database_ok is True else ("#dc3545" if database_ok is False else "#ffc107"),
+                "Database" if database_ok is not None else ("Checking…"),
+            ),
+        ],
+        style={
+            "textAlign": "center",
+            "marginBottom": "10px",
+            "fontSize": "11px",
+        },
+        id="network-indicator",
+    )
+
+
+# ── Stage 1: Society selection ────────────────────────────────────────
 
 def society_select_layout() -> list:
     return [
@@ -30,6 +78,8 @@ def society_select_layout() -> list:
                     style={"textAlign": "center", "color": "#7d8ea3",
                            "fontSize": "13px", "marginBottom": "20px"},
                 ),
+
+                _network_indicator(),
 
                 # Error / info banner (hidden by default)
                 html.Div(id="login-db-error", style={"display": "none"}),
@@ -59,7 +109,6 @@ def society_select_layout() -> list:
 
                 html.Hr(style={"margin": "20px 0", "opacity": "0.3"}),
 
-                # Master admin collapse
                 html.Div(
                     [
                         html.Button(
@@ -109,7 +158,7 @@ def society_select_layout() -> list:
     ]
 
 
-# ── Stage 2: Multi-method login ───────────────────────────────────────────────
+# ── Stage 2: Multi-method login ───────────────────────────────────────
 
 def login_layout(society_name: str = "Society") -> list:
     return [
@@ -138,11 +187,13 @@ def login_layout(society_name: str = "Society") -> list:
                            "marginBottom": "18px"},
                 ),
 
+                _network_indicator(),
+
                 dbc.Tabs(
                     id="login-method-tabs",
                     active_tab="tab-password",
                     children=[
-                        # ── Password tab ──────────────────────────────────
+                        # ── Password tab ──────────────────────────────
                         dbc.Tab(
                             label="Password",
                             tab_id="tab-password",
@@ -183,7 +234,7 @@ def login_layout(society_name: str = "Society") -> list:
                             ),
                         ),
 
-                        # ── PIN tab ───────────────────────────────────────
+                        # ── PIN tab ──────────────────────────────────
                         dbc.Tab(
                             label="PIN",
                             tab_id="tab-pin",
@@ -216,7 +267,7 @@ def login_layout(society_name: str = "Society") -> list:
                             ),
                         ),
 
-                        # ── Pattern tab ───────────────────────────────────
+                        # ── Pattern tab ──────────────────────────────
                         dbc.Tab(
                             label="Pattern",
                             tab_id="tab-pattern",
@@ -295,7 +346,7 @@ def login_layout(society_name: str = "Society") -> list:
     ]
 
 
-# ── Password reset modals ─────────────────────────────────────────────────────
+# ── Password reset modals ─────────────────────────────────────────────
 
 def forgot_password_modal() -> dbc.Modal:
     return dbc.Modal(

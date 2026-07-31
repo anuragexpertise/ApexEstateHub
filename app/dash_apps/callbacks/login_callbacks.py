@@ -1,37 +1,42 @@
 # app/dash_apps/callbacks/login_callbacks.py
 """
-Login Callbacks — password / PIN / pattern authentication + password reset.
+Login Callbacks — password / PIN / pattern authentication + password reset
+with mandatory network connectivity check before every authentication attempt.
 """
 
 import dash
-from dash import Input, Output, State, no_update, html
+from dash import Input, Output, State, no_update, html, ctx
 from dash.exceptions import PreventUpdate
 
 from app.services.auth_service import authenticate_user
+from app.utils.network_check import check_all, _db_ok
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _db():
     from database.db_manager import db
     return db
 
 
-def _establish_server_session(user: dict) -> None:
-    """
-    Log the user into the server-side Flask-Login session so that
-    `flask_login.current_user` is available on every subsequent Dash
-    callback request. This is what makes server-side audit resolution
-    (app/security/audit_context.py) possible — without it, `created_by` /
-    `updated_by` / `confirmed_by` have no trustworthy source and fall back
-    to the client-editable auth-store.
+def _net_error(message: str):
+    return no_update, no_update, \
+           {"type": "error", "message": message}, no_update
 
-    Never let a failure here block login — worst case the session isn't
-    established and audit writes fall back to the (untrusted) client value,
-    same as before this change.
-    """
+
+def _offline_response():
+    return \
+        no_update, no_update, \
+        {"type": "error", "message": "No network connection — check your internet and try again."}, \
+        no_update
+
+
+def _db_down_response():
+    return \
+        no_update, no_update, \
+        {"type": "error", "message": "Cannot reach the database. Contact your administrator."}, \
+        no_update
+
+
+def _establish_server_session(user: dict) -> None:
     try:
         from flask_login import login_user
         from app.models.user import User
@@ -57,18 +62,17 @@ def _build_auth_store(user: dict) -> dict:
         "society_id":    user.get("society_id"),
         "linked_id":     user.get("linked_id"),
         "security_id":   user.get("security_id") or (
-                             user.get("linked_id") if user.get("role") == "security" else None),
+                              user.get("linked_id") if user.get("role") == "security" else None),
         "apartment_id":  user.get("apartment_id") or (
-                             user.get("linked_id") if user.get("role") == "apartment" else None),
+                              user.get("linked_id") if user.get("role") == "apartment" else None),
         "vendor_id":     user.get("vendor_id") or (
-                             user.get("linked_id") if user.get("role") == "vendor" else None),
+                              user.get("linked_id") if user.get("role") == "vendor" else None),
         "authenticated": True,
         "token":         user.get("token", ""),
     }
 
 
 def _redirect(role: str, society_id) -> str:
-    """Default landing URL for each role."""
     if role == "master":
         return "/dashboard/master"
     paths = {
@@ -81,33 +85,48 @@ def _redirect(role: str, society_id) -> str:
 
 
 def _login_response(user: dict):
-    """Tuple returned by every successful login callback."""
     _establish_server_session(user)
     role       = user.get("role", "admin")
     society_id = user.get("society_id")
     name       = user.get("email", "").split("@")[0]
     return (
-        _build_auth_store(user),                                # auth-store
-        _redirect(role, society_id),                            # url.pathname
-        {"type": "success", "message": f"Welcome, {name}!"},   # toast-store
-        False,                                                  # login-modal.is_open
+        _build_auth_store(user),
+        _redirect(role, society_id),
+        {"type": "success", "message": f"Welcome, {name}!"},
+        False,
     )
 
 
 def _login_error(message: str):
-    """Tuple returned by every failed login callback."""
     return no_update, no_update, {"type": "error", "message": message}, no_update
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
 # REGISTRATION
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
 
 def register_login_callbacks(app):
     print("  → Registering login callbacks…")
 
-    # ── 1. PASSWORD LOGIN ─────────────────────────────────────────────────────
-    # allow_duplicate=True because shell_callbacks also writes auth-store
+    # ── Pre-login network gate ─────────────────────────────────────
+    # Runs before any login handler; blocks the entire auth flow when
+    # the browser reports offline or the DB probe fails.
+    @app.callback(
+        Output("network-status-store",  "data"),
+        Output("login-btn",             "disabled"),
+        Output("login-pin-btn",         "disabled"),
+        Output("login-pattern-btn",     "disabled"),
+        Output("master-admin-login-btn", "disabled"),
+        Input("url", "pathname"),
+        Input("network-check-trigger",  "n_intervals"),
+        prevent_initial_call=False,
+    )
+    def check_network_status(pathname, n_intervals):
+        result = check_all()
+        disabled = not result["all_ok"]
+        return result, disabled, disabled, disabled, disabled
+
+    # ── 1. PASSWORD LOGIN ──────────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -122,6 +141,15 @@ def register_login_callbacks(app):
     def handle_password_login(n, email, password, auth):
         if not n or not email or not password:
             raise PreventUpdate
+
+        net = check_all()
+        if not net["internet"]:
+            print("❌ Login blocked: no internet")
+            return _offline_response()
+        if not net["database"]:
+            print("❌ Login blocked: database unreachable")
+            return _db_down_response()
+
         print(f"\n🔐 Password login: {email}")
         society_id = (auth or {}).get("society_id")
         user = authenticate_user(email.strip(), password, society_id)
@@ -131,7 +159,7 @@ def register_login_callbacks(app):
         print(f"✅ Password login success: {email}")
         return _login_response(user)
 
-    # ── 2. PIN LOGIN ──────────────────────────────────────────────────────────
+    # ── 2. PIN LOGIN ───────────────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -146,17 +174,26 @@ def register_login_callbacks(app):
     def handle_pin_login(n, email, pin, auth):
         if not n or not email or not pin:
             raise PreventUpdate
+
+        net = check_all()
+        if not net["internet"]:
+            print("❌ PIN login blocked: no internet")
+            return _offline_response()
+        if not net["database"]:
+            print("❌ PIN login blocked: database unreachable")
+            return _db_down_response()
+
         print(f"\n🔢 PIN login: {email}")
         society_id = (auth or {}).get("society_id")
-        # authenticate_user accepts a method kwarg so auth_service can branch
-        user = authenticate_user(email.strip(), pin, society_id, method="pin")
+        from app.services.auth_service import authenticate_pin
+        user = authenticate_pin(email.strip(), pin, society_id)
         if not user:
             print(f"❌ PIN login failed: {email}")
             return _login_error("Invalid PIN — please try again")
         print(f"✅ PIN login success: {email}")
         return _login_response(user)
 
-    # ── 3. PATTERN LOGIN ──────────────────────────────────────────────────────
+    # ── 3. PATTERN LOGIN ──────────────────────────────────────────
     @app.callback(
         Output("auth-store",       "data",    allow_duplicate=True),
         Output("url",              "pathname",allow_duplicate=True),
@@ -171,16 +208,26 @@ def register_login_callbacks(app):
     def handle_pattern_login(n, email, pattern, auth):
         if not n or not email or not pattern:
             raise PreventUpdate
+
+        net = check_all()
+        if not net["internet"]:
+            print("❌ Pattern login blocked: no internet")
+            return _offline_response()
+        if not net["database"]:
+            print("❌ Pattern login blocked: database unreachable")
+            return _db_down_response()
+
         print(f"\n🔵 Pattern login: {email}")
         society_id = (auth or {}).get("society_id")
-        user = authenticate_user(email.strip(), pattern, society_id, method="pattern")
+        from app.services.auth_service import authenticate_pattern
+        user = authenticate_pattern(email.strip(), pattern, society_id)
         if not user:
             print(f"❌ Pattern login failed: {email}")
             return _login_error("Pattern not recognised — please try again")
         print(f"✅ Pattern login success: {email}")
         return _login_response(user)
 
-    # ── 4. MASTER ADMIN LOGIN ─────────────────────────────────────────────────
+    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
     @app.callback(
         Output("auth-store",    "data",    allow_duplicate=True),
         Output("url",           "pathname",allow_duplicate=True),
@@ -194,14 +241,20 @@ def register_login_callbacks(app):
     def handle_master_login(n, email, password):
         if not n or not email or not password:
             raise PreventUpdate
-        print(f"\n👑 Master admin login: {email}")
 
-        # Authenticate without a society_id
+        net = check_all()
+        if not net["internet"]:
+            print("❌ Master login blocked: no internet")
+            return _offline_response()
+        if not net["database"]:
+            print("❌ Master login blocked: database unreachable")
+            return _db_down_response()
+
+        print(f"\n👑 Master admin login: {email}")
         user = authenticate_user(email.strip(), password, society_id=None)
         if not user or user.get("role") != "master":
             return _login_error("Invalid master admin credentials")
 
-        # Confirm the is_master_admin flag in the DB
         try:
             row = _db()._execute(
                 "SELECT id FROM users WHERE email = %s AND is_master_admin = TRUE",
@@ -216,12 +269,11 @@ def register_login_callbacks(app):
             print(f"❌ {email} is not flagged as master admin")
             return _login_error("Not authorised as master admin")
 
-        # Override society_id to None so routing lands on master portal
         user["society_id"] = None
         print(f"✅ Master admin login success: {email}")
         return _login_response(user)
 
-    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────────────────
+    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────
     @app.callback(
         Output("forgot-password-modal", "is_open"),
         Output("reset-email-input",     "value"),
@@ -235,7 +287,7 @@ def register_login_callbacks(app):
             raise PreventUpdate
         return not is_open, email or ""
 
-    # ── 6. FORGOT PASSWORD — SEND RESET / CONFIRM NEW PASSWORD ───────────────
+    # ── 6. FORGOT PASSWORD — SEND RESET / CONFIRM NEW PASSWORD ──
     @app.callback(
         Output("forgot-password-modal", "is_open",  allow_duplicate=True),
         Output("reset-password-modal",  "is_open"),
@@ -250,24 +302,25 @@ def register_login_callbacks(app):
         prevent_initial_call=True,
     )
     def handle_reset_flow(send_n, confirm_n, email, token, new_pass, confirm_pass, auth):
-        ctx = dash.callback_context
-        if not ctx.triggered:
+        ctx_local = dash.callback_context
+        if not ctx_local.triggered:
             raise PreventUpdate
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+        trigger = ctx_local.triggered[0]["prop_id"].split(".")[0]
 
         if trigger == "send-reset-btn":
             if not email:
                 return no_update, no_update, \
                        {"type": "error", "message": "Please enter your email address"}
+            net = check_all()
+            if not net["internet"]:
+                return no_update, no_update, \
+                       _offline_response()[2]
             print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
-            # Delegate to auth_service if it provides this helper,
-            # otherwise handle inline
             try:
                 from app.services.auth_service import request_password_reset
                 ok, msg, _ = request_password_reset(email.strip(), society_id)
             except ImportError:
-                # Minimal inline fallback — generate token and email
                 ok, msg = _inline_request_reset(email.strip(), society_id)
             return (not ok), no_update, {"type": "success" if ok else "error", "message": msg}
 
@@ -279,6 +332,10 @@ def register_login_callbacks(app):
                 return no_update, no_update, \
                        {"type": "error", "message": "Passwords do not match"}
             print("\n🔑 Confirming password reset")
+            net = check_all()
+            if not net["internet"]:
+                return no_update, no_update, \
+                       _offline_response()[2]
             try:
                 from app.services.auth_service import reset_password
                 ok, msg = reset_password(token.strip(), new_pass)
@@ -288,8 +345,7 @@ def register_login_callbacks(app):
 
         raise PreventUpdate
 
-    # ── 7. PATTERN CLEAR BUTTON ───────────────────────────────────────────────
-    # Simple clientside: clear the hidden pattern input when user clicks Clear
+    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────────────
     app.clientside_callback(
         """
         function(n) {
@@ -311,15 +367,11 @@ def register_login_callbacks(app):
     print("  ✓ Login callbacks registered")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# INLINE RESET FALLBACKS (used when auth_service lacks these helpers)
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
+# INLINE RESET FALLBACKS
+# ──────────────────────────────────────────────────────────────────────
 
 def _inline_request_reset(email: str, society_id) -> tuple[bool, str]:
-    """
-    Minimal password-reset request: generate a token, store it in the DB,
-    and log it (email delivery must be wired separately).
-    """
     import secrets, hashlib
     from datetime import datetime, timedelta
     try:
@@ -335,7 +387,6 @@ def _inline_request_reset(email: str, society_id) -> tuple[bool, str]:
             q += " AND society_id = %s"
             params += (society_id,)
         db._execute(q, params)
-        # In production: send token via email here
         print(f"🔑 Reset token generated for {email}: {token}")
         return True, "If that email exists, a reset link has been sent."
     except Exception as exc:
@@ -344,7 +395,6 @@ def _inline_request_reset(email: str, society_id) -> tuple[bool, str]:
 
 
 def _inline_reset_password(token: str, new_password: str) -> tuple[bool, str]:
-    """Minimal password reset: verify token and update hash."""
     import hashlib
     from datetime import datetime
     from werkzeug.security import generate_password_hash
