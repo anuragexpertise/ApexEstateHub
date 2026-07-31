@@ -169,32 +169,27 @@ def flash_health():
     """
     Flash Auth health probe endpoint.
 
-    Performs two server-side checks:
-      1. Internet reachability via TCP probe to 1.1.1.1:53
+    Performs two server-side checks via flash_auth.get_health_status():
+      1. Internet reachability via multi-strategy probe (TCP + HTTP fallback)
       2. Database reachability via SELECT 1
 
     Returns a JSON payload with the results. No authentication required —
     this endpoint exists so the browser can determine if the server and
     database are reachable BEFORE presenting the login form.
     """
-    import socket
-    from app.utils.flash_auth import get_health_status
+    from app.utils.flash_auth import get_health_status, check_all
 
-    internet_start = time.time()
-    internet_ok = check_internet()
-    internet_latency_ms = round((time.time() - internet_start) * 1000)
-
-    db_start = time.time()
-    database_ok = check_database()
-    db_latency_ms = round((time.time() - db_start) * 1000)
+    start = time.time()
+    result = check_all()
+    total_latency_ms = round((time.time() - start) * 1000)
 
     return jsonify({
-        'internet': internet_ok,
-        'database': database_ok,
-        'all_ok': internet_ok and database_ok,
+        'internet': result.get('internet', False),
+        'database': result.get('database', False),
+        'all_ok': result.get('all_ok', False),
         'timestamp': time.time(),
-        'latency_internet_ms': internet_latency_ms,
-        'latency_db_ms': db_latency_ms,
+        'latency_internet_ms': result.get('latency_internet_ms'),
+        'latency_db_ms': result.get('latency_db_ms'),
         'server': 'ok',
     })
 

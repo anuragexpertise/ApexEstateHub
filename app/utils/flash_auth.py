@@ -5,7 +5,7 @@ Flash Auth — Pre-login Connectivity Gate for EstateHub.
 This module implements the "Flash Auth" system: before any user can attempt
 to log in, the application verifies two layers of connectivity:
 
-  1. Network Connectivity  — browser navigator.onLine + server-side TCP probe
+  1. Network Connectivity  — browser navigator.onLine + server-side HTTP probe
   2. Database Connectivity  — server-side SELECT 1 via db_manager
 
 Only when BOTH checks pass does the login UI become interactive.  The system
@@ -23,15 +23,25 @@ Components
 import socket
 import time
 import logging
+import os
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-INTERNET_PROBE_HOST = "1.1.1.1"
-INTERNET_PROBE_PORT = 53
+# Internet probe: try Cloudflare DNS first, then fall back to Google DNS,
+# then HTTP probe to a reliable endpoint. This handles environments where
+# raw TCP to port 53 is blocked (corporate firewalls, Docker, etc.).
+INTERNET_PROBES = [
+    ("1.1.1.1", 53, "tcp"),       # Cloudflare DNS
+    ("8.8.8.8", 53, "tcp"),       # Google DNS (fallback)
+]
 INTERNET_PROBE_TIMEOUT = 4
+
+# HTTP probe fallback for environments where TCP probes are blocked
+HTTP_PROBE_URL = "https://httpbin.org/get"
+HTTP_PROBE_TIMEOUT = 4
 
 # Health-check interval in milliseconds (how often the app re-probes connectivity)
 HEALTH_CHECK_INTERVAL_MS = 15_000
@@ -42,21 +52,48 @@ NET_CHECK_TRIGGER_MS = 30_000
 
 # ── Server-side connectivity probes ───────────────────────────────────────────
 
-def check_internet(host: str = INTERNET_PROBE_HOST,
-                   port: int = INTERNET_PROBE_PORT,
-                   timeout: float = INTERNET_PROBE_TIMEOUT) -> bool:
-    """
-    Attempt a TCP connection to a known reliable host (Cloudflare DNS).
-
-    Returns True only when the socket connects without error or timeout.
-    """
+def _probe_tcp(host: str, port: int, timeout: float = INTERNET_PROBE_TIMEOUT) -> bool:
+    """Attempt a TCP connection to a host:port."""
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
         sock.close()
         return True
-    except OSError as exc:
-        log.warning("[FlashAuth] Internet probe failed (%s:%s): %s", host, port, exc)
+    except OSError:
         return False
+
+
+def _probe_http(url: str = HTTP_PROBE_URL, timeout: float = HTTP_PROBE_TIMEOUT) -> bool:
+    """Attempt an HTTP GET to a reliable endpoint."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, method="GET")
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        return resp.status == 200
+    except Exception:
+        return False
+
+
+def check_internet() -> bool:
+    """
+    Check internet connectivity with multiple fallback strategies.
+
+    1. Try TCP probes to Cloudflare DNS (1.1.1.1:53) and Google DNS (8.8.8.8:53)
+    2. If all TCP probes fail, try an HTTP GET to httpbin.org
+    3. Return True if ANY probe succeeds
+
+    This handles environments where raw TCP to port 53 is blocked.
+    """
+    # Strategy 1: TCP probes
+    for host, port, _ in INTERNET_PROBES:
+        if _probe_tcp(host, port):
+            return True
+
+    # Strategy 2: HTTP fallback
+    if _probe_http():
+        return True
+
+    log.warning("[FlashAuth] Internet probe: all methods failed")
+    return False
 
 
 def check_database() -> bool:
@@ -64,9 +101,11 @@ def check_database() -> bool:
     Probe the database with a trivial query.
 
     Returns True on success, False on any exception.
+    Uses None for params (not an empty tuple) so psycopg2 doesn't try
+    to format the query with named parameters.
     """
     try:
-        db._execute("SELECT 1", (), fetch_one=True)
+        db._execute("SELECT 1", None, fetch_one=True)
         return True
     except Exception as exc:
         log.warning("[FlashAuth] Database probe failed: %s", exc)
