@@ -4,9 +4,10 @@
 # Changes vs previous version:
 #   - Added registration of noc_callbacks (NOC Print/PDF/Email)
 #     as step 10, before debug callbacks.
-#   - Added registration of admin_callbacks (pruned to just
-#     validate_qr_code_admin — see admin_callbacks.py header)
-#     as step 11.
+#   - admin_callbacks (step 11) fully pruned — validate_qr_code_admin
+#     moved to qr_callbacks.py's validate_manual_qr_scoped; remaining
+#     callbacks (update_society_count, update_recent_societies,
+#     enroll_member) had no matching layout IDs and were removed.
 # ============================================================
 
 def register_callbacks(app):
@@ -90,19 +91,18 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ noc_callbacks failed: {e}")
 
-    # 11. Admin callbacks — pruned to just validate_qr_code_admin (manual
-    #     paste-and-validate QR entry). update_society_count,
-    #     update_recent_societies, and enroll_member were removed from
-    #     admin_callbacks.py: their target component IDs don't exist
-    #     anywhere in portal_pages.py — society counts already come from
-    #     the generic KPI system, and enrollment already goes through the
-    #     schema-driven "New" button flow. Registering the removed ones
-    #     would just be inert duplicate logic. See admin_callbacks.py's
-    #     module docstring for the full rationale.
-    #     NOTE: validate_qr_code_admin's own target IDs (qr-scan-input,
-    #     validate-qr-btn, qr-validation-result) also aren't in the layout
-    #     yet — this registers cleanly but stays inert until a manual-entry
-    #     panel is added somewhere (e.g. admin's Evaluate Pass tab).
+    # 11. Admin callbacks — fully pruned. update_society_count,
+    #     update_recent_societies, enroll_member, and
+    #     validate_qr_code_admin were all removed from admin_callbacks.py:
+    #     their target component IDs don't exist anywhere in portal_pages.py.
+    #     Society counts come from the generic KPI system, enrollment goes
+    #     through the schema-driven "New" button flow, and the manual QR
+    #     paste-and-validate feature was moved to qr_callbacks.py's
+    #     validate_manual_qr_scoped (modular, scoped, opens concern profiles
+    #     inline). register_admin_callbacks is a no-op now — kept so the
+    #     registration slot remains documented for future admin-specific
+    #     callbacks. See admin_callbacks.py's module docstring for the full
+    #     rationale.
     try:
         from .admin_callbacks import register_admin_callbacks
         register_admin_callbacks(app)
