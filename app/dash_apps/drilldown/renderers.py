@@ -1069,7 +1069,17 @@ def render_form_card(card_id: str, title: str, icon: str,
         required = f.get("required", False)
         label_txt = f["label"] + (" *" if required else "")
 
-        if ftype == "select" and f.get("options_from"):
+        if ftype == "select" and f.get("dynamic_options"):
+            from app.dash_apps.drilldown.schema_introspect import load_dynamic_select_options
+            opts = load_dynamic_select_options(f["dynamic_options"], society_id)
+            ctrl = dcc.Dropdown(
+                id={"type": "form-field", "entity": entity, "field": fid},
+                options=opts, value=pre_val,
+                placeholder=f"Select {f['label']}…",
+                clearable=not required,
+                style={"fontSize": "13px"},
+            )
+        elif ftype == "select" and f.get("options_from"):
             from app.dash_apps.drilldown.schema_introspect import load_fk_options
             opts = load_fk_options(f["options_from"])
             ctrl = dcc.Dropdown(

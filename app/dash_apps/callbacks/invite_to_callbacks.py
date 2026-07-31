@@ -201,14 +201,25 @@ def register_invite_to_callbacks(app):
         return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
 
     # ── 4. Toggle selection on item click ────────────────────────────────────
+    # NOTE: this used to only write invite-to-store + the summary badges below
+    # the list — the store update was correct, but the clicked row itself
+    # never got a re-render, so the checkbox stayed visually unchecked and
+    # the row never got its selected border/background. From the user's
+    # perspective this looked exactly like "can't select" — clicking did
+    # something (the badge appeared below), but the row you actually clicked
+    # never seemed to respond. Now also re-renders the visible list so the
+    # clicked row reflects its new state immediately.
     @app.callback(
         Output("invite-to-store", "data", allow_duplicate=True),
         Output("invite-selected-summary", "children"),
+        Output("invite-list-container", "children", allow_duplicate=True),
         Input({"type": "invite-item", "role": ALL, "entity_id": ALL}, "n_clicks"),
         State("invite-to-store", "data"),
+        State("invite-search", "value"),
+        State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def toggle_invite_selection(n_clicks_list, store):
+    def toggle_invite_selection(n_clicks_list, store, search, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             raise PreventUpdate
         triggered = ctx.triggered_id
@@ -242,7 +253,26 @@ def register_invite_to_callbacks(app):
                 )
             )
         summary = html.Div(badges) if badges else html.Small("No invitations selected.", className="text-muted")
-        return store, summary
+
+        # Re-render the currently-visible list so the row the user just
+        # clicked actually shows its new checked/border state. Re-querying
+        # here (rather than patching just the one clicked row) keeps this in
+        # lockstep with load_invite_list's own rendering and stays correct
+        # even if the same entity got toggled from elsewhere.
+        list_children = no_update
+        society_id = (auth or {}).get("society_id")
+        if role in ("VND", "SEC") and society_id:
+            s = (search or "").strip() or None
+            try:
+                rows = list_invitable_vendors(society_id, s) if role == "VND" else list_invitable_security(society_id, s)
+                items = [_render_invite_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+                list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
+                    f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
+                )
+            except Exception:
+                pass  # keep list_children = no_update rather than blank the list on a transient query error
+
+        return store, summary, list_children
 
     # ── 5. Clear all selections ──────────────────────────────────────────
     @app.callback(

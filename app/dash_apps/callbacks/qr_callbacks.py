@@ -1,10 +1,51 @@
 # app/dash_apps/callbacks/qr_callbacks.py (COMPLETE WITH CAMERA)
 
-from dash import Input, Output, State, dcc, html, no_update, clientside_callback
+from dash import Input, Output, State, dcc, html, no_update, clientside_callback, ctx, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import base64
 from datetime import datetime
+
+
+def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
+    """Shared by manual-entry lookup (validate_manual_qr_scoped) and the
+    camera scanner (validate_qr_scanned) — renders the SAME full concern
+    profile card (QR image, status, all Invite/Assign/Resolve/Close actions)
+    that clicking through the normal Concerns list would give you, inline,
+    right where the scan/lookup happened. This is what "opening
+    concern_profile when scanning" means in practice — no separate
+    click-through or tab-switch needed.
+    """
+    from app.dash_apps.drilldown import loaders, renderers
+    from app.dash_apps.drilldown.schema_introspect import get_entity_meta
+
+    record = loaders.load_profile("concern", concern_id, society_id)
+    if not record:
+        return html.Div([
+            html.I(className="fas fa-exclamation-triangle fa-2x mb-2", style={"color": "#e59620"}),
+            html.Div("Concern not found.", style={"color": "#e59620", "fontWeight": "600"}),
+        ], className="text-center p-3")
+
+    meta = get_entity_meta().get("concerns", {})
+    return html.Div([
+        html.Div([
+            html.I(className="fas fa-check-circle me-2", style={"color": "#27ae60"}),
+            html.Span("Concern found", style={"fontWeight": "700", "color": "#27ae60", "fontSize": "13px"}),
+        ], style={"marginBottom": "8px"}),
+        renderers.render_profile_card(
+            card_id="profile_concern",
+            title=meta.get("profile_title", "Concern"),
+            icon=meta.get("profile_icon", "fa-hand-point-up"),
+            entity="concern",
+            record=record,
+            fields=meta.get("profile_fields", []),
+            actions=meta.get("profile_actions", []),
+            color=meta.get("profile_color", "#1d74d8"),
+            auth_data=auth_data,
+            filters={"society_id": society_id},
+        ),
+    ])
+
 
 # ════════════════════════════════════════════════════════════════
 # Camera JavaScript - Dual Mode (Entry/Exit) with Auto-stop
@@ -263,6 +304,50 @@ function qrCameraController(
 """
 
 
+def render_manual_qr_card(
+    scope: str,
+    title: str = "Manual QR Entry",
+    subtitle: str = "paste a QR payload if the camera isn't available",
+    placeholder: str = "e.g. 1-CON-13",
+    color: str = "#1859b8",
+) -> dbc.Card:
+    """Modular manual QR-entry widget — extracted from the bespoke
+    'Manual QR Entry' card that used to live only in _evaluate_pass_page()
+    (Admin/Security's Pass Evaluation tab). Ids are scoped via `scope` so
+    multiple independent instances can exist across different pages
+    (e.g. scope="pass_evaluation" vs scope="vendor_concern_lookup")
+    without colliding, all served by the single pattern-matched
+    validate_manual_qr_scoped callback below.
+    """
+    return dbc.Card([
+        dbc.CardHeader(html.Div([
+            html.I(className="fas fa-keyboard me-2", style={"color": color}),
+            html.Strong(title),
+            html.Small(f"  — {subtitle}", style={"color": "#999", "fontSize": "11px", "marginLeft": "6px"}),
+        ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "10px 14px"}),
+        dbc.CardBody([
+            html.Div([
+                dbc.Input(
+                    id={"type": "manual-qr-input", "scope": scope},
+                    type="text", placeholder=placeholder,
+                    style={"fontSize": "13px", "fontFamily": "monospace"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-check me-1"), "Look Up"],
+                    id={"type": "manual-qr-validate-btn", "scope": scope},
+                    n_clicks=0, color="primary", size="sm",
+                    style={"flexShrink": "0"},
+                ),
+            ], style={"display": "flex", "gap": "8px"}),
+            dcc.Loading(
+                html.Div(id={"type": "manual-qr-result", "scope": scope}, style={"marginTop": "10px"}),
+                type="circle",
+            ),
+        ], style={"padding": "14px"}),
+    ], style={"borderRadius": "18px", "boxShadow": f"0 10px 28px {color}1a", "marginTop": "16px"})
+
+
 def register_qr_callbacks(app):
 
     # ── 1. Camera controller (clientside) ──────────────────────
@@ -471,7 +556,42 @@ def register_qr_callbacks(app):
         
         # Map role to gate_access code
         role_code_map = {"admin": "ADM", "apartment": "APT", "vendor": "VND", "security": "SEC"}
-        
+
+        # ════════════════════════════════════════════════════════
+        # INFORMATIONAL ROLES (concern/receipt/expense/asset): these were
+        # never people that can walk through a gate, so mode=='entry'/'exit'
+        # doesn't apply to them. Previously they fell straight through to
+        # the entry/exit branches below, where role_code_map.get(role,'ADM')
+        # silently defaulted to 'ADM' — logging a bogus gate_access row
+        # keyed off e.g. a concern's id as if it were an admin's user id.
+        # Handled uniformly here instead, regardless of which mode button
+        # was selected, and — for concerns specifically — opens the concern
+        # profile right in the result card instead of just describing it.
+        # ════════════════════════════════════════════════════════
+        if result.get("status") == "PASS" and (result.get("user") or {}).get("role") in (
+            "concern", "receipt", "expense", "asset",
+        ):
+            user = result["user"]
+            log.insert(0, {
+                "passed": True, "name": user.get("name", "?"), "time": now_s,
+                "qr_snippet": qr_payload[:30], "mode": "lookup",
+            })
+            if user["role"] == "concern":
+                body = render_concern_lookup_result(user["id"], society_id, auth_data)
+            else:
+                body = html.Div([
+                    html.I(className="fas fa-check-circle fa-3x mb-2", style={"color": "#27ae60"}),
+                    html.H4(user.get("name", "?"), style={"color": "#27ae60"}),
+                    html.Small(now_s, style={"color": "#95a5a6"}),
+                ], style={"textAlign": "center", "padding": "20px"})
+            return (
+                body,
+                {"background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
+                 "border": "3px solid #27ae60", "borderRadius": "14px", "marginTop": "12px"},
+                log[:20],
+                {"type": "success", "message": f"Found — {user.get('name', '?')}"},
+            )
+
         # ════════════════════════════════════════════════════════
         # ENTRY MODE: Only PASS allowed
         # ════════════════════════════════════════════════════════
@@ -625,6 +745,68 @@ def register_qr_callbacks(app):
             )
         
         return no_update, no_update, no_update, no_update
+
+    # ── 3b. Manual QR lookup (modular — any render_manual_qr_card instance) ──
+    # Pattern-matched on scope, so this single callback serves every
+    # render_manual_qr_card() instance on the site: Pass Evaluation
+    # (Admin/Security, scope="pass_evaluation") and the Vendor portal's
+    # Concerns tab (scope="vendor_concern_lookup"), with room for more.
+    # Replaces the old singleton validate_qr_code_admin in
+    # admin_callbacks.py, which only ever showed a generic "Access Granted"
+    # card and never actually opened anything for concern/receipt/expense/
+    # asset QR types.
+    @app.callback(
+        Output({"type": "manual-qr-result", "scope": MATCH}, "children"),
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
+        Input({"type": "manual-qr-validate-btn", "scope": MATCH}, "n_clicks"),
+        State({"type": "manual-qr-input", "scope": MATCH}, "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def validate_manual_qr_scoped(n_clicks, qr_data, auth_data):
+        if not n_clicks or not (qr_data or "").strip():
+            raise PreventUpdate
+
+        from app.services.qr_service import validate_qr_code
+        society_id = (auth_data or {}).get("society_id")
+        scanning_user_id = (auth_data or {}).get("user_id")
+        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
+        user = result.get("user") or {}
+        role = user.get("role")
+
+        if result.get("status") == "PASS" and role == "concern":
+            return (
+                render_concern_lookup_result(user["id"], society_id, auth_data),
+                {"type": "success", "message": f"Found — {user.get('name', 'Concern')}"},
+                {"type": "success"},
+            )
+
+        if result.get("status") == "PASS":
+            return (
+                html.Div([
+                    html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
+                    html.H4("Valid", style={"color": "#2ecc71", "marginTop": "10px"}),
+                    html.P(user.get("name", "Unknown")),
+                    html.Hr(),
+                    html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+                ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"}),
+                {"type": "success", "message": f"Valid — {user.get('name', 'Unknown')}"},
+                {"type": "success"},
+            )
+
+        reason = result.get("reason", "Invalid QR code")
+        return (
+            html.Div([
+                html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
+                html.H4("Not Found", style={"color": "#e74c3c", "marginTop": "10px"}),
+                html.P(reason),
+                html.Hr(),
+                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+            ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"}),
+            {"type": "error", "message": reason},
+            {"type": "error"},
+        )
 
     # ── 4. Render recent scans log ──────────────────────────────
     @app.callback(
