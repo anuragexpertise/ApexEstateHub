@@ -275,13 +275,16 @@ def register_shell_callbacks(app):
         _ERR = {"display": "block", "marginBottom": "15px",
                 "padding": "8px", "borderRadius": "8px"}
 
-        if not _db_ok():
-            print("❌ DB unreachable")
+        # Flash Auth: check connectivity before loading societies
+        from app.utils.flash_auth import check_all
+        health = check_all()
+        if not health["database"]:
+            print(f"❌ Flash Auth: DB unreachable (internet={health['internet']})")
             return (
                 [], True,
                 html.Div(
                     [html.I(className="fas fa-database me-2"),
-                     "Cannot connect to the database."],
+                     "Cannot connect to the database. Please check your network."],
                     style={"color": "#dc3545", "fontSize": "12px", "textAlign": "center"},
                 ),
                 {**_ERR, "background": "#f8d7da"},

@@ -46,10 +46,12 @@ def _redirect_url(role, society_id):
 
 
 def _check_network():
-    """Return (ok, error_message).  Checks internet + database."""
-    if not check_internet():
+    """Return (ok, error_message).  Checks internet + database via Flash Auth."""
+    from app.utils.flash_auth import require_network, check_all
+    result = check_all()
+    if not result["internet"]:
         return False, 'No internet connection'
-    if not check_database():
+    if not result["database"]:
         return False, 'Database unreachable'
     return True, None
 
@@ -157,10 +159,54 @@ def check_auth():
     return jsonify({'authenticated': False}), 401
 
 
+# ── Flash Auth Health Endpoint ────────────────────────────────
+# Lightweight server-side connectivity probe for the Flash Auth system.
+# Returns internet + database reachability status without requiring
+# authentication. Used by the client-side health-check interval.
+
+@auth_bp.route('/flash-health', methods=['GET'])
+def flash_health():
+    """
+    Flash Auth health probe endpoint.
+
+    Performs two server-side checks:
+      1. Internet reachability via TCP probe to 1.1.1.1:53
+      2. Database reachability via SELECT 1
+
+    Returns a JSON payload with the results. No authentication required —
+    this endpoint exists so the browser can determine if the server and
+    database are reachable BEFORE presenting the login form.
+    """
+    import socket
+    from app.utils.flash_auth import get_health_status
+
+    internet_start = time.time()
+    internet_ok = check_internet()
+    internet_latency_ms = round((time.time() - internet_start) * 1000)
+
+    db_start = time.time()
+    database_ok = check_database()
+    db_latency_ms = round((time.time() - db_start) * 1000)
+
+    return jsonify({
+        'internet': internet_ok,
+        'database': database_ok,
+        'all_ok': internet_ok and database_ok,
+        'timestamp': time.time(),
+        'latency_internet_ms': internet_latency_ms,
+        'latency_db_ms': db_latency_ms,
+        'server': 'ok',
+    })
+
+
 # ── Society list (used by society_select page) ────────────────
 
 @auth_bp.route('/societies', methods=['GET'])
 def get_societies_list():
+    # Flash Auth: check connectivity before serving society list
+    ok, err = _check_network()
+    if not ok:
+        return jsonify({'error': err, 'flash_auth': True}), 503
     try:
         societies = db._execute(
             'SELECT id, name, address, logo FROM societies ORDER BY name',
