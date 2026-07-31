@@ -1,7 +1,17 @@
 # app/dash_apps/callbacks/login_callbacks.py
 """
-Login Callbacks — password / PIN / pattern authentication + password reset
-with mandatory network connectivity check before every authentication attempt.
+Login Callbacks — Flash Auth Edition.
+
+Password / PIN / pattern authentication with mandatory Flash Auth
+connectivity gate before every authentication attempt.
+
+The Flash Auth system ensures that:
+  1. The browser's navigator.onLine is checked (clientside)
+  2. Server-side internet reachability is verified (TCP probe)
+  3. Database reachability is confirmed (SELECT 1)
+
+All three checks must pass before credentials are processed.
+Login buttons are visually disabled until connectivity is confirmed.
 """
 
 import dash
@@ -9,7 +19,7 @@ from dash import Input, Output, State, no_update, html, ctx
 from dash.exceptions import PreventUpdate
 
 from app.services.auth_service import authenticate_user
-from app.utils.network_check import check_all, _db_ok
+from app.utils.flash_auth import check_all, require_network
 
 
 def _db():
@@ -101,30 +111,29 @@ def _login_error(message: str):
     return no_update, no_update, {"type": "error", "message": message}, no_update
 
 
+def _flash_auth_guard():
+    """
+    Flash Auth connectivity gate.
+
+    Returns None if all checks pass, or a toast-store error response
+    if connectivity is missing. Call this at the top of every login handler.
+    """
+    result = check_all()
+    if not result["internet"]:
+        print("❌ Flash Auth: login blocked — no internet")
+        return _offline_response()
+    if not result["database"]:
+        print("❌ Flash Auth: login blocked — database unreachable")
+        return _db_down_response()
+    return None  # all checks passed
+
+
 # ──────────────────────────────────────────────────────────────────────
 # REGISTRATION
 # ──────────────────────────────────────────────────────────────────────
 
 def register_login_callbacks(app):
     print("  → Registering login callbacks…")
-
-    # ── Pre-login network gate ─────────────────────────────────────
-    # Runs before any login handler; blocks the entire auth flow when
-    # the browser reports offline or the DB probe fails.
-    @app.callback(
-        Output("network-status-store",  "data"),
-        Output("login-btn",             "disabled"),
-        Output("login-pin-btn",         "disabled"),
-        Output("login-pattern-btn",     "disabled"),
-        Output("master-admin-login-btn", "disabled"),
-        Input("url", "pathname"),
-        Input("network-check-trigger",  "n_intervals"),
-        prevent_initial_call=False,
-    )
-    def check_network_status(pathname, n_intervals):
-        result = check_all()
-        disabled = not result["all_ok"]
-        return result, disabled, disabled, disabled, disabled
 
     # ── 1. PASSWORD LOGIN ──────────────────────────────────────────
     @app.callback(
@@ -142,13 +151,10 @@ def register_login_callbacks(app):
         if not n or not email or not password:
             raise PreventUpdate
 
-        net = check_all()
-        if not net["internet"]:
-            print("❌ Login blocked: no internet")
-            return _offline_response()
-        if not net["database"]:
-            print("❌ Login blocked: database unreachable")
-            return _db_down_response()
+        # Flash Auth: verify connectivity before processing credentials
+        blocked = _flash_auth_guard()
+        if blocked:
+            return blocked
 
         print(f"\n🔐 Password login: {email}")
         society_id = (auth or {}).get("society_id")
@@ -175,13 +181,10 @@ def register_login_callbacks(app):
         if not n or not email or not pin:
             raise PreventUpdate
 
-        net = check_all()
-        if not net["internet"]:
-            print("❌ PIN login blocked: no internet")
-            return _offline_response()
-        if not net["database"]:
-            print("❌ PIN login blocked: database unreachable")
-            return _db_down_response()
+        # Flash Auth: verify connectivity before processing credentials
+        blocked = _flash_auth_guard()
+        if blocked:
+            return blocked
 
         print(f"\n🔢 PIN login: {email}")
         society_id = (auth or {}).get("society_id")
@@ -209,13 +212,10 @@ def register_login_callbacks(app):
         if not n or not email or not pattern:
             raise PreventUpdate
 
-        net = check_all()
-        if not net["internet"]:
-            print("❌ Pattern login blocked: no internet")
-            return _offline_response()
-        if not net["database"]:
-            print("❌ Pattern login blocked: database unreachable")
-            return _db_down_response()
+        # Flash Auth: verify connectivity before processing credentials
+        blocked = _flash_auth_guard()
+        if blocked:
+            return blocked
 
         print(f"\n🔵 Pattern login: {email}")
         society_id = (auth or {}).get("society_id")
@@ -242,13 +242,10 @@ def register_login_callbacks(app):
         if not n or not email or not password:
             raise PreventUpdate
 
-        net = check_all()
-        if not net["internet"]:
-            print("❌ Master login blocked: no internet")
-            return _offline_response()
-        if not net["database"]:
-            print("❌ Master login blocked: database unreachable")
-            return _db_down_response()
+        # Flash Auth: verify connectivity before processing credentials
+        blocked = _flash_auth_guard()
+        if blocked:
+            return blocked
 
         print(f"\n👑 Master admin login: {email}")
         user = authenticate_user(email.strip(), password, society_id=None)
@@ -311,10 +308,14 @@ def register_login_callbacks(app):
             if not email:
                 return no_update, no_update, \
                        {"type": "error", "message": "Please enter your email address"}
-            net = check_all()
-            if not net["internet"]:
-                return no_update, no_update, \
-                       _offline_response()[2]
+
+            # Flash Auth: verify connectivity before processing reset
+            result = check_all()
+            if not result["internet"]:
+                return no_update, no_update, _offline_response()[2]
+            if not result["database"]:
+                return no_update, no_update, _db_down_response()[2]
+
             print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
             try:
@@ -331,11 +332,15 @@ def register_login_callbacks(app):
             if new_pass != confirm_pass:
                 return no_update, no_update, \
                        {"type": "error", "message": "Passwords do not match"}
+
+            # Flash Auth: verify connectivity before processing reset
+            result = check_all()
+            if not result["internet"]:
+                return no_update, no_update, _offline_response()[2]
+            if not result["database"]:
+                return no_update, no_update, _db_down_response()[2]
+
             print("\n🔑 Confirming password reset")
-            net = check_all()
-            if not net["internet"]:
-                return no_update, no_update, \
-                       _offline_response()[2]
             try:
                 from app.services.auth_service import reset_password
                 ok, msg = reset_password(token.strip(), new_pass)

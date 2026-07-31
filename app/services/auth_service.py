@@ -1,6 +1,6 @@
 # app/services/auth_service.py
 """
-Authentication service — EstateHub.
+Authentication service — EstateHub (Flash Auth Edition).
 
 Password storage: werkzeug.security (scrypt/pbkdf2, salted).
 All DB queries use named params (:name) via db_manager._to_pyformat().
@@ -8,11 +8,13 @@ All DB queries use named params (:name) via db_manager._to_pyformat().
 CRITICAL: seed.py and society_service.py both use generate_password_hash().
            This file must use check_password_hash() to verify — NOT sha256.
 
-Network awareness
-------------------
-Every public authenticate* function validates database connectivity before
-proceeding.  If the DB probe fails, a None is returned immediately so the
-caller can surface a clear error to the user.
+Flash Auth Connectivity Gate
+-----------------------------
+Every public authenticate* function validates connectivity via the
+Flash Auth system before proceeding.  The _require_network() function
+calls require_network() from app.utils.flash_auth, which performs both
+internet (TCP probe) and database (SELECT 1) checks.  If either fails,
+None is returned immediately so the caller can surface a clear error.
 """
 
 import secrets
@@ -22,18 +24,24 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from database.db_manager import db
-from app.utils.network_check import check_internet, check_database
+from app.utils.flash_auth import require_network
 
 log = logging.getLogger(__name__)
 
 
 def _require_network() -> bool:
-    """Return True only when both internet and database are reachable."""
-    if not check_internet():
-        log.warning("Network check failed: no internet")
-        return False
-    if not check_database():
-        log.warning("Network check failed: database unreachable")
+    """
+    Flash Auth connectivity gate.
+
+    Return True only when both internet and database are reachable.
+    Delegates to app.utils.flash_auth.require_network() which performs:
+      1. TCP probe to 1.1.1.1:53 (internet check)
+      2. SELECT 1 against PostgreSQL (database check)
+
+    Logs warnings when checks fail for server-side diagnostics.
+    """
+    if not require_network():
+        log.warning("[FlashAuth] Auth blocked: connectivity check failed")
         return False
     return True
 

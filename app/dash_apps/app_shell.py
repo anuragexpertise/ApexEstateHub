@@ -637,6 +637,36 @@ def shell_layout() -> html.Div:
             # update this pathname without triggering an HTTP request
             dcc.Location(id="url", refresh=False),
 
+            # ── Flash Auth: Connectivity Gate Stores & Intervals ──────────────
+            # These MUST exist in the layout before callback registration
+            dcc.Store(
+                id="network-status-store",
+                storage_type="memory",
+                data={"internet": None, "database": None, "all_ok": None},
+            ),
+            dcc.Store(
+                id="flash-auth-status-store",
+                storage_type="memory",
+                data={
+                    "internet": None,
+                    "database": None,
+                    "all_ok": False,
+                    "last_check": None,
+                    "latency_internet_ms": None,
+                    "latency_db_ms": None,
+                },
+            ),
+            dcc.Interval(
+                id="network-check-trigger",
+                interval=30_000,  # 30s — server-side health probe trigger
+                n_intervals=0,
+            ),
+            dcc.Interval(
+                id="flash-health-interval",
+                interval=15_000,  # 15s — client-side browser health probe
+                n_intervals=0,
+            ),
+
             # ── Stores ─────────────────────────────────────────────────────────
             # auth-store: localStorage — survives refresh + tab close + new tab
             dcc.Store(id="auth-store",             storage_type="local", data=None),
