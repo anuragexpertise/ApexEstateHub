@@ -53,7 +53,7 @@ def register_flash_auth_callbacks(app):
         Input("url", "pathname"),
         Input("network-check-trigger", "n_intervals"),
         Input("flash-auth-retry-btn", "n_clicks"),
-        prevent_initial_call=False,
+        prevent_initial_call='initial_duplicate',
     )
     def check_network_status(pathname, n_intervals, retry_n):
         """
@@ -112,7 +112,7 @@ def register_flash_auth_callbacks(app):
         Output("flash-auth-message",  "style",    allow_duplicate=True),
         Output("flash-auth-message",  "children", allow_duplicate=True),
         Input("network-status-store", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call='initial_duplicate',
     )
     def update_login_gates(status):
         if not status:
