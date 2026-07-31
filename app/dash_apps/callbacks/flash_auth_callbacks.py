@@ -44,46 +44,44 @@ def register_flash_auth_callbacks(app):
     """
     print("  → Registering Flash Auth callbacks…")
 
-    # ── 1. CLIENTSIDE: Browser Online Detection + Server Health Probe ──
-    # This runs in the browser every HEALTH_CHECK_INTERVAL_MS.
-    # It checks navigator.onLine and hits /auth/flash-health for DB status.
-    app.clientside_callback(
-        FLASH_AUTH_CLIENTSIDE_JS,
-        Output("flash-auth-status-store", "data", allow_duplicate=True),
-        Input("flash-health-interval", "n_intervals"),
-        Input("flash-auth-retry-btn", "n_clicks"),
-        prevent_initial_call=True,
-    )
-
-    # ── 2. SERVERSIDE: Network Check Trigger ──
-    # Runs on page load and periodically via network-check-trigger interval.
-    # Performs server-side TCP probe + DB probe and populates network-status-store.
+    # ── 1. SERVER-SIDE: Network Check Trigger (page load + interval) ──
+    # Runs on initial page load (pathname) and periodically via the
+    # network-check-trigger interval. Performs server-side TCP probe + DB probe.
+    # Also fires when the retry button is clicked.
     @app.callback(
-        Output("network-status-store", "data"),
+        Output("network-status-store", "data", allow_duplicate=True),
         Input("url", "pathname"),
         Input("network-check-trigger", "n_intervals"),
+        Input("flash-auth-retry-btn", "n_clicks"),
         prevent_initial_call=False,
     )
-    def check_network_status(pathname, n_intervals):
+    def check_network_status(pathname, n_intervals, retry_n):
         """
         Server-side connectivity check.
 
-        Fires on initial page load (pathname) and periodically via the
-        network-check-trigger interval. Performs:
+        Fires on:
+          - Initial page load (pathname fires immediately)
+          - Every 30s via network-check-trigger interval
+          - Every click of the Retry Connection button
+
+        Performs:
           - TCP probe to Cloudflare DNS (internet check)
           - SELECT 1 against PostgreSQL (database check)
 
         Returns structured status dict for the network-status-store.
         """
+        triggered_id = ctx.triggered_id if ctx.triggered_id else "url"
+        print(f"[FlashAuth] Health check triggered by: {triggered_id}")
+
         result = check_all()
         print(
-            f"[FlashAuth] Health check: internet={result['internet']}, "
+            f"[FlashAuth] Result: internet={result['internet']}, "
             f"database={result['database']}, all_ok={result['all_ok']}, "
             f"latency_db={result.get('latency_db_ms')}ms"
         )
         return result
 
-    # ── 3. UPDATE NETWORK INDICATOR on network-status-store change ──
+    # ── 2. UPDATE NETWORK INDICATOR on network-status-store change ──
     # This callback updates the visual indicator dots in both Stage 1 and Stage 2.
     @app.callback(
         Output("network-indicator", "children", allow_duplicate=True),
@@ -98,9 +96,11 @@ def register_flash_auth_callbacks(app):
             status.get("database"),
         )
 
-    # ── 4. ENABLE/DISABLE LOGIN BUTTONS based on connectivity ──
-    # When network-status-store shows all_ok=True, enable all login buttons.
-    # When any check fails, disable them and show an overlay.
+    # ── 3. ENABLE/DISABLE LOGIN BUTTONS + SHOW/HIDE OVERLAY ──
+    # This is the MASTER callback for connectivity state.
+    # When network-status-store shows all_ok=True, enable all login buttons
+    # and hide the overlay. When any check fails, disable buttons and show overlay.
+    # Uses prevent_initial_call=False so the overlay shows immediately on load.
     @app.callback(
         Output("login-btn",           "disabled", allow_duplicate=True),
         Output("login-pin-btn",       "disabled", allow_duplicate=True),
@@ -112,7 +112,7 @@ def register_flash_auth_callbacks(app):
         Output("flash-auth-message",  "style",    allow_duplicate=True),
         Output("flash-auth-message",  "children", allow_duplicate=True),
         Input("network-status-store", "data"),
-        prevent_initial_call=True,
+        prevent_initial_call=False,
     )
     def update_login_gates(status):
         if not status:
@@ -146,6 +146,8 @@ def register_flash_auth_callbacks(app):
                     "background": "#fff3cd",
                     "color": "#856404",
                     "border": "1px solid #ffeaa7",
+                    "padding": "6px 12px",
+                    "borderRadius": "6px",
                 }
             elif errors:
                 msg = " | ".join(errors) + " — login unavailable"
@@ -154,6 +156,8 @@ def register_flash_auth_callbacks(app):
                     "background": "#f8d7da",
                     "color": "#721c24",
                     "border": "1px solid #f5c6cb",
+                    "padding": "6px 12px",
+                    "borderRadius": "6px",
                 }
             else:
                 msg = "Checking connectivity…"
@@ -162,9 +166,12 @@ def register_flash_auth_callbacks(app):
                     "background": "#fff3cd",
                     "color": "#856404",
                     "border": "1px solid #ffeaa7",
+                    "padding": "6px 12px",
+                    "borderRadius": "6px",
                 }
 
-            # Overlay is visible when internet or database is confirmed down
+            # Overlay is visible when internet or database is confirmed down,
+            # or still checking (while we wait for the first result).
             overlay_visible = (internet is False or database is False)
             overlay_style = {
                 "display": "flex" if overlay_visible else "none",
@@ -194,7 +201,7 @@ def register_flash_auth_callbacks(app):
                 ),
             )
 
-    # ── 5. UPDATE FLASH-AUTH OVERLAY STATUS TEXT ──
+    # ── 4. UPDATE FLASH-AUTH OVERLAY STATUS TEXT ──
     # When the overlay is visible, update the individual status lines
     @app.callback(
         Output("flash-auth-internet-status", "children", allow_duplicate=True),
@@ -244,7 +251,7 @@ def register_flash_auth_callbacks(app):
 
         return internet_text, database_text, {"color": icon_color, "marginBottom": "16px"}
 
-    # ── 6. PRE-LOGIN AUTH GATE (clientside) ──
+    # ── 5. PRE-LOGIN AUTH GATE (clientside) ──
     # Before any login button click reaches the server, verify connectivity
     # on the client side. If navigator.onLine is false, show toast.
     app.clientside_callback(
@@ -252,7 +259,6 @@ def register_flash_auth_callbacks(app):
         function(n) {
             if (!n) return window.dash_clientside.no_update;
             if (!navigator.onLine) {
-                // Network is offline — block the login attempt
                 return {
                     type: 'error',
                     message: 'No internet connection. Please check your network and try again.'
@@ -320,38 +326,15 @@ def register_flash_auth_callbacks(app):
         prevent_initial_call=True,
     )
 
-    # ── 7. SYNC flash-auth-status-store from network-status-store ──
-    # The clientside callback writes to flash-auth-status-store;
-    # this server-side callback syncs it back so the UI stays consistent.
-    @app.callback(
+    # ── 6. CLIENTSIDE: Browser Online Detection (supplementary) ──
+    # This runs in the browser every 15s as a supplementary check.
+    # It checks navigator.onLine and hits /auth/flash-health for DB status.
+    # Updates flash-auth-status-store as a mirror of network-status-store.
+    app.clientside_callback(
+        FLASH_AUTH_CLIENTSIDE_JS,
         Output("flash-auth-status-store", "data", allow_duplicate=True),
-        Input("network-status-store", "data"),
+        Input("flash-health-interval", "n_intervals"),
         prevent_initial_call=True,
     )
-    def sync_flash_auth_store(status):
-        if not status:
-            raise PreventUpdate
-        return {
-            "internet": status.get("internet"),
-            "database": status.get("database"),
-            "all_ok": status.get("all_ok", False),
-            "last_check": status.get("timestamp"),
-            "latency_internet_ms": status.get("latency_internet_ms"),
-            "latency_db_ms": status.get("latency_db_ms"),
-        }
-
-    # ── 8. AUTO-HIDE OVERLAY when connectivity is restored ──
-    # When flash-auth-status-store updates to all_ok=True, hide the overlay
-    @app.callback(
-        Output("flash-auth-overlay", "style", allow_duplicate=True),
-        Input("flash-auth-status-store", "data"),
-        prevent_initial_call=True,
-    )
-    def auto_hide_overlay(status):
-        if not status:
-            raise PreventUpdate
-        if status.get("all_ok"):
-            return {"display": "none"}
-        raise PreventUpdate
 
     print("  ✓ Flash Auth callbacks registered")
