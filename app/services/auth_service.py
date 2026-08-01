@@ -70,10 +70,10 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
         return None
 
 
-# ── Login methods ─────────────────────────────────────────────────────
+# ── Login methods ─────────────────────────────────────────────
 
 def authenticate_user(email: str, password: str,
-                         society_id: int | None = None) -> dict | None:
+                        society_id: int | None = None) -> dict | None:
     """Verify email + password (werkzeug check_password_hash)."""
     row = _fetch_user(email, society_id)
     if not row:
@@ -93,7 +93,7 @@ def authenticate_user(email: str, password: str,
 
 
 def authenticate_pin(email: str, pin: str,
-                        society_id: int | None = None) -> dict | None:
+                       society_id: int | None = None) -> dict | None:
     """Verify email + PIN (werkzeug hash in pin_hash column)."""
     row = _fetch_user(email, society_id)
     if not row:
@@ -116,10 +116,10 @@ def authenticate_pattern(email: str, pattern: str,
     return _build_auth(row)
 
 
-# ── Password reset ────────────────────────────────────────────────────
+# ── Password reset ────────────────────────────────────────────
 
 def request_password_reset(email: str,
-                               society_id: int | None = None) -> tuple[bool, str, str | None]:
+                                 society_id: int | None = None) -> tuple[bool, str, str | None]:
     """Generate 6-digit reset token. Returns (ok, message, plain_token)."""
     try:
         q = "SELECT id FROM users WHERE email = :email"
