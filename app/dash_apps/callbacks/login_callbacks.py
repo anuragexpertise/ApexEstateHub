@@ -80,7 +80,7 @@ def _redirect(role: str, society_id) -> str:
 def register_login_callbacks(app):
     print("  → Registering login callbacks…")
 
-    # ── 1. PASSWORD LOGIN ──────────────────────────────────
+    # ── 1. PASSWORD LOGIN ──────────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -100,8 +100,8 @@ def register_login_callbacks(app):
         society_id = (auth or {}).get("society_id")
         try:
             user = authenticate_user(email.strip(), password, society_id)
-        except Exception as exc:
-            print(f"❌ Database connection error: {exc}")
+        except Exception:
+            print(f"❌ Database connection error during password login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ Password login failed: {email}")
@@ -109,7 +109,7 @@ def register_login_callbacks(app):
         print(f"✅ Password login success: {email}")
         return _login_response(user)
 
-    # ── 2. PIN LOGIN ───────────────────────────────────────
+    # ── 2. PIN LOGIN ───────────────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -130,8 +130,8 @@ def register_login_callbacks(app):
         from app.services.auth_service import authenticate_pin
         try:
             user = authenticate_pin(email.strip(), pin, society_id)
-        except Exception as exc:
-            print(f"❌ Database connection error: {exc}")
+        except Exception:
+            print(f"❌ Database connection error during PIN login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ PIN login failed: {email}")
@@ -139,7 +139,7 @@ def register_login_callbacks(app):
         print(f"✅ PIN login success: {email}")
         return _login_response(user)
 
-    # ── 3. PATTERN LOGIN ──────────────────────────────────
+    # ── 3. PATTERN LOGIN ──────────────────────────────────────────
     @app.callback(
         Output("auth-store",       "data",    allow_duplicate=True),
         Output("url",              "pathname",allow_duplicate=True),
@@ -160,8 +160,8 @@ def register_login_callbacks(app):
         from app.services.auth_service import authenticate_pattern
         try:
             user = authenticate_pattern(email.strip(), pattern, society_id)
-        except Exception as exc:
-            print(f"❌ Database connection error: {exc}")
+        except Exception:
+            print(f"❌ Database connection error during pattern login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ Pattern login failed: {email}")
@@ -169,7 +169,7 @@ def register_login_callbacks(app):
         print(f"✅ Pattern login success: {email}")
         return _login_response(user)
 
-    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────
+    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
     @app.callback(
         Output("auth-store",    "data",    allow_duplicate=True),
         Output("url",           "pathname",allow_duplicate=True),
@@ -187,17 +187,16 @@ def register_login_callbacks(app):
         print(f"\n👑 Master admin login: {email}")
         try:
             user = authenticate_user(email.strip(), password, society_id=None)
-        except Exception as exc:
-            print(f"❌ Database connection error: {exc}")
+        except Exception:
+            print(f"❌ Database connection error during master admin login")
             return _login_error("No Database connection")
         if not user or user.get("role") != "master":
             return _login_error("Invalid master admin credentials")
 
-        user["society_id"] = None
         print(f"✅ Master admin login success: {email}")
         return _login_response(user)
 
-    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────
+    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────
     @app.callback(
         Output("forgot-password-modal", "is_open"),
         Output("reset-email-input",     "value"),
@@ -263,7 +262,7 @@ def register_login_callbacks(app):
 
         raise PreventUpdate
 
-    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────
+    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────────────
     app.clientside_callback(
         """
         function(n) {

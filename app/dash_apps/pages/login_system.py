@@ -1,207 +1,22 @@
 # app/dash_apps/pages/login_system.py
 """
-Login page layouts — Flash Auth Edition.
-
-Network connectivity is verified BEFORE the login form becomes interactive.
-The system shows real-time status indicators for internet and database reachability.
+Login page layouts — EstateHub.
 
 Layouts:
-  society_select_layout() → Stage 1: choose society (with connectivity indicators)
+  society_select_layout() → Stage 1: choose society
   login_layout(society_name) → Stage 2: email/password + PIN + pattern tabs
-  flash_auth_overlay() → Full-page connectivity gate when network is down
-
-All layouts include the Flash Auth network indicator that shows:
-  - Internet connectivity (green/yellow/red dot)
-  - Database connectivity (green/yellow/red dot)
-  - Overall readiness badge
 """
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 
-# ── Flash Auth Network Indicator ──────────────────────────────────────────────
-
-def _network_indicator(status: dict | None = None) -> html.Div:
-    """
-    Small badge showing network / database reachability.
-
-    Colors:
-      Green  (#28a745) — reachable
-      Yellow (#ffc107) — checking / unknown
-      Red    (#dc3545) — unreachable
-
-    Args:
-        status: dict with 'internet' and 'database' keys (True/False/None)
-    """
-    if status is None:
-        status = {"internet": None, "database": None}
-
-    internet_ok = status.get("internet")
-    database_ok = status.get("database")
-
-    def _dot(color: str, label: str) -> html.Span:
-        return html.Span(
-            [
-                html.Span(
-                    "",
-                    style={
-                        "display": "inline-block",
-                        "width": "8px",
-                        "height": "8px",
-                        "borderRadius": "50%",
-                        "backgroundColor": color,
-                        "marginRight": "4px",
-                        "verticalAlign": "middle",
-                        "boxShadow": f"0 0 6px {color}40",
-                    },
-                ),
-                html.Span(label, style={"fontSize": "11px", "color": "#888"}),
-            ],
-            style={"display": "inline-flex", "alignItems": "center", "marginRight": "10px"},
-        )
-
-    return html.Div(
-        [
-            _dot(
-                "#28a745" if internet_ok is True else ("#dc3545" if internet_ok is False else "#ffc107"),
-                "Internet" if internet_ok is not None else ("Checking…"),
-            ),
-            _dot(
-                "#28a745" if database_ok is True else ("#dc3545" if database_ok is False else "#ffc107"),
-                "Database" if database_ok is not None else ("Checking…"),
-            ),
-        ],
-        style={
-            "textAlign": "center",
-            "marginBottom": "10px",
-            "fontSize": "11px",
-        },
-        id="network-indicator",
-    )
-
-
-def _flash_auth_overlay() -> html.Div:
-    """
-    Full-page overlay shown when connectivity checks fail.
-
-    This overlay blocks the entire login modal content and shows a
-    connectivity status screen with a retry button. It prevents users
-    from seeing an empty or broken login form when the network or
-    database is down.
-    """
-    return html.Div(
-        [
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.I(
-                                className="fas fa-wifi fa-3x",
-                                id="flash-auth-overlay-icon",
-                                style={"color": "#dc3545", "marginBottom": "16px"},
-                            ),
-                            html.H5(
-                                "Connectivity Required",
-                                style={
-                                    "fontWeight": "700",
-                                    "color": "#2c3e50",
-                                    "marginBottom": "8px",
-                                },
-                            ),
-                            html.P(
-                                "EstateHub requires both internet and database "
-                                "connectivity before login. Please check your "
-                                "network connection.",
-                                style={
-                                    "color": "#7d8ea3",
-                                    "fontSize": "13px",
-                                    "textAlign": "center",
-                                    "lineHeight": "1.5",
-                                    "marginBottom": "16px",
-                                },
-                            ),
-                            html.Div(
-                                id="flash-auth-overlay-details",
-                                children=[
-                                    html.Div(
-                                        [
-                                            html.Span(
-                                                "● ",
-                                                style={"color": "#ffc107", "fontSize": "14px"},
-                                            ),
-                                            html.Span(
-                                                "Checking internet connection…",
-                                                id="flash-auth-internet-status",
-                                                style={"fontSize": "12px", "color": "#888"},
-                                            ),
-                                        ],
-                                        style={"marginBottom": "6px"},
-                                    ),
-                                    html.Div(
-                                        [
-                                            html.Span(
-                                                "● ",
-                                                style={"color": "#ffc107", "fontSize": "14px"},
-                                            ),
-                                            html.Span(
-                                                "Checking database connection…",
-                                                id="flash-auth-database-status",
-                                                style={"fontSize": "12px", "color": "#888"},
-                                            ),
-                                        ],
-                                        style={"marginBottom": "16px"},
-                                    ),
-                                ],
-                                style={"textAlign": "center", "marginBottom": "20px"},
-                            ),
-                            dbc.Button(
-                                [html.I(className="fas fa-sync-alt me-2"), "Retry Connection"],
-                                id="flash-auth-retry-btn",
-                                color="primary",
-                                size="sm",
-                                style={"borderRadius": "8px", "fontWeight": "600"},
-                                n_clicks=0,
-                            ),
-                        ],
-                        style={
-                            "textAlign": "center",
-                            "padding": "30px 20px",
-                        },
-                    ),
-                ],
-                style={
-                    "display": "flex",
-                    "alignItems": "center",
-                    "justifyContent": "center",
-                    "minHeight": "300px",
-                },
-            ),
-        ],
-        id="flash-auth-overlay",
-        style={
-            "position": "absolute",
-            "top": "0",
-            "left": "0",
-            "right": "0",
-            "bottom": "0",
-            "background": "rgba(255,255,255,0.97)",
-            "zIndex": "10",
-            "borderRadius": "0 0 15px 15px",
-            "backdropFilter": "blur(4px)",
-        },
-    )
-
-
-# ── Stage 1: Society selection ────────────────────────────────────────
+# ── Stage 1: Society selection ────────────────────────────────
 
 def society_select_layout() -> list:
     return [
         html.Div(
             [
-                # Flash Auth connectivity gate overlay (visible when network is down)
-                _flash_auth_overlay(),
-
                 html.I(
                     className="fas fa-building fa-2x mb-3",
                     style={"color": "#667eea", "display": "block", "textAlign": "center"},
@@ -217,33 +32,12 @@ def society_select_layout() -> list:
                            "fontSize": "13px", "marginBottom": "20px"},
                 ),
 
-                # Flash Auth network indicator — updated in real-time
-                _network_indicator(),
-
-                # Error / info banner (hidden by default)
-                html.Div(id="login-db-error", style={"display": "none"}),
-
-                # Flash Auth status message area
-                html.Div(
-                    id="flash-auth-message",
-                    children="",
-                    style={
-                        "display": "none",
-                        "textAlign": "center",
-                        "fontSize": "12px",
-                        "padding": "6px 10px",
-                        "borderRadius": "6px",
-                        "marginBottom": "10px",
-                    },
-                ),
-
                 dcc.Dropdown(
                     id="society-dropdown",
                     placeholder="Search or select society…",
                     searchable=True,
                     clearable=False,
                     style={"fontSize": "13px", "marginBottom": "14px"},
-                    disabled=False,  # Flash Auth will disable until connected
                 ),
 
                 dbc.Checkbox(
@@ -259,7 +53,6 @@ def society_select_layout() -> list:
                     color="primary",
                     className="w-100",
                     style={"borderRadius": "10px", "fontWeight": "600"},
-                    disabled=True,  # Flash Auth: disabled until connectivity confirmed
                 ),
 
                 html.Hr(style={"margin": "20px 0", "opacity": "0.3"}),
@@ -302,19 +95,18 @@ def society_select_layout() -> list:
                                     className="w-100",
                                     n_clicks=0,
                                     style={"borderRadius": "8px"},
-                                    disabled=True,  # Flash Auth: disabled until connected
                                 ),
                             ],
                         ),
                     ]
                 ),
             ],
-            style={"padding": "10px 5px", "position": "relative"},
+            style={"padding": "10px 5px"},
         )
     ]
 
 
-# ── Stage 2: Multi-method login ───────────────────────────────────────
+# ── Stage 2: Multi-method login ───────────────────────────────
 
 def login_layout(society_name: str = "Society") -> list:
     return [
@@ -341,23 +133,6 @@ def login_layout(society_name: str = "Society") -> list:
                     ],
                     style={"display": "flex", "alignItems": "center",
                            "marginBottom": "18px"},
-                ),
-
-                # Flash Auth network indicator — updated in real-time
-                _network_indicator(),
-
-                # Flash Auth status message area
-                html.Div(
-                    id="flash-auth-login-message",
-                    children="",
-                    style={
-                        "display": "none",
-                        "textAlign": "center",
-                        "fontSize": "12px",
-                        "padding": "6px 10px",
-                        "borderRadius": "6px",
-                        "marginBottom": "10px",
-                    },
                 ),
 
                 dbc.Tabs(
@@ -400,7 +175,6 @@ def login_layout(society_name: str = "Society") -> list:
                                         className="w-100",
                                         n_clicks=0,
                                         style={"borderRadius": "10px", "fontWeight": "600"},
-                                        disabled=True,  # Flash Auth: disabled until connected
                                     ),
                                 ]
                             ),
@@ -434,7 +208,6 @@ def login_layout(society_name: str = "Society") -> list:
                                         className="w-100",
                                         n_clicks=0,
                                         style={"borderRadius": "10px", "fontWeight": "600"},
-                                        disabled=True,  # Flash Auth: disabled until connected
                                     ),
                                 ]
                             ),
@@ -504,7 +277,6 @@ def login_layout(society_name: str = "Society") -> list:
                                                 size="sm",
                                                 n_clicks=0,
                                                 style={"fontWeight": "600"},
-                                                disabled=True,  # Flash Auth: disabled until connected
                                             ),
                                         ],
                                         style={"display": "flex", "justifyContent": "center"},
@@ -515,12 +287,12 @@ def login_layout(society_name: str = "Society") -> list:
                     ],
                 ),
             ],
-            style={"padding": "10px 5px", "position": "relative"},
+            style={"padding": "10px 5px"},
         )
     ]
 
 
-# ── Password reset modals ─────────────────────────────────────────────
+# ── Password reset modals ─────────────────────────────────────
 
 def forgot_password_modal() -> dbc.Modal:
     return dbc.Modal(

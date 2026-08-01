@@ -44,6 +44,8 @@ def _redirect_url(role, society_id):
     return '/dashboard/'
 
 
+# ── Login ─────────────────────────────────────────────
+
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data       = request.json or {}
@@ -92,7 +94,7 @@ def login():
     })
 
 
-# ── Token refresh ─────────────────────────────────────
+# ── Token refresh ─────────────────────────────────────────────
 
 @auth_bp.route('/refresh', methods=['POST'])
 def refresh_token():
@@ -118,7 +120,7 @@ def refresh_token():
         return jsonify({'success': False, 'message': str(e)}), 401
 
 
-# ── Logout ──────────────────────────────────────────────
+# ── Logout ────────────────────────────────────────────────────
 
 @auth_bp.route('/logout', methods=['POST'])
 @login_required
@@ -128,7 +130,7 @@ def logout():
     return jsonify({'success': True, 'message': 'Logged out'})
 
 
-# ── Auth check ───────────────────────────────────────────
+# ── Auth check ─────────────────────────────────────────────────
 
 @auth_bp.route('/check-auth', methods=['GET'])
 def check_auth():
@@ -137,7 +139,7 @@ def check_auth():
     return jsonify({'authenticated': False}), 401
 
 
-# ── Society list (used by society_select page) ────────────
+# ── Society list (used by society_select page) ────────────────
 
 @auth_bp.route('/societies', methods=['GET'])
 def get_societies_list():
