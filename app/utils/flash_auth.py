@@ -3,14 +3,7 @@
 Flash Auth — Pre-login Connectivity Gate for EstateHub.
 
 This module implements the "Flash Auth" system: before any user can attempt
-to log in, the application verifies two layers of connectivity:
-
-  1. Network Connectivity  — browser navigator.onLine + server-side HTTP probe
-  2. Database Connectivity  — server-side SELECT 1 via db_manager
-
-Only when BOTH checks pass does the login UI become interactive.  The system
-continuously monitors connectivity via a periodic interval and updates visual
-indicators in real time.
+to log in, the application verifies database connectivity.
 
 Components
 ----------
@@ -18,82 +11,58 @@ Components
 - flash_auth_clientside  — JavaScript for browser-side online/offline detection
 - NetworkHealthRoute     — Flask endpoint for server-side health probing
 - Pre-login guard logic  — server-side check_all() called before every auth attempt
+
+Connectivity status is cached with a TTL and warmed at app startup.
+No live TCP/HTTP probes are performed per-request.
 """
 
-import socket
 import time
 import logging
-import os
+import threading
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-# Internet probe: try Cloudflare DNS first, then fall back to Google DNS,
-# then HTTP probe to a reliable endpoint. This handles environments where
-# raw TCP to port 53 is blocked (corporate firewalls, Docker, etc.).
-INTERNET_PROBES = [
-    ("1.1.1.1", 53, "tcp"),       # Cloudflare DNS
-    ("8.8.8.8", 53, "tcp"),       # Google DNS (fallback)
-]
-INTERNET_PROBE_TIMEOUT = 4
+CACHE_TTL = 60
 
-# HTTP probe fallback for environments where TCP probes are blocked
-HTTP_PROBE_URL = "https://httpbin.org/get"
-HTTP_PROBE_TIMEOUT = 4
-
-# Health-check interval in milliseconds (how often the app re-probes connectivity)
 HEALTH_CHECK_INTERVAL_MS = 15_000
-
-# Network check trigger interval (faster, for polling in callbacks)
 NET_CHECK_TRIGGER_MS = 30_000
 
 
-# ── Server-side connectivity probes ───────────────────────────────────────────
+# ── Connectivity cache ──────────────────────────────────────────────────────────
 
-def _probe_tcp(host: str, port: int, timeout: float = INTERNET_PROBE_TIMEOUT) -> bool:
-    """Attempt a TCP connection to a host:port."""
-    try:
-        sock = socket.create_connection((host, port), timeout=timeout)
-        sock.close()
-        return True
-    except OSError:
-        return False
+_connectivity_cache = {
+    "database": None,
+    "internet": True,
+    "timestamp": 0,
+}
+_cache_lock = threading.Lock()
 
 
-def _probe_http(url: str = HTTP_PROBE_URL, timeout: float = HTTP_PROBE_TIMEOUT) -> bool:
-    """Attempt an HTTP GET to a reliable endpoint."""
-    try:
-        import urllib.request
-        req = urllib.request.Request(url, method="GET")
-        resp = urllib.request.urlopen(req, timeout=timeout)
-        return resp.status == 200
-    except Exception:
-        return False
+def _is_cache_fresh() -> bool:
+    return (time.time() - _connectivity_cache["timestamp"]) < CACHE_TTL
 
 
-def check_internet() -> bool:
+def warm_cache() -> None:
     """
-    Check internet connectivity with multiple fallback strategies.
+    One-time connectivity warm-up at app startup.
 
-    1. Try TCP probes to Cloudflare DNS (1.1.1.1:53) and Google DNS (8.8.8.8:53)
-    2. If all TCP probes fail, try an HTTP GET to httpbin.org
-    3. Return True if ANY probe succeeds
-
-    This handles environments where raw TCP to port 53 is blocked.
+    Probes the database and caches the result. Called from create_app()
+    so that the first page load does not block on a cold cache miss.
+    Runs in a daemon thread so it never blocks startup.
     """
-    # Strategy 1: TCP probes
-    for host, port, _ in INTERNET_PROBES:
-        if _probe_tcp(host, port):
-            return True
+    def _do_warm():
+        database = check_database()
+        with _cache_lock:
+            _connectivity_cache["database"] = database
+            _connectivity_cache["internet"] = True
+            _connectivity_cache["timestamp"] = time.time()
+        log.info("[FlashAuth] Cache warmed: database=%s", database)
 
-    # Strategy 2: HTTP fallback
-    if _probe_http():
-        return True
-
-    log.warning("[FlashAuth] Internet probe: all methods failed")
-    return False
+    t = threading.Thread(target=_do_warm, daemon=True)
+    t.start()
 
 
 def check_database() -> bool:
@@ -101,8 +70,6 @@ def check_database() -> bool:
     Probe the database with a trivial query.
 
     Returns True on success, False on any exception.
-    Uses None for params (not an empty tuple) so psycopg2 doesn't try
-    to format the query with named parameters.
     """
     try:
         db._execute("SELECT 1", None, fetch_one=True)
@@ -112,86 +79,79 @@ def check_database() -> bool:
         return False
 
 
-def check_all() -> dict:
+def check_all(force: bool = False) -> dict:
     """
-    Run every connectivity probe and return a structured result.
+    Return connectivity status, optionally bypassing the cache.
+
+    No live probes are performed unless *force* is True or the cache
+    has aged past CACHE_TTL seconds.
+
+    Args:
+        force: When True, always re-probe the database regardless of
+            cache freshness. Used by the Retry Connection button.
 
     Returns:
         dict with keys: internet (bool), database (bool), all_ok (bool),
-        timestamp (float), latency_internet (float|None), latency_db (float|None)
+        timestamp (float), latency_internet_ms (None), latency_db_ms (None)
     """
-    start = time.time()
-    internet = check_internet()
-    latency_internet = round((time.time() - start) * 1000)
+    if force or not _is_cache_fresh():
+        database = check_database()
+        with _cache_lock:
+            _connectivity_cache["database"] = database
+            _connectivity_cache["internet"] = True
+            _connectivity_cache["timestamp"] = time.time()
 
-    start = time.time()
-    database = check_database()
-    latency_db = round((time.time() - start) * 1000)
-
-    return {
-        "internet": internet,
-        "database": database,
-        "all_ok": internet and database,
-        "timestamp": time.time(),
-        "latency_internet_ms": latency_internet,
-        "latency_db_ms": latency_db,
-    }
+    with _cache_lock:
+        return {
+            "internet": _connectivity_cache["internet"],
+            "database": _connectivity_cache["database"],
+            "all_ok": _connectivity_cache["database"],
+            "timestamp": _connectivity_cache["timestamp"],
+            "latency_internet_ms": None,
+            "latency_db_ms": None,
+        }
 
 
 def require_network() -> bool:
     """
-    Hard gate: return True only when both internet and database are reachable.
+    Gate: return True only when the database is reachable.
 
-    Use this as the first line in any authentication function to ensure
-    connectivity before proceeding with credential verification.
+    Uses cached connectivity status — no live probes.
+    The internet TCP probe has been removed; only the real dependency
+    (database reachability) is checked.
     """
-    if not check_internet():
-        log.warning("[FlashAuth] Network gate: no internet — blocking auth")
-        return False
-    if not check_database():
+    result = check_all()
+    if not result["database"]:
         log.warning("[FlashAuth] Network gate: database unreachable — blocking auth")
         return False
     return True
 
 
-# ── Flask Health Endpoint Data ────────────────────────────────────────────────
-
 def get_health_status() -> dict:
     """
     Build the health status payload returned by the /auth/flash-health endpoint.
 
-    This is the server-side counterpart to the client-side navigator.onLine check.
+    Uses cached connectivity status — no live probes.
     """
-    internet = check_internet()
-    database = check_database()
+    result = check_all()
     return {
-        "internet": internet,
-        "database": database,
-        "all_ok": internet and database,
+        "internet": result["internet"],
+        "database": result["database"],
+        "all_ok": result["all_ok"],
         "timestamp": time.time(),
         "server": "ok",
     }
 
 
-# ── Dash Layout Components ────────────────────────────────────────────────────
+# ── Dash Layout Components ─────────────────────────────────────────────────────
 
 def get_flash_auth_components():
     """
     Return the Dash components needed for the Flash Auth connectivity gate.
-
-    These must be inserted into the shell_layout() so that the connectivity
-    callback outputs have valid targets.
-
-    Components returned:
-      - dcc.Store(id="network-status-store")     — holds {internet, database, all_ok}
-      - dcc.Store(id="flash-auth-status-store")  — holds overall flash auth state
-      - dcc.Interval(id="network-check-trigger") — periodic health probe trigger
-      - dcc.Interval(id="flash-health-interval") — continuous connectivity monitor
     """
     from dash import dcc
 
     return [
-        # Stores
         dcc.Store(
             id="network-status-store",
             storage_type="memory",
@@ -209,7 +169,6 @@ def get_flash_auth_components():
                 "latency_db_ms": None,
             },
         ),
-        # Intervals
         dcc.Interval(
             id="network-check-trigger",
             interval=NET_CHECK_TRIGGER_MS,
@@ -226,10 +185,6 @@ def get_flash_auth_components():
 # ── Client-side JavaScript for Browser Online Detection ───────────────────────
 
 FLASH_AUTH_CLIENTSIDE_JS = """
-// Flash Auth — Browser-side online/offline detection
-// This runs in the browser and checks navigator.onLine, then hits
-// /auth/flash-health for server-side DB probe.
-
 async function() {
     var online = navigator.onLine;
     var result = {
@@ -245,7 +200,6 @@ async function() {
         return result;
     }
 
-    // Server-side probe (database reachability)
     var start = performance.now();
     try {
         var resp = await fetch('/auth/flash-health', {
@@ -277,15 +231,6 @@ async function() {
 def build_network_indicator(status: dict = None):
     """
     Build the HTML for the network connectivity indicator.
-
-    Shows colored dots for:
-      - Internet (green/red/yellow)
-      - Database (green/red/yellow)
-      - Overall status with latency
-
-    Args:
-        status: dict with keys internet, database, all_ok, latency_db_ms, etc.
-                If None, shows "checking" state.
     """
     from dash import html
 
@@ -326,11 +271,11 @@ def build_network_indicator(status: dict = None):
 
     def _status_color(val):
         if val is True:
-            return "#28a745"  # green
+            return "#28a745"
         elif val is False:
-            return "#dc3545"  # red
+            return "#dc3545"
         else:
-            return "#ffc107"  # yellow/checking
+            return "#ffc107"
 
     def _status_label(val, name):
         if val is True:

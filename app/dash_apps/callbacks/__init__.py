@@ -22,16 +22,7 @@ def register_callbacks(app):
     from .shell_callbacks import register_shell_callbacks
     register_shell_callbacks(app)
 
-    # 2. Flash Auth (connectivity gate — MUST run before login callbacks)
-    #    Populates network-status-store so login handlers can check connectivity.
-    try:
-        from .flash_auth_callbacks import register_flash_auth_callbacks
-        register_flash_auth_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ flash_auth_callbacks failed: {e}")
-        import traceback; traceback.print_exc()
-
-    # 3. Login (writes auth-store with allow_duplicate=True)
+    # 2. Login (writes auth-store with allow_duplicate=True)
     from .login_callbacks import register_login_callbacks
     register_login_callbacks(app)
 
