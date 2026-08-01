@@ -32,15 +32,21 @@ def society_select_layout() -> list:
                            "fontSize": "13px", "marginBottom": "20px"},
                 ),
 
-                dcc.Dropdown(
-                    id="society-dropdown",
-                    placeholder="Search or select society…",
-                    searchable=True,
-                    clearable=False,
-                    style={"fontSize": "13px", "marginBottom": "14px"},
-                ),
+                 dcc.Dropdown(
+                     id="society-dropdown",
+                     placeholder="Search or select society…",
+                     searchable=True,
+                     clearable=False,
+                     style={"fontSize": "13px", "marginBottom": "14px"},
+                 ),
 
-                dbc.Checkbox(
+                 html.Div(
+                     id="login-db-error",
+                     children="",
+                     style={"display": "none"},
+                 ),
+
+                 dbc.Checkbox(
                     id="remember-society-checkbox",
                     label="Remember my society",
                     value=False,
