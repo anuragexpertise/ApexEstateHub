@@ -1,17 +1,8 @@
 # app/dash_apps/callbacks/login_callbacks.py
 """
-Login Callbacks — Flash Auth Edition.
+Login Callbacks — EstateHub.
 
-Password / PIN / pattern authentication with mandatory Flash Auth
-connectivity gate before every authentication attempt.
-
-The Flash Auth system ensures that:
-  1. The browser's navigator.onLine is checked (clientside)
-  2. Server-side internet reachability is verified (TCP probe)
-  3. Database reachability is confirmed (SELECT 1)
-
-All three checks must pass before credentials are processed.
-Login buttons are visually disabled until connectivity is confirmed.
+Password / PIN / pattern authentication.
 """
 
 import dash
@@ -19,31 +10,23 @@ from dash import Input, Output, State, no_update, html, ctx
 from dash.exceptions import PreventUpdate
 
 from app.services.auth_service import authenticate_user
-from app.utils.flash_auth import check_all, require_network
 
 
-def _db():
-    from database.db_manager import db
-    return db
+def _login_response(user: dict):
+    _establish_server_session(user)
+    role       = user.get("role", "admin")
+    society_id = user.get("society_id")
+    name       = user.get("email", "").split("@")[0]
+    return (
+        _build_auth_store(user),
+        _redirect(role, society_id),
+        {"type": "success", "message": f"Welcome, {name}!"},
+        False,
+    )
 
 
-def _net_error(message: str):
-    return no_update, no_update, \
-           {"type": "error", "message": message}, no_update
-
-
-def _offline_response():
-    return \
-        no_update, no_update, \
-        {"type": "error", "message": "No network connection — check your internet and try again."}, \
-        no_update
-
-
-def _db_down_response():
-    return \
-        no_update, no_update, \
-        {"type": "error", "message": "Cannot reach the database. Contact your administrator."}, \
-        no_update
+def _login_error(message: str):
+    return no_update, no_update, {"type": "error", "message": message}, no_update
 
 
 def _establish_server_session(user: dict) -> None:
@@ -94,48 +77,10 @@ def _redirect(role: str, society_id) -> str:
     return paths.get(role, "/dashboard/admin-portal")
 
 
-def _login_response(user: dict):
-    _establish_server_session(user)
-    role       = user.get("role", "admin")
-    society_id = user.get("society_id")
-    name       = user.get("email", "").split("@")[0]
-    return (
-        _build_auth_store(user),
-        _redirect(role, society_id),
-        {"type": "success", "message": f"Welcome, {name}!"},
-        False,
-    )
-
-
-def _login_error(message: str):
-    return no_update, no_update, {"type": "error", "message": message}, no_update
-
-
-def _flash_auth_guard():
-    """
-    Flash Auth connectivity gate.
-
-    Returns None if all checks pass, or a toast-store error response
-    if connectivity is missing. Call this at the top of every login handler.
-    """
-    result = check_all()
-    if not result["internet"]:
-        print("❌ Flash Auth: login blocked — no internet")
-        return _offline_response()
-    if not result["database"]:
-        print("❌ Flash Auth: login blocked — database unreachable")
-        return _db_down_response()
-    return None  # all checks passed
-
-
-# ──────────────────────────────────────────────────────────────────────
-# REGISTRATION
-# ──────────────────────────────────────────────────────────────────────
-
 def register_login_callbacks(app):
     print("  → Registering login callbacks…")
 
-    # ── 1. PASSWORD LOGIN ──────────────────────────────────────────
+    # ── 1. PASSWORD LOGIN ──────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -151,21 +96,20 @@ def register_login_callbacks(app):
         if not n or not email or not password:
             raise PreventUpdate
 
-        # Flash Auth: verify connectivity before processing credentials
-        blocked = _flash_auth_guard()
-        if blocked:
-            return blocked
-
         print(f"\n🔐 Password login: {email}")
         society_id = (auth or {}).get("society_id")
-        user = authenticate_user(email.strip(), password, society_id)
+        try:
+            user = authenticate_user(email.strip(), password, society_id)
+        except Exception as exc:
+            print(f"❌ Database connection error: {exc}")
+            return _login_error("No Database connection")
         if not user:
             print(f"❌ Password login failed: {email}")
             return _login_error("Invalid email or password")
         print(f"✅ Password login success: {email}")
         return _login_response(user)
 
-    # ── 2. PIN LOGIN ───────────────────────────────────────────────
+    # ── 2. PIN LOGIN ───────────────────────────────────────
     @app.callback(
         Output("auth-store",   "data",    allow_duplicate=True),
         Output("url",          "pathname",allow_duplicate=True),
@@ -181,22 +125,21 @@ def register_login_callbacks(app):
         if not n or not email or not pin:
             raise PreventUpdate
 
-        # Flash Auth: verify connectivity before processing credentials
-        blocked = _flash_auth_guard()
-        if blocked:
-            return blocked
-
         print(f"\n🔢 PIN login: {email}")
         society_id = (auth or {}).get("society_id")
         from app.services.auth_service import authenticate_pin
-        user = authenticate_pin(email.strip(), pin, society_id)
+        try:
+            user = authenticate_pin(email.strip(), pin, society_id)
+        except Exception as exc:
+            print(f"❌ Database connection error: {exc}")
+            return _login_error("No Database connection")
         if not user:
             print(f"❌ PIN login failed: {email}")
             return _login_error("Invalid PIN — please try again")
         print(f"✅ PIN login success: {email}")
         return _login_response(user)
 
-    # ── 3. PATTERN LOGIN ──────────────────────────────────────────
+    # ── 3. PATTERN LOGIN ──────────────────────────────────
     @app.callback(
         Output("auth-store",       "data",    allow_duplicate=True),
         Output("url",              "pathname",allow_duplicate=True),
@@ -212,22 +155,21 @@ def register_login_callbacks(app):
         if not n or not email or not pattern:
             raise PreventUpdate
 
-        # Flash Auth: verify connectivity before processing credentials
-        blocked = _flash_auth_guard()
-        if blocked:
-            return blocked
-
         print(f"\n🔵 Pattern login: {email}")
         society_id = (auth or {}).get("society_id")
         from app.services.auth_service import authenticate_pattern
-        user = authenticate_pattern(email.strip(), pattern, society_id)
+        try:
+            user = authenticate_pattern(email.strip(), pattern, society_id)
+        except Exception as exc:
+            print(f"❌ Database connection error: {exc}")
+            return _login_error("No Database connection")
         if not user:
             print(f"❌ Pattern login failed: {email}")
             return _login_error("Pattern not recognised — please try again")
         print(f"✅ Pattern login success: {email}")
         return _login_response(user)
 
-    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
+    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────
     @app.callback(
         Output("auth-store",    "data",    allow_duplicate=True),
         Output("url",           "pathname",allow_duplicate=True),
@@ -242,35 +184,20 @@ def register_login_callbacks(app):
         if not n or not email or not password:
             raise PreventUpdate
 
-        # Flash Auth: verify connectivity before processing credentials
-        blocked = _flash_auth_guard()
-        if blocked:
-            return blocked
-
         print(f"\n👑 Master admin login: {email}")
-        user = authenticate_user(email.strip(), password, society_id=None)
+        try:
+            user = authenticate_user(email.strip(), password, society_id=None)
+        except Exception as exc:
+            print(f"❌ Database connection error: {exc}")
+            return _login_error("No Database connection")
         if not user or user.get("role") != "master":
             return _login_error("Invalid master admin credentials")
-
-        try:
-            row = _db()._execute(
-                "SELECT id FROM users WHERE email = %s AND is_master_admin = TRUE",
-                (email.strip(),),
-                fetch_one=True,
-            )
-        except Exception as exc:
-            print(f"❌ Master admin DB check failed: {exc}")
-            return _login_error("Database error during master admin check")
-
-        if not row:
-            print(f"❌ {email} is not flagged as master admin")
-            return _login_error("Not authorised as master admin")
 
         user["society_id"] = None
         print(f"✅ Master admin login success: {email}")
         return _login_response(user)
 
-    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────
+    # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────
     @app.callback(
         Output("forgot-password-modal", "is_open"),
         Output("reset-email-input",     "value"),
@@ -309,13 +236,6 @@ def register_login_callbacks(app):
                 return no_update, no_update, \
                        {"type": "error", "message": "Please enter your email address"}
 
-            # Flash Auth: verify connectivity before processing reset
-            result = check_all()
-            if not result["internet"]:
-                return no_update, no_update, _offline_response()[2]
-            if not result["database"]:
-                return no_update, no_update, _db_down_response()[2]
-
             print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
             try:
@@ -333,13 +253,6 @@ def register_login_callbacks(app):
                 return no_update, no_update, \
                        {"type": "error", "message": "Passwords do not match"}
 
-            # Flash Auth: verify connectivity before processing reset
-            result = check_all()
-            if not result["internet"]:
-                return no_update, no_update, _offline_response()[2]
-            if not result["database"]:
-                return no_update, no_update, _db_down_response()[2]
-
             print("\n🔑 Confirming password reset")
             try:
                 from app.services.auth_service import reset_password
@@ -350,7 +263,7 @@ def register_login_callbacks(app):
 
         raise PreventUpdate
 
-    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────────────
+    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────
     app.clientside_callback(
         """
         function(n) {

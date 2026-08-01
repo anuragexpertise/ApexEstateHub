@@ -260,7 +260,7 @@ def register_shell_callbacks(app):
     # ── 0. SOCIETY DROPDOWN ───────────────────────────────────────────────────
     # Trigger: url.pathname (fires on initial mount).
     # allow_duplicate=True on society-dropdown.disabled because Flash Auth
-    # (flash_auth_callbacks.py) also writes to that Output.
+    # also writes to that Output.
     # prevent_initial_call='initial_duplicate' allows both allow_duplicate AND
     # the initial call to fire on page load.
     @app.callback(
@@ -275,21 +275,6 @@ def register_shell_callbacks(app):
         print(f"\n🔍 load_societies — pathname={pathname}")
         _ERR = {"display": "block", "marginBottom": "15px",
                 "padding": "8px", "borderRadius": "8px"}
-
-        # Flash Auth: check connectivity before loading societies
-        from app.utils.flash_auth import check_all
-        health = check_all()
-        if not health["database"]:
-            print(f"❌ Flash Auth: DB unreachable (internet={health['internet']})")
-            return (
-                [], True,
-                html.Div(
-                    [html.I(className="fas fa-database me-2"),
-                     "Cannot connect to the database. Please check your network."],
-                    style={"color": "#dc3545", "fontSize": "12px", "textAlign": "center"},
-                ),
-                {**_ERR, "background": "#f8d7da"},
-            )
 
         try:
             rows = _db()._execute(

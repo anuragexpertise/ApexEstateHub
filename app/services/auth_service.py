@@ -1,20 +1,12 @@
 # app/services/auth_service.py
 """
-Authentication service — EstateHub (Flash Auth Edition).
+Authentication service — EstateHub.
 
 Password storage: werkzeug.security (scrypt/pbkdf2, salted).
 All DB queries use named params (:name) via db_manager._to_pyformat().
 
 CRITICAL: seed.py and society_service.py both use generate_password_hash().
            This file must use check_password_hash() to verify — NOT sha256.
-
-Flash Auth Connectivity Gate
------------------------------
-Every public authenticate* function validates connectivity via the
-Flash Auth system before proceeding.  The _require_network() function
-calls require_network() from app.utils.flash_auth, which performs both
-internet (TCP probe) and database (SELECT 1) checks.  If either fails,
-None is returned immediately so the caller can surface a clear error.
 """
 
 import secrets
@@ -24,29 +16,11 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from database.db_manager import db
-from app.utils.flash_auth import require_network
 
 log = logging.getLogger(__name__)
 
 
-def _require_network() -> bool:
-    """
-    Flash Auth connectivity gate.
-
-    Return True only when both internet and database are reachable.
-    Delegates to app.utils.flash_auth.require_network() which performs:
-      1. TCP probe to 1.1.1.1:53 (internet check)
-      2. SELECT 1 against PostgreSQL (database check)
-
-    Logs warnings when checks fail for server-side diagnostics.
-    """
-    if not require_network():
-        log.warning("[FlashAuth] Auth blocked: connectivity check failed")
-        return False
-    return True
-
-
-# ── Internal helpers ──────────────────────────────────────────────────
+# ── Internal helpers ──────────────────────────────────────────
 
 def _build_auth(row: dict) -> dict | None:
     """Convert a DB user row into the auth-store payload."""
@@ -99,14 +73,8 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
 # ── Login methods ─────────────────────────────────────────────────────
 
 def authenticate_user(email: str, password: str,
-                        society_id: int | None = None) -> dict | None:
-    """Verify email + password (werkzeug check_password_hash).
-
-    Returns None when the network/database is unreachable.
-    """
-    if not _require_network():
-        return None
-
+                         society_id: int | None = None) -> dict | None:
+    """Verify email + password (werkzeug check_password_hash)."""
     row = _fetch_user(email, society_id)
     if not row:
         log.warning("No user: %s sid=%s", email, society_id)
@@ -125,14 +93,8 @@ def authenticate_user(email: str, password: str,
 
 
 def authenticate_pin(email: str, pin: str,
-                       society_id: int | None = None) -> dict | None:
-    """Verify email + PIN (werkzeug hash in pin_hash column).
-
-    Returns None when the network/database is unreachable.
-    """
-    if not _require_network():
-        return None
-
+                        society_id: int | None = None) -> dict | None:
+    """Verify email + PIN (werkzeug hash in pin_hash column)."""
     row = _fetch_user(email, society_id)
     if not row:
         return None
@@ -143,14 +105,8 @@ def authenticate_pin(email: str, pin: str,
 
 
 def authenticate_pattern(email: str, pattern: str,
-                           society_id: int | None = None) -> dict | None:
-    """Verify email + pattern string (werkzeug hash in pattern_hash column).
-
-    Returns None when the network/database is unreachable.
-    """
-    if not _require_network():
-        return None
-
+                            society_id: int | None = None) -> dict | None:
+    """Verify email + pattern string (werkzeug hash in pattern_hash column)."""
     row = _fetch_user(email, society_id)
     if not row:
         return None
@@ -163,14 +119,8 @@ def authenticate_pattern(email: str, pattern: str,
 # ── Password reset ────────────────────────────────────────────────────
 
 def request_password_reset(email: str,
-                              society_id: int | None = None) -> tuple[bool, str, str | None]:
-    """Generate 6-digit reset token. Returns (ok, message, plain_token).
-
-    Fails immediately when network/database is unreachable.
-    """
-    if not _require_network():
-        return False, "Cannot reach the database. Try again later.", None
-
+                               society_id: int | None = None) -> tuple[bool, str, str | None]:
+    """Generate 6-digit reset token. Returns (ok, message, plain_token)."""
     try:
         q = "SELECT id FROM users WHERE email = :email"
         p: dict = {"email": email}
@@ -199,9 +149,6 @@ def request_password_reset(email: str,
 
 def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
     """Match plain_token against stored hashes, then update password."""
-    if not _require_network():
-        return False, "Cannot reach the database. Try again later."
-
     try:
         rows = db._execute(
             """SELECT id, reset_token FROM users

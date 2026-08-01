@@ -3,7 +3,6 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from database.db_manager import db
 from app.models.user import User
-from app.utils.flash_auth import check_internet, check_database
 import jwt, os, time
 from datetime import datetime, timedelta
 
@@ -45,25 +44,8 @@ def _redirect_url(role, society_id):
     return '/dashboard/'
 
 
-def _check_network():
-    """Return (ok, error_message).  Checks internet + database via Flash Auth."""
-    from app.utils.flash_auth import require_network, check_all
-    result = check_all()
-    if not result["internet"]:
-        return False, 'No internet connection'
-    if not result["database"]:
-        return False, 'Database unreachable'
-    return True, None
-
-
-# ── Login ─────────────────────────────────────────────────────
-
 @auth_bp.route('/login', methods=['POST'])
 def login():
-    ok, err = _check_network()
-    if not ok:
-        return jsonify({'success': False, 'message': err}), 503
-
     data       = request.json or {}
     email      = data.get('email')
     password   = data.get('password')
@@ -110,14 +92,10 @@ def login():
     })
 
 
-# ── Token refresh ─────────────────────────────────────────────
+# ── Token refresh ─────────────────────────────────────
 
 @auth_bp.route('/refresh', methods=['POST'])
 def refresh_token():
-    ok, err = _check_network()
-    if not ok:
-        return jsonify({'success': False, 'message': err}), 503
-
     data  = request.json or {}
     token = data.get('refresh_token')
     if not token:
@@ -140,7 +118,7 @@ def refresh_token():
         return jsonify({'success': False, 'message': str(e)}), 401
 
 
-# ── Logout ────────────────────────────────────────────────────
+# ── Logout ──────────────────────────────────────────────
 
 @auth_bp.route('/logout', methods=['POST'])
 @login_required
@@ -150,7 +128,7 @@ def logout():
     return jsonify({'success': True, 'message': 'Logged out'})
 
 
-# ── Auth check ─────────────────────────────────────────────────
+# ── Auth check ───────────────────────────────────────────
 
 @auth_bp.route('/check-auth', methods=['GET'])
 def check_auth():
@@ -159,49 +137,10 @@ def check_auth():
     return jsonify({'authenticated': False}), 401
 
 
-# ── Flash Auth Health Endpoint ────────────────────────────────
-# Lightweight server-side connectivity probe for the Flash Auth system.
-# Returns internet + database reachability status without requiring
-# authentication. Used by the client-side health-check interval.
-
-@auth_bp.route('/flash-health', methods=['GET'])
-def flash_health():
-    """
-    Flash Auth health probe endpoint.
-
-    Performs two server-side checks via flash_auth.get_health_status():
-      1. Internet reachability via multi-strategy probe (TCP + HTTP fallback)
-      2. Database reachability via SELECT 1
-
-    Returns a JSON payload with the results. No authentication required —
-    this endpoint exists so the browser can determine if the server and
-    database are reachable BEFORE presenting the login form.
-    """
-    from app.utils.flash_auth import get_health_status, check_all
-
-    start = time.time()
-    result = check_all()
-    total_latency_ms = round((time.time() - start) * 1000)
-
-    return jsonify({
-        'internet': result.get('internet', False),
-        'database': result.get('database', False),
-        'all_ok': result.get('all_ok', False),
-        'timestamp': time.time(),
-        'latency_internet_ms': result.get('latency_internet_ms'),
-        'latency_db_ms': result.get('latency_db_ms'),
-        'server': 'ok',
-    })
-
-
-# ── Society list (used by society_select page) ────────────────
+# ── Society list (used by society_select page) ────────────
 
 @auth_bp.route('/societies', methods=['GET'])
 def get_societies_list():
-    # Flash Auth: check connectivity before serving society list
-    ok, err = _check_network()
-    if not ok:
-        return jsonify({'error': err, 'flash_auth': True}), 503
     try:
         societies = db._execute(
             'SELECT id, name, address, logo FROM societies ORDER BY name',
