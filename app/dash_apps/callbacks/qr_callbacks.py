@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/qr_callbacks.py (COMPLETE WITH CAMERA)
 
-from dash import Input, Output, State, dcc, html, no_update, clientside_callback, ctx, MATCH
+from dash import Input, Output, State, dcc, html, no_update, clientside_callback, ctx, MATCH, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import base64
@@ -757,8 +757,6 @@ def register_qr_callbacks(app):
     # asset QR types.
     @app.callback(
         Output({"type": "manual-qr-result", "scope": MATCH}, "children"),
-        Output("toast-store", "data", allow_duplicate=True),
-        Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
         Input({"type": "manual-qr-validate-btn", "scope": MATCH}, "n_clicks"),
         State({"type": "manual-qr-input", "scope": MATCH}, "value"),
         State("auth-store", "data"),
@@ -776,34 +774,75 @@ def register_qr_callbacks(app):
         role = user.get("role")
 
         if result.get("status") == "PASS" and role == "concern":
+            return render_concern_lookup_result(user["id"], society_id, auth_data)
+
+        if result.get("status") == "PASS":
+            return html.Div([
+                html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
+                html.H4("Valid", style={"color": "#2ecc71", "marginTop": "10px"}),
+                html.P(user.get("name", "Unknown")),
+                html.Hr(),
+                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+            ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
+
+        reason = result.get("reason", "Invalid QR code")
+        return html.Div([
+            html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
+            html.H4("Not Found", style={"color": "#e74c3c", "marginTop": "10px"}),
+            html.P(reason),
+            html.Hr(),
+            html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+        ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"})
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
+        Input({"type": "manual-qr-validate-btn", "scope": ALL}, "n_clicks"),
+        State({"type": "manual-qr-input", "scope": ALL}, "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def validate_manual_qr_scoped_stores(n_clicks_list, qr_data_list, auth_data):
+        if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+            raise PreventUpdate
+
+        triggered_scope = ctx.triggered_id.get("scope")
+        triggered_idx = None
+
+        if ctx.inputs_list and ctx.inputs_list[0]:
+            for idx, item in enumerate(ctx.inputs_list[0]):
+                if item.get("id", {}).get("scope") == triggered_scope:
+                    triggered_idx = idx
+                    break
+
+        if triggered_idx is None or triggered_idx >= len(n_clicks_list) or not n_clicks_list[triggered_idx]:
+            raise PreventUpdate
+
+        qr_data = (qr_data_list[triggered_idx] or "").strip() if triggered_idx < len(qr_data_list) else ""
+        if not qr_data:
+            raise PreventUpdate
+
+        from app.services.qr_service import validate_qr_code
+        society_id = (auth_data or {}).get("society_id")
+        scanning_user_id = (auth_data or {}).get("user_id")
+        result = validate_qr_code(qr_data, society_id, scanning_user_id)
+        user = result.get("user") or {}
+        role = user.get("role")
+
+        if result.get("status") == "PASS" and role == "concern":
             return (
-                render_concern_lookup_result(user["id"], society_id, auth_data),
                 {"type": "success", "message": f"Found — {user.get('name', 'Concern')}"},
                 {"type": "success"},
             )
 
         if result.get("status") == "PASS":
             return (
-                html.Div([
-                    html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
-                    html.H4("Valid", style={"color": "#2ecc71", "marginTop": "10px"}),
-                    html.P(user.get("name", "Unknown")),
-                    html.Hr(),
-                    html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
-                ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"}),
                 {"type": "success", "message": f"Valid — {user.get('name', 'Unknown')}"},
                 {"type": "success"},
             )
 
         reason = result.get("reason", "Invalid QR code")
         return (
-            html.Div([
-                html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
-                html.H4("Not Found", style={"color": "#e74c3c", "marginTop": "10px"}),
-                html.P(reason),
-                html.Hr(),
-                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
-            ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"}),
             {"type": "error", "message": reason},
             {"type": "error"},
         )
