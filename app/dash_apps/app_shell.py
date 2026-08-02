@@ -489,30 +489,26 @@ def _concern_invite_modal() -> dbc.Modal:
                     ),
                     # ── Role selector cards ──────────────────────────────
                     html.Div([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.I(className="fas fa-truck fa-2x mb-2",
-                                       style={"color": "#17976e"}),
-                                html.H6("Vendor", style={"fontWeight": "600", "fontSize": "13px"}),
-                                html.Small("Invite a vendor to bid",
-                                           style={"color": "#64748b", "fontSize": "11px"}),
-                            ], className="text-center"),
+                        dbc.Button([
+                            html.I(className="fas fa-truck fa-2x mb-2",
+                                   style={"color": "#17976e", "display": "block"}),
+                            html.H6("Vendor", style={"fontWeight": "600", "fontSize": "13px", "marginBottom": "2px"}),
+                            html.Small("Invite a vendor to bid",
+                                       style={"fontSize": "11px"}),
                         ], id={"type": "invite-card", "role": "VND"},
-                           style={"cursor": "pointer", "border": "1px solid #e2e8f0",
-                                  "borderRadius": "10px", "padding": "12px",
-                                  "backgroundColor": "#fff", "textAlign": "center"}),
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.I(className="fas fa-shield-alt fa-2x mb-2",
-                                       style={"color": "#e59620"}),
-                                html.H6("Security", style={"fontWeight": "600", "fontSize": "13px"}),
-                                html.Small("Invite security to bid",
-                                           style={"color": "#64748b", "fontSize": "11px"}),
-                            ], className="text-center"),
+                           color="secondary", outline=True,
+                           style={"flex": "1", "padding": "12px", "borderRadius": "10px",
+                                  "textAlign": "center"}),
+                        dbc.Button([
+                            html.I(className="fas fa-shield-alt fa-2x mb-2",
+                                   style={"color": "#e59620", "display": "block"}),
+                            html.H6("Security", style={"fontWeight": "600", "fontSize": "13px", "marginBottom": "2px"}),
+                            html.Small("Invite security to bid",
+                                       style={"fontSize": "11px"}),
                         ], id={"type": "invite-card", "role": "SEC"},
-                           style={"cursor": "pointer", "border": "1px solid #e2e8f0",
-                                  "borderRadius": "10px", "padding": "12px",
-                                  "backgroundColor": "#fff", "textAlign": "center"}),
+                           color="secondary", outline=True,
+                           style={"flex": "1", "padding": "12px", "borderRadius": "10px",
+                                  "textAlign": "center"}),
                     ], className="d-flex gap-2 mb-3", style={"justifyContent": "center"}),
                     # ── Search ───────────────────────────────────────────
                     dbc.InputGroup([
