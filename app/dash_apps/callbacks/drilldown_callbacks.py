@@ -451,6 +451,9 @@ def register_drilldown_callbacks(app):
             static_filter = nav_info.get("filter", {}) or {}
             dynamic_filter = _compute_dynamic_filter(card_id, static_filter, sid)
             
+            if card_id == "kpi_concerns_assigned_admin" and role == "admin":
+                static_filter = {**static_filter, "admin_user_id": auth.get("user_id")}
+            
             store = nav_state.navigate_to(
                 store,
                 target,

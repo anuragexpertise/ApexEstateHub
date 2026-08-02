@@ -339,82 +339,121 @@ def register_assign_to_callbacks(app):
         if not society_id:
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
 
+        # ── Server-side role + ownership check ──────────────────────────────
+        # Previously this endpoint had NO role check at all — only the
+        # "Assign" button's client-side visibility was gated to
+        # admin/apartment (profile_actions.py). Since Dash callbacks are
+        # directly reachable independent of what buttons a given portal
+        # renders, that meant any authenticated Vendor/Security session, or
+        # an Owner acting on a concern they didn't raise, could previously
+        # write arbitrary concerns_assigns rows. Mirrors the check already
+        # used by close_concern's handler. See Concerns_Workflow_Review.md §3.1.
+        caller_role = (auth or {}).get("role")
+        if caller_role not in ("admin", "apartment"):
+            return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
+        if caller_role == "apartment":
+            concern_owner_row = db._execute(
+                "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                (concern_id, society_id), fetch_one=True,
+            ) or {}
+            if concern_owner_row.get("created_by") != (auth or {}).get("user_id"):
+                return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
+
         try:
-            # Fetch prior assignments first so we can tell which of the
-            # selected entities are newly assigned (only those get a push —
-            # resubmitting an unchanged assignment shouldn't re-notify).
-            # This table now also carries invited/bid_submitted/resolved/
-            # closed rows (unified 2026-07), so status comes along too.
-            prior_rows = db._execute(
-                "SELECT role, entity_id, status FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
-                (concern_id, society_id), fetch_all=True,
-            ) or []
-            prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
-            prior_keys = set(prior_by_key.keys())
-
-            selected_keys = {k for k, v in selected.items() if v}
-            to_delete = prior_keys - selected_keys
-            to_insert = selected_keys - prior_keys
-
-            # Unchecking someone must not silently erase a resolved/closed
-            # assignment's history — only rows still in-flight (invited,
-            # bid_submitted, assigned) can be removed here.
-            for key in to_delete:
-                if prior_by_key.get(key) in ("resolved", "closed"):
-                    continue
-                parts = key.split("-", 1)
-                role = parts[0]
-                try:
-                    entity_id = int(parts[1])
-                except (IndexError, ValueError):
-                    continue
-                db._execute(
-                    "DELETE FROM concerns_assigns "
-                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
-                    "AND status NOT IN ('resolved', 'closed')",
-                    (concern_id, society_id, role, entity_id),
+            with db._conn() as conn:
+                cur = conn.cursor()
+                # Lock the concern's assignment rows so concurrent submits
+                # serialise on this concern (prevents one admin's DELETE
+                # from removing rows another admin just INSERTed).
+                cur.execute(
+                    "SELECT role, entity_id, status FROM concerns_assigns "
+                    "WHERE concern_id=%s AND society_id=%s FOR UPDATE",
+                    (concern_id, society_id),
                 )
+                prior_rows = [dict(r) for r in cur.fetchall()]
+                prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
+                prior_keys = set(prior_by_key.keys())
 
-            inserted = 0
-            newly_assigned = []
-            for key in to_insert:
-                parts = key.split("-", 1)
-                role = parts[0]
-                try:
-                    entity_id = int(parts[1])
-                except (IndexError, ValueError):
-                    continue
-                db._execute(
-                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
-                    "VALUES (%s, %s, %s, %s, %s, 'assigned') "
-                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
-                    "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
-                    "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
-                    (concern_id, society_id, role, entity_id, actor_user_id),
-                )
-                inserted += 1
-                newly_assigned.append((role, entity_id))
+                selected_keys = {k for k, v in selected.items() if v}
+                to_delete = prior_keys - selected_keys
+                to_insert = selected_keys - prior_keys
 
-            # concerns.status is now kept in sync automatically by
-            # trg_concerns_assigns_sync_status (see estatehub.sql) whenever
-            # concerns_assigns rows are inserted/updated/deleted above — no
-            # manual UPDATE concerns SET status=... needed here anymore.
-
-            # Push-notify only the newly-assigned entities.
-            if newly_assigned:
-                try:
-                    from app.services.push_service import notify_concern_assigned
-                    concern_row = db._execute(
-                        "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
-                        (concern_id, society_id), fetch_one=True,
+                # Unchecking someone must not silently erase a resolved/closed
+                # assignment's history — only rows still in-flight (invited,
+                # bid_submitted, assigned) can be removed here.
+                for key in to_delete:
+                    if prior_by_key.get(key) in ("resolved", "closed"):
+                        continue
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    cur.execute(
+                        "DELETE FROM concerns_assigns "
+                        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
+                        "AND status NOT IN ('resolved', 'closed')",
+                        (concern_id, society_id, role, entity_id),
                     )
-                    notify_concern_assigned(
-                        society_id, concern_id,
-                        (concern_row or {}).get("concern_type", "other"),
-                        newly_assigned,
+
+                inserted = 0
+                newly_assigned = []
+                for key in to_insert:
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    cur.execute(
+                        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
+                        "VALUES (%s, %s, %s, %s, %s, 'assigned') "
+                        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                        "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
+                        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
+                        (concern_id, society_id, role, entity_id, actor_user_id),
                     )
-                except Exception as e:
-                    print(f"⚠️  notify_concern_assigned failed: {e}")
+                    inserted += 1
+                    newly_assigned.append((role, entity_id))
+
+                    # Auto-decline any other still-open (invited/bid_submitted)
+                    # candidates of the SAME role for this concern — choosing
+                    # one vendor's bid implicitly declines the other vendors
+                    # who bid but weren't picked. Doesn't touch other roles
+                    # (e.g. a separately-assigned SEC row) or anyone already
+                    # resolved/closed. See Concerns_Workflow_Review.md §2.7.
+                    cur.execute(
+                        "DELETE FROM concerns_assigns "
+                        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id != %s "
+                        "AND status IN ('invited', 'bid_submitted')",
+                        (concern_id, society_id, role, entity_id),
+                    )
+
+                # concerns.status is now kept in sync automatically by
+                # trg_concerns_assigns_sync_status (see estatehub.sql) whenever
+                # concerns_assigns rows are inserted/updated/deleted above — no
+                # manual UPDATE concerns SET status=... needed here anymore.
+
+                # Push-notify only the newly-assigned entities.
+                if newly_assigned:
+                    try:
+                        from app.services.push_service import notify_concern_assigned
+                        cur.execute(
+                            "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (concern_id, society_id),
+                        )
+                        concern_row = cur.fetchone()
+                        notify_concern_assigned(
+                            society_id, concern_id,
+                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            newly_assigned,
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_assigned failed (concern_id=%s): %s", concern_id, e,
+                        )
 
             # Refresh the concern list/profile
             from app.dash_apps.callbacks.drilldown_callbacks import _render_current
