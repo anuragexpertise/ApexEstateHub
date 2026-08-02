@@ -131,6 +131,12 @@ def register_concern_bid_callbacks(app):
                 notify_concern_bid_saved(
                     society_id, concern_row.get("apartment_id"), concern_row.get("concern_type"), bidder_label,
                 )
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "notify_concern_bid_saved skipped: concern %s not found in society %s (possibly deleted)",
+                    concern_id, society_id,
+                )
         except Exception as e:
             print(f"⚠️  notify_concern_bid_saved failed: {e}")
 
