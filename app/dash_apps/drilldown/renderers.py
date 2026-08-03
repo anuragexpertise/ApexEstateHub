@@ -922,6 +922,24 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
     text_cells = [_field_cell(f) for f in text_fields]
 
+    # ── Concern actions: scope Save Bid / Resolved to the caller's own
+    # concerns_assigns stage ──────────────────────────────────────────────
+    # NOTE (fixed 2026-08): these two buttons used to be shown to every
+    # vendor/security caller on every concern regardless of their own
+    # concerns_assigns.status — "Save Bid" only makes sense at 'invited'
+    # (submit_concern_bid() requires status='invited' or fails with "No
+    # pending invitation found"), and "Resolved" only at 'assigned'
+    # (resolve_concern_assignment() requires status='assigned'). See
+    # Concerns_Workflow_Review.md §3.4.
+    my_concern_status = None
+    if entity == "concern" and role in ("vendor", "security"):
+        my_role_code = "VND" if role == "vendor" else "SEC"
+        my_entity_id = auth_data.get("linked_id")
+        for a in (record_dict.get("_assignments") or []):
+            if a.get("role") == my_role_code and a.get("entity_id") == my_entity_id:
+                my_concern_status = a.get("status")
+                break
+
     # ── Action buttons filtered by role ─────────────────────────────────
     # renderers.py — render_profile_card(), action button loop
     action_btns = []
@@ -932,6 +950,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
             continue
         if act_id == "edit"   and "edit"   not in allowed: continue
         if act_id == "delete" and "delete" not in allowed: continue
+        if act_id == "save_bid" and my_concern_status != "invited": continue
+        if act_id == "vendor_resolve" and my_concern_status != "assigned": continue
         action_btns.append(dbc.Button(
             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
             act["label"]],

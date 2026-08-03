@@ -829,6 +829,38 @@ def load_list(
                 params.append(status_filter)
             else:
                 extra += " AND c.status != 'closed'"
+            # NOTE (fixed 2026-08): _apply_portal_filters() (drilldown_callbacks.py)
+            # is the thing that actually always populates vnd_assignee_id /
+            # sec_assignee_id for vendor/security sessions — the
+            # assigned_vnd_id / assigned_sec_id branch above is dead code,
+            # nothing ever sets those keys. Without this block, load_list()
+            # (which drives both the KPI count AND the drilldown rows) fell
+            # through with NO vendor/security scoping at all: every vendor
+            # and security guard saw every non-closed concern in the whole
+            # society, and the list count didn't match the (correctly
+            # scoped) KPI badge above it. _build_list_sql already had this
+            # fix — load_list (the actual live path) did not. See
+            # Concerns_Workflow_Review.md §3.2.
+            vnd_assignee_id = filters.get("vnd_assignee_id")
+            if vnd_assignee_id:
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
+                params.append(vnd_assignee_id)
+                if assigned_status:
+                    extra += " AND ca.status=%s"
+                    params.append(assigned_status)
+                else:
+                    extra += " AND ca.status != 'closed'"
+                extra += ")"
+            sec_assignee_id = filters.get("sec_assignee_id")
+            if sec_assignee_id:
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
+                params.append(sec_assignee_id)
+                if assigned_status:
+                    extra += " AND ca.status=%s"
+                    params.append(assigned_status)
+                else:
+                    extra += " AND ca.status != 'closed'"
+                extra += ")"
             rows = db._execute(
                 "SELECT c.*, a.flat_number FROM concerns c "
                 "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
@@ -1299,16 +1331,18 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
 
         # ── CONCERN ──────────────────────────────────────────────────────────
         if entity_singular == "concern":
-            r = db._execute("SELECT * FROM fn_concern_profile(%s)", (pk,), fetch_one=True)
+            # NOTE (fixed 2026-08): fn_concern_profile previously took only
+            # p_concern_id with no tenant check — any pk could be loaded
+            # regardless of society. See migration_fn_concern_profile_scope.sql.
+            r = db._execute(
+                "SELECT * FROM fn_concern_profile(%s, %s)", (pk, society_id), fetch_one=True
+            )
             profile = dict(r) if r else None
             if profile and pk:
-                try:
-                    assigns = db._execute(
-                        "SELECT * FROM fn_concern_assignments(%s)", (pk,), fetch_all=True
-                    ) or []
-                    profile["_assignments"] = assigns
-                except Exception:
-                    profile["_assignments"] = []
+                assigns = db._execute(
+                    "SELECT * FROM fn_concern_assignments(%s)", (pk,), fetch_all=True
+                ) or []
+                profile["_assignments"] = assigns
             return profile
 
         # ── SOCIETY ──────────────────────────────────────────────────────────

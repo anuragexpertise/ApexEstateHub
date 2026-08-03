@@ -200,7 +200,17 @@ def register_invite_to_callbacks(app):
         selected = store.get("selected", {})
         society_id = (auth or {}).get("society_id")
         if not society_id:
-            return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
+            # NOTE (fixed 2026-08): the two card-color/outline outputs below
+            # are ALL-wildcard ({"type":"invite-card","role":ALL}) — Dash's
+            # validate_multi_return() requires a list matching the number of
+            # matched components (2: VND+SEC) for those, not a bare
+            # no_update. Returning a lone no_update 500'd every time this
+            # branch was hit, silently eating the "Not authenticated"
+            # message before it ever reached the UI.
+            return (
+                html.P("Not authenticated.", style={"color": "#de5c52"}),
+                [no_update, no_update], [no_update, no_update], no_update,
+            )
 
         s = (search or "").strip() or None
         concern_id = store.get("concern_id")
@@ -210,7 +220,11 @@ def register_invite_to_callbacks(app):
             else:
                 rows = list_invitable_security(society_id, s, concern_id=concern_id)
         except Exception as e:
-            return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
+            # Same fix — see note above.
+            return (
+                html.P(f"Error loading list: {e}", style={"color": "#de5c52"}),
+                [no_update, no_update], [no_update, no_update], no_update,
+            )
 
         card_colors = []
         card_outlines = []
@@ -279,9 +293,9 @@ def register_invite_to_callbacks(app):
             badges.append(
                 dbc.Badge(
                     label,
-                    color="success" if r == "VND" else "warning",
                     className="me-1",
-                    style={"fontSize": "11px"},
+                    style={"backgroundColor": "#1d74d8", "color": "#ffffff",
+                           "fontSize": "11px", "fontWeight": "600"},
                 )
             )
         summary = html.Div(badges) if badges else html.Small("No invitations selected.", className="text-muted")
