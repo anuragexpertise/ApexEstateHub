@@ -3965,9 +3965,9 @@ LANGUAGE SQL STABLE AS $$
     FROM events WHERE id = p_event_id;
 $$;
 
-DROP FUNCTION IF EXISTS fn_concern_profile CASCADE;
+DROP FUNCTION IF EXISTS fn_concern_profile(INT, INT) CASCADE;
 
-CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT)
+CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT, p_society_id INT)
 RETURNS TABLE (
     id INT, society_id INT, apartment_id INT, concern_type VARCHAR(50),
     description TEXT, status VARCHAR(20), assigned_to VARCHAR(100),
@@ -3997,7 +3997,8 @@ LANGUAGE SQL STABLE AS $$
            a.flat_number::VARCHAR(20)
     FROM concerns c
     LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id
-    WHERE c.id = p_concern_id;
+    WHERE c.id = p_concern_id
+      AND c.society_id = p_society_id;
 $$;
 
 DROP FUNCTION IF EXISTS fn_concern_assignments CASCADE;
