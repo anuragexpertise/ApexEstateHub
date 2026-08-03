@@ -1,0 +1,810 @@
+diff --git a/app/dash_apps/callbacks/assign_to_callbacks.py b/app/dash_apps/callbacks/assign_to_callbacks.py
+index b2a9147..be57127 100644
+--- a/app/dash_apps/callbacks/assign_to_callbacks.py
++++ b/app/dash_apps/callbacks/assign_to_callbacks.py
+@@ -35,8 +35,38 @@ PORTAL_ROLE_LABEL = {
+ }
+ 
+ 
++# Human labels for the concerns_assigns.status enrichment optionally
++# joined in by list_assignable_*() when a concern_id is passed. See
++# Concerns_Workflow_Review.md §2.2.
++_STAGE_LABEL = {
++    "invited": ("Invited", "#7d8ea3"),
++    "bid_submitted": ("Bid submitted", "#1d74d8"),
++    "assigned": ("Assigned", "#e59620"),
++    "resolved": ("Resolved", "#17976e"),
++    "closed": ("Closed", "#64748b"),
++}
++
++
++def _stage_badge(row: dict):
++    """Small status pill shown next to a candidate's name in the Assign
++    modal, if they already have a concerns_assigns row for this concern —
++    so an admin doesn't have to guess whether "checked" means "invited" or
++    "already assigned and resolved" (§2.2)."""
++    status = row.get("assign_status")
++    if not status:
++        return None
++    label, color = _STAGE_LABEL.get(status, (status.title(), "#7d8ea3"))
++    bid = row.get("assign_bid_amount")
++    text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
++    return dbc.Badge(text, style={
++        "backgroundColor": f"{color}20", "color": color,
++        "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
++    })
++
++
+ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
+     """Render a single assignable entity item."""
++    stage_badge = _stage_badge(row)
+     if role == "ADM":
+         label = row.get("name") or row.get("email", "Admin")
+         sub = row.get("email", "")
+@@ -68,6 +98,7 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
+                     html.I(className=f"{icon} fa-2x mb-2", style={"color": color}),
+                     html.H6(label, style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
++                    html.Div(stage_badge, className="mt-1") if stage_badge else None,
+                 ], className="text-center"),
+             ], style={"padding": "12px"}),
+         ], style={
+@@ -86,7 +117,8 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
+                 ),
+                 html.I(className=f"{icon} me-2", style={"color": color, "width": "20px", "textAlign": "center"}),
+                 html.Div([
+-                    html.Span(label, style={"fontWeight": "600", "fontSize": "13px"}),
++                    html.Span([label, stage_badge] if stage_badge else label,
++                              style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Br(),
+                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
+                 ]),
+@@ -191,13 +223,14 @@ def register_assign_to_callbacks(app):
+             return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
+ 
+         s = (search or "").strip() or None
++        concern_id = store.get("concern_id")
+         try:
+             if role == "ADM":
+-                rows = list_assignable_admins(society_id, s)
++                rows = list_assignable_admins(society_id, s, concern_id=concern_id)
+             elif role == "VND":
+-                rows = list_assignable_vendors(society_id, s)
++                rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
+             else:
+-                rows = list_assignable_security(society_id, s)
++                rows = list_assignable_security(society_id, s, concern_id=concern_id)
+         except Exception as e:
+             return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
+ 
+@@ -281,13 +314,14 @@ def register_assign_to_callbacks(app):
+         society_id = (auth or {}).get("society_id")
+         if role in ("ADM", "VND", "SEC") and society_id:
+             s = (search or "").strip() or None
++            concern_id = store.get("concern_id")
+             try:
+                 if role == "ADM":
+-                    rows = list_assignable_admins(society_id, s)
++                    rows = list_assignable_admins(society_id, s, concern_id=concern_id)
+                 elif role == "VND":
+-                    rows = list_assignable_vendors(society_id, s)
++                    rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
+                 else:
+-                    rows = list_assignable_security(society_id, s)
++                    rows = list_assignable_security(society_id, s, concern_id=concern_id)
+                 items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+                 list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
+                     f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
+diff --git a/app/dash_apps/callbacks/concern_bid_callbacks.py b/app/dash_apps/callbacks/concern_bid_callbacks.py
+index 6d44fa4..a58f429 100644
+--- a/app/dash_apps/callbacks/concern_bid_callbacks.py
++++ b/app/dash_apps/callbacks/concern_bid_callbacks.py
+@@ -138,7 +138,10 @@ def register_concern_bid_callbacks(app):
+                     concern_id, society_id,
+                 )
+         except Exception as e:
+-            print(f"⚠️  notify_concern_bid_saved failed: {e}")
++            import logging
++            logging.getLogger(__name__).exception(
++                "notify_concern_bid_saved failed (concern_id=%s): %s", concern_id, e,
++            )
+ 
+         from app.dash_apps.callbacks.drilldown_callbacks import _render_current
+         content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})
+diff --git a/app/dash_apps/callbacks/drilldown_callbacks.py b/app/dash_apps/callbacks/drilldown_callbacks.py
+index e014e46..150dbdf 100644
+--- a/app/dash_apps/callbacks/drilldown_callbacks.py
++++ b/app/dash_apps/callbacks/drilldown_callbacks.py
+@@ -534,7 +534,22 @@ def register_drilldown_callbacks(app):
+                 return no_update, no_update, no_update, no_update, trigger_data
+ 
+             # ── Invite vendor/security — opens the invite-to modal ────────────────
++            # ── Invite vendor/security — opens the invite-to modal ────────────────
++            # Same role + ownership gate as Assign/Close (§2.6) — an Owner can
++            # only invite candidates on a concern they raised themselves.
+             if action == "invite" and entity == "concern":
++                role = (auth or {}).get("role")
++                if role not in ("admin", "apartment"):
++                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
++                    return store, content, bc, {"display": "none"}, toast
++                if role == "apartment":
++                    concern_row = db._execute(
++                        "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
++                        (pk, sid), fetch_one=True,
++                    ) or {}
++                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
++                        toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
++                        return store, content, bc, {"display": "none"}, toast
+                 trigger_data = {
+                     "action": "open_invite_modal",
+                     "params": {"concern_id": int(pk) if pk else None},
+@@ -542,7 +557,24 @@ def register_drilldown_callbacks(app):
+                 return no_update, no_update, no_update, no_update, trigger_data
+ 
+             # ── Assign concern — opens the assign-to modal ─────────────────────────
++            # Same role + ownership gate as Close (§2.6): an Owner can only
++            # assign entities to a concern they raised themselves. The
++            # actual write is server-enforced again in submit_assignments()
++            # (assign_to_callbacks.py) — this check just stops the modal
++            # from opening at all for a concern the owner doesn't own.
+             elif action == "assign" and entity == "concern":
++                role = (auth or {}).get("role")
++                if role not in ("admin", "apartment"):
++                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
++                    return store, content, bc, {"display": "none"}, toast
++                if role == "apartment":
++                    concern_row = db._execute(
++                        "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
++                        (pk, sid), fetch_one=True,
++                    ) or {}
++                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
++                        toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
++                        return store, content, bc, {"display": "none"}, toast
+                 trigger_data = {
+                     "action": "open_assign_modal",
+                     "params": {"concern_id": int(pk) if pk else None},
+@@ -557,14 +589,24 @@ def register_drilldown_callbacks(app):
+                 }
+                 return no_update, no_update, no_update, no_update, trigger_data
+ 
+-            # ── Resolved (vendor) — mark the vendor's own assignment resolved ─────
++            # ── Resolved (vendor OR security) — mark the caller's own assignment
++            #    resolved. Generalized 2026-08: security staff can now be
++            #    invited/bid on concerns the same as vendors (see
++            #    concern_bid_callbacks.py's BID_ROLE_CODE, which already
++            #    supported both), so this handler — previously hard-coded to
++            #    "vendor" only — now honours whichever role the caller
++            #    actually is. See Concerns_Workflow_Review.md §2.8.
+             elif action == "vendor_resolve" and entity == "concern":
+                 role = (auth or {}).get("role")
+-                vendor_entity_id = (auth or {}).get("linked_id")
+-                if role != "vendor" or not vendor_entity_id:
+-                    toast = {"_toast": {"type": "error", "message": "Only the assigned vendor can resolve this"}}
++                caller_entity_id = (auth or {}).get("linked_id")
++                role_code = {"vendor": "VND", "security": "SEC"}.get(role)
++                if not role_code or not caller_entity_id:
++                    toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
+                     return store, content, bc, {"display": "none"}, toast
+-                ok, msg = loaders.resolve_concern_assignment(int(pk), sid, "VND", int(vendor_entity_id))
++                actor_user_id = get_current_user_id()
++                ok, msg = loaders.resolve_concern_assignment(
++                    int(pk), sid, role_code, int(caller_entity_id), resolved_by=actor_user_id,
++                )
+                 if ok:
+                     try:
+                         concern_row = db._execute(
+@@ -576,7 +618,10 @@ def register_drilldown_callbacks(app):
+                                 sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                             )
+                     except Exception as e:
+-                        print(f"⚠️  notify_concern_resolved_by_vendor failed: {e}")
++                        import logging
++                        logging.getLogger(__name__).exception(
++                            "notify_concern_resolved_by_vendor failed (concern_id=%s): %s", pk, e,
++                        )
+                 store["refresh"] = True
+                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                 content, bc, db_err = _render_current(store, auth)
+@@ -596,7 +641,8 @@ def register_drilldown_callbacks(app):
+                 if role == "apartment" and concern_row.get("created_by") != (auth or {}).get("user_id"):
+                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
+                     return store, content, bc, {"display": "none"}, toast
+-                ok, msg = loaders.close_concern(int(pk), sid)
++                actor_user_id = get_current_user_id()
++                ok, msg = loaders.close_concern(int(pk), sid, closed_by=actor_user_id)
+                 if ok:
+                     try:
+                         assignees = loaders.get_concern_assignments(int(pk))
+@@ -604,7 +650,10 @@ def register_drilldown_callbacks(app):
+                             sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), assignees,
+                         )
+                     except Exception as e:
+-                        print(f"⚠️  notify_concern_closed failed: {e}")
++                        import logging
++                        logging.getLogger(__name__).exception(
++                            "notify_concern_closed failed (concern_id=%s): %s", pk, e,
++                        )
+                 store["refresh"] = True
+                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                 content, bc, db_err = _render_current(store, auth)
+@@ -1119,6 +1168,17 @@ def register_drilldown_callbacks(app):
+             merged["entity_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+             merged["role"] = "apartment"
+ 
++        # Owner-initiated concerns must always be raised against the owner's
++        # own flat — never trust apartment_id coming back from the form for
++        # this. concerns.apartment_id is an ordinary schema-driven FK
++        # dropdown shared with Admin's "pick any flat" picker, so without
++        # this an owner could edit that dropdown and submit a concern
++        # against a different apartment. Admin/master keep it fully
++        # editable, since picking the right flat is the whole point of that
++        # picker for them. See Concerns_Workflow_Review.md round 2.
++        if merged['caller_role'] == "apartment" and entity_singular == "concern":
++            merged["apartment_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
++
+         # ── 6. Smart receipt defaults (date + account) ────────────────────────
+         #       Applied only when submitting a new receipt/expense form and the
+         #       user left the date or account blank.
+diff --git a/app/dash_apps/callbacks/invite_to_callbacks.py b/app/dash_apps/callbacks/invite_to_callbacks.py
+index 7c54490..fa46a75 100644
+--- a/app/dash_apps/callbacks/invite_to_callbacks.py
++++ b/app/dash_apps/callbacks/invite_to_callbacks.py
+@@ -36,9 +36,38 @@ PORTAL_ROLE_LABEL = {
+     "SEC": "Security",
+ }
+ 
++# Shared with assign_to_callbacks.py's stage labelling (§2.2) — kept as a
++# local copy rather than a cross-module import so this file has no
++# dependency on assign_to_callbacks.py's internals.
++_STAGE_LABEL = {
++    "invited": ("Invited", "#7d8ea3"),
++    "bid_submitted": ("Bid submitted", "#1d74d8"),
++    "assigned": ("Assigned", "#e59620"),
++    "resolved": ("Resolved", "#17976e"),
++    "closed": ("Closed", "#64748b"),
++}
++
++
++def _stage_badge(row: dict):
++    """Small status pill shown next to a candidate's name in the Invite
++    modal, if they already have a concerns_assigns row for this concern —
++    so an admin doesn't re-invite (and silently reset) someone who's
++    already assigned/resolved without realizing it (§2.2)."""
++    status = row.get("assign_status")
++    if not status:
++        return None
++    label, color = _STAGE_LABEL.get(status, (status.title(), "#7d8ea3"))
++    bid = row.get("assign_bid_amount")
++    text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
++    return dbc.Badge(text, style={
++        "backgroundColor": f"{color}20", "color": color,
++        "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
++    })
++
+ 
+ def _render_invite_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
+     """Render a single inviteable entity item."""
++    stage_badge = _stage_badge(row)
+     if role == "VND":
+         label = row.get("business_name") or row.get("name", "Vendor")
+         sub = row.get("mobile", "")
+@@ -60,6 +89,7 @@ def _render_invite_item(row: dict, role: str, selected: bool, view: str = "list"
+                     html.I(className=f"{icon} fa-2x mb-2", style={"color": color}),
+                     html.H6(label, style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
++                    html.Div(stage_badge, className="mt-1") if stage_badge else None,
+                 ], className="text-center"),
+             ], style={"padding": "12px"}),
+         ], style={
+@@ -78,7 +108,8 @@ def _render_invite_item(row: dict, role: str, selected: bool, view: str = "list"
+                 ),
+                 html.I(className=f"{icon} me-2", style={"color": color, "width": "20px", "textAlign": "center"}),
+                 html.Div([
+-                    html.Span(label, style={"fontWeight": "600", "fontSize": "13px"}),
++                    html.Span([label, stage_badge] if stage_badge else label,
++                              style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Br(),
+                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
+                 ]),
+@@ -172,11 +203,12 @@ def register_invite_to_callbacks(app):
+             return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
+ 
+         s = (search or "").strip() or None
++        concern_id = store.get("concern_id")
+         try:
+             if role == "VND":
+-                rows = list_invitable_vendors(society_id, s)
++                rows = list_invitable_vendors(society_id, s, concern_id=concern_id)
+             else:
+-                rows = list_invitable_security(society_id, s)
++                rows = list_invitable_security(society_id, s, concern_id=concern_id)
+         except Exception as e:
+             return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
+ 
+@@ -263,8 +295,12 @@ def register_invite_to_callbacks(app):
+         society_id = (auth or {}).get("society_id")
+         if role in ("VND", "SEC") and society_id:
+             s = (search or "").strip() or None
++            concern_id = store.get("concern_id")
+             try:
+-                rows = list_invitable_vendors(society_id, s) if role == "VND" else list_invitable_security(society_id, s)
++                rows = (
++                    list_invitable_vendors(society_id, s, concern_id=concern_id) if role == "VND"
++                    else list_invitable_security(society_id, s, concern_id=concern_id)
++                )
+                 items = [_render_invite_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+                 list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
+                     f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
+@@ -316,6 +352,21 @@ def register_invite_to_callbacks(app):
+         if not society_id:
+             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
+ 
++        # ── Server-side role + ownership check ──────────────────────────────
++        # Previously this endpoint had no role check at all — see the
++        # identical issue and fix in assign_to_callbacks.submit_assignments().
++        # See Concerns_Workflow_Review.md §3.1.
++        caller_role = (auth or {}).get("role")
++        if caller_role not in ("admin", "apartment"):
++            return False, {"type": "error", "message": "Only Admin or the concern creator can invite candidates."}, no_update, no_update, no_update
++        if caller_role == "apartment":
++            concern_owner_row = db._execute(
++                "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
++                (concern_id, society_id), fetch_one=True,
++            ) or {}
++            if concern_owner_row.get("created_by") != (auth or {}).get("user_id"):
++                return False, {"type": "error", "message": "Only Admin or the concern creator can invite candidates."}, no_update, no_update, no_update
++
+         try:
+             # Fetch prior VND/SEC assignee rows (any lifecycle stage) so we
+             # only touch what actually needs to change.
+@@ -384,7 +435,10 @@ def register_invite_to_callbacks(app):
+                         newly_invited,
+                     )
+                 except Exception as e:
+-                    print(f"⚠️  notify_concern_invited failed: {e}")
++                    import logging
++                    logging.getLogger(__name__).exception(
++                        "notify_concern_invited failed (concern_id=%s): %s", concern_id, e,
++                    )
+ 
+             # Refresh the concern list/profile
+             from app.dash_apps.callbacks.drilldown_callbacks import _render_current
+diff --git a/app/dash_apps/drilldown/loaders.py b/app/dash_apps/drilldown/loaders.py
+index 5c6843c..bacc4c5 100644
+--- a/app/dash_apps/drilldown/loaders.py
++++ b/app/dash_apps/drilldown/loaders.py
+@@ -62,36 +62,60 @@ def get_concern_assignments(concern_id: int) -> list[dict]:
+         return []
+ 
+ 
+-def list_assignable_admins(society_id: int, search: str | None = None) -> list[dict]:
+-    """List admin users assignable to concerns."""
+-    sql = "SELECT id, name, email FROM users WHERE society_id=%s AND role='admin' AND active=TRUE"
+-    params: list = [society_id]
++def list_assignable_admins(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
++    """List admin users assignable to concerns. If `concern_id` is given,
++    each row also carries `assign_status`/`assign_bid_amount` for THIS
++    concern (NULL if the admin has no concerns_assigns row yet) — lets the
++    Assign modal show each candidate's current lifecycle stage instead of
++    a plain checked/unchecked checkbox (§2.2)."""
++    sql = "SELECT u.id, u.name, u.email"
++    if concern_id:
++        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
++    sql += " FROM users u"
++    if concern_id:
++        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = u.id AND ca.role='ADM' AND ca.concern_id=%s"
++    sql += " WHERE u.society_id=%s AND u.role='admin' AND u.active=TRUE"
++    params: list = ([concern_id] if concern_id else []) + [society_id]
+     if search:
+-        sql += " AND (name ILIKE %s OR email ILIKE %s)"
++        sql += " AND (u.name ILIKE %s OR u.email ILIKE %s)"
+         params += [f"%{search}%", f"%{search}%"]
+-    sql += " ORDER BY name"
++    sql += " ORDER BY u.name"
+     return db._execute(sql, tuple(params), fetch_all=True) or []
+ 
+ 
+-def list_assignable_vendors(society_id: int, search: str | None = None) -> list[dict]:
+-    """List vendors assignable to concerns."""
+-    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
+-    params: list = [society_id]
++def list_assignable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
++    """List vendors assignable to concerns. See list_assignable_admins()
++    docstring re: the optional `concern_id` status enrichment."""
++    sql = "SELECT v.id, v.business_name, v.name, v.mobile"
++    if concern_id:
++        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
++    sql += " FROM vendors v"
++    if concern_id:
++        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
++    sql += " WHERE v.society_id=%s AND v.active=TRUE"
++    params: list = ([concern_id] if concern_id else []) + [society_id]
+     if search:
+-        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
++        sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
+         params += [f"%{search}%", f"%{search}%"]
+-    sql += " ORDER BY business_name"
++    sql += " ORDER BY v.business_name"
+     return db._execute(sql, tuple(params), fetch_all=True) or []
+ 
+ 
+-def list_assignable_security(society_id: int, search: str | None = None) -> list[dict]:
+-    """List security staff assignable to concerns."""
+-    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
+-    params: list = [society_id]
++def list_assignable_security(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
++    """List security staff assignable to concerns. See list_assignable_admins()
++    docstring re: the optional `concern_id` status enrichment."""
++    sql = "SELECT s.id, s.name, s.mobile, s.shift"
++    if concern_id:
++        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
++    sql += " FROM security_staff s"
++    if concern_id:
++        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = s.id AND ca.role='SEC' AND ca.concern_id=%s"
++    sql += " WHERE s.society_id=%s AND s.active=TRUE"
++    params: list = ([concern_id] if concern_id else []) + [society_id]
+     if search:
+-        sql += " AND name ILIKE %s"
++        sql += " AND s.name ILIKE %s"
+         params.append(f"%{search}%")
+-    sql += " ORDER BY name"
++    sql += " ORDER BY s.name"
+     return db._execute(sql, tuple(params), fetch_all=True) or []
+ 
+ 
+@@ -120,25 +144,42 @@ def humanize_assignment(row: dict) -> str:
+ # write concerns_assigns.status, never concerns.status directly.
+ # ════════════════════════════════════════════════════════════════════════════
+ 
+-def list_invitable_vendors(society_id: int, search: str | None = None) -> list[dict]:
+-    """List vendors that can be invited to bid on concerns."""
+-    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
+-    params: list = [society_id]
++def list_invitable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
++    """List vendors that can be invited to bid on concerns. If `concern_id`
++    is given, each row also carries `assign_status`/`assign_bid_amount` for
++    THIS concern, so the Invite modal can show e.g. "already Assigned" next
++    to a name instead of a plain checkbox (§2.2)."""
++    sql = "SELECT v.id, v.business_name, v.name, v.mobile"
++    if concern_id:
++        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
++    sql += " FROM vendors v"
++    if concern_id:
++        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
++    sql += " WHERE v.society_id=%s AND v.active=TRUE"
++    params: list = ([concern_id] if concern_id else []) + [society_id]
+     if search:
+-        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
++        sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
+         params += [f"%{search}%", f"%{search}%"]
+-    sql += " ORDER BY business_name"
++    sql += " ORDER BY v.business_name"
+     return db._execute(sql, tuple(params), fetch_all=True) or []
+ 
+ 
+-def list_invitable_security(society_id: int, search: str | None = None) -> list[dict]:
+-    """List security staff that can be invited to bid on concerns."""
+-    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
+-    params: list = [society_id]
++def list_invitable_security(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
++    """List security staff that can be invited to bid on concerns. See
++    list_invitable_vendors() docstring re: the optional `concern_id` status
++    enrichment."""
++    sql = "SELECT s.id, s.name, s.mobile, s.shift"
++    if concern_id:
++        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
++    sql += " FROM security_staff s"
++    if concern_id:
++        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = s.id AND ca.role='SEC' AND ca.concern_id=%s"
++    sql += " WHERE s.society_id=%s AND s.active=TRUE"
++    params: list = ([concern_id] if concern_id else []) + [society_id]
+     if search:
+-        sql += " AND name ILIKE %s"
++        sql += " AND s.name ILIKE %s"
+         params.append(f"%{search}%")
+-    sql += " ORDER BY name"
++    sql += " ORDER BY s.name"
+     return db._execute(sql, tuple(params), fetch_all=True) or []
+ 
+ 
+@@ -164,6 +205,12 @@ def invite_concern_assignee(concern_id: int, society_id: int, role: str, entity_
+     return True, "Invitation sent"
+ 
+ 
++# Sanity ceiling for a single concern's bid — catches fat-finger entry
++# (e.g. an extra zero or two). Not a hard business rule, just a guardrail;
++# raise it here if a society genuinely needs bigger single-concern jobs.
++MAX_BID_AMOUNT = 1_000_000  # ₹10,00,000
++
++
+ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
+     """BID stage: the invited vendor/security submits their bid_amount.
+     Only valid from status='invited'; moves the row to 'bid_submitted'."""
+@@ -171,6 +218,8 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
+         bid = float(bid_amount)
+         if bid < 0:
+             return False, "Bid amount must be positive"
++        if bid > MAX_BID_AMOUNT:
++            return False, f"Bid amount looks too high (max ₹{MAX_BID_AMOUNT:,.0f}) — please double-check"
+     except (TypeError, ValueError):
+         return False, "Enter a valid bid amount"
+     row = db._execute(
+@@ -189,7 +238,18 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int,
+     'accept the bid' (promotes an existing invited/bid_submitted row to
+     'assigned') and as a direct shortcut that skips invite/bid entirely
+     (e.g. admin auto-assign, or price already agreed offline). Never
+-    downgrades a resolved/closed row."""
++    downgrades a resolved/closed row.
++
++    Also auto-declines (deletes) any other still-open (invited/bid_submitted)
++    rows of the SAME role for this concern — i.e. formally choosing one
++    vendor's bid implicitly declines the other vendors who bid but weren't
++    picked. This is belt-and-suspenders alongside the fn_sync_concern_status
++    aggregation fix (2026-08): that fix already stops leftover invited/
++    bid_submitted rows from blocking a concern's 'resolved' status, but
++    cleaning them up here also keeps the Invite/Assign modals from showing
++    stale "still invited" candidates for a slot that's already filled.
++    Different-role rows (e.g. a separately-assigned SEC row) are untouched.
++    """
+     row = db._execute(
+         "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
+         "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
+@@ -201,33 +261,44 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int,
+     )
+     if not row:
+         return False, "Already resolved/closed for this concern — cannot reassign"
++
++    db._execute(
++        "DELETE FROM concerns_assigns "
++        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id != %s "
++        "AND status IN ('invited', 'bid_submitted')",
++        (concern_id, society_id, role, entity_id),
++    )
+     return True, "Assigned"
+ 
+ 
+-def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
++def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int,
++                                resolved_by: int | None = None) -> tuple[bool, str]:
+     """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
+-    (e.g. vendor marking their work done). Only valid from status='assigned'.
+-    The concerns.status aggregate ('resolved' once every assignee row is
+-    resolved/closed) is updated automatically by the sync trigger."""
++    (e.g. vendor/security marking their work done). Only valid from
++    status='assigned'. The concerns.status aggregate ('resolved' once every
++    *touched* assignee row is resolved/closed — see fn_sync_concern_status)
++    is updated automatically by the sync trigger. `resolved_by` is optional
++    for backward compatibility with any existing callers."""
+     row = db._execute(
+-        "UPDATE concerns_assigns SET status='resolved', updated_at=NOW() "
++        "UPDATE concerns_assigns SET status='resolved', resolved_by=%s, updated_at=NOW() "
+         "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='assigned' "
+         "RETURNING id",
+-        (concern_id, society_id, role, entity_id), fetch_one=True,
++        (resolved_by, concern_id, society_id, role, entity_id), fetch_one=True,
+     )
+     if not row:
+         return False, "No active (assigned) assignment found for you on this concern"
+     return True, "Marked resolved"
+ 
+ 
+-def close_concern(concern_id: int, society_id: int) -> tuple[bool, str]:
++def close_concern(concern_id: int, society_id: int, closed_by: int | None = None) -> tuple[bool, str]:
+     """CLOSE stage — admin/owner action: close a concern for ALL assignees
+     at once, whatever stage each one is at. The sync trigger then rolls
+-    concerns.status up to 'closed' too."""
++    concerns.status up to 'closed' too. `closed_by` is optional for backward
++    compatibility with any existing callers."""
+     db._execute(
+-        "UPDATE concerns_assigns SET status='closed', updated_at=NOW() "
++        "UPDATE concerns_assigns SET status='closed', closed_by=%s, updated_at=NOW() "
+         "WHERE concern_id=%s AND society_id=%s AND status != 'closed' RETURNING id",
+-        (concern_id, society_id), fetch_all=True,
++        (closed_by, concern_id, society_id), fetch_all=True,
+     )
+     return True, "Concern closed"
+ 
+@@ -364,17 +435,36 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+         # Vendor portal: show every concern this vendor has any row for
+         # (invited, bid_submitted, assigned, or resolved), at any lifecycle
+         # stage — concerns_assigns is now the single source (concerns_invite
+-        # retired 2026-07).
++        # retired 2026-07). If a KPI drilldown passed `assigned_status`
++        # (e.g. "kpi_concerns_assigned" -> "Assigned To Me"), narrow to that
++        # specific concerns_assigns.status instead of "anything not closed".
++        # Fixed 2026-08 — this branch is the one _apply_portal_filters
++        # actually always populates per-portal (vnd_assignee_id), so
++        # assigned_status needs to be read HERE, not only in the separate
++        # assigned_vnd_id branch above which nothing ever sets. See
++        # Concerns_Workflow_Review.md §3.2.
+         vnd_assignee_id = filters.get("vnd_assignee_id")
+         if vnd_assignee_id:
+-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed')"
++            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
+             params.append(vnd_assignee_id)
++            if assigned_status:
++                extra += " AND ca.status=%s"
++                params.append(assigned_status)
++            else:
++                extra += " AND ca.status != 'closed'"
++            extra += ")"
+ 
+         # Security portal: same, for security staff.
+         sec_assignee_id = filters.get("sec_assignee_id")
+         if sec_assignee_id:
+-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed')"
++            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
+             params.append(sec_assignee_id)
++            if assigned_status:
++                extra += " AND ca.status=%s"
++                params.append(assigned_status)
++            else:
++                extra += " AND ca.status != 'closed'"
++            extra += ")"
+         return (
+             "SELECT c.*, a.flat_number FROM concerns c "
+             "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "
+diff --git a/app/dash_apps/drilldown/profile_actions.py b/app/dash_apps/drilldown/profile_actions.py
+index ec663ba..ab27da5 100644
+--- a/app/dash_apps/drilldown/profile_actions.py
++++ b/app/dash_apps/drilldown/profile_actions.py
+@@ -155,7 +155,11 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "target_card": None,          # opens the bid-entry modal — no navigation
+             "icon": "fa-hand-holding-usd",
+             "color": "primary",
+-            "roles": ["vendor"],
++            # Security staff can be invited/bid on concerns the same as
++            # vendors (concern_bid_callbacks.py's BID_ROLE_CODE already
++            # supported "security" -> "SEC"; only this button's role gate
++            # was vendor-only). See Concerns_Workflow_Review.md §2.3.
++            "roles": ["vendor", "security"],
+         },
+         {
+             "label": "Resolved",
+@@ -163,7 +167,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "target_card": None,          # server-side only — no navigation
+             "icon": "fa-check",
+             "color": "success",
+-            "roles": ["vendor"],
++            # See §2.8 — resolve_concern_assignment() is role-generic;
++            # the handler in drilldown_callbacks.py now honours whichever
++            # role the caller actually is instead of hard-coding "vendor".
++            "roles": ["vendor", "security"],
+         },
+         {
+             "label": "Close",
+diff --git a/app/dash_apps/drilldown/renderers.py b/app/dash_apps/drilldown/renderers.py
+index 17d506a..04c761e 100644
+--- a/app/dash_apps/drilldown/renderers.py
++++ b/app/dash_apps/drilldown/renderers.py
+@@ -1025,11 +1025,35 @@ def render_form_card(card_id: str, title: str, icon: str,
+             prefill.setdefault(k, v)
+     entity_plural = to_plural(entity)
+     fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
++
++    # Owner's self-service "Raise Concern" form shares its schema-driven
++    # apartment_id field with Admin's "pick any flat" picker (see
++    # _concern_wait_banner's docstring above) — that field is an ordinary
++    # FK dropdown with no built-in role restriction, so an apartment-role
++    # user could otherwise change it away from their own flat. The actual
++    # value is always pinned server-side regardless (handle_form_submit in
++    # drilldown_callbacks.py), but showing an editable picker that doesn't
++    # do anything would just be confusing, so it's hidden here and replaced
++    # with a short locked-flat note instead.
++    _owner_locked_apartment_field = (
++        entity_plural == "concerns" and (role or "admin") == "apartment"
++    )
++    if _owner_locked_apartment_field:
++        fields = [f for f in fields if f.get("id") != "apartment_id"]
++
+     form_rows = [
+           dcc.Input(id={"type":"form-entity-pk","entity":entity},
+                     type="hidden", value=str(prefill.get("id",""))),
+       ]
+ 
++    if _owner_locked_apartment_field and not prefill.get("id"):
++        form_rows.append(dbc.Alert(
++            [html.I(className="fas fa-lock me-2"),
++             "This concern will be raised for your own flat."],
++            color="secondary",
++            style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px"},
++        ))
++
+     # ── Concern QR — Edit form only, never New (concern has no id yet, and
+     # qr_payload isn't generated until _save_concern's INSERT completes) ──
+     if entity == "concern" and prefill.get("id"):
+diff --git a/database/estatehub.sql b/database/estatehub.sql
+index c7b4349..173dc77 100644
+--- a/database/estatehub.sql
++++ b/database/estatehub.sql
+@@ -261,6 +261,8 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
+     entity_id INT NOT NULL,
+     invited_by INT REFERENCES users (id),
+     assigned_by INT REFERENCES users (id),
++    resolved_by INT REFERENCES users (id),
++    closed_by INT REFERENCES users (id),
+     status VARCHAR(20) NOT NULL DEFAULT 'invited'
+         CHECK (status IN ('invited', 'bid_submitted', 'assigned', 'resolved', 'closed')),
+     bid_amount NUMERIC(10, 2),
+@@ -279,34 +281,42 @@ CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (conc
+ -- This is now the ONLY trigger writing concerns.status from delegation state
+ -- (previously a second, independently-ruled trigger on concerns_invite could
+ -- race this one and leave concerns.status reflecting whichever fired last).
++--
++-- 2026-08 fix: the aggregate is now computed ONLY over "touched" rows —
++-- rows that actually reached 'assigned' or beyond. Rows still sitting at
++-- 'invited'/'bid_submitted' (candidates who were never formally chosen,
++-- e.g. losing bidders) are excluded entirely from this calculation, so
++-- they can no longer block a concern from reaching 'resolved'. Previously
++-- a single leftover invited/bid_submitted row from an unselected candidate
++-- would keep a concern stuck at 'assigned' forever, even after the actual
++-- assignee(s) had resolved their work — see Concerns_Workflow_Review.md §2.9.
+ CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
+ RETURNS VOID
+ LANGUAGE plpgsql AS $$
+ DECLARE
+-    v_total INT;
+-    v_closed INT;
+-    v_resolved_or_closed INT;
+     v_touched INT;
++    v_touched_closed INT;
++    v_touched_resolved_or_closed INT;
+     v_new_status VARCHAR(20);
+ BEGIN
+-    SELECT COUNT(*),
++    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed')),
+            COUNT(*) FILTER (WHERE status = 'closed'),
+-           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed')),
+-           COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed'))
+-      INTO v_total, v_closed, v_resolved_or_closed, v_touched
++           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
++      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
+       FROM concerns_assigns
+-     WHERE concern_id = p_concern_id;
++     WHERE concern_id = p_concern_id
++       AND status IN ('assigned', 'resolved', 'closed');
+ 
+-    IF v_total = 0 THEN
++    IF v_touched = 0 THEN
++        -- No one has ever been formally assigned yet — still open, whether
++        -- there are zero rows or only invited/bid_submitted candidates.
+         v_new_status := 'open';
+-    ELSIF v_closed = v_total THEN
++    ELSIF v_touched_closed = v_touched THEN
+         v_new_status := 'closed';
+-    ELSIF v_resolved_or_closed = v_total THEN
++    ELSIF v_touched_resolved_or_closed = v_touched THEN
+         v_new_status := 'resolved';
+-    ELSIF v_touched > 0 THEN
+-        v_new_status := 'assigned';
+     ELSE
+-        v_new_status := 'open';
++        v_new_status := 'assigned';
+     END IF;
+ 
+     UPDATE concerns
+@@ -5191,6 +5201,7 @@ CREATE TABLE IF NOT EXISTS visitors (
+     id               SERIAL PRIMARY KEY,
+     society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+     apartment_id     INT REFERENCES apartments(id) ON DELETE SET NULL,
++    host_apartment_id INT REFERENCES apartments(id),
+     name             VARCHAR(100) NOT NULL,
+     mobile           VARCHAR(15),
+     purpose          VARCHAR(200),
+diff --git a/database/migrate.py b/database/migrate.py
+index 1b640db..1633642 100644
+--- a/database/migrate.py
++++ b/database/migrate.py
+@@ -160,6 +160,12 @@ def run_migrations(conn):
+         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id)",
+         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id)",
+ 
++        # concerns_assigns: audit columns for who resolved/closed an
++        # assignment row (added 2026-08 alongside the fn_sync_concern_status
++        # aggregation fix — see Concerns_Workflow_Review.md §3.4 / §2.9)
++        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS resolved_by INT REFERENCES users(id)",
++        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS closed_by INT REFERENCES users(id)",
++
+         # qr_payload columns for tables that existed before this column was introduced
+         "ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
+         "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",

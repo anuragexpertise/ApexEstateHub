@@ -138,7 +138,10 @@ def register_concern_bid_callbacks(app):
                     concern_id, society_id,
                 )
         except Exception as e:
-            print(f"⚠️  notify_concern_bid_saved failed: {e}")
+            import logging
+            logging.getLogger(__name__).exception(
+                "notify_concern_bid_saved failed (concern_id=%s): %s", concern_id, e,
+            )
 
         from app.dash_apps.callbacks.drilldown_callbacks import _render_current
         content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})

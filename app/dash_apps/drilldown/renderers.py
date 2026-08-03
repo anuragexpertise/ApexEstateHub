@@ -1025,10 +1025,34 @@ def render_form_card(card_id: str, title: str, icon: str,
             prefill.setdefault(k, v)
     entity_plural = to_plural(entity)
     fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
+
+    # Owner's self-service "Raise Concern" form shares its schema-driven
+    # apartment_id field with Admin's "pick any flat" picker (see
+    # _concern_wait_banner's docstring above) — that field is an ordinary
+    # FK dropdown with no built-in role restriction, so an apartment-role
+    # user could otherwise change it away from their own flat. The actual
+    # value is always pinned server-side regardless (handle_form_submit in
+    # drilldown_callbacks.py), but showing an editable picker that doesn't
+    # do anything would just be confusing, so it's hidden here and replaced
+    # with a short locked-flat note instead.
+    _owner_locked_apartment_field = (
+        entity_plural == "concerns" and (role or "admin") == "apartment"
+    )
+    if _owner_locked_apartment_field:
+        fields = [f for f in fields if f.get("id") != "apartment_id"]
+
     form_rows = [
           dcc.Input(id={"type":"form-entity-pk","entity":entity},
                     type="hidden", value=str(prefill.get("id",""))),
       ]
+
+    if _owner_locked_apartment_field and not prefill.get("id"):
+        form_rows.append(dbc.Alert(
+            [html.I(className="fas fa-lock me-2"),
+             "This concern will be raised for your own flat."],
+            color="secondary",
+            style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px"},
+        ))
 
     # ── Concern QR — Edit form only, never New (concern has no id yet, and
     # qr_payload isn't generated until _save_concern's INSERT completes) ──

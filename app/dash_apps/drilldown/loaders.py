@@ -62,36 +62,60 @@ def get_concern_assignments(concern_id: int) -> list[dict]:
         return []
 
 
-def list_assignable_admins(society_id: int, search: str | None = None) -> list[dict]:
-    """List admin users assignable to concerns."""
-    sql = "SELECT id, name, email FROM users WHERE society_id=%s AND role='admin' AND active=TRUE"
-    params: list = [society_id]
+def list_assignable_admins(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
+    """List admin users assignable to concerns. If `concern_id` is given,
+    each row also carries `assign_status`/`assign_bid_amount` for THIS
+    concern (NULL if the admin has no concerns_assigns row yet) — lets the
+    Assign modal show each candidate's current lifecycle stage instead of
+    a plain checked/unchecked checkbox (§2.2)."""
+    sql = "SELECT u.id, u.name, u.email"
+    if concern_id:
+        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
+    sql += " FROM users u"
+    if concern_id:
+        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = u.id AND ca.role='ADM' AND ca.concern_id=%s"
+    sql += " WHERE u.society_id=%s AND u.role='admin' AND u.active=TRUE"
+    params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
-        sql += " AND (name ILIKE %s OR email ILIKE %s)"
+        sql += " AND (u.name ILIKE %s OR u.email ILIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
-    sql += " ORDER BY name"
+    sql += " ORDER BY u.name"
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
-def list_assignable_vendors(society_id: int, search: str | None = None) -> list[dict]:
-    """List vendors assignable to concerns."""
-    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
-    params: list = [society_id]
+def list_assignable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
+    """List vendors assignable to concerns. See list_assignable_admins()
+    docstring re: the optional `concern_id` status enrichment."""
+    sql = "SELECT v.id, v.business_name, v.name, v.mobile"
+    if concern_id:
+        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
+    sql += " FROM vendors v"
+    if concern_id:
+        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
+    sql += " WHERE v.society_id=%s AND v.active=TRUE"
+    params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
-        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
+        sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
-    sql += " ORDER BY business_name"
+    sql += " ORDER BY v.business_name"
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
-def list_assignable_security(society_id: int, search: str | None = None) -> list[dict]:
-    """List security staff assignable to concerns."""
-    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
-    params: list = [society_id]
+def list_assignable_security(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
+    """List security staff assignable to concerns. See list_assignable_admins()
+    docstring re: the optional `concern_id` status enrichment."""
+    sql = "SELECT s.id, s.name, s.mobile, s.shift"
+    if concern_id:
+        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
+    sql += " FROM security_staff s"
+    if concern_id:
+        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = s.id AND ca.role='SEC' AND ca.concern_id=%s"
+    sql += " WHERE s.society_id=%s AND s.active=TRUE"
+    params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
-        sql += " AND name ILIKE %s"
+        sql += " AND s.name ILIKE %s"
         params.append(f"%{search}%")
-    sql += " ORDER BY name"
+    sql += " ORDER BY s.name"
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
@@ -120,25 +144,42 @@ def humanize_assignment(row: dict) -> str:
 # write concerns_assigns.status, never concerns.status directly.
 # ════════════════════════════════════════════════════════════════════════════
 
-def list_invitable_vendors(society_id: int, search: str | None = None) -> list[dict]:
-    """List vendors that can be invited to bid on concerns."""
-    sql = "SELECT id, business_name, name, mobile FROM vendors WHERE society_id=%s AND active=TRUE"
-    params: list = [society_id]
+def list_invitable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
+    """List vendors that can be invited to bid on concerns. If `concern_id`
+    is given, each row also carries `assign_status`/`assign_bid_amount` for
+    THIS concern, so the Invite modal can show e.g. "already Assigned" next
+    to a name instead of a plain checkbox (§2.2)."""
+    sql = "SELECT v.id, v.business_name, v.name, v.mobile"
+    if concern_id:
+        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
+    sql += " FROM vendors v"
+    if concern_id:
+        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
+    sql += " WHERE v.society_id=%s AND v.active=TRUE"
+    params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
-        sql += " AND (business_name ILIKE %s OR name ILIKE %s)"
+        sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
-    sql += " ORDER BY business_name"
+    sql += " ORDER BY v.business_name"
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
-def list_invitable_security(society_id: int, search: str | None = None) -> list[dict]:
-    """List security staff that can be invited to bid on concerns."""
-    sql = "SELECT id, name, mobile, shift FROM security_staff WHERE society_id=%s AND active=TRUE"
-    params: list = [society_id]
+def list_invitable_security(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
+    """List security staff that can be invited to bid on concerns. See
+    list_invitable_vendors() docstring re: the optional `concern_id` status
+    enrichment."""
+    sql = "SELECT s.id, s.name, s.mobile, s.shift"
+    if concern_id:
+        sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
+    sql += " FROM security_staff s"
+    if concern_id:
+        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = s.id AND ca.role='SEC' AND ca.concern_id=%s"
+    sql += " WHERE s.society_id=%s AND s.active=TRUE"
+    params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
-        sql += " AND name ILIKE %s"
+        sql += " AND s.name ILIKE %s"
         params.append(f"%{search}%")
-    sql += " ORDER BY name"
+    sql += " ORDER BY s.name"
     return db._execute(sql, tuple(params), fetch_all=True) or []
 
 
@@ -164,6 +205,12 @@ def invite_concern_assignee(concern_id: int, society_id: int, role: str, entity_
     return True, "Invitation sent"
 
 
+# Sanity ceiling for a single concern's bid — catches fat-finger entry
+# (e.g. an extra zero or two). Not a hard business rule, just a guardrail;
+# raise it here if a society genuinely needs bigger single-concern jobs.
+MAX_BID_AMOUNT = 1_000_000  # ₹10,00,000
+
+
 def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
     """BID stage: the invited vendor/security submits their bid_amount.
     Only valid from status='invited'; moves the row to 'bid_submitted'."""
@@ -171,6 +218,8 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
         bid = float(bid_amount)
         if bid < 0:
             return False, "Bid amount must be positive"
+        if bid > MAX_BID_AMOUNT:
+            return False, f"Bid amount looks too high (max ₹{MAX_BID_AMOUNT:,.0f}) — please double-check"
     except (TypeError, ValueError):
         return False, "Enter a valid bid amount"
     row = db._execute(
@@ -189,7 +238,18 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
     'accept the bid' (promotes an existing invited/bid_submitted row to
     'assigned') and as a direct shortcut that skips invite/bid entirely
     (e.g. admin auto-assign, or price already agreed offline). Never
-    downgrades a resolved/closed row."""
+    downgrades a resolved/closed row.
+
+    Also auto-declines (deletes) any other still-open (invited/bid_submitted)
+    rows of the SAME role for this concern — i.e. formally choosing one
+    vendor's bid implicitly declines the other vendors who bid but weren't
+    picked. This is belt-and-suspenders alongside the fn_sync_concern_status
+    aggregation fix (2026-08): that fix already stops leftover invited/
+    bid_submitted rows from blocking a concern's 'resolved' status, but
+    cleaning them up here also keeps the Invite/Assign modals from showing
+    stale "still invited" candidates for a slot that's already filled.
+    Different-role rows (e.g. a separately-assigned SEC row) are untouched.
+    """
     row = db._execute(
         "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
         "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
@@ -201,33 +261,44 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
     )
     if not row:
         return False, "Already resolved/closed for this concern — cannot reassign"
+
+    db._execute(
+        "DELETE FROM concerns_assigns "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id != %s "
+        "AND status IN ('invited', 'bid_submitted')",
+        (concern_id, society_id, role, entity_id),
+    )
     return True, "Assigned"
 
 
-def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
+def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int,
+                                resolved_by: int | None = None) -> tuple[bool, str]:
     """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
-    (e.g. vendor marking their work done). Only valid from status='assigned'.
-    The concerns.status aggregate ('resolved' once every assignee row is
-    resolved/closed) is updated automatically by the sync trigger."""
+    (e.g. vendor/security marking their work done). Only valid from
+    status='assigned'. The concerns.status aggregate ('resolved' once every
+    *touched* assignee row is resolved/closed — see fn_sync_concern_status)
+    is updated automatically by the sync trigger. `resolved_by` is optional
+    for backward compatibility with any existing callers."""
     row = db._execute(
-        "UPDATE concerns_assigns SET status='resolved', updated_at=NOW() "
+        "UPDATE concerns_assigns SET status='resolved', resolved_by=%s, updated_at=NOW() "
         "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='assigned' "
         "RETURNING id",
-        (concern_id, society_id, role, entity_id), fetch_one=True,
+        (resolved_by, concern_id, society_id, role, entity_id), fetch_one=True,
     )
     if not row:
         return False, "No active (assigned) assignment found for you on this concern"
     return True, "Marked resolved"
 
 
-def close_concern(concern_id: int, society_id: int) -> tuple[bool, str]:
+def close_concern(concern_id: int, society_id: int, closed_by: int | None = None) -> tuple[bool, str]:
     """CLOSE stage — admin/owner action: close a concern for ALL assignees
     at once, whatever stage each one is at. The sync trigger then rolls
-    concerns.status up to 'closed' too."""
+    concerns.status up to 'closed' too. `closed_by` is optional for backward
+    compatibility with any existing callers."""
     db._execute(
-        "UPDATE concerns_assigns SET status='closed', updated_at=NOW() "
+        "UPDATE concerns_assigns SET status='closed', closed_by=%s, updated_at=NOW() "
         "WHERE concern_id=%s AND society_id=%s AND status != 'closed' RETURNING id",
-        (concern_id, society_id), fetch_all=True,
+        (closed_by, concern_id, society_id), fetch_all=True,
     )
     return True, "Concern closed"
 
@@ -364,17 +435,36 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         # Vendor portal: show every concern this vendor has any row for
         # (invited, bid_submitted, assigned, or resolved), at any lifecycle
         # stage — concerns_assigns is now the single source (concerns_invite
-        # retired 2026-07).
+        # retired 2026-07). If a KPI drilldown passed `assigned_status`
+        # (e.g. "kpi_concerns_assigned" -> "Assigned To Me"), narrow to that
+        # specific concerns_assigns.status instead of "anything not closed".
+        # Fixed 2026-08 — this branch is the one _apply_portal_filters
+        # actually always populates per-portal (vnd_assignee_id), so
+        # assigned_status needs to be read HERE, not only in the separate
+        # assigned_vnd_id branch above which nothing ever sets. See
+        # Concerns_Workflow_Review.md §3.2.
         vnd_assignee_id = filters.get("vnd_assignee_id")
         if vnd_assignee_id:
-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s AND ca.status != 'closed')"
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
             params.append(vnd_assignee_id)
+            if assigned_status:
+                extra += " AND ca.status=%s"
+                params.append(assigned_status)
+            else:
+                extra += " AND ca.status != 'closed'"
+            extra += ")"
 
         # Security portal: same, for security staff.
         sec_assignee_id = filters.get("sec_assignee_id")
         if sec_assignee_id:
-            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s AND ca.status != 'closed')"
+            extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
             params.append(sec_assignee_id)
+            if assigned_status:
+                extra += " AND ca.status=%s"
+                params.append(assigned_status)
+            else:
+                extra += " AND ca.status != 'closed'"
+            extra += ")"
         return (
             "SELECT c.*, a.flat_number FROM concerns c "
             "LEFT JOIN apartments a ON a.id = c.apartment_id AND a.society_id = c.society_id "

@@ -534,7 +534,22 @@ def register_drilldown_callbacks(app):
                 return no_update, no_update, no_update, no_update, trigger_data
 
             # ── Invite vendor/security — opens the invite-to modal ────────────────
+            # ── Invite vendor/security — opens the invite-to modal ────────────────
+            # Same role + ownership gate as Assign/Close (§2.6) — an Owner can
+            # only invite candidates on a concern they raised themselves.
             if action == "invite" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role not in ("admin", "apartment"):
+                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
+                    return store, content, bc, {"display": "none"}, toast
+                if role == "apartment":
+                    concern_row = db._execute(
+                        "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                        (pk, sid), fetch_one=True,
+                    ) or {}
+                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
+                        toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
+                        return store, content, bc, {"display": "none"}, toast
                 trigger_data = {
                     "action": "open_invite_modal",
                     "params": {"concern_id": int(pk) if pk else None},
@@ -542,7 +557,24 @@ def register_drilldown_callbacks(app):
                 return no_update, no_update, no_update, no_update, trigger_data
 
             # ── Assign concern — opens the assign-to modal ─────────────────────────
+            # Same role + ownership gate as Close (§2.6): an Owner can only
+            # assign entities to a concern they raised themselves. The
+            # actual write is server-enforced again in submit_assignments()
+            # (assign_to_callbacks.py) — this check just stops the modal
+            # from opening at all for a concern the owner doesn't own.
             elif action == "assign" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role not in ("admin", "apartment"):
+                    toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                if role == "apartment":
+                    concern_row = db._execute(
+                        "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                        (pk, sid), fetch_one=True,
+                    ) or {}
+                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
+                        toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
+                        return store, content, bc, {"display": "none"}, toast
                 trigger_data = {
                     "action": "open_assign_modal",
                     "params": {"concern_id": int(pk) if pk else None},
@@ -557,14 +589,24 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
-            # ── Resolved (vendor) — mark the vendor's own assignment resolved ─────
+            # ── Resolved (vendor OR security) — mark the caller's own assignment
+            #    resolved. Generalized 2026-08: security staff can now be
+            #    invited/bid on concerns the same as vendors (see
+            #    concern_bid_callbacks.py's BID_ROLE_CODE, which already
+            #    supported both), so this handler — previously hard-coded to
+            #    "vendor" only — now honours whichever role the caller
+            #    actually is. See Concerns_Workflow_Review.md §2.8.
             elif action == "vendor_resolve" and entity == "concern":
                 role = (auth or {}).get("role")
-                vendor_entity_id = (auth or {}).get("linked_id")
-                if role != "vendor" or not vendor_entity_id:
-                    toast = {"_toast": {"type": "error", "message": "Only the assigned vendor can resolve this"}}
+                caller_entity_id = (auth or {}).get("linked_id")
+                role_code = {"vendor": "VND", "security": "SEC"}.get(role)
+                if not role_code or not caller_entity_id:
+                    toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
                     return store, content, bc, {"display": "none"}, toast
-                ok, msg = loaders.resolve_concern_assignment(int(pk), sid, "VND", int(vendor_entity_id))
+                actor_user_id = get_current_user_id()
+                ok, msg = loaders.resolve_concern_assignment(
+                    int(pk), sid, role_code, int(caller_entity_id), resolved_by=actor_user_id,
+                )
                 if ok:
                     try:
                         concern_row = db._execute(
@@ -576,7 +618,10 @@ def register_drilldown_callbacks(app):
                                 sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
                             )
                     except Exception as e:
-                        print(f"⚠️  notify_concern_resolved_by_vendor failed: {e}")
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_resolved_by_vendor failed (concern_id=%s): %s", pk, e,
+                        )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
@@ -596,7 +641,8 @@ def register_drilldown_callbacks(app):
                 if role == "apartment" and concern_row.get("created_by") != (auth or {}).get("user_id"):
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
                     return store, content, bc, {"display": "none"}, toast
-                ok, msg = loaders.close_concern(int(pk), sid)
+                actor_user_id = get_current_user_id()
+                ok, msg = loaders.close_concern(int(pk), sid, closed_by=actor_user_id)
                 if ok:
                     try:
                         assignees = loaders.get_concern_assignments(int(pk))
@@ -604,7 +650,10 @@ def register_drilldown_callbacks(app):
                             sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), assignees,
                         )
                     except Exception as e:
-                        print(f"⚠️  notify_concern_closed failed: {e}")
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_closed failed (concern_id=%s): %s", pk, e,
+                        )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
@@ -1118,6 +1167,17 @@ def register_drilldown_callbacks(app):
         if merged['caller_role'] == "apartment" and entity_singular == "receipt":
             merged["entity_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
             merged["role"] = "apartment"
+
+        # Owner-initiated concerns must always be raised against the owner's
+        # own flat — never trust apartment_id coming back from the form for
+        # this. concerns.apartment_id is an ordinary schema-driven FK
+        # dropdown shared with Admin's "pick any flat" picker, so without
+        # this an owner could edit that dropdown and submit a concern
+        # against a different apartment. Admin/master keep it fully
+        # editable, since picking the right flat is the whole point of that
+        # picker for them. See Concerns_Workflow_Review.md round 2.
+        if merged['caller_role'] == "apartment" and entity_singular == "concern":
+            merged["apartment_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
 
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
         #       Applied only when submitting a new receipt/expense form and the
