@@ -261,6 +261,8 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     entity_id INT NOT NULL,
     invited_by INT REFERENCES users (id),
     assigned_by INT REFERENCES users (id),
+    resolved_by INT REFERENCES users (id),
+    closed_by INT REFERENCES users (id),
     status VARCHAR(20) NOT NULL DEFAULT 'invited'
         CHECK (status IN ('invited', 'bid_submitted', 'assigned', 'resolved', 'closed')),
     bid_amount NUMERIC(10, 2),
@@ -279,34 +281,42 @@ CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (conc
 -- This is now the ONLY trigger writing concerns.status from delegation state
 -- (previously a second, independently-ruled trigger on concerns_invite could
 -- race this one and leave concerns.status reflecting whichever fired last).
+--
+-- 2026-08 fix: the aggregate is now computed ONLY over "touched" rows —
+-- rows that actually reached 'assigned' or beyond. Rows still sitting at
+-- 'invited'/'bid_submitted' (candidates who were never formally chosen,
+-- e.g. losing bidders) are excluded entirely from this calculation, so
+-- they can no longer block a concern from reaching 'resolved'. Previously
+-- a single leftover invited/bid_submitted row from an unselected candidate
+-- would keep a concern stuck at 'assigned' forever, even after the actual
+-- assignee(s) had resolved their work — see Concerns_Workflow_Review.md §2.9.
 CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
 RETURNS VOID
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_total INT;
-    v_closed INT;
-    v_resolved_or_closed INT;
     v_touched INT;
+    v_touched_closed INT;
+    v_touched_resolved_or_closed INT;
     v_new_status VARCHAR(20);
 BEGIN
-    SELECT COUNT(*),
+    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed')),
            COUNT(*) FILTER (WHERE status = 'closed'),
-           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed')),
-           COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed'))
-      INTO v_total, v_closed, v_resolved_or_closed, v_touched
+           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
+      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
       FROM concerns_assigns
-     WHERE concern_id = p_concern_id;
+     WHERE concern_id = p_concern_id
+       AND status IN ('assigned', 'resolved', 'closed');
 
-    IF v_total = 0 THEN
+    IF v_touched = 0 THEN
+        -- No one has ever been formally assigned yet — still open, whether
+        -- there are zero rows or only invited/bid_submitted candidates.
         v_new_status := 'open';
-    ELSIF v_closed = v_total THEN
+    ELSIF v_touched_closed = v_touched THEN
         v_new_status := 'closed';
-    ELSIF v_resolved_or_closed = v_total THEN
+    ELSIF v_touched_resolved_or_closed = v_touched THEN
         v_new_status := 'resolved';
-    ELSIF v_touched > 0 THEN
-        v_new_status := 'assigned';
     ELSE
-        v_new_status := 'open';
+        v_new_status := 'assigned';
     END IF;
 
     UPDATE concerns
@@ -5191,6 +5201,7 @@ CREATE TABLE IF NOT EXISTS visitors (
     id               SERIAL PRIMARY KEY,
     society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
     apartment_id     INT REFERENCES apartments(id) ON DELETE SET NULL,
+    host_apartment_id INT REFERENCES apartments(id),
     name             VARCHAR(100) NOT NULL,
     mobile           VARCHAR(15),
     purpose          VARCHAR(200),

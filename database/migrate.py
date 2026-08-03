@@ -160,6 +160,12 @@ def run_migrations(conn):
         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id)",
         "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id)",
 
+        # concerns_assigns: audit columns for who resolved/closed an
+        # assignment row (added 2026-08 alongside the fn_sync_concern_status
+        # aggregation fix — see Concerns_Workflow_Review.md §3.4 / §2.9)
+        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS resolved_by INT REFERENCES users(id)",
+        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS closed_by INT REFERENCES users(id)",
+
         # qr_payload columns for tables that existed before this column was introduced
         "ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
         "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",

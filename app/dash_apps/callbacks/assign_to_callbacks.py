@@ -35,8 +35,38 @@ PORTAL_ROLE_LABEL = {
 }
 
 
+# Human labels for the concerns_assigns.status enrichment optionally
+# joined in by list_assignable_*() when a concern_id is passed. See
+# Concerns_Workflow_Review.md §2.2.
+_STAGE_LABEL = {
+    "invited": ("Invited", "#7d8ea3"),
+    "bid_submitted": ("Bid submitted", "#1d74d8"),
+    "assigned": ("Assigned", "#e59620"),
+    "resolved": ("Resolved", "#17976e"),
+    "closed": ("Closed", "#64748b"),
+}
+
+
+def _stage_badge(row: dict):
+    """Small status pill shown next to a candidate's name in the Assign
+    modal, if they already have a concerns_assigns row for this concern —
+    so an admin doesn't have to guess whether "checked" means "invited" or
+    "already assigned and resolved" (§2.2)."""
+    status = row.get("assign_status")
+    if not status:
+        return None
+    label, color = _STAGE_LABEL.get(status, (status.title(), "#7d8ea3"))
+    bid = row.get("assign_bid_amount")
+    text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
+    return dbc.Badge(text, style={
+        "backgroundColor": f"{color}20", "color": color,
+        "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
+    })
+
+
 def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
     """Render a single assignable entity item."""
+    stage_badge = _stage_badge(row)
     if role == "ADM":
         label = row.get("name") or row.get("email", "Admin")
         sub = row.get("email", "")
@@ -68,6 +98,7 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
                     html.I(className=f"{icon} fa-2x mb-2", style={"color": color}),
                     html.H6(label, style={"fontWeight": "600", "fontSize": "13px"}),
                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
+                    html.Div(stage_badge, className="mt-1") if stage_badge else None,
                 ], className="text-center"),
             ], style={"padding": "12px"}),
         ], style={
@@ -86,7 +117,8 @@ def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list"
                 ),
                 html.I(className=f"{icon} me-2", style={"color": color, "width": "20px", "textAlign": "center"}),
                 html.Div([
-                    html.Span(label, style={"fontWeight": "600", "fontSize": "13px"}),
+                    html.Span([label, stage_badge] if stage_badge else label,
+                              style={"fontWeight": "600", "fontSize": "13px"}),
                     html.Br(),
                     html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
                 ]),
@@ -191,13 +223,14 @@ def register_assign_to_callbacks(app):
             return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
 
         s = (search or "").strip() or None
+        concern_id = store.get("concern_id")
         try:
             if role == "ADM":
-                rows = list_assignable_admins(society_id, s)
+                rows = list_assignable_admins(society_id, s, concern_id=concern_id)
             elif role == "VND":
-                rows = list_assignable_vendors(society_id, s)
+                rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
             else:
-                rows = list_assignable_security(society_id, s)
+                rows = list_assignable_security(society_id, s, concern_id=concern_id)
         except Exception as e:
             return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
 
@@ -281,13 +314,14 @@ def register_assign_to_callbacks(app):
         society_id = (auth or {}).get("society_id")
         if role in ("ADM", "VND", "SEC") and society_id:
             s = (search or "").strip() or None
+            concern_id = store.get("concern_id")
             try:
                 if role == "ADM":
-                    rows = list_assignable_admins(society_id, s)
+                    rows = list_assignable_admins(society_id, s, concern_id=concern_id)
                 elif role == "VND":
-                    rows = list_assignable_vendors(society_id, s)
+                    rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
                 else:
-                    rows = list_assignable_security(society_id, s)
+                    rows = list_assignable_security(society_id, s, concern_id=concern_id)
                 items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
                 list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
                     f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},

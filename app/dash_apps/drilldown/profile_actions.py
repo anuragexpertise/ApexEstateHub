@@ -155,7 +155,11 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # opens the bid-entry modal — no navigation
             "icon": "fa-hand-holding-usd",
             "color": "primary",
-            "roles": ["vendor"],
+            # Security staff can be invited/bid on concerns the same as
+            # vendors (concern_bid_callbacks.py's BID_ROLE_CODE already
+            # supported "security" -> "SEC"; only this button's role gate
+            # was vendor-only). See Concerns_Workflow_Review.md §2.3.
+            "roles": ["vendor", "security"],
         },
         {
             "label": "Resolved",
@@ -163,7 +167,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-check",
             "color": "success",
-            "roles": ["vendor"],
+            # See §2.8 — resolve_concern_assignment() is role-generic;
+            # the handler in drilldown_callbacks.py now honours whichever
+            # role the caller actually is instead of hard-coding "vendor".
+            "roles": ["vendor", "security"],
         },
         {
             "label": "Close",
