@@ -220,7 +220,19 @@ def register_assign_to_callbacks(app):
 
         society_id = (auth or {}).get("society_id")
         if not society_id:
-            return html.P("Not authenticated.", style={"color": "#de5c52"}), no_update, no_update, no_update
+            # NOTE (fixed 2026-08): same bug as invite_to_callbacks.py's
+            # load_invite_list — the color/outline outputs below are
+            # ALL-wildcard ({"type":"assign-card","role":ALL}), matching 3
+            # components here (ADM/VND/SEC). Dash's validate_multi_return()
+            # requires a list of that length, not a bare no_update, or it
+            # 500s. This was very likely why the Assign modal appeared to
+            # "not open" — the moment auth-store hadn't populated
+            # society_id yet (e.g. a fast click right after page load) this
+            # branch crashed instead of showing the auth message.
+            return (
+                html.P("Not authenticated.", style={"color": "#de5c52"}),
+                [no_update, no_update, no_update], [no_update, no_update, no_update], no_update,
+            )
 
         s = (search or "").strip() or None
         concern_id = store.get("concern_id")
@@ -232,7 +244,11 @@ def register_assign_to_callbacks(app):
             else:
                 rows = list_assignable_security(society_id, s, concern_id=concern_id)
         except Exception as e:
-            return html.P(f"Error loading list: {e}", style={"color": "#de5c52"}), no_update, no_update, no_update
+            # Same fix — see note above.
+            return (
+                html.P(f"Error loading list: {e}", style={"color": "#de5c52"}),
+                [no_update, no_update, no_update], [no_update, no_update, no_update], no_update,
+            )
 
         # Card highlight reflects the active role directly, not accumulated
         # n_clicks — with n_clicks, once two cards had each been clicked at
@@ -301,9 +317,9 @@ def register_assign_to_callbacks(app):
             badges.append(
                 dbc.Badge(
                     label,
-                    color="primary" if r == "ADM" else "success" if r == "VND" else "warning",
                     className="me-1",
-                    style={"fontSize": "11px"},
+                    style={"backgroundColor": "#1d74d8", "color": "#ffffff",
+                           "fontSize": "11px", "fontWeight": "600"},
                 )
             )
         summary = html.Div(badges) if badges else html.Small("No assignments selected.", className="text-muted")
