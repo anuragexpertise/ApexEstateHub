@@ -150,7 +150,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "roles": ["admin", "apartment"],   # Admin portal + Owner portal
         },
         {
-            "label": "Save Bid",
+            "label": "Bid",
             "action_id": "save_bid",
             "target_card": None,          # opens the bid-entry modal — no navigation
             "icon": "fa-hand-holding-usd",
@@ -159,6 +159,22 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             # vendors (concern_bid_callbacks.py's BID_ROLE_CODE already
             # supported "security" -> "SEC"; only this button's role gate
             # was vendor-only). See Concerns_Workflow_Review.md §2.3.
+            # Renamed "Save Bid" -> "Bid" 2026-08, paired with "Decline"
+            # below — both shown only while the caller's own row is
+            # 'invited' (renderers.py).
+            "roles": ["vendor", "security"],
+        },
+        {
+            "label": "Decline",
+            "action_id": "decline_concern",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-times",
+            "color": "secondary",
+            # NEW 2026-08 — companion to "Bid". Only shown while the
+            # caller's own concerns_assigns row is 'invited' (same gate as
+            # "Bid"); sets status='declined', notifies admin, and drops the
+            # caller from the Assign modal's candidate pool for this
+            # concern until re-invited. See Concerns_Workflow_Review.md §2.11.
             "roles": ["vendor", "security"],
         },
         {

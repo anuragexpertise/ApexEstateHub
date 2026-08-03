@@ -309,6 +309,18 @@ def notify_concern_resolved_by_vendor(society_id, apartment_id, concern_type):
     return send_bulk_push(targets, "✅ Concern Resolved By Vendor", body, url="/dashboard/concerns", society_id=society_id)
 
 
+def notify_concern_declined(society_id, apartment_id, concern_type, vendor_label=None):
+    """Vendor/security declined an invitation — notify admin + creator
+    apartment so they know to re-invite someone else (§2.11)."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    who = f" by {vendor_label}" if vendor_label else ""
+    body = f"An invitation was declined{who} for: {label}. You can re-invite another candidate."
+    return send_bulk_push(targets, "🚫 Concern Invitation Declined", body, url="/dashboard/concerns", society_id=society_id)
+
+
 def notify_concern_closed(society_id, apartment_id, concern_type, assignments=None):
     """Admin/Owner closed a concern — notify admin, the creator apartment,
     and every assignee. `assignments` is the list of rows returned by

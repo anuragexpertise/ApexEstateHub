@@ -85,13 +85,22 @@ def list_assignable_admins(society_id: int, search: str | None = None, concern_i
 
 def list_assignable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
     """List vendors assignable to concerns. See list_assignable_admins()
-    docstring re: the optional `concern_id` status enrichment."""
+    docstring re: the optional `concern_id` status enrichment.
+
+    2026-08: when `concern_id` is given, this now also FILTERS (not just
+    enriches) to vendors still "in play" for this concern's invite round —
+    status IN ('invited', 'bid_submitted'). Declined vendors, and vendors
+    never invited to this concern at all, are excluded from the Assign
+    candidate pool. This is a deliberate behavior change: the Assign modal
+    now expects an Invite round to have happened first for vendors (Admin
+    and Security candidates are unaffected — always listed in full,
+    concern_id or not). See Concerns_Workflow_Review.md §2.10."""
     sql = "SELECT v.id, v.business_name, v.name, v.mobile"
     if concern_id:
         sql += ", ca.status AS assign_status, ca.bid_amount AS assign_bid_amount"
     sql += " FROM vendors v"
     if concern_id:
-        sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
+        sql += " JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s AND ca.status IN ('invited', 'bid_submitted')"
     sql += " WHERE v.society_id=%s AND v.active=TRUE"
     params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
@@ -231,6 +240,26 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
     if not row:
         return False, "No pending invitation found for you on this concern"
     return True, "Bid submitted"
+
+
+def decline_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
+    """DECLINE stage: the invited vendor/security opts out before bidding.
+    Only valid from status='invited' — once a bid is submitted there's
+    nothing to "decline" (the admin either picks it via assign_concern()
+    or doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
+    ON CONFLICT clause resets any row not already resolved/closed back to
+    'invited', and 'declined' was never in that exclusion list, so no
+    change was needed there. Declined vendors also drop out of the Assign
+    modal's candidate pool — see list_assignable_vendors()."""
+    row = db._execute(
+        "UPDATE concerns_assigns SET status='declined', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited' "
+        "RETURNING id",
+        (concern_id, society_id, role, entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "No pending invitation found for you on this concern"
+    return True, "Declined"
 
 
 def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, assigned_by: int) -> tuple[bool, str]:

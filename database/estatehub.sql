@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     resolved_by INT REFERENCES users (id),
     closed_by INT REFERENCES users (id),
     status VARCHAR(20) NOT NULL DEFAULT 'invited'
-        CHECK (status IN ('invited', 'bid_submitted', 'assigned', 'resolved', 'closed')),
+        CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'resolved', 'closed')),
     bid_amount NUMERIC(10, 2),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,

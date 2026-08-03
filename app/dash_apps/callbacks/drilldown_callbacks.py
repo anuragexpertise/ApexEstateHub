@@ -589,6 +589,53 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── Decline (vendor OR security) — the caller opts out of an
+            #    invitation before bidding. NEW 2026-08, companion to Bid.
+            #    Notifies admin + creator apartment so they know to
+            #    re-invite another candidate (§2.11). See
+            #    Concerns_Workflow_Review.md §2.11.
+            elif action == "decline_concern" and entity == "concern":
+                role = (auth or {}).get("role")
+                caller_entity_id = (auth or {}).get("linked_id")
+                role_code = {"vendor": "VND", "security": "SEC"}.get(role)
+                if not role_code or not caller_entity_id:
+                    toast = {"_toast": {"type": "error", "message": "Only an invited vendor or security staff can decline"}}
+                    return store, content, bc, {"display": "none"}, toast
+                ok, msg = loaders.decline_concern_assignment(int(pk), sid, role_code, int(caller_entity_id))
+                if ok:
+                    try:
+                        from app.services.push_service import notify_concern_declined
+                        concern_row = db._execute(
+                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        if role_code == "VND":
+                            e_row = db._execute(
+                                "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
+                                (caller_entity_id, sid), fetch_one=True,
+                            )
+                            decliner_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
+                        else:
+                            e_row = db._execute(
+                                "SELECT name FROM security_staff WHERE id=%s AND society_id=%s",
+                                (caller_entity_id, sid), fetch_one=True,
+                            )
+                            decliner_label = (e_row or {}).get("name")
+                        if concern_row:
+                            notify_concern_declined(
+                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), decliner_label,
+                            )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_declined failed (concern_id=%s): %s", pk, e,
+                        )
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
             # ── Resolved (vendor OR security) — mark the caller's own assignment
             #    resolved. Generalized 2026-08: security staff can now be
             #    invited/bid on concerns the same as vendors (see
