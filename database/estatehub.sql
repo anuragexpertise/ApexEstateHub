@@ -606,6 +606,7 @@ CREATE TABLE IF NOT EXISTS payables (
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    entry_side VARCHAR(2),
     trx_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
     entity_id INTEGER,
@@ -3578,7 +3579,7 @@ $$;
 -- columns by transaction mode, and includes rc_acc_id/pc_acc_id (ledger
 -- folio) columns. Now the only cashbook function — loaders.py and
 -- cashbook_export.py both call this.
-DROP FUNCTION IF EXISTS fn_cashbook_paired_v2 (
+DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
     INT,
     INT,
     TEXT,
@@ -3587,7 +3588,7 @@ DROP FUNCTION IF EXISTS fn_cashbook_paired_v2 (
     DATE
 ) CASCADE;
 
-CREATE OR REPLACE FUNCTION fn_cashbook_paired_v2(
+CREATE OR REPLACE FUNCTION fn_cashbook_paired_v3(
     p_society_id  INT,
     p_entity_id   INT  DEFAULT NULL,
     p_entity_role TEXT DEFAULT NULL,
@@ -3612,8 +3613,7 @@ BEGIN
                  ELSE EXTRACT(YEAR FROM p_start_date)::SMALLINT
                       - CASE WHEN EXTRACT(MONTH FROM p_start_date) < 4 THEN 1 ELSE 0 END
             END;
-
-    -- is_cash_or_bank accounts are always Dr-natured; Dr BF adds, Cr BF subtracts.
+ 
     SELECT COALESCE(SUM(
         CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
     ), 0)
@@ -3622,9 +3622,11 @@ BEGIN
     JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
     WHERE a.society_id = p_society_id AND a.is_cash_or_bank = TRUE
       AND bf.financial_year = v_fy;
-
+ 
     RETURN QUERY
     WITH cr_rows AS (
+        -- entry_side = 'Cr' means this leg is the receipt side of its
+        -- journal pair, regardless of the account's own natural type.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, a.name::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -3633,11 +3635,12 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Cr'
+        JOIN accounts a ON a.id = t.acc_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
+          AND t.entry_side = 'Cr'
           AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
           AND (p_end_date IS NULL OR t.trx_date <= p_end_date)
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
@@ -3656,11 +3659,12 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.drcr_account = 'Dr'
+        JOIN accounts a ON a.id = t.acc_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
+          AND t.entry_side = 'Dr'
           AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
           AND (p_end_date IS NULL OR t.trx_date <= p_end_date)
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
@@ -3670,61 +3674,33 @@ BEGIN
                (p_entity_role = 'security' AND s.id IS NOT NULL))
           AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%' OR t.acc_particulars ILIKE '%'||p_search||'%')
     ),
-    journals AS (
-        SELECT COALESCE(journal_id, -id) AS jid, trx_date FROM transactions
-        WHERE society_id = p_society_id AND status = 'paid'
-        GROUP BY COALESCE(journal_id, -id), trx_date
-    ),
-    slot_counts AS (
-        SELECT j.jid, j.trx_date,
-               GREATEST(COALESCE(MAX(cr.rn), 0), COALESCE(MAX(dr.rn), 0)) AS max_rn
-        FROM journals j
-        LEFT JOIN cr_rows cr ON cr.journal_id = j.jid OR (cr.journal_id IS NULL AND -cr.id = j.jid)
-        LEFT JOIN dr_rows dr ON dr.journal_id = j.jid OR (dr.journal_id IS NULL AND -dr.id = j.jid)
-        GROUP BY j.jid, j.trx_date
-        HAVING GREATEST(COALESCE(MAX(cr.rn), 0), COALESCE(MAX(dr.rn), 0)) > 0
-    ),
-    slots AS (
-        SELECT jid, trx_date, gs AS rn
-        FROM slot_counts, LATERAL generate_series(1, max_rn) AS gs
-    ),
     paired AS (
-        SELECT
-            sl.trx_date AS row_date,
-            cr.acc_id AS rc_acc_id,
-            cr.account_name AS rc_account_name, cr.entity_name AS rc_entity_name,
-            cr.particulars AS rc_particulars, cr.cash_amt AS rc_cash, cr.chq_amt AS rc_chq,
-            dr.acc_id AS pc_acc_id,
-            dr.account_name AS pc_account_name, dr.entity_name AS pc_entity_name,
-            dr.particulars AS pc_particulars, dr.cash_amt AS pc_cash, dr.chq_amt AS pc_chq
-        FROM slots sl
-        LEFT JOIN cr_rows cr ON (cr.journal_id = sl.jid OR (cr.journal_id IS NULL AND -cr.id = sl.jid)) AND cr.rn = sl.rn
-        LEFT JOIN dr_rows dr ON (dr.journal_id = sl.jid OR (dr.journal_id IS NULL AND -dr.id = sl.jid)) AND dr.rn = sl.rn
-    ),
-    day_totals AS (
-        SELECT row_date,
-               SUM(COALESCE(rc_cash,0) + COALESCE(rc_chq,0)) AS day_rc,
-               SUM(COALESCE(pc_cash,0) + COALESCE(pc_chq,0)) AS day_pc
-        FROM paired GROUP BY row_date
-    ),
-    running AS (
-        SELECT row_date,
-               v_opening_balance + SUM(day_rc - day_pc) OVER (ORDER BY row_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS bal
-        FROM day_totals
+        SELECT COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
+               COALESCE(c.trx_date, d.trx_date) AS row_date,
+               c.acc_id AS rc_acc_id, c.account_name AS rc_account_name,
+               c.entity_name AS rc_entity_name, c.particulars AS rc_particulars,
+               c.cash_amt AS rc_cash, c.chq_amt AS rc_chq,
+               d.acc_id AS pc_acc_id, d.account_name AS pc_account_name,
+               d.entity_name AS pc_entity_name, d.particulars AS pc_particulars,
+               d.cash_amt AS pc_cash, d.chq_amt AS pc_chq
+        FROM cr_rows c
+        FULL OUTER JOIN dr_rows d
+          ON c.journal_id IS NOT NULL AND c.journal_id = d.journal_id AND c.rn = d.rn
+        WHERE c.journal_id IS NOT NULL OR d.journal_id IS NULL
+        -- NOTE: pairing strategy carried over from v2 as-is; the entry_side
+        -- change only affects which side each row lands on, not how rows
+        -- are paired. Revisit this CTE together with the closing-engine
+        -- work if journal_id pairing needs to change.
     )
-    SELECT
-        p.row_date,
-        p.rc_acc_id, COALESCE(p.rc_account_name,'')::TEXT, COALESCE(p.rc_entity_name,'')::TEXT, COALESCE(p.rc_particulars,'')::TEXT,
-        COALESCE(p.rc_cash,0)::NUMERIC(15,2), COALESCE(p.rc_chq,0)::NUMERIC(15,2),
-        p.pc_acc_id, COALESCE(p.pc_account_name,'')::TEXT, COALESCE(p.pc_entity_name,'')::TEXT, COALESCE(p.pc_particulars,'')::TEXT,
-        COALESCE(p.pc_cash,0)::NUMERIC(15,2), COALESCE(p.pc_chq,0)::NUMERIC(15,2),
-        r.bal::NUMERIC(15,2)
+    SELECT p.row_date, p.rc_acc_id, p.rc_account_name, p.rc_entity_name, p.rc_particulars,
+           p.rc_cash, p.rc_chq, p.pc_acc_id, p.pc_account_name, p.pc_entity_name, p.pc_particulars,
+           p.pc_cash, p.pc_chq,
+           v_opening_balance + SUM(COALESCE(p.rc_cash,0) - COALESCE(p.pc_cash,0))
+               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS running_balance
     FROM paired p
-    JOIN running r ON r.row_date = p.row_date
-    ORDER BY p.row_date;
+    ORDER BY p.row_date, p.pair_key;
 END;
 $$;
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════

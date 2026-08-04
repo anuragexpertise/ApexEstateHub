@@ -2,88 +2,95 @@
 """
 Cashbook Excel Generator — EstateHub
 ======================================
-Produces the traditional paired Indian society cashbook (month-wise).
+Produces the traditional paired Indian society cashbook, one sheet per
+month, all months of a financial year in a single workbook — matching the
+CB2025-2026.xlsx reference layout supplied 2026-08.
 
-Column layout (A–O):
+DEPENDS ON: fn_cashbook_paired_v3 (see fn_cashbook_paired_v3.sql), which
+requires the entry_side migration to be deployed first. Until then this
+module will raise if entry_side doesn't exist on transactions — it does NOT
+silently fall back to fn_cashbook_paired_v2's buggy drcr_account-inferred
+join, since that would reproduce the exact bug this rewrite exists to fix.
+
+Column layout (A–O) — unchanged from the original single-month version:
   A  Date (receipt side)
   B  Receipt A/c name       (accounts.tab_name)
   C  Receipt Particulars    (acc_particulars + payment_gateway_id)
   D  Receipt L.F. No.       (ledger folio = accounts.id)
-  E  Receipt Cash           (mode='cash' → Cr amount)
-  F  Receipt Chq/UPI        (mode≠'cash' → Cr amount, informational only)
+  E  Receipt Cash           (mode='cash', entry_side='Cr')
+  F  Receipt Chq/UPI        (mode<>'cash', entry_side='Cr', informational)
   G  Receipt Running Total  (running sum of col E — cash receipts only)
   H  Date (payment side)
   I  Payment A/c name       (accounts.tab_name)
   J  Payment Particulars    (acc_particulars + payment_gateway_id)
   K  Payment L.F. No.       (accounts.id)
-  L  Payment Cash           (mode='cash' → Dr amount)
-  M  Payment Chq            (mode≠'cash' → Dr amount, informational)
+  L  Payment Cash           (mode='cash', entry_side='Dr')
+  M  Payment Chq            (mode<>'cash', entry_side='Dr', informational)
   N  Payment Running Total  (running sum of col L — cash payables only)
   O  Balance                (= G − N, physical cash in hand)
 
-Row structure:
+Row structure per month sheet:
   Row 1: blank
   Row 2: A2=filename, C2=society_name, E2='Society', F2='CASHBOOK', G2='PAN:', H2=PAN,
           J2='Asst.Yr.', K2=year_range, L2='Month', M2=month_abbrev
   Row 3: blank
   Row 4: Column headers
-  Row 5: B/F balance row (Balance B/F from brought_forward, Cash/Bank accounts, current FY)
-  Row 6+: Data rows (receipt side / payment side, odd side left blank)
-  Last:  C/F row (Balance C/F, closing cash → payment side)
+  Row 5: Balance B/F row — ONLY 'Balance' (col B/I) + 'B/F' (col C/J) + the
+          opening amount + running-total seeds. No other data on this row.
+  Row 6+: Data rows (receipt side / payment side; the side with no entry on
+          a given row is left entirely blank)
+  Last:  Balance C/F row — ONLY 'Balance' + 'C/F' + closing cash amount.
+          No other data on this row.
 
-Balance formulas (in O column):
-  O5  =E5-L5                       ← first data row
-  O6  =O5+E6-L6                    ← subsequent rows
+FY grouping: one workbook per financial year (Apr–Mar), one sheet per
+month named by month abbreviation (Apr, May, ... Mar), each month's
+opening balance carried from the prior month's closing balance, the very
+first month's opening balance coming from `brought_forward`.
 
-G formula:
-  G5  =E5
-  G6  =G5+E6                       ← running cash receipt total
+Entity/user scoping: entity_id / entity_role passed straight through
+to fn_cashbook_paired_v3, so the same generator serves both:
+  - Admin portal: entity_id=None (all) or a specific user's underlying
+    entity_id when 'ALL' is not selected
+  - Owner/Vendor/Security portals: entity_id defaults to current user's
+    linked entity_id, entity_role fixed to the portal's role
 
-N formula:
-  N5  =L5
-  N6  =N5+L6                       ← running cash payment total
-
-The C/F row's L value = O_{last_data_row} (cash carried forward), making N_cf = N_prev + O_prev
-so that G_total = N_cf (both sides foot).
+NOTE: "Intelligent grouping" (individual apartment dues -> single
+'Apartment maintenance' line, individual vendor payments -> 'Vendors',
+etc.) is NOT implemented in this pass. It needs a defined account-level
+grouping label before it can be built without hardcoding account-name
+matches, which would be fragile against the registry-driven account list.
+This generator currently always shows the underlying per-account rows.
 """
 
 from __future__ import annotations
 import io
-from datetime import date, datetime
-from typing import Any
+from datetime import date
 
 from openpyxl import Workbook
-from openpyxl.styles import (
-    Font, PatternFill, Alignment, Border, Side, numbers
-)
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.worksheet.worksheet import Worksheet
 
 
-# ── Style constants ──────────────────────────────────────────────────────
 _FONT_BODY   = Font(name="Arial", size=9)
 _FONT_HEADER = Font(name="Arial", size=9, bold=True)
 _FONT_TITLE  = Font(name="Arial", size=10, bold=True)
 _FONT_BF_CF  = Font(name="Arial", size=9, bold=True, italic=True)
 
-_FILL_HEADER  = PatternFill("solid", fgColor="D9E1F2")   # light blue
-_FILL_BF      = PatternFill("solid", fgColor="E2EFDA")   # light green
-_FILL_CF      = PatternFill("solid", fgColor="FCE4D6")   # light orange
-_FILL_ALT     = PatternFill("solid", fgColor="F7F7F7")   # alternating row
+_FILL_HEADER = PatternFill("solid", fgColor="D9E1F2")
+_FILL_BF     = PatternFill("solid", fgColor="E2EFDA")
+_FILL_CF     = PatternFill("solid", fgColor="FCE4D6")
+_FILL_ALT    = PatternFill("solid", fgColor="F7F7F7")
 
-_ALIGN_C  = Alignment(horizontal="center", vertical="center")
-_ALIGN_L  = Alignment(horizontal="left",   vertical="center")
-_ALIGN_R  = Alignment(horizontal="right",  vertical="center")
+_ALIGN_C = Alignment(horizontal="center", vertical="center")
+_ALIGN_L = Alignment(horizontal="left",   vertical="center")
+_ALIGN_R = Alignment(horizontal="right",  vertical="center")
 
 _THIN = Side(style="thin")
-_THICK = Side(style="medium")
-_BORDER_ALL   = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-_BORDER_THICK = Border(left=_THICK, right=_THICK, top=_THICK, bottom=_THICK)
+_BORDER_ALL = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
-_FMT_DATE  = "DD-MMM-YY"
-_FMT_AMT   = '#,##0.00;[Red](#,##0.00);"-"'
-_FMT_AMT0  = '#,##0;[Red](#,##0);"-"'
+_FMT_DATE = "DD-MMM-YY"
+_FMT_AMT  = '#,##0.00;[Red](#,##0.00);"-"'
 
-# Column widths (A=1 … O=15)
 _COL_WIDTHS = {
     "A": 10, "B": 10, "C": 28, "D":  6,
     "E":  9, "F":  9, "G": 10,
@@ -91,288 +98,202 @@ _COL_WIDTHS = {
     "L":  9, "M":  9, "N": 10, "O": 10,
 }
 
-# Separator column between receipt and payment halves (thin right border on G)
-_DIVIDER_COL = 7   # column G (1-indexed)
+
+def _particulars(row_dict: dict, prefix: str) -> str:
+    p  = (row_dict.get(f"{prefix}particulars") or "").strip()
+    gw = (row_dict.get(f"{prefix}cheque_no") or "").strip()
+    return f"{p} [{gw}]" if gw else p
 
 
-def _style_cell(cell, font=None, fill=None, align=None, border=None, fmt=None):
-    if font:   cell.font      = font
-    if fill:   cell.fill      = fill
-    if align:  cell.alignment = align
-    if border: cell.border    = border
-    if fmt:    cell.number_format = fmt
+def _write_month_sheet(
+    ws: Worksheet,
+    rows: list[dict],
+    opening_balance: float,
+    society_name: str,
+    pan: str,
+    asst_year: str,
+    month_dt: date,
+    filename: str,
+) -> float:
+    """Writes one month's cashbook onto `ws`. Returns the closing balance."""
+
+    for col_letter, width in _COL_WIDTHS.items():
+        ws.column_dimensions[col_letter].width = width
+
+    ws.row_dimensions[1].height = 6
+
+    month_abbrev = month_dt.strftime("%b")
+    title_data = {
+        1: filename, 3: society_name, 5: "Society", 6: "CASHBOOK",
+        7: "PAN:", 8: pan, 10: "Asst.Yr.", 11: asst_year,
+        12: "Month", 13: month_abbrev,
+    }
+    for col, val in title_data.items():
+        cell = ws.cell(row=2, column=col, value=val)
+        cell.font, cell.alignment = _FONT_TITLE, _ALIGN_C
+
+    ws.row_dimensions[3].height = 6
+
+    headers = {
+        1: "Date", 2: "Receipt A/c", 3: "Receipt Particulars", 4: "L.F.",
+        5: "Cash", 6: "Chq./UPI", 7: "Total",
+        8: "Date", 9: "Payment A/c", 10: "Payment Particulars", 11: "L.F.",
+        12: "Cash", 13: "Chq.", 14: "Total", 15: "Balance",
+    }
+    for col, hdr in headers.items():
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font, cell.fill = _FONT_HEADER, _FILL_HEADER
+        cell.alignment, cell.border = _ALIGN_C, _BORDER_ALL
+
+    bf_row = {
+        1: month_dt, 2: "Balance", 3: "B/F",
+        5: opening_balance if opening_balance >= 0 else None,
+        12: abs(opening_balance) if opening_balance < 0 else None,
+    }
+    for col, val in bf_row.items():
+        cell = ws.cell(row=5, column=col, value=val)
+        cell.font, cell.fill = _FONT_BF_CF, _FILL_BF
+        cell.alignment = _ALIGN_R if col in (5, 12) else _ALIGN_L
+        cell.border = _BORDER_ALL
+        if col == 1:
+            cell.number_format = _FMT_DATE
+        elif col in (5, 12):
+            cell.number_format = _FMT_AMT
+
+    for col, formula in [(7, "=E5"), (14, "=L5"), (15, "=G5-N5")]:
+        cell = ws.cell(row=5, column=col, value=formula)
+        cell.font, cell.fill = _FONT_BF_CF, _FILL_BF
+        cell.border, cell.alignment = _BORDER_ALL, _ALIGN_R
+        cell.number_format = _FMT_AMT
+
+    current_row = 6
+    for i, r in enumerate(rows):
+        fill = _FILL_ALT if i % 2 == 0 else None
+        row_data = {
+            1: r.get("row_date") or None,
+            2: r.get("rc_account_name") or None,
+            3: _particulars(r, "rc_") or None,
+            4: r.get("rc_acc_id") or None,
+            5: float(r.get("rc_cash") or 0) or None,
+            6: float(r.get("rc_chq") or 0) or None,
+            8: r.get("row_date") or None,
+            9: r.get("pc_account_name") or None,
+            10: _particulars(r, "pc_") or None,
+            11: r.get("pc_acc_id") or None,
+            12: float(r.get("pc_cash") or 0) or None,
+            13: float(r.get("pc_chq") or 0) or None,
+        }
+        for col, val in row_data.items():
+            cell = ws.cell(row=current_row, column=col, value=val)
+            cell.font = _FONT_BODY
+            cell.fill = fill or PatternFill()
+            cell.border = _BORDER_ALL
+            cell.alignment = _ALIGN_R if col in (5, 6, 12, 13) else _ALIGN_L
+            if col in (1, 8) and val:
+                cell.number_format = _FMT_DATE
+            elif col in (5, 6, 12, 13):
+                cell.number_format = _FMT_AMT
+
+        prev = current_row - 1
+        for col, formula in [
+            (7,  f'=G{prev}+IF(E{current_row}<>"",E{current_row},0)'),
+            (14, f'=N{prev}+IF(L{current_row}<>"",L{current_row},0)'),
+            (15, f"=G{current_row}-N{current_row}"),
+        ]:
+            cell = ws.cell(row=current_row, column=col, value=formula)
+            cell.font, cell.fill = _FONT_BODY, (fill or PatternFill())
+            cell.border, cell.alignment = _BORDER_ALL, _ALIGN_R
+            cell.number_format = _FMT_AMT
+        current_row += 1
+
+    cf_row = current_row
+    prev = cf_row - 1
+    ws.cell(row=cf_row, column=9,  value="Balance")
+    ws.cell(row=cf_row, column=10, value="C/F")
+    ws.cell(row=cf_row, column=12, value=f"=O{prev}")
+    ws.cell(row=cf_row, column=7,  value=f"=G{prev}")
+    ws.cell(row=cf_row, column=14, value=f"=N{prev}+L{cf_row}")
+    ws.cell(row=cf_row, column=15, value=f"=G{cf_row}-N{cf_row}")
+    for col in [7, 9, 10, 12, 14, 15]:
+        cell = ws.cell(row=cf_row, column=col)
+        cell.font, cell.fill = _FONT_BF_CF, _FILL_CF
+        cell.border = _BORDER_ALL
+        cell.alignment = _ALIGN_L if col in (9, 10) else _ALIGN_R
+        if col in (7, 12, 14, 15):
+            cell.number_format = _FMT_AMT
+
+    ws.freeze_panes = "A5"
+
+    # Closing balance is computed here in Python (not read back from an
+    # Excel formula), so the next month's opening balance doesn't depend on
+    # spreadsheet recalculation having happened.
+    closing_balance = opening_balance + sum(
+        float(r.get("rc_cash") or 0) - float(r.get("pc_cash") or 0) for r in rows
+    )
+    return closing_balance
 
 
-def _write_row(ws, row_idx: int, values: dict[int, Any], style: dict = None):
-    """Write a dict of {col_idx: value} into a row, applying optional shared style."""
-    style = style or {}
-    for col, val in values.items():
-        cell = ws.cell(row=row_idx, column=col, value=val)
-        _style_cell(cell,
-                    font=style.get("font"),
-                    fill=style.get("fill"),
-                    align=style.get("align"),
-                    fmt=style.get("fmt"))
-        cell.border = style.get("border", _BORDER_ALL)
-
-
-def generate_cashbook_excel(
+def generate_cashbook_excel_fy(
     db,
     society_id: int,
-    month: int,       # 1–12
-    year: int,
+    fy: int,                      # e.g. 2025 for FY2025 (Apr 2025-Mar 2026)
+    entity_id: int | None = None,
+    entity_role: str | None = None,
     filename_prefix: str = "Cashbook",
 ) -> bytes:
     """
-    Query fn_cashbook_paired for the given month/year and produce
-    an .xlsx cashbook in the traditional paired format.
-
-    Returns raw bytes (ready to stream with dcc.send_bytes).
+    Builds a full-FY cashbook workbook, one sheet per month (Apr..Mar),
+    using fn_cashbook_paired_v3. Requires the entry_side migration to be
+    deployed - this does not fall back to the pre-entry_side function.
     """
     from database.db_manager import db as _db
     if db is None:
         db = _db
 
-    # ── 1. Load society meta ──────────────────────────────────────────────
     soc = db._execute(
-        "SELECT name, pan_number, calc_start_date FROM societies WHERE id=%s",
+        "SELECT name, pan_number FROM societies WHERE id=%s",
         (society_id,), fetch_one=True,
     ) or {}
     society_name = soc.get("name", "Society")
-    pan          = soc.get("pan_number", "")
-    calc_start   = soc.get("calc_start_date", date(year, 4, 1))
-    asst_year    = f"{year}-{year+1}"
+    pan = soc.get("pan_number", "")
+    asst_year = f"{fy}-{fy+1}"
+    filename = f"{filename_prefix}_{fy}-{fy+1}.xlsx"
 
-    # ── 2. Opening balance = FY-start BF of Cash/Bank accounts only ───────
-    # (Capital Account and depreciable-asset BF must NOT be included here —
-    # a cashbook's B/F is physical cash + bank balances only.)
-    fy = year if month >= 4 else year - 1
     bf_row = db._execute(
         "SELECT COALESCE(SUM(CASE WHEN bf.drcr_bf='Dr' THEN bf.bf_amount ELSE -bf.bf_amount END),0) AS bf "
         "FROM accounts a JOIN brought_forward bf ON bf.acc_id=a.id AND bf.society_id=a.society_id "
         "WHERE a.society_id=%s AND a.is_cash_or_bank=TRUE AND bf.financial_year=%s",
         (society_id, fy), fetch_one=True,
     ) or {}
-    fy_opening_balance = float(bf_row.get("bf", 0))
+    opening_balance = float(bf_row.get("bf", 0))
 
-    # ── 3. Pull cashbook data for the month ───────────────────────────────
-    month_start = date(year, month, 1)
-    if month == 12:
-        month_end = date(year + 1, 1, 1)
-    else:
-        month_end = date(year, month + 1, 1)
     fy_start = date(fy, 4, 1)
 
-    # Query from FY start through this month's end so running_balance is
-    # correct even for months after April — fn_cashbook_paired_v2's own
-    # opening balance is FY-start-scoped, so prior months in the same FY
-    # must be included to get the right running total for this month.
-    all_fy_rows = db._execute(
-        "SELECT * FROM fn_cashbook_paired_v2(%s, NULL, NULL, NULL, %s, %s) ORDER BY row_date",
-        (society_id, fy_start, date(month_end.year, month_end.month, 1)),
+    all_rows = db._execute(
+        "SELECT * FROM fn_cashbook_paired_v3(%s, %s, %s, NULL, %s, %s) ORDER BY row_date",
+        (society_id, entity_id, entity_role, fy_start, date(fy + 1, 3, 31)),
         fetch_all=True,
     ) or []
-    rows = [r for r in all_fy_rows if month_start <= r["row_date"] < month_end]
-    prior_rows = [r for r in all_fy_rows if r["row_date"] < month_start]
-    opening_balance = float(prior_rows[-1]["running_balance"]) if prior_rows else fy_opening_balance
 
-    # ── 4. Build the workbook ─────────────────────────────────────────────
     wb = Workbook()
-    ws = wb.active
-    ws.title = date(year, month, 1).strftime("%b")
+    wb.remove(wb.active)
 
-    # Set column widths
-    for col_letter, width in _COL_WIDTHS.items():
-        ws.column_dimensions[col_letter].width = width
+    month, year = 4, fy
+    for _ in range(12):
+        month_start = date(year, month, 1)
+        month_end = date(year + 1, 4, 1) if month == 3 else date(year, month + 1, 1)
+        month_rows = [r for r in all_rows if month_start <= r["row_date"] < month_end]
 
-    # ── Row 1: blank ─────────────────────────────────────────────────────
-    ws.row_dimensions[1].height = 6
+        ws = wb.create_sheet(title=month_start.strftime("%b"))
+        opening_balance = _write_month_sheet(
+            ws, month_rows, opening_balance, society_name, pan, asst_year, month_start, filename
+        )
 
-    # ── Row 2: Title header ───────────────────────────────────────────────
-    filename = f"{filename_prefix}_{year}-{year+1}.xlsx"
-    month_abbrev = date(year, month, 1).strftime("%b")
+        if month == 3:
+            month, year = 4, year + 1
+        else:
+            month += 1
 
-    title_data = {
-        1: filename,            # A2
-        3: society_name,        # C2
-        5: "Society",           # E2
-        6: "CASHBOOK",          # F2
-        7: "PAN:",              # G2
-        8: pan,                 # H2
-        10: "Asst.Yr.",         # J2
-        11: asst_year,          # K2
-        12: "Month",            # L2
-        13: month_abbrev,       # M2
-    }
-    for col, val in title_data.items():
-        cell = ws.cell(row=2, column=col, value=val)
-        cell.font      = _FONT_TITLE
-        cell.alignment = _ALIGN_C
-
-    # ── Row 3: blank ─────────────────────────────────────────────────────
-    ws.row_dimensions[3].height = 6
-
-    # ── Row 4: Column headers ─────────────────────────────────────────────
-    headers = {
-        1: "Date",        2: "Receipt A/c",      3: "Receipt Particulars",
-        4: "L.F.",        5: "Cash",              6: "Chq./UPI",
-        7: "Total",
-        8: "Date",        9: "Payment A/c",       10: "Payment Particulars",
-        11: "L.F.",       12: "Cash",             13: "Chq.",
-        14: "Total",      15: "Balance",
-    }
-    for col, hdr in headers.items():
-        cell = ws.cell(row=4, column=col, value=hdr)
-        _style_cell(cell, font=_FONT_HEADER, fill=_FILL_HEADER,
-                    align=_ALIGN_C, border=_BORDER_ALL)
-
-    # ── Row 5: Balance B/F ───────────────────────────────────────────────
-    bf_date = month_start
-    bf_values = {
-        1: bf_date,        # A5
-        2: "Balance",      # B5
-        3: "B/F",          # C5
-        5: opening_balance if opening_balance >= 0 else None,   # E5 cash receipt
-        12: abs(opening_balance) if opening_balance < 0 else None,  # L5 cash payment
-    }
-    for col, val in bf_values.items():
-        cell = ws.cell(row=5, column=col, value=val)
-        _style_cell(cell, font=_FONT_BF_CF, fill=_FILL_BF,
-                    align=_ALIGN_R if col in (5,6,7,12,13,14,15) else _ALIGN_L,
-                    border=_BORDER_ALL,
-                    fmt=_FMT_DATE if col in (1,8) else (_FMT_AMT if col in (5,6,7,12,13,14,15) else None))
-
-    # G5 = E5 (running receipt total initialised from B/F)
-    ws.cell(row=5, column=7).value  = f"=E5"
-    ws.cell(row=5, column=7).number_format = _FMT_AMT
-    ws.cell(row=5, column=7).font   = _FONT_BF_CF
-    ws.cell(row=5, column=7).fill   = _FILL_BF
-    ws.cell(row=5, column=7).border = _BORDER_ALL
-    ws.cell(row=5, column=7).alignment = _ALIGN_R
-    # N5 = L5 (running payment total initialised from B/F payment side, usually 0)
-    ws.cell(row=5, column=14).value = f"=L5"
-    ws.cell(row=5, column=14).number_format = _FMT_AMT
-    ws.cell(row=5, column=14).font   = _FONT_BF_CF
-    ws.cell(row=5, column=14).fill   = _FILL_BF
-    ws.cell(row=5, column=14).border = _BORDER_ALL
-    ws.cell(row=5, column=14).alignment = _ALIGN_R
-    # O5 = G5 - N5
-    ws.cell(row=5, column=15).value = f"=G5-N5"
-    ws.cell(row=5, column=15).number_format = _FMT_AMT
-    ws.cell(row=5, column=15).font   = _FONT_BF_CF
-    ws.cell(row=5, column=15).fill   = _FILL_BF
-    ws.cell(row=5, column=15).border = _BORDER_ALL
-    ws.cell(row=5, column=15).alignment = _ALIGN_R
-
-    # ── Rows 6+: Data rows ───────────────────────────────────────────────
-    current_row = 6
-
-    def _particulars(row_dict: dict, prefix: str = "") -> str:
-        """Concatenate particulars + payment gateway id if present."""
-        p   = (row_dict.get(f"{prefix}particulars") or "").strip()
-        gw  = (row_dict.get(f"{prefix}cheque_no") or "").strip()  # payment_gateway_id stored here
-        return f"{p} [{gw}]" if gw else p
-
-    for i, r in enumerate(rows):
-        fill = _FILL_ALT if i % 2 == 0 else None
-
-        # ── Receipt side (Cr) ─────────────────────────────────────────────
-        rc_date  = r.get("row_date")
-        rc_acc   = r.get("rc_account_name") or ""
-        rc_part  = _particulars(r, "rc_")
-        rc_lf    = r.get("rc_acc_id")          # ledger folio = accounts.id
-        rc_cash  = float(r.get("rc_cash") or 0) or None
-        rc_chq   = float(r.get("rc_chq") or 0) or None
-
-        # ── Payment side (Dr) ─────────────────────────────────────────────
-        pc_date  = r.get("row_date")
-        pc_acc   = r.get("pc_account_name") or ""
-        pc_part  = _particulars(r, "pc_")
-        pc_lf    = r.get("pc_acc_id")
-        pc_cash  = float(r.get("pc_cash") or 0) or None
-        pc_chq   = float(r.get("pc_chq") or 0) or None
-
-        row_data = {
-            1:  rc_date or None,
-            2:  rc_acc  or None,
-            3:  rc_part or None,
-            4:  rc_lf   or None,
-            5:  rc_cash,
-            6:  rc_chq,
-            8:  pc_date or None,
-            9:  pc_acc  or None,
-            10: pc_part or None,
-            11: pc_lf   or None,
-            12: pc_cash,
-            13: pc_chq,
-        }
-
-        for col, val in row_data.items():
-            cell = ws.cell(row=current_row, column=col, value=val)
-            cell.font   = _FONT_BODY
-            cell.fill   = fill or PatternFill()
-            cell.border = _BORDER_ALL
-            align = _ALIGN_R if col in (5, 6, 12, 13) else _ALIGN_L
-            cell.alignment = align
-            if col in (1, 8) and val:
-                cell.number_format = _FMT_DATE
-            elif col in (5, 6, 12, 13):
-                cell.number_format = _FMT_AMT
-
-        # Running totals as Excel formulas (G, N, O)
-        prev = current_row - 1
-        for col, formula in [
-            (7,  f"=G{prev}+IF(E{current_row}<>\"\",E{current_row},0)"),
-            (14, f"=N{prev}+IF(L{current_row}<>\"\",L{current_row},0)"),
-            (15, f"=G{current_row}-N{current_row}"),
-        ]:
-            cell = ws.cell(row=current_row, column=col, value=formula)
-            cell.font   = _FONT_BODY
-            cell.fill   = fill or PatternFill()
-            cell.border = _BORDER_ALL
-            cell.alignment = _ALIGN_R
-            cell.number_format = _FMT_AMT
-
-        current_row += 1
-
-    # ── C/F row ───────────────────────────────────────────────────────────
-    cf_row = current_row
-    prev   = cf_row - 1
-
-    ws.cell(row=cf_row, column=8,  value=month_start.replace(day=28))   # H - end of month date approx
-    ws.cell(row=cf_row, column=9,  value="Balance")                      # I
-    ws.cell(row=cf_row, column=10, value="C/F")                          # J
-    # L = closing cash balance = O{prev}
-    ws.cell(row=cf_row, column=12, value=f"=O{prev}")                    # L
-    # G stays the same (no more receipts)
-    ws.cell(row=cf_row, column=7,  value=f"=G{prev}")                    # G
-    # N = N_prev + C/F cash (so both sides total equal)
-    ws.cell(row=cf_row, column=14, value=f"=N{prev}+L{cf_row}")          # N
-    # O = G - N = 0 (balanced)
-    ws.cell(row=cf_row, column=15, value=f"=G{cf_row}-N{cf_row}")        # O
-
-    for col in [7, 8, 9, 10, 12, 14, 15]:
-        cell = ws.cell(row=cf_row, column=col)
-        cell.font   = _FONT_BF_CF
-        cell.fill   = _FILL_CF
-        cell.border = _BORDER_ALL
-        cell.alignment = _ALIGN_R if col not in (9, 10) else _ALIGN_L
-        if col in (7, 12, 14, 15):
-            cell.number_format = _FMT_AMT
-
-    # Also stamp blank cells on receipt side of C/F row with fills
-    for col in [1, 2, 3, 4, 5, 6]:
-        cell = ws.cell(row=cf_row, column=col)
-        if not cell.value:
-            cell.value = None
-        cell.font   = _FONT_BODY
-        cell.fill   = _FILL_CF
-        cell.border = _BORDER_ALL
-
-    # ── Freeze panes below header row ─────────────────────────────────────
-    ws.freeze_panes = "A5"
-
-    # ── Output ────────────────────────────────────────────────────────────
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
