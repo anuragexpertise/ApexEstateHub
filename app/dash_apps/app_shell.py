@@ -395,6 +395,16 @@ def _assign_to_modal() -> dbc.Modal:
             ),
             dbc.ModalBody(
                 html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Please select invitees to assign",
+                        ],
+                        color="info",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
                     # ── Entity-type selector cards ──────────────────────────────
                     dbc.Row([
                         dbc.Col([
@@ -483,6 +493,16 @@ def _concern_invite_modal() -> dbc.Modal:
             dbc.ModalHeader(dbc.ModalTitle("Invite to Bid"), close_button=True),
             dbc.ModalBody(
                 html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Please select invitees and wait for bids",
+                        ],
+                        color="info",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
                     html.P(
                         "Invite a vendor or security staff to submit a bid.",
                         className="text-muted", style={"fontSize": "13px"},
@@ -547,6 +567,16 @@ def _concern_bid_modal() -> dbc.Modal:
             dbc.ModalHeader(dbc.ModalTitle("Save Your Bid"), close_button=True),
             dbc.ModalBody(
                 html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Bid sensibly — you only get one chance",
+                        ],
+                        color="warning",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
                     html.P(
                         "Enter the amount you're bidding to resolve this concern.",
                         className="text-muted", style={"fontSize": "13px"},
