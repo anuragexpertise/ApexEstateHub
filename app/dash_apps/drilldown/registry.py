@@ -39,6 +39,9 @@ PK_MAP: dict = {
     "ledger": "row_date",
     "channels": "id",
     "polls": "id",
+    "visitors": "id",
+    "event_ticket_items": "id",
+    "patrol_locations": "id",
 }
 
 
@@ -67,6 +70,9 @@ ENTITY_MAP: dict = {
     "ledger": "ledger",
     "channels": "channel",
     "polls": "poll",
+    "visitors": "visitor",
+    "event_ticket_items": "event_ticket",
+    "patrol_locations": "patrol_location",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -141,6 +147,10 @@ DRILLDOWN_MAP: dict = {
         "filter": {"on_duty": False},
     },
     "kpi_events_total": {"target": "list_events", "label": "Upcoming Events"},
+    "kpi_events_tickets": {
+        "target": "list_event_ticket_items",
+        "label": "My Event Tickets",
+    },
     "kpi_concerns_open": {
         "target": "list_concerns", "label": "Open Concerns",
         "filter": {"status": "open"},
@@ -426,6 +436,19 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_payment",
         "label": "Payment Details",
     },
+    # ── LIST → PROFILE (newly registered scan entities) ───────────────────────
+    "list_visitors": {
+        "target": "profile_visitor",
+        "label": "Visitor Profile",
+    },
+    "list_event_ticket_items": {
+        "target": "profile_event_ticket",
+        "label": "Ticket Details",
+    },
+    "list_patrol_locations": {
+        "target": "profile_patrol_location",
+        "label": "Patrol Location",
+    },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
         "actions": {
@@ -498,6 +521,18 @@ DRILLDOWN_MAP: dict = {
         }
     },
     "profile_ledger": {
+        "actions": {}
+    },
+    # ── Profiles opened from gate QR scan (no full CRUD forms wired; read-only
+    # scan context). These back the "QR scan opens the profile it represents"
+    # behaviour added to validate_qr_scanned in qr_callbacks.py.
+    "profile_visitor": {
+        "actions": {}
+    },
+    "profile_event_ticket": {
+        "actions": {}
+    },
+    "profile_patrol_location": {
         "actions": {}
     },
 }

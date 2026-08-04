@@ -142,15 +142,46 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
              ORDER BY triggered_at DESC LIMIT 1
         """, (channel_id,), fetch_one=True)
 
+        # 2nd Press on Yellow (Pending) -> Escalate to Phone Call.
+        # Concurrency-safe: a conditional UPDATE (state='pending' → 'calling')
+        # with a rowcount check, so two simultaneous presses on a shared gate
+        # device can't both fire a duplicate call or double-log the event.
         if existing and existing["state"] == "pending":
-            # 2nd Press on Yellow (Pending) -> Escalate to Phone Call
-            db._execute("""
-                UPDATE alert_events SET state = 'calling' WHERE id = %s
-            """, (existing["id"],))
-            return True, "Calling owner for verbal confirmation", {
-                "action": "call",
-                "phone": channel.get("owner_phone"),
-                "state": "calling",
+            # 2nd Press on Yellow (Pending) -> Escalate to Phone Call.
+            # Concurrency-safe: RETURNING yields a matched row iff THIS update
+            # won the race (the db._execute driver layer exposes no cur.rowcount,
+            # so a non-RETURNING UPDATE returns None and can't be tested).
+            won = db._execute(
+                "UPDATE alert_events SET state = 'calling' "
+                " WHERE id = %s AND state = 'pending' RETURNING id",
+                (existing["id"],), fetch_one=True,
+            )
+            if won:
+                return True, "Calling owner for verbal confirmation", {
+                    "action": "call",
+                    "phone": channel.get("owner_phone"),
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                }
+            # Lost the race — re-fetch to see who won.
+            cur = db._execute(
+                "SELECT * FROM alert_events WHERE id = %s",
+                (existing["id"],), fetch_one=True,
+            )
+            if cur and cur["state"] == "calling":
+                return True, "Already escalated — call in progress", {
+                    "action": "noop",
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                }
+
+        # A third press while already 'calling' is a no-op (avoids duplicate
+        # calls). Resolved school-bus events are still re-triggerable via the
+        # "Re-notify" KPI; everything else already-active just returns.
+        if existing and existing["state"] in ("calling",):
+            return True, "Already escalated — call in progress", {
+                "action": "noop",
+                "state": existing["state"],
                 "alert_event_id": existing["id"],
             }
 
@@ -303,13 +334,39 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
              ORDER BY triggered_at DESC LIMIT 1
         """, (visitor_id,), fetch_one=True)
 
+        # 2nd Press on Yellow (Pending) -> Escalate to Phone Call.
+        # Concurrency-safe: conditional UPDATE with rowcount check so two
+        # simultaneous scans/presses can't both fire a duplicate call.
         if existing and existing["state"] == "pending":
-            db._execute("""
-                UPDATE alert_events SET state = 'calling' WHERE id = %s
-            """, (existing["id"],))
-            return True, "Calling owner for verbal confirmation", {
-                "action": "call",
-                "phone": visitor.get("owner_phone"),
+            # 2nd Press on Yellow (Pending) -> Escalate to Phone Call.
+            # Concurrency-safe via RETURNING (driver exposes no cur.rowcount).
+            won = db._execute(
+                "UPDATE alert_events SET state = 'calling' "
+                " WHERE id = %s AND state = 'pending' RETURNING id",
+                (existing["id"],), fetch_one=True,
+            )
+            if won:
+                return True, "Calling owner for verbal confirmation", {
+                    "action": "call",
+                    "phone": visitor.get("owner_phone"),
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                }
+            cur = db._execute(
+                "SELECT * FROM alert_events WHERE id = %s",
+                (existing["id"],), fetch_one=True,
+            )
+            if cur and cur["state"] == "calling":
+                return True, "Already escalated — call in progress", {
+                    "action": "noop",
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                }
+
+        # A third press while already 'calling' is a no-op.
+        if existing and existing["state"] == "calling":
+            return True, "Already escalated — call in progress", {
+                "action": "noop",
                 "state": "calling",
                 "alert_event_id": existing["id"],
             }
@@ -368,16 +425,36 @@ def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
         if owner_check and owner_check.get("owner_user_id") != owner_user_id:
             return False, "Only the apartment owner can respond to this visitor alert"
 
-        # Update visitor status
-        db._execute("""
-            UPDATE visitors SET status = %s, approved_by = %s, entered_at = NOW()
-             WHERE id = %s
-        """, (visitor_status, owner_user_id, visitor_id))
+        # Admit ONLY if the visitor is still awaiting confirmation. Conditional
+        # update with RETURNING so two co-owners (e.g. spouse + owner) both
+        # tapping the push get: first-click-wins admit, second click gets a
+        # friendly "already admitted" signal instead of a silent double-write.
+        # (db._execute exposes no cur.rowcount, so RETURNING is the win detector.)
+        allowed_now = ("pending", "approved")
+        won = db._execute(
+            "UPDATE visitors SET status = %s, approved_by = %s, entered_at = NOW() "
+            " WHERE id = %s AND status = ANY(%s) RETURNING id",
+            (visitor_status, owner_user_id, visitor_id, list(allowed_now)),
+            fetch_one=True,
+        )
 
-        # Update alert event state
-        db._execute("""
-            UPDATE alert_events SET state = %s WHERE visitor_id = %s AND (expires_at IS NULL OR expires_at > NOW())
-        """, (new_state, visitor_id))
+        if not won and action == "approve":
+            # Another owner / the gate already moved the visitor on.
+            cur = db._execute("SELECT status FROM visitors WHERE id = %s",
+                              (visitor_id,), fetch_one=True)
+            if cur and cur["status"] == "entered":
+                return True, "Visitor already admitted by another owner"
+            return False, "Visitor no longer pending confirmation"
+
+        # Update the alert event state (first click wins — only transitions an
+        # in-flight pending/calling event so a lost admission race can't leave a
+        # stale 'pending' alert for an already-entered visitor).
+        db._execute(
+            "UPDATE alert_events SET state = %s "
+            " WHERE visitor_id = %s AND (expires_at IS NULL OR expires_at > NOW()) "
+            "   AND state IN ('pending','calling')",
+            (new_state, visitor_id),
+        )
 
         return True, f"Visitor alert response recorded: {new_state.upper()}"
     except Exception as e:

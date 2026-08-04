@@ -41,6 +41,9 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "security_roster": "security_roster",
     "ledger":       "accounts",
     "polls":        "polls",
+    "visitors":           "visitors",
+    "event_ticket_items": "event_ticket_items",
+    "patrol_locations":   "patrol_locations",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -60,6 +63,9 @@ _SYSTEM_COLUMNS = {
 NO_EDIT_ACTION = {
     "gate_logs", "cashbook", "receivables", "payables",
     "ledger",
+    # Scan-only / event-managed entities: no CRUD forms, profile shown
+    # read-only from the gate scan result.
+    "visitors", "event_ticket_items", "patrol_locations",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -157,6 +163,18 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     "assets": [
         {"label": "Book Value",       "field": "book_value",   "icon": "fa-coins"},
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
+    ],
+    "visitors": [
+        {"label": "Flat",           "field": "flat_number", "icon": "fa-home"},
+        {"label": "Owner",          "field": "owner_name",  "icon": "fa-user"},
+    ],
+    "event_ticket_items": [
+        {"label": "Event",        "field": "event_title",   "icon": "fa-calendar-alt"},
+        {"label": "Booking Ref",  "field": "booking_reference", "icon": "fa-ticket-alt"},
+    ],
+    "patrol_locations": [
+        {"label": "Active",       "field": "active", "icon": "fa-toggle-on", "format": "bool"},
+        {"label": "Scan Interval", "field": "scan_interval", "icon": "fa-clock"},
     ],
 }
 
@@ -655,6 +673,16 @@ def build_entity_meta() -> dict:
             meta[ekey]["list_columns"] = _LEDGER_LIST_COLUMNS
             meta[ekey]["list_title"] = "Account Ledger"
             meta[ekey]["list_icon"] = "fa-book"
+
+        if ekey == "event_ticket_items":
+            meta[ekey]["list_columns"] = [
+                {"name": "Ticket",  "field": "ticket_type",   "sortable": True},
+                {"name": "Event",   "field": "event_title",   "sortable": True},
+                {"name": "Date",    "field": "event_date",    "sortable": True, "format": "date"},
+                {"name": "Venue",   "field": "venue",         "sortable": True},
+                {"name": "Booking", "field": "booking_reference", "sortable": False},
+                {"name": "Status",  "field": "status",        "sortable": True},
+            ]
 
     return meta
 

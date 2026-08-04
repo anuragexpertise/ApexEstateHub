@@ -348,6 +348,171 @@ def render_manual_qr_card(
     ], style={"borderRadius": "18px", "boxShadow": f"0 10px 28px {color}1a", "marginTop": "16px"})
 
 
+# ════════════════════════════════════════════════════════════════
+# Scan-result helpers — "QR scan opens the profile it represents"
+# ════════════════════════════════════════════════════════════════
+# These mirror render_concern_lookup_result() (which already opens a full
+# concern profile inline on scan). The same "lookup → open represented
+# profile + coloured status banner" treatment is extended here to the other
+# gate-scan roles, so a scanned apartment/vendor/security/admin/event-ticket/
+# visitor/patrol code surfaces the entity's profile card rather than a bare
+# one-line "Access Granted" flash.
+
+
+def _scan_banner(title, subtitle, icon_class, color, now_s, foot=None, sub_color=None):
+    """Coloured status banner rendered atop a scanned-entity profile card."""
+    children = [
+        html.I(className=f"fas {icon_class} fa-4x mb-3", style={"color": color}),
+        html.H3(title, style={"color": color, "margin": 0}),
+    ]
+    if subtitle:
+        children.append(html.Div(subtitle, style={
+            "fontSize": "18px", "fontWeight": "700", "marginTop": "10px",
+            "color": sub_color or "#2c3e50"}))
+    if foot:
+        children.append(foot)
+    children.append(html.Hr(style={"margin": "12px 0", "opacity": "0.3"}))
+    children.append(html.Small(now_s, style={"color": "#95a5a6"}))
+    return html.Div(children, style={"textAlign": "center", "padding": "24px"})
+
+
+def _open_entity_profile(entity, entity_id, society_id, auth_data, banner):
+    """Render `banner` over the full profile card of the scanned entity.
+
+    Reuses the same loaders.load_profile() + render_profile_card() pipeline
+    as the drilldown list→profile flow, so the gate scan opens the SAME
+    profile page the user would see from the roster. Falls back to the bare
+    banner when no profile metadata/record exists for the entity.
+    """
+    from app.dash_apps.drilldown import loaders, renderers
+    from app.dash_apps.drilldown.registry import to_plural
+    from app.dash_apps.drilldown.schema_introspect import get_entity_meta
+    try:
+        record = loaders.load_profile(entity, entity_id, society_id)
+        meta = get_entity_meta().get(to_plural(entity), {})
+        fields = meta.get("profile_fields", [])
+        if not record or not fields:
+            return banner
+        profile = renderers.render_profile_card(
+            card_id=f"profile_{entity}",
+            title=meta.get("profile_title", entity.replace("_", " ").title()),
+            icon=meta.get("profile_icon", "fa-id-card"),
+            entity=entity,
+            record=record,
+            fields=fields,
+            actions=meta.get("profile_actions", []),
+            color=meta.get("profile_color", "#1d74d8"),
+            auth_data=auth_data,
+            filters={"society_id": society_id},
+        )
+        return html.Div([banner, profile])
+    except Exception as e:
+        print(f"⚠️  _open_entity_profile({entity}, {entity_id}): {e}")
+        return banner
+
+
+def _handle_visitor_scan(result, now_s, qr_payload, mode, society_id,
+                         security_user_id, auth_data, log):
+    """Converge a visitor QR scan onto the same two-actor alert state machine
+    as the KPI press (security_callbacks.trigger_visitor_alert).
+
+      entry, status=pending/approved → trigger owner push (pending→calling
+        on repeat scan), render yellow card, do NOT admit.
+      entry, already entered        → green 'Admitted' card over profile.
+      exit,  already entered        → mark exited, green 'Exited' card.
+      denied/not found              → red.
+
+    Admission (status='entered') is ultimately set by the owner's push
+    response (alert_service.respond_to_visitor_alert) — never by the gate
+    scan itself — so security cannot bypass owner consent.
+    """
+    from app.services.alert_service import trigger_visitor_alert
+    from database.db_manager import db
+
+    user = result.get("user") or {}
+    vis_id = user.get("visitor_id")
+    vis_name = user.get("visitor_name") or user.get("name", "Visitor")
+    flat = user.get("flat_number", "") or ""
+    status_val = user.get("status", "")
+    owner_phone = user.get("owner_phone") or ""
+    is_pass = result.get("status") == "PASS"
+    is_pending = result.get("status") == "PENDING_CONFIRMATION"
+
+    if is_pending:
+        # Entry of a not-yet-approved presumptive visitor → alert flow.
+        # Converges onto the same state machine as the KPI "Notify Owner" press.
+        _ok, msg, _data = trigger_visitor_alert(vis_id, security_user_id)
+        banner = _scan_banner(
+            "Awaiting Owner Confirmation",
+            f"👤 {vis_name} — Flat {flat}",
+            "fa-user-clock", "#e59620", now_s,
+            foot=html.Small("Owner push notification sent — admit only after approval",
+                            style={"color": "#95a5a6"}),
+        )
+        body = _open_entity_profile("visitor", vis_id, society_id, auth_data, banner)
+        call_btn = None
+        if owner_phone:
+            call_btn = html.A(
+                [html.I(className="fas fa-phone me-1"), owner_phone],
+                href=f"tel:{owner_phone}",
+                className="btn btn-sm btn-outline-danger mt-2",
+                style={"borderRadius": "8px", "fontSize": "11px"},
+            )
+        return (
+            html.Div([body, call_btn] if call_btn else [body]),
+            {"background": "linear-gradient(135deg, #fef3c7, #fef9c3)",
+             "border": "3px solid #eab308", "borderRadius": "14px",
+             "marginTop": "12px", "boxShadow": "0 4px 12px rgba(234,179,8,0.2)"},
+            _push_log(log, now_s, qr_payload, vis_name, True, mode or "entry"),
+            {"type": "warning", "message": msg or "Owner notified — awaiting confirmation"},
+        )
+
+    if is_pass:
+        # Already entered — treat as info; on EXIT mark exited.
+        if mode == "exit":
+            db._execute(
+                "UPDATE visitors SET status='exited', exited_at=NOW() "
+                " WHERE id=%s AND status='entered'",
+                (vis_id,),
+            )
+            head, color, icon = "Visitor Exited", "#e67e22", "fa-sign-out-alt"
+        else:
+            head, color, icon = "Visitor Admitted", "#27ae60", "fa-user-check"
+        banner = _scan_banner(head, vis_name, icon, color, now_s,
+                              foot=html.Small(f"Flat {flat}" if flat else status_val or "visitor",
+                                              style={"color": "#95a5a6"}))
+        body = _open_entity_profile("visitor", vis_id, society_id, auth_data, banner)
+        return (
+            body,
+            {"background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
+             "border": "3px solid #27ae60", "borderRadius": "14px",
+             "marginTop": "12px", "boxShadow": "0 4px 12px rgba(39,174,110,0.2)"},
+            _push_log(log, now_s, qr_payload, vis_name, True, mode or "entry"),
+            {"type": "success", "message": f"{head} — {vis_name}"},
+        )
+
+    # FAIL (not found / denied / cancelled)
+    reason = result.get("reason", "Visitor not admitted")
+    banner = _scan_banner("Visitor Not Admitted", reason, "fa-times-circle",
+                          "#e74c3c", now_s)
+    return (
+        banner,
+        {"background": "linear-gradient(135deg, #f8d7da, #f5c6cb)",
+         "border": "3px solid #e74c3c", "borderRadius": "14px",
+         "marginTop": "12px", "boxShadow": "0 4px 12px rgba(231,76,60,0.2)"},
+        _push_log(log, now_s, qr_payload, vis_name, False, mode or "entry"),
+        {"type": "error", "message": f"Visitor denied — {reason}"},
+    )
+
+
+def _push_log(log, now_s, qr_snippet, name, passed, mode):
+    log.insert(0, {
+        "passed": passed, "name": name, "time": now_s,
+        "qr_snippet": qr_snippet[:30], "mode": mode,
+    })
+    return log[:20]
+
+
 def register_qr_callbacks(app):
 
     # ── 1. Camera controller (clientside) ──────────────────────
@@ -556,17 +721,15 @@ def register_qr_callbacks(app):
         
         # Map role to gate_access code
         role_code_map = {"admin": "ADM", "apartment": "APT", "vendor": "VND", "security": "SEC"}
+        # Roles whose gate scan represents a real person pass at the gate.
+        # event_ticket / patrol_location log themselves inside validate_*_qr,
+        # and visitor is handled by the two-actor alert flow below — neither
+        # should write a (bogus) ADM 'admin' gate_access row.
+        GATE_PERSON_ROLES = ("apartment", "vendor", "security", "admin")
 
         # ════════════════════════════════════════════════════════
-        # INFORMATIONAL ROLES (concern/receipt/expense/asset): these were
-        # never people that can walk through a gate, so mode=='entry'/'exit'
-        # doesn't apply to them. Previously they fell straight through to
-        # the entry/exit branches below, where role_code_map.get(role,'ADM')
-        # silently defaulted to 'ADM' — logging a bogus gate_access row
-        # keyed off e.g. a concern's id as if it were an admin's user id.
-        # Handled uniformly here instead, regardless of which mode button
-        # was selected, and — for concerns specifically — opens the concern
-        # profile right in the result card instead of just describing it.
+        # INFORMATIONAL ROLES (concern/receipt/expense/asset): lookup-only,
+        # opens the represented profile inline (already implemented).
         # ════════════════════════════════════════════════════════
         if result.get("status") == "PASS" and (result.get("user") or {}).get("role") in (
             "concern", "receipt", "expense", "asset",
@@ -579,11 +742,17 @@ def register_qr_callbacks(app):
             if user["role"] == "concern":
                 body = render_concern_lookup_result(user["id"], society_id, auth_data)
             else:
-                body = html.Div([
-                    html.I(className="fas fa-check-circle fa-3x mb-2", style={"color": "#27ae60"}),
-                    html.H4(user.get("name", "?"), style={"color": "#27ae60"}),
-                    html.Small(now_s, style={"color": "#95a5a6"}),
-                ], style={"textAlign": "center", "padding": "20px"})
+                label = user.get("name", "?")
+                extra = ""
+                if user.get("amount") is not None:
+                    extra = f" — ₹{user.get('amount')}"
+                body = _scan_banner("Access Granted", f"{label}{extra}",
+                                    "fa-check-circle", "#27ae60", now_s)
+                profile_entity = {"receipt": "receipt", "expense": "expense",
+                                  "asset": "asset"}.get(user["role"])
+                if profile_entity:
+                    body = _open_entity_profile(profile_entity, user.get("id"),
+                                                society_id, auth_data, body)
             return (
                 body,
                 {"background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
@@ -593,157 +762,163 @@ def register_qr_callbacks(app):
             )
 
         # ════════════════════════════════════════════════════════
-        # ENTRY MODE: Only PASS allowed
+        # VISITOR: converge QR scan onto the two-actor alert flow.
+        # A pending visitor is NOT admitted by the scan; the owner's push
+        # response is the only thing that flips status to 'entered'.
+        # ════════════════════════════════════════════════════════
+        if (result.get("user") or {}).get("role") == "visitor":
+            return _handle_visitor_scan(
+                result, now_s, qr_payload, mode, society_id,
+                scanning_user_id, auth_data, log,
+            )
+
+        # ════════════════════════════════════════════════════════
+        # ENTRY MODE: open the represented profile on a PASS, gate_log only
+        # for genuine person passes.
         # ════════════════════════════════════════════════════════
         if mode == "entry":
             if result.get("status") == "PASS":
-                user = result.get("user", {})
+                user = result.get("user", {}) or {}
                 user_id = user.get("id")
-                user_name = user.get("name", "Visitor")
+                user_name = user.get("name", "Unknown") or "Unknown"
                 role = user.get("role", "")
                 flat = user.get("flat_number", "")
-                
-                role_code = role_code_map.get(role, "ADM")
-                
-                # Create time_in gate log
-                try:
-                    db._execute(
-                        """INSERT INTO gate_access (society_id, role, entity_id, time_in)
-                           VALUES (%s, %s, %s, NOW())""",
-                        (society_id, role_code, user_id)
-                    )
-                    gate_msg = "🟢 ENTERED"
-                except Exception as e:
-                    print(f"Gate log error: {e}")
-                    gate_msg = "⚠️ Log failed"
-                
-                log.insert(0, {
-                    "passed": True, "name": user_name, "time": now_s,
-                    "qr_snippet": qr_payload[:30], "mode": "entry"
-                })
-                
-                return (
-                    html.Div([
-                        html.I(className="fas fa-check-circle fa-4x mb-3", 
-                               style={"color": "#27ae60"}),
-                        html.H3("Access Granted", style={"color": "#27ae60", "margin": 0}),
-                        html.Div(user_name, style={
-                            "fontSize": "18px", "fontWeight": "700", 
-                            "marginTop": "10px", "color": "#2c3e50"
-                        }),
-                        html.Div(f"Flat {flat}" if flat else role.title(), 
-                                 style={"fontSize": "14px", "color": "#7f8c8d", "marginTop": "4px"}),
-                        html.Div(gate_msg, style={
-                            "fontSize": "24px", "fontWeight": "700",
-                            "margin": "12px 0", "color": "#27ae60"
-                        }),
-                        html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
-                        html.Small(now_s, style={"color": "#95a5a6"}),
-                    ], style={"textAlign": "center", "padding": "24px"}),
-                    {
-                        "background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
-                        "border": "3px solid #27ae60",
-                        "borderRadius": "14px",
-                        "marginTop": "12px",
-                        "boxShadow": "0 4px 12px rgba(39,174,110,0.2)"
-                    },
-                    log[:20],
-                    {"type": "success", "message": f"{gate_msg} — {user_name}"}
+
+                gate_msg = "🟢 ENTERED"
+                if role in GATE_PERSON_ROLES:
+                    role_code = role_code_map.get(role, "ADM")
+                    try:
+                        db._execute(
+                            """INSERT INTO gate_access (society_id, role, entity_id, time_in)
+                               VALUES (%s, %s, %s, NOW())""",
+                            (society_id, role_code, user_id),
+                        )
+                    except Exception as e:
+                        print(f"Gate log error: {e}")
+                        gate_msg = "⚠️ Log failed"
+                elif role == "event_ticket":
+                    gate_msg = "🟢 TICKET ADMITTED"
+                elif role == "patrol_location":
+                    gate_msg = "🟢 PATROL LOGGED"
+                else:
+                    # attendance_entry etc. already mutated state in the validator.
+                    gate_msg = "✅ OK"
+
+                # Pick the profile entity to open (if any).
+                if role in GATE_PERSON_ROLES:
+                    profile_entity, profile_pk = role, user_id
+                    sub = f"Flat {flat}" if flat else role.title()
+                elif role == "event_ticket":
+                    profile_entity, profile_pk = "event", result.get("event_id")
+                    sub = f"{user.get('ticket_type','')} — {user.get('event_title','')}"
+                elif role == "patrol_location":
+                    profile_entity, profile_pk = "patrol_location", user_id
+                    sub = user.get("name", "Patrol Point")
+                else:
+                    profile_entity, profile_pk = None, None
+                    sub = role.title() or gate_msg
+
+                banner = _scan_banner("Access Granted", user_name, sub,
+                                      "fa-check-circle", "#27ae60", now_s,
+                                      foot=html.Div(gate_msg, style={
+                                          "fontSize": "20px", "fontWeight": "700",
+                                          "margin": "10px 0", "color": "#27ae60"}))
+                body = (
+                    _open_entity_profile(profile_entity, profile_pk, society_id, auth_data, banner)
+                    if profile_entity else banner
                 )
+                log = _push_log(log, now_s, qr_payload, user_name, True, "entry")
+                return (
+                    body,
+                    {"background": "linear-gradient(135deg, #d4edda, #c3e6cb)",
+                     "border": "3px solid #27ae60",
+                     "borderRadius": "14px",
+                     "marginTop": "12px",
+                     "boxShadow": "0 4px 12px rgba(39,174,110,0.2)"},
+                    log[:20],
+                    {"type": "success", "message": f"{gate_msg} — {user_name}"},
+                )
+
             else:
                 reason = result.get("reason", "Invalid QR")
-                user = result.get("user", {})
-                user_name = user.get("name", "Unknown") if user else "Unknown"
-                
-                log.insert(0, {
-                    "passed": False, "name": user_name, "time": now_s,
-                    "qr_snippet": qr_payload[:30], "mode": "entry"
-                })
-                
+                name = (result.get("user") or {}).get("name", "Unknown") or "Unknown"
+                log = _push_log(log, now_s, qr_payload, name, False, "entry")
+                banner = _scan_banner("Access Denied", reason,
+                                       "fa-times-circle", "#e74c3c", now_s)
                 return (
-                    html.Div([
-                        html.I(className="fas fa-times-circle fa-4x mb-3", 
-                               style={"color": "#e74c3c"}),
-                        html.H3("Access Denied", style={"color": "#e74c3c"}),
-                        html.P(reason, style={"fontSize": "14px", "marginTop": "8px"}),
-                        html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
-                        html.Small(now_s, style={"color": "#95a5a6"}),
-                    ], style={"textAlign": "center", "padding": "24px"}),
-                    {
-                        "background": "linear-gradient(135deg, #f8d7da, #f5c6cb)",
-                        "border": "3px solid #e74c3c",
-                        "borderRadius": "14px",
-                        "marginTop": "12px",
-                        "boxShadow": "0 4px 12px rgba(231,76,60,0.2)"
-                    },
+                    banner,
+                    {"background": "linear-gradient(135deg, #f8d7da, #f5c6cb)",
+                     "border": "3px solid #e74c3c",
+                     "borderRadius": "14px",
+                     "marginTop": "12px",
+                     "boxShadow": "0 4px 12px rgba(231,76,60,0.2)"},
                     log[:20],
-                    {"type": "error", "message": f"Entry denied — {reason}"}
+                    {"type": "error", "message": f"Entry denied — {reason}"},
                 )
-        
+
         # ════════════════════════════════════════════════════════
-        # EXIT MODE: PASS or FAIL both allowed (always log exit)
+        # EXIT MODE: PASS or FAIL — log time_out for person passes only.
         # ════════════════════════════════════════════════════════
         elif mode == "exit":
-            user = result.get("user", {})
-            user_id = user.get("id") if user else None
-            user_name = user.get("name", "Unknown") if user else "Unknown"
+            user = result.get("user", {}) or {}
+            user_id = user.get("id")
+            user_name = user.get("name", "Unknown") if user else "Unknown" or "Unknown"
             role = user.get("role", "") if user else ""
-            
-            role_code = role_code_map.get(role, "VND") if role else "VND"
-            
-            # Update time_out (even if validation failed)
-            try:
-                if user_id:
-                    # Use a subquery to find the specific record ID first
+
+            gate_msg = "🔴 EXITED"
+            if role in GATE_PERSON_ROLES and result.get("status") == "PASS" and user_id:
+                role_code = role_code_map.get(role, "ADM")
+                try:
                     db._execute(
-                        """UPDATE gate_access 
+                        """UPDATE gate_access
                            SET time_out = NOW()
                            WHERE id = (
-                               SELECT id FROM gate_access 
-                               WHERE society_id = %s 
-                                 AND entity_id = %s 
-                                 AND role = %s 
-                                 AND time_out IS NULL
-                               ORDER BY time_in DESC 
-                               LIMIT 1
+                               SELECT id FROM gate_access
+                                WHERE society_id = %s
+                                  AND entity_id = %s
+                                  AND role = %s
+                                  AND time_out IS NULL
+                               ORDER BY time_in DESC LIMIT 1
                            )""",
-                        (society_id, user_id, role_code)
+                        (society_id, user_id, role_code),
                     )
-                gate_msg = "🔴 EXITED"
-            except Exception as e:
-                print(f"Gate exit log error: {e}")
-                gate_msg = "🔴 EXIT (log failed)"
-            
-            log.insert(0, {
-                "passed": result.get("status") == "PASS",
-                "name": user_name, "time": now_s,
-                "qr_snippet": qr_payload[:30], "mode": "exit"
-            })
-            
-            if result.get("status") == "PASS":
-                color = "#e67e22"
-            else:
-                color = "#95a5a6"
-            
-            return (
-                html.Div([
-                    html.I(className="fas fa-sign-out-alt fa-4x mb-3", 
-                           style={"color": color}),
-                    html.H3(gate_msg, style={"color": color}),
-                    html.P(user_name, style={"fontSize": "16px", "fontWeight": "600"}),
-                    html.Hr(style={"margin": "12px 0", "opacity": "0.3"}),
-                    html.Small(now_s, style={"color": "#95a5a6"}),
-                ], style={"textAlign": "center", "padding": "24px"}),
-                {
-                    "background": f"linear-gradient(135deg, {color}18, {color}10)",
-                    "border": f"3px solid {color}",
-                    "borderRadius": "14px",
-                    "marginTop": "12px",
-                },
-                log[:20],
-                {"type": "info", "message": f"{gate_msg} — {user_name}"}
+                except Exception as e:
+                    print(f"Gate exit log error: {e}")
+                    gate_msg = "🔴 EXIT (log failed)"
+            elif role == "event_ticket":
+                gate_msg = "🔴 TICKET SCAN (EXIT)"
+            elif role == "patrol_location":
+                gate_msg = "🔴 PATROL SCAN (EXIT)"
+
+            color = "#e67e22" if result.get("status") == "PASS" else "#95a5a6"
+
+            # Open the represented profile on exit too (for context).
+            profile_map = {
+                "apartment": ("apartment", user_id),
+                "vendor": ("vendor", user_id),
+                "security": ("security", user_id),
+                "admin": ("admin", user_id),
+                "event_ticket": ("event", result.get("event_id")),
+                "patrol_location": ("patrol_location", user_id),
+            }
+            profile_entity, profile_pk = profile_map.get(role, (None, None))
+            sub = f"Flat {user.get('flat_number','')}" if (role in GATE_PERSON_ROLES and user.get("flat_number")) else role.title()
+            banner = _scan_banner(gate_msg, user_name, sub, "fa-sign-out-alt", color, now_s)
+            body = (
+                _open_entity_profile(profile_entity, profile_pk, society_id, auth_data, banner)
+                if profile_entity else banner
             )
-        
+            log = _push_log(log, now_s, qr_payload, user_name, result.get("status") == "PASS", "exit")
+            return (
+                body,
+                {"background": f"linear-gradient(135deg, {color}18, {color}10)",
+                 "border": f"3px solid {color}",
+                 "borderRadius": "14px",
+                 "marginTop": "12px"},
+                log[:20],
+                {"type": "info", "message": f"{gate_msg} — {user_name}"},
+            )
+
         return no_update, no_update, no_update, no_update
 
     # ── 3b. Manual QR lookup (modular — any render_manual_qr_card instance) ──
@@ -775,6 +950,32 @@ def register_qr_callbacks(app):
 
         if result.get("status") == "PASS" and role == "concern":
             return render_concern_lookup_result(user["id"], society_id, auth_data)
+
+        # Visitor manual lookup mirrors the camera scan: a pending visitor
+        # converges onto the two-actor alert flow instead of auto-admitting.
+        if role == "visitor":
+            vis_id = user.get("visitor_id")
+            if result.get("status") == "PENDING_CONFIRMATION" and vis_id:
+                from app.services.alert_service import trigger_visitor_alert
+                _ok, msg, _data = trigger_visitor_alert(
+                    vis_id, scanning_user_id or (auth_data or {}).get("user_id")
+                )
+                return html.Div([
+                    html.I(className="fas fa-user-clock fa-2x", style={"color": "#e59620"}),
+                    html.H4("Pending Owner Approval", style={"color": "#e59620", "marginTop": "10px"}),
+                    html.P(user.get("name", "Unknown")),
+                    html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
+                    html.Small(f"Owner notified — {msg}", style={"color": "#95a5a6"}),
+                ], className="text-center p-3", style={"backgroundColor": "#fef3c7", "borderRadius": "10px"})
+
+            if result.get("status") == "PASS":
+                return html.Div([
+                    html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
+                    html.H4("Admitted", style={"color": "#2ecc71", "marginTop": "10px"}),
+                    html.P(user.get("name", "Unknown")),
+                    html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
+                    html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style={"color": "#95a5a6"}),
+                ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
 
         if result.get("status") == "PASS":
             return html.Div([

@@ -868,6 +868,44 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── EVENT TICKET ITEMS (the owner's bought tickets) ────────────────
+        # Apartment-scoped via filters.owner_user_id (added by
+        # _apply_portal_filters for the Owner portal → event_tickets.user_id).
+        # Admin/owner-less lists are society-wide.
+        if entity == "event_ticket_items":
+            owner_uid = filters.get("owner_user_id")
+            extra, params = "", [sid]
+            if owner_uid:
+                extra += " AND et.user_id=%s"
+                params.append(owner_uid)
+            if s:
+                extra += " AND (e.title ILIKE %s OR eti.ticket_type ILIKE %s)"
+                params += [f"%{s}%", f"%{s}%"]
+            rows = db._execute(
+                "SELECT eti.id AS id, eti.id AS ticket_item_id, "
+                "  eti.ticket_type, eti.status, eti.qr_payload, eti.scanned_at, "
+                "  et.event_id, et.booking_reference, et.amount AS booking_amount, "
+                "  e.title AS event_title, e.event_date, e.venue, "
+                "  u.name AS owner_name "
+                "FROM event_ticket_items eti "
+                "JOIN event_tickets et ON et.id = eti.event_ticket_id "
+                "JOIN events e ON e.id = et.event_id "
+                "LEFT JOIN users u ON u.id = et.user_id "
+                "WHERE eti.society_id=%s " + extra +
+                " AND e.event_date>=CURRENT_DATE"
+                " ORDER BY e.event_date ASC, eti.id DESC"
+                " LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM event_ticket_items eti "
+                "JOIN event_tickets et ON et.id = eti.event_ticket_id "
+                "JOIN events e ON e.id = et.event_id "
+                "WHERE eti.society_id=%s " + extra + " AND e.event_date>=CURRENT_DATE",
+                params, fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         # ── POLLS ──────────────────────────────────────────────────────
         if entity == "polls":
             p_status = filters.get("status")
@@ -1587,6 +1625,53 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
                 (pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None
+
+        # ── VISITOR ─────────────────────────────────────────────────────
+        # pk = visitors.id (matches the -VST-<id> QR payload). Joins the
+        # host apartment + owning user so the profile shows flat number,
+        # owner name and phone — the same columns the gate alert cards use.
+        if entity_singular == "visitor":
+            r = db._execute(
+                "SELECT v.*, "
+                "  COALESCE(a.flat_number,'') AS flat_number, "
+                "  COALESCE(u.name,'') AS owner_name, "
+                "  COALESCE(u.phone,'') AS owner_phone "
+                "FROM visitors v "
+                "LEFT JOIN apartments a ON a.id=v.apartment_id "
+                "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "
+                "WHERE v.id=%s AND v.society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
+        # ── EVENT TICKET ITEM ───────────────────────────────────────────
+        # pk = event_ticket_items.id (matches the -EVT-<id> QR payload).
+        # Surfaces the parent event + booking so the scan profile has the
+        # date / venue / ticket-type context a gate guard needs.
+        if entity_singular == "event_ticket":
+            r = db._execute(
+                "SELECT eti.*, "
+                "  e.title AS event_title, e.event_date, e.event_time, e.venue, "
+                "  et.booking_reference, et.quantity_adult, et.quantity_child, et.amount AS booking_amount "
+                "FROM event_ticket_items eti "
+                "JOIN event_tickets et ON et.id=eti.event_ticket_id "
+                "JOIN events e ON e.id=et.event_id "
+                "WHERE eti.id=%s AND eti.society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
+        # ── PATROL LOCATION ─────────────────────────────────────────────
+        # pk = patrol_locations.id (matches the -PTL-<id> QR payload).
+        # Recent scan history is fetched via fn_patrol_scan_history if present,
+        # otherwise the raw row is returned.
+        if entity_singular == "patrol_location":
+            r = db._execute(
+                "SELECT * FROM patrol_locations WHERE id=%s AND society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
         return None
 
     except Exception as e:

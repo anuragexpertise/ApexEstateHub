@@ -383,6 +383,21 @@ KPI_CARDS = {
         "title": "Upcoming Events", "group": "scheduled",
     },
 
+    # Owner portal: how many event tickets this owner has bought for upcoming
+    # events. Apartment-scoped override below; admin falls back here (all
+    # tickets society-wide).
+    "kpi_events_tickets": {
+        "query": """
+            SELECT COUNT(*)::INT AS v FROM event_ticket_items eti
+            JOIN event_tickets et ON et.id = eti.event_ticket_id
+            JOIN events e ON e.id = et.event_id
+            WHERE et.society_id=%s AND e.event_date>=CURRENT_DATE
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-ticket-alt", "color": "#2563eb",
+        "title": "Tickets Bought", "group": "events",
+    },
+
     "kpi_concerns_open": {
         "query": """
             SELECT COUNT(*) AS v FROM concerns
@@ -1022,7 +1037,7 @@ DEFAULT_LAYOUTS = {
             "kpi_bank_balance",
             "kpi_ledger_open",
         ],
-        "events": ["kpi_events_total"],
+        "events": ["kpi_events_total", "kpi_events_tickets"],
         # Per the Concerns workflow spec: Admin/Concerns tab shows
         # "not closed" + "total" (society-wide).
         "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
@@ -1097,7 +1112,7 @@ DEFAULT_LAYOUTS = {
         # closed" (own concerns), "total" (society-wide), and "open" (own
         # concerns).
         "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total", "kpi_concerns_open"],
-        "events": ["kpi_events_total"],
+        "events": ["kpi_events_total", "kpi_events_tickets"],
         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
         "settings": ["kpi_owner_member_since"],
     },
