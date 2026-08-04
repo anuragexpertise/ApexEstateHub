@@ -59,10 +59,10 @@ def _stage_badge(row: dict):
     label, color = _STAGE_LABEL.get(status, (status.title(), "#7d8ea3"))
     bid = row.get("assign_bid_amount")
     text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
-    return dbc.Badge(text, style={
-        "backgroundColor": f"{color}20", "color": color,
-        "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
-    })
+return dbc.Badge(text, style={
+         "backgroundColor": "#1d74d8", "color": "#ffffff",
+         "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
+     })
 
 
 def _render_invite_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
