@@ -306,6 +306,7 @@ DECLARE
     v_touched_resolved_or_closed INT;
     v_new_status VARCHAR(20);
 BEGIN
+    PERFORM 1 FROM concerns WHERE id=p_concern_id FOR UPDATE; -- lock the concern row to prevent race conditions
     SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
            COUNT(*) FILTER (WHERE status = 'closed'),
            COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
