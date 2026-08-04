@@ -55,11 +55,11 @@ def _stage_badge(row: dict):
     status = row.get("assign_status")
     if not status:
         return None
-    label, color = _STAGE_LABEL.get(status, (status.title(), "#7d8ea3"))
+    label, color = _STAGE_LABEL.get(status, (status.title(), "#0a3974"))
     bid = row.get("assign_bid_amount")
     text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
-return dbc.Badge(text, style={
-         "backgroundColor": "#1d74d8", "color": "#ffffff",
+    return dbc.Badge(text, style={
+         "backgroundColor": f"{color}", "color": "#ffffff",
          "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
      })
 
