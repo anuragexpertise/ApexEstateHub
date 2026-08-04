@@ -145,9 +145,27 @@ DRILLDOWN_MAP: dict = {
         "target": "list_concerns", "label": "Open Concerns",
         "filter": {"status": "open"},
     },
+    "kpi_concerns_not_closed": {
+        "target": "list_concerns", "label": "Not Closed Concerns",
+        "filter": {},   # {} => builder's default "status != 'closed'" branch
+    },
+    "kpi_concerns_total": {
+        "target": "list_concerns", "label": "Total Concerns",
+        # Deliberately society-wide even on the Owner portal — see the
+        # Concerns workflow spec and card_catalogue.py's kpi_concerns_total.
+        "filter": {"status": "all", "society_wide": True},
+    },
     "kpi_concerns_assigned": {
         "target": "list_concerns", "label": "Assigned To Me",
         "filter": {"assigned_status": "assigned"},
+    },
+    "kpi_concerns_invited": {
+        "target": "list_concerns", "label": "Invited",
+        "filter": {"assigned_status": "invited"},
+    },
+    "kpi_concerns_resolved": {
+        "target": "list_concerns", "label": "Resolved",
+        "filter": {"assigned_status": "resolved"},
     },
     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
     "kpi_receipts_month": {

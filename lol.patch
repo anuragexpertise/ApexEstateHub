@@ -1,0 +1,1300 @@
+From b2763da2b4ed8042a4e9c8d45e88a4b6e3c50bf7 Mon Sep 17 00:00:00 2001
+From: Concerns Workflow Fix <concerns-workflow-fix@local>
+Date: Tue, 4 Aug 2026 01:57:17 +0000
+Subject: [PATCH] Conform Concerns workflow to authoritative spec
+
+KPIs:
+- Add kpi_concerns_not_closed, kpi_concerns_total, kpi_concerns_invited,
+  kpi_concerns_resolved (card defs, role-scoped overrides, drilldown
+  filters, cache scoping).
+- kpi_concerns_total is society-wide on every portal (incl. Owner), per
+  spec's literal {'all' concerns, society_id} with no apartment_id.
+- Rewrite DEFAULT_LAYOUTS + the customize-KPI catalog so every
+  portal/tab's KPI set matches the spec table exactly (Admin, Owner,
+  Vendor, Security's pass_evaluation/security_concerns tabs).
+
+Workflow buttons:
+- Remove Security's Bid/Decline (vendor-only per spec), locked down
+  server-side in concern_bid_callbacks.py's BID_ROLE_CODE too.
+- Add Admin's Accept (assigned->accepted), Decline (assigned->declined),
+  and Resolved (accepted->resolved) actions, incl. new loader functions,
+  handlers, and renderer gating.
+- Fix Security's Resolved gate to check an ADMIN's row status='accepted'
+  on the same concern (loaders.is_any_admin_accepted), per spec, instead
+  of security's own assignment status.
+- Add matching push notifications for the new admin/security events.
+
+Database:
+- Add 'accepted' to concerns_assigns.status; update
+  fn_sync_concern_status() to treat it like 'assigned' in the aggregate.
+- New migration/rollback pair:
+  migration_concerns_assigns_accepted_status.sql,
+  rollback_concerns_assigns_accepted_status.sql,
+  apply_migration_concerns_assigns_accepted_status.py.
+---
+ .../callbacks/card_catalogue_callbacks.py     |  32 +++-
+ .../callbacks/concern_bid_callbacks.py        |   4 +-
+ .../callbacks/customize_kpi_callbacks.py      |  21 ++-
+ .../callbacks/drilldown_callbacks.py          | 165 ++++++++++++++----
+ app/dash_apps/drilldown/loaders.py            | 105 ++++++++---
+ app/dash_apps/drilldown/profile_actions.py    |  66 +++++--
+ app/dash_apps/drilldown/registry.py           |  18 ++
+ app/dash_apps/drilldown/renderers.py          |  40 +++--
+ app/dash_apps/pages/card_catalogue.py         |  81 ++++++++-
+ app/services/push_service.py                  |  43 +++++
+ ...ration_concerns_assigns_accepted_status.py |  83 +++++++++
+ database/estatehub.sql                        |  31 ++--
+ ...ation_concerns_assigns_accepted_status.sql |  74 ++++++++
+ ...lback_concerns_assigns_accepted_status.sql |  56 ++++++
+ 14 files changed, 710 insertions(+), 109 deletions(-)
+ create mode 100644 database/apply_migration_concerns_assigns_accepted_status.py
+ create mode 100644 database/migration_concerns_assigns_accepted_status.sql
+ create mode 100644 database/rollback_concerns_assigns_accepted_status.sql
+
+diff --git a/app/dash_apps/callbacks/card_catalogue_callbacks.py b/app/dash_apps/callbacks/card_catalogue_callbacks.py
+index d5f46ae..b4b7975 100644
+--- a/app/dash_apps/callbacks/card_catalogue_callbacks.py
++++ b/app/dash_apps/callbacks/card_catalogue_callbacks.py
+@@ -73,15 +73,17 @@ SCOPED_CARD_IDS = {
+     "apartment": {
+         "kpi_apartments_dues", "kpi_receivables_total", "kpi_advance_credits",
+         "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_receipts_month",
+-        "kpi_concerns_open", "kpi_gate_logs", "kpi_owner_member_since",
++        "kpi_concerns_open", "kpi_concerns_not_closed", "kpi_gate_logs", "kpi_owner_member_since",
+     },
+     "vendor": {
+         "kpi_receipts_month", "kpi_receivables_total", "kpi_my_pass_expiry",
+         "kpi_gate_logs", "kpi_concerns_open", "kpi_concerns_assigned",
++        "kpi_concerns_invited", "kpi_concerns_resolved",
+     },
+     "security": {
+         "kpi_security_shift_count", "kpi_security_salary_due",
+         "kpi_receipts_month", "kpi_gate_logs", "kpi_concerns_open",
++        "kpi_concerns_assigned", "kpi_concerns_resolved",
+     },
+ }
+ 
+@@ -287,6 +289,14 @@ def register_card_catalogue_callbacks(app):
+                         "WHERE society_id=%s AND created_by=%s AND status='open'",
+                         (sid, own_user_id),
+                     ),
++                    "kpi_concerns_not_closed": (
++                        "SELECT COUNT(*)::INT AS v FROM concerns "
++                        "WHERE society_id=%s AND created_by=%s AND status != 'closed'",
++                        (sid, own_user_id),
++                    ),
++                    # kpi_concerns_total is deliberately NOT overridden here —
++                    # per the Concerns workflow spec it stays society-wide
++                    # even on the Owner portal (see card_catalogue.py).
+                     "kpi_gate_logs": (
+                         # FIX: gate_access rows for apartment owners are
+                         # inserted by qr_callbacks.py's validate_qr_scanned
+@@ -357,6 +367,16 @@ def register_card_catalogue_callbacks(app):
+                         "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='assigned'",
+                         (sid, vendor_id),
+                     ) if vendor_id else None,
++                    "kpi_concerns_invited": (
++                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
++                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='invited'",
++                        (sid, vendor_id),
++                    ) if vendor_id else None,
++                    "kpi_concerns_resolved": (
++                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
++                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='resolved'",
++                        (sid, vendor_id),
++                    ) if vendor_id else None,
+                 }
+                 return overrides.get(card_id)
+ 
+@@ -393,6 +413,16 @@ def register_card_catalogue_callbacks(app):
+                         "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)",
+                         (sid, sec_id),
+                     ) if sec_id else None,
++                    "kpi_concerns_assigned": (
++                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
++                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='assigned'",
++                        (sid, sec_id),
++                    ) if sec_id else None,
++                    "kpi_concerns_resolved": (
++                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
++                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='resolved'",
++                        (sid, sec_id),
++                    ) if sec_id else None,
+                 }
+                 return overrides.get(card_id)
+ 
+diff --git a/app/dash_apps/callbacks/concern_bid_callbacks.py b/app/dash_apps/callbacks/concern_bid_callbacks.py
+index a58f429..3325297 100644
+--- a/app/dash_apps/callbacks/concern_bid_callbacks.py
++++ b/app/dash_apps/callbacks/concern_bid_callbacks.py
+@@ -26,7 +26,9 @@ from database.db_manager import db
+ from app.dash_apps.drilldown import loaders
+ 
+ # Maps auth-store "role" values to the role codes used in concerns_assigns.
+-BID_ROLE_CODE = {"vendor": "VND", "security": "SEC"}
++# Vendor portal only, per the Concerns workflow spec
++# (workflow_vendor_kpi_list_profile) — security does not bid.
++BID_ROLE_CODE = {"vendor": "VND"}
+ 
+ 
+ def register_concern_bid_callbacks(app):
+diff --git a/app/dash_apps/callbacks/customize_kpi_callbacks.py b/app/dash_apps/callbacks/customize_kpi_callbacks.py
+index d964a13..448c503 100644
+--- a/app/dash_apps/callbacks/customize_kpi_callbacks.py
++++ b/app/dash_apps/callbacks/customize_kpi_callbacks.py
+@@ -56,7 +56,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     # ADMIN - Events tab
+     ("kpi_events_total", "admin", "events", "Events"),
+     # ADMIN - Concerns tab
+-    ("kpi_concerns_open", "admin", "concerns", "Concerns"),
++    ("kpi_concerns_not_closed", "admin", "concerns", "Concerns"),
++    ("kpi_concerns_total", "admin", "concerns", "Concerns"),
+     # ADMIN - Polls tab
+     ("kpi_polls_total", "admin", "polls", "Polling"),
+     ("kpi_polls_active", "admin", "polls", "Polling"),
+@@ -96,7 +97,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     ("kpi_master_security_total", "master", "dashboard", "Master"),
+     # APARTMENT PORTAL - Dashboard
+     ("kpi_apartments_dues", "apartment", "dashboard", "Account"),
+-    ("kpi_concerns_open", "apartment", "dashboard", "Concerns"),
++    ("kpi_concerns_not_closed", "apartment", "dashboard", "Concerns"),
+     ("kpi_events_total", "apartment", "dashboard", "Events"),
+     ("kpi_channels_total", "apartment", "dashboard", "Channels"),
+     ("kpi_gate_logs", "apartment", "dashboard", "Gate"),
+@@ -114,6 +115,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     ("kpi_apartments_other_charges", "apartment", "charges", "Charges"),
+     # APARTMENT - Events / Concerns / Settings
+     ("kpi_events_total", "apartment", "events", "Events"),
++    ("kpi_concerns_not_closed", "apartment", "concerns", "Concerns"),
++    ("kpi_concerns_total", "apartment", "concerns", "Concerns"),
+     ("kpi_concerns_open", "apartment", "concerns", "Concerns"),
+     # APARTMENT - Polls tab
+     ("kpi_polls_total", "apartment", "polls", "Polling"),
+@@ -121,7 +124,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     ("kpi_polls_votes", "apartment", "polls", "Polling"),
+     ("kpi_apartments_date", "apartment", "settings", "Profile"),
+     # VENDOR PORTAL - Dashboard
+-    ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
++    ("kpi_concerns_invited", "vendor", "dashboard", "Jobs"),
+     ("kpi_concerns_assigned", "vendor", "dashboard", "Jobs"),
+     ("kpi_events_total", "vendor", "dashboard", "Events"),
+     ("kpi_channels_total", "vendor", "dashboard", "Channels"),
+@@ -135,6 +138,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     ("kpi_vendors_other_charges", "vendor", "charges", "Charges"),
+     ("kpi_events_total", "vendor", "events", "Events"),
+     ("kpi_vendors_date", "vendor", "settings", "Profile"),
++    # VENDOR - Concerns tab
++    ("kpi_concerns_invited", "vendor", "concerns", "Concerns"),
++    ("kpi_concerns_assigned", "vendor", "concerns", "Concerns"),
++    ("kpi_concerns_resolved", "vendor", "concerns", "Concerns"),
+     # SECURITY - Dashboard
+     ("kpi_apartments_total", "security", "dashboard", "Users"),
+     ("kpi_vendors_total", "security", "dashboard", "Users"),
+@@ -143,15 +150,19 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
+     ("kpi_receivables_total", "security", "dashboard", "Cash"),
+     ("kpi_gate_logs", "security", "dashboard", "Gate"),
+     # SECURITY - pass_evaluation (the portal's actual default/landing tab —
+-    # see shell_callbacks.py, "dashboard" here is the Users roster page)
++    # see shell_callbacks.py, "dashboard" here is the Users roster page).
++    # Per the Concerns workflow spec, this is Security's "Dashboard".
+     ("kpi_events_total", "security", "pass_evaluation", "Events"),
+-    ("kpi_concerns_open", "security", "pass_evaluation", "Concerns"),
++    ("kpi_concerns_assigned", "security", "pass_evaluation", "Concerns"),
+     ("kpi_channels_total", "security", "pass_evaluation", "Channels"),
+     ("kpi_channels_pending", "security", "pass_evaluation", "Channels"),
+     ("kpi_channels_pending_bus", "security", "pass_evaluation", "Channels"),
+     ("kpi_channels_pending_taxi", "security", "pass_evaluation", "Channels"),
+     ("kpi_presumed_visitor", "security", "pass_evaluation", "Visitors"),
+     ("kpi_security_on_duty", "security", "pass_evaluation", "Security"),
++    # SECURITY - Concerns tab
++    ("kpi_concerns_assigned", "security", "security_concerns", "Concerns"),
++    ("kpi_concerns_resolved", "security", "security_concerns", "Concerns"),
+     # SECURITY - Cashbook / Charges / payables / Events / Receipt / Settings
+     ("kpi_receivables_total", "security", "cashbook", "payables"),
+     ("kpi_payables_total", "security", "cashbook", "payables"),
+diff --git a/app/dash_apps/callbacks/drilldown_callbacks.py b/app/dash_apps/callbacks/drilldown_callbacks.py
+index e82ec09..964cb33 100644
+--- a/app/dash_apps/callbacks/drilldown_callbacks.py
++++ b/app/dash_apps/callbacks/drilldown_callbacks.py
+@@ -589,17 +589,18 @@ def register_drilldown_callbacks(app):
+                 }
+                 return no_update, no_update, no_update, no_update, trigger_data
+ 
+-            # ── Decline (vendor OR security) — the caller opts out of an
+-            #    invitation before bidding. NEW 2026-08, companion to Bid.
+-            #    Notifies admin + creator apartment so they know to
+-            #    re-invite another candidate (§2.11). See
+-            #    Concerns_Workflow_Review.md §2.11.
++            # ── Decline (vendor) — the caller opts out of an invitation
++            #    before bidding, companion to "Bid". Notifies admin +
++            #    creator apartment so they know to re-invite another
++            #    candidate. Vendor portal only, per spec — for an admin
++            #    declining an ASSIGNED concern, see "decline_concern_admin"
++            #    below.
+             elif action == "decline_concern" and entity == "concern":
+                 role = (auth or {}).get("role")
+                 caller_entity_id = (auth or {}).get("linked_id")
+-                role_code = {"vendor": "VND", "security": "SEC"}.get(role)
++                role_code = {"vendor": "VND"}.get(role)
+                 if not role_code or not caller_entity_id:
+-                    toast = {"_toast": {"type": "error", "message": "Only an invited vendor or security staff can decline"}}
++                    toast = {"_toast": {"type": "error", "message": "Only an invited vendor can decline"}}
+                     return store, content, bc, {"display": "none"}, toast
+                 ok, msg = loaders.decline_concern_assignment(int(pk), sid, role_code, int(caller_entity_id))
+                 if ok:
+@@ -609,18 +610,11 @@ def register_drilldown_callbacks(app):
+                             "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                             (pk, sid), fetch_one=True,
+                         )
+-                        if role_code == "VND":
+-                            e_row = db._execute(
+-                                "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
+-                                (caller_entity_id, sid), fetch_one=True,
+-                            )
+-                            decliner_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
+-                        else:
+-                            e_row = db._execute(
+-                                "SELECT name FROM security_staff WHERE id=%s AND society_id=%s",
+-                                (caller_entity_id, sid), fetch_one=True,
+-                            )
+-                            decliner_label = (e_row or {}).get("name")
++                        e_row = db._execute(
++                            "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
++                            (caller_entity_id, sid), fetch_one=True,
++                        )
++                        decliner_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
+                         if concern_row:
+                             notify_concern_declined(
+                                 sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), decliner_label,
+@@ -636,13 +630,116 @@ def register_drilldown_callbacks(app):
+                 kpi_style = {"display": "none"}
+                 return store, content, bc, kpi_style, toast
+ 
+-            # ── Resolved (vendor OR security) — mark the caller's own assignment
+-            #    resolved. Generalized 2026-08: security staff can now be
+-            #    invited/bid on concerns the same as vendors (see
+-            #    concern_bid_callbacks.py's BID_ROLE_CODE, which already
+-            #    supported both), so this handler — previously hard-coded to
+-            #    "vendor" only — now honours whichever role the caller
+-            #    actually is. See Concerns_Workflow_Review.md §2.8.
++            # ── Accept (Admin) — the assigned admin formally accepts the
++            #    concern (assigned -> accepted). Admin portal only, per
++            #    workflow_admin_kpi_list_profile.
++            elif action == "accept_concern" and entity == "concern":
++                role = (auth or {}).get("role")
++                if role != "admin":
++                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can accept this concern"}}
++                    return store, content, bc, {"display": "none"}, toast
++                caller_entity_id = (auth or {}).get("user_id")
++                ok, msg = loaders.accept_concern_assignment(int(pk), sid, int(caller_entity_id))
++                if ok:
++                    try:
++                        from app.services.push_service import notify_concern_accepted
++                        concern_row = db._execute(
++                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
++                            (pk, sid), fetch_one=True,
++                        )
++                        u_row = db._execute("SELECT name FROM users WHERE id=%s", (caller_entity_id,), fetch_one=True)
++                        if concern_row:
++                            notify_concern_accepted(
++                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
++                                (u_row or {}).get("name"),
++                            )
++                    except Exception as e:
++                        import logging
++                        logging.getLogger(__name__).exception(
++                            "notify_concern_accepted failed (concern_id=%s): %s", pk, e,
++                        )
++                store["refresh"] = True
++                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
++                content, bc, db_err = _render_current(store, auth)
++                kpi_style = {"display": "none"}
++                return store, content, bc, kpi_style, toast
++
++            # ── Decline (Admin) — the assigned admin declines the
++            #    assignment outright (assigned -> declined). Admin portal
++            #    only, per workflow_admin_kpi_list_profile. Distinct action
++            #    id from the vendor's pre-bid "decline_concern" above.
++            elif action == "decline_concern_admin" and entity == "concern":
++                role = (auth or {}).get("role")
++                if role != "admin":
++                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can decline this concern"}}
++                    return store, content, bc, {"display": "none"}, toast
++                caller_entity_id = (auth or {}).get("user_id")
++                ok, msg = loaders.decline_concern_assignment(int(pk), sid, "ADM", int(caller_entity_id))
++                if ok:
++                    try:
++                        from app.services.push_service import notify_concern_declined_by_admin
++                        concern_row = db._execute(
++                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
++                            (pk, sid), fetch_one=True,
++                        )
++                        u_row = db._execute("SELECT name FROM users WHERE id=%s", (caller_entity_id,), fetch_one=True)
++                        if concern_row:
++                            notify_concern_declined_by_admin(
++                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
++                                (u_row or {}).get("name"),
++                            )
++                    except Exception as e:
++                        import logging
++                        logging.getLogger(__name__).exception(
++                            "notify_concern_declined_by_admin failed (concern_id=%s): %s", pk, e,
++                        )
++                store["refresh"] = True
++                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
++                content, bc, db_err = _render_current(store, auth)
++                kpi_style = {"display": "none"}
++                return store, content, bc, kpi_style, toast
++
++            # ── Resolved (Admin) — the assigned admin marks their own
++            #    assignment resolved (accepted -> resolved). Admin portal
++            #    only, per workflow_admin_kpi_list_profile.
++            elif action == "admin_resolve" and entity == "concern":
++                role = (auth or {}).get("role")
++                if role != "admin":
++                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can resolve this concern"}}
++                    return store, content, bc, {"display": "none"}, toast
++                caller_entity_id = (auth or {}).get("user_id")
++                actor_user_id = get_current_user_id()
++                ok, msg = loaders.resolve_concern_assignment(
++                    int(pk), sid, "ADM", int(caller_entity_id), resolved_by=actor_user_id,
++                )
++                if ok:
++                    try:
++                        concern_row = db._execute(
++                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
++                            (pk, sid), fetch_one=True,
++                        )
++                        if concern_row:
++                            from app.services.push_service import notify_concern_resolved_by_admin
++                            notify_concern_resolved_by_admin(
++                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
++                            )
++                    except Exception as e:
++                        import logging
++                        logging.getLogger(__name__).exception(
++                            "notify_concern_resolved_by_admin failed (concern_id=%s): %s", pk, e,
++                        )
++                store["refresh"] = True
++                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
++                content, bc, db_err = _render_current(store, auth)
++                kpi_style = {"display": "none"}
++                return store, content, bc, kpi_style, toast
++
++            # ── Resolved (vendor OR security) — mark the caller's own
++            #    assignment resolved. Vendor: enabled once vendor's own row
++            #    is 'assigned'. Security: per spec, enabled once an ADMIN's
++            #    row on the same concern is 'accepted' (see
++            #    loaders.is_any_admin_accepted / renderers.py) — the
++            #    underlying write still targets security's own row.
+             elif action == "vendor_resolve" and entity == "concern":
+                 role = (auth or {}).get("role")
+                 caller_entity_id = (auth or {}).get("linked_id")
+@@ -650,6 +747,9 @@ def register_drilldown_callbacks(app):
+                 if not role_code or not caller_entity_id:
+                     toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
+                     return store, content, bc, {"display": "none"}, toast
++                if role_code == "SEC" and not loaders.is_any_admin_accepted(int(pk), sid):
++                    toast = {"_toast": {"type": "error", "message": "This concern hasn't been accepted by an admin yet"}}
++                    return store, content, bc, {"display": "none"}, toast
+                 actor_user_id = get_current_user_id()
+                 ok, msg = loaders.resolve_concern_assignment(
+                     int(pk), sid, role_code, int(caller_entity_id), resolved_by=actor_user_id,
+@@ -661,13 +761,18 @@ def register_drilldown_callbacks(app):
+                             (pk, sid), fetch_one=True,
+                         )
+                         if concern_row:
+-                            PushService.notify_concern_resolved_by_vendor(
+-                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+-                            )
++                            if role_code == "SEC":
++                                PushService.notify_concern_resolved_by_security(
++                                    sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
++                                )
++                            else:
++                                PushService.notify_concern_resolved_by_vendor(
++                                    sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
++                                )
+                     except Exception as e:
+                         import logging
+                         logging.getLogger(__name__).exception(
+-                            "notify_concern_resolved_by_vendor failed (concern_id=%s): %s", pk, e,
++                            "notify_concern_resolved failed (concern_id=%s): %s", pk, e,
+                         )
+                 store["refresh"] = True
+                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+diff --git a/app/dash_apps/drilldown/loaders.py b/app/dash_apps/drilldown/loaders.py
+index c0ad2c2..6357371 100644
+--- a/app/dash_apps/drilldown/loaders.py
++++ b/app/dash_apps/drilldown/loaders.py
+@@ -243,25 +243,54 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
+ 
+ 
+ def decline_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
+-    """DECLINE stage: the invited vendor/security opts out before bidding.
+-    Only valid from status='invited' — once a bid is submitted there's
+-    nothing to "decline" (the admin either picks it via assign_concern()
+-    or doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
++    """DECLINE stage: opts the caller out of a concern.
++
++    VND/SEC: the invited vendor/security opts out before bidding. Only
++    valid from status='invited' — once a bid is submitted there's nothing
++    to "decline" (the admin either picks it via assign_concern() or
++    doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
+     ON CONFLICT clause resets any row not already resolved/closed back to
+     'invited', and 'declined' was never in that exclusion list, so no
+     change was needed there. Declined vendors also drop out of the Assign
+-    modal's candidate pool — see list_assignable_vendors()."""
++    modal's candidate pool — see list_assignable_vendors().
++
++    ADM: an assigned admin declines the assignment outright. Only valid
++    from status='assigned' (admins skip invite/bid — see assign_concern()),
++    per the Admin portal's 'Decline' action in the Concerns workflow spec."""
++    from_status = "assigned" if role == "ADM" else "invited"
+     row = db._execute(
+         "UPDATE concerns_assigns SET status='declined', updated_at=NOW() "
+-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited' "
++        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
+         "RETURNING id",
+-        (concern_id, society_id, role, entity_id), fetch_one=True,
++        (concern_id, society_id, role, entity_id, from_status), fetch_one=True,
+     )
+     if not row:
+-        return False, "No pending invitation found for you on this concern"
++        msg = "No active assignment found for you on this concern" if role == "ADM" \
++            else "No pending invitation found for you on this concern"
++        return False, msg
+     return True, "Declined"
+ 
+ 
++def accept_concern_assignment(concern_id: int, society_id: int, entity_id: int) -> tuple[bool, str]:
++    """ACCEPT stage — ADM only: the assigned admin formally accepts the
++    concern before doing the work and later marking it resolved. Only
++    valid from status='assigned'. Per the Concerns workflow spec's Admin
++    portal 'Accept' action (admin's concerns_assigns.status='accepted').
++    Also gates the Security portal's 'Resolved' button (see
++    resolve_concern_assignment / the caller in drilldown_callbacks.py),
++    which is enabled only once an admin's row on the same concern reaches
++    this state."""
++    row = db._execute(
++        "UPDATE concerns_assigns SET status='accepted', updated_at=NOW() "
++        "WHERE concern_id=%s AND society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned' "
++        "RETURNING id",
++        (concern_id, society_id, entity_id), fetch_one=True,
++    )
++    if not row:
++        return False, "No active (assigned) assignment found for you on this concern"
++    return True, "Accepted"
++
++
+ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, assigned_by: int) -> tuple[bool, str]:
+     """ASSIGN stage: formally assign an entity to the concern. Works both as
+     'accept the bid' (promotes an existing invited/bid_submitted row to
+@@ -304,21 +333,43 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
+                                 resolved_by: int | None = None) -> tuple[bool, str]:
+     """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
+     (e.g. vendor/security marking their work done). Only valid from
+-    status='assigned'. The concerns.status aggregate ('resolved' once every
+-    *touched* assignee row is resolved/closed — see fn_sync_concern_status)
+-    is updated automatically by the sync trigger. `resolved_by` is optional
+-    for backward compatibility with any existing callers."""
++    status='assigned' for VND/SEC. ADM rows go through the extra 'accepted'
++    step first (see accept_concern_assignment) so an admin's row must be
++    status='accepted' before it can be resolved, per the Concerns workflow
++    spec's Admin portal 'Resolved' action. The concerns.status aggregate
++    ('resolved' once every *touched* assignee row is resolved/closed — see
++    fn_sync_concern_status) is updated automatically by the sync trigger.
++    `resolved_by` is optional for backward compatibility with any existing
++    callers."""
++    from_status = "accepted" if role == "ADM" else "assigned"
+     row = db._execute(
+         "UPDATE concerns_assigns SET status='resolved', resolved_by=%s, updated_at=NOW() "
+-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='assigned' "
++        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
+         "RETURNING id",
+-        (resolved_by, concern_id, society_id, role, entity_id), fetch_one=True,
++        (resolved_by, concern_id, society_id, role, entity_id, from_status), fetch_one=True,
+     )
+     if not row:
+-        return False, "No active (assigned) assignment found for you on this concern"
++        msg = "No active (accepted) assignment found for you on this concern" if role == "ADM" \
++            else "No active (assigned) assignment found for you on this concern"
++        return False, msg
+     return True, "Marked resolved"
+ 
+ 
++def is_any_admin_accepted(concern_id: int, society_id: int) -> bool:
++    """True if ANY admin (role='ADM') assignment on this concern has
++    reached status='accepted'. Per the Concerns workflow spec, the
++    Security portal's 'Resolved' button is gated on this — not on
++    security's own assignment status — so this helper backs both the
++    button's enablement (renderers.py) and its server-side guard
++    (drilldown_callbacks.py)."""
++    row = db._execute(
++        "SELECT 1 FROM concerns_assigns WHERE concern_id=%s AND society_id=%s "
++        "AND role='ADM' AND status='accepted' LIMIT 1",
++        (concern_id, society_id), fetch_one=True,
++    )
++    return bool(row)
++
++
+ def close_concern(concern_id: int, society_id: int, closed_by: int | None = None) -> tuple[bool, str]:
+     """CLOSE stage — admin/owner action: close a concern for ALL assignees
+     at once, whatever stage each one is at. The sync trigger then rolls
+@@ -421,9 +472,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+     # ── CONCERNS ────────────────────────────────────────────────────────
+     if entity == "concerns":
+         extra, params = "", [sid]
+-        creator_id = filters.get("concern_creator_id")
+-        assigned_vnd_id = filters.get("assigned_vnd_id")
+-        assigned_sec_id = filters.get("assigned_sec_id")
++        # kpi_concerns_total is deliberately society-wide on every portal
++        # (per the Concerns workflow spec) — skip all owner/vendor/security
++        # scoping below when set, so it isn't narrowed to "my own" rows.
++        society_wide = filters.get("society_wide")
++        creator_id = None if society_wide else filters.get("concern_creator_id")
++        assigned_vnd_id = None if society_wide else filters.get("assigned_vnd_id")
++        assigned_sec_id = None if society_wide else filters.get("assigned_sec_id")
+         # assigned_status: filter concerns_assigns.status for the
+         # currently-scoped vendor/security row (e.g. 'assigned' for the
+         # vendor's "kpi_concerns_assigned" drilldown). Only meaningful
+@@ -446,7 +501,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+                 extra += " AND ca.status=%s"
+                 params.append(assigned_status)
+             extra += ")"
+-        elif apt_id:
++        elif apt_id and not society_wide:
+             extra += " AND c.apartment_id=%s"
+             params.append(apt_id)
+         if s:
+@@ -454,9 +509,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+             params += [f"%{s}%", f"%{s}%"]
+         # Top-level concerns.status filter (e.g. {"status": "open"} for the
+         # kpi_concerns_open drilldown). Defaults to "everything not closed"
+-        # so plain browsing still hides closed concerns.
++        # so plain browsing still hides closed concerns. status="all" (used
++        # by kpi_concerns_total) is an explicit sentinel to show literally
++        # every concern, including closed ones.
+         status_filter = filters.get("status")
+-        if status_filter:
++        if status_filter == "all":
++            pass
++        elif status_filter:
+             extra += " AND c.status=%s"
+             params.append(status_filter)
+         else:
+@@ -472,7 +531,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+         # assigned_status needs to be read HERE, not only in the separate
+         # assigned_vnd_id branch above which nothing ever sets. See
+         # Concerns_Workflow_Review.md §3.2.
+-        vnd_assignee_id = filters.get("vnd_assignee_id")
++        vnd_assignee_id = None if society_wide else filters.get("vnd_assignee_id")
+         if vnd_assignee_id:
+             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
+             params.append(vnd_assignee_id)
+@@ -484,7 +543,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
+             extra += ")"
+ 
+         # Security portal: same, for security staff.
+-        sec_assignee_id = filters.get("sec_assignee_id")
++        sec_assignee_id = None if society_wide else filters.get("sec_assignee_id")
+         if sec_assignee_id:
+             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
+             params.append(sec_assignee_id)
+diff --git a/app/dash_apps/drilldown/profile_actions.py b/app/dash_apps/drilldown/profile_actions.py
+index 2deea13..1471b4b 100644
+--- a/app/dash_apps/drilldown/profile_actions.py
++++ b/app/dash_apps/drilldown/profile_actions.py
+@@ -155,14 +155,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "target_card": None,          # opens the bid-entry modal — no navigation
+             "icon": "fa-hand-holding-usd",
+             "color": "primary",
+-            # Security staff can be invited/bid on concerns the same as
+-            # vendors (concern_bid_callbacks.py's BID_ROLE_CODE already
+-            # supported "security" -> "SEC"; only this button's role gate
+-            # was vendor-only). See Concerns_Workflow_Review.md §2.3.
+-            # Renamed "Save Bid" -> "Bid" 2026-08, paired with "Decline"
+-            # below — both shown only while the caller's own row is
+-            # 'invited' (renderers.py).
+-            "roles": ["vendor", "security"],
++            # Vendor portal only, per the Concerns workflow spec
++            # (workflow_vendor_kpi_list_profile). Shown only while the
++            # caller's own row is 'invited' (renderers.py).
++            "roles": ["vendor"],
+         },
+         {
+             "label": "Decline",
+@@ -170,12 +166,12 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "target_card": None,          # server-side only — no navigation
+             "icon": "fa-times",
+             "color": "secondary",
+-            # NEW 2026-08 — companion to "Bid". Only shown while the
+-            # caller's own concerns_assigns row is 'invited' (same gate as
+-            # "Bid"); sets status='declined', notifies admin, and drops the
+-            # caller from the Assign modal's candidate pool for this
+-            # concern until re-invited. See Concerns_Workflow_Review.md §2.11.
+-            "roles": ["vendor", "security"],
++            # Vendor portal only, per spec — companion to "Bid". Only
++            # shown while the caller's own concerns_assigns row is
++            # 'invited' (same gate as "Bid"); sets status='declined',
++            # notifies admin, and drops the caller from the Assign modal's
++            # candidate pool for this concern until re-invited.
++            "roles": ["vendor"],
+         },
+         {
+             "label": "Resolved",
+@@ -183,11 +179,47 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
+             "target_card": None,          # server-side only — no navigation
+             "icon": "fa-check",
+             "color": "success",
+-            # See §2.8 — resolve_concern_assignment() is role-generic;
+-            # the handler in drilldown_callbacks.py now honours whichever
+-            # role the caller actually is instead of hard-coding "vendor".
++            # Vendor portal: shown while the caller's own row is
++            # 'assigned' (renderers.py). Security portal: also uses this
++            # action id, but per spec its gate checks whether an ADMIN's
++            # row on the same concern is 'accepted' — not the security
++            # caller's own status (see renderers.py / loaders.is_any_admin_accepted).
+             "roles": ["vendor", "security"],
+         },
++        {
++            "label": "Accept",
++            "action_id": "accept_concern",
++            "target_card": None,          # server-side only — no navigation
++            "icon": "fa-thumbs-up",
++            "color": "success",
++            # Admin portal only, per workflow_admin_kpi_list_profile.
++            # Shown while the caller's own ADM row is 'assigned'
++            # (renderers.py); moves it to 'accepted'.
++            "roles": ["admin"],
++        },
++        {
++            "label": "Decline",
++            "action_id": "decline_concern_admin",
++            "target_card": None,          # server-side only — no navigation
++            "icon": "fa-times",
++            "color": "secondary",
++            # Admin portal only, per workflow_admin_kpi_list_profile — an
++            # assigned admin declining the assignment (distinct from the
++            # vendor's pre-bid "decline_concern" above). Shown while the
++            # caller's own ADM row is 'assigned' (renderers.py).
++            "roles": ["admin"],
++        },
++        {
++            "label": "Resolved",
++            "action_id": "admin_resolve",
++            "target_card": None,          # server-side only — no navigation
++            "icon": "fa-check",
++            "color": "success",
++            # Admin portal only, per workflow_admin_kpi_list_profile.
++            # Shown while the caller's own ADM row is 'accepted'
++            # (renderers.py); moves it to 'resolved'.
++            "roles": ["admin"],
++        },
+         {
+             "label": "Close",
+             "action_id": "close_concern",
+diff --git a/app/dash_apps/drilldown/registry.py b/app/dash_apps/drilldown/registry.py
+index 39d84db..8ebcc1a 100644
+--- a/app/dash_apps/drilldown/registry.py
++++ b/app/dash_apps/drilldown/registry.py
+@@ -145,10 +145,28 @@ DRILLDOWN_MAP: dict = {
+         "target": "list_concerns", "label": "Open Concerns",
+         "filter": {"status": "open"},
+     },
++    "kpi_concerns_not_closed": {
++        "target": "list_concerns", "label": "Not Closed Concerns",
++        "filter": {},   # {} => builder's default "status != 'closed'" branch
++    },
++    "kpi_concerns_total": {
++        "target": "list_concerns", "label": "Total Concerns",
++        # Deliberately society-wide even on the Owner portal — see the
++        # Concerns workflow spec and card_catalogue.py's kpi_concerns_total.
++        "filter": {"status": "all", "society_wide": True},
++    },
+     "kpi_concerns_assigned": {
+         "target": "list_concerns", "label": "Assigned To Me",
+         "filter": {"assigned_status": "assigned"},
+     },
++    "kpi_concerns_invited": {
++        "target": "list_concerns", "label": "Invited",
++        "filter": {"assigned_status": "invited"},
++    },
++    "kpi_concerns_resolved": {
++        "target": "list_concerns", "label": "Resolved",
++        "filter": {"assigned_status": "resolved"},
++    },
+     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
+     "kpi_receipts_month": {
+         "target": "list_receipts",
+diff --git a/app/dash_apps/drilldown/renderers.py b/app/dash_apps/drilldown/renderers.py
+index 66f7e8a..83936cd 100644
+--- a/app/dash_apps/drilldown/renderers.py
++++ b/app/dash_apps/drilldown/renderers.py
+@@ -922,24 +922,34 @@ def render_profile_card(card_id: str, title: str, icon: str,
+ 
+     text_cells = [_field_cell(f) for f in text_fields]
+ 
+-    # ── Concern actions: scope Bid/Decline/Resolved to the caller's own
+-    # concerns_assigns stage ──────────────────────────────────────────────
++    # ── Concern actions: scope actions to the caller's own concerns_assigns
++    # stage ──────────────────────────────────────────────────────────────
+     # NOTE (fixed 2026-08): these buttons used to be shown to every
+-    # vendor/security caller on every concern regardless of their own
+-    # concerns_assigns.status — "Bid" (formerly "Save Bid") and "Decline"
+-    # only make sense at 'invited' (submit_concern_bid()/
+-    # decline_concern_assignment() both require status='invited' or fail),
+-    # and "Resolved" only at 'assigned' (resolve_concern_assignment()
+-    # requires status='assigned'). See Concerns_Workflow_Review.md §3.4, §2.11.
++    # vendor/security/admin caller on every concern regardless of their own
++    # concerns_assigns.status — "Bid" and "Decline" only make sense at
++    # 'invited' (submit_concern_bid()/decline_concern_assignment() both
++    # require status='invited' or fail), vendor "Resolved" only at
++    # 'assigned', and admin "Accept"/"Decline"/"Resolved" only at
++    # 'assigned'/'assigned'/'accepted' respectively (loaders.py).
+     my_concern_status = None
+-    if entity == "concern" and role in ("vendor", "security"):
+-        my_role_code = "VND" if role == "vendor" else "SEC"
+-        my_entity_id = auth_data.get("linked_id")
++    if entity == "concern" and role in ("vendor", "security", "admin"):
++        my_role_code = {"vendor": "VND", "security": "SEC", "admin": "ADM"}[role]
++        my_entity_id = auth_data.get("user_id") if role == "admin" else auth_data.get("linked_id")
+         for a in (record_dict.get("_assignments") or []):
+             if a.get("role") == my_role_code and a.get("entity_id") == my_entity_id:
+                 my_concern_status = a.get("status")
+                 break
+ 
++    # Security's "Resolved" is gated differently from vendor's: per the
++    # Concerns workflow spec it's enabled once an ADMIN's row on this
++    # concern reaches 'accepted' — not on security's own assignment status.
++    any_admin_accepted = False
++    if entity == "concern" and role == "security":
++        for a in (record_dict.get("_assignments") or []):
++            if a.get("role") == "ADM" and a.get("status") == "accepted":
++                any_admin_accepted = True
++                break
++
+     # ── Action buttons filtered by role ─────────────────────────────────
+     # renderers.py — render_profile_card(), action button loop
+     action_btns = []
+@@ -952,7 +962,13 @@ def render_profile_card(card_id: str, title: str, icon: str,
+         if act_id == "delete" and "delete" not in allowed: continue
+         if act_id == "save_bid" and my_concern_status != "invited": continue
+         if act_id == "decline_concern" and my_concern_status != "invited": continue
+-        if act_id == "vendor_resolve" and my_concern_status != "assigned": continue
++        if act_id == "vendor_resolve":
++            if role == "security":
++                if not any_admin_accepted: continue
++            elif my_concern_status != "assigned": continue
++        if act_id == "accept_concern" and my_concern_status != "assigned": continue
++        if act_id == "decline_concern_admin" and my_concern_status != "assigned": continue
++        if act_id == "admin_resolve" and my_concern_status != "accepted": continue
+         action_btns.append(dbc.Button(
+             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
+             act["label"]],
+diff --git a/app/dash_apps/pages/card_catalogue.py b/app/dash_apps/pages/card_catalogue.py
+index a624650..0b958ff 100644
+--- a/app/dash_apps/pages/card_catalogue.py
++++ b/app/dash_apps/pages/card_catalogue.py
+@@ -393,6 +393,33 @@ KPI_CARDS = {
+         "title": "Open Concerns", "group": "pending issues",
+     },
+ 
++    # Admin/Owner: every concern not yet closed (open OR assigned OR
++    # resolved-but-not-closed). Owner sees only concerns THEY raised — see
++    # the "apartment" override in card_catalogue_callbacks.py.
++    "kpi_concerns_not_closed": {
++        "query": """
++            SELECT COUNT(*) AS v FROM concerns
++            WHERE society_id=%s AND status != 'closed'
++        """,
++        "params": 1, "format": "number",
++        "icon": "fa-hand-point-up", "color": "#de5c52",
++        "title": "Not Closed Concerns", "group": "pending issues",
++    },
++
++    # Admin/Owner: every concern regardless of status. Deliberately
++    # society-wide for BOTH portals (per the Concerns workflow spec, this
++    # KPI is never apartment-scoped, unlike kpi_concerns_not_closed/
++    # kpi_concerns_open) — no per-role override needed.
++    "kpi_concerns_total": {
++        "query": """
++            SELECT COUNT(*) AS v FROM concerns
++            WHERE society_id=%s
++        """,
++        "params": 1, "format": "number",
++        "icon": "fa-list", "color": "#3f7cd6",
++        "title": "Total Concerns", "group": "pending issues",
++    },
++
+     # Vendor-only: count of concerns_assigns rows currently assigned to
+     # THIS vendor and not yet resolved/closed. Society-wide default query
+     # below is a harmless fallback (0 for non-vendor entity_ids); the real
+@@ -407,6 +434,32 @@ KPI_CARDS = {
+         "title": "Assigned To Me", "group": "pending issues",
+     },
+ 
++    # Vendor/Security: count of concerns_assigns rows this caller has been
++    # INVITED to (not yet bid/declined). Real per-vendor/security count is
++    # supplied via the role overrides in card_catalogue_callbacks.py.
++    "kpi_concerns_invited": {
++        "query": """
++            SELECT COUNT(*) AS v FROM concerns_assigns
++            WHERE society_id=%s AND role='VND' AND status='invited'
++        """,
++        "params": 1, "format": "number",
++        "icon": "fa-envelope-open-text", "color": "#8e44ad",
++        "title": "Invited", "group": "pending issues",
++    },
++
++    # Vendor/Security: count of concerns_assigns rows this caller has
++    # marked resolved. Real per-vendor/security count is supplied via the
++    # role overrides in card_catalogue_callbacks.py.
++    "kpi_concerns_resolved": {
++        "query": """
++            SELECT COUNT(*) AS v FROM concerns_assigns
++            WHERE society_id=%s AND role='VND' AND status='resolved'
++        """,
++        "params": 1, "format": "number",
++        "icon": "fa-check-circle", "color": "#27ae60",
++        "title": "Resolved", "group": "pending issues",
++    },
++
+     # ════════════════════════════════════════════════════════════════
+     # POLLING
+     # ════════════════════════════════════════════════════════════════
+@@ -938,7 +991,7 @@ DEFAULT_LAYOUTS = {
+             "kpi_vendors_passes",
+             "kpi_security_on_duty",
+             "kpi_events_total",
+-            "kpi_concerns_open",
++            "kpi_concerns_not_closed",
+             "kpi_gate_logs",
+             "kpi_assets_count",
+             "kpi_receivables_total",
+@@ -970,7 +1023,9 @@ DEFAULT_LAYOUTS = {
+             "kpi_ledger_open",
+         ],
+         "events": ["kpi_events_total"],
+-        "concerns": ["kpi_concerns_open"],
++        # Per the Concerns workflow spec: Admin/Concerns tab shows
++        # "not closed" + "total" (society-wide).
++        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
+         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
+         "assets": ["kpi_assets_count", "kpi_assets_value"],
+         "receipts": [
+@@ -1014,7 +1069,7 @@ DEFAULT_LAYOUTS = {
+             "kpi_my_overdue_dues",
+             "kpi_advance_credits",
+             "kpi_gate_logs",
+-            "kpi_concerns_open",
++            "kpi_concerns_not_closed",
+             "kpi_events_total",
+             "kpi_channels_total",
+         ],
+@@ -1038,7 +1093,10 @@ DEFAULT_LAYOUTS = {
+         "cashbook": ["kpi_cash_in_hand", "kpi_receivables_this_month", "kpi_payables_this_month"],
+         "owner_receipts": ["kpi_receipts_total"],
+         "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
+-        "concerns": ["kpi_concerns_open"],
++        # Per the Concerns workflow spec: Owner/Concerns tab shows "not
++        # closed" (own concerns), "total" (society-wide), and "open" (own
++        # concerns).
++        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total", "kpi_concerns_open"],
+         "events": ["kpi_events_total"],
+         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
+         "settings": ["kpi_owner_member_since"],
+@@ -1047,7 +1105,7 @@ DEFAULT_LAYOUTS = {
+         "dashboard": [
+             "kpi_my_pass_expiry",
+             "kpi_gate_logs",
+-            "kpi_concerns_open",
++            "kpi_concerns_invited",
+             "kpi_concerns_assigned",
+             "kpi_events_total",
+             "kpi_channels_total",
+@@ -1062,7 +1120,9 @@ DEFAULT_LAYOUTS = {
+         ],
+         "vendor_receipts": ["kpi_receipts_total"],
+         "cashbook": ["kpi_cash_in_hand"],
+-        "concerns": ["kpi_concerns_open", "kpi_concerns_assigned"],
++        # Per the Concerns workflow spec: Vendor/Concerns tab shows
++        # "invited", "assigned", and "resolved".
++        "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],
+         "charges": ["kpi_ven_charges_count", "kpi_vendors_other_charges"],
+         "events": ["kpi_events_total"],
+         "settings": ["kpi_vendors_date"],
+@@ -1085,10 +1145,15 @@ DEFAULT_LAYOUTS = {
+         "security_receipt": ["kpi_receipts_month"],
+         "security_receipts": ["kpi_security_receipts"],
+         "security_events": ["kpi_events_total"],
+-        "security_concerns": ["kpi_concerns_open"],
++        # Per the Concerns workflow spec: Security/Concerns tab shows
++        # "assigned" and "resolved".
++        "security_concerns": ["kpi_concerns_assigned", "kpi_concerns_resolved"],
+         "pass_evaluation": [
+             "kpi_events_total",
+-            "kpi_concerns_open",
++            # Security's actual landing/"Dashboard" page (see NOTE above —
++            # "dashboard" here is the Users roster instead). Per the
++            # Concerns workflow spec, Security/Dashboard shows "assigned".
++            "kpi_concerns_assigned",
+             "kpi_channels_total",
+             "kpi_channels_pending",
+             "kpi_channels_pending_bus",
+diff --git a/app/services/push_service.py b/app/services/push_service.py
+index 7294a65..7355c4d 100644
+--- a/app/services/push_service.py
++++ b/app/services/push_service.py
+@@ -321,6 +321,49 @@ def notify_concern_declined(society_id, apartment_id, concern_type, vendor_label
+     return send_bulk_push(targets, "🚫 Concern Invitation Declined", body, url="/dashboard/concerns", society_id=society_id)
+ 
+ 
++def notify_concern_accepted(society_id, apartment_id, concern_type, admin_label=None):
++    """Admin accepted an assigned concern — notify admin + creator apartment."""
++    targets = _concern_notify_targets(society_id, apartment_id)
++    if not targets:
++        return 0, 0
++    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
++    who = f" by {admin_label}" if admin_label else ""
++    body = f"The assignment was accepted{who} for: {label}"
++    return send_bulk_push(targets, "👍 Admin Accepted Concern", body, url="/dashboard/concerns", society_id=society_id)
++
++
++def notify_concern_declined_by_admin(society_id, apartment_id, concern_type, admin_label=None):
++    """Admin declined an assigned concern — notify admin + creator apartment
++    so they know to re-assign someone else."""
++    targets = _concern_notify_targets(society_id, apartment_id)
++    if not targets:
++        return 0, 0
++    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
++    who = f" by {admin_label}" if admin_label else ""
++    body = f"The assignment was declined{who} for: {label}. You can assign another candidate."
++    return send_bulk_push(targets, "🚫 Admin Declined Concern", body, url="/dashboard/concerns", society_id=society_id)
++
++
++def notify_concern_resolved_by_admin(society_id, apartment_id, concern_type):
++    """Admin marked their assignment resolved — notify admin + creator apartment."""
++    targets = _concern_notify_targets(society_id, apartment_id)
++    if not targets:
++        return 0, 0
++    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
++    body = f"An admin marked the concern as resolved: {label}"
++    return send_bulk_push(targets, "✅ Admin Resolved Concern", body, url="/dashboard/concerns", society_id=society_id)
++
++
++def notify_concern_resolved_by_security(society_id, apartment_id, concern_type):
++    """Security marked their assignment resolved — notify admin + creator apartment."""
++    targets = _concern_notify_targets(society_id, apartment_id)
++    if not targets:
++        return 0, 0
++    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
++    body = f"Security marked the concern as resolved: {label}"
++    return send_bulk_push(targets, "✅ Security Resolved Concern", body, url="/dashboard/concerns", society_id=society_id)
++
++
+ def notify_concern_closed(society_id, apartment_id, concern_type, assignments=None):
+     """Admin/Owner closed a concern — notify admin, the creator apartment,
+     and every assignee. `assignments` is the list of rows returned by
+diff --git a/database/apply_migration_concerns_assigns_accepted_status.py b/database/apply_migration_concerns_assigns_accepted_status.py
+new file mode 100644
+index 0000000..68d484a
+--- /dev/null
++++ b/database/apply_migration_concerns_assigns_accepted_status.py
+@@ -0,0 +1,83 @@
++#!/usr/bin/env python3
++# database/apply_migration_concerns_assigns_accepted_status.py
++"""
++ApexEstateHub — apply/rollback the concerns_assigns 'accepted' status migration.
++
++Usage
++-----
++    python3 database/apply_migration_concerns_assigns_accepted_status.py            # apply
++    python3 database/apply_migration_concerns_assigns_accepted_status.py --rollback # revert
++    python3 database/apply_migration_concerns_assigns_accepted_status.py --dry-run  # print only
++"""
++
++import os
++import sys
++import argparse
++
++sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
++
++from dotenv import load_dotenv
++load_dotenv(override=False)
++
++import psycopg2
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++MIGRATION_SQL = os.path.join(HERE, "migration_concerns_assigns_accepted_status.sql")
++ROLLBACK_SQL = os.path.join(HERE, "rollback_concerns_assigns_accepted_status.sql")
++
++
++def _dsn() -> str:
++    raw = os.getenv("DATABASE_URL", "").strip()
++    if raw:
++        return raw.replace("postgres://", "postgresql://", 1)
++    host = os.getenv("PGHOST", "").strip()
++    port = os.getenv("PGPORT", "5432").strip() or "5432"
++    dbname = os.getenv("PGDATABASE", "").strip()
++    user = os.getenv("PGUSER", "").strip()
++    pw = os.getenv("PGPASSWORD", "").strip()
++    if not (host and dbname and user):
++        print("❌ No DATABASE_URL and no PGHOST/PGDATABASE/PGUSER set.")
++        sys.exit(1)
++    return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}"
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Apply/rollback concerns_assigns 'accepted' status migration")
++    parser.add_argument("--rollback", action="store_true", help="revert to the pre-'accepted' constraint")
++    parser.add_argument("--dry-run", action="store_true", help="print the SQL, don't execute")
++    args = parser.parse_args()
++
++    path = ROLLBACK_SQL if args.rollback else MIGRATION_SQL
++    label = "ROLLBACK" if args.rollback else "MIGRATION"
++
++    if not os.path.exists(path):
++        print(f"❌ {path} not found — place it next to this script.")
++        sys.exit(1)
++
++    with open(path, "r") as f:
++        sql = f.read()
++
++    if args.dry_run:
++        print(f"── {label} ({path}) ──")
++        print(sql)
++        return
++
++    print("→ Connecting…")
++    conn = psycopg2.connect(_dsn())
++    conn.autocommit = False
++    try:
++        with conn.cursor() as cur:
++            print(f"→ Applying {label}: {os.path.basename(path)}")
++            cur.execute(sql)
++        conn.commit()
++        print(f"✅ {label} applied successfully.")
++    except Exception as e:
++        conn.rollback()
++        print(f"❌ {label} failed, rolled back: {e}")
++        sys.exit(1)
++    finally:
++        conn.close()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/database/estatehub.sql b/database/estatehub.sql
+index f9b8646..14d2544 100644
+--- a/database/estatehub.sql
++++ b/database/estatehub.sql
+@@ -233,10 +233,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
+ --     invited -> bid_submitted -> assigned -> resolved -> closed
+ --
+ -- ADM rows (society admins, who are auto-assigned rather than invited to
+--- bid) skip straight to 'assigned'. VND/SEC rows normally start at
+--- 'invited' and progress through 'bid_submitted' before an admin formally
+--- 'assigned's them — though a direct "Assign" is still allowed at any
+--- point as a shortcut (e.g. price already agreed offline), which simply
++-- bid) skip straight to 'assigned', then follow their own sub-lifecycle:
++--
++--     assigned -> accepted -> resolved -> closed
++--     assigned -> declined
++--
++-- ('accepted' added 2026-08 to support the Admin portal's Accept/Decline/
++-- Resolved actions on an assigned concern — see
++-- migration_concerns_assigns_accepted_status.sql.) VND/SEC rows normally
++-- start at 'invited' and progress through 'bid_submitted' before an admin
++-- formally 'assigned's them — though a direct "Assign" is still allowed at
++-- any point as a shortcut (e.g. price already agreed offline), which simply
+ -- promotes whatever row exists straight to 'assigned'.
+ --
+ -- concerns.status is KEPT (existing code, KPIs, and the
+@@ -246,11 +253,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
+ -- concerns.status directly for anything except the initial INSERT ('open').
+ --
+ -- Aggregate rule:
+---   no concerns_assigns rows for this concern_id        -> concerns.status='open'
+---   all rows status='closed'                            -> 'closed'
+---   all rows status IN ('resolved','closed')             -> 'resolved'
+---   any row status IN ('assigned','resolved','closed')   -> 'assigned'
+---   otherwise (only 'invited'/'bid_submitted' rows exist) -> 'open'
++--   no concerns_assigns rows for this concern_id            -> concerns.status='open'
++--   all rows status='closed'                                -> 'closed'
++--   all rows status IN ('resolved','closed')                 -> 'resolved'
++--   any row status IN ('assigned','accepted','resolved','closed') -> 'assigned'
++--   otherwise (only 'invited'/'bid_submitted' rows exist)     -> 'open'
+ -- ════════════════════════════════════════════════════════════════════════
+ 
+ CREATE TABLE IF NOT EXISTS concerns_assigns (
+@@ -264,7 +271,7 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
+     resolved_by INT REFERENCES users (id),
+     closed_by INT REFERENCES users (id),
+     status VARCHAR(20) NOT NULL DEFAULT 'invited'
+-        CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'resolved', 'closed')),
++        CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'accepted', 'resolved', 'closed')),
+     bid_amount NUMERIC(10, 2),
+     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+     updated_at TIMESTAMP,
+@@ -299,13 +306,13 @@ DECLARE
+     v_touched_resolved_or_closed INT;
+     v_new_status VARCHAR(20);
+ BEGIN
+-    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed')),
++    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
+            COUNT(*) FILTER (WHERE status = 'closed'),
+            COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
+       INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
+       FROM concerns_assigns
+      WHERE concern_id = p_concern_id
+-       AND status IN ('assigned', 'resolved', 'closed');
++       AND status IN ('assigned', 'accepted', 'resolved', 'closed');
+ 
+     IF v_touched = 0 THEN
+         -- No one has ever been formally assigned yet — still open, whether
+diff --git a/database/migration_concerns_assigns_accepted_status.sql b/database/migration_concerns_assigns_accepted_status.sql
+new file mode 100644
+index 0000000..68f71c6
+--- /dev/null
++++ b/database/migration_concerns_assigns_accepted_status.sql
+@@ -0,0 +1,74 @@
++-- migration_concerns_assigns_accepted_status.sql
++-- ApexEstateHub — add 'accepted' to concerns_assigns.status
++--
++-- Supports the Admin portal's Accept / Decline / Resolved actions on a
++-- concern assigned to an admin (role='ADM'), per the authoritative
++-- Concerns workflow spec:
++--
++--   button 'Accept'   -> admin's concerns_assigns.status = 'accepted'
++--   button 'Decline'  -> admin's concerns_assigns.status = 'declined'
++--   button 'Resolved' -> admin's concerns_assigns.status = 'resolved'
++--                         (only once status = 'accepted')
++--
++-- An ADM row therefore follows its own sub-lifecycle after 'assigned':
++--
++--     assigned -> accepted -> resolved -> closed
++--     assigned -> declined
++--
++-- fn_sync_concern_status is updated (in estatehub.sql) to treat 'accepted'
++-- the same as 'assigned' for the purposes of the concerns.status aggregate
++-- — an accepted-but-not-yet-resolved admin assignment should keep the
++-- parent concern showing as 'assigned', not fall back to 'open'.
++--
++-- Validated against PostgreSQL 16. Apply with
++-- database/apply_migration_concerns_assigns_accepted_status.py or psql -f.
++-- Companion rollback: rollback_concerns_assigns_accepted_status.sql
++
++BEGIN;
++
++ALTER TABLE concerns_assigns DROP CONSTRAINT IF EXISTS concerns_assigns_status_check;
++
++ALTER TABLE concerns_assigns ADD CONSTRAINT concerns_assigns_status_check
++    CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'accepted', 'resolved', 'closed'));
++
++COMMENT ON COLUMN concerns_assigns.status IS
++    'invited -> bid_submitted | declined -> assigned -> accepted -> resolved -> closed '
++    '(ADM rows only use accepted; VND/SEC rows go straight assigned -> resolved). '
++    'Added accepted 2026-08.';
++
++CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
++RETURNS VOID
++LANGUAGE plpgsql AS $$
++DECLARE
++    v_touched INT;
++    v_touched_closed INT;
++    v_touched_resolved_or_closed INT;
++    v_new_status VARCHAR(20);
++BEGIN
++    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
++           COUNT(*) FILTER (WHERE status = 'closed'),
++           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
++      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
++      FROM concerns_assigns
++     WHERE concern_id = p_concern_id
++       AND status IN ('assigned', 'accepted', 'resolved', 'closed');
++
++    IF v_touched = 0 THEN
++        v_new_status := 'open';
++    ELSIF v_touched_closed = v_touched THEN
++        v_new_status := 'closed';
++    ELSIF v_touched_resolved_or_closed = v_touched THEN
++        v_new_status := 'resolved';
++    ELSE
++        v_new_status := 'assigned';
++    END IF;
++
++    UPDATE concerns
++       SET status = v_new_status,
++           updated_at = NOW()
++     WHERE id = p_concern_id
++       AND status IS DISTINCT FROM v_new_status;
++END;
++$$;
++
++COMMIT;
+diff --git a/database/rollback_concerns_assigns_accepted_status.sql b/database/rollback_concerns_assigns_accepted_status.sql
+new file mode 100644
+index 0000000..384b1e5
+--- /dev/null
++++ b/database/rollback_concerns_assigns_accepted_status.sql
+@@ -0,0 +1,56 @@
++-- rollback_concerns_assigns_accepted_status.sql
++-- Reverts migration_concerns_assigns_accepted_status.sql.
++--
++-- NOTE: run this only after re-pointing any 'accepted' rows to another
++-- status (e.g. back to 'assigned') — the tightened CHECK constraint will
++-- otherwise fail to apply while such rows still exist.
++
++BEGIN;
++
++UPDATE concerns_assigns SET status = 'assigned' WHERE status = 'accepted';
++
++ALTER TABLE concerns_assigns DROP CONSTRAINT IF EXISTS concerns_assigns_status_check;
++
++ALTER TABLE concerns_assigns ADD CONSTRAINT concerns_assigns_status_check
++    CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'resolved', 'closed'));
++
++COMMENT ON COLUMN concerns_assigns.status IS
++    'invited -> bid_submitted | declined -> assigned -> resolved -> closed. '
++    'declined is re-invitable (resets to invited). Added declined 2026-08.';
++
++CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
++RETURNS VOID
++LANGUAGE plpgsql AS $$
++DECLARE
++    v_touched INT;
++    v_touched_closed INT;
++    v_touched_resolved_or_closed INT;
++    v_new_status VARCHAR(20);
++BEGIN
++    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed')),
++           COUNT(*) FILTER (WHERE status = 'closed'),
++           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
++      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
++      FROM concerns_assigns
++     WHERE concern_id = p_concern_id
++       AND status IN ('assigned', 'resolved', 'closed');
++
++    IF v_touched = 0 THEN
++        v_new_status := 'open';
++    ELSIF v_touched_closed = v_touched THEN
++        v_new_status := 'closed';
++    ELSIF v_touched_resolved_or_closed = v_touched THEN
++        v_new_status := 'resolved';
++    ELSE
++        v_new_status := 'assigned';
++    END IF;
++
++    UPDATE concerns
++       SET status = v_new_status,
++           updated_at = NOW()
++     WHERE id = p_concern_id
++       AND status IS DISTINCT FROM v_new_status;
++END;
++$$;
++
++COMMIT;
+-- 
+2.43.0
+

@@ -243,23 +243,52 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
 
 
 def decline_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
-    """DECLINE stage: the invited vendor/security opts out before bidding.
-    Only valid from status='invited' — once a bid is submitted there's
-    nothing to "decline" (the admin either picks it via assign_concern()
-    or doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
+    """DECLINE stage: opts the caller out of a concern.
+
+    VND/SEC: the invited vendor/security opts out before bidding. Only
+    valid from status='invited' — once a bid is submitted there's nothing
+    to "decline" (the admin either picks it via assign_concern() or
+    doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
     ON CONFLICT clause resets any row not already resolved/closed back to
     'invited', and 'declined' was never in that exclusion list, so no
     change was needed there. Declined vendors also drop out of the Assign
-    modal's candidate pool — see list_assignable_vendors()."""
+    modal's candidate pool — see list_assignable_vendors().
+
+    ADM: an assigned admin declines the assignment outright. Only valid
+    from status='assigned' (admins skip invite/bid — see assign_concern()),
+    per the Admin portal's 'Decline' action in the Concerns workflow spec."""
+    from_status = "assigned" if role == "ADM" else "invited"
     row = db._execute(
         "UPDATE concerns_assigns SET status='declined', updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited' "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
         "RETURNING id",
-        (concern_id, society_id, role, entity_id), fetch_one=True,
+        (concern_id, society_id, role, entity_id, from_status), fetch_one=True,
     )
     if not row:
-        return False, "No pending invitation found for you on this concern"
+        msg = "No active assignment found for you on this concern" if role == "ADM" \
+            else "No pending invitation found for you on this concern"
+        return False, msg
     return True, "Declined"
+
+
+def accept_concern_assignment(concern_id: int, society_id: int, entity_id: int) -> tuple[bool, str]:
+    """ACCEPT stage — ADM only: the assigned admin formally accepts the
+    concern before doing the work and later marking it resolved. Only
+    valid from status='assigned'. Per the Concerns workflow spec's Admin
+    portal 'Accept' action (admin's concerns_assigns.status='accepted').
+    Also gates the Security portal's 'Resolved' button (see
+    resolve_concern_assignment / the caller in drilldown_callbacks.py),
+    which is enabled only once an admin's row on the same concern reaches
+    this state."""
+    row = db._execute(
+        "UPDATE concerns_assigns SET status='accepted', updated_at=NOW() "
+        "WHERE concern_id=%s AND society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned' "
+        "RETURNING id",
+        (concern_id, society_id, entity_id), fetch_one=True,
+    )
+    if not row:
+        return False, "No active (assigned) assignment found for you on this concern"
+    return True, "Accepted"
 
 
 def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, assigned_by: int) -> tuple[bool, str]:
@@ -304,19 +333,41 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
                                 resolved_by: int | None = None) -> tuple[bool, str]:
     """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
     (e.g. vendor/security marking their work done). Only valid from
-    status='assigned'. The concerns.status aggregate ('resolved' once every
-    *touched* assignee row is resolved/closed — see fn_sync_concern_status)
-    is updated automatically by the sync trigger. `resolved_by` is optional
-    for backward compatibility with any existing callers."""
+    status='assigned' for VND/SEC. ADM rows go through the extra 'accepted'
+    step first (see accept_concern_assignment) so an admin's row must be
+    status='accepted' before it can be resolved, per the Concerns workflow
+    spec's Admin portal 'Resolved' action. The concerns.status aggregate
+    ('resolved' once every *touched* assignee row is resolved/closed — see
+    fn_sync_concern_status) is updated automatically by the sync trigger.
+    `resolved_by` is optional for backward compatibility with any existing
+    callers."""
+    from_status = "accepted" if role == "ADM" else "assigned"
     row = db._execute(
         "UPDATE concerns_assigns SET status='resolved', resolved_by=%s, updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='assigned' "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
         "RETURNING id",
-        (resolved_by, concern_id, society_id, role, entity_id), fetch_one=True,
+        (resolved_by, concern_id, society_id, role, entity_id, from_status), fetch_one=True,
     )
     if not row:
-        return False, "No active (assigned) assignment found for you on this concern"
+        msg = "No active (accepted) assignment found for you on this concern" if role == "ADM" \
+            else "No active (assigned) assignment found for you on this concern"
+        return False, msg
     return True, "Marked resolved"
+
+
+def is_any_admin_accepted(concern_id: int, society_id: int) -> bool:
+    """True if ANY admin (role='ADM') assignment on this concern has
+    reached status='accepted'. Per the Concerns workflow spec, the
+    Security portal's 'Resolved' button is gated on this — not on
+    security's own assignment status — so this helper backs both the
+    button's enablement (renderers.py) and its server-side guard
+    (drilldown_callbacks.py)."""
+    row = db._execute(
+        "SELECT 1 FROM concerns_assigns WHERE concern_id=%s AND society_id=%s "
+        "AND role='ADM' AND status='accepted' LIMIT 1",
+        (concern_id, society_id), fetch_one=True,
+    )
+    return bool(row)
 
 
 def close_concern(concern_id: int, society_id: int, closed_by: int | None = None) -> tuple[bool, str]:
@@ -421,9 +472,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     # ── CONCERNS ────────────────────────────────────────────────────────
     if entity == "concerns":
         extra, params = "", [sid]
-        creator_id = filters.get("concern_creator_id")
-        assigned_vnd_id = filters.get("assigned_vnd_id")
-        assigned_sec_id = filters.get("assigned_sec_id")
+        # kpi_concerns_total is deliberately society-wide on every portal
+        # (per the Concerns workflow spec) — skip all owner/vendor/security
+        # scoping below when set, so it isn't narrowed to "my own" rows.
+        society_wide = filters.get("society_wide")
+        creator_id = None if society_wide else filters.get("concern_creator_id")
+        assigned_vnd_id = None if society_wide else filters.get("assigned_vnd_id")
+        assigned_sec_id = None if society_wide else filters.get("assigned_sec_id")
         # assigned_status: filter concerns_assigns.status for the
         # currently-scoped vendor/security row (e.g. 'assigned' for the
         # vendor's "kpi_concerns_assigned" drilldown). Only meaningful
@@ -446,7 +501,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
                 extra += " AND ca.status=%s"
                 params.append(assigned_status)
             extra += ")"
-        elif apt_id:
+        elif apt_id and not society_wide:
             extra += " AND c.apartment_id=%s"
             params.append(apt_id)
         if s:
@@ -454,9 +509,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             params += [f"%{s}%", f"%{s}%"]
         # Top-level concerns.status filter (e.g. {"status": "open"} for the
         # kpi_concerns_open drilldown). Defaults to "everything not closed"
-        # so plain browsing still hides closed concerns.
+        # so plain browsing still hides closed concerns. status="all" (used
+        # by kpi_concerns_total) is an explicit sentinel to show literally
+        # every concern, including closed ones.
         status_filter = filters.get("status")
-        if status_filter:
+        if status_filter == "all":
+            pass
+        elif status_filter:
             extra += " AND c.status=%s"
             params.append(status_filter)
         else:
@@ -472,7 +531,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         # assigned_status needs to be read HERE, not only in the separate
         # assigned_vnd_id branch above which nothing ever sets. See
         # Concerns_Workflow_Review.md §3.2.
-        vnd_assignee_id = filters.get("vnd_assignee_id")
+        vnd_assignee_id = None if society_wide else filters.get("vnd_assignee_id")
         if vnd_assignee_id:
             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
             params.append(vnd_assignee_id)
@@ -484,7 +543,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             extra += ")"
 
         # Security portal: same, for security staff.
-        sec_assignee_id = filters.get("sec_assignee_id")
+        sec_assignee_id = None if society_wide else filters.get("sec_assignee_id")
         if sec_assignee_id:
             extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s"
             params.append(sec_assignee_id)

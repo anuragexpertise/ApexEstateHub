@@ -922,22 +922,32 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
     text_cells = [_field_cell(f) for f in text_fields]
 
-    # ── Concern actions: scope Bid/Decline/Resolved to the caller's own
-    # concerns_assigns stage ──────────────────────────────────────────────
+    # ── Concern actions: scope actions to the caller's own concerns_assigns
+    # stage ──────────────────────────────────────────────────────────────
     # NOTE (fixed 2026-08): these buttons used to be shown to every
-    # vendor/security caller on every concern regardless of their own
-    # concerns_assigns.status — "Bid" (formerly "Save Bid") and "Decline"
-    # only make sense at 'invited' (submit_concern_bid()/
-    # decline_concern_assignment() both require status='invited' or fail),
-    # and "Resolved" only at 'assigned' (resolve_concern_assignment()
-    # requires status='assigned'). See Concerns_Workflow_Review.md §3.4, §2.11.
+    # vendor/security/admin caller on every concern regardless of their own
+    # concerns_assigns.status — "Bid" and "Decline" only make sense at
+    # 'invited' (submit_concern_bid()/decline_concern_assignment() both
+    # require status='invited' or fail), vendor "Resolved" only at
+    # 'assigned', and admin "Accept"/"Decline"/"Resolved" only at
+    # 'assigned'/'assigned'/'accepted' respectively (loaders.py).
     my_concern_status = None
-    if entity == "concern" and role in ("vendor", "security"):
-        my_role_code = "VND" if role == "vendor" else "SEC"
-        my_entity_id = auth_data.get("linked_id")
+    if entity == "concern" and role in ("vendor", "security", "admin"):
+        my_role_code = {"vendor": "VND", "security": "SEC", "admin": "ADM"}[role]
+        my_entity_id = auth_data.get("user_id") if role == "admin" else auth_data.get("linked_id")
         for a in (record_dict.get("_assignments") or []):
             if a.get("role") == my_role_code and a.get("entity_id") == my_entity_id:
                 my_concern_status = a.get("status")
+                break
+
+    # Security's "Resolved" is gated differently from vendor's: per the
+    # Concerns workflow spec it's enabled once an ADMIN's row on this
+    # concern reaches 'accepted' — not on security's own assignment status.
+    any_admin_accepted = False
+    if entity == "concern" and role == "security":
+        for a in (record_dict.get("_assignments") or []):
+            if a.get("role") == "ADM" and a.get("status") == "accepted":
+                any_admin_accepted = True
                 break
 
     # ── Action buttons filtered by role ─────────────────────────────────
@@ -952,7 +962,13 @@ def render_profile_card(card_id: str, title: str, icon: str,
         if act_id == "delete" and "delete" not in allowed: continue
         if act_id == "save_bid" and my_concern_status != "invited": continue
         if act_id == "decline_concern" and my_concern_status != "invited": continue
-        if act_id == "vendor_resolve" and my_concern_status != "assigned": continue
+        if act_id == "vendor_resolve":
+            if role == "security":
+                if not any_admin_accepted: continue
+            elif my_concern_status != "assigned": continue
+        if act_id == "accept_concern" and my_concern_status != "assigned": continue
+        if act_id == "decline_concern_admin" and my_concern_status != "assigned": continue
+        if act_id == "admin_resolve" and my_concern_status != "accepted": continue
         action_btns.append(dbc.Button(
             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
             act["label"]],

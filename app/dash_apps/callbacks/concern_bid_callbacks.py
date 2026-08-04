@@ -26,7 +26,9 @@ from database.db_manager import db
 from app.dash_apps.drilldown import loaders
 
 # Maps auth-store "role" values to the role codes used in concerns_assigns.
-BID_ROLE_CODE = {"vendor": "VND", "security": "SEC"}
+# Vendor portal only, per the Concerns workflow spec
+# (workflow_vendor_kpi_list_profile) — security does not bid.
+BID_ROLE_CODE = {"vendor": "VND"}
 
 
 def register_concern_bid_callbacks(app):

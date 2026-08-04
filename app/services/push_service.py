@@ -321,6 +321,49 @@ def notify_concern_declined(society_id, apartment_id, concern_type, vendor_label
     return send_bulk_push(targets, "🚫 Concern Invitation Declined", body, url="/dashboard/concerns", society_id=society_id)
 
 
+def notify_concern_accepted(society_id, apartment_id, concern_type, admin_label=None):
+    """Admin accepted an assigned concern — notify admin + creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    who = f" by {admin_label}" if admin_label else ""
+    body = f"The assignment was accepted{who} for: {label}"
+    return send_bulk_push(targets, "👍 Admin Accepted Concern", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_declined_by_admin(society_id, apartment_id, concern_type, admin_label=None):
+    """Admin declined an assigned concern — notify admin + creator apartment
+    so they know to re-assign someone else."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    who = f" by {admin_label}" if admin_label else ""
+    body = f"The assignment was declined{who} for: {label}. You can assign another candidate."
+    return send_bulk_push(targets, "🚫 Admin Declined Concern", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_resolved_by_admin(society_id, apartment_id, concern_type):
+    """Admin marked their assignment resolved — notify admin + creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"An admin marked the concern as resolved: {label}"
+    return send_bulk_push(targets, "✅ Admin Resolved Concern", body, url="/dashboard/concerns", society_id=society_id)
+
+
+def notify_concern_resolved_by_security(society_id, apartment_id, concern_type):
+    """Security marked their assignment resolved — notify admin + creator apartment."""
+    targets = _concern_notify_targets(society_id, apartment_id)
+    if not targets:
+        return 0, 0
+    label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
+    body = f"Security marked the concern as resolved: {label}"
+    return send_bulk_push(targets, "✅ Security Resolved Concern", body, url="/dashboard/concerns", society_id=society_id)
+
+
 def notify_concern_closed(society_id, apartment_id, concern_type, assignments=None):
     """Admin/Owner closed a concern — notify admin, the creator apartment,
     and every assignee. `assignments` is the list of rows returned by

@@ -56,7 +56,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # ADMIN - Events tab
     ("kpi_events_total", "admin", "events", "Events"),
     # ADMIN - Concerns tab
-    ("kpi_concerns_open", "admin", "concerns", "Concerns"),
+    ("kpi_concerns_not_closed", "admin", "concerns", "Concerns"),
+    ("kpi_concerns_total", "admin", "concerns", "Concerns"),
     # ADMIN - Polls tab
     ("kpi_polls_total", "admin", "polls", "Polling"),
     ("kpi_polls_active", "admin", "polls", "Polling"),
@@ -96,7 +97,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_master_security_total", "master", "dashboard", "Master"),
     # APARTMENT PORTAL - Dashboard
     ("kpi_apartments_dues", "apartment", "dashboard", "Account"),
-    ("kpi_concerns_open", "apartment", "dashboard", "Concerns"),
+    ("kpi_concerns_not_closed", "apartment", "dashboard", "Concerns"),
     ("kpi_events_total", "apartment", "dashboard", "Events"),
     ("kpi_channels_total", "apartment", "dashboard", "Channels"),
     ("kpi_gate_logs", "apartment", "dashboard", "Gate"),
@@ -114,6 +115,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_apartments_other_charges", "apartment", "charges", "Charges"),
     # APARTMENT - Events / Concerns / Settings
     ("kpi_events_total", "apartment", "events", "Events"),
+    ("kpi_concerns_not_closed", "apartment", "concerns", "Concerns"),
+    ("kpi_concerns_total", "apartment", "concerns", "Concerns"),
     ("kpi_concerns_open", "apartment", "concerns", "Concerns"),
     # APARTMENT - Polls tab
     ("kpi_polls_total", "apartment", "polls", "Polling"),
@@ -121,7 +124,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_polls_votes", "apartment", "polls", "Polling"),
     ("kpi_apartments_date", "apartment", "settings", "Profile"),
     # VENDOR PORTAL - Dashboard
-    ("kpi_concerns_open", "vendor", "dashboard", "Jobs"),
+    ("kpi_concerns_invited", "vendor", "dashboard", "Jobs"),
     ("kpi_concerns_assigned", "vendor", "dashboard", "Jobs"),
     ("kpi_events_total", "vendor", "dashboard", "Events"),
     ("kpi_channels_total", "vendor", "dashboard", "Channels"),
@@ -135,6 +138,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_vendors_other_charges", "vendor", "charges", "Charges"),
     ("kpi_events_total", "vendor", "events", "Events"),
     ("kpi_vendors_date", "vendor", "settings", "Profile"),
+    # VENDOR - Concerns tab
+    ("kpi_concerns_invited", "vendor", "concerns", "Concerns"),
+    ("kpi_concerns_assigned", "vendor", "concerns", "Concerns"),
+    ("kpi_concerns_resolved", "vendor", "concerns", "Concerns"),
     # SECURITY - Dashboard
     ("kpi_apartments_total", "security", "dashboard", "Users"),
     ("kpi_vendors_total", "security", "dashboard", "Users"),
@@ -143,15 +150,19 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_receivables_total", "security", "dashboard", "Cash"),
     ("kpi_gate_logs", "security", "dashboard", "Gate"),
     # SECURITY - pass_evaluation (the portal's actual default/landing tab —
-    # see shell_callbacks.py, "dashboard" here is the Users roster page)
+    # see shell_callbacks.py, "dashboard" here is the Users roster page).
+    # Per the Concerns workflow spec, this is Security's "Dashboard".
     ("kpi_events_total", "security", "pass_evaluation", "Events"),
-    ("kpi_concerns_open", "security", "pass_evaluation", "Concerns"),
+    ("kpi_concerns_assigned", "security", "pass_evaluation", "Concerns"),
     ("kpi_channels_total", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending_bus", "security", "pass_evaluation", "Channels"),
     ("kpi_channels_pending_taxi", "security", "pass_evaluation", "Channels"),
     ("kpi_presumed_visitor", "security", "pass_evaluation", "Visitors"),
     ("kpi_security_on_duty", "security", "pass_evaluation", "Security"),
+    # SECURITY - Concerns tab
+    ("kpi_concerns_assigned", "security", "security_concerns", "Concerns"),
+    ("kpi_concerns_resolved", "security", "security_concerns", "Concerns"),
     # SECURITY - Cashbook / Charges / payables / Events / Receipt / Settings
     ("kpi_receivables_total", "security", "cashbook", "payables"),
     ("kpi_payables_total", "security", "cashbook", "payables"),
