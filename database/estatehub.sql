@@ -233,10 +233,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
 --     invited -> bid_submitted -> assigned -> resolved -> closed
 --
 -- ADM rows (society admins, who are auto-assigned rather than invited to
--- bid) skip straight to 'assigned'. VND/SEC rows normally start at
--- 'invited' and progress through 'bid_submitted' before an admin formally
--- 'assigned's them — though a direct "Assign" is still allowed at any
--- point as a shortcut (e.g. price already agreed offline), which simply
+-- bid) skip straight to 'assigned', then follow their own sub-lifecycle:
+--
+--     assigned -> accepted -> resolved -> closed
+--     assigned -> declined
+--
+-- ('accepted' added 2026-08 to support the Admin portal's Accept/Decline/
+-- Resolved actions on an assigned concern — see
+-- migration_concerns_assigns_accepted_status.sql.) VND/SEC rows normally
+-- start at 'invited' and progress through 'bid_submitted' before an admin
+-- formally 'assigned's them — though a direct "Assign" is still allowed at
+-- any point as a shortcut (e.g. price already agreed offline), which simply
 -- promotes whatever row exists straight to 'assigned'.
 --
 -- concerns.status is KEPT (existing code, KPIs, and the
@@ -246,11 +253,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
 -- concerns.status directly for anything except the initial INSERT ('open').
 --
 -- Aggregate rule:
---   no concerns_assigns rows for this concern_id        -> concerns.status='open'
---   all rows status='closed'                            -> 'closed'
---   all rows status IN ('resolved','closed')             -> 'resolved'
---   any row status IN ('assigned','resolved','closed')   -> 'assigned'
---   otherwise (only 'invited'/'bid_submitted' rows exist) -> 'open'
+--   no concerns_assigns rows for this concern_id            -> concerns.status='open'
+--   all rows status='closed'                                -> 'closed'
+--   all rows status IN ('resolved','closed')                 -> 'resolved'
+--   any row status IN ('assigned','accepted','resolved','closed') -> 'assigned'
+--   otherwise (only 'invited'/'bid_submitted' rows exist)     -> 'open'
 -- ════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS concerns_assigns (
@@ -264,7 +271,7 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     resolved_by INT REFERENCES users (id),
     closed_by INT REFERENCES users (id),
     status VARCHAR(20) NOT NULL DEFAULT 'invited'
-        CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'resolved', 'closed')),
+        CHECK (status IN ('invited', 'bid_submitted', 'declined', 'assigned', 'accepted', 'resolved', 'closed')),
     bid_amount NUMERIC(10, 2),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
@@ -299,13 +306,13 @@ DECLARE
     v_touched_resolved_or_closed INT;
     v_new_status VARCHAR(20);
 BEGIN
-    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'resolved', 'closed')),
+    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
            COUNT(*) FILTER (WHERE status = 'closed'),
            COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
       INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
       FROM concerns_assigns
      WHERE concern_id = p_concern_id
-       AND status IN ('assigned', 'resolved', 'closed');
+       AND status IN ('assigned', 'accepted', 'resolved', 'closed');
 
     IF v_touched = 0 THEN
         -- No one has ever been formally assigned yet — still open, whether

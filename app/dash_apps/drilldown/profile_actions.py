@@ -155,14 +155,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # opens the bid-entry modal — no navigation
             "icon": "fa-hand-holding-usd",
             "color": "primary",
-            # Security staff can be invited/bid on concerns the same as
-            # vendors (concern_bid_callbacks.py's BID_ROLE_CODE already
-            # supported "security" -> "SEC"; only this button's role gate
-            # was vendor-only). See Concerns_Workflow_Review.md §2.3.
-            # Renamed "Save Bid" -> "Bid" 2026-08, paired with "Decline"
-            # below — both shown only while the caller's own row is
-            # 'invited' (renderers.py).
-            "roles": ["vendor", "security"],
+            # Vendor portal only, per the Concerns workflow spec
+            # (workflow_vendor_kpi_list_profile). Shown only while the
+            # caller's own row is 'invited' (renderers.py).
+            "roles": ["vendor"],
         },
         {
             "label": "Decline",
@@ -170,12 +166,12 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-times",
             "color": "secondary",
-            # NEW 2026-08 — companion to "Bid". Only shown while the
-            # caller's own concerns_assigns row is 'invited' (same gate as
-            # "Bid"); sets status='declined', notifies admin, and drops the
-            # caller from the Assign modal's candidate pool for this
-            # concern until re-invited. See Concerns_Workflow_Review.md §2.11.
-            "roles": ["vendor", "security"],
+            # Vendor portal only, per spec — companion to "Bid". Only
+            # shown while the caller's own concerns_assigns row is
+            # 'invited' (same gate as "Bid"); sets status='declined',
+            # notifies admin, and drops the caller from the Assign modal's
+            # candidate pool for this concern until re-invited.
+            "roles": ["vendor"],
         },
         {
             "label": "Resolved",
@@ -183,10 +179,46 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-check",
             "color": "success",
-            # See §2.8 — resolve_concern_assignment() is role-generic;
-            # the handler in drilldown_callbacks.py now honours whichever
-            # role the caller actually is instead of hard-coding "vendor".
+            # Vendor portal: shown while the caller's own row is
+            # 'assigned' (renderers.py). Security portal: also uses this
+            # action id, but per spec its gate checks whether an ADMIN's
+            # row on the same concern is 'accepted' — not the security
+            # caller's own status (see renderers.py / loaders.is_any_admin_accepted).
             "roles": ["vendor", "security"],
+        },
+        {
+            "label": "Accept",
+            "action_id": "accept_concern",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-thumbs-up",
+            "color": "success",
+            # Admin portal only, per workflow_admin_kpi_list_profile.
+            # Shown while the caller's own ADM row is 'assigned'
+            # (renderers.py); moves it to 'accepted'.
+            "roles": ["admin"],
+        },
+        {
+            "label": "Decline",
+            "action_id": "decline_concern_admin",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-times",
+            "color": "secondary",
+            # Admin portal only, per workflow_admin_kpi_list_profile — an
+            # assigned admin declining the assignment (distinct from the
+            # vendor's pre-bid "decline_concern" above). Shown while the
+            # caller's own ADM row is 'assigned' (renderers.py).
+            "roles": ["admin"],
+        },
+        {
+            "label": "Resolved",
+            "action_id": "admin_resolve",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-check",
+            "color": "success",
+            # Admin portal only, per workflow_admin_kpi_list_profile.
+            # Shown while the caller's own ADM row is 'accepted'
+            # (renderers.py); moves it to 'resolved'.
+            "roles": ["admin"],
         },
         {
             "label": "Close",

@@ -393,6 +393,33 @@ KPI_CARDS = {
         "title": "Open Concerns", "group": "pending issues",
     },
 
+    # Admin/Owner: every concern not yet closed (open OR assigned OR
+    # resolved-but-not-closed). Owner sees only concerns THEY raised — see
+    # the "apartment" override in card_catalogue_callbacks.py.
+    "kpi_concerns_not_closed": {
+        "query": """
+            SELECT COUNT(*) AS v FROM concerns
+            WHERE society_id=%s AND status != 'closed'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-hand-point-up", "color": "#de5c52",
+        "title": "Not Closed Concerns", "group": "pending issues",
+    },
+
+    # Admin/Owner: every concern regardless of status. Deliberately
+    # society-wide for BOTH portals (per the Concerns workflow spec, this
+    # KPI is never apartment-scoped, unlike kpi_concerns_not_closed/
+    # kpi_concerns_open) — no per-role override needed.
+    "kpi_concerns_total": {
+        "query": """
+            SELECT COUNT(*) AS v FROM concerns
+            WHERE society_id=%s
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-list", "color": "#3f7cd6",
+        "title": "Total Concerns", "group": "pending issues",
+    },
+
     # Vendor-only: count of concerns_assigns rows currently assigned to
     # THIS vendor and not yet resolved/closed. Society-wide default query
     # below is a harmless fallback (0 for non-vendor entity_ids); the real
@@ -405,6 +432,32 @@ KPI_CARDS = {
         "params": 1, "format": "number",
         "icon": "fa-tools", "color": "#e59620",
         "title": "Assigned To Me", "group": "pending issues",
+    },
+
+    # Vendor/Security: count of concerns_assigns rows this caller has been
+    # INVITED to (not yet bid/declined). Real per-vendor/security count is
+    # supplied via the role overrides in card_catalogue_callbacks.py.
+    "kpi_concerns_invited": {
+        "query": """
+            SELECT COUNT(*) AS v FROM concerns_assigns
+            WHERE society_id=%s AND role='VND' AND status='invited'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-envelope-open-text", "color": "#8e44ad",
+        "title": "Invited", "group": "pending issues",
+    },
+
+    # Vendor/Security: count of concerns_assigns rows this caller has
+    # marked resolved. Real per-vendor/security count is supplied via the
+    # role overrides in card_catalogue_callbacks.py.
+    "kpi_concerns_resolved": {
+        "query": """
+            SELECT COUNT(*) AS v FROM concerns_assigns
+            WHERE society_id=%s AND role='VND' AND status='resolved'
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-check-circle", "color": "#27ae60",
+        "title": "Resolved", "group": "pending issues",
     },
 
     # ════════════════════════════════════════════════════════════════
@@ -938,7 +991,7 @@ DEFAULT_LAYOUTS = {
             "kpi_vendors_passes",
             "kpi_security_on_duty",
             "kpi_events_total",
-            "kpi_concerns_open",
+            "kpi_concerns_not_closed",
             "kpi_gate_logs",
             "kpi_assets_count",
             "kpi_receivables_total",
@@ -970,7 +1023,9 @@ DEFAULT_LAYOUTS = {
             "kpi_ledger_open",
         ],
         "events": ["kpi_events_total"],
-        "concerns": ["kpi_concerns_open"],
+        # Per the Concerns workflow spec: Admin/Concerns tab shows
+        # "not closed" + "total" (society-wide).
+        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
         "assets": ["kpi_assets_count", "kpi_assets_value"],
         "receipts": [
@@ -1014,7 +1069,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_overdue_dues",
             "kpi_advance_credits",
             "kpi_gate_logs",
-            "kpi_concerns_open",
+            "kpi_concerns_not_closed",
             "kpi_events_total",
             "kpi_channels_total",
         ],
@@ -1038,7 +1093,10 @@ DEFAULT_LAYOUTS = {
         "cashbook": ["kpi_cash_in_hand", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "owner_receipts": ["kpi_receipts_total"],
         "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
-        "concerns": ["kpi_concerns_open"],
+        # Per the Concerns workflow spec: Owner/Concerns tab shows "not
+        # closed" (own concerns), "total" (society-wide), and "open" (own
+        # concerns).
+        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total", "kpi_concerns_open"],
         "events": ["kpi_events_total"],
         "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
         "settings": ["kpi_owner_member_since"],
@@ -1047,7 +1105,7 @@ DEFAULT_LAYOUTS = {
         "dashboard": [
             "kpi_my_pass_expiry",
             "kpi_gate_logs",
-            "kpi_concerns_open",
+            "kpi_concerns_invited",
             "kpi_concerns_assigned",
             "kpi_events_total",
             "kpi_channels_total",
@@ -1062,7 +1120,9 @@ DEFAULT_LAYOUTS = {
         ],
         "vendor_receipts": ["kpi_receipts_total"],
         "cashbook": ["kpi_cash_in_hand"],
-        "concerns": ["kpi_concerns_open", "kpi_concerns_assigned"],
+        # Per the Concerns workflow spec: Vendor/Concerns tab shows
+        # "invited", "assigned", and "resolved".
+        "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],
         "charges": ["kpi_ven_charges_count", "kpi_vendors_other_charges"],
         "events": ["kpi_events_total"],
         "settings": ["kpi_vendors_date"],
@@ -1085,10 +1145,15 @@ DEFAULT_LAYOUTS = {
         "security_receipt": ["kpi_receipts_month"],
         "security_receipts": ["kpi_security_receipts"],
         "security_events": ["kpi_events_total"],
-        "security_concerns": ["kpi_concerns_open"],
+        # Per the Concerns workflow spec: Security/Concerns tab shows
+        # "assigned" and "resolved".
+        "security_concerns": ["kpi_concerns_assigned", "kpi_concerns_resolved"],
         "pass_evaluation": [
             "kpi_events_total",
-            "kpi_concerns_open",
+            # Security's actual landing/"Dashboard" page (see NOTE above —
+            # "dashboard" here is the Users roster instead). Per the
+            # Concerns workflow spec, Security/Dashboard shows "assigned".
+            "kpi_concerns_assigned",
             "kpi_channels_total",
             "kpi_channels_pending",
             "kpi_channels_pending_bus",

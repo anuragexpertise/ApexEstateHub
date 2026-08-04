@@ -73,15 +73,17 @@ SCOPED_CARD_IDS = {
     "apartment": {
         "kpi_apartments_dues", "kpi_receivables_total", "kpi_advance_credits",
         "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_receipts_month",
-        "kpi_concerns_open", "kpi_gate_logs", "kpi_owner_member_since",
+        "kpi_concerns_open", "kpi_concerns_not_closed", "kpi_gate_logs", "kpi_owner_member_since",
     },
     "vendor": {
         "kpi_receipts_month", "kpi_receivables_total", "kpi_my_pass_expiry",
         "kpi_gate_logs", "kpi_concerns_open", "kpi_concerns_assigned",
+        "kpi_concerns_invited", "kpi_concerns_resolved",
     },
     "security": {
         "kpi_security_shift_count", "kpi_security_salary_due",
         "kpi_receipts_month", "kpi_gate_logs", "kpi_concerns_open",
+        "kpi_concerns_assigned", "kpi_concerns_resolved",
     },
 }
 
@@ -287,6 +289,14 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND created_by=%s AND status='open'",
                         (sid, own_user_id),
                     ),
+                    "kpi_concerns_not_closed": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns "
+                        "WHERE society_id=%s AND created_by=%s AND status != 'closed'",
+                        (sid, own_user_id),
+                    ),
+                    # kpi_concerns_total is deliberately NOT overridden here —
+                    # per the Concerns workflow spec it stays society-wide
+                    # even on the Owner portal (see card_catalogue.py).
                     "kpi_gate_logs": (
                         # FIX: gate_access rows for apartment owners are
                         # inserted by qr_callbacks.py's validate_qr_scanned
@@ -357,6 +367,16 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='assigned'",
                         (sid, vendor_id),
                     ) if vendor_id else None,
+                    "kpi_concerns_invited": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='invited'",
+                        (sid, vendor_id),
+                    ) if vendor_id else None,
+                    "kpi_concerns_resolved": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='resolved'",
+                        (sid, vendor_id),
+                    ) if vendor_id else None,
                 }
                 return overrides.get(card_id)
 
@@ -391,6 +411,16 @@ def register_card_catalogue_callbacks(app):
                         "WHERE c.society_id=%s AND c.status='open' "
                         "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
                         "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)",
+                        (sid, sec_id),
+                    ) if sec_id else None,
+                    "kpi_concerns_assigned": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='assigned'",
+                        (sid, sec_id),
+                    ) if sec_id else None,
+                    "kpi_concerns_resolved": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='resolved'",
                         (sid, sec_id),
                     ) if sec_id else None,
                 }

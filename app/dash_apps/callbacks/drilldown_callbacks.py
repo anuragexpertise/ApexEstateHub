@@ -589,17 +589,18 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
-            # ── Decline (vendor OR security) — the caller opts out of an
-            #    invitation before bidding. NEW 2026-08, companion to Bid.
-            #    Notifies admin + creator apartment so they know to
-            #    re-invite another candidate (§2.11). See
-            #    Concerns_Workflow_Review.md §2.11.
+            # ── Decline (vendor) — the caller opts out of an invitation
+            #    before bidding, companion to "Bid". Notifies admin +
+            #    creator apartment so they know to re-invite another
+            #    candidate. Vendor portal only, per spec — for an admin
+            #    declining an ASSIGNED concern, see "decline_concern_admin"
+            #    below.
             elif action == "decline_concern" and entity == "concern":
                 role = (auth or {}).get("role")
                 caller_entity_id = (auth or {}).get("linked_id")
-                role_code = {"vendor": "VND", "security": "SEC"}.get(role)
+                role_code = {"vendor": "VND"}.get(role)
                 if not role_code or not caller_entity_id:
-                    toast = {"_toast": {"type": "error", "message": "Only an invited vendor or security staff can decline"}}
+                    toast = {"_toast": {"type": "error", "message": "Only an invited vendor can decline"}}
                     return store, content, bc, {"display": "none"}, toast
                 ok, msg = loaders.decline_concern_assignment(int(pk), sid, role_code, int(caller_entity_id))
                 if ok:
@@ -609,18 +610,11 @@ def register_drilldown_callbacks(app):
                             "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
                             (pk, sid), fetch_one=True,
                         )
-                        if role_code == "VND":
-                            e_row = db._execute(
-                                "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
-                                (caller_entity_id, sid), fetch_one=True,
-                            )
-                            decliner_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
-                        else:
-                            e_row = db._execute(
-                                "SELECT name FROM security_staff WHERE id=%s AND society_id=%s",
-                                (caller_entity_id, sid), fetch_one=True,
-                            )
-                            decliner_label = (e_row or {}).get("name")
+                        e_row = db._execute(
+                            "SELECT business_name, name FROM vendors WHERE id=%s AND society_id=%s",
+                            (caller_entity_id, sid), fetch_one=True,
+                        )
+                        decliner_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
                         if concern_row:
                             notify_concern_declined(
                                 sid, concern_row.get("apartment_id"), concern_row.get("concern_type"), decliner_label,
@@ -636,19 +630,125 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
-            # ── Resolved (vendor OR security) — mark the caller's own assignment
-            #    resolved. Generalized 2026-08: security staff can now be
-            #    invited/bid on concerns the same as vendors (see
-            #    concern_bid_callbacks.py's BID_ROLE_CODE, which already
-            #    supported both), so this handler — previously hard-coded to
-            #    "vendor" only — now honours whichever role the caller
-            #    actually is. See Concerns_Workflow_Review.md §2.8.
+            # ── Accept (Admin) — the assigned admin formally accepts the
+            #    concern (assigned -> accepted). Admin portal only, per
+            #    workflow_admin_kpi_list_profile.
+            elif action == "accept_concern" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role != "admin":
+                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can accept this concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                caller_entity_id = (auth or {}).get("user_id")
+                ok, msg = loaders.accept_concern_assignment(int(pk), sid, int(caller_entity_id))
+                if ok:
+                    try:
+                        from app.services.push_service import notify_concern_accepted
+                        concern_row = db._execute(
+                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        u_row = db._execute("SELECT name FROM users WHERE id=%s", (caller_entity_id,), fetch_one=True)
+                        if concern_row:
+                            notify_concern_accepted(
+                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                                (u_row or {}).get("name"),
+                            )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_accepted failed (concern_id=%s): %s", pk, e,
+                        )
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Decline (Admin) — the assigned admin declines the
+            #    assignment outright (assigned -> declined). Admin portal
+            #    only, per workflow_admin_kpi_list_profile. Distinct action
+            #    id from the vendor's pre-bid "decline_concern" above.
+            elif action == "decline_concern_admin" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role != "admin":
+                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can decline this concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                caller_entity_id = (auth or {}).get("user_id")
+                ok, msg = loaders.decline_concern_assignment(int(pk), sid, "ADM", int(caller_entity_id))
+                if ok:
+                    try:
+                        from app.services.push_service import notify_concern_declined_by_admin
+                        concern_row = db._execute(
+                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        u_row = db._execute("SELECT name FROM users WHERE id=%s", (caller_entity_id,), fetch_one=True)
+                        if concern_row:
+                            notify_concern_declined_by_admin(
+                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                                (u_row or {}).get("name"),
+                            )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_declined_by_admin failed (concern_id=%s): %s", pk, e,
+                        )
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Resolved (Admin) — the assigned admin marks their own
+            #    assignment resolved (accepted -> resolved). Admin portal
+            #    only, per workflow_admin_kpi_list_profile.
+            elif action == "admin_resolve" and entity == "concern":
+                role = (auth or {}).get("role")
+                if role != "admin":
+                    toast = {"_toast": {"type": "error", "message": "Only the assigned admin can resolve this concern"}}
+                    return store, content, bc, {"display": "none"}, toast
+                caller_entity_id = (auth or {}).get("user_id")
+                actor_user_id = get_current_user_id()
+                ok, msg = loaders.resolve_concern_assignment(
+                    int(pk), sid, "ADM", int(caller_entity_id), resolved_by=actor_user_id,
+                )
+                if ok:
+                    try:
+                        concern_row = db._execute(
+                            "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        if concern_row:
+                            from app.services.push_service import notify_concern_resolved_by_admin
+                            notify_concern_resolved_by_admin(
+                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                            )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_resolved_by_admin failed (concern_id=%s): %s", pk, e,
+                        )
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Resolved (vendor OR security) — mark the caller's own
+            #    assignment resolved. Vendor: enabled once vendor's own row
+            #    is 'assigned'. Security: per spec, enabled once an ADMIN's
+            #    row on the same concern is 'accepted' (see
+            #    loaders.is_any_admin_accepted / renderers.py) — the
+            #    underlying write still targets security's own row.
             elif action == "vendor_resolve" and entity == "concern":
                 role = (auth or {}).get("role")
                 caller_entity_id = (auth or {}).get("linked_id")
                 role_code = {"vendor": "VND", "security": "SEC"}.get(role)
                 if not role_code or not caller_entity_id:
                     toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
+                    return store, content, bc, {"display": "none"}, toast
+                if role_code == "SEC" and not loaders.is_any_admin_accepted(int(pk), sid):
+                    toast = {"_toast": {"type": "error", "message": "This concern hasn't been accepted by an admin yet"}}
                     return store, content, bc, {"display": "none"}, toast
                 actor_user_id = get_current_user_id()
                 ok, msg = loaders.resolve_concern_assignment(
@@ -661,13 +761,18 @@ def register_drilldown_callbacks(app):
                             (pk, sid), fetch_one=True,
                         )
                         if concern_row:
-                            PushService.notify_concern_resolved_by_vendor(
-                                sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
-                            )
+                            if role_code == "SEC":
+                                PushService.notify_concern_resolved_by_security(
+                                    sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                                )
+                            else:
+                                PushService.notify_concern_resolved_by_vendor(
+                                    sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
+                                )
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_resolved_by_vendor failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_resolved failed (concern_id=%s): %s", pk, e,
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
