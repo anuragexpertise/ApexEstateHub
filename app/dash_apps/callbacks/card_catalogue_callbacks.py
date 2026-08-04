@@ -74,6 +74,7 @@ SCOPED_CARD_IDS = {
         "kpi_apartments_dues", "kpi_receivables_total", "kpi_advance_credits",
         "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_receipts_month",
         "kpi_concerns_open", "kpi_concerns_not_closed", "kpi_gate_logs", "kpi_owner_member_since",
+        "kpi_events_tickets",
     },
     "vendor": {
         "kpi_receipts_month", "kpi_receivables_total", "kpi_my_pass_expiry",
@@ -289,11 +290,20 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND created_by=%s AND status='open'",
                         (sid, own_user_id),
                     ),
-                    "kpi_concerns_not_closed": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns "
-                        "WHERE society_id=%s AND created_by=%s AND status != 'closed'",
-                        (sid, own_user_id),
-                    ),
+        "kpi_concerns_not_closed": (
+            "SELECT COUNT(*)::INT AS v FROM concerns "
+            "WHERE society_id=%s AND created_by=%s AND status != 'closed'",
+            (sid, own_user_id),
+        ),
+        # Owner's bought event tickets for upcoming events — scoped to the
+        # apartment owner's user_id (event_tickets.user_id = users.id).
+        "kpi_events_tickets": (
+            "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
+            "JOIN event_tickets et ON et.id = eti.event_ticket_id "
+            "JOIN events e ON e.id = et.event_id "
+            "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE",
+            (own_user_id,),
+        ),
                     # kpi_concerns_total is deliberately NOT overridden here —
                     # per the Concerns workflow spec it stays society-wide
                     # even on the Owner portal (see card_catalogue.py).

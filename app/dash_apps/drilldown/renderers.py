@@ -101,7 +101,14 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("security", "events"):       {"view"},
     ("security", "concerns"):     {"view"},
     ("security", "gate_logs"):    {"view"},
+    # Visitable via gate QR scan / subscriber alert cards (read-only context).
+    ("security", "visitors"):           {"view"},
+    ("security", "patrol_locations"):   {"view"},
+    ("security", "event_ticket_items"): {"view"},
     ("security", "receipts"): {"view", "new"},
+    # Owner portal: bought event tickets are visible (list + profile) so the
+    # owner can see/verify what they bought; admin covered by ("admin","*").
+    ("apartment", "event_ticket_items"): {"view"},
     ("security", "cashbook"):     {"view"},
     ("security", "ledger"):       set(),
     ("security", "*"):            set(),
@@ -777,7 +784,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         f for f in fields
         if f.get("field") not in hidden
         and _field_visible(entity_plural, f.get("field"), role)
-        and not (entity == "concern" and f.get("field") == "qr_payload")
+        and not (entity in ("concern", "event_ticket") and f.get("field") == "qr_payload")
     ]
     image_fields = [
         f for f in visible_fields
@@ -830,8 +837,61 @@ def render_profile_card(card_id: str, title: str, icon: str,
         except Exception as e:
             print(f"⚠️  concern QR render failed: {e}")
 
+    # ── Event ticket QR — rendered live from the stored qr_payload so the
+    # owner can hand the screen to security / admin to scan at the gate.
+    # Scans dispatch to validate_event_ticket_qr() (qr_service.py). Mirrors the
+    # concern QR section above.
+    event_ticket_qr_section = []
+    if entity == "event_ticket" and pk_val:
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_society_id = record_dict.get("society_id") or society_id
+            qr_img, qr_payload = generate_qr_code(qr_society_id, "EVT", pk_val)
+            if qr_img:
+                status = record_dict.get("status", "")
+                color = "#27ae60" if status == "used" else ("#e74c3c" if status == "cancelled" else "#27ae60")
+                event_ticket_qr_section.append(
+                    html.Div([
+                        html.Div([
+                            html.I(className="fas fa-qrcode",
+                                   style={"color": "#aaa", "fontSize": "10px",
+                                          "marginRight": "5px"}),
+                            html.Span("Ticket QR",
+                                      style={"color": "#7d8ea3", "fontSize": "10px",
+                                             "fontWeight": "600",
+                                             "textTransform": "uppercase"}),
+                        ], style={"marginBottom": "5px"}),
+                        html.Img(
+                            src=qr_img,
+                            style={
+                                "maxWidth": "160px", "maxHeight": "160px",
+                                "borderRadius": "8px",
+                                "border": "1px solid rgba(0,0,0,0.08)",
+                                "objectFit": "contain", "background": "#fff",
+                                "padding": "4px", "display": "block",
+                            },
+                        ),
+                        html.Div(qr_payload, style={
+                            "fontSize": "10px", "color": "#7d8ea3",
+                            "fontFamily": "monospace", "marginTop": "4px",
+                        }),
+                        html.Div(
+                            f"Status: {status.title() if status else 'Active'}",
+                            style={"fontSize": "10px", "color": color,
+                                   "fontWeight": "600", "marginTop": "4px"},
+                        ),
+                    ], style={
+                        "marginBottom": "12px", "padding": "10px",
+                        "background": "rgba(248,251,255,0.7)",
+                        "borderRadius": "10px",
+                        "border": "1px solid rgba(200,215,235,0.4)",
+                    })
+                )
+        except Exception as e:
+            print(f"⚠️  event ticket QR render failed: {e}")
+
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
-    image_section = list(concern_qr_section)
+    image_section = list(concern_qr_section) + list(event_ticket_qr_section)
     for f in image_fields:
         image_path = record_dict.get(f["field"])
         if not image_path or str(image_path).strip() in ("", "None"):

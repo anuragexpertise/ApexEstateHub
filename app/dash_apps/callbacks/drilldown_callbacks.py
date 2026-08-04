@@ -3238,6 +3238,9 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         owner_user_id = auth.get("user_id")
         if owner_user_id:
             f["concern_creator_id"] = owner_user_id
+            # Reused by owner-scoped lists that key off the buyer's users.id
+            # (e.g. list_event_ticket_items → event_tickets.user_id).
+            f["owner_user_id"] = owner_user_id
     elif role == "vendor":
         # A vendor's `linked_id` (auth.linked_id) points at vendors.id, and
         # fn_vendors_list now returns vendors.id as its `id` column (matches

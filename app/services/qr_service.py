@@ -110,10 +110,16 @@ def generate_static_qr_code(entity_id: int, role: str, society_id: int):
 
 
 def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user_id: int = None) -> dict:
-    """Check event_ticket_items row, verify validity and mark as used on gate scan."""
+    """Check event_ticket_items row, verify validity and mark as used on gate scan.
+
+    Single-use: a scanned ticket is stamped 'used' immediately (events are
+    admission-gated, no two-actor approval needed). The event's id/title/date
+    are surfaced so the gate callback can pivot to the event profile.
+    """
     try:
         item = db._execute("""
-            SELECT eti.*, et.booking_reference, e.title as event_title, e.event_date, e.venue
+            SELECT eti.*, et.booking_reference, et.event_id,
+                   e.title as event_title, e.event_date, e.venue
               FROM event_ticket_items eti
               JOIN event_tickets et ON et.id = eti.event_ticket_id
               JOIN events e ON e.id = et.event_id
@@ -136,31 +142,70 @@ def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user
         db._execute("""
             UPDATE event_ticket_items
                SET status = 'used', scanned_at = NOW(), scanned_by = %s
-             WHERE id = %s
+            WHERE id = %s
         """, (security_user_id, ticket_item_id))
 
         return {
             "status": "PASS",
+            "event_id": item["event_id"],
+            "ticket_item_id": item["id"],
             "user": {
                 "id": item["id"],
                 "name": f"Event Ticket ({item['ticket_type']}) - {item['event_title']}",
                 "role": "event_ticket",
                 "society_id": society_id,
+                "ticket_type": item["ticket_type"],
+                "event_title": item["event_title"],
+                "event_date": str(item["event_date"]),
+                "venue": item["venue"] or "",
+                "booking_reference": item["booking_reference"] or "",
             },
-            "message": f"Valid {item['ticket_type']} Pass for {item['event_title']}",
+            "message": f"Valid {item['ticket_type']} Pass admitted for {item['event_title']}",
             "gate_action": "allow",
         }
     except Exception as e:
         return {"status": "FAIL", "reason": f"Event ticket scan error: {str(e)}", "gate_action": "deny"}
 
 
+
+def _visitor_user(vis, society_id: int) -> dict:
+    """Build the user-profile payload embedded in visitor QR-scan results."""
+    return {
+        "id": vis["id"],
+        "name": f"Visitor: {vis['name']} (Flat {vis.get('flat_number', 'N/A')})",
+        "role": "visitor",
+        "society_id": society_id,
+        "visitor_id": vis["id"],
+        "visitor_name": vis["name"],
+        "flat_number": vis.get("flat_number") or "",
+        "purpose": vis.get("purpose") or "",
+        "status": vis.get("status"),
+        "owner_name": vis.get("owner_name") or "",
+        "owner_phone": vis.get("owner_phone") or "",
+    }
+
+
 def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int = None) -> dict:
-    """Check visitor pass and mark entered."""
+    """Validate a scanned visitor QR.
+
+    Two-actor enforcement: a visitor is NEVER auto-admitted by the gate scan
+    alone. Only a *pre-approved* pass (status='approved', approved_by set by
+    an owner up-front) is admitted directly on scan. A 'pending' presumptive
+    visitor resolves to PENDING_CONFIRMATION — the caller
+    (qr_callbacks.validate_qr_scanned) routes it through
+    alert_service.trigger_visitor_alert(), identical to the KPI-press flow,
+    so an owner must confirm before status flips to 'entered'.
+
+    Admission (status='entered') is ultimately set by the owner's response
+    via alert_service.respond_to_visitor_alert() — never by the gate scan
+    itself — so security cannot bypass owner consent.
+    """
     try:
         vis = db._execute("""
-            SELECT v.*, a.flat_number
+            SELECT v.*, a.flat_number, u.name AS owner_name, u.phone AS owner_phone
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
+              LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
              WHERE v.id = %s AND v.society_id = %s
         """, (visitor_id, society_id), fetch_one=True)
 
@@ -171,25 +216,57 @@ def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int 
             return {"status": "FAIL", "reason": "Visitor pass was denied", "gate_action": "deny"}
 
         if vis["status"] == "entered":
-            return {"status": "PASS", "reason": "Visitor already admitted", "gate_action": "allow"}
+            return {
+                "status": "PASS",
+                "reason": "Visitor already admitted",
+                "gate_action": "allow",
+                "user": _visitor_user(vis, society_id),
+            }
 
-        # Update visitor status to entered
-        db._execute("""
-            UPDATE visitors
-               SET status = 'entered', entered_at = NOW(), security_user_id = %s
-             WHERE id = %s
-        """, (security_user_id, visitor_id))
+        # Pre-approved by an owner → admit directly on scan.
+        # Concurrency-safe: a conditional UPDATE (status='approved' only) with
+        # a RETURNING row, so two simultaneous scans / a scan racing the
+        # owner's in-app approval can't double-admit. db._execute returns the
+        # matched row (or None) for RETURNING, which stands in for rowcount
+        # since this driver layer exposes no cur.rowcount.
+        if vis["status"] == "approved" and vis.get("approved_by"):
+            won = db._execute("""
+                UPDATE visitors
+                   SET status = 'entered', entered_at = NOW(), security_user_id = %s
+                WHERE id = %s AND status = 'approved'
+                RETURNING id
+            """, (security_user_id, visitor_id), fetch_one=True)
 
+            if not won:  # race: owner / another guard already moved it
+                vis = db._execute(
+                    "SELECT v.*, a.flat_number FROM visitors v "
+                    "LEFT JOIN apartments a ON a.id = v.apartment_id "
+                    "WHERE v.id = %s", (visitor_id,), fetch_one=True
+                )
+                return {
+                    "status": "PASS" if vis and vis["status"] == "entered" else "PENDING_CONFIRMATION",
+                    "reason": "Visitor already processed" if (vis and vis["status"] == "entered")
+                            else "Visitor awaiting owner confirmation",
+                    "gate_action": "allow" if vis and vis["status"] == "entered" else "review",
+                    "needs_owner_approval": not (vis and vis["status"] == "entered"),
+                    "user": _visitor_user(vis, society_id) if vis else None,
+                }
+
+            return {
+                "status": "PASS",
+                "message": f"Visitor Admitted: {vis['name']}",
+                "gate_action": "allow",
+                "user": _visitor_user(vis, society_id),
+            }
+
+        # Pending / not-yet-approved presumptive visitor → valid QR, but entry
+        # requires owner confirmation. The gate scan itself must NOT admit.
         return {
-            "status": "PASS",
-            "user": {
-                "id": vis["id"],
-                "name": f"Visitor: {vis['name']} (Flat {vis.get('flat_number', 'N/A')})",
-                "role": "visitor",
-                "society_id": society_id,
-            },
-            "message": f"Visitor Admitted: {vis['name']}",
-            "gate_action": "allow",
+            "status": "PENDING_CONFIRMATION",
+            "gate_action": "review",
+            "reason": "Visitor awaiting owner confirmation",
+            "needs_owner_approval": True,
+            "user": _visitor_user(vis, society_id),
         }
     except Exception as e:
         return {"status": "FAIL", "reason": f"Visitor validation error: {str(e)}", "gate_action": "deny"}
