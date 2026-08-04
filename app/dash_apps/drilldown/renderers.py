@@ -713,6 +713,27 @@ def render_list_card(card_id: str, title: str, icon: str,
 # PROFILE CARD RENDERER
 # ════════════════════════════════════════════════════════════════════════════
 
+# Lifecycle stage labels for concerns_assigns.status — kept here (and mirrored
+# in invite_to_callbacks.py / assign_to_callbacks.py) so the concern profile
+# card can render a stage banner without a cross-module import.
+# Stage legend: invited -> bid_submitted -> assigned -> accepted -> resolved -> closed
+_CONCERN_STAGE_LABEL = {
+    "invited":       ("Invited",            "#7d8ea3"),
+    "bid_submitted": ("Bid submitted",      "#1d74d8"),
+    "assigned":      ("Assigned",           "#e59620"),
+    "accepted":      ("Accepted",           "#2563eb"),
+    "resolved":      ("Resolved",           "#17976e"),
+    "closed":        ("Closed",             "#64748b"),
+}
+
+_CONCERN_STATUS_BANNER = {
+    "open":     ("New concern — awaiting invitation/assignment",  "#de5c52"),
+    "assigned": ("Assigned — work in progress",                   "#e59620"),
+    "resolved": ("Resolved — pending close",                      "#17976e"),
+    "closed":   ("Closed — this concern is complete",             "#64748b"),
+}
+
+
 def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record,
                         fields: list[dict], actions: list[dict] | None = None,
@@ -979,6 +1000,40 @@ def render_profile_card(card_id: str, title: str, icon: str,
             style={"borderRadius": "10px", "fontWeight": "600"},
         ))
 
+    # ── Concern lifecycle banners — only on the concern profile card ──────────
+    # 4b: overall concern status banner
+    _concern_banners = []
+    if entity == "concern":
+        _cstatus = record_dict.get("status")
+        _stext, _scolor = _CONCERN_STATUS_BANNER.get(
+            _cstatus, ("In progress", "#1d74d8"))
+        _concern_banners.append(dbc.Alert(
+            [html.I(className="fas fa-info-circle me-2"), _stext],
+            color="light",
+            style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                   "borderRadius": "8px", "marginBottom": "8px",
+                   "borderColor": f"{_scolor}40"},
+        ))
+        # 4a: caller's own assignment stage banner
+        if my_concern_status:
+            _mlabel, _mcolor = _CONCERN_STAGE_LABEL.get(
+                my_concern_status, (my_concern_status.title(), "#1d74d8"))
+            _my_assign = None
+            for _a in (record_dict.get("_assignments") or []):
+                if _a.get("role") == my_role_code and _a.get("entity_id") == my_entity_id:
+                    _my_assign = _a
+                    break
+            _bid = _my_assign.get("assign_bid_amount") if _my_assign else None
+            _stage_txt = f"{_mlabel} · ₹{_bid:,.0f}" if _bid not in (None, "") else _mlabel
+            _concern_banners.append(dbc.Alert(
+                [html.I(className="fas fa-hourglass-half me-2"),
+                 html.Span(["Your involvement: ", html.Strong(_stage_txt)])],
+                color="light",
+                style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                       "borderRadius": "8px", "marginBottom": "8px",
+                       "borderColor": f"{_mcolor}40"},
+            ))
+
     return html.Div([
         html.Div(
             html.Div([
@@ -1007,6 +1062,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
                    "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         html.Div([
+
+            # ── Concern lifecycle banners (status + caller's own stage) ─
+            *(_concern_banners if _concern_banners else []),
 
             # ── Images (full-width, stacked) ─────────────────────────
             html.Div(image_section) if image_section else None,
@@ -1496,7 +1554,7 @@ def _concern_wait_banner(entity_plural: str, prefill: dict) -> html.Div | None:
     return dbc.Alert(
         [
             html.I(className="fas fa-hourglass-half me-2"),
-            "Submitted — please wait for bids from vendors/security, then assign one.",
+            "Submitted — please wait for bids from vendors/security. Once bids arrive, the Invite and Assign buttons below will let you pick a candidate.",
         ],
         color="info",
         style={"fontSize": "13px", "fontWeight": "600", "flex": "0 0 auto", "maxWidth": "260px"},
