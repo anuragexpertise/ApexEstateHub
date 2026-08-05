@@ -1,5 +1,17 @@
 -- ============================================================
 -- ESTATEHUB - COMPLETE DATABASE SCHEMA & FUNCTIONS (v3 - CORRECTED)
+-- Reorganized 2026-08: CREATE TABLES -> INDEXES -> FUNCTIONS -> VIEWS -> TRIGGERS
+-- Statement order WITHIN each section is unchanged from the prior file -
+-- only the section grouping moved. No statement bodies were altered.
+-- ============================================================
+
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 1: TABLES (CREATE TABLE / ALTER TABLE / CREATE SEQUENCE / COMMENT ON COLUMN)
+-- ════════════════════════════════════════════════════════════════
+
+-- ============================================================
+-- ESTATEHUB - COMPLETE DATABASE SCHEMA & FUNCTIONS (v3 - CORRECTED)
 -- Accounts-as-categorisation: acc_id replaces charge_type/payment_type/category
 -- Interest split: single receivable row, two transaction lines on verify
 -- ============================================================
@@ -70,8 +82,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_by INT REFERENCES users (id)
 );
 
-
 ALTER TABLE societies DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
+
 ALTER TABLE societies ADD CONSTRAINT societies_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
 
 -- ── accounts ──────────────────────────────────────────────────
@@ -216,6 +228,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     updated_by INT REFERENCES users (id),
     qr_payload VARCHAR(255)
 );
+
 -- ════════════════════════════════════════════════════════════════════════
 -- CONCERNS_ASSIGNS — unified per-assignee lifecycle (2026-07 overhaul)
 --
@@ -289,6 +302,7 @@ CREATE TABLE IF NOT EXISTS security_roster (
         roster_date
     )
 );
+
 -- ════════════════════════════════════════════════════════════════
 -- RECEIVABLES  — auto-credits, one row per entity per billing period.
 --
@@ -583,6 +597,7 @@ CREATE TABLE IF NOT EXISTS event_tickets (
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW()
 );
+
 -- ── Apartment charges / fines basis ───────────────────────────
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
@@ -776,6 +791,7 @@ CREATE TABLE IF NOT EXISTS patrol_scans (
     scanned_at       TIMESTAMP DEFAULT NOW(),
     notes            TEXT
 );
+
 CREATE TABLE IF NOT EXISTS poll_votes (
     id SERIAL PRIMARY KEY,
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
@@ -784,6 +800,7 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (poll_id, user_id)
 );
+
 CREATE TABLE IF NOT EXISTS polls (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -807,27 +824,67 @@ CREATE TABLE IF NOT EXISTS polls (
 );
 
 -- ════════════════════════════════════════════════════════════════
+-- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
+-- Auto-generate human-friendly receipt_number / transaction_number.
+-- ════════════════════════════════════════════════════════════════
+CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
+
+CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- DOCUMENTATION: clarify receipts.user_id's dual role
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- receipts.user_id is semantically "created_by" / "recorded_by" — the user
+-- who entered the receipt (an admin entering it directly, or security/an
+-- apartment owner submitting one that lands as status='pending'). It is
+-- NOT who verified/approved it — that's confirmed_by, set separately by
+-- fn_verify_receipt when an admin confirms a pending receipt. Left as
+-- `user_id` rather than renamed to `created_by`, since dozens of existing
+-- call sites (fn_save_receipt, fn_verify_receipt,
+-- every receipts list/report query) already depend on this exact name;
+-- renaming has no functional upside and meaningful regression risk.
+COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
+
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 2: INDEXES
+-- ════════════════════════════════════════════════════════════════
+
+-- ════════════════════════════════════════════════════════════════
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets(qr_payload);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month)
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_journal ON transactions (journal_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses(qr_payload);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts(qr_payload);
+
 CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
+
 CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors(society_id, visit_date);
+
 CREATE INDEX IF NOT EXISTS idx_event_ticket_items_qr ON event_ticket_items(qr_payload);
+
 CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
 
 CREATE INDEX IF NOT EXISTS idx_event_tickets_user ON event_tickets (user_id);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
+
 CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
+
 CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (
     user_id,
     read,
@@ -906,12 +963,27 @@ CREATE INDEX IF NOT EXISTS idx_assets_society ON assets (society_id, disposed);
 CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (society_id, key);
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
--- Auto-generate human-friendly receipt_number / transaction_number.
+-- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
 -- ════════════════════════════════════════════════════════════════
-CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
+-- ════════════════════════════════════════════════════════════════
+-- POLLING SYSTEM
+-- ════════════════════════════════════════════════════════════════
 
-CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
+
+CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
+
+CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
+
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
+
+CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_user ON poll_votes (poll_id, user_id);
+
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 3: FUNCTIONS
+-- ════════════════════════════════════════════════════════════════
 
 -- ── Chain hash helpers ─────────────────────────────────────────
 DROP FUNCTION IF EXISTS fn_compute_receipt_hash(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) CASCADE;
@@ -1107,13 +1179,6 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_receipt_hash_issue ON receipts;
-
-CREATE TRIGGER trg_receipt_hash_issue
-    BEFORE UPDATE OF status ON receipts
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_receipt_hash_issue();
-
 -- Fallback BEFORE INSERT trigger: if a receipt is inserted already confirmed, issue number immediately.
 DROP FUNCTION IF EXISTS fn_trg_receipt_hash_insert () CASCADE;
 
@@ -1180,15 +1245,9 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_receipt_hash_insert ON receipts;
-
-CREATE TRIGGER trg_receipt_hash_insert
-    BEFORE INSERT ON receipts
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_receipt_hash_insert();
-
 -- Same for expenses: placeholder no-op triggers (expense hash feature not yet fully implemented).
 DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1196,25 +1255,14 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
-CREATE TRIGGER trg_expense_hash_issue
-    BEFORE UPDATE OF status ON expenses
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_expense_hash_issue();
-
 DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert () CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
-CREATE TRIGGER trg_expense_hash_insert
-    BEFORE INSERT ON expenses
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_expense_hash_insert();
 
 DROP FUNCTION IF EXISTS fn_trg_transaction_number () CASCADE;
 
@@ -1228,13 +1276,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_transaction_number ON transactions;
-
-CREATE TRIGGER trg_transaction_number
-    BEFORE INSERT ON transactions
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_transaction_number();
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: APARTMENT HELPER FUNCTIONS (used by trigger + gate pass + NOC)
@@ -1283,13 +1324,6 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_apartment_active_guard ON apartments;
-
-CREATE TRIGGER trg_apartment_active_guard
-    BEFORE UPDATE ON apartments
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_apartment_active_guard();
-
 -- Generic updated_at stamping trigger factory
 DROP FUNCTION IF EXISTS fn_trg_set_updated_at () CASCADE;
 
@@ -1300,61 +1334,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_vendors_updated ON vendors;
-
-CREATE TRIGGER trg_vendors_updated
-    BEFORE UPDATE ON vendors
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_security_updated ON security_staff;
-
-CREATE TRIGGER trg_security_updated
-    BEFORE UPDATE ON security_staff
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_assets_updated ON assets;
-
-CREATE TRIGGER trg_assets_updated
-    BEFORE UPDATE ON assets
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_events_updated ON events;
-
-CREATE TRIGGER trg_events_updated
-    BEFORE UPDATE ON events
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
-
-CREATE TRIGGER trg_concerns_updated
-    BEFORE UPDATE ON concerns
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
-CREATE TRIGGER trg_concerns_assigns_updated
-    BEFORE UPDATE ON concerns_assigns
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_apt_charges_updated ON apt_charges_fines_basis;
-
-CREATE TRIGGER trg_apt_charges_updated
-    BEFORE UPDATE ON apt_charges_fines_basis
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_ven_charges_updated ON ven_charges_fines_basis;
-
-CREATE TRIGGER trg_ven_charges_updated
-    BEFORE UPDATE ON ven_charges_fines_basis
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_set_updated_at();
 
 -- ════════════════════════════════════════════════════════════════
 -- QR PAYLOAD AUTO-GENERATION TRIGGERS
@@ -1371,12 +1350,6 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_concerns_qr ON concerns;
-CREATE TRIGGER trg_concerns_qr
-    BEFORE INSERT ON concerns
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_concerns_qr();
-
 CREATE OR REPLACE FUNCTION fn_trg_receipts_qr()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1386,12 +1359,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_receipts_qr ON receipts;
-CREATE TRIGGER trg_receipts_qr
-    BEFORE INSERT ON receipts
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_receipts_qr();
 
 CREATE OR REPLACE FUNCTION fn_trg_expenses_qr()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -1403,12 +1370,6 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_expenses_qr ON expenses;
-CREATE TRIGGER trg_expenses_qr
-    BEFORE INSERT ON expenses
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_expenses_qr();
-
 CREATE OR REPLACE FUNCTION fn_trg_assets_qr()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1418,12 +1379,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_assets_qr ON assets;
-CREATE TRIGGER trg_assets_qr
-    BEFORE INSERT ON assets
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_assets_qr();
 
 CREATE OR REPLACE FUNCTION fn_trg_visitors_qr()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -1435,12 +1390,6 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
-CREATE TRIGGER trg_visitors_qr
-    BEFORE INSERT ON visitors
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_visitors_qr();
-
 CREATE OR REPLACE FUNCTION fn_trg_patrol_locations_qr()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -1450,12 +1399,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
-CREATE TRIGGER trg_patrol_locations_qr
-    BEFORE INSERT ON patrol_locations
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_patrol_locations_qr();
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3B: GATE-PASS EVALUATION
@@ -3061,7 +3004,6 @@ BEGIN
 END;
 $$;
 
-
 DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendors_list(
@@ -3728,6 +3670,7 @@ BEGIN
     ORDER BY p.row_date, p.pair_key;
 END;
 $$;
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
@@ -4042,6 +3985,7 @@ $$;
 -- above is now the single source for a concern's assignee list, at every
 -- lifecycle stage (invited/bid_submitted/assigned/resolved/closed).
 DROP FUNCTION IF EXISTS fn_concern_invite_profile CASCADE;
+
 DROP FUNCTION IF EXISTS fn_concern_invite_assignments CASCADE;
 
 -- ════════════════════════════════════════════════════════════════
@@ -4090,254 +4034,6 @@ BEGIN
     ORDER BY ar.purchase_date DESC;
 END;
 $$;
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 18: VIEWS
--- ════════════════════════════════════════════════════════════════
-
-CREATE OR REPLACE VIEW v_apartment_dues AS
-SELECT
-    a.id AS apartment_id,
-    a.society_id,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-        ),
-        0
-    ) AS pending_dues,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-                AND r.due_date < CURRENT_DATE
-        ),
-        0
-    ) AS overdue_dues,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-                AND r.due_date < CURRENT_DATE
-        ),
-        0
-    ) <= 0 AS gate_pass,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-        ),
-        0
-    ) <= 0 AS noc_eligible
-FROM
-    apartments a
-    LEFT JOIN receivables r ON r.entity_id = a.id
-    AND r.role = 'apartment'
-GROUP BY
-    a.id,
-    a.society_id;
-
-CREATE OR REPLACE VIEW v_vendor_pass_status AS
-SELECT
-    u.id AS user_id,
-    u.society_id,
-    v.id AS vendor_id,
-    MAX(vp.valid_until) AS pass_expiry,
-    COALESCE(
-        MAX(vp.valid_until) >= CURRENT_DATE,
-        FALSE
-    ) AS gate_pass
-FROM
-    users u
-    LEFT JOIN vendors v ON v.id = u.linked_id
-    LEFT JOIN vendor_passes vp ON vp.user_id = u.id
-    AND vp.status = 'active'
-WHERE
-    u.role = 'vendor'
-GROUP BY
-    u.id,
-    u.society_id,
-    v.id;
-
-CREATE OR REPLACE VIEW v_security_status AS
-SELECT
-    u.id AS user_id,
-    u.society_id,
-    s.id AS security_id,
-    COUNT(ga.id) FILTER (
-        WHERE
-            ga.role = 'SEC'
-            AND ga.time_out IS NOT NULL
-    ) AS shift_count,
-    EXISTS (
-        SELECT 1
-        FROM gate_access ga2
-        WHERE
-            ga2.entity_id = u.id
-            AND ga2.role = 'SEC'
-            AND ga2.time_out IS NULL
-    ) AS gate_pass
-FROM
-    users u
-    JOIN security_staff s ON s.id = u.linked_id
-    LEFT JOIN gate_access ga ON ga.entity_id = u.id
-    AND ga.role = 'SEC'
-WHERE
-    u.role = 'security'
-GROUP BY
-    u.id,
-    u.society_id,
-    s.id;
-
--- ── v_apartment_data: enriched apartment info ──
-CREATE OR REPLACE VIEW v_apartment_data AS
-SELECT
-    a.id AS apartment_id,
-    a.society_id,
-    a.flat_number,
-    a.owner_name,
-    a.mobile,
-    a.apartment_size,
-    a.active,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-        ),
-        0
-    ) AS pending_dues,
-    COALESCE(
-        SUM(r.amount - r.paid_amount) FILTER (
-            WHERE
-                r.status IN ('pending', 'partial')
-                AND r.due_date < CURRENT_DATE
-        ),
-        0
-    ) AS overdue_dues,
-    COALESCE(apd.gate_pass, TRUE) AS gate_pass,
-    COALESCE(apd.noc_eligible, TRUE) AS noc_eligible,
-    (
-        SELECT MAX(vp.valid_until)
-        FROM
-            vendor_passes vp
-            JOIN users vu ON vu.id = vp.user_id
-            AND vu.role = 'vendor'
-        WHERE
-            vu.linked_id = a.id
-            AND vp.status = 'active'
-    ) AS gate_pass_valid_until,
-    (
-        SELECT COALESCE(
-                SUM(r2.amount - r2.paid_amount), 0
-            )
-        FROM receivables r2
-        WHERE
-            r2.entity_id = a.id
-            AND r2.role = 'apartment'
-            AND r2.status = 'credit'
-    ) AS advance_credit
-FROM
-    apartments a
-    LEFT JOIN receivables r ON r.entity_id = a.id
-    AND r.role = 'apartment'
-    LEFT JOIN v_apartment_dues apd ON apd.apartment_id = a.id
-GROUP BY
-    a.id,
-    a.society_id,
-    a.flat_number,
-    a.owner_name,
-    a.mobile,
-    a.apartment_size,
-    a.active,
-    apd.gate_pass,
-    apd.noc_eligible;
-
--- ── v_financial_trial_balance: every account with Dr/Cr split ──
-CREATE OR REPLACE VIEW v_financial_trial_balance AS
-SELECT
-    a.society_id,
-    a.id AS account_id,
-    a.name AS account_name,
-    a.drcr_account,
-    a.parent_account_id,
-    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Dr'), 0)::NUMERIC(15,2)
-        + COALESCE(MAX(bf.bf_amount), 0) AS dr_total,
-    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Cr'), 0)::NUMERIC(15,2)
-        + COALESCE(MAX(bf.bf_amount), 0) AS cr_total,
-    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
-        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS balance
-FROM accounts a
-LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
-LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-                             AND bf.financial_year = fn_current_financial_year()
-GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.parent_account_id
-ORDER BY a.society_id, a.id;
-
--- ── v_financial_income_expenditure: income & expense accounts ──
-CREATE OR REPLACE VIEW v_financial_income_expenditure AS
-SELECT
-    a.society_id,
-    a.id AS account_id,
-    a.name AS account_name,
-    a.drcr_account,
-    COALESCE(SUM(t.amount), 0)::NUMERIC(15,2) AS gross_movement,
-    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
-        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS net_balance
-FROM accounts a
-LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
-LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-                             AND bf.financial_year = fn_current_financial_year()
-WHERE a.drcr_account IN ('Dr','Cr')
-  AND (a.name ILIKE '%Income%' OR a.name ILIKE '%Receipt%'
-       OR a.name ILIKE '%Expense%' OR a.name ILIKE '%Salary%'
-       OR a.header ILIKE '%Income%' OR a.header ILIKE '%Expense%')
-GROUP BY a.society_id, a.id, a.name, a.drcr_account
-ORDER BY a.society_id, a.drcr_account, a.name;
-
--- ── v_financial_balance_sheet: assets, liabilities, capital ──
-CREATE OR REPLACE VIEW v_financial_balance_sheet AS
-SELECT
-    a.society_id,
-    a.id AS account_id,
-    a.name AS account_name,
-    CASE
-        WHEN a.name ILIKE '%Asset%' OR a.header ILIKE '%Asset%' THEN 'Assets'
-        WHEN a.drcr_account = 'Cr' THEN 'Liabilities & Capital'
-        ELSE 'Expenses'
-    END AS category,
-    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
-        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS balance
-FROM accounts a
-LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
-LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-                             AND bf.financial_year = fn_current_financial_year()
-GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.header
-HAVING (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
-        + COALESCE(MAX(bf.bf_amount), 0)) <> 0
-ORDER BY a.society_id, category, a.name;
-
--- ── v_dashboard_stats: key metrics ──
-CREATE OR REPLACE VIEW v_dashboard_stats AS
-SELECT
-    s.id AS society_id,
-    s.name AS society_name,
-    (SELECT COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC(15,2)
-     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS total_receivables,
-    (SELECT COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.due_date < CURRENT_DATE), 0)::NUMERIC(15,2)
-     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS overdue_dues,
-    (SELECT COALESCE(SUM(p.amount), 0)::NUMERIC(15,2)
-     FROM payables p WHERE p.society_id = s.id AND p.status = 'pending') AS total_payables,
-    (SELECT COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)::NUMERIC(15,2)
-     FROM transactions t
-     JOIN accounts a ON a.id = t.acc_id
-     WHERE t.society_id = s.id AND t.status = 'paid'
-       AND (a.name ILIKE '%Cash%' OR a.name ILIKE '%Bank%' OR a.name ILIKE '%SBI%')
-     AND a.drcr_account = 'Dr') AS cash_balance,
-    (SELECT COUNT(*) FROM apartments ap WHERE ap.society_id = s.id AND ap.active = TRUE) AS total_apartments,
-    (SELECT COUNT(*) FROM vendors vd WHERE vd.society_id = s.id) AS total_vendors,
-    (SELECT COUNT(*) FROM security_staff ss WHERE ss.society_id = s.id) AS total_security
-FROM societies s
-ORDER BY s.id;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 19: APT CHARGES LIST / VEN CHARGES LIST
@@ -4918,20 +4614,6 @@ END;
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- DOCUMENTATION: clarify receipts.user_id's dual role
--- ═══════════════════════════════════════════════════════════════════════════════
--- receipts.user_id is semantically "created_by" / "recorded_by" — the user
--- who entered the receipt (an admin entering it directly, or security/an
--- apartment owner submitting one that lands as status='pending'). It is
--- NOT who verified/approved it — that's confirmed_by, set separately by
--- fn_verify_receipt when an admin confirms a pending receipt. Left as
--- `user_id` rather than renamed to `created_by`, since dozens of existing
--- call sites (fn_save_receipt, fn_verify_receipt,
--- every receipts list/report query) already depend on this exact name;
--- renaming has no functional upside and meaningful regression risk.
-COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
-
--- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
 -- ═══════════════════════════════════════════════════════════════════════════════
 
@@ -5192,22 +4874,6 @@ END;
 $$;
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
--- ════════════════════════════════════════════════════════════════
--- ════════════════════════════════════════════════════════════════
--- POLLING SYSTEM
--- ════════════════════════════════════════════════════════════════
-
-
-CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
-CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
-
-
-CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
-CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_user ON poll_votes (poll_id, user_id);
-
--- ════════════════════════════════════════════════════════════════
 -- POLLING SYSTEM FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
 
@@ -5242,6 +4908,7 @@ $$;
 
 -- fn_polls_list: List polls for a society with vote counts
 DROP FUNCTION IF EXISTS fn_polls_list CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_polls_list(
     p_society_id INT, p_search TEXT DEFAULT NULL, p_status VARCHAR DEFAULT NULL
 )
@@ -5521,7 +5188,7 @@ RETURNS BIGINT LANGUAGE SQL STABLE AS $$
     SELECT COUNT(*)::BIGINT FROM polls WHERE society_id = p_society_id;
 $$;
 
-- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
+-- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
 -- This is now the ONLY trigger writing concerns.status from delegation state
 -- (previously a second, independently-ruled trigger on concerns_invite could
 -- race this one and leave concerns.status reflecting whichever fired last).
@@ -5586,7 +5253,406 @@ BEGIN
 END;
 $$;
 
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 4: VIEWS
+-- ════════════════════════════════════════════════════════════════
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 18: VIEWS
+-- ════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE VIEW v_apartment_dues AS
+SELECT
+    a.id AS apartment_id,
+    a.society_id,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+        ),
+        0
+    ) AS pending_dues,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+                AND r.due_date < CURRENT_DATE
+        ),
+        0
+    ) AS overdue_dues,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+                AND r.due_date < CURRENT_DATE
+        ),
+        0
+    ) <= 0 AS gate_pass,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+        ),
+        0
+    ) <= 0 AS noc_eligible
+FROM
+    apartments a
+    LEFT JOIN receivables r ON r.entity_id = a.id
+    AND r.role = 'apartment'
+GROUP BY
+    a.id,
+    a.society_id;
+
+CREATE OR REPLACE VIEW v_vendor_pass_status AS
+SELECT
+    u.id AS user_id,
+    u.society_id,
+    v.id AS vendor_id,
+    MAX(vp.valid_until) AS pass_expiry,
+    COALESCE(
+        MAX(vp.valid_until) >= CURRENT_DATE,
+        FALSE
+    ) AS gate_pass
+FROM
+    users u
+    LEFT JOIN vendors v ON v.id = u.linked_id
+    LEFT JOIN vendor_passes vp ON vp.user_id = u.id
+    AND vp.status = 'active'
+WHERE
+    u.role = 'vendor'
+GROUP BY
+    u.id,
+    u.society_id,
+    v.id;
+
+CREATE OR REPLACE VIEW v_security_status AS
+SELECT
+    u.id AS user_id,
+    u.society_id,
+    s.id AS security_id,
+    COUNT(ga.id) FILTER (
+        WHERE
+            ga.role = 'SEC'
+            AND ga.time_out IS NOT NULL
+    ) AS shift_count,
+    EXISTS (
+        SELECT 1
+        FROM gate_access ga2
+        WHERE
+            ga2.entity_id = u.id
+            AND ga2.role = 'SEC'
+            AND ga2.time_out IS NULL
+    ) AS gate_pass
+FROM
+    users u
+    JOIN security_staff s ON s.id = u.linked_id
+    LEFT JOIN gate_access ga ON ga.entity_id = u.id
+    AND ga.role = 'SEC'
+WHERE
+    u.role = 'security'
+GROUP BY
+    u.id,
+    u.society_id,
+    s.id;
+
+-- ── v_apartment_data: enriched apartment info ──
+CREATE OR REPLACE VIEW v_apartment_data AS
+SELECT
+    a.id AS apartment_id,
+    a.society_id,
+    a.flat_number,
+    a.owner_name,
+    a.mobile,
+    a.apartment_size,
+    a.active,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+        ),
+        0
+    ) AS pending_dues,
+    COALESCE(
+        SUM(r.amount - r.paid_amount) FILTER (
+            WHERE
+                r.status IN ('pending', 'partial')
+                AND r.due_date < CURRENT_DATE
+        ),
+        0
+    ) AS overdue_dues,
+    COALESCE(apd.gate_pass, TRUE) AS gate_pass,
+    COALESCE(apd.noc_eligible, TRUE) AS noc_eligible,
+    (
+        SELECT MAX(vp.valid_until)
+        FROM
+            vendor_passes vp
+            JOIN users vu ON vu.id = vp.user_id
+            AND vu.role = 'vendor'
+        WHERE
+            vu.linked_id = a.id
+            AND vp.status = 'active'
+    ) AS gate_pass_valid_until,
+    (
+        SELECT COALESCE(
+                SUM(r2.amount - r2.paid_amount), 0
+            )
+        FROM receivables r2
+        WHERE
+            r2.entity_id = a.id
+            AND r2.role = 'apartment'
+            AND r2.status = 'credit'
+    ) AS advance_credit
+FROM
+    apartments a
+    LEFT JOIN receivables r ON r.entity_id = a.id
+    AND r.role = 'apartment'
+    LEFT JOIN v_apartment_dues apd ON apd.apartment_id = a.id
+GROUP BY
+    a.id,
+    a.society_id,
+    a.flat_number,
+    a.owner_name,
+    a.mobile,
+    a.apartment_size,
+    a.active,
+    apd.gate_pass,
+    apd.noc_eligible;
+
+-- ── v_financial_trial_balance: every account with Dr/Cr split ──
+CREATE OR REPLACE VIEW v_financial_trial_balance AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    a.drcr_account,
+    a.parent_account_id,
+    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Dr'), 0)::NUMERIC(15,2)
+        + COALESCE(MAX(bf.bf_amount), 0) AS dr_total,
+    COALESCE(SUM(t.amount) FILTER (WHERE t.acc_id = a.id AND t.amount > 0 AND a.drcr_account = 'Cr'), 0)::NUMERIC(15,2)
+        + COALESCE(MAX(bf.bf_amount), 0) AS cr_total,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                             AND bf.financial_year = fn_current_financial_year()
+GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.parent_account_id
+ORDER BY a.society_id, a.id;
+
+-- ── v_financial_income_expenditure: income & expense accounts ──
+CREATE OR REPLACE VIEW v_financial_income_expenditure AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    a.drcr_account,
+    COALESCE(SUM(t.amount), 0)::NUMERIC(15,2) AS gross_movement,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS net_balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                             AND bf.financial_year = fn_current_financial_year()
+WHERE a.drcr_account IN ('Dr','Cr')
+  AND (a.name ILIKE '%Income%' OR a.name ILIKE '%Receipt%'
+       OR a.name ILIKE '%Expense%' OR a.name ILIKE '%Salary%'
+       OR a.header ILIKE '%Income%' OR a.header ILIKE '%Expense%')
+GROUP BY a.society_id, a.id, a.name, a.drcr_account
+ORDER BY a.society_id, a.drcr_account, a.name;
+
+-- ── v_financial_balance_sheet: assets, liabilities, capital ──
+CREATE OR REPLACE VIEW v_financial_balance_sheet AS
+SELECT
+    a.society_id,
+    a.id AS account_id,
+    a.name AS account_name,
+    CASE
+        WHEN a.name ILIKE '%Asset%' OR a.header ILIKE '%Asset%' THEN 'Assets'
+        WHEN a.drcr_account = 'Cr' THEN 'Liabilities & Capital'
+        ELSE 'Expenses'
+    END AS category,
+    (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2) AS balance
+FROM accounts a
+LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                             AND bf.financial_year = fn_current_financial_year()
+GROUP BY a.society_id, a.id, a.name, a.drcr_account, a.header
+HAVING (COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)
+        + COALESCE(MAX(bf.bf_amount), 0)) <> 0
+ORDER BY a.society_id, category, a.name;
+
+-- ── v_dashboard_stats: key metrics ──
+CREATE OR REPLACE VIEW v_dashboard_stats AS
+SELECT
+    s.id AS society_id,
+    s.name AS society_name,
+    (SELECT COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC(15,2)
+     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS total_receivables,
+    (SELECT COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.due_date < CURRENT_DATE), 0)::NUMERIC(15,2)
+     FROM receivables r WHERE r.society_id = s.id AND r.status IN ('pending','partial')) AS overdue_dues,
+    (SELECT COALESCE(SUM(p.amount), 0)::NUMERIC(15,2)
+     FROM payables p WHERE p.society_id = s.id AND p.status = 'pending') AS total_payables,
+    (SELECT COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END), 0)::NUMERIC(15,2)
+     FROM transactions t
+     JOIN accounts a ON a.id = t.acc_id
+     WHERE t.society_id = s.id AND t.status = 'paid'
+       AND (a.name ILIKE '%Cash%' OR a.name ILIKE '%Bank%' OR a.name ILIKE '%SBI%')
+     AND a.drcr_account = 'Dr') AS cash_balance,
+    (SELECT COUNT(*) FROM apartments ap WHERE ap.society_id = s.id AND ap.active = TRUE) AS total_apartments,
+    (SELECT COUNT(*) FROM vendors vd WHERE vd.society_id = s.id) AS total_vendors,
+    (SELECT COUNT(*) FROM security_staff ss WHERE ss.society_id = s.id) AS total_security
+FROM societies s
+ORDER BY s.id;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 5: TRIGGERS
+-- ════════════════════════════════════════════════════════════════
+
+DROP TRIGGER IF EXISTS trg_receipt_hash_issue ON receipts;
+
+CREATE TRIGGER trg_receipt_hash_issue
+    BEFORE UPDATE OF status ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipt_hash_issue();
+
+DROP TRIGGER IF EXISTS trg_receipt_hash_insert ON receipts;
+
+CREATE TRIGGER trg_receipt_hash_insert
+    BEFORE INSERT ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipt_hash_insert();
+
+DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
+
+CREATE TRIGGER trg_expense_hash_issue
+    BEFORE UPDATE OF status ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expense_hash_issue();
+
+DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
+
+CREATE TRIGGER trg_expense_hash_insert
+    BEFORE INSERT ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expense_hash_insert();
+
+DROP TRIGGER IF EXISTS trg_transaction_number ON transactions;
+
+CREATE TRIGGER trg_transaction_number
+    BEFORE INSERT ON transactions
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_transaction_number();
+
+DROP TRIGGER IF EXISTS trg_apartment_active_guard ON apartments;
+
+CREATE TRIGGER trg_apartment_active_guard
+    BEFORE UPDATE ON apartments
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_apartment_active_guard();
+
+DROP TRIGGER IF EXISTS trg_vendors_updated ON vendors;
+
+CREATE TRIGGER trg_vendors_updated
+    BEFORE UPDATE ON vendors
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_security_updated ON security_staff;
+
+CREATE TRIGGER trg_security_updated
+    BEFORE UPDATE ON security_staff
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_assets_updated ON assets;
+
+CREATE TRIGGER trg_assets_updated
+    BEFORE UPDATE ON assets
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_events_updated ON events;
+
+CREATE TRIGGER trg_events_updated
+    BEFORE UPDATE ON events
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
+
+CREATE TRIGGER trg_concerns_updated
+    BEFORE UPDATE ON concerns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
+
+CREATE TRIGGER trg_concerns_assigns_updated
+    BEFORE UPDATE ON concerns_assigns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_apt_charges_updated ON apt_charges_fines_basis;
+
+CREATE TRIGGER trg_apt_charges_updated
+    BEFORE UPDATE ON apt_charges_fines_basis
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ven_charges_updated ON ven_charges_fines_basis;
+
+CREATE TRIGGER trg_ven_charges_updated
+    BEFORE UPDATE ON ven_charges_fines_basis
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_concerns_qr ON concerns;
+
+CREATE TRIGGER trg_concerns_qr
+    BEFORE INSERT ON concerns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_concerns_qr();
+
+DROP TRIGGER IF EXISTS trg_receipts_qr ON receipts;
+
+CREATE TRIGGER trg_receipts_qr
+    BEFORE INSERT ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipts_qr();
+
+DROP TRIGGER IF EXISTS trg_expenses_qr ON expenses;
+
+CREATE TRIGGER trg_expenses_qr
+    BEFORE INSERT ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_expenses_qr();
+
+DROP TRIGGER IF EXISTS trg_assets_qr ON assets;
+
+CREATE TRIGGER trg_assets_qr
+    BEFORE INSERT ON assets
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_assets_qr();
+
+DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
+
+CREATE TRIGGER trg_visitors_qr
+    BEFORE INSERT ON visitors
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_visitors_qr();
+
+DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
+
+CREATE TRIGGER trg_patrol_locations_qr
+    BEFORE INSERT ON patrol_locations
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_patrol_locations_qr();
+
 DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
+
 CREATE TRIGGER trg_concerns_assigns_sync_status
     AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
     FOR EACH ROW
