@@ -2,8 +2,6 @@
 -- ESTATEHUB - COMPLETE DATABASE SCHEMA & FUNCTIONS (v3 - CORRECTED)
 -- Accounts-as-categorisation: acc_id replaces charge_type/payment_type/category
 -- Interest split: single receivable row, two transaction lines on verify
--- Double-entry bookkeeping: every financial event posts paired Dr + Cr lines
---   linked by transactions.journal_id.
 -- ============================================================
 -- SAFE TO RE-RUN: CREATE OR REPLACE / IF NOT EXISTS / ON CONFLICT DO NOTHING
 -- Intended for a FRESH database reset followed by migrate.py seeding.
@@ -19,7 +17,7 @@ CREATE TABLE IF NOT EXISTS societies (
     PAN_number VARCHAR(10),
     logo VARCHAR(100),
     address TEXT,
-    email VARCHAR(100),
+    email VARCHAR(30),
     phone VARCHAR(20),
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
@@ -44,12 +42,12 @@ CREATE TABLE IF NOT EXISTS societies (
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    email VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(30) NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     pin_hash TEXT,
     pattern_hash TEXT,
     name VARCHAR(100),
-    role VARCHAR(20) NOT NULL CHECK (
+    role VARCHAR(10) NOT NULL CHECK (
         role IN (
             'admin',
             'apartment',
@@ -132,7 +130,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     license VARCHAR(255),
     name VARCHAR(100),
     photo VARCHAR(255),
-    service_type VARCHAR(100),
+    service_type VARCHAR(30),
     mobile VARCHAR(15),
     service_description TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -182,8 +180,6 @@ CREATE TABLE IF NOT EXISTS assets (
     qr_payload VARCHAR(255)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets(qr_payload);
-
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -220,9 +216,6 @@ CREATE TABLE IF NOT EXISTS concerns (
     updated_by INT REFERENCES users (id),
     qr_payload VARCHAR(255)
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
-
 -- ════════════════════════════════════════════════════════════════════════
 -- CONCERNS_ASSIGNS — unified per-assignee lifecycle (2026-07 overhaul)
 --
@@ -278,83 +271,6 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     UNIQUE (concern_id, role, entity_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id);
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
-
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
-
--- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
--- This is now the ONLY trigger writing concerns.status from delegation state
--- (previously a second, independently-ruled trigger on concerns_invite could
--- race this one and leave concerns.status reflecting whichever fired last).
---
--- 2026-08 fix: the aggregate is now computed ONLY over "touched" rows —
--- rows that actually reached 'assigned' or beyond. Rows still sitting at
--- 'invited'/'bid_submitted' (candidates who were never formally chosen,
--- e.g. losing bidders) are excluded entirely from this calculation, so
--- they can no longer block a concern from reaching 'resolved'. Previously
--- a single leftover invited/bid_submitted row from an unselected candidate
--- would keep a concern stuck at 'assigned' forever, even after the actual
--- assignee(s) had resolved their work — see Concerns_Workflow_Review.md §2.9.
-CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
-RETURNS VOID
-LANGUAGE plpgsql AS $$
-DECLARE
-    v_touched INT;
-    v_touched_closed INT;
-    v_touched_resolved_or_closed INT;
-    v_new_status VARCHAR(20);
-BEGIN
-    PERFORM 1 FROM concerns WHERE id=p_concern_id FOR UPDATE; -- lock the concern row to prevent race conditions
-    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
-           COUNT(*) FILTER (WHERE status = 'closed'),
-           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
-      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
-      FROM concerns_assigns
-     WHERE concern_id = p_concern_id
-       AND status IN ('assigned', 'accepted', 'resolved', 'closed');
-
-    IF v_touched = 0 THEN
-        -- No one has ever been formally assigned yet — still open, whether
-        -- there are zero rows or only invited/bid_submitted candidates.
-        v_new_status := 'open';
-    ELSIF v_touched_closed = v_touched THEN
-        v_new_status := 'closed';
-    ELSIF v_touched_resolved_or_closed = v_touched THEN
-        v_new_status := 'resolved';
-    ELSE
-        v_new_status := 'assigned';
-    END IF;
-
-    UPDATE concerns
-       SET status = v_new_status,
-           updated_at = NOW()
-     WHERE id = p_concern_id
-       AND status IS DISTINCT FROM v_new_status;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION fn_trg_sync_concern_status()
-RETURNS TRIGGER
-LANGUAGE plpgsql AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        PERFORM fn_sync_concern_status(OLD.concern_id);
-        RETURN OLD;
-    ELSE
-        PERFORM fn_sync_concern_status(NEW.concern_id);
-        RETURN NEW;
-    END IF;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
-CREATE TRIGGER trg_concerns_assigns_sync_status
-    AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_sync_concern_status();
-
 -- ── security_roster & attendance (needed before payables FK) ──
 CREATE TABLE IF NOT EXISTS security_roster (
     id SERIAL PRIMARY KEY,
@@ -373,7 +289,6 @@ CREATE TABLE IF NOT EXISTS security_roster (
         roster_date
     )
 );
-
 -- ════════════════════════════════════════════════════════════════
 -- RECEIVABLES  — auto-credits, one row per entity per billing period.
 --
@@ -407,7 +322,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INT NOT NULL,
-    role VARCHAR(20) NOT NULL CHECK (
+    role VARCHAR(10) NOT NULL CHECK (
         role IN (
             'apartment',
             'vendor',
@@ -446,7 +361,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     created_by INT REFERENCES users (id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month)
+
 WHERE
     period_month IS NOT NULL;
 
@@ -456,7 +371,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    role VARCHAR(20) CHECK (
+    role VARCHAR(10) CHECK (
         role IN (
             'apartment',
             'vendor',
@@ -499,15 +414,13 @@ CREATE TABLE IF NOT EXISTS receipts (
     created_by INT REFERENCES users (id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts(qr_payload);
-
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
 CREATE TABLE IF NOT EXISTS expenses (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
     entity_id INT,
-    role VARCHAR(20) CHECK (
+    role VARCHAR(10) CHECK (
         role IN (
             'vendor',
             'security',
@@ -549,8 +462,6 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_by INT REFERENCES users (id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses(qr_payload);
-
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
 --
@@ -567,7 +478,7 @@ CREATE TABLE IF NOT EXISTS payables (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INT, -- security_staff.id
-    role VARCHAR(20) CHECK (
+    role VARCHAR(10) CHECK (
         role IN (
             'apartment',
             'vendor',
@@ -632,8 +543,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_transactions_journal ON transactions (journal_id);
-
 -- ── Vendor passes ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendor_passes (
     id SERIAL PRIMARY KEY,
@@ -678,11 +587,6 @@ CREATE TABLE IF NOT EXISTS event_tickets (
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
-
-CREATE INDEX IF NOT EXISTS idx_event_tickets_user ON event_tickets (user_id);
-
 -- ── Apartment charges / fines basis ───────────────────────────
 CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
@@ -700,8 +604,6 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
 
 -- ── Vendor charges ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
@@ -725,14 +627,11 @@ CREATE TABLE IF NOT EXISTS gate_access (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INTEGER NOT NULL,
-    role VARCHAR(20),
+    role VARCHAR(10),
     time_in TIMESTAMP NOT NULL DEFAULT NOW(),
     time_out TIMESTAMP
 );
 
--- brought_forward: opening balance per account per financial year.
--- Replaces accounts.bf_amount/drcr_bf as the source of truth once
--- seeded (see fn_seed_brought_forward_from_accounts below).
 CREATE TABLE IF NOT EXISTS brought_forward (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -753,12 +652,10 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
-
 CREATE TABLE IF NOT EXISTS role_permissions (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL,
+    role VARCHAR(10) NOT NULL,
     card_id VARCHAR(100) NOT NULL,
     permission VARCHAR(20) NOT NULL CHECK (
         permission IN (
@@ -798,9 +695,143 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS event_ticket_items (
+    id               SERIAL PRIMARY KEY,
+    event_ticket_id  INT NOT NULL REFERENCES event_tickets(id) ON DELETE CASCADE,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    ticket_type      VARCHAR(20) NOT NULL CHECK (ticket_type IN ('ADULT', 'CHILD')),
+    qr_payload       VARCHAR(255) UNIQUE NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'cancelled')),
+    scanned_at       TIMESTAMP,
+    scanned_by       INT REFERENCES users(id),
+    created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS visitors (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    apartment_id     INT REFERENCES apartments(id) ON DELETE SET NULL,
+    host_apartment_id INT REFERENCES apartments(id),
+    name             VARCHAR(100) NOT NULL,
+    mobile           VARCHAR(15),
+    purpose          VARCHAR(200),
+    vehicle_number   VARCHAR(20),
+    visit_date       DATE NOT NULL DEFAULT CURRENT_DATE,
+    visit_time_from  TIME,
+    visit_time_to    TIME,
+    qr_payload       VARCHAR(255) UNIQUE,
+    status           VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','entered','exited')),
+    approved_by      INT REFERENCES users(id),
+    security_user_id INT REFERENCES users(id),
+    entered_at       TIMESTAMP,
+    exited_at        TIMESTAMP,
+    created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS alert_channels (
+    id           SERIAL PRIMARY KEY,
+    society_id   INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    channel_type VARCHAR(30) NOT NULL CHECK (channel_type IN ('school_bus', 'taxi', 'visitor')),
+    name         VARCHAR(100) NOT NULL,
+    identifier   VARCHAR(50),
+    apartment_id INT REFERENCES apartments(id),
+    is_recurring BOOLEAN NOT NULL DEFAULT TRUE,
+    active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS alert_subscriptions (
+    id           SERIAL PRIMARY KEY,
+    channel_id   INT NOT NULL REFERENCES alert_channels(id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
+    created_at   TIMESTAMP DEFAULT NOW(),
+    UNIQUE(channel_id, apartment_id)
+);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    id             SERIAL PRIMARY KEY,
+    society_id     INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    channel_id     INT REFERENCES alert_channels(id) ON DELETE CASCADE,
+    visitor_id     INT REFERENCES visitors(id) ON DELETE CASCADE,
+    state          VARCHAR(30) NOT NULL CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied')),
+    triggered_by   INT REFERENCES users(id),
+    triggered_at   TIMESTAMP DEFAULT NOW(),
+    expires_at     TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS patrol_locations (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_name   VARCHAR(100) NOT NULL,
+    description     TEXT,
+    qr_payload      VARCHAR(255) UNIQUE NOT NULL,
+    schedule_start  TIME,
+    schedule_end    TIME,
+    scan_interval   INT DEFAULT 120,
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS patrol_scans (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    location_id      INT NOT NULL REFERENCES patrol_locations(id) ON DELETE CASCADE,
+    security_user_id INT NOT NULL REFERENCES users(id),
+    scanned_at       TIMESTAMP DEFAULT NOW(),
+    notes            TEXT
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id SERIAL PRIMARY KEY,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users (id),
+    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
+    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (poll_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS polls (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    created_by INT REFERENCES users (id),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN ('active', 'closed', 'results_declared')
+    ),
+    choice_count SMALLINT NOT NULL CHECK (choice_count BETWEEN 2 AND 5),
+    choice_1 VARCHAR(100) NOT NULL,
+    choice_2 VARCHAR(100) NOT NULL,
+    choice_3 VARCHAR(100),
+    choice_4 VARCHAR(100),
+    choice_5 VARCHAR(100),
+    results_announced_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    ends_at TIMESTAMP,
+    reminder_sent_at TIMESTAMP
+);
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets(qr_payload);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month)
+
+CREATE INDEX IF NOT EXISTS idx_transactions_journal ON transactions (journal_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses(qr_payload);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts(qr_payload);
+CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
+CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors(society_id, visit_date);
+CREATE INDEX IF NOT EXISTS idx_event_ticket_items_qr ON event_ticket_items(qr_payload);
+CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
+
+CREATE INDEX IF NOT EXISTS idx_event_tickets_user ON event_tickets (user_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
+CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns(qr_payload);
+CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (
     user_id,
     read,
@@ -3043,8 +3074,8 @@ CREATE OR REPLACE FUNCTION fn_vendors_list(
     p_has_passes BOOLEAN DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, user_id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
-    business_name VARCHAR(100), service_type VARCHAR(100), mobile VARCHAR(15), active BOOLEAN,
+    id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
+    business_name VARCHAR(100), service_type VARCHAR(30), mobile VARCHAR(15), active BOOLEAN,
     pass_expiry DATE, gate_pass BOOLEAN, active_passes INT
 )
 LANGUAGE plpgsql STABLE AS $$
@@ -3088,7 +3119,7 @@ DROP FUNCTION IF EXISTS fn_security_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (
-    id INT, user_id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
+    id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
     shift VARCHAR(20), mobile VARCHAR(15), active BOOLEAN, salary_per_shift NUMERIC(10,2),
     joining_date DATE, shift_count BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), gate_pass BOOLEAN
 )
@@ -3132,7 +3163,7 @@ CREATE OR REPLACE FUNCTION fn_receivables_named(
     p_date_from   DATE DEFAULT NULL, p_date_to DATE DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
+    id INT, society_id INT, entity_id INT, role VARCHAR(10), entity_name TEXT,
     acc_id INT, account_name TEXT, interest_acc_id INT, interest_account_name TEXT,
     description TEXT, period_month DATE,
     base_amount NUMERIC(10,2), interest_amount NUMERIC(10,2),
@@ -3188,7 +3219,7 @@ CREATE OR REPLACE FUNCTION fn_payables_named(
     p_shift_date_from DATE DEFAULT NULL, p_shift_date_to DATE DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
+    id INT, society_id INT, entity_id INT, role VARCHAR(10), entity_name TEXT,
     acc_id INT, account_name TEXT,
     description TEXT, roster_id INT, shift_date DATE,
     amount NUMERIC(10,2), status VARCHAR(20), due_date DATE, days_overdue INT,
@@ -3233,7 +3264,7 @@ CREATE OR REPLACE FUNCTION fn_receipts_list(
     p_entity_role TEXT DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
+    id INT, society_id INT, entity_id INT, role VARCHAR(10), entity_name TEXT,
     receipt_date DATE, acc_id INT, account_name TEXT,
     particulars TEXT, amount NUMERIC(10,2), mode VARCHAR(20),
     cheque_no VARCHAR(50), transaction_id VARCHAR(255), status VARCHAR(20),
@@ -3286,7 +3317,7 @@ CREATE OR REPLACE FUNCTION fn_expenses_list(
     p_entity_role TEXT DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, society_id INT, entity_id INT, role VARCHAR(20), entity_name TEXT,
+    id INT, society_id INT, entity_id INT, role VARCHAR(10), entity_name TEXT,
     expense_date DATE, acc_id INT, account_name TEXT,
     particulars TEXT, amount NUMERIC(10,2), mode VARCHAR(20),
     cheque_no VARCHAR(50), transaction_id VARCHAR(255), status VARCHAR(20),
@@ -3830,7 +3861,7 @@ CREATE OR REPLACE FUNCTION fn_societies_list(
     p_status VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, name VARCHAR(100), email VARCHAR(100), phone VARCHAR(20),
+    id INT, name VARCHAR(100), email VARCHAR(30), phone VARCHAR(20),
     pan_number VARCHAR(10), secretary_name VARCHAR(100),
     plan VARCHAR(20), plan_status VARCHAR(10), plan_validity DATE,
     calc_start_date DATE,
@@ -3866,7 +3897,7 @@ DROP FUNCTION IF EXISTS fn_society_profile CASCADE;
 CREATE OR REPLACE FUNCTION fn_society_profile(p_society_id INT)
 RETURNS TABLE (
     id INT, name VARCHAR(100), logo VARCHAR(100), login_background VARCHAR(100),
-    email VARCHAR(100), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
+    email VARCHAR(30), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
     plan_status VARCHAR(10), plan_validity DATE, calc_start_date DATE,
     secretary_name VARCHAR(100), secretary_phone VARCHAR(20), secretary_sign VARCHAR(100),
     PAN_number VARCHAR(10), payment_qr VARCHAR(255),
@@ -4728,7 +4759,7 @@ $$;
 DROP FUNCTION IF EXISTS fn_check_orphan_receivables (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_receivables(p_society_id INT)
-RETURNS TABLE (receivable_id INT, role VARCHAR(20), entity_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
+RETURNS TABLE (receivable_id INT, role VARCHAR(10), entity_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT r.id, r.role, r.entity_id, 'Receivable references missing entity'::TEXT
     FROM receivables r
     WHERE r.society_id = p_society_id
@@ -4752,7 +4783,7 @@ $$;
 DROP FUNCTION IF EXISTS fn_check_duplicate_receivables (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_duplicate_receivables(p_society_id INT)
-RETURNS TABLE (entity_id INT, role VARCHAR(20), period_month DATE, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
+RETURNS TABLE (entity_id INT, role VARCHAR(10), period_month DATE, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
     SELECT r.entity_id, r.role, r.period_month, COUNT(*) AS dup_count,
            'Multiple receivables for same entity/role/period'::TEXT
     FROM receivables r
@@ -5167,133 +5198,14 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
 -- ════════════════════════════════════════════════════════════════
-
-CREATE TABLE IF NOT EXISTS event_ticket_items (
-    id               SERIAL PRIMARY KEY,
-    event_ticket_id  INT NOT NULL REFERENCES event_tickets(id) ON DELETE CASCADE,
-    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    ticket_type      VARCHAR(20) NOT NULL CHECK (ticket_type IN ('ADULT', 'CHILD')),
-    qr_payload       VARCHAR(255) UNIQUE NOT NULL,
-    status           VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'cancelled')),
-    scanned_at       TIMESTAMP,
-    scanned_by       INT REFERENCES users(id),
-    created_at       TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_event_ticket_items_qr ON event_ticket_items(qr_payload);
-
-CREATE TABLE IF NOT EXISTS visitors (
-    id               SERIAL PRIMARY KEY,
-    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    apartment_id     INT REFERENCES apartments(id) ON DELETE SET NULL,
-    host_apartment_id INT REFERENCES apartments(id),
-    name             VARCHAR(100) NOT NULL,
-    mobile           VARCHAR(15),
-    purpose          VARCHAR(200),
-    vehicle_number   VARCHAR(20),
-    visit_date       DATE NOT NULL DEFAULT CURRENT_DATE,
-    visit_time_from  TIME,
-    visit_time_to    TIME,
-    qr_payload       VARCHAR(255) UNIQUE,
-    status           VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','entered','exited')),
-    approved_by      INT REFERENCES users(id),
-    security_user_id INT REFERENCES users(id),
-    entered_at       TIMESTAMP,
-    exited_at        TIMESTAMP,
-    created_at       TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors(society_id, visit_date);
-
-CREATE TABLE IF NOT EXISTS alert_channels (
-    id           SERIAL PRIMARY KEY,
-    society_id   INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    channel_type VARCHAR(30) NOT NULL CHECK (channel_type IN ('school_bus', 'taxi', 'visitor')),
-    name         VARCHAR(100) NOT NULL,
-    identifier   VARCHAR(50),
-    apartment_id INT REFERENCES apartments(id),
-    is_recurring BOOLEAN NOT NULL DEFAULT TRUE,
-    active       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at   TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS alert_subscriptions (
-    id           SERIAL PRIMARY KEY,
-    channel_id   INT NOT NULL REFERENCES alert_channels(id) ON DELETE CASCADE,
-    apartment_id INT NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
-    created_at   TIMESTAMP DEFAULT NOW(),
-    UNIQUE(channel_id, apartment_id)
-);
-
-CREATE TABLE IF NOT EXISTS alert_events (
-    id             SERIAL PRIMARY KEY,
-    society_id     INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    channel_id     INT REFERENCES alert_channels(id) ON DELETE CASCADE,
-    visitor_id     INT REFERENCES visitors(id) ON DELETE CASCADE,
-    state          VARCHAR(30) NOT NULL CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied')),
-    triggered_by   INT REFERENCES users(id),
-    triggered_at   TIMESTAMP DEFAULT NOW(),
-    expires_at     TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS patrol_locations (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    location_name   VARCHAR(100) NOT NULL,
-    description     TEXT,
-    qr_payload      VARCHAR(255) UNIQUE NOT NULL,
-    schedule_start  TIME,
-    schedule_end    TIME,
-    scan_interval   INT DEFAULT 120,
-    active          BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS patrol_scans (
-    id               SERIAL PRIMARY KEY,
-    society_id       INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    location_id      INT NOT NULL REFERENCES patrol_locations(id) ON DELETE CASCADE,
-    security_user_id INT NOT NULL REFERENCES users(id),
-    scanned_at       TIMESTAMP DEFAULT NOW(),
-    notes            TEXT
-);
 -- ════════════════════════════════════════════════════════════════
 -- POLLING SYSTEM
 -- ════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS polls (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    created_by INT REFERENCES users (id),
-    title VARCHAR(200) NOT NULL,
-    description TEXT,
-    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
-        status IN ('active', 'closed', 'results_declared')
-    ),
-    choice_count SMALLINT NOT NULL CHECK (choice_count BETWEEN 2 AND 5),
-    choice_1 VARCHAR(100) NOT NULL,
-    choice_2 VARCHAR(100) NOT NULL,
-    choice_3 VARCHAR(100),
-    choice_4 VARCHAR(100),
-    choice_5 VARCHAR(100),
-    results_announced_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP,
-    ends_at TIMESTAMP,
-    reminder_sent_at TIMESTAMP
-);
 
 CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
 CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
 
-CREATE TABLE IF NOT EXISTS poll_votes (
-    id SERIAL PRIMARY KEY,
-    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
-    user_id INT NOT NULL REFERENCES users (id),
-    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
-    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (poll_id, user_id)
-);
 
 CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
 CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
@@ -5612,3 +5524,74 @@ CREATE OR REPLACE FUNCTION fn_poll_total_count_kpi(p_society_id INT)
 RETURNS BIGINT LANGUAGE SQL STABLE AS $$
     SELECT COUNT(*)::BIGINT FROM polls WHERE society_id = p_society_id;
 $$;
+
+- ── fn_sync_concern_status: aggregate concerns_assigns.status -> concerns.status ──
+-- This is now the ONLY trigger writing concerns.status from delegation state
+-- (previously a second, independently-ruled trigger on concerns_invite could
+-- race this one and leave concerns.status reflecting whichever fired last).
+--
+-- 2026-08 fix: the aggregate is now computed ONLY over "touched" rows —
+-- rows that actually reached 'assigned' or beyond. Rows still sitting at
+-- 'invited'/'bid_submitted' (candidates who were never formally chosen,
+-- e.g. losing bidders) are excluded entirely from this calculation, so
+-- they can no longer block a concern from reaching 'resolved'. Previously
+-- a single leftover invited/bid_submitted row from an unselected candidate
+-- would keep a concern stuck at 'assigned' forever, even after the actual
+-- assignee(s) had resolved their work — see Concerns_Workflow_Review.md §2.9.
+CREATE OR REPLACE FUNCTION fn_sync_concern_status(p_concern_id INT)
+RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_touched INT;
+    v_touched_closed INT;
+    v_touched_resolved_or_closed INT;
+    v_new_status VARCHAR(20);
+BEGIN
+    PERFORM 1 FROM concerns WHERE id=p_concern_id FOR UPDATE; -- lock the concern row to prevent race conditions
+    SELECT COUNT(*) FILTER (WHERE status IN ('assigned', 'accepted', 'resolved', 'closed')),
+           COUNT(*) FILTER (WHERE status = 'closed'),
+           COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))
+      INTO v_touched, v_touched_closed, v_touched_resolved_or_closed
+      FROM concerns_assigns
+     WHERE concern_id = p_concern_id
+       AND status IN ('assigned', 'accepted', 'resolved', 'closed');
+
+    IF v_touched = 0 THEN
+        -- No one has ever been formally assigned yet — still open, whether
+        -- there are zero rows or only invited/bid_submitted candidates.
+        v_new_status := 'open';
+    ELSIF v_touched_closed = v_touched THEN
+        v_new_status := 'closed';
+    ELSIF v_touched_resolved_or_closed = v_touched THEN
+        v_new_status := 'resolved';
+    ELSE
+        v_new_status := 'assigned';
+    END IF;
+
+    UPDATE concerns
+       SET status = v_new_status,
+           updated_at = NOW()
+     WHERE id = p_concern_id
+       AND status IS DISTINCT FROM v_new_status;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_trg_sync_concern_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        PERFORM fn_sync_concern_status(OLD.concern_id);
+        RETURN OLD;
+    ELSE
+        PERFORM fn_sync_concern_status(NEW.concern_id);
+        RETURN NEW;
+    END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
+CREATE TRIGGER trg_concerns_assigns_sync_status
+    AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_sync_concern_status();
