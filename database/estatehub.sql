@@ -361,10 +361,6 @@ CREATE TABLE IF NOT EXISTS receivables (
     created_by INT REFERENCES users (id)
 );
 
-
-WHERE
-    period_month IS NOT NULL;
-
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
 CREATE TABLE IF NOT EXISTS receipts (
     id SERIAL PRIMARY KEY,
