@@ -87,31 +87,7 @@ def register_poll_callbacks(app):
                 "FROM polls WHERE society_id = %s AND status = 'active' ORDER BY created_at DESC",
                 (society_id,), fetch_all=True
             )
-            try:
-                soon_rows = db._execute(
-                    "SELECT * FROM fn_get_polls_ending_soon(%s, %s)",
-                    (society_id, 15), fetch_all=True
-                )
-                if soon_rows:
-                    targets = PushService.get_notification_targets(society_id, roles=["apartment"])
-                    if targets:
-                        for soon in soon_rows:
-                            try:
-                                PushService.send_bulk_push(
-                                    targets,
-                                    "⏰ Poll Ending Soon",
-                                    f"Poll '{soon['title']}' ends at {soon['ends_at']}",
-                                    url="/dashboard/polls",
-                                    society_id=society_id,
-                                )
-                                db._execute(
-                                    "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
-                                    (soon["id"],)
-                                )
-                            except Exception as e:
-                                logger.error(f"Ending soon push notify failed: {e}")
-            except Exception as e:
-                logger.error(f"Poll ending soon check failed: {e}")
+            _check_poll_ending_soon(society_id)
             if not rows:
                 return html.Div([
                     html.Div([
@@ -292,13 +268,14 @@ def register_poll_callbacks(app):
         choices_out = []
         for i, choice_text in enumerate(choices, start=1):
             is_selected = user_vote == i
-            btn_color = "primary" if is_selected else "outline-primary"
+            btn_color = "info"
             choices_out.append(
                 dbc.Button(
                     [html.I(className="fas fa-check me-1") if is_selected else "", f" {choice_text}"],
                     id={"type": "poll-choice-btn", "poll_id": poll_id, "choice": i},
                     color=btn_color,
-                    outline=not is_selected,
+                    outline=False,
+                    disabled=user_vote is not None,
                     className="mb-2 me-2",
                     style={"minWidth": "200px", "textAlign": "left"},
                 )
@@ -360,12 +337,8 @@ def register_poll_callbacks(app):
                 color_updates = []
                 outline_updates = []
                 for i in range(1, store_data.get("choice_count", 2) + 1):
-                    if i == choice:
-                        color_updates.append("primary")
-                        outline_updates.append(False)
-                    else:
-                        color_updates.append("outline-primary")
-                        outline_updates.append(True)
+                    color_updates.append("info")
+                    outline_updates.append(False)
 
                 return updated_store, color_updates, outline_updates
         except Exception as e:
@@ -508,6 +481,18 @@ def register_poll_callbacks(app):
             if not rows:
                 return html.Div("No polls found.", className="text-muted text-center")
 
+            poll_ids = [row["id"] for row in rows]
+            vote_counts_rows = db._execute(
+                "SELECT poll_id, choice, COUNT(*) AS cnt "
+                "FROM poll_votes "
+                "WHERE poll_id = ANY(%s) "
+                "GROUP BY poll_id, choice",
+                (poll_ids,), fetch_all=True
+            )
+            vote_counts = {}
+            for vc in vote_counts_rows:
+                vote_counts.setdefault(vc["poll_id"], {})[vc["choice"]] = vc["cnt"]
+
             cards = []
             for row in rows:
                 poll_id = row["id"]
@@ -529,10 +514,7 @@ def register_poll_callbacks(app):
                 vote_details = []
                 if results_announced or status == "closed":
                     for i, choice_text in enumerate(choices, start=1):
-                        vote_count = db._execute(
-                            "SELECT COUNT(*) AS cnt FROM poll_votes WHERE poll_id = %s AND choice = %s",
-                            (poll_id, i), fetch_one=True
-                        )["cnt"]
+                        vote_count = vote_counts.get(poll_id, {}).get(i, 0)
                         pct = (vote_count / total_votes * 100) if total_votes > 0 else 0
                         vote_details.append(
                             html.Div([
