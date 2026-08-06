@@ -454,6 +454,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     ),
     cheque_no VARCHAR(50),
     transaction_id VARCHAR(255),
+    tds_pct NUMERIC(5,2) DEFAULT 10,
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
             'pending',
@@ -2239,46 +2240,101 @@ BEGIN
 END;
 $$;
 
--- Single-row verify. Posts Dr expense side + Cr cash/bank side.
+
+-- fn_verify_payment: entry_side + TDS split
+-- ============================================
+-- Same two fixes as fn_save_expense: entry_side was entirely missing
+-- (0 references, confirmed in the live repo), and this adds the same
+-- p_tds_pct-driven split (default 10) using fn_resolve_tds_account.
+--
+-- NOT wired to any UI prompt yet — "Verify Payment" is currently a
+-- single-click row action (drilldown_callbacks.py, action=="verify_payment")
+-- with no modal and no field collection at all, unlike the "New Expense"
+-- form which is schema-introspected from a real table. Exposing p_tds_pct
+-- here means either:
+--   (a) always applying the default 10% silently (no prompt), or
+--   (b) building a small confirm-modal to ask before calling verify,
+--       mirroring how other confirm actions in this codebase collect a
+--       value before submitting (need to look at an existing example of
+--       that pattern before building it, rather than inventing one).
+-- Left as an open question rather than guessed at.
+--
+-- STATUS: draft, not yet run against a live PG16 instance.
+
 DROP FUNCTION IF EXISTS fn_verify_payment CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_payment(
     p_payment_id   INT,
     p_confirmed_by INT,
-    p_mode         VARCHAR DEFAULT 'cash'
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_tds_pct      NUMERIC DEFAULT 10
 )
 RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
-    v_pay    payables%ROWTYPE;
-    v_trx_id INT;
+    v_pay        payables%ROWTYPE;
+    v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc INT;
+    v_cash_acc   INT;
+    v_tds_acc    INT;
+    v_tds_amt    NUMERIC(15,2) := 0;
+    v_net_amt    NUMERIC(15,2);
 BEGIN
     SELECT * INTO v_pay FROM payables WHERE id = p_payment_id FOR UPDATE;
     IF NOT FOUND THEN RETURN 'Error: Payment not found'; END IF;
     IF v_pay.status = 'verified' THEN RETURN 'Already verified'; END IF;
     IF v_pay.acc_id IS NULL THEN RETURN 'Error: No expense account set on this payment row'; END IF;
+    IF p_tds_pct IS NOT NULL AND (p_tds_pct < 0 OR p_tds_pct > 100) THEN
+        RETURN 'Error: TDS % must be between 0 and 100';
+    END IF;
 
     v_cash_acc := fn_resolve_cash_account(v_pay.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
-    -- Dr: expense account (salary etc.)
-    INSERT INTO transactions(
-        society_id, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-    ) VALUES (
-        v_pay.society_id, CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
-        v_pay.description,
-        v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
-    ) RETURNING id INTO v_trx_id;
+    IF COALESCE(p_tds_pct, 0) > 0 THEN
+        v_tds_acc := fn_resolve_tds_account(v_pay.society_id);
+    END IF;
 
-    -- Cr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_pay.acc_id THEN
+    IF v_tds_acc IS NOT NULL THEN
+        v_tds_amt := ROUND(v_pay.amount * p_tds_pct / 100.0, 2);
+        v_net_amt := v_pay.amount - v_tds_amt;
+
+        -- Dr: net expense amount, to the payable's own expense account
         INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, CURRENT_DATE, v_cash_acc, v_pay.entity_id,
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
+            v_pay.description,
+            v_net_amt, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
+        ) RETURNING id INTO v_trx_id;
+
+        -- Dr: TDS amount, to the TDS account
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_tds_acc, v_pay.entity_id,
+            'TDS on ' || v_pay.description,
+            v_tds_amt, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
+        );
+    ELSE
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
+            v_pay.description,
+            v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
+        ) RETURNING id INTO v_trx_id;
+    END IF;
+
+    -- Cr: cash/bank, full gross amount either way
+    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_pay.acc_id THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_pay.society_id, 'Cr', CURRENT_DATE, v_cash_acc, v_pay.entity_id,
             'Cash paid - ' || v_pay.description,
             v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         );
@@ -2864,13 +2920,13 @@ END;
 $$;
 
 DROP FUNCTION IF EXISTS fn_save_expense CASCADE;
-
+ 
 CREATE OR REPLACE FUNCTION fn_save_expense(
     p_society_id       INT,
     p_acc_id           INT,
     p_particulars      TEXT,
     p_amount           NUMERIC,
-
+ 
     p_entity_id        INT     DEFAULT NULL,
     p_role             VARCHAR DEFAULT 'other',
     p_mode             VARCHAR DEFAULT 'cash',
@@ -2878,7 +2934,8 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
     p_created_by       INT     DEFAULT NULL,
     p_cheque_no        VARCHAR DEFAULT NULL,
     p_trx_id           VARCHAR DEFAULT NULL,
-    p_source_reference VARCHAR DEFAULT NULL
+    p_source_reference VARCHAR DEFAULT NULL,
+    p_tds_pct          NUMERIC DEFAULT 10
 )
 RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
@@ -2887,6 +2944,9 @@ DECLARE
     v_trx_id     INT;
     v_journal_id INT;
     v_cash_acc   INT;
+    v_tds_acc    INT;
+    v_tds_amt    NUMERIC(15,2) := 0;
+    v_net_amt    NUMERIC(15,2);
     v_drcr       VARCHAR(2);
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
@@ -2894,22 +2954,25 @@ BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
-
+    IF p_tds_pct IS NOT NULL AND (p_tds_pct < 0 OR p_tds_pct > 100) THEN
+        RAISE EXCEPTION 'TDS %% must be between 0 and 100';
+    END IF;
+ 
     SELECT drcr_account INTO v_drcr FROM accounts WHERE id = p_acc_id AND society_id = p_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found for this society', p_acc_id; END IF;
     IF v_drcr = 'Cr' THEN
         RAISE EXCEPTION 'Account % is a Cr (income) account — use fn_save_receipt for receipts', p_acc_id;
     END IF;
-
+ 
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
       FROM users WHERE id = p_created_by;
-
+ 
     IF v_is_admin THEN
         v_status := 'confirmed';
     ELSE
         v_status := 'pending';
     END IF;
-
+ 
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
@@ -2921,25 +2984,60 @@ BEGIN
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
         p_source_reference, NOW()
     ) RETURNING id INTO v_expense_id;
-
+ 
     IF v_status = 'confirmed' THEN
         v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
         v_journal_id := NEXTVAL('seq_transaction_number');
-
-        INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            p_society_id, p_expense_date, p_acc_id, p_entity_id, p_particulars,
-            p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
-        ) RETURNING id INTO v_trx_id;
-
-        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+ 
+        -- Resolve TDS only if a percentage was actually asked for and the
+        -- society has a TDS account configured. Anything else falls
+        -- through to the pre-existing single-leg behavior.
+        IF COALESCE(p_tds_pct, 0) > 0 THEN
+            v_tds_acc := fn_resolve_tds_account(p_society_id);
+        END IF;
+ 
+        IF v_tds_acc IS NOT NULL THEN
+            v_tds_amt := ROUND(p_amount * p_tds_pct / 100.0, 2);
+            v_net_amt := p_amount - v_tds_amt;
+ 
+            -- Leg 1a: net expense amount, Dr, to the chosen expense account
             INSERT INTO transactions(
-                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, p_expense_date, v_cash_acc, p_entity_id,
+                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_particulars,
+                v_net_amt, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
+            ) RETURNING id INTO v_trx_id;
+ 
+            -- Leg 1b: TDS amount, Dr, to the TDS account
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                p_society_id, 'Dr', p_expense_date, v_tds_acc, p_entity_id,
+                'TDS on ' || p_particulars,
+                v_tds_amt, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
+            );
+        ELSE
+            -- No TDS configured/requested — original single Dr leg, full amount.
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_particulars,
+                p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
+            ) RETURNING id INTO v_trx_id;
+        END IF;
+ 
+        -- Leg 2: cash/bank, Cr, always the FULL gross amount — matches
+        -- the confirmed example (Cr ICICI 1000 whether or not TDS splits
+        -- the Dr side into 900+100).
+        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                p_society_id, 'Cr', p_expense_date, v_cash_acc, p_entity_id,
                 'Cash paid - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             );
@@ -2948,15 +3046,71 @@ BEGIN
         v_trx_id := NULL;
         v_journal_id := NULL;
     END IF;
-
+ 
     status := v_status;
     expense_id := v_expense_id;
     transaction_id := v_trx_id;
     journal_id := v_journal_id;
-
+ 
     RETURN NEXT;
 END;
 $$;
+
+--   1. fn_save_expense still had ZERO entry_side references in the repo
+--      as of this session — the earlier entry_side migration draft
+--      covering the 11 writer functions was never actually merged in.
+--      This patch adds entry_side to both of fn_save_expense's legs
+--      (Dr on the expense account, Cr on the cash/bank account) — same
+--      direction assignment as before, just finally landing here too.
+--
+--   2. New: p_tds_pct parameter (default 10, matching "on expenses form,
+--      default 10%"). When > 0 and a TDS-target account can be resolved
+--      for the society, the expense leg splits into TWO Dr rows sharing
+--      the same journal_id — net expense amount to p_acc_id, TDS amount
+--      to the resolved TDS account — while the cash/bank Cr leg still
+--      posts the FULL gross amount, matching the pattern confirmed
+--      earlier this session (Cr bank 1000 / Dr Salary 900 / Dr TDS 100).
+--      When p_tds_pct = 0 or no TDS account is configured for the
+--      society, behavior is unchanged (single Dr leg) — backward
+--      compatible with existing callers that don't pass the new param.
+--
+-- fn_resolve_tds_account mirrors fn_resolve_cash_account's existing
+-- ILIKE-name-lookup pattern (same fragility, same convention — this
+-- codebase already does this for the cash/bank resolver, so matching it
+-- here is more consistent than introducing a different mechanism).
+-- Flagging that fragility rather than hiding it: if a society renames
+-- its TDS account away from containing "TDS to IT", this silently stops
+-- resolving and TDS splitting silently stops happening (falls back to
+-- single-leg behavior) rather than erroring — worth a follow-up look at
+-- a proper flag/reference column if this matters enough to harden.
+--
+-- STATUS: draft, not yet run against a live PG16 instance this session
+-- (unlike fn_fy_closing_report / fn_cashbook_paired_v3, which were
+-- actually executed and had real bugs caught). Verify with pglast +
+-- a real DB pass, including a live run, before deploying.
+-- ════════════════════════════════════════════════════════════════
+ 
+-- ── Schema: TDS % field on the expenses table itself ──
+-- This is what makes the New-Expense form pick it up automatically —
+-- forms in this codebase are built from live schema introspection
+-- (schema_introspect.py), not hand-authored field lists, so adding the
+-- column is the actual UI change; DEFAULT_FIELD_VALUES["expenses"] in
+-- schema_introspect.py additionally pre-fills 10 on the New form (see
+-- accompanying Python patch).
+CREATE OR REPLACE FUNCTION fn_resolve_tds_account(p_society_id INT)
+RETURNS INT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+BEGIN
+    SELECT id INTO v_acc_id FROM accounts
+    WHERE society_id = p_society_id AND drcr_account = 'Dr'
+      AND name ILIKE '%TDS to IT%'
+    LIMIT 1;
+ 
+    RETURN v_acc_id;  -- NULL if not found — caller treats that as "TDS not configured"
+END;
+$$;
+ 
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 9: LIST FUNCTIONS (apartments, vendors, security)

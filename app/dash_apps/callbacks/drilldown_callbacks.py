@@ -2159,9 +2159,20 @@ def _save_expense_v3(db, d, sid):
     if not particulars:
         return False, "Particulars are required", None
 
+    # TDS % — defaults to 10 if the form field is blank/missing (matches
+    # fn_save_expense's own DB-side default), not just if it's absent from
+    # the dict, since a cleared/blank input field also arrives as "".
+    tds_pct_raw = d.get("tds_pct")
+    try:
+        tds_pct = float(tds_pct_raw) if tds_pct_raw not in (None, "") else 10
+    except (ValueError, TypeError):
+        return False, "Invalid TDS %", None
+    if tds_pct < 0 or tds_pct > 100:
+        return False, "TDS % must be between 0 and 100", None
+
     try:
         r = db._execute(
-            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 acc_id,
@@ -2175,6 +2186,7 @@ def _save_expense_v3(db, d, sid):
                 d.get("cheque_no"),
                 d.get("transaction_id"),
                 d.get("source_reference"),
+                tds_pct,
             ),
             fetch_one=True,
         )

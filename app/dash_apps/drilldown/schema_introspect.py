@@ -507,6 +507,13 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
     },
     "expenses": {
         "mode": "cash",
+        # New — "TDS %" asked on the New Expense form, default 10 (matches
+        # fn_save_expense's own p_tds_pct default). Set to 0 to skip TDS
+        # entirely for a given expense; requires a resolvable TDS account
+        # for the society either way (fn_resolve_tds_account), otherwise
+        # fn_save_expense silently falls back to the old single-leg
+        # behavior regardless of what's entered here.
+        "tds_pct": 10,
     },
 }
 
