@@ -62,6 +62,7 @@ from app.dash_apps.drilldown.registry import (
 )
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from app.security.audit_context import get_current_user_role, get_current_user_id
 
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
