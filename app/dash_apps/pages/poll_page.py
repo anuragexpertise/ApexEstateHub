@@ -15,14 +15,7 @@ def render_poll_page(sid=None, user_id=None, role=None, active_tab="polls"):
 
 
 def _polls_list(sid, user_id, role):
-    portal = "owner" if role == "apartment" else "admin"
     return html.Div([
-        html.Div([
-            html.H4("Polls", className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
-            html.Small("View and vote in community polls", style={"color": "#aaa", "fontSize": "12px"}),
-        ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"}),
-        html.Div(id="polls-kpi-row", children=_kpi_row_dynamic(portal, "polls", sid)),
-        html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
         html.Div(id="drill-content", children=[
             html.Div("Click a KPI to explore data →",
                      className="text-muted text-center", style={"padding": "6px 2px"}),
@@ -47,6 +40,7 @@ def _polls_list(sid, user_id, role):
                 html.Div(id="poll-detail-description", className="mb-3", style={"color": "#555", "fontSize": "14px"}),
                 html.Div(id="poll-detail-choices", className="mb-3"),
                 html.Div(id="poll-detail-vote-result", className="mb-3"),
+                html.Div(id="poll-detail-results", className="mb-3"),
                 html.Small(id="poll-detail-total-votes", className="text-muted", style={"fontSize": "12px"}),
             ]),
             html.Div(id="poll-results-section", children=[
@@ -59,7 +53,7 @@ def _polls_list(sid, user_id, role):
         ]),
         html.Div(id="poll-toast-container"),
         dcc.Store(id="poll-action-store", storage_type="memory", data=None),
-    ], className="portal-page")
+    ])
 
 
 def _kpi_row_dynamic(portal, tab, sid):
@@ -78,9 +72,10 @@ def _poll_detail(sid, user_id, role):
         html.Div(id="poll-detail-description", className="mb-3", style={"color": "#555", "fontSize": "14px"}),
         html.Div(id="poll-detail-choices", className="mb-3"),
         html.Div(id="poll-detail-vote-result", className="mb-3"),
+        html.Div(id="poll-detail-results", className="mb-3"),
         html.Div(id="poll-detail-total-votes", className="text-muted", style={"fontSize": "12px"}),
         dcc.Store(id="poll-detail-store", storage_type="memory", data=None),
-    ], className="portal-page")
+    ])
 
 
 def _create_poll_form(sid, user_id, role):
@@ -156,7 +151,7 @@ def _create_poll_form(sid, user_id, role):
             ]),
             html.Div(id="poll-create-result", className="mt-3"),
         ], className="p-4"),
-    ], className="portal-page")
+    ])
 
 
 def _poll_results(sid, user_id, role):
@@ -167,4 +162,4 @@ def _poll_results(sid, user_id, role):
         html.Div(id="poll-results-container", children=[
             html.Div("Loading results…", className="text-muted text-center", style={"padding": "40px 0"}),
         ]),
-    ], className="portal-page")
+    ])

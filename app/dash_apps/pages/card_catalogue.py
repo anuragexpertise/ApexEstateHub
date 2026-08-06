@@ -493,13 +493,6 @@ KPI_CARDS = {
         "title": "Active Polls", "group": "polling",
     },
 
-    "kpi_polls_votes": {
-        "query": "SELECT COUNT(*) AS v FROM poll_votes pv JOIN polls p ON p.id=pv.poll_id WHERE p.society_id=%s",
-        "params": 1, "format": "number",
-        "icon": "fa-check-to-slot", "color": "#18794e",
-        "title": "Total Votes Cast", "group": "polling",
-    },
-
 
     # ══════════════════════════════════════════════════════════════════════
     # GATE LOGS
@@ -1041,7 +1034,7 @@ DEFAULT_LAYOUTS = {
         # Per the Concerns workflow spec: Admin/Concerns tab shows
         # "not closed" + "total" (society-wide).
         "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
-        "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
+        "polls": ["kpi_polls_total", "kpi_polls_active"],
         "assets": ["kpi_assets_count", "kpi_assets_value"],
         "receipts": [
             "kpi_receipts_month",
@@ -1113,7 +1106,7 @@ DEFAULT_LAYOUTS = {
         # concerns).
         "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total", "kpi_concerns_open"],
         "events": ["kpi_events_total", "kpi_events_tickets"],
-        "polls": ["kpi_polls_total", "kpi_polls_active", "kpi_polls_votes"],
+        "polls": ["kpi_polls_total", "kpi_polls_active"],
         "settings": ["kpi_owner_member_since"],
     },
     "vendor": {

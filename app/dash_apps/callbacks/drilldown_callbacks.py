@@ -783,6 +783,40 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
+            # ── Close Poll (admin only) ───────────────────────────────────────────
+            elif action == "close_poll" and entity == "poll":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can close a poll"}}
+                    return store, content, bc, {"display": "none"}, toast
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                db._execute(
+                    "SELECT fn_close_poll(%s::INT, %s::INT)",
+                    (int(pk), int(user_id)), fetch_one=True
+                )
+                invalidate_kpi_cache()
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success", "message": "Poll closed"}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
+            # ── Declare Results (admin only) ──────────────────────────────────────
+            elif action == "declare_results" and entity == "poll":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can declare results"}}
+                    return store, content, bc, {"display": "none"}, toast
+                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                db._execute(
+                    "SELECT fn_declare_results(%s::INT, %s::INT)",
+                    (int(pk), int(user_id)), fetch_one=True
+                )
+                invalidate_kpi_cache()
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success", "message": "Results declared"}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
             # ── Closed (Admin/Owner) — close a concern for every assignee row ──────
             elif action == "close_concern" and entity == "concern":
                 role = (auth or {}).get("role")
@@ -1672,7 +1706,8 @@ def _render_card(
         entity_key = to_plural(singular)
         meta = get_entity_meta().get(entity_key, {})
         pk = (store.get("stack") or [{}])[-1].get("entity_pk")
-        record = loaders.load_profile(singular, pk, filters.get("society_id"))
+        user_id = (auth or {}).get("user_id")
+        record = loaders.load_profile(singular, pk, filters.get("society_id"), user_id=user_id)
         if not record:
             return _empty_state("Record not found")
         return renderers.render_profile_card(
@@ -1844,6 +1879,13 @@ def _render_card(
                 reason=prefill.get("reason", ""),
                 outstanding=float(prefill.get("outstanding") or 0),
             )
+
+        # ── Create Poll — dedicated form (bypasses schema-driven form) ─────────
+        if card_id == "form_poll_new":
+            sid_val = filters.get("society_id")
+            role = (auth or {}).get("role", "admin")
+            from app.dash_apps.pages.poll_page import _create_poll_form
+            return _create_poll_form(sid_val, (auth or {}).get("user_id"), role)
 
         rest = card_id[5:]
         parts = rest.rsplit("_", 1)
@@ -3287,3 +3329,50 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if sec_staff_id:
             f["sec_assignee_id"] = sec_staff_id
     return f
+
+
+    # ── Poll vote (inline on profile card) ─────────────────────────────────
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("profile-action-trigger", "data", allow_duplicate=True),
+        Input({"type": "poll-vote-btn", "poll_id": ALL, "choice": ALL}, "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_poll_vote(n_clicks_list, store, auth):
+        ctx = callback_context
+        if not ctx.triggered or not any(n_clicks_list):
+            return no_update, no_update
+
+        user_id = (auth or {}).get("user_id")
+        society_id = (auth or {}).get("society_id")
+        if not user_id or not society_id:
+            return no_update, no_update
+
+        try:
+            prop_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            import json
+            parsed = json.loads(prop_id)
+            poll_id = int(parsed["poll_id"])
+            choice = int(parsed["choice"])
+        except Exception:
+            return no_update, no_update
+
+        try:
+            result = db._execute(
+                "SELECT fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT) AS success",
+                (poll_id, user_id, choice), fetch_one=True
+            )
+            if result and result.get("success"):
+                invalidate_kpi_cache()
+                if store is None:
+                    store = {}
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success", "message": "Vote cast successfully"}}
+                return store, toast
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Poll vote failed: {e}")
+
+        return no_update, no_update

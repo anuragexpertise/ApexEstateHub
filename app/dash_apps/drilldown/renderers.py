@@ -113,6 +113,9 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("security", "cashbook"):     {"view"},
     ("security", "ledger"):       set(),
     ("security", "*"):            set(),
+    ("apartment", "polls"):       {"view"},
+    ("vendor", "polls"):          {"view"},
+    ("security", "polls"):        {"view"},
 }
 
 
@@ -1125,6 +1128,89 @@ def render_profile_card(card_id: str, title: str, icon: str,
                        "borderColor": f"{_mcolor}40"},
             ))
 
+    # ── Poll UI: voting buttons + results under hr divider ─────────────
+    _poll_ui = []
+    if entity == "poll" and pk_val:
+        poll_status = record_dict.get("status", "")
+        choice_count = record_dict.get("choice_count", 0)
+        choices = [record_dict.get(f"choice_{i}") for i in range(1, choice_count + 1)]
+        total_votes = record_dict.get("total_votes") or 0
+        has_voted = record_dict.get("has_voted")
+        user_vote = record_dict.get("user_vote")
+        vote_counts = record_dict.get("vote_counts") or {}
+        show_results = poll_status in ("results_declared", "closed")
+        can_vote = poll_status == "active" and not has_voted
+
+        if can_vote and choices:
+            _poll_ui.append(
+                html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"})
+            )
+            _poll_ui.append(
+                html.Div([
+                    html.Span("Cast your vote", style={
+                        "fontSize": "13px", "fontWeight": "700",
+                        "color": "#15304f", "marginBottom": "8px", "display": "block"
+                    }),
+                    html.Div([
+                        dbc.Button(
+                            [html.I(className="fas fa-check me-1"), f" {choice_text}"],
+                            id={"type": "poll-vote-btn", "poll_id": str(pk_val), "choice": str(i)},
+                            color="primary", size="sm", outline=False,
+                            className="me-2 mb-2",
+                            style={"borderRadius": "8px", "minWidth": "160px", "textAlign": "left"},
+                        )
+                        for i, choice_text in enumerate(choices, start=1)
+                        if choice_text
+                    ], style={"display": "flex", "flexWrap": "wrap", "gap": "6px"}),
+                ], style={"marginBottom": "8px"})
+            )
+
+        if show_results and total_votes > 0:
+            bars = []
+            for i, choice_text in enumerate(choices, start=1):
+                vote_count = vote_counts.get(f"choice_{i}", 0) or 0
+                pct = (vote_count / total_votes * 100) if total_votes > 0 else 0
+                bars.append(
+                    html.Div([
+                        html.Span(f"{choice_text}", style={"fontSize": "13px", "fontWeight": "600"}),
+                        html.Div([
+                            html.Div(
+                                style={
+                                    "height": "20px",
+                                    "width": f"{pct}%",
+                                    "backgroundColor": "#1859b8",
+                                    "borderRadius": "4px",
+                                    "transition": "width 0.3s ease",
+                                }
+                            ),
+                        ], style={"flex": "1", "backgroundColor": "#eee", "borderRadius": "4px", "overflow": "hidden", "minWidth": "40px"}),
+                        html.Span(f"{vote_count} ({pct:.1f}%)", style={"fontSize": "12px", "width": "80px", "textAlign": "right"}),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "4px"}),
+                )
+            _poll_ui.append(
+                html.Div([
+                    html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+                    html.H6("Results", style={"fontWeight": "700", "color": "#15304f", "fontSize": "14px", "marginBottom": "8px"}),
+                    html.Div(bars),
+                    html.Small(f"{total_votes} total vote(s)", style={"color": "#999", "fontSize": "12px"}),
+                ])
+            )
+        elif show_results and total_votes == 0:
+            _poll_ui.append(
+                html.Div([
+                    html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+                    html.Small("No votes yet.", style={"color": "#999"}),
+                ])
+            )
+
+        if has_voted and user_vote:
+            _poll_ui.append(
+                html.Div([
+                    html.I(className="fas fa-check-circle me-1", style={"color": "#2ecc71"}),
+                    html.Span(f"You voted for: {choices[user_vote - 1]}", style={"fontWeight": "600", "color": "#15304f"}),
+                ], className="text-success mt-2")
+            )
+
     return html.Div([
         html.Div(
             html.Div([
@@ -1170,6 +1256,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
                     "marginBottom": "14px",
                 },
             ) if text_cells else None,
+
+            # ── Poll UI (voting + results) ───────────────────────────
+            *(_poll_ui),
 
             # ── Action buttons ────────────────────────────────────────
             html.Div([

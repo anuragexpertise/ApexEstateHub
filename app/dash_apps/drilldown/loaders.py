@@ -913,10 +913,12 @@ def load_list(
                 "SELECT * FROM fn_polls_list(%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_status, page_size, offset), fetch_all=True,
             ) or []
-            cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM polls WHERE society_id=%s",
-                (sid,), fetch_one=True,
-            )
+            cnt_query = "SELECT COUNT(*) AS n FROM polls WHERE society_id=%s"
+            cnt_params = [sid]
+            if p_status:
+                cnt_query += " AND status=%s"
+                cnt_params.append(p_status)
+            cnt = db._execute(cnt_query, tuple(cnt_params), fetch_one=True)
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── CONCERNS ────────────────────────────────────────────────────────
@@ -1357,7 +1359,7 @@ def load_list(
 # LOAD PROFILE
 # ════════════════════════════════════════════════════════════════════════════
 
-def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
+def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dict | None:
     try:
         # ── APARTMENT ───────────────────────────────────────────────────
         if entity_singular == "apartment":
@@ -1451,7 +1453,8 @@ def load_profile(entity_singular: str, pk, society_id=None) -> dict | None:
         # ── POLL ───────────────────────────────────────────────────────────────
         if entity_singular == "poll":
             r = db._execute(
-                "SELECT * FROM fn_get_poll_detail(%s, NULL)", (pk,), fetch_one=True
+                "SELECT * FROM fn_get_poll_detail(%s, %s)",
+                (pk, user_id or society_id), fetch_one=True
             )
             return dict(r) if r else None
 
