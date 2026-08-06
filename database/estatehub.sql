@@ -5291,40 +5291,6 @@ BEGIN
 END;
 $$;
 
--- fn_polls_list: List polls for a society with vote counts
-DROP FUNCTION IF EXISTS fn_polls_list CASCADE;
-
-CREATE OR REPLACE FUNCTION fn_polls_list(
-    p_society_id INT, p_search TEXT DEFAULT NULL, p_status VARCHAR DEFAULT NULL
-)
-RETURNS TABLE (
-    id              INT,
-    title           VARCHAR(200),
-    description     TEXT,
-    status          VARCHAR(20),
-    choice_count    SMALLINT,
-    choice_1        VARCHAR(100),
-    choice_2        VARCHAR(100),
-    choice_3        VARCHAR(100),
-    choice_4        VARCHAR(100),
-    choice_5        VARCHAR(100),
-    total_votes     BIGINT,
-    created_at      TIMESTAMP,
-    ends_at         TIMESTAMP
-) LANGUAGE sql STABLE AS $$
-    SELECT
-        p.id, p.title, p.description, p.status, p.choice_count,
-        p.choice_1, p.choice_2, p.choice_3, p.choice_4, p.choice_5,
-        COALESCE(v.total_votes, 0)::BIGINT, p.created_at, p.ends_at
-    FROM polls p
-    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
-        ON v.poll_id = p.id
-    WHERE p.society_id = p_society_id
-      AND (p_search IS NULL OR p.title ILIKE '%' || p_search || '%')
-      AND (p_status IS NULL OR p.status = p_status)
-    ORDER BY p.created_at DESC;
-$$;
-
 -- fn_get_polls: List active polls for a society (owner portal)
 CREATE OR REPLACE FUNCTION fn_get_polls(p_society_id INT)
 RETURNS TABLE (
@@ -5360,7 +5326,7 @@ BEGIN
         p.results_announced_at,
         p.created_at,
         COALESCE(v.total_votes, 0)::BIGINT,
-        FALSE AS has_voting,
+        FALSE AS has_voted,
         p.ends_at
     FROM polls p
     LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
@@ -5416,7 +5382,7 @@ BEGIN
         p.ends_at
     INTO
         id, title, description, status, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
-        results_announced_at, created_at, total_votes, v_has_voted, v_user_vote, ends_at;
+        results_announced_at, created_at, total_votes, has_voted, user_vote, ends_at;
 
     vote_counts := (
         SELECT jsonb_object_agg(
@@ -5430,9 +5396,6 @@ BEGIN
             GROUP BY choice
         ) v
     );
-
-    has_voted := v_has_voted;
-    user_vote := v_user_vote;
 
     RETURN NEXT;
 END;
@@ -5484,6 +5447,9 @@ BEGIN
     SELECT COUNT(*) INTO v_total FROM poll_votes WHERE poll_id = p_poll_id;
 
     RETURN QUERY SELECT TRUE, 'Vote cast successfully'::TEXT, v_total;
+EXCEPTION
+    WHEN unique_violation THEN
+        RETURN QUERY SELECT FALSE, 'You have already voted in this poll'::TEXT, 0::BIGINT;
 END;
 $$;
 
@@ -5511,11 +5477,22 @@ $$;
 -- fn_close_poll: Admin closes a poll
 CREATE OR REPLACE FUNCTION fn_close_poll(p_poll_id INT, p_user_id INT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll polls%ROWTYPE;
 BEGIN
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    IF v_poll.status <> 'active' THEN
+        RETURN FALSE;
+    END IF;
+
     UPDATE polls
        SET status = 'closed',
            updated_at = NOW()
-      WHERE id = p_poll_id;
+     WHERE id = p_poll_id;
 
     RETURN FOUND;
 END;
