@@ -3557,6 +3557,25 @@ DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
     DATE
 ) CASCADE;
 
+-- fn_cashbook_paired_v3
+-- ======================
+-- Draft replacement for fn_cashbook_paired_v2. NOT tested against a live
+-- schema yet — depends on the entry_side migration (transactions.entry_side
+-- CHAR(2) CHECK IN ('Dr','Cr')) already designed but not yet deployed.
+--
+-- Key change from v2: the receipt/payment split now comes from the
+-- transaction's own entry_side, not from a.drcr_account. This is what makes
+-- a non-natural-direction leg (refund, correction, TDS/GST split) land on
+-- the correct side of the cashbook instead of silently vanishing from the
+-- join or landing on the wrong side.
+--
+-- Multi-bank-account default: all is_cash_or_bank=TRUE accounts pool into
+-- a single Cash/Chq pair of columns per the CB2025-2026.xlsx reference
+-- layout (mode='cash' -> Cash column, mode<>'cash' -> Chq column,
+-- regardless of which specific bank account the row's opposite leg hit).
+-- If per-bank-account cashbooks are wanted instead, add
+-- p_bank_account_id and filter both cr_rows/dr_rows on it.
+
 CREATE OR REPLACE FUNCTION fn_cashbook_paired_v3(
     p_society_id  INT,
     p_entity_id   INT  DEFAULT NULL,
@@ -3582,7 +3601,7 @@ BEGIN
                  ELSE EXTRACT(YEAR FROM p_start_date)::SMALLINT
                       - CASE WHEN EXTRACT(MONTH FROM p_start_date) < 4 THEN 1 ELSE 0 END
             END;
- 
+
     SELECT COALESCE(SUM(
         CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
     ), 0)
@@ -3591,7 +3610,7 @@ BEGIN
     JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
     WHERE a.society_id = p_society_id AND a.is_cash_or_bank = TRUE
       AND bf.financial_year = v_fy;
- 
+
     RETURN QUERY
     WITH cr_rows AS (
         -- entry_side = 'Cr' means this leg is the receipt side of its
@@ -3644,8 +3663,8 @@ BEGIN
           AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%' OR t.acc_particulars ILIKE '%'||p_search||'%')
     ),
     paired AS (
-        SELECT COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
-               COALESCE(c.trx_date, d.trx_date) AS row_date,
+        SELECT COALESCE(c.trx_date, d.trx_date) AS row_date,
+               COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
                c.acc_id AS rc_acc_id, c.account_name AS rc_account_name,
                c.entity_name AS rc_entity_name, c.particulars AS rc_particulars,
                c.cash_amt AS rc_cash, c.chq_amt AS rc_chq,
@@ -3654,13 +3673,26 @@ BEGIN
                d.cash_amt AS pc_cash, d.chq_amt AS pc_chq
         FROM cr_rows c
         FULL OUTER JOIN dr_rows d
-          ON c.journal_id IS NOT NULL AND c.journal_id = d.journal_id AND c.rn = d.rn
-        WHERE c.journal_id IS NOT NULL OR d.journal_id IS NULL
-        -- NOTE: pairing strategy carried over from v2 as-is; the entry_side
-        -- change only affects which side each row lands on, not how rows
-        -- are paired. Revisit this CTE together with the closing-engine
-        -- work if journal_id pairing needs to change.
+          -- Pair leg N on the Cr side with leg N on the Dr side, within the
+          -- same journal_id. journal_id is assumed always positive (a real
+          -- FK-like sequence value); COALESCE(journal_id, -id) then can't
+          -- collide between an unmatched Cr row and an unmatched Dr row,
+          -- since transaction ids are globally unique across both sides —
+          -- each solo leg gets its own private key and is guaranteed to
+          -- fall through to the unmatched branch of this FULL OUTER JOIN.
+          --
+          -- For an N Dr : 1 Cr journal (or 1 Dr : N Cr), only rn=1 on each
+          -- side finds a same-rn counterpart at the same key; every leg
+          -- beyond that (rn=2, 3, ...) has no match on the opposite side
+          -- and is naturally preserved by the FULL OUTER JOIN as its own
+          -- row with the other side's columns NULL — no extra WHERE
+          -- filtering needed, and none is applied, since any such filter
+          -- risks re-introducing exactly the leftover-leg-dropping bug
+          -- this replaces.
+          ON COALESCE(c.journal_id, -c.id) = COALESCE(d.journal_id, -d.id)
+         AND c.rn = d.rn
     )
+
     SELECT p.row_date, p.rc_acc_id, p.rc_account_name, p.rc_entity_name, p.rc_particulars,
            p.rc_cash, p.rc_chq, p.pc_acc_id, p.pc_account_name, p.pc_entity_name, p.pc_particulars,
            p.pc_cash, p.pc_chq,
@@ -3671,7 +3703,206 @@ BEGIN
 END;
 $$;
 
--- ════════════════════════════════════════════════════════════════
+
+-- ═══════════════-- fn_fy_closing_report
+-- ======================
+-- The closing engine. For a given society + financial year, computes every
+-- account's FY closing figure AND rolls it up through parent_account_id so
+-- every ancestor (Movable Assets, Current Assets, Income & Expenditure,
+-- Capital Account, Balance Sheet Root, ...) gets a correct aggregate too.
+--
+-- STATUS: draft, not yet run against a live PG16 instance. Verify with
+-- pglast + a real instance before deploying, per usual workflow.
+--
+-- DESIGN, confirmed over several rounds this session:
+--   - Purely presentational / computed-on-read. Nothing is posted to
+--     `transactions`, nothing is written to `brought_forward`. Re-run
+--     this any time someone picks a different FY in the UI.
+--   - has_bf=TRUE accounts carry their own real balance forward
+--     independently (via brought_forward, entered at Settings > Accounts,
+--     or auto-derived e.g. cashbook closing cash / depreciated WDV) —
+--     this function's C/F-to-parent rollup for them is a DISPLAY line
+--     only, it does not reset or replace their own persisted BF.
+--   - has_bf=FALSE accounts (P&L leaves, and the Income Expenditure A/c
+--     node itself) have no persisted BF at all — they start every FY at
+--     zero and their FY movement genuinely is what rolls up into the
+--     parent; there is nothing "next FY" for them to carry.
+--   - Depreciable accounts (is_depreciable, depreciation_percent<100) are
+--     the one hybrid: they keep their own WDV as next-FY BF (has_bf=TRUE),
+--     but this FY's depreciation charge is split off and routed into the
+--     Dep account, which itself is a has_bf=FALSE P&L leaf and rolls up
+--     normally from there.
+--
+-- SIGN CONVENTION: everything internally is Cr-positive (a Cr movement
+-- adds, a Dr movement subtracts), regardless of the account's own
+-- drcr_account. This means rolling up through the hierarchy needs no
+-- sign-flipping at each level — a subtree's total is simply the sum of
+-- Cr-positive own_closing values across every account in it. The
+-- account's own drcr_account is only used at the very end, to decide
+-- whether to *display* the total as a Dr or Cr balance.
+--
+-- ACCEPTANCE TEST (per your instruction): the root (Balance Sheet Root,
+-- p_account_id with parent_account_id IS NULL) should sum to 0 if the
+-- books balance — that's the double-entry identity (total debits =
+-- total credits) expressed in this sign convention, equivalent to
+-- "total Assets = total Liabilities + Capital" on the rendered sheet.
+-- A nonzero root total means either a data problem (unbalanced
+-- transaction, direction bug) or a bug in this function — treat it as
+-- a hard error signal, not something to silently absorb.
+--
+-- Dep/Income & Expenditure/Capital Account are NOT looked up by name —
+-- per the explicit comment on the accounts table ("there is no category
+-- column... categorisation is entirely determined by acc_id... at the
+-- point of use"), their account_ids are passed in explicitly by the
+-- caller, same convention as the rest of the codebase (e.g.
+-- fn_dispose_asset's gain/loss account lookups).
+
+CREATE OR REPLACE FUNCTION fn_fy_closing_report(
+    p_society_id             INT,
+    p_fy                     SMALLINT,
+    p_depreciation_acc_id    INT   -- the 'Dep' account this society routes depreciation charges to
+)
+RETURNS TABLE (
+    account_id           INT,
+    account_name         TEXT,
+    parent_account_id    INT,
+    drcr_account         TEXT,
+    has_bf               BOOLEAN,
+    own_bf               NUMERIC(15,2),   -- Cr-positive; 0 for has_bf=FALSE
+    own_movement         NUMERIC(15,2),   -- Cr-positive; this FY's direct transactions only
+    depreciation_charge  NUMERIC(15,2),   -- positive amount, added back to own_closing (a Dr-natured asset's Cr-positive value moves toward zero as it depreciates)
+    own_closing          NUMERIC(15,2),   -- own_bf + own_movement + depreciation_charge (this account alone, no descendants)
+    total_closing         NUMERIC(15,2),   -- own_closing summed across this account + its entire subtree
+    display_side          TEXT,            -- 'Dr' or 'Cr', sign of total_closing
+    display_amount         NUMERIC(15,2)    -- ABS(total_closing)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_total_depreciation NUMERIC(15,2);
+BEGIN
+    -- Total depreciation charged across every depreciable account this FY —
+    -- this is what gets added into the Dep account's own_movement below.
+    -- fn_account_depreciation already returns 0 for non-depreciable
+    -- accounts / depreciation_percent>=100, so no extra filtering needed.
+    SELECT COALESCE(SUM(fn_account_depreciation(p_society_id, a.id, p_fy)), 0)
+    INTO v_total_depreciation
+    FROM accounts a
+    WHERE a.society_id = p_society_id;
+
+    RETURN QUERY
+    WITH leaf_closing AS (
+        SELECT
+            a.id,
+            a.name::TEXT,
+            a.parent_account_id,
+            a.drcr_account::TEXT,
+            a.has_bf,
+            -- fn_resolve_bf_amount_fy returns Dr-positive by its own
+            -- convention, so negate it here to land in this function's
+            -- Cr-positive frame.
+            CASE WHEN a.has_bf THEN -fn_resolve_bf_amount_fy(p_society_id, a.id, p_fy) ELSE 0 END AS own_bf,
+            COALESCE((
+                SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                                 WHEN t.entry_side = 'Dr' THEN -t.amount
+                                 ELSE 0 END)
+                FROM transactions t
+                WHERE t.acc_id = a.id AND t.society_id = p_society_id
+                  AND t.status = 'paid'
+                  AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+            ), 0)
+            -- Dep account additionally picks up every depreciable
+            -- account's charge for the FY, since nothing posts a literal
+            -- transaction to Dep under this presentational model. Dep is
+            -- Dr-natured and this is an expense increase (a Dr-like
+            -- movement), so it's SUBTRACTED here in Cr-positive terms.
+            - CASE WHEN a.id = p_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
+              AS own_movement_raw,
+            fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge
+        FROM accounts a
+        WHERE a.society_id = p_society_id
+    ),
+    leaf_final AS (
+        SELECT
+            id, name, parent_account_id, drcr_account, has_bf,
+            -- Depreciation reduces a Dr-natured asset's balance, which in
+            -- this Cr-positive frame means its value moves TOWARD zero —
+            -- i.e. it's added back, not subtracted.
+            own_bf, (own_movement_raw + depreciation_charge) AS own_movement,
+            depreciation_charge,
+            (own_bf + own_movement_raw + depreciation_charge) AS own_closing
+        FROM leaf_closing
+    ),
+    -- Every account paired with every ancestor of itself (including itself),
+    -- walking up parent_account_id to the root. Summing own_closing grouped
+    -- by ancestor_id gives that ancestor's full subtree total in one pass —
+    -- no per-level sign flip needed thanks to the Dr-positive convention.
+    ancestry AS (
+        SELECT id AS acc_id, id AS ancestor_id
+        FROM leaf_final
+        UNION ALL
+        SELECT anc.acc_id, lf.parent_account_id
+        FROM ancestry anc
+        JOIN leaf_final lf ON lf.id = anc.ancestor_id
+        WHERE lf.parent_account_id IS NOT NULL
+    ),
+    rollup AS (
+        SELECT anc.ancestor_id AS id, SUM(lf.own_closing) AS total_closing
+        FROM ancestry anc
+        JOIN leaf_final lf ON lf.id = anc.acc_id
+        GROUP BY anc.ancestor_id
+    )
+    SELECT
+        lf.id, lf.name, lf.parent_account_id, lf.drcr_account, lf.has_bf,
+        lf.own_bf, lf.own_movement, lf.depreciation_charge, lf.own_closing,
+        r.total_closing,
+        CASE WHEN r.total_closing >= 0 THEN 'Cr' ELSE 'Dr' END,
+        ABS(r.total_closing)
+    FROM leaf_final lf
+    JOIN rollup r ON r.id = lf.id
+    ORDER BY lf.id;
+END;
+$$;
+
+-- Usage note for ledger_export.py's C/F row: for a given account_id, its
+-- "transfer to hierarchy parent" line is:
+--   target account  = parent_account_id
+--   amount           = own_closing (NOT total_closing — the parent's own
+--                       row already gets this via its own subtree rollup,
+--                       so don't double count by using total_closing here)
+--   side             = the sign needed to zero this account's own_closing
+--                       out ('Dr' if own_closing is positive/Cr, 'Cr' if
+--                       own_closing is negative/Dr, per this function's
+--                       Cr-positive convention)
+-- This only produces a *meaningful, distinct* C/F transfer for has_bf=FALSE
+-- accounts — for has_bf=TRUE accounts the "transfer" is real in the sense
+-- that the Balance Sheet reflects it, but the account's own persisted BF
+-- for next FY is untouched by it (see design note above).
+
+-- Usage note for the Balance Sheet screen: query this function for
+-- p_society_id/p_fy, take the row where parent_account_id IS NULL (the
+-- root), and confirm total_closing = 0. If it isn't, something's wrong
+-- upstream (an unbalanced transaction, or a bug here) — surface it as an
+-- error rather than rendering a Balance Sheet that doesn't balance.
+
+-- TODO before deploying:
+--   1. Requires the account_category migration to be dropped/ignored
+--      (superseded by the has_bf correction discussed) and the has_bf
+--      corrections in seed.py to be applied first — this function is
+--      only correct once has_bf is TRUE on every genuine carrying
+--      Asset-side account (per your confirmation) and FALSE on Income
+--      Expenditure A/c and the one-off Capital-Account-direct items.
+--   2. fn_resolve_bf_amount_fy's own no-row fallback still sums children
+--      via drcr_account rather than entry_side — for has_bf=TRUE leaf
+--      accounts this shouldn't ever be hit (a BF row should exist), but
+--      worth reviewing together with the Phase 3 balance-calc fix.
+--   3. Not tested against a live PG16 instance — run pglast + a real DB
+--      pass, including a case with a depreciable asset that has both
+--      opening WDV and an in-year purchase, to confirm
+--      fn_account_depreciation's two components both flow through
+--      correctly.
+═════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
 
