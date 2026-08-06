@@ -368,20 +368,25 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
 
     # ── Polls ──────────────────────────────────────────────────────────
     if active_tab in ("polls", "admin_polls"):
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="admin", active_tab="polls")
-
-    if active_tab == "poll_detail":
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="admin", active_tab="poll_detail")
+        return html.Div([
+            _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
 
     if active_tab == "create_poll":
         from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="admin", active_tab="create_poll")
+        return html.Div([
+            _page_title("fa-plus-circle", c, "Create Poll", "Admin-only: create a new poll for your society"),
+            render_poll_page(sid, user_id=None, role="admin", active_tab="create_poll"),
+        ], className="portal-page")
 
-    if active_tab == "poll_results":
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="admin", active_tab="poll_results")
+    if active_tab in ("poll_detail", "poll_results"):
+        return html.Div([
+            _page_title("fa-poll", c, "Polls"),
+            _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
 
     # ── Assets (NEW) ──────────────────────────────────────────────────────────
     if active_tab == "assets":
@@ -525,12 +530,18 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
 
     # ── Polls ──────────────────────────────────────────────────
     if active_tab in ("polls", "owner_polls"):
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="apartment", active_tab="polls")
+        return html.Div([
+            _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
 
     if active_tab == "poll_detail":
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return render_poll_page(sid, user_id=None, role="apartment", active_tab="poll_detail")
+        return html.Div([
+            _page_title("fa-poll", c, "Polls"),
+            _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
 
     if active_tab in ("channels", "owner_channels", "owner-channels"):
         from app.services.alert_service import list_channels, get_active_alerts

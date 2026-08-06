@@ -197,6 +197,15 @@ def register_poll_callbacks(app):
                 (poll_id,), fetch_one=True
             )["cnt"]
 
+            vote_counts = {}
+            if total_votes > 0:
+                vc_rows = db._execute(
+                    "SELECT choice, COUNT(*) AS cnt FROM poll_votes WHERE poll_id = %s GROUP BY choice",
+                    (poll_id,), fetch_all=True
+                )
+                for vc in vc_rows:
+                    vote_counts[vc["choice"]] = vc["cnt"]
+
             return {
                 "poll_id": row["id"],
                 "title": row["title"],
@@ -209,6 +218,7 @@ def register_poll_callbacks(app):
                 "ends_at": str(row.get("ends_at")) if row.get("ends_at") else None,
                 "total_votes": total_votes,
                 "user_vote": user_vote,
+                "vote_counts": vote_counts,
             }
         except Exception as e:
             logger.error(f"Error loading poll detail: {e}")
@@ -221,6 +231,7 @@ def register_poll_callbacks(app):
         Output("poll-detail-choices", "children"),
         Output("poll-detail-total-votes", "children"),
         Output("poll-detail-vote-result", "children"),
+        Output("poll-detail-results", "children"),
         Input("poll-detail-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=False,
@@ -228,10 +239,10 @@ def register_poll_callbacks(app):
     def render_poll_detail(store_data, auth_data):
         user_id, society_id, auth_error = _require_auth(auth_data)
         if auth_error:
-            return no_update, no_update, no_update, no_update, no_update, auth_error
+            return no_update, no_update, no_update, no_update, no_update, no_update, auth_error
 
         if not store_data:
-            return "No poll selected", "", "", "", "", no_update
+            return "No poll selected", "", "", "", "", no_update, no_update
 
         poll_id = store_data.get("poll_id")
         title = store_data.get("title", "")
@@ -266,6 +277,8 @@ def register_poll_callbacks(app):
             ])
 
         choices_out = []
+        show_results = status in ("results_declared", "closed") or results_announced is not None
+        can_vote = status == "active" and user_vote is None
         for i, choice_text in enumerate(choices, start=1):
             is_selected = user_vote == i
             btn_color = "info"
@@ -275,7 +288,7 @@ def register_poll_callbacks(app):
                     id={"type": "poll-choice-btn", "poll_id": poll_id, "choice": i},
                     color=btn_color,
                     outline=False,
-                    disabled=user_vote is not None,
+                    disabled=not can_vote,
                     className="mb-2 me-2",
                     style={"minWidth": "200px", "textAlign": "left"},
                 )
@@ -291,7 +304,37 @@ def register_poll_callbacks(app):
                 className="text-success mt-2", style={"fontWeight": "600"}
             )
 
-        return title_out, status_out, desc_out, choices_out, total_votes_out, vote_result_out
+        results_out = no_update
+        if show_results and total_votes > 0:
+            vote_counts = store_data.get("vote_counts", {})
+            bars = []
+            for i, choice_text in enumerate(choices, start=1):
+                vote_count = vote_counts.get(i, 0)
+                pct = (vote_count / total_votes * 100) if total_votes > 0 else 0
+                bars.append(
+                    html.Div([
+                        html.Span(f"{choice_text}", style={"fontSize": "13px", "fontWeight": "600"}),
+                        html.Div([
+                            html.Div(
+                                style={
+                                    "height": "20px",
+                                    "width": f"{pct}%",
+                                    "backgroundColor": "#1859b8",
+                                    "borderRadius": "4px",
+                                    "transition": "width 0.3s ease",
+                                }
+                            ),
+                        ], style={"flex": "1", "backgroundColor": "#eee", "borderRadius": "4px", "overflow": "hidden", "minWidth": "40px"}),
+                        html.Span(f"{vote_count} ({pct:.1f}%)", style={"fontSize": "12px", "width": "80px", "textAlign": "right"}),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "4px"}),
+                )
+            results_out = html.Div([
+                html.Hr(style={"margin": "12px 0", "opacity": "0.12"}),
+                html.H6("Results", style={"fontWeight": "700", "color": "#15304f", "fontSize": "14px"}),
+                html.Div(bars),
+            ])
+
+        return title_out, status_out, desc_out, choices_out, total_votes_out, vote_result_out, results_out
 
     @app.callback(
         Output("poll-detail-store", "data", allow_duplicate=True),
@@ -321,6 +364,10 @@ def register_poll_callbacks(app):
             return no_update, no_update, no_update
 
         if not store_data:
+            return no_update, no_update, no_update
+
+        poll_status = store_data.get("status", "")
+        if poll_status != "active":
             return no_update, no_update, no_update
 
         try:

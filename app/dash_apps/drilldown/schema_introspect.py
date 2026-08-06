@@ -62,7 +62,7 @@ _SYSTEM_COLUMNS = {
 # Entities with no Edit action (immutable ledger / read-only tabs).
 NO_EDIT_ACTION = {
     "gate_logs", "cashbook", "receivables", "payables",
-    "ledger",
+    "ledger", "polls",
     # Scan-only / event-managed entities: no CRUD forms, profile shown
     # read-only from the gate scan result.
     "visitors", "event_ticket_items", "patrol_locations",

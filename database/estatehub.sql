@@ -5337,6 +5337,55 @@ BEGIN
 END;
 $$;
 
+-- fn_polls_list: Paginated poll list for the generic drilldown system
+CREATE OR REPLACE FUNCTION fn_polls_list(
+    p_society_id INT,
+    p_search VARCHAR DEFAULT NULL,
+    p_status VARCHAR DEFAULT NULL
+)
+RETURNS TABLE (
+    id                  INT,
+    title               VARCHAR(200),
+    description         TEXT,
+    status              VARCHAR(20),
+    choice_count        SMALLINT,
+    choice_1            VARCHAR(100),
+    choice_2            VARCHAR(100),
+    choice_3            VARCHAR(100),
+    choice_4            VARCHAR(100),
+    choice_5            VARCHAR(100),
+    results_announced_at TIMESTAMP,
+    created_at          TIMESTAMP,
+    ends_at             TIMESTAMP,
+    total_votes         BIGINT
+) LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        p.id,
+        p.title,
+        p.description,
+        p.status,
+        p.choice_count,
+        p.choice_1,
+        p.choice_2,
+        p.choice_3,
+        p.choice_4,
+        p.choice_5,
+        p.results_announced_at,
+        p.created_at,
+        p.ends_at,
+        COALESCE(v.total_votes, 0)::BIGINT
+    FROM polls p
+    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
+        ON v.poll_id = p.id
+    WHERE p.society_id = p_society_id
+      AND (p_status IS NULL OR p.status = p_status)
+      AND (p_search IS NULL OR p.title ILIKE '%' || p_search || '%' OR p.description ILIKE '%' || p_search || '%')
+    ORDER BY p.created_at DESC;
+END;
+$$;
+
 -- fn_get_poll_detail: Get a single poll with vote counts per choice
 CREATE OR REPLACE FUNCTION fn_get_poll_detail(p_poll_id INT, p_user_id INT)
 RETURNS TABLE (
@@ -5380,6 +5429,8 @@ BEGIN
         EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
         (SELECT choice FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
         p.ends_at
+    FROM polls p
+    WHERE p.id = p_poll_id
     INTO
         id, title, description, status, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
         results_announced_at, created_at, total_votes, has_voted, user_vote, ends_at;
