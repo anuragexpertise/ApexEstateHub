@@ -792,15 +792,6 @@ CREATE TABLE IF NOT EXISTS patrol_scans (
     notes            TEXT
 );
 
-CREATE TABLE IF NOT EXISTS poll_votes (
-    id SERIAL PRIMARY KEY,
-    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
-    user_id INT NOT NULL REFERENCES users (id),
-    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
-    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (poll_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS polls (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -821,6 +812,15 @@ CREATE TABLE IF NOT EXISTS polls (
     updated_at TIMESTAMP,
     ends_at TIMESTAMP,
     reminder_sent_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id SERIAL PRIMARY KEY,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users (id),
+    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
+    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (poll_id, user_id)
 );
 
 -- ════════════════════════════════════════════════════════════════
@@ -3902,7 +3902,7 @@ $$;
 --      opening WDV and an in-year purchase, to confirm
 --      fn_account_depreciation's two components both flow through
 --      correctly.
-═════════════════════════════════════════════════
+-- ═════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
 

@@ -538,6 +538,49 @@ def set_opening_balances(cur, conn, society_id: int):
           "— actual amounts seeded per-FY by seed_brought_forward()")
 
 
+def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
+    """Seed FY-scoped opening balances into brought_forward for every account
+    where has_bf = TRUE."""
+    fy = 2026
+    cur.execute(
+        """SELECT id, drcr_bf FROM accounts
+           WHERE society_id = %s AND has_bf = TRUE
+           ORDER BY id""",
+        (society_id,),
+    )
+    bf_accounts = cur.fetchall()
+
+    bf_amounts = {
+        2:     BF_CAPITAL,
+        61:    BF_FURNITURE,
+        6311:  BF_BANK,
+        633:   BF_CASH_IN_HAND,
+        64:    BF_INSTRUMENTS,
+    }
+
+    for row in bf_accounts:
+        acc_id = row["id"]
+        drcr = row["drcr_bf"]
+        amount = bf_amounts.get(acc_id, 0.00)
+
+        cur.execute(
+            """INSERT INTO brought_forward
+               (society_id, financial_year, acc_id, drcr_bf, bf_amount,
+                is_auto_calculated, remarks, created_by)
+               VALUES (%s,%s,%s,%s,%s,FALSE,%s,%s)
+               ON CONFLICT ON CONSTRAINT uq_bf_society_fy_acc
+               DO UPDATE SET bf_amount = EXCLUDED.bf_amount,
+                             drcr_bf   = EXCLUDED.drcr_bf,
+                             updated_at = NOW()""",
+            (society_id, fy, acc_id, drcr, amount,
+             f"Opening balance for FY {fy}", admin_uid),
+        )
+        conn.commit()
+
+    print(f"  ✓ Brought-forward balances seeded for FY {fy} "
+          f"({len(bf_accounts)} accounts with has_bf=TRUE)")
+
+
 def seed_master_admin(cur, conn) -> int:
     row = _one(cur, "SELECT id FROM users WHERE is_master_admin = TRUE")
     if row:
@@ -1069,6 +1112,8 @@ def run_seed(conn):
     security_lid_1 = users["guard1@sunriseresidency.com"]["linked_id"]
     security_uid_2 = users["guard2@sunriseresidency.com"]["user_id"]
     security_lid_2 = users["guard2@sunriseresidency.com"]["linked_id"]
+
+    seed_brought_forward(cur, conn, society_id, admin_uid)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
