@@ -18,6 +18,7 @@ from decimal import Decimal
 from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
+from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
 
 # ════════════════════════════════════════════════════════════════════════════
 # COLORS & STYLES
@@ -530,6 +531,35 @@ def render_list_card(card_id: str, title: str, icon: str,
                            "borderRadius": "7px"},
                 ))
 
+            # ── Quick-action buttons derived from PROFILE_ACTIONS ──
+            # These let users perform logical actions directly from the
+            # list card without opening the profile first.
+            entity_actions = PROFILE_ACTIONS.get(entity, [])
+            for act in entity_actions:
+                act_id = act.get("action_id", "")
+                act_roles = act.get("roles")
+                if act_roles and role not in act_roles:
+                    continue
+                # Skip actions that already have dedicated buttons above
+                if act_id in ("edit", "delete", "view"):
+                    continue
+                # Skip actions that are purely profile-scoped (no navigation
+                # or server-side action that makes sense at list level)
+                # All remaining actions are rendered as quick-action buttons.
+                act_label = act.get("label", act_id)
+                act_color = act.get("color", "primary")
+                act_icon = act.get("icon", "fa-bolt")
+                action_btns.append(dbc.Button(
+                    [html.I(className=f"fas {act_icon} me-1"), act_label],
+                    id={"type": "profile-action", "entity": entity,
+                        "pk": pk_val, "action": act_id,
+                        "target": act.get("target_card") or ""},
+                    size="sm", color=act_color, outline=True,
+                    title=act_label,
+                    style={"fontSize": "10px", "padding": "2px 6px",
+                           "borderRadius": "7px"},
+                ))
+
             cells.append(html.Td(
                 html.Div(action_btns, style={"display": "flex", "gap": "4px",
                                              "flexWrap": "nowrap"}),
@@ -540,6 +570,7 @@ def render_list_card(card_id: str, title: str, icon: str,
             html.Tr(
                 cells,
                 id={"type": "list-row", "entity": entity, "pk": str(pk_val)},
+                n_clicks=0,
                 style={"transition": "background 0.12s ease"},
             )
         )

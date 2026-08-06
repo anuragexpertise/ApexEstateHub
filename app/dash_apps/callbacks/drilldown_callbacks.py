@@ -1,22 +1,23 @@
 # app/dash_apps/callbacks/drilldown_callbacks.py
 """
 Drill-Down UX Engine — Master Callback Router (ENHANCED)
-=========================================================
-Handles ALL card navigation without page reloads:
-
-  KPI click       → list card      (filtered) + HIDES KPIs
-  List row click  → profile card   (double-click)
-  List row view   → profile card   (with entity data)
-  List row edit   → form card      (pre-filled)
-  List row delete → delete + refresh list
-  Profile action  → form card      (pre-filled from profile)
-  Breadcrumb      → navigate back  (stack pop) + SHOWS KPIs on root
-  Pagination      → same list, new page
-  Search          → same list, filtered
-  Column sort     → same list, sorted (NEW)
-  CSV/XLS download → streamed file (NEW: both formats)
-  Bulk upload     → XLS import (NEW)
-  Form submit     → save → back → refresh list
+ =========================================================
+ Handles ALL card navigation without page reloads:
+ 
+   KPI click       → list card      (filtered) + HIDES KPIs
+   List row click  → profile card   (single-click, replaces double-click)
+   List row view   → profile card   (with entity data)
+   List row edit   → form card      (pre-filled)
+   List row delete → delete + refresh list
+   List row action → profile action (quick-action buttons on list card)
+   Profile action  → form card      (pre-filled from profile)
+   Breadcrumb      → navigate back  (stack pop) + SHOWS KPIs on root
+   Pagination      → same list, new page
+   Search          → same list, filtered
+   Column sort     → same list, sorted (NEW)
+   CSV/XLS download → streamed file (NEW: both formats)
+   Bulk upload     → XLS import (NEW)
+   Form submit     → save → back → refresh list
 
 ENHANCEMENTS:
 1. KPI hide/show when viewing drill-down content
@@ -332,6 +333,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "kpi-card-div", "card_id": ALL}, "n_clicks"),
         Input({"type": "kpi-card", "card_id": ALL}, "n_clicks"),
         Input({"type": "list-view", "entity": ALL, "pk": ALL}, "n_clicks"),
+        Input({"type": "list-row", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-edit", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-confirm", "entity": ALL, "pk": ALL}, "n_clicks"),
@@ -464,7 +466,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
         # ── Row click → profile ───────────────────────────────────────────
         # ── View button → profile ─────────────────────────────────────────
-        elif trig_type == "list-view":
+        elif trig_type in ("list-view", "list-row"):
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
             singular = to_singular(entity)
