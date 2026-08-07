@@ -5291,51 +5291,6 @@ BEGIN
 END;
 $$;
 
--- fn_get_polls: List active polls for a society (owner portal)
-CREATE OR REPLACE FUNCTION fn_get_polls(p_society_id INT)
-RETURNS TABLE (
-    id              INT,
-    title           VARCHAR(200),
-    description     TEXT,
-    status          VARCHAR(20),
-    choice_count    SMALLINT,
-    choice_1        VARCHAR(100),
-    choice_2        VARCHAR(100),
-    choice_3        VARCHAR(100),
-    choice_4        VARCHAR(100),
-    choice_5        VARCHAR(100),
-    results_announced_at TIMESTAMP,
-    created_at      TIMESTAMP,
-    total_votes     BIGINT,
-    has_voted       BOOLEAN,
-    ends_at         TIMESTAMP
-) LANGUAGE plpgsql AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        p.id,
-        p.title,
-        p.description,
-        p.status,
-        p.choice_count,
-        p.choice_1,
-        p.choice_2,
-        p.choice_3,
-        p.choice_4,
-        p.choice_5,
-        p.results_announced_at,
-        p.created_at,
-        COALESCE(v.total_votes, 0)::BIGINT,
-        FALSE AS has_voted,
-        p.ends_at
-    FROM polls p
-    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
-        ON v.poll_id = p.id
-    WHERE p.society_id = p_society_id
-      AND p.status = 'active'
-    ORDER BY p.created_at DESC;
-END;
-$$;
 
 -- fn_polls_list: Paginated poll list for the generic drilldown system
 CREATE OR REPLACE FUNCTION fn_polls_list(
@@ -5459,18 +5414,19 @@ BEGIN
 END;
 $$;
 
--- fn_cast_vote: User casts a vote (server-side auth via p_user_id)
+-- fn_cast_vote: User casts a vote (server-side auth via p_user_id + p_society_id)
 CREATE OR REPLACE FUNCTION fn_cast_vote(
-    p_poll_id  INT,
-    p_user_id  INT,
-    p_choice   SMALLINT
+    p_poll_id    INT,
+    p_user_id    INT,
+    p_choice     SMALLINT,
+    p_society_id INT
 ) RETURNS TABLE (success BOOLEAN, message TEXT, total_votes BIGINT) LANGUAGE plpgsql AS $$
 DECLARE
     v_poll      polls%ROWTYPE;
     v_existing  INT;
     v_total     BIGINT;
 BEGIN
-    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
 
     IF NOT FOUND THEN
         RETURN QUERY SELECT FALSE, 'Poll not found'::TEXT, 0::BIGINT;
