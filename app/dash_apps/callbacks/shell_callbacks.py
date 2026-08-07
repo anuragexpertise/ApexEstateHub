@@ -143,7 +143,6 @@ _PATH_LABELS = {
     "security-receipts":  "Receipts",
     "security-receipt":   "New Receipt",
     "security-users":    "Users",
-    "create-poll":       "Create Poll",
 }
 
 
@@ -196,7 +195,6 @@ def _portal_content(role, society_id, pathname, auth=None):
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
             "polls"         if "/polls"         in p else
-            "create_poll"   if "/create-poll"   in p else
             "assets"        if "/assets"        in p else
             "channels"      if "/channels"      in p else
             "evaluate_pass" if "/evaluate-pass" in p else

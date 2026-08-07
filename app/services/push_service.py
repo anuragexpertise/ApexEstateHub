@@ -179,6 +179,16 @@ def notify_poll_created(society_id, poll_title):
     return send_bulk_push(targets, "📊 New Poll", body, url="/dashboard/polls", society_id=society_id)
 
 
+def notify_poll_results_declared(society_id, poll_title):
+    """Notify all apartment owners in the society when an admin declares
+    results for a poll (mirrors notify_poll_created's audience/pattern)."""
+    targets = get_notification_targets(society_id, roles=["apartment"])
+    if not targets:
+        return 0, 0
+    body = f"Results are in for: {poll_title}"
+    return send_bulk_push(targets, "📊 Poll Results Declared", body, url="/dashboard/polls", society_id=society_id)
+
+
 def notify_event_created(society_id, event_title, open_to="all", event_date=None):
     """
     Push a new-event alert to everyone matching open_to.

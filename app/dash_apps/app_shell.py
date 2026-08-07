@@ -702,8 +702,10 @@ def shell_layout() -> html.Div:
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
             dcc.Store(id="invite-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
-            dcc.Store(id="poll-action-store",          storage_type="memory", data=None),
-            dcc.Store(id="poll-detail-store",          storage_type="memory", data=None),
+            # NOTE (2026-08): poll-action-store / poll-detail-store removed —
+            # they were only ever written/read by poll_callbacks.py's now-
+            # removed orphaned callbacks (dead since the Polls tab moved to
+            # the generic drill panel). See poll_callbacks.py's docstring.
 
             # ── Hidden utility elements ────────────────────────────────────────
             html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),

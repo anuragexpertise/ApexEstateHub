@@ -1,105 +1,89 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from datetime import datetime, date
 
 
-def render_poll_page(sid=None, user_id=None, role=None, active_tab="polls"):
-    if active_tab == "polls":
-        return _polls_list(sid, user_id, role)
-    if active_tab == "poll_detail":
-        return _poll_detail(sid, user_id, role)
-    if active_tab == "create_poll":
-        return _create_poll_form(sid, user_id, role)
-    if active_tab == "poll_results":
-        return _poll_results(sid, user_id, role)
-    return html.Div("Poll page")
+def _to_datetime_local(val) -> str:
+    """Format a DB timestamp (datetime/date/str) as the value a
+    type='datetime-local' input expects: 'YYYY-MM-DDTHH:MM'."""
+    if not val:
+        return ""
+    if isinstance(val, (datetime, date)):
+        return val.strftime("%Y-%m-%dT%H:%M") if isinstance(val, datetime) else val.strftime("%Y-%m-%dT00:00")
+    if isinstance(val, str):
+        s = val.strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(s, fmt).strftime("%Y-%m-%dT%H:%M")
+            except ValueError:
+                continue
+        return s
+    return ""
+
+"""
+Poll create/edit form
+======================
+Polls now go through the same generic KPI -> List -> Profile drilldown
+as Concerns/Events (see portal_pages.py's "polls"/"admin_polls" tab and
+DRILLDOWN_MAP in registry.py). This module only still supplies the
+hand-built form used for New Poll / Edit Poll — both bypass the
+schema-driven form builder (drilldown_callbacks.py intercepts
+card_id in ("form_poll_new", "form_poll_edit")) because a poll's
+variable choice count (2-5) needs a dynamic picker the generic
+column-per-field form doesn't support.
+
+The old bespoke list/detail/results view functions that used to live
+here (_polls_list, _poll_detail, _poll_results, render_poll_page) were
+removed 2026-08 — they targeted DOM containers (polls-list-container,
+poll-detail-store, poll-results-container) that stopped being rendered
+once portal_pages.py's "polls" tab switched to the generic drill panel,
+so they were dead code kept alive only by poll_callbacks.py's now-also
+-removed orphaned callbacks.
+"""
 
 
-def _polls_list(sid, user_id, role):
+def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
+    """Shared Create/Edit Poll form.
+
+    prefill=None             -> "Create New Poll"
+    prefill={"id": ..., ...} -> "Edit Poll", fields pre-populated,
+                                 hidden poll id carried for the save
+                                 callback to know it's an update.
+    """
+    prefill = prefill or {}
+    is_edit = bool(prefill.get("id"))
+    choice_count = prefill.get("choice_count") or 2
+
     return html.Div([
-        html.Div(id="drill-content", children=[
-            html.Div("Click a KPI to explore data →",
-                     className="text-muted text-center", style={"padding": "6px 2px"}),
-        ]),
-        html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
-        html.Div([
-            html.Div([
-                html.Span("Active Polls", style={"fontWeight": "700", "fontSize": "14px", "color": "#15304f"}),
-                dbc.Button([html.I(className="fas fa-plus me-1"), "Create Poll"],
-                           id="create-poll-btn", color="primary", size="sm",
-                           style={"borderRadius": "8px", "fontWeight": "600"})
-                if role == "admin" else None,
-            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "12px"}),
-            html.Div(id="polls-list-container", children=[
-                html.Div("Loading polls…", className="text-muted text-center", style={"padding": "40px 0"}),
-            ]),
-            html.Div(id="poll-detail-section", children=[
-                html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
-                html.H5("Poll Details", style={"fontWeight": "700", "color": "#15304f"}),
-                html.H4(id="poll-detail-title", style={"fontWeight": "800", "color": "#15304f"}),
-                html.Small(id="poll-detail-status", style={"color": "#aaa", "fontSize": "12px"}),
-                html.Div(id="poll-detail-description", className="mb-3", style={"color": "#555", "fontSize": "14px"}),
-                html.Div(id="poll-detail-choices", className="mb-3"),
-                html.Div(id="poll-detail-vote-result", className="mb-3"),
-                html.Div(id="poll-detail-results", className="mb-3"),
-                html.Small(id="poll-detail-total-votes", className="text-muted", style={"fontSize": "12px"}),
-            ]),
-            html.Div(id="poll-results-section", children=[
-                html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
-                html.H5("Poll Results", style={"fontWeight": "700", "color": "#15304f"}),
-                html.Div(id="poll-results-container", children=[
-                    html.Div("No results to display.", className="text-muted text-center", style={"padding": "20px 0"}),
-                ]),
-            ]),
-        ]),
-        html.Div(id="poll-toast-container"),
-        dcc.Store(id="poll-action-store", storage_type="memory", data=None),
-    ])
-
-
-def _kpi_row_dynamic(portal, tab, sid):
-    from app.dash_apps.pages.portal_pages import _kpi_row_dynamic as _krd
-    return _krd(portal, tab, sid)
-
-
-def _poll_detail(sid, user_id, role):
-    return html.Div([
-        html.Div([
-            html.Button(html.I(className="fas fa-arrow-left me-2"), id="poll-back-btn", n_clicks=0,
-                        color="secondary", size="sm", outline=True, className="mb-3"),
-            html.H4(id="poll-detail-title", className="mb-1", style={"fontWeight": "800", "color": "#15304f"}),
-            html.Small(id="poll-detail-status", style={"color": "#aaa", "fontSize": "12px"}),
-        ], style={"display": "flex", "alignItems": "flex-start", "flexDirection": "column", "marginBottom": "16px"}),
-        html.Div(id="poll-detail-description", className="mb-3", style={"color": "#555", "fontSize": "14px"}),
-        html.Div(id="poll-detail-choices", className="mb-3"),
-        html.Div(id="poll-detail-vote-result", className="mb-3"),
-        html.Div(id="poll-detail-results", className="mb-3"),
-        html.Div(id="poll-detail-total-votes", className="text-muted", style={"fontSize": "12px"}),
-        dcc.Store(id="poll-detail-store", storage_type="memory", data=None),
-    ])
-
-
-def _create_poll_form(sid, user_id, role):
-    return html.Div([
-        html.H4("Create New Poll", className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
-        html.Small("Admin-only: create a new poll for your society", style={"color": "#aaa", "fontSize": "12px"}),
+        html.H4("Edit Poll" if is_edit else "Create New Poll",
+                className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
+        html.Small(
+            "Admin-only: choices can't be changed once someone has voted"
+            if is_edit else
+            "Admin-only: create a new poll for your society",
+            style={"color": "#aaa", "fontSize": "12px"}),
         html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
         dbc.Form([
+            dcc.Input(id="poll-edit-id", type="hidden", value=str(prefill.get("id") or "")),
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Poll Title", html_for="poll-title-input"),
-                    dbc.Input(id="poll-title-input", type="text", placeholder="Enter poll title", maxLength=200),
+                    dbc.Input(id="poll-title-input", type="text", placeholder="Enter poll title",
+                              maxLength=200, value=prefill.get("title") or ""),
                 ], width=12, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Description (optional)", html_for="poll-desc-input"),
-                    dbc.Textarea(id="poll-desc-input", placeholder="Optional description…", rows=3),
+                    dbc.Textarea(id="poll-desc-input", placeholder="Optional description…", rows=3,
+                                 value=prefill.get("description") or ""),
                 ], width=12, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Poll Ends At (optional)", html_for="poll-ends-at"),
-                    dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="YYYY-MM-DDTHH:MM"),
+                    dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="YYYY-MM-DDTHH:MM",
+                              value=_to_datetime_local(prefill.get("ends_at"))),
                 ], width=4, className="mb-3"),
             ]),
             dbc.Row([
@@ -113,7 +97,7 @@ def _create_poll_form(sid, user_id, role):
                             {"label": "4 Choices", "value": 4},
                             {"label": "5 Choices", "value": 5},
                         ],
-                        value=2,
+                        value=choice_count,
                         clearable=False,
                     ),
                 ], width=4, className="mb-3"),
@@ -121,30 +105,36 @@ def _create_poll_form(sid, user_id, role):
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Choice 1", html_for="poll-choice-1"),
-                    dbc.Input(id="poll-choice-1", type="text", placeholder="Option 1", maxLength=100),
+                    dbc.Input(id="poll-choice-1", type="text", placeholder="Option 1", maxLength=100,
+                              value=prefill.get("choice_1") or ""),
                 ], width=4, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Choice 2", html_for="poll-choice-2"),
-                    dbc.Input(id="poll-choice-2", type="text", placeholder="Option 2", maxLength=100),
+                    dbc.Input(id="poll-choice-2", type="text", placeholder="Option 2", maxLength=100,
+                              value=prefill.get("choice_2") or ""),
                 ], width=4, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Choice 3 (optional)", html_for="poll-choice-3"),
-                    dbc.Input(id="poll-choice-3", type="text", placeholder="Option 3 (optional)", maxLength=100),
+                    dbc.Input(id="poll-choice-3", type="text", placeholder="Option 3 (optional)", maxLength=100,
+                              value=prefill.get("choice_3") or ""),
                 ], width=4, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Choice 4 (optional)", html_for="poll-choice-4"),
-                    dbc.Input(id="poll-choice-4", type="text", placeholder="Option 4 (optional)", maxLength=100),
+                    dbc.Input(id="poll-choice-4", type="text", placeholder="Option 4 (optional)", maxLength=100,
+                              value=prefill.get("choice_4") or ""),
                 ], width=4, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Choice 5 (optional)", html_for="poll-choice-5"),
-                    dbc.Input(id="poll-choice-5", type="text", placeholder="Option 5 (optional)", maxLength=100),
+                    dbc.Input(id="poll-choice-5", type="text", placeholder="Option 5 (optional)", maxLength=100,
+                              value=prefill.get("choice_5") or ""),
                 ], width=4, className="mb-3"),
             ], id="poll-extra-choices"),
             dbc.Row([
                 dbc.Col([
-                    dbc.Button([html.I(className="fas fa-plus me-2"), "Create Poll"],
+                    dbc.Button([html.I(className="fas fa-save me-2"), "Save Changes"] if is_edit
+                               else [html.I(className="fas fa-plus me-2"), "Create Poll"],
                                id="poll-create-btn", color="primary", className="me-2"),
                     dbc.Button("Clear", id="poll-clear-btn", color="secondary", outline=True),
                 ], width=12),
@@ -154,12 +144,7 @@ def _create_poll_form(sid, user_id, role):
     ])
 
 
-def _poll_results(sid, user_id, role):
-    return html.Div([
-        html.H4("Poll Results", className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
-        html.Small("Results are shown after the admin declares them", style={"color": "#aaa", "fontSize": "12px"}),
-        html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
-        html.Div(id="poll-results-container", children=[
-            html.Div("Loading results…", className="text-muted text-center", style={"padding": "40px 0"}),
-        ]),
-    ])
+# Backwards-compatible alias — drilldown_callbacks.py's form_poll_new
+# branch still imports this name.
+def _create_poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
+    return poll_form(sid, user_id, role, prefill)

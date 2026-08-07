@@ -367,23 +367,15 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
         ], className="portal-page")
 
     # ── Polls ──────────────────────────────────────────────────────────
+    # NOTE (2026-08): "create_poll"/"poll_detail"/"poll_results" tabs
+    # removed — they were dead-end duplicates of this "polls"/"admin_polls"
+    # tab left over from before Poll was migrated to the generic drill
+    # panel. New/View/Edit/Delete/Declare Results/Close now all happen
+    # inline here via the KPI -> List -> Profile flow, same as
+    # Concerns/Events; nothing in the app links to those tabs anymore.
     if active_tab in ("polls", "admin_polls"):
         return html.Div([
             _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
-            _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
-
-    if active_tab == "create_poll":
-        from app.dash_apps.pages.poll_page import render_poll_page
-        return html.Div([
-            _page_title("fa-plus-circle", c, "Create Poll", "Admin-only: create a new poll for your society"),
-            render_poll_page(sid, user_id=None, role="admin", active_tab="create_poll"),
-        ], className="portal-page")
-
-    if active_tab in ("poll_detail", "poll_results"):
-        return html.Div([
-            _page_title("fa-poll", c, "Polls"),
             _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -537,6 +529,10 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
         ], className="portal-page")
 
     if active_tab == "poll_detail":
+        # Dead-end duplicate of "polls"/"owner_polls" above — see the
+        # note at the admin-portal "polls" tab. Kept as a redirect-style
+        # fallback rather than removed outright, since older push
+        # notification payloads may still reference this tab_id.
         return html.Div([
             _page_title("fa-poll", c, "Polls"),
             _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
