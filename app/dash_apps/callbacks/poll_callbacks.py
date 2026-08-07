@@ -92,21 +92,10 @@ def register_poll_callbacks(app):
         user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
         if auth_error:
             return auth_error
-        if not n_clicks:
+        if not n_clicks or not title:
             return no_update
-        title = (title or "").strip()
-        if not title:
-            return html.Div([
-                html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e74c3c"}),
-                "Poll title is required.",
-            ], className="alert alert-danger mt-2")
-        choices = [(c or "").strip() for c in [c1, c2, c3, c4, c5]]
-        if not choices[0] or not choices[1]:
-            return html.Div([
-                html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e74c3c"}),
-                "Choice 1 and Choice 2 are required.",
-            ], className="alert alert-danger mt-2")
         choice_count = choice_count or 2
+        choices = [c1 or '', c2 or '', c3 or '', c4 or '', c5 or '']
         is_edit = bool(poll_id)
 
         try:

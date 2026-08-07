@@ -53,6 +53,7 @@ import os
 from pathlib import Path
 from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
+import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -3357,6 +3358,8 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     # ── Poll vote (inline on profile card) ─────────────────────────────────
     @app.callback(
         Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
         Output("profile-action-trigger", "data", allow_duplicate=True),
         Input({"type": "poll-vote-btn", "poll_id": ALL, "choice": ALL}, "n_clicks"),
         State("drilldown-store", "data"),
@@ -3364,14 +3367,13 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         prevent_initial_call=True,
     )
     def handle_poll_vote(n_clicks_list, store, auth):
-        ctx = callback_context
         if not ctx.triggered or not any(n_clicks_list):
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         user_id = (auth or {}).get("user_id")
         society_id = (auth or {}).get("society_id")
         if not user_id or not society_id:
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         try:
             prop_id = ctx.triggered[0]["prop_id"].split(".")[0]
@@ -3380,28 +3382,44 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
             poll_id = int(parsed["poll_id"])
             choice = int(parsed["choice"])
         except Exception:
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update
 
+        if store is None:
+            store = {}
+
+        banner_color, banner_icon, banner_text = "success", "fa-check-circle", "Vote recorded"
         try:
+            # NOTE (fixed 2026-08): fn_cast_vote RETURNS TABLE(success,
+            # message, total_votes) — it was being called as
+            # "SELECT fn_cast_vote(...) AS success" (a scalar alias on a
+            # set-returning function), which does not expand into the
+            # named columns db._execute()/result.get("success") expects.
+            # That's why voting never produced any success/error feedback.
+            # "SELECT * FROM fn_cast_vote(...)" expands the table properly.
             result = db._execute(
-                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT, %s::INT)",
-                (poll_id, user_id, choice, society_id), fetch_one=True
+                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT)",
+                (poll_id, user_id, choice), fetch_one=True
             )
-            if result and result.get("success"):
+            ok = bool((result or {}).get("success"))
+            msg = (result or {}).get("message") or ("Vote recorded" if ok else "Your vote could not be recorded")
+            if ok:
                 invalidate_kpi_cache()
-                if store is None:
-                    store = {}
                 store["refresh"] = True
-                message = result.get("message", "Vote cast successfully")
-                total_votes = result.get("total_votes", 0)
-                store["total_votes"] = total_votes
-                toast = {"_toast": {"type": "success", "message": message}}
-                return store, toast
-            elif result and not result.get("success"):
-                toast = {"_toast": {"type": "error", "message": result.get("message", "Vote failed")}}
-                return no_update, toast
+                banner_color, banner_icon, banner_text = "success", "fa-check-circle", msg
+            else:
+                banner_color, banner_icon, banner_text = "warning", "fa-exclamation-triangle", msg
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error(f"Poll vote failed: {e}")
+            logging.getLogger(__name__).exception(f"Poll vote failed (poll_id={poll_id}): {e}")
+            banner_color, banner_icon, banner_text = "danger", "fa-exclamation-circle", "Something went wrong recording your vote. Please try again."
 
-        return no_update, no_update
+        content, bc, db_err = _render_current(store, auth)
+        banner = dbc.Alert(
+            [html.I(className=f"fas {banner_icon} me-2"), banner_text],
+            color=banner_color,
+            style={"fontSize": "13px", "fontWeight": "600", "padding": "10px 14px",
+                   "borderRadius": "8px", "marginBottom": "10px"},
+        )
+        content = html.Div([banner, content])
+        toast = {"_toast": {"type": "success" if banner_color == "success" else "error", "message": banner_text}}
+        return store, content, bc, toast

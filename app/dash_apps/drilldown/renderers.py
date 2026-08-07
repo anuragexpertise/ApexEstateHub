@@ -469,8 +469,30 @@ def render_list_card(card_id: str, title: str, icon: str,
                 val = _FIELD_FORMATTERS[fmt](val)
                 is_formatted = True  # val is now a Dash component — don't re-coerce below
 
+            # Highlight the winning choice once a poll's results are
+            # declared — winning_choice comes from fn_polls_list and is
+            # NULL on a tie/no votes, so nothing gets highlighted then.
+            is_winning_choice = False
+            if entity == "polls" and field_key.startswith("choice_") and val not in (None, ""):
+                try:
+                    choice_num = int(field_key.rsplit("_", 1)[1])
+                except (ValueError, IndexError):
+                    choice_num = None
+                is_winning_choice = (
+                    row_dict.get("status") == "results_declared"
+                    and choice_num is not None
+                    and row_dict.get("winning_choice") == choice_num
+                )
+
             if is_formatted:
                 pass
+            elif is_winning_choice:
+                val = html.Span(
+                    [html.I(className="fas fa-trophy me-1", style={"color": "#e6a817"}),
+                     _humanize_string(str(val))],
+                    style={"color": "#17976e", "fontWeight": "800"},
+                )
+                is_formatted = True
             elif isinstance(val, bool):
                 val = html.Span(
                     ["✓" if val else "✗"],
@@ -1140,7 +1162,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                        "borderColor": f"{_mcolor}40"},
             ))
 
-    # ── Poll UI: voting buttons + results under hr divider ─────────────
+    # ── Poll UI: lifecycle banner + voting buttons + results under hr divider
     _poll_ui = []
     if entity == "poll" and pk_val:
         poll_status = record_dict.get("status", "")
@@ -1150,8 +1172,27 @@ def render_profile_card(card_id: str, title: str, icon: str,
         has_voted = record_dict.get("has_voted")
         user_vote = record_dict.get("user_vote")
         vote_counts = record_dict.get("vote_counts") or {}
-        show_results = poll_status in ("results_declared", "closed")
+        # Results only become visible once an admin has explicitly declared
+        # them — Close Poll alone just stops new votes, it isn't a reveal.
+        show_results = poll_status == "results_declared"
         can_vote = poll_status == "active" and not has_voted
+
+        # Unmistakable status banner, mirroring the concern-status banner
+        # pattern above — the bars further down are easy to miss on a
+        # crowded profile card, this isn't.
+        _poll_banner = {
+            "results_declared": ("🏆 Results Declared", "#17976e"),
+            "closed":            ("Voting Closed — results not yet declared", "#e59620"),
+        }.get(poll_status)
+        if _poll_banner:
+            _btext, _bcolor = _poll_banner
+            _poll_ui.append(dbc.Alert(
+                [html.I(className="fas fa-poll me-2"), _btext],
+                color="light",
+                style={"fontSize": "12px", "fontWeight": "700", "padding": "8px 12px",
+                       "borderRadius": "8px", "marginBottom": "8px",
+                       "borderColor": f"{_bcolor}40", "color": _bcolor},
+            ))
 
         if can_vote and choices:
             _poll_ui.append(
