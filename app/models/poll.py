@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 @dataclass
@@ -22,10 +22,13 @@ class Poll:
     updated_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     reminder_sent_at: Optional[datetime] = None
+    total_votes: int = 0
+    has_voted: bool = False
+    user_vote: Optional[int] = None
+    vote_counts: Optional[Dict[str, Any]] = field(default_factory=dict)
 
-    def to_dict(self, include_calculated: bool = False):
-        data = asdict(self)
-        return data
+    def to_dict(self):
+        return asdict(self)
 
     def choices(self) -> list[str]:
         result = [self.choice_1, self.choice_2]

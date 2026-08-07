@@ -3384,16 +3384,22 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
 
         try:
             result = db._execute(
-                "SELECT fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT) AS success",
-                (poll_id, user_id, choice), fetch_one=True
+                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT, %s::INT)",
+                (poll_id, user_id, choice, society_id), fetch_one=True
             )
             if result and result.get("success"):
                 invalidate_kpi_cache()
                 if store is None:
                     store = {}
                 store["refresh"] = True
-                toast = {"_toast": {"type": "success", "message": "Vote cast successfully"}}
+                message = result.get("message", "Vote cast successfully")
+                total_votes = result.get("total_votes", 0)
+                store["total_votes"] = total_votes
+                toast = {"_toast": {"type": "success", "message": message}}
                 return store, toast
+            elif result and not result.get("success"):
+                toast = {"_toast": {"type": "error", "message": result.get("message", "Vote failed")}}
+                return no_update, toast
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Poll vote failed: {e}")
