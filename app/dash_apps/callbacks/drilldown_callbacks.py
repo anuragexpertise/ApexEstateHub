@@ -789,13 +789,17 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can close a poll"}}
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() or (auth or {}).get("user_id")
-                db._execute(
-                    "SELECT fn_close_poll(%s::INT, %s::INT)",
-                    (int(pk), int(user_id)), fetch_one=True
+                result = db._execute(
+                    "SELECT fn_close_poll(%s::INT, %s::INT, %s::INT) AS ok",
+                    (int(pk), int(user_id), int(sid)), fetch_one=True
                 )
+                ok = bool((result or {}).get("ok"))
                 invalidate_kpi_cache()
                 store["refresh"] = True
-                toast = {"_toast": {"type": "success", "message": "Poll closed"}}
+                toast = {"_toast": {
+                    "type": "success" if ok else "error",
+                    "message": "Poll closed" if ok else "Poll could not be closed (already closed or not found)",
+                }}
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
@@ -806,13 +810,30 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can declare results"}}
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() or (auth or {}).get("user_id")
-                db._execute(
-                    "SELECT fn_declare_results(%s::INT, %s::INT)",
-                    (int(pk), int(user_id)), fetch_one=True
+                result = db._execute(
+                    "SELECT fn_declare_results(%s::INT, %s::INT, %s::INT) AS ok",
+                    (int(pk), int(user_id), int(sid)), fetch_one=True
                 )
+                ok = bool((result or {}).get("ok"))
+                if ok:
+                    try:
+                        poll_row = db._execute(
+                            "SELECT title FROM polls WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        if poll_row:
+                            PushService.notify_poll_results_declared(sid, poll_row.get("title"))
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_poll_results_declared failed (poll_id=%s): %s", pk, e,
+                        )
                 invalidate_kpi_cache()
                 store["refresh"] = True
-                toast = {"_toast": {"type": "success", "message": "Results declared"}}
+                toast = {"_toast": {
+                    "type": "success" if ok else "error",
+                    "message": "Results declared" if ok else "Results could not be declared (already declared or not found)",
+                }}
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
@@ -1880,12 +1901,14 @@ def _render_card(
                 outstanding=float(prefill.get("outstanding") or 0),
             )
 
-        # ── Create Poll — dedicated form (bypasses schema-driven form) ─────────
-        if card_id == "form_poll_new":
+        # ── Create / Edit Poll — dedicated form (bypasses schema-driven form,
+        # see poll_page.py's module docstring for why) ─────────────────────────
+        if card_id in ("form_poll_new", "form_poll_edit"):
             sid_val = filters.get("society_id")
             role = (auth or {}).get("role", "admin")
-            from app.dash_apps.pages.poll_page import _create_poll_form
-            return _create_poll_form(sid_val, (auth or {}).get("user_id"), role)
+            from app.dash_apps.pages.poll_page import poll_form
+            edit_prefill = prefill if card_id == "form_poll_edit" else None
+            return poll_form(sid_val, (auth or {}).get("user_id"), role, prefill=edit_prefill)
 
         rest = card_id[5:]
         parts = rest.rsplit("_", 1)

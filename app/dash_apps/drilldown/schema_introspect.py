@@ -60,9 +60,16 @@ _SYSTEM_COLUMNS = {
 }
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
+# NOTE (2026-08): "polls" removed — Poll now supports Edit, but only
+# while active with zero votes cast (guarded at the row level in
+# renderers.py's action-button loop, and again server-side in
+# fn_edit_poll). Poll uses its own hand-built form (form_poll_edit is
+# intercepted in drilldown_callbacks.py, same as form_poll_new) rather
+# than the generic schema-driven form, so it isn't affected by the
+# schema-driven field list below.
 NO_EDIT_ACTION = {
     "gate_logs", "cashbook", "receivables", "payables",
-    "ledger", "polls",
+    "ledger",
     # Scan-only / event-managed entities: no CRUD forms, profile shown
     # read-only from the gate scan result.
     "visitors", "event_ticket_items", "patrol_locations",

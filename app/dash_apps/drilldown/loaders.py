@@ -908,6 +908,42 @@ def load_list(
 
         # ── POLLS ──────────────────────────────────────────────────────
         if entity == "polls":
+            # Auto-expire polls whose ends_at has passed. This used to run
+            # on every polls-page load via poll_callbacks.py's
+            # load_polls_list callback, but that callback targeted a
+            # container ("polls-list-container") that no longer exists
+            # once the polls tab moved to the generic drill panel — so
+            # expiry silently stopped running. Hooking it into the list
+            # loader (called every time list_polls renders) restores the
+            # original cadence without depending on a scheduler.
+            try:
+                db._execute("SELECT fn_declare_expired_polls()")
+            except Exception:
+                pass
+            # "Poll ending soon" push reminder — also restored here for the
+            # same reason as fn_declare_expired_polls() above. Lazy-imported
+            # to keep push_service out of loaders.py's normal import graph.
+            try:
+                soon_rows = db._execute(
+                    "SELECT * FROM fn_get_polls_ending_soon(%s, %s)",
+                    (sid, 15), fetch_all=True,
+                )
+                if soon_rows:
+                    import app.services.push_service as PushService
+                    targets = PushService.get_notification_targets(sid, roles=["apartment"])
+                    if targets:
+                        for soon in soon_rows:
+                            PushService.send_bulk_push(
+                                targets, "⏰ Poll Ending Soon",
+                                f"Poll '{soon['title']}' ends at {soon['ends_at']}",
+                                url="/dashboard/polls", society_id=sid,
+                            )
+                            db._execute(
+                                "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
+                                (soon["id"],),
+                            )
+            except Exception:
+                pass
             p_status = filters.get("status")
             rows = db._execute(
                 "SELECT * FROM fn_polls_list(%s,%s,%s) LIMIT %s OFFSET %s",
@@ -1452,9 +1488,16 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
 
         # ── POLL ───────────────────────────────────────────────────────────────
         if entity_singular == "poll":
+            # NOTE (fixed 2026-08): fn_get_poll_detail previously took no
+            # p_society_id, so any pk could be loaded regardless of
+            # society (same IDOR class as fn_concern_profile, fixed
+            # separately). It also used to be called with `user_id or
+            # society_id` collapsed into one positional slot, so a falsy
+            # user_id silently substituted society_id as the "user" whose
+            # vote to check. See migration_poll_security_fixes.sql.
             r = db._execute(
-                "SELECT * FROM fn_get_poll_detail(%s, %s)",
-                (pk, user_id or society_id), fetch_one=True
+                "SELECT * FROM fn_get_poll_detail(%s, %s, %s)",
+                (pk, user_id, society_id), fetch_one=True
             )
             return dict(r) if r else None
 

@@ -1075,6 +1075,18 @@ def render_profile_card(card_id: str, title: str, icon: str,
             continue
         if act_id == "edit"   and "edit"   not in allowed: continue
         if act_id == "delete" and "delete" not in allowed: continue
+        # ── Poll lifecycle guards ────────────────────────────────────────
+        # Edit: only while the poll is still active AND nobody has voted
+        # yet — changing choices out from under existing votes would
+        # corrupt the tally (server-side guarded too, see fn_edit_poll).
+        if act_id == "edit" and entity == "poll":
+            if record_dict.get("status") != "active" or (record_dict.get("total_votes") or 0) > 0:
+                continue
+        # Close Poll only makes sense from 'active'.
+        if act_id == "close_poll" and record_dict.get("status") != "active": continue
+        # Declare Results is a no-op (and rejected server-side) once
+        # already declared.
+        if act_id == "declare_results" and record_dict.get("status") == "results_declared": continue
         if act_id == "save_bid" and my_concern_status != "invited": continue
         if act_id == "decline_concern" and my_concern_status != "invited": continue
         if act_id == "vendor_resolve":
