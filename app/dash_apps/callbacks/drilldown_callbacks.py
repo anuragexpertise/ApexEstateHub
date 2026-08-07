@@ -1555,6 +1555,80 @@ def register_drilldown_callbacks(app):
             return ""
         return selected
 
+    # ── Poll vote (inline on profile card) ─────────────────────────────────
+    # NOTE (fixed 2026-08): this callback used to be defined AFTER
+    # _apply_portal_filters()'s `return f`, at the same indentation as
+    # that function's body — meaning the @app.callback(...) decorator was
+    # unreachable dead code (lexically still inside _apply_portal_filters,
+    # but past its return statement) and NEVER ACTUALLY REGISTERED with
+    # Dash. That's the real reason voting produced zero feedback: nothing
+    # was listening for poll-vote-btn clicks at all, not even an error.
+    # Moved here, inside register_drilldown_callbacks(app), where app is
+    # actually in scope and the decorator runs at import time.
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Output("profile-action-trigger", "data", allow_duplicate=True),
+        Input({"type": "poll-vote-btn", "poll_id": ALL, "choice": ALL}, "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_poll_vote(n_clicks_list, store, auth):
+        if not ctx.triggered or not any(n_clicks_list):
+            return no_update, no_update, no_update, no_update
+
+        user_id = (auth or {}).get("user_id")
+        society_id = (auth or {}).get("society_id")
+        if not user_id or not society_id:
+            return no_update, no_update, no_update, no_update
+
+        try:
+            prop_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            parsed = json.loads(prop_id)
+            poll_id = int(parsed["poll_id"])
+            choice = int(parsed["choice"])
+        except Exception:
+            return no_update, no_update, no_update, no_update
+
+        if store is None:
+            store = {}
+
+        banner_color, banner_icon, banner_text = "success", "fa-check-circle", "Vote recorded"
+        try:
+            # fn_cast_vote RETURNS TABLE(success, message, total_votes) —
+            # must be selected with "SELECT * FROM ..." (not
+            # "SELECT fn_cast_vote(...) AS success", which doesn't expand
+            # a set-returning function's columns).
+            result = db._execute(
+                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT)",
+                (poll_id, user_id, choice), fetch_one=True
+            )
+            ok = bool((result or {}).get("success"))
+            msg = (result or {}).get("message") or ("Vote recorded" if ok else "Your vote could not be recorded")
+            if ok:
+                invalidate_kpi_cache()
+                store["refresh"] = True
+                banner_color, banner_icon, banner_text = "success", "fa-check-circle", msg
+            else:
+                banner_color, banner_icon, banner_text = "warning", "fa-exclamation-triangle", msg
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Poll vote failed (poll_id={poll_id}): {e}")
+            banner_color, banner_icon, banner_text = "danger", "fa-exclamation-circle", "Something went wrong recording your vote. Please try again."
+
+        content, bc, db_err = _render_current(store, auth)
+        banner = dbc.Alert(
+            [html.I(className=f"fas {banner_icon} me-2"), banner_text],
+            color=banner_color,
+            style={"fontSize": "13px", "fontWeight": "600", "padding": "10px 14px",
+                   "borderRadius": "8px", "marginBottom": "10px"},
+        )
+        content = html.Div([banner, content])
+        toast = {"_toast": {"type": "success" if banner_color == "success" else "error", "message": banner_text}}
+        return store, content, bc, toast
+
     print("✓ Drilldown callbacks registered (portal-aware)")
 
 
@@ -3353,73 +3427,3 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if sec_staff_id:
             f["sec_assignee_id"] = sec_staff_id
     return f
-
-
-    # ── Poll vote (inline on profile card) ─────────────────────────────────
-    @app.callback(
-        Output("drilldown-store", "data", allow_duplicate=True),
-        Output("drill-content", "children", allow_duplicate=True),
-        Output("drill-breadcrumb", "children", allow_duplicate=True),
-        Output("profile-action-trigger", "data", allow_duplicate=True),
-        Input({"type": "poll-vote-btn", "poll_id": ALL, "choice": ALL}, "n_clicks"),
-        State("drilldown-store", "data"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
-    )
-    def handle_poll_vote(n_clicks_list, store, auth):
-        if not ctx.triggered or not any(n_clicks_list):
-            return no_update, no_update, no_update, no_update
-
-        user_id = (auth or {}).get("user_id")
-        society_id = (auth or {}).get("society_id")
-        if not user_id or not society_id:
-            return no_update, no_update, no_update, no_update
-
-        try:
-            prop_id = ctx.triggered[0]["prop_id"].split(".")[0]
-            import json
-            parsed = json.loads(prop_id)
-            poll_id = int(parsed["poll_id"])
-            choice = int(parsed["choice"])
-        except Exception:
-            return no_update, no_update, no_update, no_update
-
-        if store is None:
-            store = {}
-
-        banner_color, banner_icon, banner_text = "success", "fa-check-circle", "Vote recorded"
-        try:
-            # NOTE (fixed 2026-08): fn_cast_vote RETURNS TABLE(success,
-            # message, total_votes) — it was being called as
-            # "SELECT fn_cast_vote(...) AS success" (a scalar alias on a
-            # set-returning function), which does not expand into the
-            # named columns db._execute()/result.get("success") expects.
-            # That's why voting never produced any success/error feedback.
-            # "SELECT * FROM fn_cast_vote(...)" expands the table properly.
-            result = db._execute(
-                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT)",
-                (poll_id, user_id, choice), fetch_one=True
-            )
-            ok = bool((result or {}).get("success"))
-            msg = (result or {}).get("message") or ("Vote recorded" if ok else "Your vote could not be recorded")
-            if ok:
-                invalidate_kpi_cache()
-                store["refresh"] = True
-                banner_color, banner_icon, banner_text = "success", "fa-check-circle", msg
-            else:
-                banner_color, banner_icon, banner_text = "warning", "fa-exclamation-triangle", msg
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).exception(f"Poll vote failed (poll_id={poll_id}): {e}")
-            banner_color, banner_icon, banner_text = "danger", "fa-exclamation-circle", "Something went wrong recording your vote. Please try again."
-
-        content, bc, db_err = _render_current(store, auth)
-        banner = dbc.Alert(
-            [html.I(className=f"fas {banner_icon} me-2"), banner_text],
-            color=banner_color,
-            style={"fontSize": "13px", "fontWeight": "600", "padding": "10px 14px",
-                   "borderRadius": "8px", "marginBottom": "10px"},
-        )
-        content = html.Div([banner, content])
-        toast = {"_toast": {"type": "success" if banner_color == "success" else "error", "message": banner_text}}
-        return store, content, bc, toast
