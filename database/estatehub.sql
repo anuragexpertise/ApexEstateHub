@@ -5387,7 +5387,9 @@ END;
 $$;
 
 -- fn_get_poll_detail: Get a single poll with vote counts per choice
-CREATE OR REPLACE FUNCTION fn_get_poll_detail(p_poll_id INT, p_user_id INT)
+-- (tenant-scoped — see migration_poll_security_fixes.sql)
+DROP FUNCTION IF EXISTS fn_get_poll_detail(INT, INT);
+CREATE OR REPLACE FUNCTION fn_get_poll_detail(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS TABLE (
     id              INT,
     title           VARCHAR(200),
@@ -5431,9 +5433,14 @@ BEGIN
         p.ends_at
     FROM polls p
     WHERE p.id = p_poll_id
+      AND p.society_id = p_society_id
     INTO
         id, title, description, status, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
         results_announced_at, created_at, total_votes, has_voted, user_vote, ends_at;
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
 
     vote_counts := (
         SELECT jsonb_object_agg(
@@ -5504,14 +5511,79 @@ EXCEPTION
 END;
 $$;
 
+-- fn_edit_poll: Admin edits an existing poll. Server-side guarded
+-- (defense-in-depth alongside the UI-level guard in renderers.py) —
+-- only allowed while status='active' AND zero votes have been cast,
+-- since changing choices out from under existing votes would corrupt
+-- the tally. Editing after a vote exists (or once closed/declared)
+-- must go through Close Poll -> a new poll instead.
+CREATE OR REPLACE FUNCTION fn_edit_poll(
+    p_poll_id      INT,
+    p_society_id   INT,
+    p_title        VARCHAR(200),
+    p_description  TEXT DEFAULT NULL,
+    p_choice_count SMALLINT DEFAULT 2,
+    p_choice_1     VARCHAR(100) DEFAULT '',
+    p_choice_2     VARCHAR(100) DEFAULT '',
+    p_choice_3     VARCHAR(100) DEFAULT NULL,
+    p_choice_4     VARCHAR(100) DEFAULT NULL,
+    p_choice_5     VARCHAR(100) DEFAULT NULL,
+    p_ends_at      TIMESTAMP DEFAULT NULL
+) RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll       polls%ROWTYPE;
+    v_vote_count BIGINT;
+BEGIN
+    IF p_choice_count < 2 OR p_choice_count > 5 THEN
+        RAISE EXCEPTION 'choice_count must be between 2 and 5';
+    END IF;
+
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    IF v_poll.status <> 'active' THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT COUNT(*) INTO v_vote_count FROM poll_votes WHERE poll_id = p_poll_id;
+    IF v_vote_count > 0 THEN
+        RETURN FALSE;
+    END IF;
+
+    UPDATE polls
+       SET title        = p_title,
+           description  = p_description,
+           choice_count = p_choice_count,
+           choice_1     = p_choice_1,
+           choice_2     = p_choice_2,
+           choice_3     = p_choice_3,
+           choice_4     = p_choice_4,
+           choice_5     = p_choice_5,
+           ends_at      = p_ends_at,
+           updated_at   = NOW()
+     WHERE id = p_poll_id;
+
+    RETURN TRUE;
+END;
+$$;
+
 -- fn_declare_results: Admin declares results at a specified time
-CREATE OR REPLACE FUNCTION fn_declare_results(p_poll_id INT, p_user_id INT)
+-- (tenant-scoped + no-op guard against re-declaring — see
+-- migration_poll_security_fixes.sql)
+DROP FUNCTION IF EXISTS fn_declare_results(INT, INT);
+CREATE OR REPLACE FUNCTION fn_declare_results(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
 DECLARE
     v_poll polls%ROWTYPE;
 BEGIN
-    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
     IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    IF v_poll.status = 'results_declared' THEN
         RETURN FALSE;
     END IF;
 
@@ -5525,13 +5597,15 @@ BEGIN
 END;
 $$;
 
--- fn_close_poll: Admin closes a poll
-CREATE OR REPLACE FUNCTION fn_close_poll(p_poll_id INT, p_user_id INT)
+-- fn_close_poll: Admin closes a poll (tenant-scoped — see
+-- migration_poll_security_fixes.sql)
+DROP FUNCTION IF EXISTS fn_close_poll(INT, INT);
+CREATE OR REPLACE FUNCTION fn_close_poll(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
 DECLARE
     v_poll polls%ROWTYPE;
 BEGIN
-    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
     IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
