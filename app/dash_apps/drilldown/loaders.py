@@ -1681,7 +1681,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "SELECT v.*, "
                 "  COALESCE(a.flat_number,'') AS flat_number, "
                 "  COALESCE(u.name,'') AS owner_name, "
-                "  COALESCE(u.phone,'') AS owner_phone "
+                "  COALESCE(u.mobile,'') AS owner_phone "
                 "FROM visitors v "
                 "LEFT JOIN apartments a ON a.id=v.apartment_id "
                 "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "
