@@ -2887,20 +2887,27 @@ BEGIN
         v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
         v_journal_id := NEXTVAL('seq_transaction_number');
 
+        -- entry_side mirrors fn_save_expense's convention, just the opposite
+        -- direction: the receipt/income account (already validated Cr above)
+        -- gets entry_side='Cr' on its own leg; the cash/bank account gets
+        -- entry_side='Dr' since cash is increasing. Previously this function
+        -- inserted no entry_side at all, leaving every receipt-originated
+        -- transaction row NULL on the one column the balance/ledger readers
+        -- (fn_account_ledger_fy, v_financial_trial_balance, etc.) key off.
         INSERT INTO transactions(
-            society_id, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, p_receipt_date, p_acc_id, p_entity_id, p_particulars,
+            p_society_id, 'Cr', p_receipt_date, p_acc_id, p_entity_id, p_particulars,
             p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
         IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
             INSERT INTO transactions(
-                society_id, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, p_receipt_date, v_cash_acc, p_entity_id,
+                p_society_id, 'Dr', p_receipt_date, v_cash_acc, p_entity_id,
                 'Cash received - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );

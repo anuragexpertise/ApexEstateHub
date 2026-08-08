@@ -368,7 +368,7 @@ def register_security_callbacks(app):
             return {"type": "error", "message": "Session expired"}, no_update
 
         try:
-            ok, msg, data = trigger_channel_alert(channel_id, user_id)
+            ok, msg, data = trigger_channel_alert(channel_id, user_id, society_id)
             if ok:
                 toast_type = "success"
                 if data and data.get("state") == "resolved":
@@ -403,9 +403,16 @@ def register_security_callbacks(app):
         society_id = auth.get("society_id") or auth.get("linked_id")
 
         try:
-            db._execute("""
-                UPDATE alert_events SET state = 'calling' WHERE id = %s
-            """, (alert_event_id,))
+            # society_id filter closes a cross-tenant IDOR — without it, any
+            # alert_event_id (even from another society) could be escalated
+            # by a logged-in security user of a different society.
+            updated = db._execute("""
+                UPDATE alert_events SET state = 'calling'
+                 WHERE id = %s AND society_id = %s
+                RETURNING id
+            """, (alert_event_id, society_id), fetch_one=True)
+            if not updated:
+                return {"type": "error", "message": "Alert not found"}, no_update
             return (
                 {"type": "warning", "message": "Escalated: Calling owner for verbal confirmation"},
                 render_gate_alerts_section(society_id),
@@ -439,7 +446,7 @@ def register_security_callbacks(app):
         society_id = auth.get("society_id") or auth.get("linked_id")
 
         try:
-            ok, msg, data = trigger_visitor_alert(visitor_id, user_id)
+            ok, msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
             if ok:
                 return {"type": "success", "message": msg}, render_gate_alerts_section(society_id)
             return {"type": "error", "message": msg}, no_update
@@ -471,11 +478,17 @@ def register_security_callbacks(app):
         society_id = auth.get("society_id") or auth.get("linked_id")
 
         try:
-            db._execute("""
+            # society_id filter closes a cross-tenant IDOR — without it, any
+            # visitor_id (even from another society) could be escalated by a
+            # logged-in security user of a different society.
+            updated = db._execute("""
                 UPDATE alert_events SET state = 'calling'
-                 WHERE visitor_id = %s AND state = 'pending'
+                 WHERE visitor_id = %s AND state = 'pending' AND society_id = %s
                    AND (expires_at IS NULL OR expires_at > NOW())
-            """, (visitor_id,))
+                RETURNING id
+            """, (visitor_id, society_id), fetch_one=True)
+            if not updated:
+                return {"type": "error", "message": "Alert not found"}, no_update
             return (
                 {"type": "warning", "message": "Escalated: Calling owner for verbal confirmation"},
                 render_gate_alerts_section(society_id),
@@ -537,7 +550,7 @@ def register_security_callbacks(app):
                 return {"type": "error", "message": msg}, no_update
 
             # Auto-trigger alert to owner
-            ok, alert_msg, data = trigger_visitor_alert(visitor_id, user_id)
+            ok, alert_msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
             if ok:
                 return (
                     {"type": "success", "message": f"Visitor created and owner notified: {alert_msg}"},
@@ -599,8 +612,12 @@ def register_security_callbacks(app):
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
         society_id = (auth_data or {}).get("society_id")
         user_id = (auth_data or {}).get("user_id")
-        staff_id = (auth_data or {}).get("user_id")
-        if not user_id or not society_id:
+        # gate_access.entity_id for role='SEC' stores security_staff.id, not
+        # users.id (matches fn_evaluate_gate_pass('security', ...) and the
+        # attendance-list join in loaders.py) — auth-store carries this
+        # separately as "security_id", set at login from users.linked_id.
+        staff_id = (auth_data or {}).get("security_id")
+        if not user_id or not society_id or not staff_id:
             return no_update, {"type": "error", "message": "Session expired — please log in again"}
 
         now_str = datetime.now().strftime("%I:%M %p")

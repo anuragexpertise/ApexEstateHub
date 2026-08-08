@@ -99,7 +99,7 @@ def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = Fa
         return []
 
 
-def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
+def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id: int = None):
     """
     Trigger a School Bus, Taxi, or Visitor alert.
 
@@ -117,15 +117,25 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int):
         - State set to 'pending' (Yellow).
         - Second press while pending escalates to 'calling'.
         - ONLY the owner can approve/deny. Security CANNOT PASS.
+
+    `society_id`, when provided, scopes the channel lookup to the caller's
+    own society — closes a cross-tenant IDOR where a channel_id belonging
+    to another society could otherwise be triggered by ID alone.
     """
     try:
-        channel = db._execute("""
+        params = [channel_id]
+        society_clause = ""
+        if society_id is not None:
+            society_clause = " AND ac.society_id = %s"
+            params.append(society_id)
+
+        channel = db._execute(f"""
             SELECT ac.*, a.flat_number, u.id as owner_user_id, u.phone as owner_phone
               FROM alert_channels ac
               LEFT JOIN apartments a ON a.id = ac.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
-             WHERE ac.id = %s
-        """, (channel_id,), fetch_one=True)
+             WHERE ac.id = %s{society_clause}
+        """, tuple(params), fetch_one=True)
 
         if not channel:
             return False, "Alert channel not found", None
@@ -306,20 +316,30 @@ def create_walk_in_visitor(society_id: int, name: str, mobile: str, purpose: str
         return None, str(e)
 
 
-def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id: int = None):
+def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id: int = None, society_id: int = None):
     """
     Trigger a visitor alert (for both presumed and walk-in visitors).
     Sends push to owner, sets state to 'pending'.
     Second press escalates to 'calling'.
+
+    `society_id`, when provided, scopes the visitor lookup to the caller's
+    own society — closes a cross-tenant IDOR where a visitor_id belonging
+    to another society could otherwise be alerted by ID alone.
     """
     try:
-        visitor = db._execute("""
+        params = [visitor_id]
+        society_clause = ""
+        if society_id is not None:
+            society_clause = " AND v.society_id = %s"
+            params.append(society_id)
+
+        visitor = db._execute(f"""
             SELECT v.*, a.flat_number, u.id as owner_user_id, u.phone as owner_phone
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
-             WHERE v.id = %s
-        """, (visitor_id,), fetch_one=True)
+             WHERE v.id = %s{society_clause}
+        """, tuple(params), fetch_one=True)
 
         if not visitor:
             return False, "Visitor not found", None
