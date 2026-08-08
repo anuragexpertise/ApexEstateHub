@@ -23,7 +23,11 @@ Entity map for load_list():
 """
 
 from __future__ import annotations
+
 from datetime import date
+
+import psycopg2
+
 from database.db_manager import db
 
 PAGE_SIZE = 15
@@ -33,12 +37,32 @@ DB_ERROR_KEYWORDS = [
     "error in processing",
     "error in querying",
     "operationalerror",
+    "connection",
+    "network",
+    "server closed",
+    "could not connect",
+    "timeout",
+    "timed out",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
 ]
 
 
 def _is_db_error(e: Exception) -> bool:
+    """True when the exception looks like a database / network connectivity
+    failure rather than a SQL logic error (e.g. column-not-found).
+
+    Checks both error-message keywords and psycopg2 connection-level
+    exception types, because str(psycopg2.OperationalError(...)) yields
+    only the human message (e.g. "server closed the connection") which
+    does not contain the word "operationalerror".
+    """
     s = str(e).lower()
-    return any(kw in s for kw in DB_ERROR_KEYWORDS)
+    return (
+        any(kw in s for kw in DB_ERROR_KEYWORDS)
+        or isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError))
+    )
 
 
 def _sid(f): return f.get("society_id")
@@ -2208,7 +2232,8 @@ def export_csv(entity: str, filters: dict) -> str:
     rows, _ = load_list(entity, filters, page=1, page_size=10_000)
     if not rows:
         return ""
-    import csv, io
+    import csv
+    import io
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
     writer.writeheader()

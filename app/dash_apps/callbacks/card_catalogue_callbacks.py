@@ -1,12 +1,15 @@
 # app/dash_apps/callbacks/card_catalogue_callbacks.py
 
-from datetime import date, datetime
-from dash import Input, Output, State, html, dcc, no_update, ALL
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
-from database.db_manager import db
-import time
 import logging
+import time
+from datetime import date, datetime
+
+import dash_bootstrap_components as dbc
+from dash import ALL, Input, Output, State, html, no_update
+from dash.exceptions import PreventUpdate
+
+from app.dash_apps.drilldown.loaders import _is_db_error
+from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +122,14 @@ def resolve_seed_kpi_value(sid, role, card_id, entity_id=None):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 def format_kpi_value(value, fmt: str) -> str:
     if value is None or value == "":
+        if fmt == "number":
+            return "0"
+        if fmt == "currency":
+            return "₹0"
+        if fmt == "percent":
+            return "0.0%"
+        # date / time / text genuinely have no zero-equivalent — "—" means
+        # "no value" here, not a network error (see refresh_kpi_values error path).
         return "—"
     try:
         if fmt == "number":
@@ -521,12 +532,14 @@ def register_card_catalogue_callbacks(app):
 
             batch_sql = " UNION ALL ".join(select_parts)
             batch_ok = False
+            batch_net_error = False
             try:
                 rows = db._execute(batch_sql, tuple(batch_params), fetch_all=True)
                 value_by_slot = {r["slot"]: r.get("v") for r in (rows or [])}
                 batch_ok = True
             except Exception as exc:
-                err_msg = f"KPI batch query failed, falling back per-card: {str(exc)[:160]}"
+                batch_net_error = _is_db_error(exc)
+                err_msg = f"KPI batch query failed: {str(exc)[:160]}"
                 print(f"⚠️  {err_msg}")
 
             if batch_ok:
@@ -540,21 +553,38 @@ def register_card_catalogue_callbacks(app):
                 # single bad/custom KPI SQL statement can't take the whole
                 # row down — each card gets its own isolated try/except.
                 for idx, card_id, q, params, fmt, ckey, is_scoped in pending:
-                    try:
-                        row = db._execute(q, params, fetch_one=True)
-                        raw = (row or {}).get("v")
-                        value = format_kpi_value(raw, fmt)
-                        _set_cached(ckey, value)
-                        results[idx] = value
-                    except Exception as exc:
-                        tag = "scoped" if is_scoped else "default"
-                        err_msg = f"KPI [{card_id}] {tag}: {str(exc)[:120]}"
-                        print(f"  ❌ {err_msg}")
-                        results[idx] = "ERR"
-                        if first_err is None:
-                            first_err = err_msg
+                    # If the batch failed due to a network/DB error, individual
+                    # queries will also fail identically — skip the DB retry and
+                    # check cache directly (check cache → "Network unreachable").
+                    if batch_net_error:
+                        cached = _get_cached(ckey)
+                        if cached is not None:
+                            results[idx] = cached
+                        else:
+                            results[idx] = "Network unreachable"
+                    else:
+                        try:
+                            row = db._execute(q, params, fetch_one=True)
+                            raw = (row or {}).get("v")
+                            value = format_kpi_value(raw, fmt)
+                            _set_cached(ckey, value)
+                            results[idx] = value
+                        except Exception as exc:
+                            if _is_db_error(exc):
+                                cached = _get_cached(ckey)
+                                if cached is not None:
+                                    results[idx] = cached
+                                else:
+                                    results[idx] = "Network unreachable"
+                            else:
+                                tag = "scoped" if is_scoped else "default"
+                                err_msg = f"KPI [{card_id}] {tag}: {str(exc)[:120]}"
+                                print(f"  ❌ {err_msg}")
+                                results[idx] = "ERR"
+                                if first_err is None:
+                                    first_err = err_msg
 
-        results = [r if r is not None else "—" for r in results]
+        results = [r if r is not None else "Network unreachable" for r in results]
 
         if cache_hits and not pending:
             print(
