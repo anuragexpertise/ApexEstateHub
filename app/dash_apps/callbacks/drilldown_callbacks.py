@@ -2464,8 +2464,43 @@ def _save_asset_dispose(db, d, sid):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _save_vendor_pass(db, d, sid):
-    vendor_user_id = d.get("vendor_user_id") or d.get("entity_id")
-    created_by     = d.get("user_id")
+    caller_role = d.get("caller_role")
+    created_by  = d.get("user_id")
+
+    # ── SECURITY (fixed 2026-08): vendor_user_id was previously trusted
+    # straight from client-submitted form/prefill data — merged =
+    # {**prefill, **form_data} in handle_form_submit lets form_data win,
+    # and unlike society_id/user_id this field is never re-stamped
+    # server-side. It's also not covered by the row-ownership guard at
+    # merge step 6b, which only fires when "edit" in card_id — this is a
+    # "new" form (vendor_pass_new). fn_sell_vendor_pass derives
+    # v_society_id purely from whichever p_user_id row exists, with no
+    # comparison to the caller's own society or identity anywhere in that
+    # function, so a tampered vendor_user_id (e.g. via devtools on the
+    # hidden form field) could post a receipt + pass + ledger transaction
+    # into a DIFFERENT society's books — or as a different vendor within
+    # the same society — attributed to a vendor who never asked for it.
+    # Re-derive the target vendor server-side instead of trusting the
+    # client value, the same way owner-initiated receipts/concerns force
+    # apartment_id back to the caller's own flat at merge step 5.
+    if caller_role == "vendor":
+        # Vendor buying their own pass — never trust vendor_user_id from
+        # the form; force it to the caller's own (server-stamped) user_id.
+        vendor_user_id = created_by
+    else:
+        # Admin selling a pass on a vendor's behalf — re-look-up the
+        # target vendor's login by entity_id (vendors.id), scoped to the
+        # caller's own society, rather than trusting a client-submitted
+        # vendor_user_id.
+        entity_id = d.get("entity_id")
+        if not entity_id:
+            return False, "Vendor is required", None
+        row = db._execute(
+            "SELECT u.id FROM users u "
+            "WHERE u.linked_id=%s AND u.society_id=%s AND u.role='vendor'",
+            (entity_id, sid), fetch_one=True,
+        )
+        vendor_user_id = (row or {}).get("id")
 
     if not vendor_user_id:
         return False, "Vendor user ID is required", None
