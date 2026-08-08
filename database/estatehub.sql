@@ -641,7 +641,9 @@ CREATE TABLE IF NOT EXISTS gate_access (
     entity_id INTEGER NOT NULL,
     role VARCHAR(10),
     time_in TIMESTAMP NOT NULL DEFAULT NOW(),
-    time_out TIMESTAMP
+    time_out TIMESTAMP,
+    created_by INT REFERENCES users (id),
+    updated_by INT
 );
 
 CREATE TABLE IF NOT EXISTS brought_forward (

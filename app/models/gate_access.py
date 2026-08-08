@@ -10,6 +10,8 @@ class GateAccess(db.Model):
     entity_id = db.Column(db.Integer, nullable=False, index=True)
     time_in = db.Column(db.DateTime, server_default=db.func.now(), index=True)
     time_out = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_by = db.Column(db.Integer, nullable=True)
     
     __table_args__ = (
         db.Index('idx_gate_entity', 'role', 'entity_id'),
