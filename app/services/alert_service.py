@@ -267,15 +267,34 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
         if not event:
             return False, "Alert event not found"
 
-        # Verify caller is the owner of this channel's apartment
-        channel = db._execute("""
-            SELECT ac.apartment_id, u.id as owner_user_id
-              FROM alert_channels ac
-              LEFT JOIN users u ON u.linked_id = ac.apartment_id AND u.role = 'apartment'
-             WHERE ac.id = %s
-        """, (event["channel_id"],), fetch_one=True)
+        # Verify caller is the owner of this alert's apartment.
+        #
+        # Channel-based alerts (taxi / school bus) resolve ownership via
+        # alert_channels.apartment_id. Visitor-only alerts — the common
+        # case, since every trigger_visitor_alert() call site omits
+        # channel_id — have channel_id IS NULL, so the old channel-only
+        # lookup returned no row, `channel` was falsy, and the ownership
+        # check silently no-op'd: any apartment owner could approve/deny
+        # any other apartment's visitor alert. Fall back to resolving
+        # ownership via visitors.apartment_id when channel_id is absent.
+        if event.get("channel_id"):
+            record = db._execute("""
+                SELECT ac.apartment_id, u.id as owner_user_id
+                  FROM alert_channels ac
+                  LEFT JOIN users u ON u.linked_id = ac.apartment_id AND u.role = 'apartment'
+                 WHERE ac.id = %s
+            """, (event["channel_id"],), fetch_one=True)
+        elif event.get("visitor_id"):
+            record = db._execute("""
+                SELECT v.apartment_id, u.id as owner_user_id
+                  FROM visitors v
+                  LEFT JOIN users u ON u.linked_id = v.apartment_id AND u.role = 'apartment'
+                 WHERE v.id = %s
+            """, (event["visitor_id"],), fetch_one=True)
+        else:
+            record = None
 
-        if channel and channel.get("owner_user_id") != owner_user_id:
+        if record and record.get("owner_user_id") != owner_user_id:
             return False, "Only the apartment owner can respond to this alert"
 
         db._execute("""
@@ -692,15 +711,28 @@ def get_channel_subscribers_with_profile(channel_id: int):
 def get_channel_subscribers(channel_id: int, society_id: int = None):
     """
     Alias wrapper around get_channel_subscribers_with_profile.
+
+    `society_id`, when provided, scopes the channel lookup to the caller's
+    own society — closes a cross-tenant IDOR where a channel_id belonging
+    to another society could otherwise have its subscriber roster (names,
+    phone, email, flat) viewed by ID alone.
     """
     try:
+        params = [channel_id]
+        society_clause = ""
+        if society_id is not None:
+            society_clause = " AND society_id = %s"
+            params.append(society_id)
+
         ch = db._execute(
-            "SELECT name FROM alert_channels WHERE id = %s",
-            (channel_id,), fetch_one=True
+            f"SELECT name FROM alert_channels WHERE id = %s{society_clause}",
+            tuple(params), fetch_one=True
         )
-        channel_name = ch["name"] if ch else "Channel"
+        if not ch:
+            return {"channel_name": "Channel", "subscribers": []}
+
         subs = get_channel_subscribers_with_profile(channel_id)
-        return {"channel_name": channel_name, "subscribers": subs}
+        return {"channel_name": ch["name"], "subscribers": subs}
     except Exception as e:
         logger.error(f"get_channel_subscribers error: {e}")
         return {"channel_name": "Channel", "subscribers": []}
