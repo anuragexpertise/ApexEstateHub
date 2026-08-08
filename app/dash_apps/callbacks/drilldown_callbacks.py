@@ -522,17 +522,18 @@ def register_drilldown_callbacks(app):
 
             # ── QR / Gate Pass modal — does NOT navigate, fires trigger ──────────
             if action == "show_qr":
-                record = loaders.load_profile(entity, pk, sid) or {}
+                entity_singular = to_singular(entity)
+                record = loaders.load_profile(entity_singular, pk, sid) or {}
                 entity_name = record.get("owner_name") or record.get("name", entity)
 
                 qr_entity_id = pk
-                if entity in ("apartment", "vendor", "security"):
+                if entity_singular in ("apartment", "vendor", "security"):
                     if not qr_entity_id:
                         return no_update, no_update, no_update, no_update, no_update
 
                 trigger_data = {
                     "entity_id": qr_entity_id,
-                    "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity, entity),
+                    "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity_singular, entity_singular),
                     "society_id": sid,
                     "name": entity_name,
                 }
