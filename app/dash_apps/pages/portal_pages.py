@@ -11,9 +11,11 @@ v3 additions:
 """
 
 from __future__ import annotations
+
 import json
-from dash import html, dcc
+
 import dash_bootstrap_components as dbc
+from dash import dcc, html
 
 from app.dash_apps.pages.card_catalogue import DEFAULT_LAYOUTS
 
@@ -207,7 +209,9 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
 
     role = _PORTAL_TO_ROLE.get(portal, portal)
     try:
-        from app.dash_apps.callbacks.card_catalogue_callbacks import resolve_seed_kpi_value
+        from app.dash_apps.callbacks.card_catalogue_callbacks import (
+            resolve_seed_kpi_value,
+        )
         seeded = {
             cid: resolve_seed_kpi_value(sid, role, cid, entity_id) for cid in ids
         }
@@ -216,7 +220,7 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
         seeded = {}
 
     return _kpi_row(
-        *[_kpi_from_id(cid, value=seeded.get(cid) or "—") for cid in ids],
+        *[_kpi_from_id(cid, value=seeded.get(cid) or "Loading…") for cid in ids],
         cols=cols,
     )
 
@@ -394,8 +398,8 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
 
     # ── Channels ──────────────────────────────────────────────────────────────
     if active_tab in ("channels", "admin_channels"):
-        from app.services.alert_service import list_channels, get_active_alerts
         from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+        from app.services.alert_service import get_active_alerts, list_channels
         channels = list_channels(sid or 1, is_admin=True)
         alerts = get_active_alerts(sid or 1)
         return html.Div([
@@ -540,8 +544,8 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
         ], className="portal-page")
 
     if active_tab in ("channels", "owner_channels", "owner-channels"):
-        from app.services.alert_service import list_channels, get_active_alerts
         from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+        from app.services.alert_service import get_active_alerts, list_channels
         channels = list_channels(sid or 1, apartment_id=apt_id, is_admin=False)
         alerts = get_active_alerts(sid or 1)
         return html.Div([

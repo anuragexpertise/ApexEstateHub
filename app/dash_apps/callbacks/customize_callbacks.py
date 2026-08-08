@@ -1,12 +1,15 @@
 # app/dash_apps/callbacks/customize_callbacks.py
 from __future__ import annotations
+
 import json
-from dash import Input, Output, State, html, no_update, clientside_callback, dcc
+
 import dash_bootstrap_components as dbc
- 
+from dash import Input, Output, State, clientside_callback, dcc, html, no_update
+
+from app.dash_apps.drilldown.loaders import _is_db_error
 from app.dash_apps.pages.card_catalogue import (
-    KPI_CARDS,
     DEFAULT_LAYOUTS,
+    KPI_CARDS,
     make_kpi_card,
 )
 
@@ -15,8 +18,8 @@ def _kpi_ids_for_portal_tab(portal, tab):
     """Duplicate-safe KPI list for a given portal+tab."""
     try:
         from app.dash_apps.callbacks.customize_kpi_callbacks import (
-            get_kpi_ids_for_portal_tab,
             _KPI_PORTAL_ENTRIES,
+            get_kpi_ids_for_portal_tab,
         )
     except Exception:
         return list(KPI_CARDS.keys())
@@ -352,6 +355,7 @@ def register_customize_callbacks(app):
         if not n_clicks or not (sql_text or "").strip():
             return no_update
         import time
+
         from database.db_manager import db
  
         sid = (auth_data or {}).get("society_id")
@@ -405,10 +409,13 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
     if not society_id:
         return {}
 
-    from database.db_manager import db
     from app.dash_apps.callbacks.card_catalogue_callbacks import (
-        format_kpi_value, _cache_key, _get_cached, _set_cached,
+        _cache_key,
+        _get_cached,
+        _set_cached,
+        format_kpi_value,
     )
+    from database.db_manager import db
 
     card_ids = list(needed_ids) if needed_ids is not None else list(KPI_CARDS.keys())
 
@@ -446,6 +453,7 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
             batch_params.extend(params)
 
         batch_sql = " UNION ALL ".join(select_parts)
+        batch_net_error = False
         try:
             rows = db._execute(batch_sql, tuple(batch_params), fetch_all=True)
             value_by_slot = {r["slot"]: r.get("v") for r in (rows or [])}
@@ -455,8 +463,16 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
                 _set_cached(ckey, value)
                 values[card_id] = value
         except Exception as exc:
+            batch_net_error = _is_db_error(exc)
             print(f"KPI batch value error, falling back per-card: {exc}")
             for card_id, query, params, fmt, ckey in pending:
+                if batch_net_error:
+                    cached = _get_cached(ckey)
+                    if cached is not None:
+                        values[card_id] = cached
+                    else:
+                        values[card_id] = "Network unreachable"
+                    continue
                 try:
                     row = db._execute(query, params, fetch_one=True)
                     raw = (row or {}).get("v")
@@ -464,8 +480,15 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
                     _set_cached(ckey, value)
                     values[card_id] = value
                 except Exception as e:
-                    print(f"KPI value error [{card_id}]: {e}")
-                    values[card_id] = "—"
+                    if _is_db_error(e):
+                        cached = _get_cached(ckey)
+                        if cached is not None:
+                            values[card_id] = cached
+                        else:
+                            values[card_id] = "Network unreachable"
+                    else:
+                        print(f"KPI value error [{card_id}]: {e}")
+                        values[card_id] = "ERR"
 
     return values
  
