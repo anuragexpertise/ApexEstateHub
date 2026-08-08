@@ -1586,7 +1586,13 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
 
         # ── ACCOUNT ──────────────────────────────────────────────────────────
         if entity_singular == "account":
-            r = db._execute("SELECT * FROM fn_account_profile(%s)", (pk,), fetch_one=True)
+            # NOTE (fixed 2026-08): fn_account_profile previously took only
+            # p_account_id with no tenant check — any pk could be loaded
+            # regardless of society, same IDOR class as fn_concern_profile /
+            # fn_get_poll_detail. See migration_fn_account_profile_scope.sql.
+            r = db._execute(
+                "SELECT * FROM fn_account_profile(%s, %s)", (pk, society_id), fetch_one=True
+            )
             return dict(r) if r else None
 
         # ── GATE LOG ─────────────────────────────────────────────────────────
