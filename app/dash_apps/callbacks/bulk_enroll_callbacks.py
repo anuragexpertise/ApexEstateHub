@@ -49,6 +49,10 @@ from werkzeug.security import generate_password_hash
 
 from database.db_manager import db
 
+# Defense-in-depth cap: a huge CSV (accidental or malicious) would otherwise
+# trigger unbounded serial INSERTs with no upper bound.
+MAX_BULK_ROWS = 500
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CSV CONTRACT PER ENTITY
 # ══════════════════════════════════════════════════════════════════════════════
@@ -505,6 +509,23 @@ def register_bulk_enroll_callbacks(app):
         if not contents or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
 
+        # ── SECURITY (fixed 2026-08): the "Bulk Enroll" button is only
+        # rendered when `"new" in allowed` for apartments/vendors/security
+        # (see renderers.py), which is admin-only per _PORTAL_PERMS — but
+        # that's a UI-only check. This callback itself never re-verified
+        # role, unlike handle_form_submit's "Phase 4 #15" gate for ordinary
+        # New/Edit forms. Without this, an authenticated owner/vendor/
+        # security session could hit this callback directly (replaying its
+        # payload) and mint new apartment/vendor/security logins —
+        # including their own attacker-chosen email/password — in their
+        # own society. Bulk enroll is an admin/master-only action.
+        _actor_role = (auth or {}).get("role", "")
+        if _actor_role not in ("admin", "master"):
+            return (
+                html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
         sid = (auth or {}).get("society_id")
         if not sid:
             return (
@@ -523,6 +544,16 @@ def register_bulk_enroll_callbacks(app):
         if not rows:
             return (
                 html.Div("The CSV has no data rows.", style={"color": "#e59620"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        if len(rows) > MAX_BULK_ROWS:
+            return (
+                html.Div(
+                    f"Too many rows ({len(rows)}) — split into batches of "
+                    f"{MAX_BULK_ROWS} or fewer.",
+                    style={"color": "#de5c52"},
+                ),
                 no_update, no_update, no_update, no_update,
             )
 
