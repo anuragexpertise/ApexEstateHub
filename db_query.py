@@ -379,10 +379,20 @@ def print_config():
 
 
 def run_sql_file(db: DatabaseConnection, filepath: str):
-    """Execute SQL from file."""
+    """Execute SQL from file.
+
+    NOTE (fixed 2026-08): previously split on a literal ";" character, which
+    breaks any file containing a dollar-quoted function/procedure body (e.g.
+    CREATE FUNCTION ... AS $$ ... $$;) — the semicolon terminating the inner
+    statement got treated as a statement boundary, truncating the CREATE
+    FUNCTION into an unterminated $$ fragment and a dangling "$$" fragment.
+    Switched to sqlparse.split(), which is dollar-quote-aware — same
+    approach database/migrate.py already uses for estatehub.sql.
+    """
     try:
+        import sqlparse
         with open(filepath, "r") as f:
-            queries = f.read().split(";")
+            queries = sqlparse.split(f.read())
         
         print(f"\n📄 Running {len(queries)} queries from {filepath}\n")
         
