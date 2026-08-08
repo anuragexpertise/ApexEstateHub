@@ -944,21 +944,18 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
-            # ── Toggle Duty (security profile — manual clock in/out) ──────────────
+            # ── Toggle Duty (security profile — admin-only manual clock in/out) ────
             elif action == "toggle_duty":
-                # toggle_security_duty needs users.id (matches
-                # gate_access.entity_id for role='SEC'), but pk here is
-                # security_staff.id (fn_security_list convention) — resolve
-                # via linked_id, same pattern as show_qr above.
-                sec_user = db._execute(
-                    "SELECT id FROM users WHERE linked_id=%s AND role='security' AND society_id=%s",
-                    (pk, sid), fetch_one=True,
-                )
-                if not sec_user:
-                    toast = {"_toast": {"type": "error", "message": "No login found for this security staff member"}}
+                # Admin-only (profile_actions.py roles=["admin"]) — a guard's
+                # own duty status is not self-service from this action.
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can toggle a guard's duty status"}}
                     content, bc, db_err = _render_current(store, auth)
                     return store, content, bc, {"display": "none"}, toast
-                ok, msg = loaders.toggle_security_duty(sec_user["id"], sid)
+                # pk is security_staff.id (fn_security_list convention) —
+                # gate_access.entity_id for role='SEC' now stores this same
+                # ID directly, so no users.id resolution is needed here.
+                ok, msg = loaders.toggle_security_duty(int(pk), sid)
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)

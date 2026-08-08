@@ -836,7 +836,6 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
 
     for g in guards:
         sec_id = g["linked_id"]
-        uid = g["user_id"]
         for i, d in enumerate(roster_dates):
             cur.execute(
                 """INSERT INTO security_roster (society_id, security_id, roster_date, shift_type, assigned_by)
@@ -848,22 +847,25 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
 
             # gate_access role='SEC' — closed (off-duty) shift for all but the
             # most recent day, which is left open (on-duty) — req 5.
+            # entity_id must be security_staff.id (sec_id), matching
+            # fn_evaluate_gate_pass('security', ...) and every other reader
+            # of gate_access role='SEC' — not users.id (uid).
             is_latest = (i == len(roster_dates) - 1)
             if not _one(cur, """SELECT 1 FROM gate_access
                                  WHERE society_id=%s AND entity_id=%s AND role='SEC'
                                    AND time_in::DATE=%s""",
-                        (society_id, uid, d)):
+                        (society_id, sec_id, d)):
                 if is_latest:
                     cur.execute(
                         """INSERT INTO gate_access (society_id, entity_id, role, time_in)
-                           VALUES (%s,%s,'s', %s)""",
-                        (society_id, uid, f"{d} 08:00:00"),
+                           VALUES (%s,%s,'SEC', %s)""",
+                        (society_id, sec_id, f"{d} 08:00:00"),
                     )
                 else:
                     cur.execute(
                         """INSERT INTO gate_access (society_id, entity_id, role, time_in, time_out)
-                           VALUES (%s,%s,'s', %s, %s)""",
-                        (society_id, uid, f"{d} 08:00:00", f"{d} 20:00:00"),
+                           VALUES (%s,%s,'SEC', %s, %s)""",
+                        (society_id, sec_id, f"{d} 08:00:00", f"{d} 20:00:00"),
                     )
                 conn.commit()
         status = "ON duty (open shift)" if roster_dates else "—"

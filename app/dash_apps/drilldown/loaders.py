@@ -1911,18 +1911,20 @@ def verify_payment(payment_id: int, confirmed_by: int, mode: str = "cash") -> tu
 # TOGGLE SECURITY DUTY (manual clock in/out from profile_security)
 # ════════════════════════════════════════════════════════════════════════════
 
-def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
+def toggle_security_duty(security_id: int, society_id: int) -> tuple[bool, str]:
     """
-    Manual on/off-duty toggle for a security guard, from the profile_security
-    "Toggle Duty" action button.
+    Admin-only on/off-duty toggle for a security guard, from the
+    profile_security "Toggle Duty" action button (roles: ["admin"]).
 
-    `user_id` is users.id — the same id gate_access.entity_id stores for
-    role='SEC' rows (see fn_security_list / fn_evaluate_gate_pass).
+    `security_id` is security_staff.id — the single ID gate_access.entity_id
+    stores for role='SEC' rows, matching fn_evaluate_gate_pass('security', ...)
+    (see database/estatehub.sql) and the fn_security_list / attendance-list
+    joins in this module, which all key off security_staff.id directly. No
+    resolution through users.id is needed anywhere in this path.
 
     Clock IN  → opens a gate_access row (time_out NULL). While this row is
-                open, fn_evaluate_gate_pass() / fn_security_list's
-                "gate_pass" flag treat the guard as on duty and gate scans
-                for them will pass.
+                open, fn_evaluate_gate_pass() treats the guard as on duty
+                and gate scans for them will pass.
     Clock OUT → stamps time_out=NOW() on the open row. Shift/payroll
                 counting (fn_security_list's shift_count) is driven
                 separately by the security_roster + payables system, not
@@ -1935,7 +1937,7 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
             "SELECT id FROM gate_access "
             "WHERE entity_id=%s AND role='SEC' AND time_out IS NULL AND society_id=%s "
             "ORDER BY time_in DESC LIMIT 1",
-            (user_id, society_id), fetch_one=True,
+            (security_id, society_id), fetch_one=True,
         )
         if open_row:
             db._execute(
@@ -1947,7 +1949,7 @@ def toggle_security_duty(user_id: int, society_id: int) -> tuple[bool, str]:
             db._execute(
                 "INSERT INTO gate_access(society_id, entity_id, role, time_in, created_by) "
                 "VALUES(%s,%s,'SEC',NOW(),%s)",
-                (society_id, user_id, _upd_by),
+                (society_id, security_id, _upd_by),
             )
             return True, "Marked ON duty — shift started"
     except Exception as e:

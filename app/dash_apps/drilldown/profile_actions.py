@@ -109,19 +109,25 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {
             # Manual on/off-duty clock toggle. Clocking IN opens a
             # gate_access row (role='SEC', time_out NULL), which is exactly
-            # what fn_evaluate_gate_pass() / fn_security_list's "gate_pass"
-            # column checks to treat the guard as on duty for gate scans.
-            # Clocking OUT stamps time_out=NOW() on that row. Shift/payroll
-            # counting itself (fn_security_list's shift_count) is driven
-            # separately by the security_roster + payables system — this
-            # toggle only controls live on/off-duty status for gate scans.
-            # See loaders.toggle_security_duty().
+            # what fn_evaluate_gate_pass() checks to treat the guard as on
+            # duty for gate scans. Clocking OUT stamps time_out=NOW() on
+            # that row. Shift/payroll counting itself (fn_security_list's
+            # shift_count) is driven separately by the security_roster +
+            # payables system — this toggle only controls live on/off-duty
+            # status for gate scans. See loaders.toggle_security_duty().
+            #
+            # Admin-only: a guard could otherwise open ANY other guard's
+            # profile_security card (portal perm on ("security","security")
+            # is view+edit, not self-scoped) and flip their on/off-duty
+            # status. Restricting this action to admin closes that gap;
+            # a guard's own duty status is set via the portal's own
+            # Clock In/Out control or the timed attendance QR, not here.
             "label": "Toggle Duty",
             "action_id": "toggle_duty",
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-toggle-on",
             "color": "warning",
-            "roles": ["admin", "security"],
+            "roles": ["admin"],
         },
     ],
 
