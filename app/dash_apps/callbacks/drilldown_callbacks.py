@@ -101,6 +101,10 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
             "date_to": today.isoformat(),
         }
 
+    if card_id == "kpi_presumed_visitor":
+        # Matches the KPI's own query: status='pending' AND visit_date=CURRENT_DATE.
+        return {"visit_date": today.isoformat()}
+
     return {}
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService
@@ -454,10 +458,7 @@ def register_drilldown_callbacks(app):
             # ─── Dynamic filter computation ───
             static_filter = nav_info.get("filter", {}) or {}
             dynamic_filter = _compute_dynamic_filter(card_id, static_filter, sid)
-            
-            if card_id == "kpi_concerns_assigned_admin" and role == "admin":
-                static_filter = {**static_filter, "admin_user_id": auth.get("user_id")}
-            
+
             store = nav_state.navigate_to(
                 store,
                 target,
