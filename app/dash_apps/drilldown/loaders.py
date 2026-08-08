@@ -906,6 +906,44 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── VISITORS (gate QR scan register) ────────────────────────────
+        # Was previously unhandled here (fell through to the `return [],0`
+        # below), so list_visitors always rendered empty regardless of
+        # filters. Backs kpi_presumed_visitor (Security portal "Presumed
+        # Visitors" -> list_visitors -> profile_visitor). Joins the host
+        # apartment + owner the same way load_profile's "visitor" branch
+        # does, for consistent flat number / owner name display.
+        if entity == "visitors":
+            status_filter = filters.get("status")
+            visit_date    = filters.get("visit_date")  # 'today' scoping, see _compute_dynamic_filter
+            extra, params = "", [sid]
+            if status_filter:
+                extra += " AND v.status=%s"
+                params.append(status_filter)
+            if visit_date:
+                extra += " AND v.visit_date=%s"
+                params.append(visit_date)
+            if s:
+                extra += " AND (v.name ILIKE %s OR v.mobile ILIKE %s)"
+                params += [f"%{s}%", f"%{s}%"]
+            rows = db._execute(
+                "SELECT v.*, "
+                "  COALESCE(a.flat_number,'') AS flat_number, "
+                "  COALESCE(u.name,'') AS owner_name "
+                "FROM visitors v "
+                "LEFT JOIN apartments a ON a.id=v.apartment_id "
+                "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "
+                "WHERE v.society_id=%s " + extra +
+                " ORDER BY v.visit_date DESC, v.id DESC"
+                " LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM visitors v WHERE v.society_id=%s" + extra,
+                params, fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         # ── POLLS ──────────────────────────────────────────────────────
         if entity == "polls":
             # Auto-expire polls whose ends_at has passed. This used to run
@@ -1681,7 +1719,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "SELECT v.*, "
                 "  COALESCE(a.flat_number,'') AS flat_number, "
                 "  COALESCE(u.name,'') AS owner_name, "
-                "  COALESCE(u.mobile,'') AS owner_phone "
+                "  COALESCE(u.phone,'') AS owner_phone "
                 "FROM visitors v "
                 "LEFT JOIN apartments a ON a.id=v.apartment_id "
                 "LEFT JOIN users u ON u.linked_id=a.id AND u.role='apartment' "

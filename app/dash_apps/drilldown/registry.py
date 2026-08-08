@@ -177,6 +177,11 @@ DRILLDOWN_MAP: dict = {
         "filter": {"assigned_status": "resolved"},
     },
     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
+    "kpi_presumed_visitor": {
+        "target": "list_visitors",
+        "label": "Presumed Visitors",
+        "filter": {"status": "pending"},
+    },
     "kpi_receipts_month": {
         "target": "list_receipts",
         "label": "Receipts This Month",
@@ -573,6 +578,18 @@ def build_breadcrumb(nav_stack: list) -> list:
     return crumbs
 
 
+# Entities whose profile_* block above deliberately declares "actions": {}
+# to opt OUT of the generic defaults below (not "forgot to fill it in"):
+#   - concern: assign/save_bid/vendor_resolve/close_concern are intercepted
+#     directly in drilldown_callbacks.py before DRILLDOWN_MAP is consulted.
+#   - visitor / event_ticket / patrol_location: read-only QR-scan profiles,
+#     no CRUD forms wired (see comment above profile_visitor).
+#   - ledger: read-only computed report, same as cashbook (no row actions).
+# profile_security is intentionally NOT in this set — its own comment says
+# "edit is auto-populated by the post-processing loop below", i.e. it wants
+# the default. Keep this set in sync with any new no-default profile_* block.
+_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "patrol_location", "ledger"}
+
 # Ensure profile action mappings exist for entities.
 # This programmatically adds sensible defaults (edit prefill) and
 # a `show_transactions` action for financial entities when missing.
@@ -584,8 +601,9 @@ try:
             DRILLDOWN_MAP[profile_key] = {"actions": {}}
         # ensure actions dict exists
         actions = DRILLDOWN_MAP.get(profile_key, {}).get("actions") or {}
-        # add default edit mapping if not present
-        if "edit" not in actions:
+        # add default edit mapping if not present (unless this entity
+        # explicitly opted out above via an empty "actions": {} block)
+        if "edit" not in actions and singular not in _NO_AUTO_ACTIONS:
             actions["edit"] = {"target": f"form_{singular}_edit", "prefill": {"*": "*"}}
         # financial show_transactions action for financial-like entities
         if plural in (
