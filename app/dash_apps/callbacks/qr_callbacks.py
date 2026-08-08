@@ -18,6 +18,34 @@ def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -
     """
     from app.dash_apps.drilldown import loaders, renderers
     from app.dash_apps.drilldown.schema_introspect import get_entity_meta
+    from database.db_manager import db
+
+    # ── SECURITY (fixed 2026-08): load_profile only scopes by society_id,
+    # not by whether the caller is actually assigned to this concern. The
+    # normal Concerns list filters vendor/security views to their own
+    # invited/assigned rows via vnd_assignee_id/sec_assignee_id (see
+    # _apply_portal_filters), but this manual/QR lookup had no equivalent
+    # check — any vendor or security staff could type/guess any concern_id
+    # in their own society (a small sequential integer) and pull up its
+    # full profile, including the raising apartment and description, for
+    # a job they were never invited to. Admin/master are exempt — full
+    # access to any concern in their society is legitimately their job.
+    _role = (auth_data or {}).get("role")
+    if _role in ("vendor", "security"):
+        _role_code = "VND" if _role == "vendor" else "SEC"
+        _entity_id = (auth_data or {}).get("linked_id")
+        _assigned = db._execute(
+            "SELECT 1 FROM concerns_assigns "
+            "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+            (concern_id, society_id, _role_code, _entity_id), fetch_one=True,
+        )
+        if not _assigned:
+            # Same message as the not-found case below — don't confirm
+            # whether a concern_id the caller isn't assigned to even exists.
+            return html.Div([
+                html.I(className="fas fa-exclamation-triangle fa-2x mb-2", style={"color": "#e59620"}),
+                html.Div("Concern not found.", style={"color": "#e59620", "fontWeight": "600"}),
+            ], className="text-center p-3")
 
     record = loaders.load_profile("concern", concern_id, society_id)
     if not record:
