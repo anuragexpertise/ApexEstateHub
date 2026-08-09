@@ -406,7 +406,7 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
             _kpi_row_dynamic("admin", "channels", sid, cols=KPI_GRID_COLS),
             _divider(),
-            render_subscribable_alert_manager(channels, alerts, is_admin=True),
+            render_subscribable_alert_manager(channels, alerts, is_admin=True, society_id=sid),
             _divider(), _drill_panel(),
         ], className="portal-page")
 

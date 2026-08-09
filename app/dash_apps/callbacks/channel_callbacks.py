@@ -31,6 +31,19 @@ def render_channels_page(society_id: int, auth: dict) -> html.Div:
 
 def register_channel_callbacks(app):
 
+    # ── 0. Show the "Target Apartment" picker only for Taxi / Visitor ───────
+    # School Bus is broadcast-to-subscribers and has no single owner, so the
+    # field is irrelevant (and left blank/ignored) for that type.
+    @app.callback(
+        Output("channel-apartment-input-wrap", "style"),
+        Input("channel-type-input", "value"),
+        prevent_initial_call=False,
+    )
+    def toggle_channel_apartment_field(ch_type):
+        if ch_type in ("taxi", "visitor"):
+            return {"display": "block"}
+        return {"display": "none"}
+
     # ── 1. Admin: Create Channel ─────────────────────────────────────────────
     @app.callback(
         Output("toast-store", "data", allow_duplicate=True),
@@ -39,11 +52,12 @@ def register_channel_callbacks(app):
         State("channel-type-input", "value"),
         State("channel-name-input", "value"),
         State("channel-identifier-input", "value"),
+        State("channel-apartment-input", "value"),
         State("channel-recurring-switch", "value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def create_channel(n_clicks, ch_type, ch_name, identifier, is_recurring, auth):
+    def create_channel(n_clicks, ch_type, ch_name, identifier, apartment_id, is_recurring, auth):
         if not n_clicks:
             return no_update, no_update
 
@@ -60,6 +74,19 @@ def register_channel_callbacks(app):
         if not ch_type:
             return {"message": "Channel type is required.", "color": "warning"}, no_update
 
+        # Taxi / Visitor channels are addressed to a single apartment: the
+        # owner is who gets push-notified and who is authorized to
+        # approve/deny (see alert_service.trigger_channel_alert /
+        # respond_to_alert). Without apartment_id set at creation, those
+        # channels silently orphan every alert they raise — no push goes
+        # out and no one can ever respond to it. School Bus doesn't need
+        # this since it broadcasts to all subscribers instead.
+        if ch_type in ("taxi", "visitor") and not apartment_id:
+            return {
+                "message": "Please select the target apartment/flat for a Taxi or Visitor channel.",
+                "color": "warning",
+            }, no_update
+
         try:
             from app.services.alert_service import create_alert_channel
             ok, msg = create_alert_channel(
@@ -67,6 +94,7 @@ def register_channel_callbacks(app):
                 channel_type=ch_type,
                 name=ch_name.strip(),
                 identifier=(identifier or "").strip() or None,
+                apartment_id=apartment_id if ch_type in ("taxi", "visitor") else None,
                 is_recurring=bool(is_recurring),
             )
             if ok:

@@ -19,11 +19,29 @@ def create_alert_channel(
     """
     Create a new alert channel (School Bus, Taxi, or Visitor).
     `is_recurring` determines if channel persists across days.
+
+    Taxi/Visitor channels MUST carry an apartment_id: trigger_channel_alert()
+    resolves the push-notify target and respond_to_alert() resolves who is
+    authorized to approve/deny via apartments.id -> users.linked_id. Without
+    it, the resulting alert is orphaned — no push, invisible on the owner's
+    Channels page, and rejected by the ownership check even if found.
+    Enforced here (not just in the calling UI) so any future caller can't
+    silently recreate that bug.
     """
     try:
         channel_type_clean = channel_type.lower().strip()
         if channel_type_clean not in ("school_bus", "taxi", "visitor"):
             return None, f"Invalid channel type: {channel_type}"
+
+        if channel_type_clean in ("taxi", "visitor"):
+            if not apartment_id:
+                return None, f"{channel_type_clean.title()} channels require a target apartment_id"
+            apt_row = db._execute(
+                "SELECT id FROM apartments WHERE id = %s AND society_id = %s",
+                (apartment_id, society_id), fetch_one=True,
+            )
+            if not apt_row:
+                return None, "Selected apartment does not belong to this society"
 
         row = db._execute("""
             INSERT INTO alert_channels (society_id, channel_type, name, identifier, apartment_id, is_recurring, active)

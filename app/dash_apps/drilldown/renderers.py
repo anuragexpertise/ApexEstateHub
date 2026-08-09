@@ -2847,11 +2847,19 @@ def render_event_mobile_ticket_view(booking: dict) -> "html.Div":
     ], style={"borderRadius": "16px", "boxShadow": "0 4px 16px rgba(0,0,0,0.08)"})
 
 
-def render_subscribable_alert_manager(channels: list, active_alerts: list, is_admin: bool = False, apartment_id=None) -> "html.Div":
+def render_subscribable_alert_manager(channels: list, active_alerts: list, is_admin: bool = False, apartment_id=None, society_id=None) -> "html.Div":
     """
     Renders Subscribable Alert Manager + Gate KPI Alert Cards.
     Admin: active + inactive channels. Owner: active only + subscribe toggle.
     apartment_id: apartments.id of the logged-in owner.
+    society_id: required (admin view) to populate the "Target Apartment"
+    dropdown on the Create Channel form — Taxi/Visitor channels must be
+    linked to a specific apartment_id so trigger_channel_alert() can resolve
+    an owner to push-notify and respond_to_alert() can authorize that owner
+    to approve/deny. Without this, apartment_id stays NULL forever and the
+    alert is orphaned (no push, invisible on every owner's Channels page,
+    rejected by the ownership check even if found). School Bus channels are
+    broadcast-to-subscribers and don't need this field.
     """
     from dash import html
     import dash_bootstrap_components as dbc
@@ -2975,6 +2983,17 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
         )
 
     # Create Channel Form (admin only)
+    apt_options = []
+    if is_admin and society_id:
+        try:
+            apt_rows = db._execute(
+                "SELECT id, flat_number FROM apartments WHERE society_id=%s ORDER BY flat_number",
+                (society_id,), fetch_all=True,
+            ) or []
+            apt_options = [{"label": f"Flat {r['flat_number']}", "value": r["id"]} for r in apt_rows]
+        except Exception as e:
+            print(f"render_subscribable_alert_manager: apartment list error: {e}")
+
     create_channel_card = dbc.Card([
         dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
         dbc.CardBody([
@@ -2992,9 +3011,19 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
                     dbc.Input(id="channel-name-input", placeholder="e.g. DPS Bus #12 or Uber Taxi"),
                 ], width=5),
                 dbc.Col([
-                    dbc.Label("Identifier (Reg # / Flat #)"),
+                    dbc.Label("Identifier (Reg # / Ref)"),
                     dbc.Input(id="channel-identifier-input", placeholder="e.g. MH-02-1234"),
                 ], width=3),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Target Apartment (required for Taxi / Visitor — this is who gets the push and can Approve/Deny)"),
+                    dbc.Select(
+                        id="channel-apartment-input",
+                        options=apt_options,
+                        placeholder="Select flat…",
+                    ),
+                ], width=12, id="channel-apartment-input-wrap", style={"display": "none"}),
             ], className="mb-3"),
             dbc.Row([
                 dbc.Col([
