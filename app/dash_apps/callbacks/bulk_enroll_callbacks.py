@@ -48,6 +48,11 @@ import dash_bootstrap_components as dbc
 from werkzeug.security import generate_password_hash
 
 from database.db_manager import db
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+)
 
 # Defense-in-depth cap: a huge CSV (accidental or malicious) would otherwise
 # trigger unbounded serial INSERTs with no upper bound.
@@ -509,29 +514,38 @@ def register_bulk_enroll_callbacks(app):
         if not contents or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
 
-        # ── SECURITY (fixed 2026-08): the "Bulk Enroll" button is only
-        # rendered when `"new" in allowed` for apartments/vendors/security
-        # (see renderers.py), which is admin-only per _PORTAL_PERMS — but
-        # that's a UI-only check. This callback itself never re-verified
-        # role, unlike handle_form_submit's "Phase 4 #15" gate for ordinary
-        # New/Edit forms. Without this, an authenticated owner/vendor/
-        # security session could hit this callback directly (replaying its
-        # payload) and mint new apartment/vendor/security logins —
-        # including their own attacker-chosen email/password — in their
-        # own society. Bulk enroll is an admin/master-only action.
-        _actor_role = (auth or {}).get("role", "")
+        # ── SECURITY (fixed 2026-08, corrected 2026-08): the "Bulk Enroll"
+        # button is only rendered when `"new" in allowed` for apartments/
+        # vendors/security (see renderers.py), which is admin-only per
+        # _PORTAL_PERMS — but that's a UI-only check. The first pass at a
+        # server-side gate here re-derived role/society_id from `auth`
+        # (auth-store), which is a Dash dcc.Store living in the browser's
+        # localStorage — editable via devtools. That defeats the point of
+        # a server-side gate: an authenticated owner/vendor/security
+        # session could still edit auth-store.role to "admin" (and/or
+        # auth-store.society_id to another tenant) and hit this callback
+        # directly to mint logins — including attacker-chosen email/
+        # password — for itself or into a different society. Per
+        # app/security/audit_context.py's documented rule, role and
+        # tenant scoping for a write must come from the server-side
+        # Flask-Login session, never from auth-store. auth-store is kept
+        # only as a fallback for the (non-production) case where no
+        # server session is available.
+        _actor_role = get_current_user_role() or (auth or {}).get("role", "")
         if _actor_role not in ("admin", "master"):
             return (
                 html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 
-        sid = (auth or {}).get("society_id")
+        sid = get_current_society_id() or (auth or {}).get("society_id")
         if not sid:
             return (
                 html.Div("Not authenticated.", style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
+
+        actor_id = get_current_user_id() or (auth.get("user_id") if auth else None)
 
         try:
             rows = _parse_csv(contents)
@@ -558,11 +572,11 @@ def register_bulk_enroll_callbacks(app):
             )
 
         if entity == "apartments":
-            results = _bulk_insert_apartments(rows, sid, auth.get("user_id") if auth else None)
+            results = _bulk_insert_apartments(rows, sid, actor_id)
         elif entity == "vendors":
-            results = _bulk_insert_vendors(rows, sid, auth.get("user_id") if auth else None)
+            results = _bulk_insert_vendors(rows, sid, actor_id)
         else:   # security
-            results = _bulk_insert_security(rows, sid, auth.get("user_id") if auth else None)
+            results = _bulk_insert_security(rows, sid, actor_id)
 
         result_ui = _render_results(results, filename or "upload.csv")
 

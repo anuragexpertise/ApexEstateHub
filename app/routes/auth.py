@@ -3,31 +3,16 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from database.db_manager import db
 from app.models.user import User
-import jwt, os, time
+# SECURITY (fixed 2026-08): JWT_SECRET and token generation now come from
+# app.auth.jwt_handler — the single source of truth. This module used to
+# define its own JWT_SECRET with a different fallback default, which risked
+# login-minted tokens and @token_required-verified tokens using different
+# signing keys if JWT_SECRET_KEY was ever unset in an environment.
+from app.auth.jwt_handler import JWT_SECRET, generate_tokens_for as generate_tokens
+import jwt
 from datetime import datetime, timedelta
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
-
-JWT_SECRET                = os.environ.get('JWT_SECRET_KEY', 'change-me-in-production')
-JWT_ACCESS_TOKEN_EXPIRES  = int(os.environ.get('JWT_ACCESS_TOKEN_EXPIRES',  3600))
-JWT_REFRESH_TOKEN_EXPIRES = int(os.environ.get('JWT_REFRESH_TOKEN_EXPIRES', 2592000))
-
-
-# ── Token helpers ─────────────────────────────────────────────
-
-def generate_tokens(user_id, email, role):
-    now = int(time.time())
-    access_token = jwt.encode({
-        'user_id': user_id, 'email': email, 'role': role,
-        'exp': now + JWT_ACCESS_TOKEN_EXPIRES,
-        'iat': now, 'type': 'access',
-    }, JWT_SECRET, algorithm='HS256')
-    refresh_token = jwt.encode({
-        'user_id': user_id,
-        'exp': now + JWT_REFRESH_TOKEN_EXPIRES,
-        'iat': now, 'type': 'refresh',
-    }, JWT_SECRET, algorithm='HS256')
-    return access_token, refresh_token
 
 
 def _redirect_url(role, society_id):

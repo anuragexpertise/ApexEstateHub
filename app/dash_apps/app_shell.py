@@ -225,6 +225,18 @@ def _sidebar() -> html.Aside:
                         style={"display": "flex", "alignItems": "center", "padding": "0 14px 8px"},
                     ),
                     html.Button(
+                        [html.I(className="fas fa-key me-2"), "Account Settings"],
+                        id="account-settings-btn",
+                        n_clicks=0,
+                        style={
+                            "width": "calc(100% - 28px)", "margin": "0 14px 8px",
+                            "background": "rgba(255,255,255,0.08)",
+                            "border": "1px solid rgba(255,255,255,0.15)",
+                            "color": "#fff", "borderRadius": "8px",
+                            "padding": "6px", "cursor": "pointer", "fontSize": "12px",
+                        },
+                    ),
+                    html.Button(
                         [html.I(className="fas fa-sign-out-alt me-2"), "Logout"],
                         id="sb-logout-btn",
                         n_clicks=0,
@@ -602,6 +614,45 @@ def _concern_bid_modal() -> dbc.Modal:
     )
 
 
+def _account_settings_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Account Settings"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.P("Change your password", className="mb-2",
+                           style={"fontWeight": "600", "fontSize": "13px"}),
+                    dbc.Label("Current password", size="sm"),
+                    dbc.Input(id="current-password-input", type="password",
+                              className="mb-2"),
+                    dbc.Label("New password", size="sm"),
+                    dbc.Input(id="new-password-input-acct", type="password",
+                              className="mb-2"),
+                    dbc.Label("Confirm new password", size="sm"),
+                    dbc.Input(id="confirm-password-input-acct", type="password",
+                              className="mb-2"),
+                    html.Small(
+                        "Must be at least 8 characters.",
+                        style={"color": "#7d8ea3"},
+                    ),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-account-settings-modal",
+                           n_clicks=0, color="secondary"),
+                dbc.Button("Update Password", id="change-password-btn",
+                           n_clicks=0, color="primary"),
+            ]),
+        ],
+        id="account-settings-modal",
+        size="sm", is_open=False, centered=True,
+        style={"zIndex": "20050"},
+    )
+
+
 # ── QR modal ──────────────────────────────────────────────────────────────────
 
 def _qr_modal() -> dbc.Modal:
@@ -806,6 +857,9 @@ def shell_layout() -> html.Div:
                     "zIndex": "9998", "display": "none", "overflow": "hidden",
                 },
             ),
+
+            # ── Account Settings modal (Change Password, all roles) ─────────────
+            _account_settings_modal(),
 
             # ── QR modal ───────────────────────────────────────────────────────
             _qr_modal(),

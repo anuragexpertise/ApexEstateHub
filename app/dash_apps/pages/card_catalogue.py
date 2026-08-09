@@ -1002,26 +1002,16 @@ DEFAULT_LAYOUTS = {
             "kpi_concerns_not_closed",
             "kpi_gate_logs",
             "kpi_assets_count",
-            "kpi_receivables_total",
-            "kpi_advance_credits",
             "kpi_receipts_pending",
-            "kpi_payables_total",
-            "kpi_cash_in_hand",
-            "kpi_bank_balance",
             "kpi_channels_total",
         ],
         "enroll": [
             "kpi_apartments_total",
             "kpi_vendors_total",
             "kpi_security_total",
-            "kpi_security_roster_count",
         ],
         "financials": [
-            "kpi_receivables_overdue",
-            "kpi_receivables_total",
-            "kpi_advance_credits",
             "kpi_security_salaries_due",
-            "kpi_payables_total",
             "kpi_receipts_month",
             "kpi_receipts_total",
             "kpi_expenses_month",
@@ -1037,25 +1027,16 @@ DEFAULT_LAYOUTS = {
         "polls": ["kpi_polls_total", "kpi_polls_active"],
         "assets": ["kpi_assets_count", "kpi_assets_value"],
         "receipts": [
-            "kpi_receipts_month",
-            "kpi_receivables_this_month",
             "kpi_receipts_total",
             "kpi_receivables_total",
             "kpi_maintenance_due",
             "kpi_late_fees_due",
-            "kpi_vendors_payables_due",
-            "kpi_cash_in_hand",
-            "kpi_bank_balance",
         ],
         "expenses": [
-            "kpi_expenses_month",
-            "kpi_payables_this_month",
             "kpi_expenses_total",
             "kpi_payables_total",
             "kpi_security_salaries_due",
             "kpi_amc_due",
-            "kpi_cash_in_hand",
-            "kpi_bank_balance",
         ],
         "settings": [
             "kpi_societies_calc_start_date",
@@ -1087,7 +1068,6 @@ DEFAULT_LAYOUTS = {
             "kpi_channels_pending",
         ],
         "financials": [
-            "kpi_cash_in_hand",
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_maintenance_charges",
@@ -1095,16 +1075,14 @@ DEFAULT_LAYOUTS = {
         "receivables": [
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
-            "kpi_advance_credits",
-            "kpi_receivables_this_month",
         ],
-        "cashbook": ["kpi_cash_in_hand", "kpi_receivables_this_month", "kpi_payables_this_month"],
+        "cashbook": [],
         "owner_receipts": ["kpi_receipts_total"],
         "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
         # Per the Concerns workflow spec: Owner/Concerns tab shows "not
         # closed" (own concerns), "total" (society-wide), and "open" (own
         # concerns).
-        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total", "kpi_concerns_open"],
+        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
         "events": ["kpi_events_total", "kpi_events_tickets"],
         "polls": ["kpi_polls_total", "kpi_polls_active"],
         "settings": ["kpi_owner_member_since"],
@@ -1116,10 +1094,8 @@ DEFAULT_LAYOUTS = {
             "kpi_concerns_invited",
             "kpi_concerns_assigned",
             "kpi_events_total",
-            "kpi_channels_total",
         ],
         "financials": [
-            "kpi_cash_in_hand",
             "kpi_receipts_total",
             "kpi_ven_charges_count",
         ],
@@ -1127,7 +1103,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pass_expiry",
         ],
         "vendor_receipts": ["kpi_receipts_total"],
-        "cashbook": ["kpi_cash_in_hand"],
+        "cashbook": [],
         # Per the Concerns workflow spec: Vendor/Concerns tab shows
         # "invited", "assigned", and "resolved".
         "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],
@@ -1146,8 +1122,6 @@ DEFAULT_LAYOUTS = {
         ],
         "payables": [
             "kpi_security_salaries_due",
-            "kpi_security_paid_for_month",
-            "kpi_security_shifts_pending",
         ],
         "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "security_receipt": ["kpi_receipts_month"],
@@ -1167,7 +1141,6 @@ DEFAULT_LAYOUTS = {
             "kpi_channels_pending_bus",
             "kpi_channels_pending_taxi",
             "kpi_presumed_visitor",
-            "kpi_security_on_duty",
         ],
         # NEW — security portal had no "settings" tab before this. Needs a
         # matching route added in shell_callbacks.py (see admin's /admin-settings

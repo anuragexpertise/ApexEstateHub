@@ -47,3 +47,21 @@ def get_current_user_role() -> str | None:
     except Exception:
         pass
     return None
+
+
+def get_current_society_id() -> int | None:
+    """
+    Return the authenticated user's society_id from the Flask-Login session.
+
+    Never trust client-side auth-store for tenant scoping on a write —
+    society_id there can be edited via devtools the same as role can, and
+    an INSERT/UPDATE that scopes itself off that value can be redirected
+    into a different tenant's data by an otherwise-legitimate admin.
+    """
+    try:
+        from flask_login import current_user
+        if current_user and current_user.is_authenticated:
+            return getattr(current_user, 'society_id', None)
+    except Exception:
+        pass
+    return None
