@@ -237,11 +237,8 @@ def register_login_callbacks(app):
 
             print(f"\n📧 Password reset requested for: {email}")
             society_id = (auth or {}).get("society_id")
-            try:
-                from app.services.auth_service import request_password_reset
-                ok, msg, _ = request_password_reset(email.strip(), society_id)
-            except ImportError:
-                ok, msg = _inline_request_reset(email.strip(), society_id)
+            from app.services.auth_service import request_password_reset
+            ok, msg, _ = request_password_reset(email.strip(), society_id)
             return (not ok), no_update, {"type": "success" if ok else "error", "message": msg}
 
         if trigger == "confirm-reset-btn":
@@ -253,11 +250,8 @@ def register_login_callbacks(app):
                        {"type": "error", "message": "Passwords do not match"}
 
             print("\n🔑 Confirming password reset")
-            try:
-                from app.services.auth_service import reset_password
-                ok, msg = reset_password(token.strip(), new_pass)
-            except ImportError:
-                ok, msg = _inline_reset_password(token.strip(), new_pass)
+            from app.services.auth_service import reset_password
+            ok, msg = reset_password(token.strip(), new_pass)
             return no_update, (not ok), {"type": "success" if ok else "error", "message": msg}
 
         raise PreventUpdate
@@ -282,58 +276,3 @@ def register_login_callbacks(app):
     )
 
     print("  ✓ Login callbacks registered")
-
-
-# ──────────────────────────────────────────────────────────────────────
-# INLINE RESET FALLBACKS
-# ──────────────────────────────────────────────────────────────────────
-
-def _inline_request_reset(email: str, society_id) -> tuple[bool, str]:
-    import secrets, hashlib
-    from datetime import datetime, timedelta
-    try:
-        token  = secrets.token_urlsafe(32)
-        expiry = datetime.utcnow() + timedelta(hours=2)
-        from database.db_manager import db
-        q = (
-            "UPDATE users SET reset_token = %s, reset_token_expires = %s "
-            "WHERE email = %s"
-        )
-        params = (hashlib.sha256(token.encode()).hexdigest(), expiry, email)
-        if society_id:
-            q += " AND society_id = %s"
-            params += (society_id,)
-        db._execute(q, params)
-        print(f"🔑 Reset token generated for {email}: {token}")
-        return True, "If that email exists, a reset link has been sent."
-    except Exception as exc:
-        print(f"❌ _inline_request_reset error: {exc}")
-        return False, "Could not initiate password reset. Please try again."
-
-
-def _inline_reset_password(token: str, new_password: str) -> tuple[bool, str]:
-    import hashlib
-    from datetime import datetime
-    from werkzeug.security import generate_password_hash
-    try:
-        from database.db_manager import db
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
-        row = db._execute(
-            "SELECT id, reset_token_expires FROM users "
-            "WHERE reset_token = %s",
-            (token_hash,),
-            fetch_one=True,
-        )
-        if not row:
-            return False, "Invalid or expired reset token."
-        if row.get("reset_token_expires") and row["reset_token_expires"] < datetime.utcnow():
-            return False, "Reset token has expired. Please request a new one."
-        db._execute(
-            "UPDATE users SET password_hash = %s, reset_token = NULL, "
-            "reset_token_expires = NULL WHERE id = %s",
-            (generate_password_hash(new_password), row["id"]),
-        )
-        return True, "Password updated successfully. You can now log in."
-    except Exception as exc:
-        print(f"❌ _inline_reset_password error: {exc}")
-        return False, "Could not reset password. Please try again."

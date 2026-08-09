@@ -174,4 +174,13 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ poll_callbacks failed: {e}")
 
+    # 17. Account Settings — self-service Change Password (all roles).
+    #     Requires "account-settings-modal" + "account-settings-btn" in
+    #     app_shell.py.
+    try:
+        from .account_callbacks import register_account_callbacks
+        register_account_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ account_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

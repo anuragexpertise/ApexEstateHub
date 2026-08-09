@@ -1,29 +1,55 @@
 import jwt
 import os
 import time
+import logging
 from functools import wraps
 from flask import request, jsonify, current_app
 from app.models.user import User
 
+log = logging.getLogger(__name__)
+
+# ── SECURITY (fixed 2026-08): this is now the ONLY place JWT_SECRET is
+# read from the environment. Previously app/routes/auth.py defined its
+# own independent copy of JWT_SECRET with a DIFFERENT fallback string
+# ('change-me-in-production' vs this module's 'your-jwt-secret-key-
+# change-this'). Both read the same JWT_SECRET_KEY env var, so this only
+# mattered if that var was ever unset in some environment — but if it
+# was, tokens minted by /auth/login (routes/auth.py's fallback) would
+# silently fail verification in @token_required (this module's
+# fallback), and vice versa, since jwt.decode() requires an exact key
+# match. app/routes/auth.py now imports JWT_SECRET and
+# generate_tokens_for() from here instead of redefining them.
 JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'your-jwt-secret-key-change-this')
 JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hour
 JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000))  # 30 days
 
-def generate_tokens(user):
-    """Generate access and refresh tokens for user"""
+if os.getenv('JWT_SECRET_KEY') is None:
+    log.warning(
+        "JWT_SECRET_KEY is not set — falling back to an insecure default "
+        "signing key. Set JWT_SECRET_KEY in the environment before "
+        "deploying to production."
+    )
+
+
+def generate_tokens_for(user_id, email, role, society_id=None):
+    """
+    Core token generator — everything else (generate_tokens(user) below,
+    and app/routes/auth.py's login/refresh routes) wraps this so there is
+    exactly one place that builds JWT payloads and signs them.
+    """
     now = int(time.time())
     access_payload = {
-        'user_id': user.id,
-        'email': user.email,
-        'role': user.role,
-        'society_id': user.society_id,
+        'user_id': user_id,
+        'email': email,
+        'role': role,
+        'society_id': society_id,
         'type': 'access',
         'iat': now,
         'exp': now + JWT_ACCESS_TOKEN_EXPIRES
     }
 
     refresh_payload = {
-        'user_id': user.id,
+        'user_id': user_id,
         'type': 'refresh',
         'iat': now,
         'exp': now + JWT_REFRESH_TOKEN_EXPIRES
@@ -33,6 +59,11 @@ def generate_tokens(user):
     refresh_token = jwt.encode(refresh_payload, JWT_SECRET, algorithm='HS256')
 
     return access_token, refresh_token
+
+
+def generate_tokens(user):
+    """Generate access and refresh tokens for a User model instance."""
+    return generate_tokens_for(user.id, user.email, user.role, user.society_id)
 
 def verify_token(token):
     """Verify JWT token and return payload"""
