@@ -44,6 +44,13 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "visitors":           "visitors",
     "event_ticket_items": "event_ticket_items",
     "patrol_locations":   "patrol_locations",
+    # "channels" was declared in the drilldown registry (PK_MAP,
+    # ENTITY_MAP, 5 KPI -> list_channels -> profile_channel mappings) but
+    # never registered here, so get_entity_meta()["channels"] never
+    # existed and every Channels KPI card rendered a column-less/empty
+    # list even after loaders.py grew a "channels" branch. See
+    # NO_EDIT_ACTION and _COMPUTED_FIELDS below for the rest of the setup.
+    "channels":     "alert_channels",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -73,6 +80,13 @@ NO_EDIT_ACTION = {
     # Scan-only / event-managed entities: no CRUD forms, profile shown
     # read-only from the gate scan result.
     "visitors", "event_ticket_items", "patrol_locations",
+    # Channel lifecycle (create / subscribe / trigger / approve-deny) all
+    # go through dedicated, validated flows in channel_callbacks.py and
+    # alert_service.py — notably the apartment_id requirement for
+    # Taxi/Visitor channels. A generic schema-driven Edit form would let
+    # society_id/apartment_id be changed without that validation, so
+    # channels are view-only from the drilldown profile.
+    "channels",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -182,6 +196,14 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     "patrol_locations": [
         {"label": "Active",       "field": "active", "icon": "fa-toggle-on", "format": "bool"},
         {"label": "Scan Interval", "field": "scan_interval", "icon": "fa-clock"},
+    ],
+    # NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
+    # already resolved generically via _FK_HUMAN_ALIASES / _FK_LABEL_OVERRIDES
+    # below, same as every other apartment_id FK column — no separate entry
+    # needed here.
+    "channels": [
+        {"label": "Subscribers",     "field": "subscriber_count", "icon": "fa-users"},
+        {"label": "Pending Alerts",  "field": "pending_count",   "icon": "fa-bell"},
     ],
 }
 

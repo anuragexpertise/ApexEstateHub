@@ -1446,6 +1446,60 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── CHANNELS (School Bus / Taxi / Visitor alert channels) ───────
+        # Was previously unhandled here (fell through to `return [],0`
+        # below) despite being fully declared in the drilldown registry
+        # (PK_MAP/ENTITY_MAP + 5 KPI mappings), so every Channels KPI card
+        # (Total/Active/Pending/Pending Bus/Pending Taxi) silently drilled
+        # into an empty list. Same bug class as the previously-fixed
+        # kpi_presumed_visitor.
+        #
+        # "state": "pending" here means "has a live pending alert_events
+        # row" (matches the kpi_channels_pending* SQL), not a column on
+        # alert_channels itself — resolved via EXISTS rather than a JOIN
+        # so a channel with >1 pending event doesn't get listed twice.
+        if entity == "channels":
+            p_active = filters.get("active")
+            p_state  = filters.get("state")
+            p_ctype  = filters.get("channel_type")
+
+            where, params = ["ac.society_id=%s"], [sid]
+
+            if p_active is True:
+                where.append("ac.active = TRUE")
+
+            if p_state == "pending":
+                where.append(
+                    "EXISTS (SELECT 1 FROM alert_events pe WHERE pe.channel_id=ac.id "
+                    "AND pe.state='pending' AND (pe.expires_at IS NULL OR pe.expires_at > NOW()))"
+                )
+                if p_ctype:
+                    where.append("ac.channel_type = %s")
+                    params.append(p_ctype)
+
+            if s:
+                where.append("(ac.name ILIKE %s OR ac.identifier ILIKE %s)")
+                params += [f"%{s}%", f"%{s}%"]
+
+            where_sql = " AND ".join(where)
+            rows = db._execute(
+                "SELECT ac.*, "
+                "  COALESCE(apt.flat_number,'') AS flat_number, "
+                "  (SELECT COUNT(*) FROM alert_subscriptions sub WHERE sub.channel_id=ac.id) AS subscriber_count, "
+                "  (SELECT COUNT(*) FROM alert_events pe2 WHERE pe2.channel_id=ac.id AND pe2.state='pending' "
+                "     AND (pe2.expires_at IS NULL OR pe2.expires_at > NOW())) AS pending_count "
+                "FROM alert_channels ac "
+                "LEFT JOIN apartments apt ON apt.id = ac.apartment_id "
+                "WHERE " + where_sql +
+                " ORDER BY ac.active DESC, ac.created_at DESC LIMIT %s OFFSET %s",
+                params + [page_size, offset], fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM alert_channels ac WHERE " + where_sql,
+                params, fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
@@ -1782,6 +1836,26 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         if entity_singular == "patrol_location":
             r = db._execute(
                 "SELECT * FROM patrol_locations WHERE id=%s AND society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
+        # ── CHANNEL ────────────────────────────────────────────────────
+        # pk = alert_channels.id. Companion to the "channels" load_list
+        # branch above — same reasoning (registered in the drilldown
+        # registry, never wired up here).
+        if entity_singular == "channel":
+            r = db._execute(
+                "SELECT ac.*, "
+                "  COALESCE(apt.flat_number,'') AS flat_number, "
+                "  COALESCE(owner_u.name,'') AS owner_name, "
+                "  (SELECT COUNT(*) FROM alert_subscriptions sub WHERE sub.channel_id=ac.id) AS subscriber_count, "
+                "  (SELECT COUNT(*) FROM alert_events pe WHERE pe.channel_id=ac.id AND pe.state='pending' "
+                "     AND (pe.expires_at IS NULL OR pe.expires_at > NOW())) AS pending_count "
+                "FROM alert_channels ac "
+                "LEFT JOIN apartments apt ON apt.id = ac.apartment_id "
+                "LEFT JOIN users owner_u ON owner_u.linked_id = apt.id AND owner_u.role='apartment' "
+                "WHERE ac.id=%s AND ac.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None
