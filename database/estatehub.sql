@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     apartment_size INT NOT NULL DEFAULT 0,
     apt_calc_start_date DATE DEFAULT CURRENT_DATE,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    qr_version INT NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
@@ -146,6 +147,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     mobile VARCHAR(15),
     service_description TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    qr_version INT NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
@@ -163,6 +165,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
     shift VARCHAR(20),
     salary_per_shift NUMERIC(10, 2),
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    qr_version INT NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
@@ -1416,6 +1419,7 @@ DECLARE
     v_overdue     NUMERIC(15,2);
     v_pass_expiry DATE;
     v_on_duty     BOOLEAN;
+    v_active      BOOLEAN;
 BEGIN
     IF p_role = 'apartment' THEN
         v_overdue := fn_apartment_overdue_outstanding(p_entity_id);
@@ -1427,6 +1431,16 @@ BEGIN
         END IF;
 
     ELSIF p_role = 'vendor' THEN
+        -- NOTE (fixed 2026-08): previously only checked vendor_passes
+        -- expiry — an offboarded/deactivated vendor with a still-unexpired
+        -- pass would evaluate as PASS at the gate. Check vendors.active
+        -- first.
+        SELECT v.active INTO v_active FROM vendors v WHERE v.id = p_entity_id;
+        IF v_active IS NOT TRUE THEN
+            RETURN QUERY SELECT FALSE, 'Vendor account is inactive'::TEXT, 0::NUMERIC(15,2);
+            RETURN;
+        END IF;
+
         SELECT MAX(vp.valid_until) INTO v_pass_expiry
         FROM vendor_passes vp
         JOIN users u ON u.id = vp.user_id
