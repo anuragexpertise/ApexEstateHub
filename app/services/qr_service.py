@@ -43,6 +43,13 @@ _QR_VERSIONED_ROLES = {
     "SEC": "security_staff",
 }
 
+# ADM is signable too, but its qr_version isn't a single flat lookup — see
+# _current_qr_version's ADM branch below. Deliberately no "MST" entry:
+# master is a platform-level onboarding role with no society_id of its own
+# (see auth_service.py) and no gate/entity identity to represent — it has
+# no QR code at all, by design, not as an oversight.
+_QR_SIGNABLE_ROLES = set(_QR_VERSIONED_ROLES) | {"ADM"}
+
 
 def _qr_sign(society_id: int, role_code: str, entity_id: int, qr_version: int) -> str:
     """HMAC-SHA256 tag over the payload, truncated for a compact QR /
@@ -54,9 +61,34 @@ def _qr_sign(society_id: int, role_code: str, entity_id: int, qr_version: int) -
 
 def _current_qr_version(role_code: str, entity_id: int):
     """Look up an entity's current qr_version. Returns None if the role
-    isn't a versioned one or the row doesn't exist. Bump this column
-    server-side (lost card, offboarding) to invalidate every previously
-    printed/signed code for that one entity."""
+    isn't a versioned one or the row doesn't exist. Bump the relevant
+    column server-side (lost card, offboarding, re-election) to invalidate
+    every previously printed/signed code for that one entity.
+
+    ADM entity_id is always users.id (never apartments.id — see the
+    "hdr-avatar" generation call site), but which counter backs it depends
+    on how that admin came to exist:
+      - Promoted from an existing apartment owner (role flipped
+        apartment -> admin, linked_id unchanged = apartments.id): version
+        comes from apartments.qr_version — the same counter their owner
+        identity already uses, so reissuing their apartment pass for any
+        reason also invalidates their admin badge, with no separate
+        action needed.
+      - Seeded directly as the society's first admin (linked_id IS NULL,
+        no apartment to attach to): falls back to users.qr_version.
+    """
+    if role_code == "ADM":
+        row = db._execute(
+            "SELECT u.qr_version AS user_qr_version, a.qr_version AS apt_qr_version "
+            "FROM users u LEFT JOIN apartments a ON a.id = u.linked_id "
+            "WHERE u.id = %s AND u.role = 'admin'",
+            (entity_id,), fetch_one=True,
+        )
+        if not row:
+            return None
+        apt_version = row.get("apt_qr_version")
+        return apt_version if apt_version is not None else row.get("user_qr_version")
+
     table = _QR_VERSIONED_ROLES.get(role_code)
     if not table:
         return None
@@ -563,7 +595,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
 
         role_code = parsed["role_code"]
-        if role_code in _QR_VERSIONED_ROLES and QR_SIGNING_SECRET:
+        if role_code in _QR_SIGNABLE_ROLES and QR_SIGNING_SECRET:
             qr_version = parsed.get("qr_version")
             sig = parsed.get("sig")
             if sig is not None:
@@ -630,7 +662,20 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 (entity_id, qr_society_id),
                 fetch_one=True,
             )
-        elif role in ("admin", "master"):
+        elif role == "admin":
+            # NOTE (fixed 2026-08): previously WHERE u.id = %s AND
+            # u.society_id = %s only — no re-check of CURRENT u.role. A
+            # user demoted from admin (term ended, re-election) kept a
+            # working "Admin access granted" gate pass indefinitely, since
+            # nothing here noticed the role had changed back. Apartment/
+            # vendor/security never had this gap — they already re-check
+            # their own role every scan. Adding AND u.role = 'admin' makes
+            # ADM self-correct on role change the same way, with no
+            # explicit reissue/revocation step needed for this case.
+            #
+            # master intentionally has NO branch here — it's a platform-
+            # level onboarding role with no society_id of its own (see
+            # auth_service.py) and nothing gate-relevant to represent.
             user_row = db._execute(
                 """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
                    FROM users u
@@ -653,7 +698,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             "flat_number": "",
         }
 
-        if role in ("admin", "master"):
+        if role == "admin":
             return {
                 "status": "PASS",
                 "user": base_user,
