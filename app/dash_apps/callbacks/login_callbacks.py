@@ -42,6 +42,7 @@ def _establish_server_session(user: dict) -> None:
             email=user.get("email", ""),
             role=user.get("role", "admin"),
             society_id=user.get("society_id"),
+            linked_id=user.get("linked_id"),
         ), remember=True)
     except Exception as exc:
         print(f"⚠️  Could not establish server-side session for user_id={user.get('user_id')}: {exc}")
