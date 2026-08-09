@@ -54,6 +54,12 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # the "+ New" shortcut into the receipt form, a deliberate convenience.
     ("admin", "cashbook"):     {"view", "new"},
     ("admin", "accounts"):     {"view", "edit", "delete", "new"},
+    # Channels: view-only from the drilldown. Create/subscribe/trigger/
+    # approve-deny all go through their own validated flows (see
+    # channel_callbacks.py, alert_service.py) — falling through to
+    # ("admin","*")'s generic New/Edit/Delete would bypass the
+    # apartment_id requirement for Taxi/Visitor channels.
+    ("admin", "channels"):     {"view"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
@@ -75,6 +81,10 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "receivables"): {"view"},
     ("apartment", "payables"):    {"view"},
     ("apartment", "ledger"):      set(),
+    # Read-only drilldown into the channels/pending-alerts KPIs on the
+    # owner's own Channels tab — subscribing and approve/deny stay on
+    # their existing dedicated buttons, not a generic row action.
+    ("apartment", "channels"):    {"view"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
