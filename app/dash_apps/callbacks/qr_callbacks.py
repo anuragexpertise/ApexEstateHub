@@ -651,14 +651,25 @@ def register_qr_callbacks(app):
             return True, src, payload, entity_store, False  # interval enabled
 
         if ctx.triggered_id == 'hdr-avatar':
-            # Logged-in user's QR — encode domain entity ID, not users.id
+            # Logged-in user's QR — encode domain entity ID, not users.id...
+            # EXCEPT for admin, which has no domain table of its own. A
+            # seeded first-admin has linked_id IS NULL; one promoted from
+            # an apartment owner keeps their old apartments.id in
+            # linked_id, but the QR is still keyed by users.id either way
+            # — see qr_service._current_qr_version's ADM branch, which
+            # resolves the version from apartments.qr_version when
+            # linked_id is present, or users.qr_version otherwise.
+            _gen_entity_id = (
+                auth_data.get('user_id') if auth_data.get('role') == 'admin'
+                else auth_data.get('linked_id')
+            )
             src, payload = generate_static_qr_code(
-                auth_data.get('linked_id'),
+                _gen_entity_id,
                 auth_data.get('role'),
                 auth_data.get('society_id')
             )
             entity_store = {
-                'entity_id': auth_data.get('linked_id'),
+                'entity_id': _gen_entity_id,
                 'role': auth_data.get('role'),
                 'society_id': auth_data.get('society_id'),
                 'name': auth_data.get('name', 'User'),

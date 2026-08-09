@@ -68,6 +68,12 @@ CREATE TABLE IF NOT EXISTS users (
         )
     ),
     linked_id INT,
+    -- Fallback qr_version for admin logins with no apartments row to key
+    -- off (linked_id IS NULL — the seeded first-admin case). A promoted
+    -- apartment owner (linked_id = apartments.id) uses apartments.qr_version
+    -- instead; this column is only ever consulted when linked_id is NULL.
+    -- See app/services/qr_service.py _current_qr_version's ADM branch.
+    qr_version INT NOT NULL DEFAULT 1,
     login_method VARCHAR(20) DEFAULT 'password',
     push_subscription TEXT,
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,

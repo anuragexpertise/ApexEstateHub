@@ -186,6 +186,11 @@ def run_migrations(conn):
         # break the location's own code. Revisit once a patrol_location
         # create/reissue flow exists. See app/services/qr_service.py.
         "ALTER TABLE apartments ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
+
+        # Fallback for admin logins with no apartments row (linked_id IS
+        # NULL — seeded first-admin). A promoted apartment owner
+        # (linked_id = apartments.id) uses apartments.qr_version instead.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE vendors ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
     ]
