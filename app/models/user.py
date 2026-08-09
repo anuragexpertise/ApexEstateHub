@@ -3,18 +3,28 @@ from flask_login import UserMixin
 from database.db_manager import db
 
 class User(UserMixin):
-    def __init__(self, user_id, email, role, society_id=None):
+    def __init__(self, user_id, email, role, society_id=None, linked_id=None):
         self.id = user_id
         self.email = email
         self.role = role
         self.society_id = society_id
+        # apartments.id / vendors.id / security_staff.id for role in
+        # ('apartment','vendor','security') — NULL for admin/master.
+        # Added alongside get_current_linked_id() in audit_context.py:
+        # role/society_id alone can't answer "is this the caller's own
+        # record" (their own apartment, their own vendor profile, their
+        # own duty shift), which is what most ownership checks actually
+        # need — those were still reading auth-store's client-editable
+        # apartment_id/vendor_id/security_id for that, same trust gap as
+        # role, just missing from the server session until now.
+        self.linked_id = linked_id
         self.name = email.split('@')[0].title() # Default name from email
     
     @staticmethod
     def get(user_id):
         try:
             result = db._execute(
-                "SELECT id, email, role, society_id FROM users WHERE id = %s",
+                "SELECT id, email, role, society_id, linked_id FROM users WHERE id = %s",
                 (user_id,), fetch_one=True
             )
             if result:
@@ -23,6 +33,7 @@ class User(UserMixin):
                     email=result['email'],
                     role=result['role'],
                     society_id=result.get('society_id'),
+                    linked_id=result.get('linked_id'),
                 )
         except Exception as e:
             print(f"Error loading user {user_id}: {e}")
@@ -31,7 +42,7 @@ class User(UserMixin):
     @staticmethod
     def find_by_email(email, society_id=None):
         try:
-            query  = "SELECT id, email, role, society_id FROM users WHERE email = %s"
+            query  = "SELECT id, email, role, society_id, linked_id FROM users WHERE email = %s"
             params = [email]
             if society_id:
                 query  += " AND society_id = %s"
@@ -43,6 +54,7 @@ class User(UserMixin):
                     email=result['email'],
                     role=result['role'],
                     society_id=result.get('society_id'),
+                    linked_id=result.get('linked_id'),
                 )
         except Exception as e:
             print(f"Error finding user: {e}")
@@ -89,6 +101,7 @@ class User(UserMixin):
             'email': self.email,
             'role': self.role,
             'society_id': self.society_id,
+            'linked_id': self.linked_id,
             'name': self.name,
             'is_master_admin': self.is_master_admin()
         }
