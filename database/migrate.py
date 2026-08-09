@@ -173,6 +173,21 @@ def run_migrations(conn):
         "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE",
         "ALTER TABLE patrol_locations ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
+
+        # qr_version: per-entity counter for signed static-pass QR codes.
+        # Scoped to apartment/vendor/security only — these are generated
+        # live on every view via generate_static_qr_code (no stored
+        # payload), so bumping the counter takes effect immediately.
+        # patrol_locations is deliberately excluded: it's read-only /
+        # _NO_AUTO_ACTIONS with no create-or-regenerate flow anywhere in
+        # the app (seeded outside the app), and its qr_payload is a
+        # stored, static column — bumping a version with no way to
+        # re-sign and update that stored value would just permanently
+        # break the location's own code. Revisit once a patrol_location
+        # create/reissue flow exists. See app/services/qr_service.py.
+        "ALTER TABLE apartments ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
+        "ALTER TABLE vendors ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
+        "ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
     ]
 
     ok = 0

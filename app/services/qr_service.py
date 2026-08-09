@@ -1,10 +1,68 @@
 # app/services/qr_service.py
 
 import base64
+import hashlib
+import hmac
+import os
 from datetime import datetime
 from io import BytesIO
 import qrcode
 from database.db_manager import db
+
+# ── SECURITY (2026-08): signed QR codes for the "print once, stick to a
+# vehicle/patrol point" static passes (apartment/vendor/security).
+# Previously the payload was just plain data (society_id-ROLE-entity_id) —
+# small sequential integers with no proof of having been legitimately
+# issued, so a code could be forged by guessing rather than needing to
+# copy a real one. Signing keeps the "static, printed once" property
+# intact (a signed code never expires or rotates on its own) while making
+# forgery infeasible, and qr_version gives per-entity revocation: bump one
+# vendor's qr_version and every previously printed code for THAT vendor
+# stops validating, without touching anyone else's.
+#
+# Deliberately NOT applied to attendance_entry (ATD) — that's already
+# time-boxed/single-use via generate_time_qr, a different mechanism for a
+# different problem (replay, not forgery). Deliberately NOT yet applied to
+# patrol_location — no create/regenerate flow exists for it in the app
+# (read-only / _NO_AUTO_ACTIONS, seeded outside the app), and its
+# qr_payload is a stored static column rather than generated live, so
+# there's currently no safe way to re-sign it if a version were bumped.
+#
+# QR_SIGNING_SECRET is unset by default so this stays fully backward
+# compatible until deliberately provisioned (mirrors VAPID_PRIVATE_KEY /
+# VAPID_PUBLIC_KEY in push_service.py) — once set, newly generated codes
+# for apartment/vendor/security are signed, while previously-printed
+# unsigned codes for those same roles keep validating during the reprint
+# transition window. Once every existing pass has been reprinted, remove
+# the "legacy unsigned still accepted" branch in validate_qr_code below.
+QR_SIGNING_SECRET = os.getenv('QR_SIGNING_SECRET')
+
+_QR_VERSIONED_ROLES = {
+    "APT": "apartments",
+    "VND": "vendors",
+    "SEC": "security_staff",
+}
+
+
+def _qr_sign(society_id: int, role_code: str, entity_id: int, qr_version: int) -> str:
+    """HMAC-SHA256 tag over the payload, truncated for a compact QR /
+    manual-entry string. Requires QR_SIGNING_SECRET; callers must check
+    that separately."""
+    msg = f"{society_id}-{role_code}-{entity_id}-{qr_version}".encode()
+    return hmac.new(QR_SIGNING_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:10]
+
+
+def _current_qr_version(role_code: str, entity_id: int):
+    """Look up an entity's current qr_version. Returns None if the role
+    isn't a versioned one or the row doesn't exist. Bump this column
+    server-side (lost card, offboarding) to invalidate every previously
+    printed/signed code for that one entity."""
+    table = _QR_VERSIONED_ROLES.get(role_code)
+    if not table:
+        return None
+    row = db._execute(f"SELECT qr_version FROM {table} WHERE id=%s", (entity_id,), fetch_one=True)
+    return (row or {}).get("qr_version")
+
 
 ROLE_CODE_MAP = {
     "ADM": "admin",
@@ -44,14 +102,17 @@ ROLE_CODE_MAP_REV = {
 
 def parse_qr_payload(qr_data: str) -> dict:
     """
-    Parses QR string in format: <society_id>-<ROLE_CODE>-<entity_id>
-    Example: 1-EVT-1001 or 1-APT-42
+    Parses QR string.
+    Legacy (unsigned) format: <society_id>-<ROLE_CODE>-<entity_id>
+    Signed format (2026-08+, APT/VND/SEC only): adds -<qr_version>-<sig>.
+    Signature verification itself happens in validate_qr_code, not here —
+    this function only parses the string into its parts.
     """
     try:
         raw = qr_data.strip()
         parts = [p.strip() for p in raw.split("-") if p.strip()]
 
-        if len(parts) < 3:
+        if len(parts) not in (3, 5):
             return {"error": "Invalid format. Expected: society_id-ROLE_CODE-entity_id"}
 
         society_id = int(parts[0])
@@ -62,12 +123,18 @@ def parse_qr_payload(qr_data: str) -> dict:
         if role == "unknown":
             return {"error": f"Unknown role code: {role_code}"}
 
-        return {
+        result = {
             "society_id": society_id,
             "role_code": role_code,
             "role": role,
             "entity_id": entity_id,
+            "qr_version": None,
+            "sig": None,
         }
+        if len(parts) == 5:
+            result["qr_version"] = int(parts[3])
+            result["sig"] = parts[4]
+        return result
     except Exception as e:
         return {"error": f"Parse failure: {str(e)}"}
 
@@ -75,11 +142,20 @@ def parse_qr_payload(qr_data: str) -> dict:
 def generate_qr_code(society_id: int, role_code: str, entity_id: int):
     """
     Generate QR code image (Base64) and payload.
-    Payload format: <society_id>-<ROLE_CODE>-<entity_id>
+    Legacy payload: <society_id>-<ROLE_CODE>-<entity_id>
+    Signed payload (APT/VND/SEC only, once QR_SIGNING_SECRET is set): adds
+    -<qr_version>-<sig>, so the same printed/displayed code stays valid
+    indefinitely unless the entity's qr_version is bumped server-side.
     """
     try:
         role_code_clean = role_code.upper().strip()
         qr_payload = f"{society_id or 0}-{role_code_clean}-{entity_id}"
+
+        if QR_SIGNING_SECRET:
+            qr_version = _current_qr_version(role_code_clean, entity_id)
+            if qr_version is not None:
+                sig = _qr_sign(society_id or 0, role_code_clean, entity_id, qr_version)
+                qr_payload = f"{qr_payload}-{qr_version}-{sig}"
 
         qr = qrcode.QRCode(
             version=1,
@@ -486,6 +562,30 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
         if society_id and qr_society_id != society_id:
             return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
 
+        role_code = parsed["role_code"]
+        if role_code in _QR_VERSIONED_ROLES and QR_SIGNING_SECRET:
+            qr_version = parsed.get("qr_version")
+            sig = parsed.get("sig")
+            if sig is not None:
+                # Signed code presented — verify the tag AND that its
+                # version matches the entity's CURRENT version. The version
+                # check is what makes revocation actually work: bumping
+                # qr_version invalidates every code signed against the old
+                # version, even though the signature itself would still be
+                # mathematically correct for that old version.
+                current_version = _current_qr_version(role_code, entity_id)
+                expected_sig = _qr_sign(qr_society_id, role_code, entity_id, qr_version)
+                if (
+                    current_version is None
+                    or qr_version != current_version
+                    or not hmac.compare_digest(sig, expected_sig)
+                ):
+                    return {"status": "FAIL", "reason": "Invalid or revoked QR code", "gate_action": "deny"}
+            # else: legacy unsigned code for a versioned role — accepted
+            # during the reprint transition window. Once every existing
+            # apartment/vendor/security pass has been reprinted with a
+            # signature, reject here too instead of falling through.
+
         # Dispatch specialized roles
         if role == "event_ticket":
             return validate_event_ticket_qr(entity_id, qr_society_id, security_user_id)
@@ -534,7 +634,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             user_row = db._execute(
                 """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
                    FROM users u
-                   WHERE u.id = %s AND u.society_id = %s""",
+                   WHERE u.id = %s AND u.role = 'admin' AND u.society_id = %s""",
                 (entity_id, qr_society_id),
                 fetch_one=True,
             )
