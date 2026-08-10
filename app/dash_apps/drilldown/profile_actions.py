@@ -383,6 +383,14 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "primary",
             "roles": ["apartment"],
         },
+        {
+            "label": "Trigger Alert",
+            "action_id": "trigger_alert",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-bullhorn",
+            "color": "warning",
+            "roles": ["admin", "security"],
+        },
     ],
 }
 

@@ -64,7 +64,7 @@ from app.dash_apps.drilldown.registry import (
 )
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_linked_id
+from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_linked_id, get_current_society_id
 
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
@@ -1113,6 +1113,34 @@ def register_drilldown_callbacks(app):
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
+
+            # ── Trigger Channel Alert (admin / security) ─────────────────────────
+            elif action == "trigger_alert" and entity == "channel":
+                role = (auth or {}).get("role")
+                if role not in ("admin", "security"):
+                    toast = {"_toast": {"type": "error", "message": "Only admin or security can trigger channel alerts"}}
+                    return store, content, bc, {"display": "none"}, toast
+
+                user_id = get_current_user_id()
+                society_id = get_current_society_id()
+                if not society_id:
+                    toast = {"_toast": {"type": "error", "message": "Session expired"}}
+                    return store, content, bc, {"display": "none"}, toast
+
+                try:
+                    from app.services.alert_service import trigger_channel_alert
+                    ok, msg, data = trigger_channel_alert(int(pk), user_id, society_id)
+                    toast_type = "success"
+                    if data and data.get("state") == "resolved":
+                        toast_type = "info"
+                    store["refresh"] = True
+                    toast = {"_toast": {"type": toast_type if ok else "error", "message": msg or "Alert triggered"}}
+                    content, bc, db_err = _render_current(store, auth)
+                    kpi_style = {"display": "none"}
+                    return store, content, bc, kpi_style, toast
+                except Exception as e:
+                    toast = {"_toast": {"type": "error", "message": str(e)}}
+                    return store, content, bc, {"display": "none"}, toast
 
             else:
                 # ── Generic edit / other action ───────────────────────────────────

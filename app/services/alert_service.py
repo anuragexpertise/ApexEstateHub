@@ -641,6 +641,11 @@ def get_presumed_visitors(society_id: int):
              WHERE v.society_id = %s
                AND v.visit_date = CURRENT_DATE
                AND v.status = 'pending'
+               AND NOT EXISTS (
+                   SELECT 1 FROM alert_events ae
+                    WHERE ae.visitor_id = v.id
+                      AND (ae.expires_at IS NULL OR ae.expires_at > NOW())
+               )
              ORDER BY v.created_at DESC
         """, (society_id,))
         return rows or []
@@ -703,7 +708,13 @@ def get_channel_subscribers_with_profile(channel_id: int):
               FROM alert_subscriptions sub
               JOIN apartments a ON a.id = sub.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
-              LEFT JOIN alert_events ae ON ae.channel_id = sub.channel_id AND (ae.expires_at IS NULL OR ae.expires_at > NOW())
+              LEFT JOIN alert_events ae ON ae.id = (
+                  SELECT id FROM alert_events
+                   WHERE channel_id = sub.channel_id
+                     AND (expires_at IS NULL OR expires_at > NOW())
+                   ORDER BY triggered_at DESC
+                   LIMIT 1
+              )
              WHERE sub.channel_id = %s
              ORDER BY a.flat_number ASC
         """, (channel_id,))

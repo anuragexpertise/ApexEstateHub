@@ -178,7 +178,7 @@ def register_channel_callbacks(app):
             if ok:
                 return (
                     {"message": f"{action_word} successfully.", "color": "success"},
-                    f"/dashboard/channels",
+                    f"/dashboard/owner-channels",
                 )
             return {"message": msg or "Action failed.", "color": "danger"}, no_update
         except Exception as e:

@@ -549,7 +549,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
         channels = list_channels(sid or 1, apartment_id=apt_id, is_admin=False)
         alerts = get_active_alerts(sid or 1)
         return html.Div([
-            _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus & Taxi alerts"),
+            _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus, Taxi & Visitor alerts"),
             _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
             _divider(),
             html.Div(id="channels-page-refresh", children=render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id)),
