@@ -64,7 +64,7 @@ from app.dash_apps.drilldown.registry import (
 )
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from app.security.audit_context import get_current_user_role, get_current_user_id
+from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_linked_id
 
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
@@ -1084,6 +1084,35 @@ def register_drilldown_callbacks(app):
                     prefill=prefill, entity_pk=pk,
                 )
                 hide_kpis = True
+
+            # ── Subscribe / Unsubscribe channel (apartment owner) ────────────────
+            elif action == "subscribe_channel" and entity == "channel":
+                role = (auth or {}).get("role")
+                if role != "apartment":
+                    toast = {"_toast": {"type": "error", "message": "Only apartment owners can manage channel subscriptions"}}
+                    return store, content, bc, {"display": "none"}, toast
+
+                apartment_id = get_current_linked_id()
+                if not apartment_id:
+                    toast = {"_toast": {"type": "error", "message": "Apartment not found. Please log in again."}}
+                    return store, content, bc, {"display": "none"}, toast
+
+                from app.services.alert_service import list_channels, subscribe_channel, unsubscribe_channel
+
+                channels = list_channels(sid, apartment_id=apartment_id, is_admin=False)
+                ch = next((c for c in channels if c["id"] == int(pk)), None)
+                currently_subscribed = ch.get("is_subscribed", False) if ch else False
+
+                if currently_subscribed:
+                    ok, msg = unsubscribe_channel(channel_id=int(pk), apartment_id=apartment_id)
+                else:
+                    ok, msg = subscribe_channel(channel_id=int(pk), apartment_id=apartment_id)
+
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg or "Action failed"}}
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
 
             else:
                 # ── Generic edit / other action ───────────────────────────────────

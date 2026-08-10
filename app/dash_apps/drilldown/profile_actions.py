@@ -372,6 +372,18 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "roles": ["apartment"],
         },
     ],
+
+    # ── CHANNELS ─────────────────────────────────────────────────────────────
+    "channels": [
+        {
+            "label": "Subscribe",
+            "action_id": "subscribe_channel",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-bell",
+            "color": "primary",
+            "roles": ["apartment"],
+        },
+    ],
 }
 
 

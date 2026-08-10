@@ -1128,12 +1128,19 @@ def render_profile_card(card_id: str, title: str, icon: str,
         if act_id == "accept_concern" and my_concern_status != "assigned": continue
         if act_id == "decline_concern_admin" and my_concern_status != "assigned": continue
         if act_id == "admin_resolve" and my_concern_status != "accepted": continue
+        if act_id == "subscribe_channel":
+            is_subscribed = record_dict.get("is_subscribed")
+            act_label = "Subscribed" if is_subscribed else "Subscribe"
+            act_color = "success" if is_subscribed else "outline-primary"
+        else:
+            act_label = act["label"]
+            act_color = act.get("color", "primary")
         action_btns.append(dbc.Button(
             [html.I(className=f"fas {act.get('icon', 'fa-bolt')} me-2"),
-            act["label"]],
+            act_label],
             id={"type": "profile-action", "entity": entity, "pk": str(pk_val),
                 "action": act_id, "target": act.get("target_card") or ""},
-            n_clicks=0, color=act.get("color", "primary"), size="sm",
+            n_clicks=0, color=act_color, size="sm",
             className="me-2 mb-2",
             style={"borderRadius": "10px", "fontWeight": "600"},
         ))
