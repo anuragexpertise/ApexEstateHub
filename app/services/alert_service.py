@@ -148,7 +148,7 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             params.append(society_id)
 
         channel = db._execute(f"""
-            SELECT ac.*, a.flat_number, u.id as owner_user_id, u.mobile as owner_phone
+            SELECT ac.*, a.flat_number, a.id as owner_user_id, a.mobile as owner_phone
               FROM alert_channels ac
               LEFT JOIN apartments a ON a.id = ac.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
@@ -371,7 +371,7 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
             params.append(society_id)
 
         visitor = db._execute(f"""
-            SELECT v.*, a.flat_number, u.id as owner_user_id, u.mobile as owner_phone
+            SELECT v.*, a.flat_number, a.id as owner_user_id, a.mobile as owner_phone
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
@@ -527,7 +527,7 @@ def get_active_alerts(society_id: int):
         channel_alerts = db._execute("""
             SELECT ae.id as alert_event_id, ae.state, ae.triggered_at,
                    ac.id as channel_id, ac.channel_type, ac.name, ac.identifier, ac.is_recurring, ac.active as channel_active,
-                   a.flat_number, u.mobile as owner_phone, u.name as owner_name
+                   a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name
               FROM alert_events ae
               JOIN alert_channels ac ON ac.id = ae.channel_id
               LEFT JOIN apartments a ON a.id = ac.apartment_id
@@ -569,7 +569,7 @@ def get_active_alerts(society_id: int):
         # Visitors
         visitor_alerts = db._execute("""
             SELECT v.id as visitor_id, v.name as visitor_name, v.purpose, v.status as visitor_status,
-                   a.flat_number, u.mobile as owner_phone, u.name as owner_name,
+                   a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name,
                    ae.id as alert_event_id, ae.state, ae.triggered_at
               FROM visitors v
               LEFT JOIN alert_events ae ON ae.visitor_id = v.id AND (ae.expires_at IS NULL OR ae.expires_at > NOW())
@@ -621,7 +621,7 @@ def get_presumed_visitors(society_id: int):
         rows = db._execute("""
             SELECT v.id as visitor_id, v.name, v.mobile, v.purpose, v.vehicle_number,
                    v.visit_date, v.visit_time_from, v.visit_time_to, v.status,
-                   a.flat_number, u.mobile as owner_phone, u.name as owner_name
+                   a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
@@ -685,7 +685,7 @@ def get_channel_subscribers_with_profile(channel_id: int):
         rows = db._execute("""
             SELECT sub.id as subscription_id,
                    a.id as apartment_id, a.flat_number, a.block,
-                   u.id as user_id, u.name as owner_name, u.mobile, u.email,
+                   a.id as user_id, a.owner_name as owner_name, a.mobile, u.email,
                    COALESCE(ae.state, 'pending') as arrival_status
               FROM alert_subscriptions sub
               JOIN apartments a ON a.id = sub.apartment_id

@@ -857,7 +857,7 @@ def register_qr_callbacks(app):
                     profile_entity, profile_pk = None, None
                     sub = role.title() or gate_msg
 
-                banner = _scan_banner("Access Granted", user_name, sub,
+                banner = _scan_banner("Access Granted", user_name,
                                       "fa-check-circle", "#27ae60", now_s,
                                       foot=html.Div(gate_msg, style={
                                           "fontSize": "20px", "fontWeight": "700",
@@ -942,7 +942,7 @@ def register_qr_callbacks(app):
             }
             profile_entity, profile_pk = profile_map.get(role, (None, None))
             sub = f"Flat {user.get('flat_number','')}" if (role in GATE_PERSON_ROLES and user.get("flat_number")) else role.title()
-            banner = _scan_banner(gate_msg, user_name, sub, "fa-sign-out-alt", color, now_s)
+            banner = _scan_banner(gate_msg, user_name, "fa-sign-out-alt", color, now_s)
             body = (
                 _open_entity_profile(profile_entity, profile_pk, society_id, auth_data, banner)
                 if profile_entity else banner

@@ -310,7 +310,7 @@ def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int 
     """
     try:
         vis = db._execute("""
-            SELECT v.*, a.flat_number, u.name AS owner_name, u.mobile AS owner_phone
+            SELECT v.*, a.flat_number, a.name AS owner_name, a.mobile AS owner_phone
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
