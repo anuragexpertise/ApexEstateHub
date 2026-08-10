@@ -10,6 +10,13 @@ from dash import Input, Output, State, no_update, html, ctx
 from dash.exceptions import PreventUpdate
 
 from app.services.auth_service import authenticate_user
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 
 def _login_response(user: dict):

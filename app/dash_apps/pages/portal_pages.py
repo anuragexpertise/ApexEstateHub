@@ -398,15 +398,9 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
 
     # ── Channels ──────────────────────────────────────────────────────────────
     if active_tab in ("channels", "admin_channels"):
-        from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
-        from app.services.alert_service import get_active_alerts, list_channels
-        channels = list_channels(sid or 1, is_admin=True)
-        alerts = get_active_alerts(sid or 1)
         return html.Div([
             _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
             _kpi_row_dynamic("admin", "channels", sid, cols=KPI_GRID_COLS),
-            _divider(),
-            render_subscribable_alert_manager(channels, alerts, is_admin=True, society_id=sid),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -544,15 +538,9 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
         ], className="portal-page")
 
     if active_tab in ("channels", "owner_channels", "owner-channels"):
-        from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
-        from app.services.alert_service import get_active_alerts, list_channels
-        channels = list_channels(sid or 1, apartment_id=apt_id, is_admin=False)
-        alerts = get_active_alerts(sid or 1)
         return html.Div([
             _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus, Taxi & Visitor alerts"),
             _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
-            _divider(),
-            html.Div(id="channels-page-refresh", children=render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apt_id)),
             _divider(), _drill_panel(),
         ], className="portal-page")
 
@@ -772,13 +760,9 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
         ], className="portal-page")
 
     if active_tab == "security_channels":
-        from app.dash_apps.callbacks.security_callbacks import render_gate_alerts_section
         return html.Div([
             _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
             _kpi_row_dynamic("security", "security_channels", sid, cols=KPI_GRID_COLS),
-            _divider(),
-            html.Div(id="gate-alert-toast"),
-            html.Div(id="gate-alerts-refresh", children=render_gate_alerts_section(society_id=sid)),
             _divider(), _drill_panel(),
         ], className="portal-page")
 

@@ -24,6 +24,13 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,11 +117,12 @@ def register_debug_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def run_kpi_audit(n_clicks, auth_data):
         if not n_clicks:
             raise PreventUpdate
 
-        sid  = (auth_data or {}).get("society_id")
+        sid  = get_current_society_id()
         dupes = _detect_duplicate_keys()
 
         rows_out   = []

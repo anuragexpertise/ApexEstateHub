@@ -64,8 +64,13 @@ from app.dash_apps.drilldown.registry import (
 )
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_linked_id, get_current_society_id
-
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
     today = dt_date.today()
@@ -278,6 +283,7 @@ def register_drilldown_callbacks(app):
         State({"type": "form-entity-pk", "entity": MATCH}, "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def handle_image_upload(contents, filename, auth, field_id, entity_pk):
         if not contents:
             return no_update, no_update
@@ -364,11 +370,12 @@ def register_drilldown_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def route_drilldown(*args):
         store = args[-2] or {}
         auth = args[-1] or {}
-        role = auth.get("role", "admin")
-        sid = auth.get("society_id")
+        role = get_current_user_role()
+        sid = get_current_society_id()
 
         if not ctx.triggered:
             return no_update, no_update, no_update, no_update, no_update
@@ -539,12 +546,20 @@ def register_drilldown_callbacks(app):
                 }
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── View Subscribers modal — does NOT navigate, fires trigger ──────────
+            if action == "view_subscribers" and entity == "channel":
+                trigger_data = {
+                    "action": "open_subscribers_modal",
+                    "params": {"channel_id": int(pk) if pk else None, "channel_name": ""},
+                }
+                return no_update, no_update, no_update, no_update, trigger_data
+
             # ── Invite vendor/security — opens the invite-to modal ────────────────
             # ── Invite vendor/security — opens the invite-to modal ────────────────
             # Same role + ownership gate as Assign/Close (§2.6) — an Owner can
             # only invite candidates on a concern they raised themselves.
             if action == "invite" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role not in ("admin", "apartment"):
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
                     return store, content, bc, {"display": "none"}, toast
@@ -553,7 +568,7 @@ def register_drilldown_callbacks(app):
                         "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
                         (pk, sid), fetch_one=True,
                     ) or {}
-                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
+                    if concern_row.get("created_by") != get_current_user_id():
                         toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can invite candidates"}}
                         return store, content, bc, {"display": "none"}, toast
                 trigger_data = {
@@ -569,7 +584,7 @@ def register_drilldown_callbacks(app):
             # (assign_to_callbacks.py) — this check just stops the modal
             # from opening at all for a concern the owner doesn't own.
             elif action == "assign" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()  
                 if role not in ("admin", "apartment"):
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
                     return store, content, bc, {"display": "none"}, toast
@@ -578,7 +593,7 @@ def register_drilldown_callbacks(app):
                         "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
                         (pk, sid), fetch_one=True,
                     ) or {}
-                    if concern_row.get("created_by") != (auth or {}).get("user_id"):
+                    if concern_row.get("created_by") != get_current_user_id():
                         toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can assign this concern"}}
                         return store, content, bc, {"display": "none"}, toast
                 trigger_data = {
@@ -602,8 +617,8 @@ def register_drilldown_callbacks(app):
             #    declining an ASSIGNED concern, see "decline_concern_admin"
             #    below.
             elif action == "decline_concern" and entity == "concern":
-                role = (auth or {}).get("role")
-                caller_entity_id = (auth or {}).get("linked_id")
+                role = get_current_user_role()
+                caller_entity_id = get_current_linked_id()
                 role_code = {"vendor": "VND"}.get(role)
                 if not role_code or not caller_entity_id:
                     toast = {"_toast": {"type": "error", "message": "Only an invited vendor can decline"}}
@@ -640,11 +655,11 @@ def register_drilldown_callbacks(app):
             #    concern (assigned -> accepted). Admin portal only, per
             #    workflow_admin_kpi_list_profile.
             elif action == "accept_concern" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role != "admin":
                     toast = {"_toast": {"type": "error", "message": "Only the assigned admin can accept this concern"}}
                     return store, content, bc, {"display": "none"}, toast
-                caller_entity_id = (auth or {}).get("user_id")
+                caller_entity_id = get_current_user_id()
                 ok, msg = loaders.accept_concern_assignment(int(pk), sid, int(caller_entity_id))
                 if ok:
                     try:
@@ -675,11 +690,11 @@ def register_drilldown_callbacks(app):
             #    only, per workflow_admin_kpi_list_profile. Distinct action
             #    id from the vendor's pre-bid "decline_concern" above.
             elif action == "decline_concern_admin" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role != "admin":
                     toast = {"_toast": {"type": "error", "message": "Only the assigned admin can decline this concern"}}
                     return store, content, bc, {"display": "none"}, toast
-                caller_entity_id = (auth or {}).get("user_id")
+                caller_entity_id = get_current_user_id()
                 ok, msg = loaders.decline_concern_assignment(int(pk), sid, "ADM", int(caller_entity_id))
                 if ok:
                     try:
@@ -709,11 +724,11 @@ def register_drilldown_callbacks(app):
             #    assignment resolved (accepted -> resolved). Admin portal
             #    only, per workflow_admin_kpi_list_profile.
             elif action == "admin_resolve" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role != "admin":
                     toast = {"_toast": {"type": "error", "message": "Only the assigned admin can resolve this concern"}}
                     return store, content, bc, {"display": "none"}, toast
-                caller_entity_id = (auth or {}).get("user_id")
+                caller_entity_id = get_current_user_id()
                 actor_user_id = get_current_user_id()
                 ok, msg = loaders.resolve_concern_assignment(
                     int(pk), sid, "ADM", int(caller_entity_id), resolved_by=actor_user_id,
@@ -747,8 +762,8 @@ def register_drilldown_callbacks(app):
             #    loaders.is_any_admin_accepted / renderers.py) — the
             #    underlying write still targets security's own row.
             elif action == "vendor_resolve" and entity == "concern":
-                role = (auth or {}).get("role")
-                caller_entity_id = (auth or {}).get("linked_id")
+                role = get_current_user_role()
+                caller_entity_id = get_current_linked_id()
                 role_code = {"vendor": "VND", "security": "SEC"}.get(role)
                 if not role_code or not caller_entity_id:
                     toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
@@ -791,7 +806,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can close a poll"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id()
                 result = db._execute(
                     "SELECT fn_close_poll(%s::INT, %s::INT, %s::INT) AS ok",
                     (int(pk), int(user_id), int(sid)), fetch_one=True
@@ -812,7 +827,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can declare results"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id()
                 result = db._execute(
                     "SELECT fn_declare_results(%s::INT, %s::INT, %s::INT) AS ok",
                     (int(pk), int(user_id), int(sid)), fetch_one=True
@@ -843,7 +858,7 @@ def register_drilldown_callbacks(app):
 
             # ── Closed (Admin/Owner) — close a concern for every assignee row ──────
             elif action == "close_concern" and entity == "concern":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role not in ("admin", "apartment"):
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
                     return store, content, bc, {"display": "none"}, toast
@@ -851,7 +866,7 @@ def register_drilldown_callbacks(app):
                     "SELECT apartment_id, concern_type, created_by FROM concerns WHERE id=%s AND society_id=%s",
                     (pk, sid), fetch_one=True,
                 ) or {}
-                if role == "apartment" and concern_row.get("created_by") != (auth or {}).get("user_id"):
+                if role == "apartment" and concern_row.get("created_by") != get_current_user_id():
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
                     return store, content, bc, {"display": "none"}, toast
                 actor_user_id = get_current_user_id()
@@ -878,7 +893,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id()
                 ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -911,7 +926,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can confirm"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id()
                 ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -925,7 +940,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id() 
                 ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -938,7 +953,7 @@ def register_drilldown_callbacks(app):
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id() or (auth or {}).get("user_id")
+                user_id = get_current_user_id() 
                 ok, msg = loaders.verify_expense(int(pk), confirmed_by=user_id)
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1087,7 +1102,7 @@ def register_drilldown_callbacks(app):
 
             # ── Subscribe / Unsubscribe channel (apartment owner) ────────────────
             elif action == "subscribe_channel" and entity == "channel":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role != "apartment":
                     toast = {"_toast": {"type": "error", "message": "Only apartment owners can manage channel subscriptions"}}
                     return store, content, bc, {"display": "none"}, toast
@@ -1116,7 +1131,7 @@ def register_drilldown_callbacks(app):
 
             # ── Trigger Channel Alert (admin / security) ─────────────────────────
             elif action == "trigger_alert" and entity == "channel":
-                role = (auth or {}).get("role")
+                role = get_current_user_role()
                 if role not in ("admin", "security"):
                     toast = {"_toast": {"type": "error", "message": "Only admin or security can trigger channel alerts"}}
                     return store, content, bc, {"display": "none"}, toast
@@ -1260,6 +1275,7 @@ def register_drilldown_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def handle_form_submit(n_clicks_list, _fv, _hv, store, auth):
         # ── Guard: nothing triggered or all zero-clicks ──────────────────────
         if not ctx.triggered or not ctx.triggered[0]["value"]:
@@ -1272,7 +1288,7 @@ def register_drilldown_callbacks(app):
             return no_update, no_update, no_update, no_update, no_update
 
         entity_singular = _resolve_entity_singular(id_dict)
-        sid = (auth or {}).get("society_id")
+        sid = get_current_society_id()
         store = store or {}
         store.setdefault("prefill", {})
         store.setdefault("stack", [])
@@ -1298,7 +1314,7 @@ def register_drilldown_callbacks(app):
             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
             "event_ticket": {"admin", "apartment"}, "event_ticket_new": {"admin", "apartment"},
         }
-        _actor_role = (auth or {}).get("role", "admin")
+        _actor_role = get_current_user_role()
         if entity_singular in _SPECIAL_ENTITY_ROLES:
             _write_allowed = _actor_role in _SPECIAL_ENTITY_ROLES[entity_singular]
         else:
@@ -1407,7 +1423,7 @@ def register_drilldown_callbacks(app):
                     merged[_f] = _iso
 
         merged["society_id"] = sid
-        merged['caller_role']= (auth or {}).get("role", "admin")
+        merged['caller_role']= get_current_user_role()
         # Always stamp user_id — form fields never collect it, but
         # _save_pay_dues / _save_vendor_pass / _save_asset_dispose /
         # _save_concern / receipts, etc. need it as confirmed_by /
@@ -1423,7 +1439,7 @@ def register_drilldown_callbacks(app):
         if _server_uid is not None:
             merged["user_id"] = _server_uid
         elif not merged.get("user_id"):
-            merged["user_id"] = (auth or {}).get("user_id")
+            merged["user_id"] = get_current_user_id
 
         # Owner-initiated receipts (Pay Dues) must always be attributed to
         # the owner's own flat — never trust entity_id/role coming back from
@@ -1432,7 +1448,7 @@ def register_drilldown_callbacks(app):
         # apartment. Security keeps entity_id/role editable since they're
         # legitimately recording someone else's payment.
         if merged['caller_role'] == "apartment" and entity_singular == "receipt":
-            merged["entity_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+            merged["entity_id"] = get_current_linked_id()
             merged["role"] = "apartment"
 
         # Owner-initiated concerns must always be raised against the owner's
@@ -1444,8 +1460,7 @@ def register_drilldown_callbacks(app):
         # editable, since picking the right flat is the whole point of that
         # picker for them. See Concerns_Workflow_Review.md round 2.
         if merged['caller_role'] == "apartment" and entity_singular == "concern":
-            merged["apartment_id"] = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
-
+            merged["apartment_id"] = get_current_linked_id()
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
         #       Applied only when submitting a new receipt/expense form and the
         #       user left the date or account blank.
@@ -1486,13 +1501,13 @@ def register_drilldown_callbacks(app):
         if "edit" in card_id and _actor_role not in ("admin", "master"):
             _own_pk = None
             if entity_singular == "apartment":
-                _own_pk = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+                _own_pk = get_current_apartment_id()
             elif entity_singular in ("vendor", "security"):
-                _own_pk = (auth or {}).get("user_id")
+                _own_pk = get_current_user_id()
             if _own_pk is not None:
                 _submitted_id = merged.get("id")
                 if _submitted_id and str(_submitted_id) != str(_own_pk):
-                    print(f"⚠️  Row-ownership mismatch: {_actor_role} user_id={(auth or {}).get('user_id')} "
+                    print(f"⚠️  Row-ownership mismatch: {_actor_role} user_id={get_current_user_id()} "
                           f"submitted id={_submitted_id!r} for own-entity edit of '{entity_singular}', "
                           f"forced to own pk={_own_pk}")
                 merged["id"] = _own_pk
@@ -1558,12 +1573,13 @@ def register_drilldown_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def download_csv(n_clicks, store, auth):
         if not n_clicks:
             return no_update
         entity = ctx.triggered_id.get("entity", "data")
         filters = nav_state.get_filters(store or {})
-        filters["society_id"] = (auth or {}).get("society_id")
+        filters["society_id"] = get_current_society_id()
         filters = _apply_portal_filters(filters, auth or {})
         csv_str = loaders.export_csv(entity, filters)
         return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
@@ -1576,12 +1592,13 @@ def register_drilldown_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def download_xls(n_clicks, store, auth):
         if not n_clicks:
             return no_update
         entity = ctx.triggered_id.get("entity", "data")
         filters = nav_state.get_filters(store or {})
-        filters["society_id"] = (auth or {}).get("society_id")
+        filters["society_id"] = get_current_society_id()
         filters = _apply_portal_filters(filters, auth or {})
         rows, _ = loaders.load_list(entity, filters, page=1, page_size=10_000)
         if not rows:
@@ -1602,6 +1619,7 @@ def register_drilldown_callbacks(app):
         State({"type": "form-field", "entity": "vendor_pass", "field": "pass_type"}, "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def select_pass_type(n_clicks_list, current_value):
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update
@@ -1631,12 +1649,13 @@ def register_drilldown_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def handle_poll_vote(n_clicks_list, store, auth):
         if not ctx.triggered or not any(n_clicks_list):
             return no_update, no_update, no_update, no_update
 
-        user_id = (auth or {}).get("user_id")
-        society_id = (auth or {}).get("society_id")
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
         if not user_id or not society_id:
             return no_update, no_update, no_update, no_update
 
@@ -1697,7 +1716,7 @@ def _render_current(store: dict, auth: dict) -> tuple:
     active = store.get("active_card", "")
     filters = dict(nav_state.get_filters(store))
     prefill = nav_state.get_prefill(store)
-    sid = (auth or {}).get("society_id")
+    sid = get_current_society_id()
     if sid:
         filters["society_id"] = sid
 
@@ -1761,7 +1780,7 @@ def _render_card(
     # security) must be blocked — a non-master navigating to societies
     # would otherwise see every society in the database.
     if card_id.startswith("list_societies"):
-        if (auth or {}).get("role") != "master":
+        if get_current_user_role() != "master":
             return html.Div(
                 "Access denied — only master admin can view societies",
                 style={"color": "#de5c52", "padding": "20px"},
@@ -1858,7 +1877,7 @@ def _render_card(
         entity_key = to_plural(singular)
         meta = get_entity_meta().get(entity_key, {})
         pk = (store.get("stack") or [{}])[-1].get("entity_pk")
-        user_id = (auth or {}).get("user_id")
+        user_id = get_current_user_id() 
         record = loaders.load_profile(singular, pk, filters.get("society_id"), user_id=user_id)
         if not record:
             return _empty_state("Record not found")
@@ -1901,7 +1920,7 @@ def _render_card(
         if card_id == "form_vendor_pass_new":
             vendor_user_id = prefill.get("vendor_user_id") or prefill.get("user_id")
             sid_val        = filters.get("society_id")
-            caller_role    = (auth or {}).get("role", "admin")
+            caller_role    = get_current_user_role()
 
             # load_profile("vendor", ...) now expects vendors.id (see
             # fix_vendor_security_pk.sql), so resolve it from the login's
@@ -1950,7 +1969,7 @@ def _render_card(
         if card_id == "form_event_ticket_new":
             event_id    = prefill.get("event_id")
             sid_val     = filters.get("society_id")
-            caller_role = (auth or {}).get("role", "admin")
+            caller_role = get_current_user_role()
             event = loaders.load_profile("event", event_id, sid_val) or {} \
                     if event_id and sid_val else {}
 
@@ -1962,7 +1981,7 @@ def _render_card(
                 # Buyer is the logged-in apartment — pull their own identity
                 # from auth, not from the event's pk (which is the event id).
                 apt_user_id = (auth or {}).get("user_id")
-                apt_id = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
+                apt_id = get_current_linked_id()
                 apt = loaders.load_profile("apartment", apt_id, sid_val) or {} \
                       if apt_id and sid_val else {}
                 flat_number = apt.get("flat_number", "")
@@ -2036,10 +2055,31 @@ def _render_card(
         # see poll_page.py's module docstring for why) ─────────────────────────
         if card_id in ("form_poll_new", "form_poll_edit"):
             sid_val = filters.get("society_id")
-            role = (auth or {}).get("role", "admin")
+            role = get_current_user_role()
             from app.dash_apps.pages.poll_page import poll_form
             edit_prefill = prefill if card_id == "form_poll_edit" else None
-            return poll_form(sid_val, (auth or {}).get("user_id"), role, prefill=edit_prefill)
+            return poll_form(sid_val, get_current_user_id(), role, prefill=edit_prefill)
+
+        # ── Create Channel — dedicated form (bypasses schema-driven form,
+        # needs apartment_id validation for Taxi/Visitor channels) ─────────────
+        if card_id == "form_channel_new":
+            sid_val = filters.get("society_id")
+            role = get_current_user_role()
+            if role not in ("admin", "master"):
+                return html.Div("Only admin can create channels.", style={"color": "#de5c52", "padding": "20px"})
+            apt_rows = []
+            if sid_val:
+                try:
+                    apt_rows = db._execute(
+                        "SELECT id, flat_number FROM apartments WHERE society_id=%s ORDER BY flat_number",
+                        (sid_val,), fetch_all=True,
+                    ) or []
+                except Exception:
+                    pass
+            return renderers.render_form_channel_new(
+                society_id=sid_val,
+                apartment_options=[{"label": f"Flat {r['flat_number']}", "value": r["id"]} for r in apt_rows],
+            )
 
         rest = card_id[5:]
         parts = rest.rsplit("_", 1)
@@ -2064,7 +2104,7 @@ def _render_card(
             prefill=prefill,
             color=meta.get("profile_color", "#1d74d8"),
             society_id=filters.get("society_id"),
-            role=(auth or {}).get("role", "admin"),
+            role=get_current_user_role(),
         )
 
     return _empty_state(f"No content for: {card_id}")
@@ -2207,6 +2247,7 @@ def _save_entity(entity, card_id, data):
         if entity == "security":        return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":           return _save_event(db, data, sid, is_edit, pk)
         if entity == "concern":         return _save_concern(db, data, sid, is_edit, pk)
+        if entity == "channel":         return _save_channel(db, data, sid, is_edit, pk)
         if entity == "receipt":         return _save_receipt_v3(db, data, sid)
         if entity == "expense":         return _save_expense_v3(db, data, sid)
         if entity == "asset":           return _save_asset(db, data, sid, is_edit, pk)
@@ -3055,6 +3096,32 @@ def _save_concern(db, d, sid, is_edit, pk):
     return True, "Concern submitted", new_id
 
 
+def _save_channel(db, d, sid, is_edit, pk):
+    from app.services.alert_service import create_alert_channel
+    ch_type = d.get("channel_type", "school_bus")
+    ch_name = (d.get("name") or "").strip()
+    identifier = (d.get("identifier") or "").strip() or None
+    apartment_id = d.get("apartment_id") if ch_type in ("taxi", "visitor") else None
+    is_recurring = bool(d.get("is_recurring"))
+    if not ch_name:
+        return False, "Channel name is required", None
+    if not ch_type:
+        return False, "Channel type is required", None
+    if ch_type in ("taxi", "visitor") and not apartment_id:
+        return False, "Target apartment is required for Taxi / Visitor channels.", None
+    ok, msg = create_alert_channel(
+        society_id=sid,
+        channel_type=ch_type,
+        name=ch_name,
+        identifier=identifier,
+        apartment_id=apartment_id,
+        is_recurring=is_recurring,
+    )
+    if ok:
+        return True, "Channel created", None
+    return False, msg or "Failed to create channel.", None
+
+
 def _save_gate_log(db, d, sid):
     eid = d.get("entity_id")
     if not eid:
@@ -3474,14 +3541,14 @@ def _validate_transaction_account(db, acc_id, society_id, transaction_type):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _apply_portal_filters(filters: dict, auth: dict) -> dict:
-    role = auth.get("role", "admin")
+    role = get_current_user_role()
     f = dict(filters)
     if role == "apartment":
-        apt_id = auth.get("apartment_id") or auth.get("linked_id")
+        apt_id = get_current_linked_id()
         if apt_id:
             f["apartment_id"] = apt_id
         # Owner portal: show concerns created by this owner (concern creator)
-        owner_user_id = auth.get("user_id")
+        owner_user_id = get_current_user_id()
         if owner_user_id:
             f["concern_creator_id"] = owner_user_id
             # Reused by owner-scoped lists that key off the buyer's users.id
@@ -3493,7 +3560,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         # receivables/payables/receipts/expenses.entity_id for role='vendor'
         # too), so that's the correct scoping value for vendor-scoped
         # list/receipt/payable queries.
-        vendor_linked_id = auth.get("linked_id")
+        vendor_linked_id = get_current_linked_id()  
         if vendor_linked_id:
             f["vendor_id"] = vendor_linked_id
             # Vendor portal: show every concerns_assigns row for this vendor
@@ -3505,11 +3572,11 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         # now returns security_staff.id as `id` too (previously returned
         # users.id, which meant this filter never actually matched
         # anything — see fix_vendor_security_pk.sql).
-        sec_staff_id = auth.get("linked_id")
+        sec_staff_id = get_current_linked_id()
         if sec_staff_id:
             f["security_id"] = sec_staff_id
         # user_id is used for receipts (created_by = users.id)
-        sec_user_id = auth.get("user_id") or auth.get("id")
+        sec_user_id = get_current_user_id()
         if sec_user_id:
             f["user_id"] = sec_user_id
         # Security portal: show every concerns_assigns row for this security

@@ -10,6 +10,13 @@ from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.loaders import _is_db_error
 from database.db_manager import db
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +225,7 @@ def register_card_catalogue_callbacks(app):
         State("url", "pathname"),
         prevent_initial_call="initial_duplicate",
     )
+    @require_session
     def refresh_kpi_values(_content_store, auth_data, kpi_ids, kpi_row_style, pathname):
         if not kpi_ids:
             raise PreventUpdate

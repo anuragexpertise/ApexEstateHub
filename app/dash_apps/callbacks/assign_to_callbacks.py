@@ -26,7 +26,13 @@ from app.dash_apps.drilldown.loaders import (
     list_assignable_security,
     humanize_assignment,
 )
-from app.security.audit_context import get_current_user_id
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 PORTAL_ROLE_LABEL = {
     "ADM": "Admin",
@@ -143,6 +149,7 @@ def register_assign_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def open_assign_modal(trigger_data, auth):
         if not trigger_data or not isinstance(trigger_data, dict):
             raise PreventUpdate
@@ -153,7 +160,7 @@ def register_assign_to_callbacks(app):
         concern_id = params.get("concern_id")
         if not concern_id:
             return False, no_update
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         selected = {}
         if society_id and concern_id:
             try:
@@ -173,6 +180,7 @@ def register_assign_to_callbacks(app):
         Input("close-assign-to-modal", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def close_assign_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate
@@ -198,6 +206,7 @@ def register_assign_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def load_assign_list(n_clicks_list, search, store, auth):
         store = dict(store or {})
         triggered = ctx.triggered_id
@@ -218,7 +227,7 @@ def register_assign_to_callbacks(app):
 
         selected = store.get("selected", {})
 
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         if not society_id:
             # NOTE (fixed 2026-08): same bug as invite_to_callbacks.py's
             # load_invite_list — the color/outline outputs below are
@@ -288,6 +297,7 @@ def register_assign_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_selection(n_clicks_list, store, search, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             raise PreventUpdate
@@ -327,7 +337,7 @@ def register_assign_to_callbacks(app):
         # Re-render the currently-visible list so the clicked row shows its
         # new checked/border state immediately.
         list_children = no_update
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         if role in ("ADM", "VND", "SEC") and society_id:
             s = (search or "").strip() or None
             concern_id = store.get("concern_id")
@@ -355,6 +365,7 @@ def register_assign_to_callbacks(app):
         State("assign-to-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def clear_selections(n_clicks, store):
         if not n_clicks:
             raise PreventUpdate
@@ -375,6 +386,7 @@ def register_assign_to_callbacks(app):
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def submit_assignments(n_clicks, store, auth, drill_store):
         if not n_clicks:
             raise PreventUpdate
@@ -384,7 +396,7 @@ def register_assign_to_callbacks(app):
         if not concern_id:
             return False, {"type": "warning", "message": "No concern selected."}, no_update, no_update, no_update
 
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         actor_user_id = get_current_user_id()
         if not society_id:
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
@@ -398,7 +410,7 @@ def register_assign_to_callbacks(app):
         # an Owner acting on a concern they didn't raise, could previously
         # write arbitrary concerns_assigns rows. Mirrors the check already
         # used by close_concern's handler. See Concerns_Workflow_Review.md §3.1.
-        caller_role = (auth or {}).get("role")
+        caller_role = get_current_user_role()
         if caller_role not in ("admin", "apartment"):
             return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
         if caller_role == "apartment":

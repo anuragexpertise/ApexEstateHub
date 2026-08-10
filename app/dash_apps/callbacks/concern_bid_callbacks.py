@@ -24,6 +24,13 @@ from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 from database.db_manager import db
 from app.dash_apps.drilldown import loaders
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 # Maps auth-store "role" values to the role codes used in concerns_assigns.
 # Vendor portal only, per the Concerns workflow spec
@@ -44,6 +51,7 @@ def register_concern_bid_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def open_bid_modal(trigger_data, auth):
         if not trigger_data or not isinstance(trigger_data, dict):
             raise PreventUpdate
@@ -55,8 +63,8 @@ def register_concern_bid_callbacks(app):
             return False, no_update, no_update, no_update
 
         # Pre-fill with the caller's existing bid, if any.
-        role_code = BID_ROLE_CODE.get((auth or {}).get("role"))
-        entity_id = (auth or {}).get("linked_id")
+        role_code = BID_ROLE_CODE.get(get_current_user_role())
+        entity_id = get_current_linked_id()  # only if the file has an ownership check (apartment/vendor/security's own record)
         existing = None
         if role_code and entity_id:
             row = db._execute(
@@ -73,6 +81,7 @@ def register_concern_bid_callbacks(app):
         Input("close-concern-bid-modal", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def close_bid_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate
@@ -93,6 +102,7 @@ def register_concern_bid_callbacks(app):
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def submit_bid(n_clicks, store, bid_amount, auth, drill_store):
         if not n_clicks:
             raise PreventUpdate
@@ -101,9 +111,9 @@ def register_concern_bid_callbacks(app):
         if not concern_id:
             return False, "", {"type": "warning", "message": "No concern selected."}, no_update, no_update, no_update
 
-        society_id = (auth or {}).get("society_id")
-        role_code = BID_ROLE_CODE.get((auth or {}).get("role"))
-        entity_id = (auth or {}).get("linked_id")
+        society_id = get_current_society_id()
+        role_code = BID_ROLE_CODE.get(get_current_user_role())
+        entity_id = get_current_linked_id()  # only if the file has an ownership check (apartment/vendor/security's own record)
         if not society_id or not role_code or not entity_id:
             return False, "", {"type": "error", "message": "Only an invited vendor or security staff can bid."}, no_update, no_update, no_update
 

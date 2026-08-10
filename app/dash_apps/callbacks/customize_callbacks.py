@@ -12,7 +12,13 @@ from app.dash_apps.pages.card_catalogue import (
     KPI_CARDS,
     make_kpi_card,
 )
-
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 def _kpi_ids_for_portal_tab(portal, tab):
     """Duplicate-safe KPI list for a given portal+tab."""
@@ -140,6 +146,7 @@ def register_customize_callbacks(app):
         Input("dnd-order-capture", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def capture_order(value):
         if not value:
             return no_update
@@ -157,6 +164,7 @@ def register_customize_callbacks(app):
         Input("layout-portal-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def layout_tab_options(portal):
         if not portal:
             portal = "admin"
@@ -174,6 +182,7 @@ def register_customize_callbacks(app):
         Input("layout-portal-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def layout_tab_reset(portal):
         if not portal:
             portal = "admin"
@@ -199,9 +208,10 @@ def register_customize_callbacks(app):
         State("auth-store",          "data"),
         prevent_initial_call="initial_duplicate",
     )
+    @require_session
     def load_layout(_dummy_id, portal, tab, auth_data):
-        society_id = (auth_data or {}).get("society_id")
-        role       = (auth_data or {}).get("role", "admin")
+        society_id = get_current_society_id()
+        role       = get_current_user_role() or 'admin'
  
         # ── Palette: all KPIs for this portal+tab ─────────────────────────
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
@@ -276,12 +286,13 @@ def register_customize_callbacks(app):
         State("layout-tab-select",  "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def save_layout(n_clicks, layout_data, auth_data, portal, tab):
         if not n_clicks:
             return no_update, no_update
         try:
             from database.db_manager import db
-            sid = (auth_data or {}).get("society_id")
+            sid = get_current_society_id()
             if not sid:
                 return (no_update,
                         {"type": "error", "message": "No society selected"})
@@ -315,12 +326,13 @@ def register_customize_callbacks(app):
         State("layout-tab-select",   "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def reset_layout(n_clicks, auth_data, portal, tab):
         if not n_clicks:
             return no_update, no_update, no_update, no_update, no_update
  
-        role   = (auth_data or {}).get("role", "admin")
-        sid    = (auth_data or {}).get("society_id")
+        role   = get_current_user_role() or 'admin'
+        sid    = get_current_society_id()
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
  
         # Default active KPIs for this portal+tab come from DEFAULT_LAYOUTS
@@ -351,6 +363,7 @@ def register_customize_callbacks(app):
         State("auth-store",            "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def integrate_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
         if not n_clicks or not (sql_text or "").strip():
             return no_update
@@ -358,7 +371,7 @@ def register_customize_callbacks(app):
 
         from database.db_manager import db
  
-        sid = (auth_data or {}).get("society_id")
+        sid = get_current_society_id()
         sql = sql_text.strip()
  
         t0 = time.perf_counter()

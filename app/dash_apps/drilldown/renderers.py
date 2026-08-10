@@ -54,11 +54,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # the "+ New" shortcut into the receipt form, a deliberate convenience.
     ("admin", "cashbook"):     {"view", "new"},
     ("admin", "accounts"):     {"view", "edit", "delete", "new"},
-    # Channels: view-only from the drilldown. Create/subscribe/trigger/
-    # approve-deny all go through their own validated flows (see
-    # channel_callbacks.py, alert_service.py) — falling through to
-    # ("admin","*")'s generic New/Edit/Delete would bypass the
-    # apartment_id requirement for Taxi/Visitor channels.
+    # Channels: admin creates; subscribe/trigger/approve-deny go through
+    # profile actions with server-side guards (alert_service.py).
     ("admin", "channels"):     {"view", "new"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
@@ -81,10 +78,9 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "receivables"): {"view"},
     ("apartment", "payables"):    {"view"},
     ("apartment", "ledger"):      set(),
-    # Read-only drilldown into the channels/pending-alerts KPIs on the
-    # owner's own Channels tab — subscribing and approve/deny stay on
-    # their existing dedicated buttons, not a generic row action.
-    ("apartment", "channels"):    {"view", "new"},
+    # Apartments view channels and subscribe from the profile; create/approve/deny
+    # are profile actions with server-side guards.
+    ("apartment", "channels"):    {"view"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -807,6 +803,11 @@ _CONCERN_STATUS_BANNER = {
     "closed":   ("Closed — this concern is complete",             "#64748b"),
 }
 
+_CHANNEL_STATUS_BANNER = {
+    True:  ("Active — accepting subscriptions and alerts",       "#17976e"),
+    False: ("Inactive — no new alerts will be sent",             "#de5c52"),
+}
+
 
 def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record,
@@ -1180,6 +1181,29 @@ def render_profile_card(card_id: str, title: str, icon: str,
                        "borderColor": f"{_mcolor}40"},
             ))
 
+    # ── Channel lifecycle banners ──────────────────────────────────────────
+    _channel_banners = []
+    if entity == "channel" and pk_val:
+        is_active = record_dict.get("active", True)
+        _stext, _scolor = _CHANNEL_STATUS_BANNER.get(
+            is_active, ("Unknown status", "#1d74d8"))
+        _channel_banners.append(dbc.Alert(
+            [html.I(className="fas fa-info-circle me-2"), _stext],
+            color="light",
+            style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                   "borderRadius": "8px", "marginBottom": "8px",
+                   "borderColor": f"{_scolor}40"},
+        ))
+        pending_count = record_dict.get("pending_count", 0)
+        if pending_count:
+            _channel_banners.append(dbc.Alert(
+                [html.I(className="fas fa-bell me-2"),
+                 html.Strong(f"{pending_count} pending alert(s) awaiting response")],
+                color="warning",
+                style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                       "borderRadius": "8px", "marginBottom": "8px"},
+            ))
+
     # ── Poll UI: lifecycle banner + voting buttons + results under hr divider
     _poll_ui = []
     if entity == "poll" and pk_val:
@@ -1314,6 +1338,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
             # ── Concern lifecycle banners (status + caller's own stage) ─
             *(_concern_banners if _concern_banners else []),
 
+            # ── Channel lifecycle banners (active/inactive + pending alerts) ─
+            *(_channel_banners if _channel_banners else []),
+
             # ── Images (full-width, stacked) ─────────────────────────
             html.Div(image_section) if image_section else None,
 
@@ -1327,6 +1354,12 @@ def render_profile_card(card_id: str, title: str, icon: str,
                     "marginBottom": "14px",
                 },
             ) if text_cells else None,
+
+            # ── Channel subscriber list ───────────────────────────────
+            *(_render_channel_subscribers(record_dict) if entity == "channel" and pk_val else []),
+
+            # ── Channel alert events history ──────────────────────────
+            *(_render_channel_alert_events(record_dict) if entity == "channel" and pk_val else []),
 
             # ── Poll UI (voting + results) ───────────────────────────
             *(_poll_ui),
@@ -3130,3 +3163,162 @@ def render_channel_subscriber_profiles(channel_name: str, subscribers: list) -> 
             dbc.Row(profile_cards) if profile_cards else html.Div("No subscribers found for this channel.", className="text-muted")
         ])
     ], className="mt-3", style={"borderRadius": "12px", "border": "1px solid #cbd5e1"})
+
+
+def _render_channel_subscribers(record_dict: dict) -> list:
+    subscribers = record_dict.get("_subscribers") or []
+    if not subscribers:
+        return []
+    rows = []
+    for sub in subscribers:
+        flat = sub.get("flat_number") or "—"
+        name = sub.get("owner_name") or "—"
+        rows.append(
+            html.Tr([
+                html.Td(flat, style={"fontSize": "13px"}),
+                html.Td(name, style={"fontSize": "13px"}),
+            ])
+        )
+    return [
+        html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+        html.H6("Subscribers", style={"fontWeight": "700", "color": "#15304f", "fontSize": "14px", "marginBottom": "8px"}),
+        dbc.Table([
+            html.Thead(html.Tr([html.Th("Flat", style={"fontSize": "12px"}), html.Th("Owner", style={"fontSize": "12px"})])),
+            html.Tbody(rows),
+        ], bordered=False, striped=True, style={"fontSize": "13px"}),
+        html.Small(f"{len(subscribers)} total subscriber(s)", style={"color": "#999", "fontSize": "12px"}),
+    ]
+
+
+def _render_channel_alert_events(record_dict: dict) -> list:
+    events = record_dict.get("_alert_events") or []
+    if not events:
+        return []
+    rows = []
+    for ev in events:
+        state = ev.get("state", "—")
+        flat = ev.get("flat_number") or "—"
+        created = ev.get("created_at", "")
+        if isinstance(created, (datetime, date)):
+            created = created.strftime("%d/%m/%Y %H:%M")
+        rows.append(
+            html.Tr([
+                html.Td(html.Span(state.upper(), className="badge", style={
+                    "background": "#e59620" if state == "pending" else "#17976e" if state == "resolved" else "#de5c52" if state == "denied" else "#64748b",
+                    "color": "#fff", "fontSize": "10px"
+                }), style={"fontSize": "13px"}),
+                html.Td(flat, style={"fontSize": "13px"}),
+                html.Td(created, style={"fontSize": "13px"}),
+            ])
+        )
+    return [
+        html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+        html.H6("Recent Alert Events", style={"fontWeight": "700", "color": "#15304f", "fontSize": "14px", "marginBottom": "8px"}),
+        dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("State", style={"fontSize": "12px"}),
+                html.Th("Flat", style={"fontSize": "12px"}),
+                html.Th("Created", style={"fontSize": "12px"}),
+                html.Th("Actions", style={"fontSize": "12px"}),
+            ])),
+            html.Tbody([
+                html.Tr([
+                    html.Td(html.Span(state.upper(), className="badge", style={
+                        "background": "#e59620" if state == "pending" else "#17976e" if state == "resolved" else "#de5c52" if state == "denied" else "#64748b",
+                        "color": "#fff", "fontSize": "10px"
+                    }), style={"fontSize": "13px"}),
+                    html.Td(flat, style={"fontSize": "13px"}),
+                    html.Td(created, style={"fontSize": "13px"}),
+                    html.Td([
+                        dbc.Button(
+                            [html.I(className="fas fa-check me-1"), "Approve"],
+                            id={"type": "channel-approve-alert-btn", "alert_event_id": ev.get("id")},
+                            color="success", size="sm",
+                            style={"borderRadius": "6px", "fontSize": "10px", "marginRight": "4px"},
+                        )
+                    ]) if state == "pending" and ev.get("id") else html.Td("—"),
+                ])
+                for ev in events
+            ]),
+        ], bordered=False, striped=True, style={"fontSize": "13px"}),
+        html.Small(f"{len(events)} most recent event(s)", style={"color": "#999", "fontSize": "12px"}),
+    ]
+
+
+def render_form_channel_new(society_id: int | None = None, apartment_options: list | None = None) -> "html.Div":
+    """
+    Dedicated New Channel form for the drilldown system.
+    Uses generic form-field pattern so handle_form_submit in
+    drilldown_callbacks.py processes the submission.
+    """
+    from dash import html
+    import dash_bootstrap_components as dbc
+
+    apartment_options = apartment_options or []
+
+    return dbc.Card([
+        dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
+        dbc.CardBody([
+            dcc.Input(id={"type": "form-entity-pk", "entity": "channel"}, type="hidden", value=""),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Channel Type"),
+                    dcc.Dropdown(
+                        id={"type": "form-field", "entity": "channel", "field": "channel_type"},
+                        options=[
+                            {"label": "School Bus", "value": "school_bus"},
+                            {"label": "Taxi", "value": "taxi"},
+                            {"label": "Visitor", "value": "visitor"},
+                        ],
+                        value="school_bus",
+                        clearable=False,
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=4),
+                dbc.Col([
+                    dbc.Label("Channel Name"),
+                    dcc.Input(
+                        id={"type": "form-field", "entity": "channel", "field": "name"},
+                        type="text",
+                        placeholder="e.g. DPS Bus #12 or Uber Taxi",
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=5),
+                dbc.Col([
+                    dbc.Label("Identifier (Reg # / Ref)"),
+                    dcc.Input(
+                        id={"type": "form-field", "entity": "channel", "field": "identifier"},
+                        type="text",
+                        placeholder="e.g. MH-02-1234",
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=3),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Target Apartment (required for Taxi / Visitor)"),
+                    dcc.Dropdown(
+                        id={"type": "form-field", "entity": "channel", "field": "apartment_id"},
+                        options=apartment_options,
+                        placeholder="Select flat…",
+                        clearable=True,
+                        style={"fontSize": "13px"},
+                    ),
+                ], width=12),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Switch(
+                        id={"type": "form-field", "entity": "channel", "field": "is_recurring"},
+                        label="Recurring Channel (ON = Daily Recurring | OFF = One-Time / Per-Day)",
+                        value=True,
+                    ),
+                ], width=8),
+                dbc.Col([
+                    dbc.Button("Create Channel", id={"type": "form-submit", "entity": "channel", "card_id": "form_channel_new"},
+                               color="primary", className="w-100",
+                               style={"borderRadius": "8px", "fontWeight": "600"}),
+                ], width=4),
+            ]),
+        ]),
+    ], className="mb-4", style={"borderRadius": "12px", "boxShadow": "0 2px 8px rgba(0,0,0,0.05)"})

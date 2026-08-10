@@ -1868,7 +1868,29 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "WHERE ac.id=%s AND ac.society_id=%s",
                 (apartment_id, pk, society_id), fetch_one=True,
             )
-            return dict(r) if r else None
+            profile = dict(r) if r else None
+            if profile and pk:
+                subscribers = db._execute(
+                    "SELECT sub.*, COALESCE(apt.flat_number,'') AS flat_number, "
+                    "  COALESCE(owner_u.name,'') AS owner_name "
+                    "FROM alert_subscriptions sub "
+                    "LEFT JOIN apartments apt ON apt.id = sub.apartment_id "
+                    "LEFT JOIN users owner_u ON owner_u.linked_id = apt.id AND owner_u.role='apartment' "
+                    "WHERE sub.channel_id=%s "
+                    "ORDER BY apt.flat_number",
+                    (pk,), fetch_all=True,
+                ) or []
+                profile["_subscribers"] = subscribers
+                alert_events = db._execute(
+                    "SELECT ae.*, COALESCE(apt.flat_number,'') AS flat_number "
+                    "FROM alert_events ae "
+                    "LEFT JOIN apartments apt ON apt.id = ae.apartment_id "
+                    "WHERE ae.channel_id=%s AND ae.society_id=%s "
+                    "ORDER BY ae.created_at DESC LIMIT 20",
+                    (pk, society_id), fetch_all=True,
+                ) or []
+                profile["_alert_events"] = alert_events
+            return profile
 
         return None
 

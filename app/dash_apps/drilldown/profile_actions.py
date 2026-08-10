@@ -391,6 +391,22 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "warning",
             "roles": ["admin", "security"],
         },
+        {
+            "label": "Create Channel",
+            "action_id": "create_channel",
+            "target_card": "form_channel_new",
+            "icon": "fa-plus",
+            "color": "success",
+            "roles": ["admin"],
+        },
+        {
+            "label": "View Subscribers",
+            "action_id": "view_subscribers",
+            "target_card": "modal_subscribers",
+            "icon": "fa-users",
+            "color": "info",
+            "roles": ["admin", "apartment", "security"],
+        },
     ],
 }
 
