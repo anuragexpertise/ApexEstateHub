@@ -406,9 +406,9 @@ def register_card_catalogue_callbacks(app):
                 # `security_assigned_name` was never used.
                 overrides = {
                     "kpi_security_shift_count": (
-                        "SELECT COUNT(*)::INT AS v FROM attendance "
-                        "WHERE security_id=%s AND time_out IS NOT NULL",
-                        (sec_id,),
+                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='SEC' AND time_out IS NOT NULL",
+                        (own_user_id,),
                     ),
                     "kpi_security_salary_due": (
                         "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payables "
