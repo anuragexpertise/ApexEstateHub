@@ -1882,11 +1882,11 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 ) or []
                 profile["_subscribers"] = subscribers
                 alert_events = db._execute(
-                    "SELECT ae.*, COALESCE(apt.flat_number,'') AS flat_number "
+                    "SELECT ae.*, COALESCE(v.name,'') AS visitor_name "
                     "FROM alert_events ae "
-                    "LEFT JOIN apartments apt ON apt.id = ae.apartment_id "
+                    "LEFT JOIN visitors v ON v.id = ae.visitor_id "
                     "WHERE ae.channel_id=%s AND ae.society_id=%s "
-                    "ORDER BY ae.created_at DESC LIMIT 20",
+                    "ORDER BY ae.triggered_at DESC LIMIT 20",
                     (pk, society_id), fetch_all=True,
                 ) or []
                 profile["_alert_events"] = alert_events
