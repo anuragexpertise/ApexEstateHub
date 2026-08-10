@@ -69,7 +69,7 @@ from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
     get_current_society_id,
-    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+    get_current_linked_id,
 )
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
@@ -1439,7 +1439,7 @@ def register_drilldown_callbacks(app):
         if _server_uid is not None:
             merged["user_id"] = _server_uid
         elif not merged.get("user_id"):
-            merged["user_id"] = get_current_user_id
+            merged["user_id"] = get_current_user_id()
 
         # Owner-initiated receipts (Pay Dues) must always be attributed to
         # the owner's own flat — never trust entity_id/role coming back from
@@ -1450,6 +1450,19 @@ def register_drilldown_callbacks(app):
         if merged['caller_role'] == "apartment" and entity_singular == "receipt":
             merged["entity_id"] = get_current_linked_id()
             merged["role"] = "apartment"
+
+        # Owner-initiated event ticket purchases must always be billed to
+        # the buyer's own account — never trust apt_user_id coming back from
+        # the form for this. It travels as an ordinary hidden form field
+        # (see the form_event_ticket_new prefill above), so without this an
+        # owner could edit that field and have a ticket purchase attributed
+        # to a different apartment/user entirely — _save_event_ticket passes
+        # it straight through to event_service.book_event_tickets(user_id=...),
+        # which is a real financial write (receivable/charge), not just
+        # display. Admin keeps it fully editable, since picking which
+        # apartment is buying is the whole point of that path for them.
+        if merged['caller_role'] == "apartment" and entity_singular in ("event_ticket", "event_ticket_new"):
+            merged["apt_user_id"] = get_current_user_id()
 
         # Owner-initiated concerns must always be raised against the owner's
         # own flat — never trust apartment_id coming back from the form for
@@ -1979,8 +1992,14 @@ def _render_card(
             apartment_options = []
             if caller_role == "apartment":
                 # Buyer is the logged-in apartment — pull their own identity
-                # from auth, not from the event's pk (which is the event id).
-                apt_user_id = (auth or {}).get("user_id")
+                # from the server session (get_current_user_id()), not
+                # auth-store. This value is only a display prefill; the real
+                # enforcement is the merged["apt_user_id"] override at save
+                # time above (search "Owner-initiated event ticket
+                # purchases"), which is what actually stops a tampered
+                # hidden-field resubmission — this fix is what makes the
+                # form show the right thing in the first place.
+                apt_user_id = get_current_user_id()
                 apt_id = get_current_linked_id()
                 apt = loaders.load_profile("apartment", apt_id, sid_val) or {} \
                       if apt_id and sid_val else {}

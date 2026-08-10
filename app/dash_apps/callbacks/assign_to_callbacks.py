@@ -31,7 +31,6 @@ from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
     get_current_society_id,
-    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
 )
 
 PORTAL_ROLE_LABEL = {
@@ -418,7 +417,13 @@ def register_assign_to_callbacks(app):
                 "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
                 (concern_id, society_id), fetch_one=True,
             ) or {}
-            if concern_owner_row.get("created_by") != (auth or {}).get("user_id"):
+            # Was (auth or {}).get("user_id") — auth-store, client-editable.
+            # actor_user_id (computed above from get_current_user_id()) is
+            # the server-verified equivalent; this comparison is the whole
+            # point of the ownership check, so it needs the same treatment
+            # as caller_role two lines up, not the value it was written to
+            # guard against.
+            if concern_owner_row.get("created_by") != actor_user_id:
                 return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
 
         try:
