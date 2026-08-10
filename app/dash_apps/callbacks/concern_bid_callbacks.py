@@ -29,7 +29,7 @@ from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
     get_current_society_id,
-    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+    get_current_linked_id,
 )
 
 # Maps auth-store "role" values to the role codes used in concerns_assigns.
@@ -115,7 +115,7 @@ def register_concern_bid_callbacks(app):
         role_code = BID_ROLE_CODE.get(get_current_user_role())
         entity_id = get_current_linked_id()  # only if the file has an ownership check (apartment/vendor/security's own record)
         if not society_id or not role_code or not entity_id:
-            return False, "", {"type": "error", "message": "Only an invited vendor or security staff can bid."}, no_update, no_update, no_update
+            return False, "", {"type": "error", "message": "Only an invited vendor can bid."}, no_update, no_update, no_update
 
         ok, msg = loaders.submit_concern_bid(concern_id, society_id, role_code, entity_id, bid_amount)
         if not ok:
