@@ -1,4 +1,4 @@
-from dash import Input, Output, State, no_update, html, ctx
+from dash import Input, Output, State, no_update, html, ctx, ALL
 import dash_bootstrap_components as dbc
 from datetime import datetime
 from app.services.qr_service import validate_qr_code
@@ -10,6 +10,11 @@ from app.services.alert_service import (
     get_active_alerts,
 )
 from database.db_manager import db
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id, get_current_user_role,
+    get_current_society_id, get_current_linked_id,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -380,6 +385,7 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def trigger_gate_alert(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update, no_update
@@ -392,11 +398,18 @@ def register_security_callbacks(app):
         if not channel_id:
             return no_update, no_update
 
-        auth = auth or {}
-        user_id = auth.get("user_id")
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        # Server-verified — this page is shared by admin and security
+        # (see portal_pages.py's _evaluate_pass_page), so both roles are
+        # allowed; anyone else (e.g. an owner/vendor with a tampered
+        # auth-store.role) is rejected before user_id/society_id are used
+        # anywhere.
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}, no_update
 
-        if not user_id or not society_id:
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
+        if not society_id:
             return {"type": "error", "message": "Session expired"}, no_update
 
         try:
@@ -419,6 +432,7 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def escalate_to_call(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update, no_update
@@ -431,8 +445,11 @@ def register_security_callbacks(app):
         if not alert_event_id:
             return no_update, no_update
 
-        auth = auth or {}
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}, no_update
+
+        society_id = get_current_society_id()
 
         try:
             # society_id filter closes a cross-tenant IDOR — without it, any
@@ -461,6 +478,7 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def notify_presumed_visitor(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update, no_update
@@ -473,9 +491,12 @@ def register_security_callbacks(app):
         if not visitor_id:
             return no_update, no_update
 
-        auth = auth or {}
-        user_id = auth.get("user_id")
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}, no_update
+
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
 
         try:
             ok, msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
@@ -494,6 +515,7 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def call_presumed_visitor(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update, no_update
@@ -506,8 +528,11 @@ def register_security_callbacks(app):
         if not visitor_id:
             return no_update, no_update
 
-        auth = auth or {}
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}, no_update
+
+        society_id = get_current_society_id()
 
         try:
             # society_id filter closes a cross-tenant IDOR — without it, any
@@ -542,13 +567,17 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def create_walk_in_visitor_handler(n_clicks, name, mobile, purpose, flat, vehicle, auth):
         if not n_clicks:
             return no_update, no_update
 
-        auth = auth or {}
-        user_id = auth.get("user_id")
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}, no_update
+
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
 
         if not user_id or not society_id:
             return {"type": "error", "message": "Session expired"}, no_update
@@ -602,12 +631,20 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True
     )
+    @require_session
     def validate_qr(n_clicks, qr_data, auth_data):
         if not n_clicks or not qr_data:
             return no_update, no_update
 
-        society_id = (auth_data or {}).get("society_id")
-        scanning_user_id = (auth_data or {}).get("user_id")
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return (
+                html.Div("Not authorized.", style={"color": "#e74c3c"}),
+                {"backgroundColor": "#f8d7da", "color": "#721c24", "borderRadius": "10px"},
+            )
+
+        society_id = get_current_society_id()
+        scanning_user_id = get_current_user_id()
         result = validate_qr_code(qr_data, society_id, scanning_user_id)
 
         if result.get("status") == "PASS":
@@ -636,19 +673,25 @@ def register_security_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True
     )
+    @require_session
     def manage_attendance(clock_in_clicks, clock_out_clicks, auth_data):
-        ctx = dash.callback_context
         if not ctx.triggered:
             return no_update, no_update
 
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        society_id = (auth_data or {}).get("society_id")
-        user_id = (auth_data or {}).get("user_id")
-        # gate_access.entity_id for role='SEC' stores security_staff.id, not
-        # users.id (matches fn_evaluate_gate_pass('security', ...) and the
-        # attendance-list join in loaders.py) — auth-store carries this
-        # separately as "security_id", set at login from users.linked_id.
-        staff_id = (auth_data or {}).get("security_id")
+
+        # Attendance is a security guard clocking THEMSELVES in/out — role
+        # must be 'security', not just "authenticated". staff_id below is
+        # get_current_linked_id(), i.e. security_staff.id resolved from
+        # the DB row backing the session, not the auth-store "security_id"
+        # field a tampered client could set to any other guard's id.
+        role = get_current_user_role() or ""
+        if role != "security":
+            return no_update, {"type": "error", "message": "Only security staff can clock in/out."}
+
+        society_id = get_current_society_id()
+        user_id = get_current_user_id()
+        staff_id = get_current_linked_id()
         if not user_id or not society_id or not staff_id:
             return no_update, {"type": "error", "message": "Session expired — please log in again"}
 

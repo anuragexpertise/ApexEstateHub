@@ -1,0 +1,586 @@
+diff --git a/app/dash_apps/callbacks/__init__.py b/app/dash_apps/callbacks/__init__.py
+index c97e561..73220f9 100644
+--- a/app/dash_apps/callbacks/__init__.py
++++ b/app/dash_apps/callbacks/__init__.py
+@@ -55,6 +55,22 @@ def register_callbacks(app):
+     except Exception as e:
+         print(f"⚠️ qr_callbacks failed: {e}")
+ 
++    # 6b. Security gate-alert callbacks (School Bus / Taxi trigger + escalate,
++    #     presumed-visitor notify/call, walk-in visitor, QR scan validate,
++    #     attendance clock-in/out). portal_pages.py already imports
++    #     render_gate_alerts_section from this module to render the buttons
++    #     on the security portal's Gate Pass Evaluation page, but
++    #     register_security_callbacks(app) itself was never called anywhere
++    #     in this registry — every one of those buttons has been rendered
++    #     with no callback listening on it, i.e. non-functional, since
++    #     whenever this file was added. Discovered while migrating this
++    #     file's auth-store usage to the server-verified session.
++    try:
++        from .security_callbacks import register_security_callbacks
++        register_security_callbacks(app)
++    except Exception as e:
++        print(f"⚠️ security_callbacks failed: {e}")
++
+     # 7. Camera capture (clientside JS injection)
+     try:
+         from .camera_callbacks import register_camera_callbacks
+diff --git a/app/dash_apps/callbacks/owner_callbacks.py b/app/dash_apps/callbacks/owner_callbacks.py
+index 5b5cc8d..15e182d 100644
+--- a/app/dash_apps/callbacks/owner_callbacks.py
++++ b/app/dash_apps/callbacks/owner_callbacks.py
+@@ -1,3 +1,32 @@
++"""
++app/dash_apps/callbacks/owner_callbacks.py
++
++STATUS: dead code — register_owner_callbacks() is not called anywhere in
++app/dash_apps/callbacks/__init__.py's central registry, confirmed by
++searching the whole codebase for its call site. Neither callback in this
++file currently runs.
++
++Do NOT wire this up as-is:
++  - display_channel_subscribers duplicates channel_callbacks.py's
++    view_subscribers, targeting the exact same
++    Output("subscribers-modal-container", "children") without
++    allow_duplicate=True. Registering both would raise Dash's
++    DuplicateCallbackOutput error and crash the app at startup.
++    channel_callbacks.py's version is the maintained one (migrated to the
++    server-verified session — see app/security/audit_context.py) and
++    additionally scopes by society_id, which this version never did.
++  - process_payment doesn't do anything — no DB write, just a hardcoded
++    success toast — and isn't gated by role or session at all.
++  - display_channel_subscribers also references html.Div in its except
++    branch without importing `html` from dash — would raise NameError on
++    that path if it were ever invoked.
++
++Recommend deleting this file. Left unmigrated/unregistered rather than
++patched, since patching auth-store usage in code that's both unreachable
++and duplicative of a properly-migrated implementation elsewhere doesn't
++reduce any live exposure — the fix here is the deletion, not a security
++patch.
++"""
+ from dash import Input, Output, State, no_update
+ import dash
+ import requests
+diff --git a/app/dash_apps/callbacks/qr_callbacks.py b/app/dash_apps/callbacks/qr_callbacks.py
+index b4f0964..7d6b432 100644
+--- a/app/dash_apps/callbacks/qr_callbacks.py
++++ b/app/dash_apps/callbacks/qr_callbacks.py
+@@ -6,6 +6,12 @@ import dash_bootstrap_components as dbc
+ import base64
+ from datetime import datetime
+ 
++from app.security.guards import require_session
++from app.security.audit_context import (
++    get_current_user_id, get_current_user_role,
++    get_current_society_id, get_current_linked_id,
++)
++
+ 
+ def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
+     """Shared by manual-entry lookup (validate_manual_qr_scoped) and the
+@@ -618,18 +624,32 @@ def register_qr_callbacks(app):
+         State('qr-modal', 'is_open'),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, logout_n, auth_data, is_open):
+         from dash import ctx
+-        
++
+         if ctx.triggered_id == 'qr-modal-logout-btn':
+             return False, no_update, no_update, no_update, True
+-        
++
+         if ctx.triggered_id == 'close-qr-modal':
+             return False, no_update, no_update, no_update, True
+-        
+-        if not auth_data or not auth_data.get('authenticated'):
++
++        # Server-verified — this is what decides WHOSE identity gets
++        # encoded into the QR (a signed gate-access credential). The
++        # previous version sourced role/society_id/user_id/linked_id from
++        # auth_data (client-editable localStorage) here: anyone could set
++        # auth-store.role/society_id to any value, click "show my QR", and
++        # walk away with a validly-signed gate pass for an identity that
++        # was never authenticated — the HMAC signing itself was never the
++        # weak point, the INPUT to it was attacker-chosen.
++        server_role = get_current_user_role()
++        server_society_id = get_current_society_id()
++        server_user_id = get_current_user_id()
++        server_linked_id = get_current_linked_id()
++
++        if not server_user_id:
+             return False, no_update, no_update, no_update, True
+-        
++
+         from app.services.qr_service import generate_static_qr_code, generate_time_qr
+ 
+         entity_store = {}
+@@ -637,8 +657,11 @@ def register_qr_callbacks(app):
+         if ctx.triggered_id == 'profile-action-trigger' \
+                 and profile_action \
+                 and profile_action.get('action') == 'open_time_qr':
+-            # ATD dynamic QR — Security/Admin Settings tab punch-clock
+-            society_id = profile_action.get('society_id') or auth_data.get('society_id')
++            # ATD dynamic QR — Security/Admin Settings tab punch-clock.
++            # Society-scoped, not entity-scoped, but still must be THIS
++            # user's own society, not whatever profile_action/auth_data
++            # claims.
++            society_id = server_society_id
+             src, payload, issued_at, expires_at = generate_time_qr(society_id)
+             entity_store = {
+                 'role': 'attendance_entry',
+@@ -651,38 +674,53 @@ def register_qr_callbacks(app):
+             return True, src, payload, entity_store, False  # interval enabled
+ 
+         if ctx.triggered_id == 'hdr-avatar':
+-            # Logged-in user's QR — encode domain entity ID, not users.id...
+-            # EXCEPT for admin, which has no domain table of its own. A
+-            # seeded first-admin has linked_id IS NULL; one promoted from
+-            # an apartment owner keeps their old apartments.id in
+-            # linked_id, but the QR is still keyed by users.id either way
+-            # — see qr_service._current_qr_version's ADM branch, which
+-            # resolves the version from apartments.qr_version when
+-            # linked_id is present, or users.qr_version otherwise.
+-            _gen_entity_id = (
+-                auth_data.get('user_id') if auth_data.get('role') == 'admin'
+-                else auth_data.get('linked_id')
+-            )
++            # Logged-in user's OWN QR — entity_id/role/society_id must all
++            # come from the server session, never auth_data. encode domain
++            # entity ID, not users.id... EXCEPT for admin, which has no
++            # domain table of its own. A seeded first-admin has linked_id
++            # IS NULL; one promoted from an apartment owner keeps their
++            # old apartments.id in linked_id, but the QR is still keyed by
++            # users.id either way — see qr_service._current_qr_version's
++            # ADM branch, which resolves the version from
++            # apartments.qr_version when linked_id is present, or
++            # users.qr_version otherwise.
++            _gen_entity_id = server_user_id if server_role == 'admin' else server_linked_id
+             src, payload = generate_static_qr_code(
+                 _gen_entity_id,
+-                auth_data.get('role'),
+-                auth_data.get('society_id')
++                server_role,
++                server_society_id,
+             )
+             entity_store = {
+                 'entity_id': _gen_entity_id,
+-                'role': auth_data.get('role'),
+-                'society_id': auth_data.get('society_id'),
+-                'name': auth_data.get('name', 'User'),
++                'role': server_role,
++                'society_id': server_society_id,
++                'name': auth_data.get('name', 'User') if auth_data else 'User',
+             }
+         elif ctx.triggered_id == 'profile-action-trigger' \
+                 and profile_action \
+                 and profile_action.get('entity_id'):
+-            # Profile action "Gate Pass" clicked with entity data
++            # Profile action "Gate Pass" clicked FOR ANOTHER ENTITY (e.g.
++            # admin viewing an apartment/vendor/security profile). Only
++            # admin/master may mint a gate pass for someone else, and only
++            # for an entity within their own society — profile_action is
++            # itself just another client-suppliable Input/State, so
++            # trusting its entity_id/role/society_id combination without
++            # these checks would let anyone request a signed credential
++            # for an arbitrary identity in an arbitrary society, the same
++            # bug as the hdr-avatar path just via a different trigger.
++            if server_role not in ('admin', 'master'):
++                return True, "", "Error: Not authorized to generate a gate pass for another entity.", no_update, True
++
+             entity_id = profile_action.get('entity_id')
+             role = profile_action.get('role')
+-            society_id = profile_action.get('society_id')
++            requested_society_id = profile_action.get('society_id')
++
++            if requested_society_id and requested_society_id != server_society_id and server_role != 'master':
++                return True, "", "Error: Entity does not belong to your society.", no_update, True
++
++            society_id = server_society_id
+             entity_name = profile_action.get('name', 'Entity')
+-            
++
+             src, payload = generate_static_qr_code(
+                 entity_id,
+                 role,
+@@ -696,10 +734,10 @@ def register_qr_callbacks(app):
+             }
+         else:
+             return no_update, no_update, no_update, no_update, no_update
+-        
++
+         if not src:
+             return True, "", f"Error: {payload}", no_update, True
+-        
++
+         return True, src, payload, entity_store, True  # static QR — interval stays off
+ 
+     # ── 2b. ATD QR auto-refresh + live countdown (Settings tab) ────────────
+@@ -712,6 +750,7 @@ def register_qr_callbacks(app):
+         State('qr-entity-store', 'data'),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def refresh_atd_qr(n_intervals, entity_store):
+         if not entity_store or entity_store.get('role') != 'attendance_entry':
+             raise PreventUpdate
+@@ -744,16 +783,25 @@ def register_qr_callbacks(app):
+         State("auth-store",    "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def validate_qr_scanned(n_clicks, qr_payload, mode, scan_log, auth_data):
+         # print(f"DEBUG: Callback validate_qr_scanned. Mode: {mode}, Payload: {qr_payload[:20]}")
+         if not n_clicks or not qr_payload:
+             raise PreventUpdate
+-        
++
++        # Gate scanning is admin/security only — this decides which
++        # society's QR namespace is checked against and whose id is
++        # logged as the scanning user, so it needs to be the actual
++        # session, not auth-store.
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            raise PreventUpdate
++
+         from app.services.qr_service import validate_qr_code
+         from database.db_manager import db
+         
+-        society_id = (auth_data or {}).get("society_id")
+-        scanning_user_id = (auth_data or {}).get("user_id")
++        society_id = get_current_society_id()
++        scanning_user_id = get_current_user_id()
+         result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id)
+         now_s = datetime.now().strftime("%H:%M:%S")
+         log = list(scan_log or [])
+@@ -976,13 +1024,18 @@ def register_qr_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def validate_manual_qr_scoped(n_clicks, qr_data, auth_data):
+         if not n_clicks or not (qr_data or "").strip():
+             raise PreventUpdate
+ 
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            raise PreventUpdate
++
+         from app.services.qr_service import validate_qr_code
+-        society_id = (auth_data or {}).get("society_id")
+-        scanning_user_id = (auth_data or {}).get("user_id")
++        society_id = get_current_society_id()
++        scanning_user_id = get_current_user_id()
+         result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
+         user = result.get("user") or {}
+         role = user.get("role")
+@@ -996,9 +1049,7 @@ def register_qr_callbacks(app):
+             vis_id = user.get("visitor_id")
+             if result.get("status") == "PENDING_CONFIRMATION" and vis_id:
+                 from app.services.alert_service import trigger_visitor_alert
+-                _ok, msg, _data = trigger_visitor_alert(
+-                    vis_id, scanning_user_id or (auth_data or {}).get("user_id")
+-                )
++                _ok, msg, _data = trigger_visitor_alert(vis_id, scanning_user_id)
+                 return html.Div([
+                     html.I(className="fas fa-user-clock fa-2x", style={"color": "#e59620"}),
+                     html.H4("Pending Owner Approval", style={"color": "#e59620", "marginTop": "10px"}),
+@@ -1042,10 +1093,15 @@ def register_qr_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def validate_manual_qr_scoped_stores(n_clicks_list, qr_data_list, auth_data):
+         if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+             raise PreventUpdate
+ 
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            raise PreventUpdate
++
+         triggered_scope = ctx.triggered_id.get("scope")
+         triggered_idx = None
+ 
+@@ -1063,8 +1119,8 @@ def register_qr_callbacks(app):
+             raise PreventUpdate
+ 
+         from app.services.qr_service import validate_qr_code
+-        society_id = (auth_data or {}).get("society_id")
+-        scanning_user_id = (auth_data or {}).get("user_id")
++        society_id = get_current_society_id()
++        scanning_user_id = get_current_user_id()
+         result = validate_qr_code(qr_data, society_id, scanning_user_id)
+         user = result.get("user") or {}
+         role = user.get("role")
+@@ -1093,6 +1149,7 @@ def register_qr_callbacks(app):
+         Input("qr-scan-log", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def render_scans(log):
+         if not log:
+             return dbc.ListGroupItem(
+@@ -1131,6 +1188,7 @@ def register_qr_callbacks(app):
+         State('qr-entity-store', 'data'),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def save_qr_png(n_clicks, img_src, entity_data):
+         if not n_clicks or not img_src or not entity_data:
+             raise PreventUpdate
+@@ -1194,13 +1252,24 @@ def register_qr_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def trigger_emergency(n, auth_data):
+         if not n:
+             raise PreventUpdate
+-        
++
++        # Only admin/security may fire a society-wide emergency broadcast
++        # — previously unrestricted (any authenticated role) and scoped
++        # by auth-store's society_id, meaning any logged-in user could
++        # spam a fake "SECURITY EMERGENCY" event into any society by
++        # editing that one field.
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}
++
+         from database.db_manager import db
+-        society_id = (auth_data or {}).get("society_id")
+-        
++        society_id = get_current_society_id()
++        user_id = get_current_user_id()
++
+         if not society_id:
+             return {"type": "error", "message": "No society selected"}
+         
+@@ -1212,7 +1281,7 @@ def register_qr_callbacks(app):
+                    VALUES (%s, 'SECURITY EMERGENCY', 
+                            'Emergency alert triggered by security at gate', 
+                            CURRENT_DATE, 'all', %s)""",
+-                (society_id, auth_data.get("user_id") if auth_data else None)
++                (society_id, user_id)
+             )
+             return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
+         except Exception as e:
+@@ -1227,6 +1296,7 @@ def register_qr_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def show_admin_contact(n1, n2, auth_data):
+         from dash import ctx
+         
+@@ -1237,7 +1307,7 @@ def register_qr_callbacks(app):
+             raise PreventUpdate
+         
+         from database.db_manager import db
+-        society_id = (auth_data or {}).get("society_id")
++        society_id = get_current_society_id()
+         
+         if not society_id:
+             return True, "No society selected"
+diff --git a/app/dash_apps/callbacks/security_callbacks.py b/app/dash_apps/callbacks/security_callbacks.py
+index 0fdcf10..cdb85da 100644
+--- a/app/dash_apps/callbacks/security_callbacks.py
++++ b/app/dash_apps/callbacks/security_callbacks.py
+@@ -1,4 +1,4 @@
+-from dash import Input, Output, State, no_update, html, ctx
++from dash import Input, Output, State, no_update, html, ctx, ALL
+ import dash_bootstrap_components as dbc
+ from datetime import datetime
+ from app.services.qr_service import validate_qr_code
+@@ -10,6 +10,11 @@ from app.services.alert_service import (
+     get_active_alerts,
+ )
+ from database.db_manager import db
++from app.security.guards import require_session
++from app.security.audit_context import (
++    get_current_user_id, get_current_user_role,
++    get_current_society_id, get_current_linked_id,
++)
+ import logging
+ 
+ logger = logging.getLogger(__name__)
+@@ -380,6 +385,7 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def trigger_gate_alert(n_clicks_list, auth):
+         if not any(n for n in (n_clicks_list or []) if n):
+             return no_update, no_update
+@@ -392,11 +398,18 @@ def register_security_callbacks(app):
+         if not channel_id:
+             return no_update, no_update
+ 
+-        auth = auth or {}
+-        user_id = auth.get("user_id")
+-        society_id = auth.get("society_id") or auth.get("linked_id")
+-
+-        if not user_id or not society_id:
++        # Server-verified — this page is shared by admin and security
++        # (see portal_pages.py's _evaluate_pass_page), so both roles are
++        # allowed; anyone else (e.g. an owner/vendor with a tampered
++        # auth-store.role) is rejected before user_id/society_id are used
++        # anywhere.
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}, no_update
++
++        user_id = get_current_user_id()
++        society_id = get_current_society_id()
++        if not society_id:
+             return {"type": "error", "message": "Session expired"}, no_update
+ 
+         try:
+@@ -419,6 +432,7 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def escalate_to_call(n_clicks_list, auth):
+         if not any(n for n in (n_clicks_list or []) if n):
+             return no_update, no_update
+@@ -431,8 +445,11 @@ def register_security_callbacks(app):
+         if not alert_event_id:
+             return no_update, no_update
+ 
+-        auth = auth or {}
+-        society_id = auth.get("society_id") or auth.get("linked_id")
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}, no_update
++
++        society_id = get_current_society_id()
+ 
+         try:
+             # society_id filter closes a cross-tenant IDOR — without it, any
+@@ -461,6 +478,7 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def notify_presumed_visitor(n_clicks_list, auth):
+         if not any(n for n in (n_clicks_list or []) if n):
+             return no_update, no_update
+@@ -473,9 +491,12 @@ def register_security_callbacks(app):
+         if not visitor_id:
+             return no_update, no_update
+ 
+-        auth = auth or {}
+-        user_id = auth.get("user_id")
+-        society_id = auth.get("society_id") or auth.get("linked_id")
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}, no_update
++
++        user_id = get_current_user_id()
++        society_id = get_current_society_id()
+ 
+         try:
+             ok, msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
+@@ -494,6 +515,7 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def call_presumed_visitor(n_clicks_list, auth):
+         if not any(n for n in (n_clicks_list or []) if n):
+             return no_update, no_update
+@@ -506,8 +528,11 @@ def register_security_callbacks(app):
+         if not visitor_id:
+             return no_update, no_update
+ 
+-        auth = auth or {}
+-        society_id = auth.get("society_id") or auth.get("linked_id")
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}, no_update
++
++        society_id = get_current_society_id()
+ 
+         try:
+             # society_id filter closes a cross-tenant IDOR — without it, any
+@@ -542,13 +567,17 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True,
+     )
++    @require_session
+     def create_walk_in_visitor_handler(n_clicks, name, mobile, purpose, flat, vehicle, auth):
+         if not n_clicks:
+             return no_update, no_update
+ 
+-        auth = auth or {}
+-        user_id = auth.get("user_id")
+-        society_id = auth.get("society_id") or auth.get("linked_id")
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return {"type": "error", "message": "Not authorized."}, no_update
++
++        user_id = get_current_user_id()
++        society_id = get_current_society_id()
+ 
+         if not user_id or not society_id:
+             return {"type": "error", "message": "Session expired"}, no_update
+@@ -602,12 +631,20 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True
+     )
++    @require_session
+     def validate_qr(n_clicks, qr_data, auth_data):
+         if not n_clicks or not qr_data:
+             return no_update, no_update
+ 
+-        society_id = (auth_data or {}).get("society_id")
+-        scanning_user_id = (auth_data or {}).get("user_id")
++        role = get_current_user_role() or ""
++        if role not in ("admin", "master", "security"):
++            return (
++                html.Div("Not authorized.", style={"color": "#e74c3c"}),
++                {"backgroundColor": "#f8d7da", "color": "#721c24", "borderRadius": "10px"},
++            )
++
++        society_id = get_current_society_id()
++        scanning_user_id = get_current_user_id()
+         result = validate_qr_code(qr_data, society_id, scanning_user_id)
+ 
+         if result.get("status") == "PASS":
+@@ -636,19 +673,25 @@ def register_security_callbacks(app):
+         State("auth-store", "data"),
+         prevent_initial_call=True
+     )
++    @require_session
+     def manage_attendance(clock_in_clicks, clock_out_clicks, auth_data):
+-        ctx = dash.callback_context
+         if not ctx.triggered:
+             return no_update, no_update
+ 
+         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+-        society_id = (auth_data or {}).get("society_id")
+-        user_id = (auth_data or {}).get("user_id")
+-        # gate_access.entity_id for role='SEC' stores security_staff.id, not
+-        # users.id (matches fn_evaluate_gate_pass('security', ...) and the
+-        # attendance-list join in loaders.py) — auth-store carries this
+-        # separately as "security_id", set at login from users.linked_id.
+-        staff_id = (auth_data or {}).get("security_id")
++
++        # Attendance is a security guard clocking THEMSELVES in/out — role
++        # must be 'security', not just "authenticated". staff_id below is
++        # get_current_linked_id(), i.e. security_staff.id resolved from
++        # the DB row backing the session, not the auth-store "security_id"
++        # field a tampered client could set to any other guard's id.
++        role = get_current_user_role() or ""
++        if role != "security":
++            return no_update, {"type": "error", "message": "Only security staff can clock in/out."}
++
++        society_id = get_current_society_id()
++        user_id = get_current_user_id()
++        staff_id = get_current_linked_id()
+         if not user_id or not society_id or not staff_id:
+             return no_update, {"type": "error", "message": "Session expired — please log in again"}
+ 
