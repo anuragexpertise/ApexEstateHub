@@ -59,7 +59,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # channel_callbacks.py, alert_service.py) — falling through to
     # ("admin","*")'s generic New/Edit/Delete would bypass the
     # apartment_id requirement for Taxi/Visitor channels.
-    ("admin", "channels"):     {"view"},
+    ("admin", "channels"):     {"view", "new"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
@@ -84,7 +84,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # Read-only drilldown into the channels/pending-alerts KPIs on the
     # owner's own Channels tab — subscribing and approve/deny stay on
     # their existing dedicated buttons, not a generic row action.
-    ("apartment", "channels"):    {"view"},
+    ("apartment", "channels"):    {"view", "new"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -117,6 +117,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("security", "patrol_locations"):   {"view"},
     ("security", "event_ticket_items"): {"view"},
     ("security", "receipts"): {"view", "new"},
+    ("security", "channels"):     {"view"},
     # Owner portal: bought event tickets are visible (list + profile) so the
     # owner can see/verify what they bought; admin covered by ("admin","*").
     ("apartment", "event_ticket_items"): {"view"},
