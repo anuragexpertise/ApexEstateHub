@@ -254,6 +254,10 @@ def register_channel_callbacks(app):
         if not channel_id:
             return no_update
 
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "apartment"):
+            return html.Div("Not authorized to view subscribers.", className="text-danger mt-2")
+
         society_id = get_current_society_id()
 
         try:

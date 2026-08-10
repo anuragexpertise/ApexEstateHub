@@ -2882,8 +2882,8 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
     import dash_bootstrap_components as dbc
 
     # For owner view, filter alerts to only show their apartment's alerts
+    # plus any broadcast alerts (School Bus has no apartment_id).
     if not is_admin and apartment_id:
-        # Get flat number for this apartment to match against alerts
         apt_row = db._execute(
             "SELECT flat_number FROM apartments WHERE id=%s",
             (apartment_id,), fetch_one=True
@@ -2892,6 +2892,7 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
         filtered_alerts = [
             a for a in active_alerts
             if (a.get("flat_number") or "") == owner_flat
+            or (a.get("type") == "school_bus")
         ]
         active_alerts = filtered_alerts
 

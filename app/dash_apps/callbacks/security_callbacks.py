@@ -596,6 +596,8 @@ def register_security_callbacks(app):
             """, (society_id, flat.strip()), fetch_one=True)
             if apt:
                 apartment_id = apt["id"]
+            else:
+                return {"type": "error", "message": f"Flat '{flat.strip()}' not found in this society. Please verify and try again."}, no_update
 
         try:
             visitor_id, msg = create_walk_in_visitor(

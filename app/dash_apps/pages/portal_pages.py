@@ -771,6 +771,17 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    if active_tab == "security_channels":
+        from app.dash_apps.callbacks.security_callbacks import render_gate_alerts_section
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
+            _kpi_row_dynamic("security", "security_channels", sid, cols=KPI_GRID_COLS),
+            _divider(),
+            html.Div(id="gate-alert-toast"),
+            html.Div(id="gate-alerts-refresh", children=render_gate_alerts_section(society_id=sid)),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
     if active_tab in ("settings", "security_settings"):
         return html.Div([
             _page_title("fa-cog", c, "My Settings"),
@@ -792,8 +803,6 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
 # ════════════════════════════════════════════════════════════════════════════
 
 def _evaluate_pass_page(sid=None) -> html.Div:
-    from app.dash_apps.callbacks.security_callbacks import render_gate_alerts_section
-
     return html.Div([
         _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
                     "Entry IN / Exit OUT — fn_evaluate_gate_pass drives pass/fail reason"),
@@ -803,7 +812,7 @@ def _evaluate_pass_page(sid=None) -> html.Div:
         ),
         _divider(),
         html.Div(id="gate-alert-toast"),
-        html.Div(id="gate-alerts-refresh", children=render_gate_alerts_section(society_id=sid)),
+        html.Div(id="gate-alerts-refresh"),
         _divider(),
         html.Div([
             # ── Left: Scanner ──────────────────────────────────────────────

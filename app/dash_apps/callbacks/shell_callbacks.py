@@ -239,6 +239,7 @@ def _portal_content(role, society_id, pathname, auth=None):
     if role == "security":
         tab = (
             "pass_evaluation" if "/pass-evaluation"     in p else
+            "security_channels" if "/security-channels" in p else
             "attendance"      if "/attendance"          in p else
             "security_receipts" if "/security-receipts" in p else
             "security_receipt" if "/security-receipt"   in p else

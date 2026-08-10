@@ -154,11 +154,11 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # Per the Concerns workflow spec, this is Security's "Dashboard".
     ("kpi_events_total", "security", "pass_evaluation", "Events"),
     ("kpi_concerns_assigned", "security", "pass_evaluation", "Concerns"),
-    ("kpi_channels_total", "security", "pass_evaluation", "Channels"),
-    ("kpi_channels_pending", "security", "pass_evaluation", "Channels"),
-    ("kpi_channels_pending_bus", "security", "pass_evaluation", "Channels"),
-    ("kpi_channels_pending_taxi", "security", "pass_evaluation", "Channels"),
-    ("kpi_presumed_visitor", "security", "pass_evaluation", "Visitors"),
+    ("kpi_channels_total", "security", "security_channels", "Channels"),
+    ("kpi_channels_pending", "security", "security_channels", "Channels"),
+    ("kpi_channels_pending_bus", "security", "security_channels", "Channels"),
+    ("kpi_channels_pending_taxi", "security", "security_channels", "Channels"),
+    ("kpi_presumed_visitor", "security", "security_channels", "Visitors"),
     ("kpi_security_on_duty", "security", "pass_evaluation", "Security"),
     # SECURITY - Concerns tab
     ("kpi_concerns_assigned", "security", "security_concerns", "Concerns"),
