@@ -58,7 +58,7 @@ def render_gate_alerts_section(society_id=None):
             "type": uc["channel_type"],
             "id": uc["channel_id"],
             "alert_event_id": None,
-            "title": f"{'🚌' if uc['channel_type'] == 'school_bus' else '🚖'} {uc['name']}",
+            "title": f"{'🚌' if uc['channel_type'] == 'school_bus' else '👤' if uc['channel_type'] == 'visitor' else '🚖'} {uc['name']}",
             "identifier": uc.get("identifier") or "",
             "flat_number": uc.get("flat_number") or "",
             "owner_phone": uc.get("owner_phone") or "",
@@ -229,15 +229,6 @@ def render_gate_alerts_section(society_id=None):
                 ], width=12),
             ], className="mb-3"),
             dbc.Button(
-                [html.I(className="fas fa-camera me-1"), "Click Picture"],
-                id="walk-in-visitor-photo-btn",
-                color="info",
-                size="sm",
-                outline=True,
-                style={"borderRadius": "8px", "fontSize": "12px", "marginBottom": "8px"},
-            ),
-            html.Div(id="walk-in-visitor-photo-preview", className="mb-2"),
-            dbc.Button(
                 [html.I(className="fas fa-paper-plane me-1"), "Create Visitor & Notify Owner"],
                 id="walk-in-visitor-submit-btn",
                 color="success",
@@ -353,15 +344,6 @@ def render_walk_in_visitor_form():
                     dbc.Input(id="walk-in-visitor-vehicle", type="text", placeholder="e.g. MH-02-1234", style={"fontSize": "13px"}),
                 ], width=12),
             ], className="mb-3"),
-            dbc.Button(
-                [html.I(className="fas fa-camera me-1"), "Click Picture"],
-                id="walk-in-visitor-photo-btn",
-                color="info",
-                size="sm",
-                outline=True,
-                style={"borderRadius": "8px", "fontSize": "12px", "marginBottom": "8px"},
-            ),
-            html.Div(id="walk-in-visitor-photo-preview", className="mb-2"),
             dbc.Button(
                 [html.I(className="fas fa-paper-plane me-1"), "Create Visitor & Notify Owner"],
                 id="walk-in-visitor-submit-btn",
@@ -557,7 +539,7 @@ def register_security_callbacks(app):
     # ── 5. Create Walk-in Visitor ──────────────────────────────────────────
     @app.callback(
         Output("gate-alert-toast", "data", allow_duplicate=True),
-        Output("walk-in-visitor-form-container", "children", allow_duplicate=True),
+        Output("gate-alerts-refresh", "children", allow_duplicate=True),
         Input("walk-in-visitor-submit-btn", "n_clicks"),
         State("walk-in-visitor-name", "value"),
         State("walk-in-visitor-mobile", "value"),
@@ -588,7 +570,6 @@ def register_security_callbacks(app):
         if not purpose or not purpose.strip():
             return {"type": "warning", "message": "Purpose of visit is required"}, no_update
 
-        # Resolve apartment_id from flat number
         apartment_id = None
         if flat and flat.strip():
             apt = db._execute("""
@@ -612,12 +593,11 @@ def register_security_callbacks(app):
             if not visitor_id:
                 return {"type": "error", "message": msg}, no_update
 
-            # Auto-trigger alert to owner
             ok, alert_msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
             if ok:
                 return (
                     {"type": "success", "message": f"Visitor created and owner notified: {alert_msg}"},
-                    render_walk_in_visitor_form(),
+                    render_gate_alerts_section(society_id),
                 )
             return {"type": "error", "message": f"Visitor created but alert failed: {alert_msg}"}, no_update
         except Exception as e:
