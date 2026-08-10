@@ -3197,8 +3197,8 @@ def _render_channel_alert_events(record_dict: dict) -> list:
     rows = []
     for ev in events:
         state = ev.get("state", "—")
-        flat = ev.get("flat_number") or "—"
-        created = ev.get("created_at", "")
+        visitor = ev.get("visitor_name") or "—"
+        created = ev.get("triggered_at", "")
         if isinstance(created, (datetime, date)):
             created = created.strftime("%d/%m/%Y %H:%M")
         rows.append(
@@ -3207,7 +3207,7 @@ def _render_channel_alert_events(record_dict: dict) -> list:
                     "background": "#e59620" if state == "pending" else "#17976e" if state == "resolved" else "#de5c52" if state == "denied" else "#64748b",
                     "color": "#fff", "fontSize": "10px"
                 }), style={"fontSize": "13px"}),
-                html.Td(flat, style={"fontSize": "13px"}),
+                html.Td(visitor, style={"fontSize": "13px"}),
                 html.Td(created, style={"fontSize": "13px"}),
             ])
         )
@@ -3217,29 +3217,10 @@ def _render_channel_alert_events(record_dict: dict) -> list:
         dbc.Table([
             html.Thead(html.Tr([
                 html.Th("State", style={"fontSize": "12px"}),
-                html.Th("Flat", style={"fontSize": "12px"}),
-                html.Th("Created", style={"fontSize": "12px"}),
-                html.Th("Actions", style={"fontSize": "12px"}),
+                html.Th("Visitor", style={"fontSize": "12px"}),
+                html.Th("Triggered", style={"fontSize": "12px"}),
             ])),
-            html.Tbody([
-                html.Tr([
-                    html.Td(html.Span(state.upper(), className="badge", style={
-                        "background": "#e59620" if state == "pending" else "#17976e" if state == "resolved" else "#de5c52" if state == "denied" else "#64748b",
-                        "color": "#fff", "fontSize": "10px"
-                    }), style={"fontSize": "13px"}),
-                    html.Td(flat, style={"fontSize": "13px"}),
-                    html.Td(created, style={"fontSize": "13px"}),
-                    html.Td([
-                        dbc.Button(
-                            [html.I(className="fas fa-check me-1"), "Approve"],
-                            id={"type": "channel-approve-alert-btn", "alert_event_id": ev.get("id")},
-                            color="success", size="sm",
-                            style={"borderRadius": "6px", "fontSize": "10px", "marginRight": "4px"},
-                        )
-                    ]) if state == "pending" and ev.get("id") else html.Td("—"),
-                ])
-                for ev in events
-            ]),
+            html.Tbody(rows),
         ], bordered=False, striped=True, style={"fontSize": "13px"}),
         html.Small(f"{len(events)} most recent event(s)", style={"color": "#999", "fontSize": "12px"}),
     ]
