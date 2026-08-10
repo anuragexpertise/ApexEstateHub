@@ -48,6 +48,7 @@ import dash_bootstrap_components as dbc
 from werkzeug.security import generate_password_hash
 
 from database.db_manager import db
+from app.security.guards import require_session
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
@@ -458,6 +459,7 @@ def register_bulk_enroll_callbacks(app):
         Input({"type": "btn-bulk-enroll", "entity": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def open_bulk_enroll_modal(n_clicks_list):
         if not ctx.triggered or not any(n_clicks_list):
             raise PreventUpdate
@@ -475,6 +477,7 @@ def register_bulk_enroll_callbacks(app):
         Input("close-bulk-enroll-modal", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def close_bulk_enroll_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate
@@ -487,6 +490,7 @@ def register_bulk_enroll_callbacks(app):
         State("bulk-enroll-entity-store",       "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def download_bulk_enroll_template(n_clicks, entity):
         if not n_clicks or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
@@ -510,42 +514,37 @@ def register_bulk_enroll_callbacks(app):
         State("drilldown-store",            "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def process_bulk_enroll_upload(contents, filename, entity, auth, store):
         if not contents or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
 
-        # ── SECURITY (fixed 2026-08, corrected 2026-08): the "Bulk Enroll"
-        # button is only rendered when `"new" in allowed` for apartments/
-        # vendors/security (see renderers.py), which is admin-only per
-        # _PORTAL_PERMS — but that's a UI-only check. The first pass at a
-        # server-side gate here re-derived role/society_id from `auth`
-        # (auth-store), which is a Dash dcc.Store living in the browser's
-        # localStorage — editable via devtools. That defeats the point of
-        # a server-side gate: an authenticated owner/vendor/security
-        # session could still edit auth-store.role to "admin" (and/or
-        # auth-store.society_id to another tenant) and hit this callback
-        # directly to mint logins — including attacker-chosen email/
-        # password — for itself or into a different society. Per
-        # app/security/audit_context.py's documented rule, role and
-        # tenant scoping for a write must come from the server-side
-        # Flask-Login session, never from auth-store. auth-store is kept
-        # only as a fallback for the (non-production) case where no
-        # server session is available.
-        _actor_role = get_current_user_role() or (auth or {}).get("role", "")
+        # ── SECURITY: the "Bulk Enroll" button is only rendered when
+        # `"new" in allowed` for apartments/vendors/security (see
+        # renderers.py), which is admin-only per _PORTAL_PERMS — but
+        # that's a UI-only check. role/society_id/actor_id below come
+        # from the server-side Flask-Login session (see
+        # app/security/audit_context.py), never from `auth` (auth-store,
+        # a Dash dcc.Store living in browser localStorage, editable via
+        # devtools). @require_session above already guarantees a valid
+        # session exists on this request, so there's no auth-store
+        # fallback left here — an editable client value has no path to
+        # override role/tenant scoping for this write.
+        _actor_role = get_current_user_role()
         if _actor_role not in ("admin", "master"):
             return (
                 html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 
-        sid = get_current_society_id() or (auth or {}).get("society_id")
+        sid = get_current_society_id()
         if not sid:
             return (
                 html.Div("Not authenticated.", style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 
-        actor_id = get_current_user_id() or (auth.get("user_id") if auth else None)
+        actor_id = get_current_user_id()
 
         try:
             rows = _parse_csv(contents)
