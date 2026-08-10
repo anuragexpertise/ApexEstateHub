@@ -1130,17 +1130,16 @@ DEFAULT_LAYOUTS = {
         # Per the Concerns workflow spec: Security/Concerns tab shows
         # "assigned" and "resolved".
         "security_concerns": ["kpi_concerns_assigned", "kpi_concerns_resolved"],
-        "pass_evaluation": [
-            "kpi_events_total",
-            # Security's actual landing/"Dashboard" page (see NOTE above —
-            # "dashboard" here is the Users roster instead). Per the
-            # Concerns workflow spec, Security/Dashboard shows "assigned".
-            "kpi_concerns_assigned",
+        "security_channels": [
             "kpi_channels_total",
             "kpi_channels_pending",
             "kpi_channels_pending_bus",
             "kpi_channels_pending_taxi",
             "kpi_presumed_visitor",
+        ],
+        "pass_evaluation": [
+            "kpi_events_total",
+            "kpi_concerns_assigned",
         ],
         # NEW — security portal had no "settings" tab before this. Needs a
         # matching route added in shell_callbacks.py (see admin's /admin-settings

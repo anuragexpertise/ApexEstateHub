@@ -64,12 +64,13 @@ ROLE_CONFIG = {
         "icon": "fa-shield-alt",
         "tabs": [
             {"label": "Pass Eval",   "href": "/dashboard/pass-evaluation",  "icon": "fa-qrcode"},
+            {"label": "Channels",    "href": "/dashboard/security-channels", "icon": "fa-bullhorn"},
             {"label": "Attendance",  "href": "/dashboard/attendance",        "icon": "fa-clock"},
             {"label": "Receipts",    "href": "/dashboard/security-receipts",  "icon": "fa-plus-circle"},
             {"label": "Events",      "href": "/dashboard/security-events",   "icon": "fa-calendar-alt"},
-            {"label": "Concerns",    "href": "/dashboard/security-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Concerns",    "href": "/dashboard/security-concerns",  "icon": "fa-hand-point-up"},
             {"label": "Users",       "href": "/dashboard/security-users",    "icon": "fa-users"},
-            {"label": "Settings",    "href": "/dashboard/security-settings", "icon": "fa-cog"},
+            {"label": "Settings",    "href": "/dashboard/security-settings",   "icon": "fa-cog"},
         ],
     },
     "master": {

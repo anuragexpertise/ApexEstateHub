@@ -321,6 +321,19 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
              WHERE id = %s
         """, (new_state, alert_event_id))
 
+        # For visitor-linked alerts, also update the visitor's status so the
+        # database stays consistent. Without this, the alert shows resolved
+        # but visitors.status remains 'pending'.
+        if event.get("visitor_id"):
+            visitor_status = "entered" if action == "approve" else "denied"
+            db._execute("""
+                UPDATE visitors
+                   SET status = %s,
+                       approved_by = %s,
+                       entered_at = CASE WHEN %s = 'approve' THEN NOW() ELSE entered_at END
+                 WHERE id = %s
+            """, (visitor_status, owner_user_id, action, event["visitor_id"]))
+
         if event.get("channel_id") and event.get("is_recurring") is False:
             db._execute("UPDATE alert_channels SET active = FALSE WHERE id = %s", (event["channel_id"],))
 
