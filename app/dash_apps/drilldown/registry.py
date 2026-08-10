@@ -588,7 +588,7 @@ def build_breadcrumb(nav_stack: list) -> list:
 # profile_security is intentionally NOT in this set — its own comment says
 # "edit is auto-populated by the post-processing loop below", i.e. it wants
 # the default. Keep this set in sync with any new no-default profile_* block.
-_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "patrol_location", "ledger"}
+_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "patrol_location", "ledger", "channel"}
 
 # Ensure profile action mappings exist for entities.
 # This programmatically adds sensible defaults (edit prefill) and

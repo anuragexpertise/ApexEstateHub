@@ -32,7 +32,13 @@ from app.dash_apps.drilldown.registry import (
     to_singular,
     to_plural,
 )
-
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 # ════════════════════════════════════════════════════════════════════════════
 # DERIVE LIST → KPI MAP
@@ -86,6 +92,7 @@ def register_list_inspector_callbacks(app):
         Input("list-inspector-select", "id"),
         prevent_initial_call=False,
     )
+    @require_session
     def populate_list_options(_):
         opts = []
         for list_id in sorted(LIST_INDEX.keys()):
@@ -100,6 +107,7 @@ def register_list_inspector_callbacks(app):
         Input("list-inspector-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def populate_kpi_options(selected_list):
         if not selected_list or selected_list not in LIST_INDEX:
             return []
@@ -116,6 +124,7 @@ def register_list_inspector_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=False,
     )
+    @require_session
     def render_list_details(selected_list, selected_kpi, auth_data):
         from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 
@@ -259,6 +268,7 @@ def register_list_inspector_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=False,
     )
+    @require_session
     def load_list_sql(selected_list, selected_kpi, auth_data):
         from app.dash_apps.drilldown import loaders
 
@@ -266,7 +276,7 @@ def register_list_inspector_callbacks(app):
             return ""
         entry = LIST_INDEX[selected_list]
         plural = to_plural(entry["entity"])
-        sid = (auth_data or {}).get("society_id")
+        sid = get_current_society_id()
 
         active_filter = {}
         for k in entry["kpis"]:
@@ -296,6 +306,7 @@ def register_list_inspector_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def run_list_sql(n_clicks, sql_text, auth_data):
         if not n_clicks or not sql_text or not sql_text.strip():
             return no_update, no_update
@@ -338,6 +349,7 @@ def register_list_inspector_callbacks(app):
         State("list-inspector-select", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def export_list_sql(n_clicks, sql_text, selected_list):
         if not n_clicks or not sql_text:
             return no_update

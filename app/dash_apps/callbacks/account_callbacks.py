@@ -25,7 +25,13 @@ from __future__ import annotations
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
-from app.security.audit_context import get_current_user_id
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 
 def register_account_callbacks(app):
@@ -42,6 +48,7 @@ def register_account_callbacks(app):
         State("account-settings-modal", "is_open"),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_account_settings_modal(open_n, close_n, is_open):
         if not open_n and not close_n:
             raise PreventUpdate
@@ -59,6 +66,7 @@ def register_account_callbacks(app):
         State("confirm-password-input-acct", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def handle_change_password(n, current_pw, new_pw, confirm_pw):
         if not n:
             raise PreventUpdate

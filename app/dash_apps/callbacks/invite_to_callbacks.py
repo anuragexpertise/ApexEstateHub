@@ -28,7 +28,13 @@ from app.dash_apps.drilldown.loaders import (
     list_invitable_security,
     humanize_assignment,
 )
-from app.security.audit_context import get_current_user_id
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,   # only if the file has an ownership check (apartment/vendor/security's own record)
+)
 
 
 PORTAL_ROLE_LABEL = {
@@ -134,6 +140,7 @@ def register_invite_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def open_invite_modal(trigger_data, auth):
         if not trigger_data or not isinstance(trigger_data, dict):
             raise PreventUpdate
@@ -144,7 +151,7 @@ def register_invite_to_callbacks(app):
         concern_id = params.get("concern_id")
         if not concern_id:
             return False, no_update
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         selected = {}
         if society_id and concern_id:
             try:
@@ -164,6 +171,7 @@ def register_invite_to_callbacks(app):
         Input("close-invite-to-modal", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def close_invite_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate
@@ -181,6 +189,7 @@ def register_invite_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def load_invite_list(n_clicks_list, search, store, auth):
         store = dict(store or {})
         triggered = ctx.triggered_id
@@ -198,7 +207,7 @@ def register_invite_to_callbacks(app):
             raise PreventUpdate
 
         selected = store.get("selected", {})
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         if not society_id:
             # NOTE (fixed 2026-08): the two card-color/outline outputs below
             # are ALL-wildcard ({"type":"invite-card","role":ALL}) — Dash's
@@ -265,6 +274,7 @@ def register_invite_to_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_invite_selection(n_clicks_list, store, search, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             raise PreventUpdate
@@ -306,7 +316,7 @@ def register_invite_to_callbacks(app):
         # lockstep with load_invite_list's own rendering and stays correct
         # even if the same entity got toggled from elsewhere.
         list_children = no_update
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()   
         if role in ("VND", "SEC") and society_id:
             s = (search or "").strip() or None
             concern_id = store.get("concern_id")
@@ -332,6 +342,7 @@ def register_invite_to_callbacks(app):
         State("invite-to-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def clear_invite_selections(n_clicks, store):
         if not n_clicks:
             raise PreventUpdate
@@ -352,6 +363,7 @@ def register_invite_to_callbacks(app):
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def submit_invitations(n_clicks, store, auth, drill_store):
         if not n_clicks:
             raise PreventUpdate
@@ -361,7 +373,7 @@ def register_invite_to_callbacks(app):
         if not concern_id:
             return False, {"type": "warning", "message": "No concern selected."}, no_update, no_update, no_update
 
-        society_id = (auth or {}).get("society_id")
+        society_id = get_current_society_id()
         actor_user_id = get_current_user_id()
         if not society_id:
             return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
@@ -370,7 +382,7 @@ def register_invite_to_callbacks(app):
         # Previously this endpoint had no role check at all — see the
         # identical issue and fix in assign_to_callbacks.submit_assignments().
         # See Concerns_Workflow_Review.md §3.1.
-        caller_role = (auth or {}).get("role")
+        caller_role = get_current_user_role()
         if caller_role not in ("admin", "apartment"):
             return False, {"type": "error", "message": "Only Admin or the concern creator can invite candidates."}, no_update, no_update, no_update
         if caller_role == "apartment":
@@ -378,7 +390,7 @@ def register_invite_to_callbacks(app):
                 "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
                 (concern_id, society_id), fetch_one=True,
             ) or {}
-            if concern_owner_row.get("created_by") != (auth or {}).get("user_id"):
+            if concern_owner_row.get("created_by") != get_current_user_id():
                 return False, {"type": "error", "message": "Only Admin or the concern creator can invite candidates."}, no_update, no_update, no_update
 
         try:

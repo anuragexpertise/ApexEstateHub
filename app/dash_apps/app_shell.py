@@ -876,5 +876,15 @@ def shell_layout() -> html.Div:
 
             # ── Concern Bid modal (vendor: Save Bid action) ───────────────────────
             _concern_bid_modal(),
+
+            # ── Channel Subscribers modal ──────────────────────────────────────────
+            dbc.Modal([
+                dbc.ModalHeader(dbc.ModalTitle("Channel Subscribers")),
+                dbc.ModalBody(html.Div(id="channel-subscribers-modal-body")),
+                dbc.ModalFooter([
+                    dbc.Button("Close", id="close-channel-subscribers-modal", color="secondary", size="sm"),
+                ]),
+            ], id="channel-subscribers-modal", size="lg", is_open=False, centered=True,
+               style={"zIndex": "20060"}),
         ]
     )

@@ -217,6 +217,7 @@ def register_customize_kpi_callbacks(app):
         Input("customize-portal-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def update_tab_options(selected_portal):
         if not selected_portal:
             selected_portal = "admin"
@@ -231,6 +232,7 @@ def register_customize_kpi_callbacks(app):
         Input("customize-tab-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def update_kpi_options(selected_portal, selected_tab):
         if not selected_portal:
             selected_portal = "admin"
@@ -249,6 +251,7 @@ def register_customize_kpi_callbacks(app):
         Input("customize-kpi-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def update_kpi_details(selected_kpi_id):
         if not selected_kpi_id or selected_kpi_id not in KPI_CARDS:
             return "-- No KPI selected", html.Div(
@@ -351,13 +354,14 @@ def register_customize_kpi_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def test_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
         if not n_clicks or not sql_text:
             return no_update
         from database.db_manager import db
         from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
 
-        sid = (auth_data or {}).get("society_id")
+        sid = get_current_society_id()
         cfg = KPI_CARDS.get(kpi_id or "", {})
         n_params = cfg.get("params", sql_text.count("%s"))
         fmt = cfg.get("format", "number")
@@ -427,6 +431,7 @@ def register_customize_kpi_callbacks(app):
         State("customize-kpi-select", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def export_kpi_sql(n_clicks, sql_text, kpi_id):
         if not n_clicks or not sql_text:
             return no_update, no_update
@@ -455,6 +460,7 @@ def register_customize_kpi_callbacks(app):
         Input("customize-kpi-select", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def load_entity_reference(selected_kpi_id):
         if not selected_kpi_id:
             return html.Div(
