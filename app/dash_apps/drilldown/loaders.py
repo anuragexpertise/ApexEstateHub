@@ -1845,18 +1845,28 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         # branch above — same reasoning (registered in the drilldown
         # registry, never wired up here).
         if entity_singular == "channel":
+            apartment_id = None
+            if user_id:
+                user_row = db._execute(
+                    "SELECT linked_id FROM users WHERE id=%s AND role='apartment'",
+                    (user_id,), fetch_one=True,
+                )
+                apartment_id = user_row.get("linked_id") if user_row else None
+
             r = db._execute(
                 "SELECT ac.*, "
                 "  COALESCE(apt.flat_number,'') AS flat_number, "
                 "  COALESCE(owner_u.name,'') AS owner_name, "
                 "  (SELECT COUNT(*) FROM alert_subscriptions sub WHERE sub.channel_id=ac.id) AS subscriber_count, "
                 "  (SELECT COUNT(*) FROM alert_events pe WHERE pe.channel_id=ac.id AND pe.state='pending' "
-                "     AND (pe.expires_at IS NULL OR pe.expires_at > NOW())) AS pending_count "
+                "     AND (pe.expires_at IS NULL OR pe.expires_at > NOW())) AS pending_count, "
+                "  (CASE WHEN sub_me.id IS NOT NULL THEN TRUE ELSE FALSE END) AS is_subscribed "
                 "FROM alert_channels ac "
                 "LEFT JOIN apartments apt ON apt.id = ac.apartment_id "
                 "LEFT JOIN users owner_u ON owner_u.linked_id = apt.id AND owner_u.role='apartment' "
+                "LEFT JOIN alert_subscriptions sub_me ON sub_me.channel_id = ac.id AND sub_me.apartment_id = %s "
                 "WHERE ac.id=%s AND ac.society_id=%s",
-                (pk, society_id), fetch_one=True,
+                (apartment_id, pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None
 
