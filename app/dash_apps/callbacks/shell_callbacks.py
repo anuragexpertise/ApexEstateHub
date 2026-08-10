@@ -32,6 +32,10 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.app_shell import ROLE_CONFIG
+from app.security.audit_context import (
+    get_current_user_id, get_current_user_role,
+    get_current_society_id, get_current_linked_id,
+)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -473,11 +477,51 @@ def register_shell_callbacks(app):
         if not auth or not auth.get("authenticated"):
             return _BLANK
 
-        role       = auth.get("role", "admin")
-        society_id = auth.get("society_id")
-        user_id    = auth.get("user_id")
+        # Server session is the sole source of truth for whether this
+        # request is authenticated at all, and for role/society_id/
+        # linked_id if so — auth-store is client-editable localStorage
+        # (see app/security/guards.py's docstring). Previously this whole
+        # function read role/society_id straight from auth-store: an
+        # unauthenticated visitor, or a real user with a tampered
+        # auth-store, could set role="admin" here and get the Admin
+        # portal shell rendered — including whatever data admin_portal_page
+        # fetches during this same render — regardless of who (if anyone)
+        # was actually logged in. A missing/expired server session now
+        # always renders _BLANK, no matter what auth-store claims.
+        server_user_id = get_current_user_id()
+        if server_user_id is None:
+            return _BLANK
+
+        role       = get_current_user_role() or "admin"
+        society_id = get_current_society_id()
+        linked_id  = get_current_linked_id()
+        user_id    = server_user_id
         email      = auth.get("email", "")
         db = _db()
+
+        # Hardened copy of auth-store's dict — same shape everything
+        # downstream already expects, but role/society_id/linked_id (and
+        # the role-specific id aliases several callbacks still read
+        # directly) are overwritten with server-verified values before
+        # being handed to _portal_content(). This is one request's worth
+        # of hardening, not a durable fix for every callback that reads
+        # auth-store on its own subsequent request (that's the broader
+        # per-callback migration) — but it does mean the data actually
+        # fetched and rendered on THIS page load can't be steered by a
+        # tampered auth-store, even for portal pages that haven't been
+        # individually migrated yet.
+        verified_auth = dict(auth)
+        verified_auth["authenticated"] = True
+        verified_auth["user_id"]       = user_id
+        verified_auth["role"]          = role
+        verified_auth["society_id"]    = society_id
+        verified_auth["linked_id"]     = linked_id
+        if role == "apartment":
+            verified_auth["apartment_id"] = linked_id
+        elif role == "vendor":
+            verified_auth["vendor_id"] = linked_id
+        elif role == "security":
+            verified_auth["security_id"] = linked_id
 
         try:
             u_row = db._execute(
@@ -510,7 +554,7 @@ def register_shell_callbacks(app):
         avatar = (user_name or "?")[0].upper()
 
         return (
-            _portal_content(role, society_id, pathname, auth=auth),
+            _portal_content(role, society_id, pathname, auth=verified_auth),
             {"rendered": True, "ts": time.time()},
             _make_nav_items(role, society_id, pathname),
             _breadcrumb(pathname),
