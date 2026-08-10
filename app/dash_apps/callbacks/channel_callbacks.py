@@ -12,6 +12,12 @@ import logging
 from dash import Input, Output, State, ALL, ctx, html, no_update
 import dash_bootstrap_components as dbc
 
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id, get_current_user_role,
+    get_current_society_id, get_current_linked_id,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,6 +25,11 @@ def render_channels_page(society_id: int, auth: dict) -> html.Div:
     """
     Re-render the owner channels page after an approve/deny action.
     Returns the same content as portal_pages.py's owner-channels tab.
+
+    `auth` here is expected to already be server-verified (see
+    owner_respond_to_alert's verified_auth) — this function doesn't
+    re-derive apartment_id itself so it stays a plain rendering helper,
+    not a second place that has to remember to call get_current_linked_id().
     """
     from app.services.alert_service import list_channels, get_active_alerts
     from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
@@ -39,6 +50,7 @@ def register_channel_callbacks(app):
         Input("channel-type-input", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def toggle_channel_apartment_field(ch_type):
         if ch_type in ("taxi", "visitor"):
             return {"display": "block"}
@@ -57,15 +69,20 @@ def register_channel_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def create_channel(n_clicks, ch_type, ch_name, identifier, apartment_id, is_recurring, auth):
         if not n_clicks:
             return no_update, no_update
 
-        auth = auth or {}
-        society_id = auth.get("society_id") or auth.get("linked_id")
-        role = auth.get("role", "")
+        # Server session is authoritative for role/society_id — auth-store
+        # (the `auth` param above) is client-editable localStorage and is
+        # no longer trusted for this check. @require_session already
+        # guarantees a session exists on this request; get_current_*()
+        # below reads that same session rather than the request body.
+        role = get_current_user_role() or ""
+        society_id = get_current_society_id()
 
-        if role not in ("admin", "master_admin"):
+        if role not in ("admin", "master"):
             return {"message": "Only admins can create channels.", "color": "danger"}, no_update
 
         if not ch_name or not ch_name.strip():
@@ -115,6 +132,7 @@ def register_channel_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_subscription(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update, no_update
@@ -127,9 +145,17 @@ def register_channel_callbacks(app):
         if not channel_id:
             return no_update, no_update
 
-        auth = auth or {}
-        apartment_id = auth.get("apartment_id")
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        # Server-verified — apartment_id here is auth-store's client-
+        # editable value previously, meaning any authenticated user could
+        # (un)subscribe an apartment that wasn't theirs by supplying its
+        # id. get_current_linked_id() only ever returns the ownership
+        # linkage recorded in the DB for the actual logged-in user.
+        role = get_current_user_role() or ""
+        if role != "apartment":
+            return {"message": "Only apartment owners can manage channel subscriptions.", "color": "danger"}, no_update
+
+        apartment_id = get_current_linked_id()
+        society_id = get_current_society_id()
 
         if not apartment_id:
             return {"message": "Apartment not found. Please log in again.", "color": "danger"}, no_update
@@ -168,9 +194,9 @@ def register_channel_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def owner_respond_to_alert(approve_clicks, deny_clicks, auth):
-        auth = auth or {}
-        role = auth.get("role", "")
+        role = get_current_user_role() or ""
         if role != "apartment":
             return {"message": "Only apartment owners can respond to alerts.", "color": "danger"}, no_update
 
@@ -187,15 +213,22 @@ def register_channel_callbacks(app):
         if not alert_event_id:
             return no_update, no_update
 
-        user_id = auth.get("user_id")
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        # respond_to_alert() itself checks this user_id against the
+        # alert's linked apartment owner (see alert_service.py) — passing
+        # the server-verified id is what makes that check meaningful
+        # instead of trivially satisfiable by a matching client value.
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
+        verified_auth = dict(auth or {})
+        verified_auth["apartment_id"] = get_current_linked_id()
+        verified_auth["society_id"] = society_id
 
         try:
             from app.services.alert_service import respond_to_alert
             ok, msg = respond_to_alert(alert_event_id, user_id, action)
             if ok:
                 action_label = "Approved (PASS)" if action == "approve" else "Denied"
-                return {"message": f"Alert {action_label}.", "color": "success"}, render_channels_page(society_id, auth)
+                return {"message": f"Alert {action_label}.", "color": "success"}, render_channels_page(society_id, verified_auth)
             return {"message": msg or "Action failed.", "color": "danger"}, no_update
         except Exception as e:
             logger.error(f"owner_respond_to_alert error: {e}")
@@ -208,6 +241,7 @@ def register_channel_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def view_subscribers(n_clicks_list, auth):
         if not any(n for n in (n_clicks_list or []) if n):
             return no_update
@@ -220,8 +254,7 @@ def register_channel_callbacks(app):
         if not channel_id:
             return no_update
 
-        auth = auth or {}
-        society_id = auth.get("society_id") or auth.get("linked_id")
+        society_id = get_current_society_id()
 
         try:
             from app.services.alert_service import get_channel_subscribers

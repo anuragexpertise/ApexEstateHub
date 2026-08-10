@@ -2,6 +2,26 @@
 from flask_login import UserMixin
 from database.db_manager import db
 
+
+def _resolve_role(raw_role: str, society_id, is_master_admin_flag: bool) -> str:
+    """
+    Mirrors the role synthesis in app/services/auth_service.py::authenticate_user
+    (raw "admin" + no society_id + is_master_admin=TRUE -> the virtual
+    "master" role the rest of the app checks for). users.role never
+    literally contains 'master' in the DB (CHECK constraint only allows
+    admin/apartment/vendor/security) — "master" only ever existed as a
+    value computed at login time and handed to the client. Without this,
+    get_current_user_role() would return "admin" for master admins on
+    every request after the first, since User.get()/find_by_email() just
+    read the raw column — a real behavior change (master routed as an
+    ordinary admin), not just a style difference, so it has to be kept in
+    sync with auth_service.py's derivation rather than dropped.
+    """
+    if raw_role == "admin" and not society_id and is_master_admin_flag:
+        return "master"
+    return raw_role
+
+
 class User(UserMixin):
     def __init__(self, user_id, email, role, society_id=None, linked_id=None):
         self.id = user_id
@@ -24,14 +44,14 @@ class User(UserMixin):
     def get(user_id):
         try:
             result = db._execute(
-                "SELECT id, email, role, society_id, linked_id FROM users WHERE id = %s",
+                "SELECT id, email, role, society_id, linked_id, is_master_admin FROM users WHERE id = %s",
                 (user_id,), fetch_one=True
             )
             if result:
                 return User(
                     user_id=result['id'],
                     email=result['email'],
-                    role=result['role'],
+                    role=_resolve_role(result['role'], result.get('society_id'), result.get('is_master_admin')),
                     society_id=result.get('society_id'),
                     linked_id=result.get('linked_id'),
                 )
@@ -42,7 +62,7 @@ class User(UserMixin):
     @staticmethod
     def find_by_email(email, society_id=None):
         try:
-            query  = "SELECT id, email, role, society_id, linked_id FROM users WHERE email = %s"
+            query  = "SELECT id, email, role, society_id, linked_id, is_master_admin FROM users WHERE email = %s"
             params = [email]
             if society_id:
                 query  += " AND society_id = %s"
@@ -52,7 +72,7 @@ class User(UserMixin):
                 return User(
                     user_id=result['id'],
                     email=result['email'],
-                    role=result['role'],
+                    role=_resolve_role(result['role'], result.get('society_id'), result.get('is_master_admin')),
                     society_id=result.get('society_id'),
                     linked_id=result.get('linked_id'),
                 )
