@@ -80,7 +80,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "ledger"):      set(),
     # Apartments view channels and subscribe from the profile; create/approve/deny
     # are profile actions with server-side guards.
-    ("apartment", "channels"):    {"view"},
+    ("apartment", "channels"):    {"view", "new"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -3245,7 +3245,7 @@ def _render_channel_alert_events(record_dict: dict) -> list:
     ]
 
 
-def render_form_channel_new(society_id: int | None = None, apartment_options: list | None = None) -> "html.Div":
+def render_form_channel_new(society_id: int | None = None, apartment_options: list | None = None, caller_apartment_id: int | None = None) -> "html.Div":
     """
     Dedicated New Channel form for the drilldown system.
     Uses generic form-field pattern so handle_form_submit in
@@ -3255,6 +3255,7 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
     import dash_bootstrap_components as dbc
 
     apartment_options = apartment_options or []
+    is_locked_apartment = bool(caller_apartment_id)
 
     return dbc.Card([
         dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
@@ -3300,8 +3301,10 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
                     dcc.Dropdown(
                         id={"type": "form-field", "entity": "channel", "field": "apartment_id"},
                         options=apartment_options,
-                        placeholder="Select flat…",
-                        clearable=True,
+                        value=caller_apartment_id if is_locked_apartment else None,
+                        placeholder="Select flat…" if not is_locked_apartment else "Your flat (locked)",
+                        clearable=not is_locked_apartment,
+                        disabled=is_locked_apartment,
                         style={"fontSize": "13px"},
                     ),
                 ], width=12),
