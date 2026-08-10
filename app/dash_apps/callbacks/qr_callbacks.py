@@ -6,6 +6,12 @@ import dash_bootstrap_components as dbc
 import base64
 from datetime import datetime
 
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id, get_current_user_role,
+    get_current_society_id, get_current_linked_id,
+)
+
 
 def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
     """Shared by manual-entry lookup (validate_manual_qr_scoped) and the
@@ -618,18 +624,32 @@ def register_qr_callbacks(app):
         State('qr-modal', 'is_open'),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_qr_modal(avatar_n, show_n, close_n, profile_action, logout_n, auth_data, is_open):
         from dash import ctx
-        
+
         if ctx.triggered_id == 'qr-modal-logout-btn':
             return False, no_update, no_update, no_update, True
-        
+
         if ctx.triggered_id == 'close-qr-modal':
             return False, no_update, no_update, no_update, True
-        
-        if not auth_data or not auth_data.get('authenticated'):
+
+        # Server-verified — this is what decides WHOSE identity gets
+        # encoded into the QR (a signed gate-access credential). The
+        # previous version sourced role/society_id/user_id/linked_id from
+        # auth_data (client-editable localStorage) here: anyone could set
+        # auth-store.role/society_id to any value, click "show my QR", and
+        # walk away with a validly-signed gate pass for an identity that
+        # was never authenticated — the HMAC signing itself was never the
+        # weak point, the INPUT to it was attacker-chosen.
+        server_role = get_current_user_role()
+        server_society_id = get_current_society_id()
+        server_user_id = get_current_user_id()
+        server_linked_id = get_current_linked_id()
+
+        if not server_user_id:
             return False, no_update, no_update, no_update, True
-        
+
         from app.services.qr_service import generate_static_qr_code, generate_time_qr
 
         entity_store = {}
@@ -637,8 +657,11 @@ def register_qr_callbacks(app):
         if ctx.triggered_id == 'profile-action-trigger' \
                 and profile_action \
                 and profile_action.get('action') == 'open_time_qr':
-            # ATD dynamic QR — Security/Admin Settings tab punch-clock
-            society_id = profile_action.get('society_id') or auth_data.get('society_id')
+            # ATD dynamic QR — Security/Admin Settings tab punch-clock.
+            # Society-scoped, not entity-scoped, but still must be THIS
+            # user's own society, not whatever profile_action/auth_data
+            # claims.
+            society_id = server_society_id
             src, payload, issued_at, expires_at = generate_time_qr(society_id)
             entity_store = {
                 'role': 'attendance_entry',
@@ -651,38 +674,53 @@ def register_qr_callbacks(app):
             return True, src, payload, entity_store, False  # interval enabled
 
         if ctx.triggered_id == 'hdr-avatar':
-            # Logged-in user's QR — encode domain entity ID, not users.id...
-            # EXCEPT for admin, which has no domain table of its own. A
-            # seeded first-admin has linked_id IS NULL; one promoted from
-            # an apartment owner keeps their old apartments.id in
-            # linked_id, but the QR is still keyed by users.id either way
-            # — see qr_service._current_qr_version's ADM branch, which
-            # resolves the version from apartments.qr_version when
-            # linked_id is present, or users.qr_version otherwise.
-            _gen_entity_id = (
-                auth_data.get('user_id') if auth_data.get('role') == 'admin'
-                else auth_data.get('linked_id')
-            )
+            # Logged-in user's OWN QR — entity_id/role/society_id must all
+            # come from the server session, never auth_data. encode domain
+            # entity ID, not users.id... EXCEPT for admin, which has no
+            # domain table of its own. A seeded first-admin has linked_id
+            # IS NULL; one promoted from an apartment owner keeps their
+            # old apartments.id in linked_id, but the QR is still keyed by
+            # users.id either way — see qr_service._current_qr_version's
+            # ADM branch, which resolves the version from
+            # apartments.qr_version when linked_id is present, or
+            # users.qr_version otherwise.
+            _gen_entity_id = server_user_id if server_role == 'admin' else server_linked_id
             src, payload = generate_static_qr_code(
                 _gen_entity_id,
-                auth_data.get('role'),
-                auth_data.get('society_id')
+                server_role,
+                server_society_id,
             )
             entity_store = {
                 'entity_id': _gen_entity_id,
-                'role': auth_data.get('role'),
-                'society_id': auth_data.get('society_id'),
-                'name': auth_data.get('name', 'User'),
+                'role': server_role,
+                'society_id': server_society_id,
+                'name': auth_data.get('name', 'User') if auth_data else 'User',
             }
         elif ctx.triggered_id == 'profile-action-trigger' \
                 and profile_action \
                 and profile_action.get('entity_id'):
-            # Profile action "Gate Pass" clicked with entity data
+            # Profile action "Gate Pass" clicked FOR ANOTHER ENTITY (e.g.
+            # admin viewing an apartment/vendor/security profile). Only
+            # admin/master may mint a gate pass for someone else, and only
+            # for an entity within their own society — profile_action is
+            # itself just another client-suppliable Input/State, so
+            # trusting its entity_id/role/society_id combination without
+            # these checks would let anyone request a signed credential
+            # for an arbitrary identity in an arbitrary society, the same
+            # bug as the hdr-avatar path just via a different trigger.
+            if server_role not in ('admin', 'master'):
+                return True, "", "Error: Not authorized to generate a gate pass for another entity.", no_update, True
+
             entity_id = profile_action.get('entity_id')
             role = profile_action.get('role')
-            society_id = profile_action.get('society_id')
+            requested_society_id = profile_action.get('society_id')
+
+            if requested_society_id and requested_society_id != server_society_id and server_role != 'master':
+                return True, "", "Error: Entity does not belong to your society.", no_update, True
+
+            society_id = server_society_id
             entity_name = profile_action.get('name', 'Entity')
-            
+
             src, payload = generate_static_qr_code(
                 entity_id,
                 role,
@@ -696,10 +734,10 @@ def register_qr_callbacks(app):
             }
         else:
             return no_update, no_update, no_update, no_update, no_update
-        
+
         if not src:
             return True, "", f"Error: {payload}", no_update, True
-        
+
         return True, src, payload, entity_store, True  # static QR — interval stays off
 
     # ── 2b. ATD QR auto-refresh + live countdown (Settings tab) ────────────
@@ -712,6 +750,7 @@ def register_qr_callbacks(app):
         State('qr-entity-store', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def refresh_atd_qr(n_intervals, entity_store):
         if not entity_store or entity_store.get('role') != 'attendance_entry':
             raise PreventUpdate
@@ -744,16 +783,25 @@ def register_qr_callbacks(app):
         State("auth-store",    "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def validate_qr_scanned(n_clicks, qr_payload, mode, scan_log, auth_data):
         # print(f"DEBUG: Callback validate_qr_scanned. Mode: {mode}, Payload: {qr_payload[:20]}")
         if not n_clicks or not qr_payload:
             raise PreventUpdate
-        
+
+        # Gate scanning is admin/security only — this decides which
+        # society's QR namespace is checked against and whose id is
+        # logged as the scanning user, so it needs to be the actual
+        # session, not auth-store.
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            raise PreventUpdate
+
         from app.services.qr_service import validate_qr_code
         from database.db_manager import db
         
-        society_id = (auth_data or {}).get("society_id")
-        scanning_user_id = (auth_data or {}).get("user_id")
+        society_id = get_current_society_id()
+        scanning_user_id = get_current_user_id()
         result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id)
         now_s = datetime.now().strftime("%H:%M:%S")
         log = list(scan_log or [])
@@ -976,13 +1024,18 @@ def register_qr_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def validate_manual_qr_scoped(n_clicks, qr_data, auth_data):
         if not n_clicks or not (qr_data or "").strip():
             raise PreventUpdate
 
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            raise PreventUpdate
+
         from app.services.qr_service import validate_qr_code
-        society_id = (auth_data or {}).get("society_id")
-        scanning_user_id = (auth_data or {}).get("user_id")
+        society_id = get_current_society_id()
+        scanning_user_id = get_current_user_id()
         result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
         user = result.get("user") or {}
         role = user.get("role")
@@ -996,9 +1049,7 @@ def register_qr_callbacks(app):
             vis_id = user.get("visitor_id")
             if result.get("status") == "PENDING_CONFIRMATION" and vis_id:
                 from app.services.alert_service import trigger_visitor_alert
-                _ok, msg, _data = trigger_visitor_alert(
-                    vis_id, scanning_user_id or (auth_data or {}).get("user_id")
-                )
+                _ok, msg, _data = trigger_visitor_alert(vis_id, scanning_user_id)
                 return html.Div([
                     html.I(className="fas fa-user-clock fa-2x", style={"color": "#e59620"}),
                     html.H4("Pending Owner Approval", style={"color": "#e59620", "marginTop": "10px"}),
@@ -1042,8 +1093,13 @@ def register_qr_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def validate_manual_qr_scoped_stores(n_clicks_list, qr_data_list, auth_data):
         if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+            raise PreventUpdate
+
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
             raise PreventUpdate
 
         triggered_scope = ctx.triggered_id.get("scope")
@@ -1063,8 +1119,8 @@ def register_qr_callbacks(app):
             raise PreventUpdate
 
         from app.services.qr_service import validate_qr_code
-        society_id = (auth_data or {}).get("society_id")
-        scanning_user_id = (auth_data or {}).get("user_id")
+        society_id = get_current_society_id()
+        scanning_user_id = get_current_user_id()
         result = validate_qr_code(qr_data, society_id, scanning_user_id)
         user = result.get("user") or {}
         role = user.get("role")
@@ -1093,6 +1149,7 @@ def register_qr_callbacks(app):
         Input("qr-scan-log", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def render_scans(log):
         if not log:
             return dbc.ListGroupItem(
@@ -1131,6 +1188,7 @@ def register_qr_callbacks(app):
         State('qr-entity-store', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def save_qr_png(n_clicks, img_src, entity_data):
         if not n_clicks or not img_src or not entity_data:
             raise PreventUpdate
@@ -1194,13 +1252,24 @@ def register_qr_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def trigger_emergency(n, auth_data):
         if not n:
             raise PreventUpdate
-        
+
+        # Only admin/security may fire a society-wide emergency broadcast
+        # — previously unrestricted (any authenticated role) and scoped
+        # by auth-store's society_id, meaning any logged-in user could
+        # spam a fake "SECURITY EMERGENCY" event into any society by
+        # editing that one field.
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "security"):
+            return {"type": "error", "message": "Not authorized."}
+
         from database.db_manager import db
-        society_id = (auth_data or {}).get("society_id")
-        
+        society_id = get_current_society_id()
+        user_id = get_current_user_id()
+
         if not society_id:
             return {"type": "error", "message": "No society selected"}
         
@@ -1212,7 +1281,7 @@ def register_qr_callbacks(app):
                    VALUES (%s, 'SECURITY EMERGENCY', 
                            'Emergency alert triggered by security at gate', 
                            CURRENT_DATE, 'all', %s)""",
-                (society_id, auth_data.get("user_id") if auth_data else None)
+                (society_id, user_id)
             )
             return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
         except Exception as e:
@@ -1227,6 +1296,7 @@ def register_qr_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def show_admin_contact(n1, n2, auth_data):
         from dash import ctx
         
@@ -1237,7 +1307,7 @@ def register_qr_callbacks(app):
             raise PreventUpdate
         
         from database.db_manager import db
-        society_id = (auth_data or {}).get("society_id")
+        society_id = get_current_society_id()
         
         if not society_id:
             return True, "No society selected"

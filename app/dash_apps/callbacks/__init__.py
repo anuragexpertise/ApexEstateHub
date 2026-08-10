@@ -55,6 +55,22 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ qr_callbacks failed: {e}")
 
+    # 6b. Security gate-alert callbacks (School Bus / Taxi trigger + escalate,
+    #     presumed-visitor notify/call, walk-in visitor, QR scan validate,
+    #     attendance clock-in/out). portal_pages.py already imports
+    #     render_gate_alerts_section from this module to render the buttons
+    #     on the security portal's Gate Pass Evaluation page, but
+    #     register_security_callbacks(app) itself was never called anywhere
+    #     in this registry — every one of those buttons has been rendered
+    #     with no callback listening on it, i.e. non-functional, since
+    #     whenever this file was added. Discovered while migrating this
+    #     file's auth-store usage to the server-verified session.
+    try:
+        from .security_callbacks import register_security_callbacks
+        register_security_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ security_callbacks failed: {e}")
+
     # 7. Camera capture (clientside JS injection)
     try:
         from .camera_callbacks import register_camera_callbacks

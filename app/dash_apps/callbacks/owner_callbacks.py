@@ -1,3 +1,32 @@
+"""
+app/dash_apps/callbacks/owner_callbacks.py
+
+STATUS: dead code — register_owner_callbacks() is not called anywhere in
+app/dash_apps/callbacks/__init__.py's central registry, confirmed by
+searching the whole codebase for its call site. Neither callback in this
+file currently runs.
+
+Do NOT wire this up as-is:
+  - display_channel_subscribers duplicates channel_callbacks.py's
+    view_subscribers, targeting the exact same
+    Output("subscribers-modal-container", "children") without
+    allow_duplicate=True. Registering both would raise Dash's
+    DuplicateCallbackOutput error and crash the app at startup.
+    channel_callbacks.py's version is the maintained one (migrated to the
+    server-verified session — see app/security/audit_context.py) and
+    additionally scopes by society_id, which this version never did.
+  - process_payment doesn't do anything — no DB write, just a hardcoded
+    success toast — and isn't gated by role or session at all.
+  - display_channel_subscribers also references html.Div in its except
+    branch without importing `html` from dash — would raise NameError on
+    that path if it were ever invoked.
+
+Recommend deleting this file. Left unmigrated/unregistered rather than
+patched, since patching auth-store usage in code that's both unreachable
+and duplicative of a properly-migrated implementation elsewhere doesn't
+reduce any live exposure — the fix here is the deletion, not a security
+patch.
+"""
 from dash import Input, Output, State, no_update
 import dash
 import requests
