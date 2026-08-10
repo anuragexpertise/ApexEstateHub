@@ -33,6 +33,38 @@ def render_gate_alerts_section(society_id=None):
     channel_alerts = [a for a in alerts if a.get("type") != "visitor"]
     visitor_alerts = [a for a in alerts if a.get("type") == "visitor"]
 
+    existing_channel_ids = {a.get("id") for a in channel_alerts}
+
+    untriggered_channels = db._execute("""
+        SELECT ac.id as channel_id, ac.channel_type, ac.name, ac.identifier,
+               ac.is_recurring, ac.active as channel_active,
+               a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name
+          FROM alert_channels ac
+     LEFT JOIN apartments a ON a.id = ac.apartment_id
+     LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
+         WHERE ac.society_id = %s
+           AND ac.active = TRUE
+           AND ac.channel_type IN ('school_bus', 'taxi', 'visitor')
+           AND ac.id NOT IN %s
+    """, (society_id, tuple(existing_channel_ids) if existing_channel_ids else (0,)))
+
+    for uc in (untriggered_channels or []):
+        channel_alerts.append({
+            "type": uc["channel_type"],
+            "id": uc["channel_id"],
+            "alert_event_id": None,
+            "title": f"{'🚌' if uc['channel_type'] == 'school_bus' else '🚖'} {uc['name']}",
+            "identifier": uc.get("identifier") or "",
+            "flat_number": uc.get("flat_number") or "",
+            "owner_phone": uc.get("owner_phone") or "",
+            "owner_name": uc.get("owner_name") or "",
+            "is_recurring": uc.get("is_recurring"),
+            "channel_active": uc.get("channel_active"),
+            "state": "idle",
+            "color": "grey",
+            "triggered_at": "",
+        })
+
     # Channel alert cards
     channel_cards = []
     for alert in channel_alerts:
