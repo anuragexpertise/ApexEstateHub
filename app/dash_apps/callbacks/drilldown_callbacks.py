@@ -2084,10 +2084,20 @@ def _render_card(
         if card_id == "form_channel_new":
             sid_val = filters.get("society_id")
             role = get_current_user_role()
-            if role not in ("admin", "master"):
-                return html.Div("Only admin can create channels.", style={"color": "#de5c52", "padding": "20px"})
+            if role not in ("admin", "master", "apartment"):
+                return html.Div("Only admin or apartment owners can create channels.", style={"color": "#de5c52", "padding": "20px"})
             apt_rows = []
-            if sid_val:
+            caller_apartment_id = None
+            if role == "apartment":
+                caller_apartment_id = get_current_linked_id()
+                if caller_apartment_id and sid_val:
+                    apt_row = db._execute(
+                        "SELECT id, flat_number FROM apartments WHERE id=%s AND society_id=%s",
+                        (caller_apartment_id, sid_val), fetch_one=True,
+                    )
+                    if apt_row:
+                        apt_rows = [apt_row]
+            elif sid_val:
                 try:
                     apt_rows = db._execute(
                         "SELECT id, flat_number FROM apartments WHERE society_id=%s ORDER BY flat_number",
@@ -2098,6 +2108,7 @@ def _render_card(
             return renderers.render_form_channel_new(
                 society_id=sid_val,
                 apartment_options=[{"label": f"Flat {r['flat_number']}", "value": r["id"]} for r in apt_rows],
+                caller_apartment_id=caller_apartment_id,
             )
 
         rest = card_id[5:]
@@ -3117,15 +3128,26 @@ def _save_concern(db, d, sid, is_edit, pk):
 
 def _save_channel(db, d, sid, is_edit, pk):
     from app.services.alert_service import create_alert_channel
+    from app.security.audit_context import get_current_user_role, get_current_linked_id
     ch_type = d.get("channel_type", "school_bus")
     ch_name = (d.get("name") or "").strip()
     identifier = (d.get("identifier") or "").strip() or None
-    apartment_id = d.get("apartment_id") if ch_type in ("taxi", "visitor") else None
     is_recurring = bool(d.get("is_recurring"))
+    caller_role = get_current_user_role() or (d or {}).get("caller_role", "admin")
     if not ch_name:
         return False, "Channel name is required", None
     if not ch_type:
         return False, "Channel type is required", None
+    if caller_role == "apartment":
+        caller_apt_id = get_current_linked_id()
+        if not caller_apt_id:
+            return False, "Apartment profile not found. Please log in again.", None
+        if ch_type in ("taxi", "visitor"):
+            apartment_id = caller_apt_id
+        else:
+            apartment_id = None
+    else:
+        apartment_id = d.get("apartment_id") if ch_type in ("taxi", "visitor") else None
     if ch_type in ("taxi", "visitor") and not apartment_id:
         return False, "Target apartment is required for Taxi / Visitor channels.", None
     ok, msg = create_alert_channel(
