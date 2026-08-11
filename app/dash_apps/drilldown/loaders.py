@@ -1485,6 +1485,8 @@ def load_list(
             rows = db._execute(
                 "SELECT ac.*, "
                 "  COALESCE(apt.flat_number,'') AS flat_number, "
+                "  COALESCE(apt.owner_name,'') AS owner_name, "
+                "  COALESCE(apt.mobile,'') AS owner_mobile, "
                 "  (SELECT COUNT(*) FROM alert_subscriptions sub WHERE sub.channel_id=ac.id) AS subscriber_count, "
                 "  (SELECT COUNT(*) FROM alert_events pe2 WHERE pe2.channel_id=ac.id AND pe2.state='pending' "
                 "     AND (pe2.expires_at IS NULL OR pe2.expires_at > NOW())) AS pending_count "
@@ -1856,14 +1858,14 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             r = db._execute(
                 "SELECT ac.*, "
                 "  COALESCE(apt.flat_number,'') AS flat_number, "
-                "  COALESCE(owner_u.name,'') AS owner_name, "
+                "  COALESCE(apt.owner_name,'') AS owner_name, "
+                "  COALESCE(apt.mobile,'') AS owner_mobile, "
                 "  (SELECT COUNT(*) FROM alert_subscriptions sub WHERE sub.channel_id=ac.id) AS subscriber_count, "
                 "  (SELECT COUNT(*) FROM alert_events pe WHERE pe.channel_id=ac.id AND pe.state='pending' "
                 "     AND (pe.expires_at IS NULL OR pe.expires_at > NOW())) AS pending_count, "
                 "  (CASE WHEN sub_me.id IS NOT NULL THEN TRUE ELSE FALSE END) AS is_subscribed "
                 "FROM alert_channels ac "
                 "LEFT JOIN apartments apt ON apt.id = ac.apartment_id "
-                "LEFT JOIN users owner_u ON owner_u.linked_id = apt.id AND owner_u.role='apartment' "
                 "LEFT JOIN alert_subscriptions sub_me ON sub_me.channel_id = ac.id AND sub_me.apartment_id = %s "
                 "WHERE ac.id=%s AND ac.society_id=%s",
                 (apartment_id, pk, society_id), fetch_one=True,
