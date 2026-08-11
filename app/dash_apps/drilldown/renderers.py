@@ -1014,6 +1014,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         "phone":          ("tel:",     "fa-phone",    "#17976e"),
         "contact_number": ("tel:",     "fa-phone",    "#17976e"),
         "telephone":      ("tel:",     "fa-phone",    "#17976e"),
+        "owner_mobile":   ("tel:",     "fa-phone",    "#17976e"),
     }
 
     def _field_cell(f: dict) -> html.Div:

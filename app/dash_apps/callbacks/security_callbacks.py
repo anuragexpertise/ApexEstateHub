@@ -125,14 +125,23 @@ def render_gate_alerts_section(society_id=None):
                 style={"borderRadius": "8px", "fontSize": "11px"},
             )
         else:
-            badge = dbc.Badge(state.upper(), color="secondary", style={"fontSize": "11px"})
-            action_btns = dbc.Button(
-                [html.I(className="fas fa-bell me-1"), "Trigger Alert"],
-                id={"type": "gate-alert-trigger-btn", "channel_id": ch_id},
-                color="primary",
-                size="sm",
-                style={"borderRadius": "8px", "fontSize": "11px"},
-            )
+            badge = dbc.Badge(state.upper() if state else "IDLE", color="secondary", style={"fontSize": "11px"})
+            action_btns = html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-phone-alt me-1"), f"Call Owner ({owner_phone or 'N/A'})"],
+                    href=f"tel:{owner_phone}" if owner_phone else "#",
+                    color="danger",
+                    size="sm",
+                    style={"borderRadius": "8px", "fontSize": "11px", "marginRight": "6px"},
+                ) if owner_phone else html.Span("No owner phone", style={"fontSize": "11px", "color": "#999"}),
+                dbc.Button(
+                    [html.I(className="fas fa-bell me-1"), "Trigger Alert"],
+                    id={"type": "gate-alert-trigger-btn", "channel_id": ch_id},
+                    color="primary",
+                    size="sm",
+                    style={"borderRadius": "8px", "fontSize": "11px"},
+                ),
+            ])
 
         channel_cards.append(
             dbc.Col([

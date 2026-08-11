@@ -204,6 +204,8 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     "channels": [
         {"label": "Subscribers",     "field": "subscriber_count", "icon": "fa-users"},
         {"label": "Pending Alerts",  "field": "pending_count",   "icon": "fa-bell"},
+        {"label": "Owner Name",      "field": "owner_name",      "icon": "fa-user"},
+        {"label": "Owner Mobile",    "field": "owner_mobile",    "icon": "fa-phone"},
     ],
 }
 
