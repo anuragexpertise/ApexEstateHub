@@ -2,9 +2,18 @@ from flask import Blueprint, request, jsonify, render_template
 from app.services.push_service import save_push_subscription, send_push_notification
 from app.services.auth_service import verify_jwt_token
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 push_bp = Blueprint('push', __name__)
+
+VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC') or os.getenv('VAPID_PUBLIC_KEY')
+
+@push_bp.route('/api/push/vapid-public-key')
+def vapid_public_key():
+    if not VAPID_PUBLIC_KEY:
+        return jsonify({'error': 'VAPID public key not configured'}), 500
+    return jsonify({'publicKey': VAPID_PUBLIC_KEY})
 
 @push_bp.route('/push/test')
 def push_test_page():

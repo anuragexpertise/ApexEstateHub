@@ -64,10 +64,12 @@ def create_app(config_name: str | None = None) -> Flask:
         from app.routes.api   import api_bp
         from app.routes.web   import web_bp
         from app.routes.scan  import scan_bp
+        from app.routes.push_routes import push_bp
         app.register_blueprint(auth_bp, url_prefix="/auth")
         app.register_blueprint(api_bp,  url_prefix="/api")
         app.register_blueprint(web_bp)
         app.register_blueprint(scan_bp)
+        app.register_blueprint(push_bp, url_prefix="/api/push")
         log.info("Blueprints registered ✓")
     except Exception as exc:
         log.warning("Blueprint registration partial: %s", exc)
