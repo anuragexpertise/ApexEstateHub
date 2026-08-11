@@ -148,7 +148,7 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             params.append(society_id)
 
         channel = db._execute(f"""
-            SELECT ac.*, a.flat_number, a.id as owner_user_id, a.mobile as owner_phone
+            SELECT ac.*, a.flat_number, u.id as owner_user_id, a.mobile as owner_phone
               FROM alert_channels ac
               LEFT JOIN apartments a ON a.id = ac.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
@@ -224,7 +224,9 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             title = f"🚌 School Bus Arrived: {name}"
             body = f"School Bus {name} ({identifier}) is at the gate."
             for u in (sub_users or []):
-                send_push_notification(u["id"], title, body, society_id=society_id)
+                ok, msg = send_push_notification(u["id"], title, body, society_id=society_id)
+                if not ok:
+                    logger.warning(f"School Bus push failed for user {u['id']}: {msg}")
 
             event_row = db._execute("""
                 INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
@@ -245,7 +247,9 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
                 f"{name} ({identifier}) for Flat {channel.get('flat_number', '')} is at the gate. "
                 "Tap to Approve or Deny."
             )
-            send_push_notification(channel["owner_user_id"], title, body, society_id=society_id)
+            ok, msg = send_push_notification(channel["owner_user_id"], title, body, society_id=society_id)
+            if not ok:
+                logger.warning(f"Channel push failed for user {channel['owner_user_id']}: {msg}")
 
         expires_at = datetime.now() + timedelta(minutes=30)
         event_row = db._execute("""
@@ -384,7 +388,7 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
             params.append(society_id)
 
         visitor = db._execute(f"""
-            SELECT v.*, a.flat_number, a.id as owner_user_id, a.mobile as owner_phone
+            SELECT v.*, a.flat_number, u.id as owner_user_id, a.mobile as owner_phone
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
               LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
@@ -452,7 +456,9 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
         if visitor.get("owner_user_id"):
             title = f"👤 Visitor Arrived: {name}"
             body = f"Visitor {name} is at the gate for Flat {visitor.get('flat_number', '')}. Tap to Approve or Deny."
-            send_push_notification(visitor["owner_user_id"], title, body, society_id=society_id)
+            ok, msg = send_push_notification(visitor["owner_user_id"], title, body, society_id=society_id)
+            if not ok:
+                logger.warning(f"Visitor push failed for user {visitor['owner_user_id']}: {msg}")
 
         return True, "Visitor alert sent: Pending owner approval (Yellow)", {
             "state": "pending",
