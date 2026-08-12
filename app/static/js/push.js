@@ -48,7 +48,7 @@ async function initializePushNotifications() {
     }
 
     try {
-        swRegistration = await navigator.serviceWorker.register('/sw.js');
+        swRegistration = await navigator.serviceWorker.register('/static/sw.js');
         console.log('Service Worker registered');
 
         const subscription = await swRegistration.pushManager.getSubscription();
@@ -69,6 +69,14 @@ async function subscribeUser() {
         console.error('Cannot subscribe: VAPID public key not loaded');
         return;
     }
+
+    const auth = (JSON.parse(localStorage.getItem('auth-store') || '{}') || {});
+    const token = auth.access_token || localStorage.getItem('jwt_token') || '';
+    if (!token) {
+        console.warn('Push subscribe skipped: no auth token available yet');
+        return;
+    }
+
     try {
         const applicationServerKey = urlBase64ToUint8Array(applicationServerPublicKey);
         const subscription = await swRegistration.pushManager.subscribe({
@@ -78,19 +86,23 @@ async function subscribeUser() {
         
         console.log('User is subscribed:', subscription);
         
-        // Send subscription to server
-        const response = await fetch('/auth/subscribe-push', {
+        const headers = { 'Content-Type': 'application/json' };
+        headers['Authorization'] = `Bearer ${token}`;
+        
+        const response = await fetch('/api/push/subscribe', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: headers,
             body: JSON.stringify(subscription)
         });
         
         const data = await response.json();
-        if (data.success) {
+        if (data.message || data.success) {
             console.log('Push subscription saved to server');
             isSubscribed = true;
+        } else if (response.status === 401) {
+            console.warn('Push subscribe failed: auth token expired or invalid');
+        } else {
+            console.warn('Push subscribe failed:', data);
         }
     } catch (error) {
         console.error('Failed to subscribe user:', error);
@@ -104,11 +116,14 @@ async function unsubscribeUser() {
             await subscription.unsubscribe();
             
             // Notify server
-            await fetch('/auth/unsubscribe-push', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
+            const auth = (JSON.parse(localStorage.getItem('auth-store') || '{}') || {});
+            const token = (auth.data && auth.data.access_token) ? auth.data.access_token : (auth.access_token || localStorage.getItem('jwt_token') || '');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            
+            await fetch('/api/push/subscription', {
+                method: 'DELETE',
+                headers: headers,
             });
             
             console.log('User unsubscribed');

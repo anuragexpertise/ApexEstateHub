@@ -128,3 +128,60 @@ def delete_subscription():
     except Exception as e:
         logger.error(f"Delete subscription error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@push_bp.route('/api/push/fcm-token', methods=['POST'])
+def save_fcm_token():
+    """Save FCM registration token for mobile push notifications."""
+    try:
+        data = request.get_json()
+        fcm_token = data.get('fcm_token') if data else None
+        if not fcm_token or not isinstance(fcm_token, str):
+            return jsonify({'error': 'fcm_token is required'}), 400
+
+        auth_header = request.headers.get('Authorization', '')
+        token = auth_header.replace('Bearer ', '')
+        if not token:
+            return jsonify({'error': 'Authorization token required'}), 401
+
+        payload = verify_token(token)
+        if not payload or payload.get('error'):
+            return jsonify({'error': 'Invalid or expired token'}), 401
+
+        user_id = payload.get('user_id')
+        from database.db_manager import db
+        db._execute(
+            "UPDATE users SET push_token = :token, push_enabled = TRUE WHERE id = :user_id",
+            {"token": fcm_token, "user_id": user_id}
+        )
+        logger.info(f"FCM token saved for user {user_id}")
+        return jsonify({'message': 'FCM token saved'}), 200
+    except Exception as e:
+        logger.error(f"Save FCM token error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@push_bp.route('/api/push/fcm-token', methods=['DELETE'])
+def delete_fcm_token():
+    """Remove stored FCM token."""
+    try:
+        auth_header = request.headers.get('Authorization', '')
+        token = auth_header.replace('Bearer ', '')
+        if not token:
+            return jsonify({'error': 'Authorization token required'}), 401
+
+        payload = verify_token(token)
+        if not payload or payload.get('error'):
+            return jsonify({'error': 'Invalid or expired token'}), 401
+
+        user_id = payload.get('user_id')
+        from database.db_manager import db
+        db._execute(
+            "UPDATE users SET push_token = NULL, push_enabled = FALSE WHERE id = :user_id",
+            {"user_id": user_id}
+        )
+        logger.info(f"FCM token deleted for user {user_id}")
+        return jsonify({'message': 'FCM token removed'}), 200
+    except Exception as e:
+        logger.error(f"Delete FCM token error: {e}")
+        return jsonify({'error': str(e)}), 500

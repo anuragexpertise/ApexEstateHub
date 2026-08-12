@@ -19,6 +19,7 @@ def create_dash_app(flask_app):
     os.makedirs(assets_folder, exist_ok=True)
     external_scripts = [
         "https://unpkg.com/dash.nprogress@latest/dist/dash.nprogress.js",
+        "/static/js/push.js",
     ]
     external_stylesheets = [
         dbc.themes.BOOTSTRAP,
