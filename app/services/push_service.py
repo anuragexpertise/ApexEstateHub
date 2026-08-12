@@ -13,6 +13,28 @@ load_dotenv()
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE') or os.getenv('VAPID_PRIVATE_KEY')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC') or os.getenv('VAPID_PUBLIC_KEY')
 VAPID_CLAIM_EMAIL = os.getenv('VAPID_EMAIL') or os.getenv('VAPID_CLAIM_EMAIL', 'master@estatehub.com')
+FCM_SERVER_KEY = os.getenv('FCM_SERVER_KEY', '')
+
+
+def _send_fcm(fcm_token, title, body, data=None):
+    """Send a mobile push notification via Firebase Cloud Messaging.
+    Gracefully no-ops if firebase_admin is not installed or FCM_SERVER_KEY is missing."""
+    if not fcm_token or not FCM_SERVER_KEY:
+        return False, "FCM not configured"
+    try:
+        from firebase_admin import messaging
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data=data or {},
+            token=fcm_token,
+        )
+        response = messaging.send(message)
+        logger.info(f"FCM sent to {fcm_token}: {response}")
+        return True, response
+    except Exception as e:
+        logger.error(f"FCM send error: {e}")
+        return False, str(e)
+
 
 def save_push_subscription(user_id, subscription_info):
     """Save push subscription to database"""
@@ -98,7 +120,6 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
             vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
         )
         logger.info(f"Push notification sent to user {user_id}: {title}")
-        return True, "Notification sent"
     except WebPushException as e:
         logger.error(f"WebPush error: {e}")
         if hasattr(e, 'response') and e.response:
@@ -107,6 +128,25 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
     except Exception as e:
         logger.error(f"Push notification error: {e}")
         return False, str(e)
+
+    # Best-effort mobile push via FCM (does not affect web push outcome).
+    try:
+        from database.db_manager import db
+        row = db._execute(
+            "SELECT push_token, push_enabled FROM users WHERE id = :user_id",
+            {"user_id": user_id}, fetch_one=True
+        )
+        if row and row.get("push_enabled") and row.get("push_token"):
+            _send_fcm(
+                row["push_token"],
+                title,
+                body,
+                data={"url": url or '/dashboard/', "type": "alert"},
+            )
+    except Exception as e:
+        logger.error(f"FCM lookup/send error: {e}")
+
+    return True, "Notification sent"
 
 def send_payment_reminder(user_id, amount, due_date):
     """Send payment reminder notification"""

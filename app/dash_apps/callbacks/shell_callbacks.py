@@ -566,6 +566,24 @@ def register_shell_callbacks(app):
             society_name, society_logo,
         )
 
+    # ── 9. PUSH NOTIFICATION INIT ON LOGIN ──────────────────────────────────
+    app.clientside_callback(
+        """
+        function(auth) {
+            if (!auth || !auth.authenticated || !auth.access_token) {
+                return window.dash_clientside.no_update;
+            }
+            if (window.initializePushNotifications) {
+                window.initializePushNotifications();
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("push-init-dummy", "children"),
+        Input("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+
     # ── 9. SIDEBAR TOGGLE ─────────────────────────────────────────────────────
     @app.callback(
         Output("app-sidebar",        "className"),

@@ -766,6 +766,7 @@ def shell_layout() -> html.Div:
             dcc.Input(id="dnd-order-capture", value="",
                       debounce=False,                style={"display": "none"}),
             dcc.Interval(id="notifications-interval", interval=30_000, n_intervals=0),
+            html.Div(id="push-init-dummy", style={"display": "none"}),
 
             html.Div(
                 id="customize-placeholder",

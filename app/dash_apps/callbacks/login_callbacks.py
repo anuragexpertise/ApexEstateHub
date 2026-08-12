@@ -23,6 +23,20 @@ def _login_response(user: dict):
     role       = user.get("role", "admin")
     society_id = user.get("society_id")
     name       = user.get("email", "").split("@")[0]
+
+    try:
+        from app.auth.jwt_handler import generate_tokens_for
+        access_token, refresh_token = generate_tokens_for(
+            user.get("user_id") or user.get("id"),
+            user.get("email", ""),
+            role,
+            society_id,
+        )
+        user["access_token"] = access_token
+        user["refresh_token"] = refresh_token
+    except Exception as exc:
+        print(f"⚠️  JWT generation failed: {exc}")
+
     return (
         _build_auth_store(user),
         _redirect(role, society_id),
@@ -69,6 +83,8 @@ def _build_auth_store(user: dict) -> dict:
                               user.get("linked_id") if user.get("role") == "vendor" else None),
         "authenticated": True,
         "token":         user.get("token", ""),
+        "access_token":  user.get("access_token", ""),
+        "refresh_token": user.get("refresh_token", ""),
     }
 
 
