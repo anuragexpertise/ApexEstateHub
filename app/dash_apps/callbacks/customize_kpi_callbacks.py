@@ -11,7 +11,7 @@ from dash import Input, Output, State, html, dcc, ctx, no_update
 import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import KPI_CARDS
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
-
+from app.security.guards import require_session
 # ════════════════════════════════════════════════════════════════
 # KPI METADATA — list-of-tuples so duplicate card_ids are preserved
 # Each entry: (card_id, portal, tab, group)

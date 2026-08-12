@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, render_template
 from app.services.push_service import save_push_subscription, send_push_notification
-from app.services.auth_service import verify_jwt_token
+from app.auth.jwt_handler import verify_token
 import logging
 import os
 
@@ -36,12 +36,12 @@ def subscribe():
         if not token:
             return jsonify({'error': 'Authorization token required'}), 401
         
-        payload = verify_jwt_token(token)
-        
-        if not payload:
+        payload = verify_token(token)
+
+        if not payload or payload.get('error'):
             return jsonify({'error': 'Invalid or expired token'}), 401
-        
-        user_id = payload.get('sub')
+
+        user_id = payload.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'User ID not found in token'}), 401
@@ -70,12 +70,12 @@ def send_test():
         if not token:
             return jsonify({'error': 'Authorization token required'}), 401
         
-        payload = verify_jwt_token(token)
-        
-        if not payload:
+        payload = verify_token(token)
+
+        if not payload or payload.get('error'):
             return jsonify({'error': 'Invalid or expired token'}), 401
-        
-        user_id = payload.get('sub')
+
+        user_id = payload.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'User ID not found in token'}), 401
@@ -108,12 +108,12 @@ def delete_subscription():
         if not token:
             return jsonify({'error': 'Authorization token required'}), 401
         
-        payload = verify_jwt_token(token)
-        
-        if not payload:
+        payload = verify_token(token)
+
+        if not payload or payload.get('error'):
             return jsonify({'error': 'Invalid or expired token'}), 401
-        
-        user_id = payload.get('sub')
+
+        user_id = payload.get('user_id')
         
         # Clear subscription in database
         from database.db_manager import db
