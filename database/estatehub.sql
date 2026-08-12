@@ -3558,6 +3558,15 @@ BEGIN
  
     -- No explicit row: sum child accounts' pre-FY closing position
     -- (mirrors the original fn_resolve_bf_amount hierarchy fallback).
+    --
+    -- Fixed (2026-08): cr_sum/dr_sum previously bucketed every transaction
+    -- by the CHILD account's fixed drcr_account rather than that
+    -- transaction's own entry_side — same class of bug as
+    -- fn_accounts_list/fn_account_ledger_fy. For a Dr-natured child every
+    -- transaction landed in dr_sum only (cr_sum always 0 for that
+    -- account), so a receipt and a payment on the same account were
+    -- indistinguishable and this fallback always summed gross activity
+    -- instead of a true net pre-FY closing position.
     SELECT COALESCE(SUM(
         CASE WHEN a.drcr_account = 'Cr'
              THEN COALESCE(t.cr_sum, 0) - COALESCE(t.dr_sum, 0)
@@ -3566,13 +3575,12 @@ BEGIN
     ), 0) INTO v_bf
     FROM accounts a
     LEFT JOIN (
-        SELECT t.acc_id, a3.drcr_account,
-               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Cr') AS cr_sum,
-               SUM(t.amount) FILTER (WHERE a3.drcr_account = 'Dr') AS dr_sum
+        SELECT t.acc_id,
+               SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr') AS cr_sum,
+               SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr') AS dr_sum
         FROM transactions t
-        JOIN accounts a3 ON a3.id = t.acc_id
         WHERE t.status = 'paid' AND t.trx_date < v_fy_start
-        GROUP BY t.acc_id, a3.drcr_account
+        GROUP BY t.acc_id
     ) t ON t.acc_id = a.id
     WHERE a.parent_account_id = p_account_id AND a.society_id = p_society_id;
  
@@ -3694,10 +3702,9 @@ BEGIN
     WITH txns AS (
         SELECT t.trx_date,
                t.acc_particulars::TEXT,
-               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Dr'), 0) AS debit,
-               COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'), 0) AS credit
+               COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0) AS debit,
+               COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0) AS credit
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id
         WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
         GROUP BY t.trx_date, t.acc_particulars
@@ -3711,15 +3718,26 @@ BEGIN
         END,
         'txn'::TEXT, v_acc.parent_name
     FROM txns tx;
- 
-    -- Final balance before depreciation/closing
+
+    -- Final balance before depreciation/closing — net movement is
+    -- per-transaction entry_side, flipped into the account's own natural
+    -- direction (same fix as fn_accounts_list / fn_account_profile above).
+    -- Previously this joined a.drcr_account (constant for every row on
+    -- this account, since t.acc_id = p_account_id throughout), so the
+    -- inner CASE was always true or always false and it degenerated into
+    -- an unsigned SUM(t.amount) — every transaction added, none ever
+    -- netted against the other side, regardless of direction.
     SELECT v_bf + COALESCE(
         CASE v_acc.drcr_account
-            WHEN 'Cr' THEN SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END)
-            ELSE SUM(CASE WHEN a.drcr_account='Dr' THEN t.amount ELSE -t.amount END)
+            WHEN 'Cr' THEN SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                     WHEN t.entry_side='Dr' THEN -t.amount
+                                     ELSE 0 END)
+            ELSE SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                          WHEN t.entry_side='Cr' THEN -t.amount
+                          ELSE 0 END)
         END, 0)
     INTO v_final_balance
-    FROM transactions t JOIN accounts a ON a.id = t.acc_id
+    FROM transactions t
     WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
  
@@ -4206,9 +4224,20 @@ BEGIN
         a.id::INT, a.name::VARCHAR(100), a.tab_name::VARCHAR(20), a.header::VARCHAR(50),
         a.drcr_account::VARCHAR(2),
         COALESCE(MAX(bf.bf_amount), 0)::NUMERIC(12,2) AS bf_amount,
-        (COALESCE(SUM(
-            CASE WHEN a.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END
-        ), 0) + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
+        -- Net movement is computed per-transaction (t.entry_side), then
+        -- flipped into the account's own natural Dr/Cr direction — NOT
+        -- derived from the account's fixed drcr_account per row, which
+        -- previously meant every transaction on a Dr-natured account
+        -- (e.g. Bank/Cash) subtracted regardless of whether it was a
+        -- receipt or a payment.
+        (CASE WHEN a.drcr_account = 'Cr'
+              THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                      WHEN t.entry_side='Dr' THEN -t.amount
+                                      ELSE 0 END), 0)
+              ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                                      WHEN t.entry_side='Cr' THEN -t.amount
+                                      ELSE 0 END), 0)
+         END + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
         COUNT(t.id)::INT,
         COALESCE(p.name,'—')::VARCHAR(100)
     FROM accounts a
@@ -4231,6 +4260,10 @@ DROP FUNCTION IF EXISTS fn_account_profile CASCADE;
 -- (see migration_fn_concern_profile_scope.sql / migration_poll_security_fixes.sql).
 -- Any account id could be loaded regardless of society. p_society_id is
 -- now required and enforced in the WHERE clause.
+--
+-- Also fixed (2026-08): current_balance now nets per t.entry_side instead
+-- of the account's fixed drcr_account — same class of bug as
+-- fn_accounts_list above, same fix.
 CREATE OR REPLACE FUNCTION fn_account_profile(p_account_id INT, p_society_id INT)
 RETURNS TABLE (
     id INT, society_id INT, name VARCHAR(100), tab_name VARCHAR(20), header VARCHAR(50),
@@ -4245,8 +4278,14 @@ LANGUAGE SQL STABLE AS $$
         COALESCE(MAX(bf.bf_amount), 0)::NUMERIC(12,2),
         a.depreciation_percent::NUMERIC(5,2), a.is_depreciable::BOOLEAN,
         COALESCE(p.name,'—')::VARCHAR(100),
-        (COALESCE(SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END),0)
-         + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
+        (CASE WHEN a.drcr_account = 'Cr'
+              THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                      WHEN t.entry_side='Dr' THEN -t.amount
+                                      ELSE 0 END), 0)
+              ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                                      WHEN t.entry_side='Cr' THEN -t.amount
+                                      ELSE 0 END), 0)
+         END + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
         a.created_at::TIMESTAMP
     FROM accounts a
     LEFT JOIN accounts p ON p.id = a.parent_account_id
