@@ -419,6 +419,57 @@ def _fy_date_range(fy: int) -> tuple[date, date]:
     return date(fy, 4, 1), date(fy + 1, 3, 31)
 
 
+def get_available_financial_years(society_id: int) -> list[int]:
+    """
+    FY-start-year options for the Financials tab's FY selector: the
+    society's calc_start_date's year through the current FY, inclusive.
+    Mirrors _current_fy()'s Apr-Mar cycle for both ends.
+    """
+    row = db._execute(
+        "SELECT calc_start_date FROM societies WHERE id = %s",
+        (society_id,), fetch_one=True,
+    )
+    calc_start = (row or {}).get("calc_start_date")
+    if not calc_start:
+        return [_current_fy()]
+    start_fy = calc_start.year - 1 if calc_start.month < 4 else calc_start.year
+    end_fy = _current_fy()
+    if start_fy > end_fy:
+        start_fy = end_fy
+    return list(range(start_fy, end_fy + 1))
+
+
+def fy_label(fy: int) -> str:
+    """'2025-26' style label for a FY-start-year."""
+    return f"{fy}-{str(fy + 1)[-2:]}"
+
+
+def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    """
+    Wraps fn_fy_closing_report(society_id, fy, dep_account_id).
+
+    Returns (rows, error_message). error_message is set (rows == []) when
+    the society hasn't got a dep_account_id configured yet — the function
+    requires it explicitly (see the comment on societies.dep_account_id
+    for why this isn't resolved by an ILIKE name lookup instead).
+    """
+    soc = db._execute(
+        "SELECT dep_account_id FROM societies WHERE id = %s",
+        (society_id,), fetch_one=True,
+    )
+    dep_acc_id = (soc or {}).get("dep_account_id")
+    if not dep_acc_id:
+        return [], (
+            "Depreciation account not configured for this society yet — "
+            "set societies.dep_account_id before the FY Closing Report can run."
+        )
+    rows = db._execute(
+        "SELECT * FROM fn_fy_closing_report(%s,%s,%s)",
+        (society_id, fy, dep_acc_id), fetch_all=True,
+    ) or []
+    return rows, None
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # LOAD LIST
 # ════════════════════════════════════════════════════════════════════════════
@@ -2059,11 +2110,12 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 # VERIFY RECEIVABLE / PAYMENT  (admin-only action buttons)
 # ════════════════════════════════════════════════════════════════════════════
 
-def verify_receivable(receivable_id: int, confirmed_by: int, mode: str = "cash") -> tuple[bool, str]:
+def verify_receivable(receivable_id: int, confirmed_by: int, mode: str = "cash",
+                       amount: float | None = None) -> tuple[bool, str]:
     try:
         r = db._execute(
-            "SELECT fn_verify_receivable(%s,%s,%s) AS msg",
-            (receivable_id, confirmed_by, mode), fetch_one=True,
+            "SELECT fn_verify_receivable(%s,%s,%s,%s) AS msg",
+            (receivable_id, confirmed_by, mode, amount), fetch_one=True,
         )
         msg = (r or {}).get("msg", "Done")
         return not str(msg).lower().startswith("error"), msg

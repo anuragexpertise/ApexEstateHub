@@ -241,7 +241,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {
             "label": "Verify",
             "action_id": "verify_receivable",
-            "target_card": None,         # server-side only — no navigation
+            "target_card": "form_verify_receivable",
             "icon": "fa-check-double",
             "color": "success",
             "roles": ["admin"],          # admin-only; enforced in renderers.py

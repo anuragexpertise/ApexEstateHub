@@ -455,6 +455,30 @@ def register_drilldown_callbacks(app):
                 trigger_data = {"action": "open_time_qr", "society_id": sid}
                 return no_update, no_update, no_update, no_update, trigger_data
 
+            # ── FY Closing Report — custom card, not a schema-driven list.
+            # Entry tile is "kpi_fy_closing_report" (no FY prefill — the
+            # dispatch below defaults to the current FY). The in-card FY
+            # switcher pills reuse this same click pipeline with
+            # "kpi_fy_closing_report__<fy>" ids so no new Input/callback
+            # wiring is needed — see render dispatch in this file's
+            # "form_fy_closing_report" branch and
+            # renderers.render_fy_closing_card.
+            if card_id.startswith("kpi_fy_closing_report"):
+                store = nav_state.initial_state(role, sid)
+                fy_prefill = {}
+                if "__" in card_id:
+                    fy_suffix = card_id.split("__", 1)[1]
+                    if fy_suffix.isdigit():
+                        fy_prefill["fy"] = int(fy_suffix)
+                store = nav_state.navigate_to(
+                    store, "form_fy_closing_report", "FY Closing Report",
+                    prefill=fy_prefill,
+                )
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target = nav_info.get("target")
             if not target:
@@ -888,18 +912,22 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, toast
 
-            # ── Verify receivable — server action only, no navigation ─────────────
+            # ── Verify receivable — navigates to an amount-entry form ─────────────
             elif action == "verify_receivable":
                 if not _require_admin(auth):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
-                user_id = get_current_user_id()
-                ok, msg = loaders.verify_receivable(int(pk), confirmed_by=user_id, mode="cash")
-                store["refresh"] = True
-                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
-                content, bc, db_err = _render_current(store, auth)
-                kpi_style = {"display": "none"}
-                return store, content, bc, kpi_style, toast
+                rec = loaders.load_profile("receivable", pk, sid) or {}
+                residual = float(rec.get("amount") or 0) - float(rec.get("paid_amount") or 0)
+                prefill = {
+                    "amount": round(max(residual, 0), 2),
+                    "mode": "cash",
+                }
+                store = nav_state.navigate_to(
+                    store, "form_verify_receivable", "Verify Receivable",
+                    prefill=prefill, entity_pk=pk,
+                )
+                hide_kpis = True
 
             elif action == "pay_due_receivable":
                 rec = loaders.load_profile("receivable", pk, sid) or {}
@@ -1310,6 +1338,7 @@ def register_drilldown_callbacks(app):
         # admin, breaking e.g. a vendor buying their own pass).
         _SPECIAL_ENTITY_ROLES = {
             "pay_due": {"admin"}, "pay_dues": {"admin"},
+            "verify_receivable_amt": {"admin"},
             "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
             "event_ticket": {"admin", "apartment"}, "event_ticket_new": {"admin", "apartment"},
@@ -1910,6 +1939,32 @@ def _render_card(
     # ── form ──────────────────────────────────────────────────────────────────
     if card_id.startswith("form_"):
 
+        # ── Verify Receivable — amount-entry form (not schema-driven) ────────
+        if card_id == "form_verify_receivable":
+            rec_id  = (store.get("stack") or [{}])[-1].get("entity_pk")
+            sid_val = filters.get("society_id")
+            rec = loaders.load_profile("receivable", rec_id, sid_val) or {} if rec_id and sid_val else {}
+            residual = float(rec.get("amount") or 0) - float(rec.get("paid_amount") or 0)
+            return renderers.render_verify_receivable_card(
+                receivable_id=rec_id,
+                description=rec.get("description", "Receivable"),
+                residual=round(max(residual, 0), 2),
+                prefill_amount=float(prefill.get("amount") or max(residual, 0)),
+                prefill_mode=prefill.get("mode", "cash"),
+            )
+
+        # ── FY Closing Report — custom card (not schema-driven) ──────────────
+        if card_id == "form_fy_closing_report":
+            sid_val = filters.get("society_id")
+            fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
+            selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
+            rows, err = (loaders.get_fy_closing_report(sid_val, selected_fy)
+                         if sid_val and selected_fy else ([], "Society not resolved"))
+            return renderers.render_fy_closing_card(
+                rows=rows, error=err,
+                fy_options=fy_options, selected_fy=selected_fy,
+            )
+
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
         if card_id == "form_pay_dues_new":
             apt_id  = prefill.get("entity_id") or prefill.get("apartment_id")
@@ -2292,6 +2347,8 @@ def _save_entity(entity, card_id, data):
         # ── PATCH: previously missing branches ──────────────────────────
         if entity in ("pay_due", "pay_dues"):
             return _save_pay_dues(db, data, sid)
+        if entity == "verify_receivable_amt":
+            return _save_verify_receivable_amt(db, data, sid)
         if entity in ("asset_dispose", "asset_dispose_new"):
             return _save_asset_dispose(db, data, sid)
         if entity in ("vendor_pass", "vendor_pass_new"):
@@ -2542,6 +2599,47 @@ def _save_pay_dues(db, d, sid):
         except Exception as e:
             print(f"⚠️  notify_payment_received (pay_dues) failed: {e}")
     return ok, msg, trx_id
+
+
+def _save_verify_receivable_amt(db, d, sid):
+    """
+    Handle form submission from the Verify Receivable form.
+
+    Unlike the old one-click 'Verify' action (which always force-settled
+    the full residual), this reads the amount the form's user actually
+    entered and passes it through to fn_verify_receivable, which now
+    accepts a partial amount and leaves the row 'partial' if it doesn't
+    fully clear the balance.
+    """
+    rec_id = d.get("entity_id")
+    if not rec_id:
+        return False, "Receivable ID is required", None
+    try:
+        rec_id = int(rec_id)
+    except (ValueError, TypeError):
+        return False, "Invalid receivable ID", None
+
+    amt = d.get("amount")
+    if not amt:
+        return False, "Amount is required", None
+    try:
+        amt = float(amt)
+        if amt <= 0:
+            return False, "Amount must be > 0", None
+    except (ValueError, TypeError):
+        return False, "Invalid amount", None
+
+    confirmed_by = d.get("user_id")
+    try:
+        confirmed_by = int(confirmed_by) if confirmed_by else None
+    except (ValueError, TypeError):
+        confirmed_by = None
+
+    ok, msg = loaders.verify_receivable(
+        receivable_id=rec_id, confirmed_by=confirmed_by,
+        mode=d.get("mode", "cash"), amount=amt,
+    )
+    return ok, msg, rec_id
 
 
 # ════════════════════════════════════════════════════════════════════════════

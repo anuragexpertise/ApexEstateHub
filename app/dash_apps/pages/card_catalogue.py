@@ -564,6 +564,18 @@ KPI_CARDS = {
         "title": "Open Ledger", "group": "chart",
     },
 
+    # Nav tile for the FY Closing Report (fn_fy_closing_report). Shared
+    # across Admin/Owner/Vendor/Security — see the "financials" context
+    # arrays below and the special-case dispatch in drilldown_callbacks.py
+    # (kpi_fy_closing_report bypasses DRILLDOWN_MAP, same pattern as
+    # kpi_time_qr, since its target isn't a schema-driven entity list).
+    "kpi_fy_closing_report": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-file-invoice-dollar", "color": "#17976e",
+        "title": "FY Closing Report", "group": "chart",
+    },
+
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
@@ -1019,6 +1031,7 @@ DEFAULT_LAYOUTS = {
             "kpi_cash_in_hand",
             "kpi_bank_balance",
             "kpi_ledger_open",
+            "kpi_fy_closing_report",
         ],
         "events": ["kpi_events_total", "kpi_events_tickets"],
         # Per the Concerns workflow spec: Admin/Concerns tab shows
@@ -1071,6 +1084,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_maintenance_charges",
+            "kpi_fy_closing_report",
         ],
         "receivables": [
             "kpi_my_pending_dues",
@@ -1098,6 +1112,7 @@ DEFAULT_LAYOUTS = {
         "financials": [
             "kpi_receipts_total",
             "kpi_ven_charges_count",
+            "kpi_fy_closing_report",
         ],
         "vendor_passes": [
             "kpi_my_pass_expiry",
@@ -1122,6 +1137,9 @@ DEFAULT_LAYOUTS = {
         ],
         "payables": [
             "kpi_security_salaries_due",
+        ],
+        "financials": [
+            "kpi_fy_closing_report",
         ],
         "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "security_receipt": ["kpi_receipts_month"],
