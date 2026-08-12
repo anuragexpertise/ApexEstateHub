@@ -69,6 +69,7 @@ ROLE_CONFIG = {
             {"label": "Receipts",    "href": "/dashboard/security-receipts",  "icon": "fa-plus-circle"},
             {"label": "Events",      "href": "/dashboard/security-events",   "icon": "fa-calendar-alt"},
             {"label": "Concerns",    "href": "/dashboard/security-concerns",  "icon": "fa-hand-point-up"},
+            {"label": "Financials",  "href": "/dashboard/security-financials", "icon": "fa-book"},
             {"label": "Users",       "href": "/dashboard/security-users",    "icon": "fa-users"},
             {"label": "Settings",    "href": "/dashboard/security-settings",   "icon": "fa-cog"},
         ],

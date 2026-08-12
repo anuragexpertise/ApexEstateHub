@@ -46,6 +46,12 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
     ("admin", "ledger"):       {"view"},
+    # FY Closing Report (fn_fy_closing_report) — read-only for every role
+    # that can reach it; there's nothing to create/edit/delete here, it's
+    # a derived report. Custom-rendered (not the generic schema-driven
+    # list/profile pipeline), so this entry is mostly documentation / a
+    # safety net if it's ever routed through that pipeline later.
+    ("admin", "financials"):   {"view"},
     # Cashbook rows are derived/paired display of `transactions`, which
     # loaders.delete_entity() already refuses to touch ("Transactions are
     # immutable — cashbook is read-only"). Without this explicit entry,
@@ -78,6 +84,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "receivables"): {"view"},
     ("apartment", "payables"):    {"view"},
     ("apartment", "ledger"):      set(),
+    ("apartment", "financials"):  {"view"},
     # Apartments view channels and subscribe from the profile; create/approve/deny
     # are profile actions with server-side guards.
     ("apartment", "channels"):    {"view", "new"},
@@ -98,6 +105,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("vendor", "receivables"):    {"view"},
     ("vendor", "payables"):       {"view"},
     ("vendor", "ledger"):         set(),
+    ("vendor", "financials"):     {"view"},
     ("vendor", "*"):              set(),
 
     # ── SECURITY: view most lists + can create receipts ───────────────────
@@ -119,6 +127,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "event_ticket_items"): {"view"},
     ("security", "cashbook"):     {"view"},
     ("security", "ledger"):       set(),
+    ("security", "financials"):   {"view"},
     ("security", "*"):            set(),
     ("apartment", "polls"):       {"view"},
     ("vendor", "polls"):          {"view"},
@@ -1966,6 +1975,198 @@ def model_to_display(record) -> dict:
     if hasattr(record, "to_dict"):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FY CLOSING REPORT CARD — fn_fy_closing_report, full account-by-account detail
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_fy_closing_card(rows: list, error: str | None,
+                            fy_options: list, selected_fy) -> html.Div:
+    """
+    Read-only FY Closing Report — same account-by-account detail for every
+    role that can reach it (Admin/Owner/Vendor/Security all confirmed the
+    full-detail option). FY pills reuse the existing kpi-card-div click
+    pipeline (id pattern "kpi_fy_closing_report__<fy>") rather than a new
+    callback — see the special case in drilldown_callbacks.py.
+    """
+    color = "#17976e"
+
+    def _fy_label(fy):
+        return f"{fy}-{str(fy + 1)[-2:]}"
+
+    pills = html.Div([
+        html.Div(
+            _fy_label(fy),
+            id={"type": "kpi-card-div", "card_id": f"kpi_fy_closing_report__{fy}"},
+            n_clicks=0,
+            style={
+                "padding": "6px 14px", "borderRadius": "20px", "fontSize": "12px",
+                "fontWeight": "700", "cursor": "pointer", "display": "inline-block",
+                "marginRight": "8px", "marginBottom": "8px",
+                "background": color if fy == selected_fy else "#fff",
+                "color": "#fff" if fy == selected_fy else "#555",
+                "border": f"1px solid {color}" if fy == selected_fy else "1px solid #e0e0e0",
+            },
+        )
+        for fy in fy_options
+    ], style={"marginBottom": "12px"})
+
+    header = html.Div([
+        html.Div([
+            html.Div(html.I(className="fas fa-file-invoice-dollar",
+                            style={"color": "#fff", "fontSize": "16px"}),
+                     style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                            "background": f"linear-gradient(135deg,{color},{color}aa)",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center", "marginRight": "12px"}),
+            html.Div([
+                html.Strong("FY Closing Report", style={"fontSize": "14px"}),
+                html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
+                         style={"fontSize": "11px", "color": "#999"}),
+            ]),
+        ], style={"display": "flex", "alignItems": "center"}),
+        pills,
+    ], style={"padding": "12px 16px",
+              "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
+
+    if error:
+        return html.Div([
+            header,
+            html.Div(
+                dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error],
+                          color="warning", style={"borderRadius": "10px"}),
+                style={"padding": "16px"},
+            ),
+        ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+                  "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+    if not rows:
+        body = dbc.Alert("No accounts found for this financial year.", color="secondary",
+                          style={"borderRadius": "10px"})
+    else:
+        head = html.Thead(html.Tr([
+            html.Th("Account"), html.Th("B/F", className="text-end"),
+            html.Th("Movement", className="text-end"), html.Th("Dep.", className="text-end"),
+            html.Th("Own Closing", className="text-end"),
+            html.Th("Total Closing", className="text-end"), html.Th("Dr/Cr"),
+        ], style={"fontSize": "11px"}))
+
+        def _row(r):
+            is_root = not r.get("parent_account_id")
+            return html.Tr([
+                html.Td(r.get("account_name", ""),
+                        style={"fontWeight": "700" if is_root else "400",
+                               "paddingLeft": "8px" if is_root else "24px"}),
+                html.Td(f"{float(r.get('own_bf') or 0):,.2f}", className="text-end"),
+                html.Td(f"{float(r.get('own_movement') or 0):,.2f}", className="text-end"),
+                html.Td(f"{float(r.get('depreciation_charge') or 0):,.2f}", className="text-end"),
+                html.Td(f"{float(r.get('own_closing') or 0):,.2f}", className="text-end"),
+                html.Td(f"{float(r.get('display_amount') or 0):,.2f}",
+                        className="text-end", style={"fontWeight": "700"}),
+                html.Td(
+                    r.get("display_side", ""),
+                    style={"color": "#17976e" if r.get("display_side") == "Cr" else "#c0392b",
+                           "fontWeight": "700"},
+                ),
+            ], style={"fontSize": "12px",
+                      "background": "#fafcff" if is_root else "transparent"})
+
+        body = dbc.Table(
+            [head, html.Tbody([_row(r) for r in rows])],
+            bordered=False, hover=True, responsive=True, size="sm",
+            style={"marginTop": "4px"},
+        )
+
+    return html.Div([
+        header,
+        html.Div(body, style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# VERIFY RECEIVABLE CARD — amount-entry form (single-row confirm)
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_verify_receivable_card(
+    receivable_id,
+    description: str,
+    residual: float,
+    prefill_amount: float,
+    prefill_mode: str = "cash",
+) -> html.Div:
+    color = "#17976e"
+    return html.Div([
+        html.Div(
+            html.Div([
+                html.Div(html.I(className="fas fa-check-double",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong("Verify Receivable", style={"fontSize": "14px"}),
+                    html.Div(description, style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        html.Div([
+            dbc.Card([
+                html.Div("Outstanding", style={"fontSize": "10px", "color": "#7d8ea3",
+                                                "fontWeight": "600", "textTransform": "uppercase"}),
+                html.Div(f"₹{residual:,.2f}", style={"fontSize": "20px", "fontWeight": "800",
+                                                      "color": "#15304f"}),
+            ], body=True, style={"borderRadius": "10px", "border": "1px solid #e8edf5",
+                                  "textAlign": "center", "padding": "10px", "marginBottom": "12px"}),
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                "Enter the amount actually received. Leave as-is to confirm in full — "
+                "a lower amount leaves the balance outstanding as 'partial'.",
+            ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
+                                    "borderRadius": "10px", "marginBottom": "12px"}),
+            dcc.Input(id={"type": "form-field", "entity": "verify_receivable_amt", "field": "entity_id"},
+                      type="hidden", value=str(receivable_id or "")),
+            dbc.Row([
+                dbc.Col(dbc.Label("Amount Received (₹) *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=5, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "verify_receivable_amt", "field": "amount"},
+                    type="number", value=str(prefill_amount) if prefill_amount else "",
+                    min=0.01, max=residual if residual else None, step=0.01,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=7),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=5, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "verify_receivable_amt", "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ],
+                    value=prefill_mode, clearable=False,
+                    style={"fontSize": "13px"},
+                ), width=7),
+            ], className="mb-2"),
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Confirm Receipt"],
+                id={"type": "form-submit", "entity": "verify_receivable_amt", "card_id": "form_verify_receivable"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
 
 # ════════════════════════════════════════════════════════════════════════════

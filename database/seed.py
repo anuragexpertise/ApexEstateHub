@@ -477,6 +477,15 @@ def seed_accounts(cur, conn, society_id: int) -> int:
         "(SELECT COALESCE(MAX(id),1) FROM accounts))"
     )
     conn.commit()
+
+    # fn_fy_closing_report needs the society's Dep account passed in
+    # explicitly (see comment on societies.dep_account_id) — point it at
+    # the Depreciation account (234) seeded just above.
+    cur.execute(
+        "UPDATE societies SET dep_account_id = 234 WHERE id = %s AND dep_account_id IS NULL",
+        (society_id,),
+    )
+    conn.commit()
     return created
 
 
@@ -944,16 +953,16 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     # Dr Depreciation A/c (234) / Cr Instruments A/c (64)
     cur.execute(
         """INSERT INTO transactions
-           (society_id, trx_date, acc_id, acc_particulars, amount, mode, status,
+           (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Dr',%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     cur.execute(
         """INSERT INTO transactions
-           (society_id, trx_date, acc_id, acc_particulars, amount, mode, status,
+           (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,%s,64,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Cr',%s,64,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     conn.commit()
@@ -965,16 +974,16 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     desc2 = "Depreciation transferred to Income & Expenditure A/c"
     cur.execute(
         """INSERT INTO transactions
-           (society_id, trx_date, acc_id, acc_particulars, amount, mode, status,
+           (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,%s,23,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Dr',%s,23,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     cur.execute(
         """INSERT INTO transactions
-           (society_id, trx_date, acc_id, acc_particulars, amount, mode, status,
+           (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Cr',%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()

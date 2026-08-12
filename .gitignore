@@ -16,3 +16,4 @@ generate_vapid_keys.py
 migrations/
 *.log
 *.diff
+*.patch
