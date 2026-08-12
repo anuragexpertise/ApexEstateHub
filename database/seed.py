@@ -91,6 +91,11 @@ def get_conn():
             _dsn(),
             cursor_factory=psycopg2.extras.RealDictCursor,
             connect_timeout=20,
+            # See the matching comment in migrate.py's get_conn() — without
+            # these, a blocked statement (most likely lock contention from
+            # another session, e.g. the live app or a previous interrupted
+            # run) waits forever with no output at all.
+            options="-c lock_timeout=15000 -c statement_timeout=180000",
         )
         conn.autocommit = False
         return conn
