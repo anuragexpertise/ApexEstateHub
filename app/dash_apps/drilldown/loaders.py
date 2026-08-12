@@ -446,28 +446,21 @@ def fy_label(fy: int) -> str:
 
 def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | None]:
     """
-    Wraps fn_fy_closing_report(society_id, fy, dep_account_id).
+    Wraps fn_fy_closing_report(society_id, fy). The function resolves the
+    society's Dep account internally (fn_resolve_depreciation_account,
+    ILIKE 'Depreciation%') — no separate lookup needed here.
 
-    Returns (rows, error_message). error_message is set (rows == []) when
-    the society hasn't got a dep_account_id configured yet — the function
-    requires it explicitly (see the comment on societies.dep_account_id
-    for why this isn't resolved by an ILIKE name lookup instead).
+    Returns (rows, error_message). error_message is set (rows == []) if
+    the query itself fails (e.g. no accounts seeded yet for this society).
     """
-    soc = db._execute(
-        "SELECT dep_account_id FROM societies WHERE id = %s",
-        (society_id,), fetch_one=True,
-    )
-    dep_acc_id = (soc or {}).get("dep_account_id")
-    if not dep_acc_id:
-        return [], (
-            "Depreciation account not configured for this society yet — "
-            "set societies.dep_account_id before the FY Closing Report can run."
-        )
-    rows = db._execute(
-        "SELECT * FROM fn_fy_closing_report(%s,%s,%s)",
-        (society_id, fy, dep_acc_id), fetch_all=True,
-    ) or []
-    return rows, None
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_fy_closing_report(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        return rows, None
+    except Exception as e:
+        return [], str(e)
 
 
 # ════════════════════════════════════════════════════════════════════════════

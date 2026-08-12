@@ -47,16 +47,6 @@ CREATE TABLE IF NOT EXISTS societies (
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
-    -- Explicit reference to this society's 'Dep' (Depreciation) account,
-    -- used by fn_fy_closing_report. Per the standing convention on the
-    -- accounts table ("no category column — categorisation is entirely
-    -- determined by acc_id at the point of use"), this is NOT resolved by
-    -- an ILIKE name lookup; it's set once (e.g. at society setup / seed
-    -- time) and referenced directly. NULL means the FY Closing Report
-    -- cannot run for this society yet — the UI should say so plainly
-    -- rather than guessing an account. FK added below, once the accounts
-    -- table (which this file defines later) actually exists.
-    dep_account_id INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT
 );
@@ -129,10 +119,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
-
-ALTER TABLE societies
-    DROP CONSTRAINT IF EXISTS fk_society_dep_account,
-    ADD CONSTRAINT fk_society_dep_account FOREIGN KEY (dep_account_id) REFERENCES accounts (id) DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
@@ -4002,17 +3988,38 @@ $$;
 -- transaction, direction bug) or a bug in this function — treat it as
 -- a hard error signal, not something to silently absorb.
 --
--- Dep/Income & Expenditure/Capital Account are NOT looked up by name —
--- per the explicit comment on the accounts table ("there is no category
--- column... categorisation is entirely determined by acc_id... at the
--- point of use"), their account_ids are passed in explicitly by the
--- caller, same convention as the rest of the codebase (e.g.
--- fn_dispose_asset's gain/loss account lookups).
+-- Dep is resolved by an ILIKE name lookup (fn_resolve_depreciation_account
+-- below), same convention as fn_resolve_cash_account — reversing the
+-- earlier "pass the account id in explicitly" approach, which needed a new
+-- societies.dep_account_id column and broke on already-provisioned
+-- databases (CREATE TABLE IF NOT EXISTS doesn't retroactively add columns
+-- to an existing table, so the FK migration failed with "column
+-- dep_account_id ... does not exist" against real environments).
+-- Income & Expenditure and Capital Account are still reached purely via
+-- the parent_account_id hierarchy walk below, not by name at all.
+
+-- Resolves a society's 'Dep' (Depreciation) account by name, same ILIKE
+-- convention as fn_resolve_cash_account. No dedicated societies column
+-- needed — CREATE TABLE IF NOT EXISTS is a no-op against an existing
+-- database, so a new column there requires an explicit ALTER TABLE
+-- migration on every already-provisioned society's DB; a name lookup
+-- avoids that entirely.
+CREATE OR REPLACE FUNCTION fn_resolve_depreciation_account(p_society_id INT)
+RETURNS INT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+BEGIN
+    SELECT id INTO v_acc_id FROM accounts
+    WHERE society_id = p_society_id AND name ILIKE 'Depreciation%'
+    LIMIT 1;
+
+    RETURN v_acc_id;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION fn_fy_closing_report(
     p_society_id             INT,
-    p_fy                     SMALLINT,
-    p_depreciation_acc_id    INT   -- the 'Dep' account this society routes depreciation charges to
+    p_fy                     SMALLINT
 )
 RETURNS TABLE (
     account_id           INT,
@@ -4033,7 +4040,12 @@ DECLARE
     v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
     v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
     v_total_depreciation NUMERIC(15,2);
+    v_depreciation_acc_id INT;
 BEGIN
+    -- Resolved by name (fn_resolve_depreciation_account) rather than
+    -- taken as a caller-supplied parameter — see that function's comment.
+    v_depreciation_acc_id := fn_resolve_depreciation_account(p_society_id);
+
     -- Total depreciation charged across every depreciable account this FY —
     -- this is what gets added into the Dep account's own_movement below.
     -- fn_account_depreciation already returns 0 for non-depreciable
@@ -4069,7 +4081,7 @@ BEGIN
             -- transaction to Dep under this presentational model. Dep is
             -- Dr-natured and this is an expense increase (a Dr-like
             -- movement), so it's SUBTRACTED here in Cr-positive terms.
-            - CASE WHEN a.id = p_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
+            - CASE WHEN a.id = v_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
               AS own_movement_raw,
             fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge
         FROM accounts a

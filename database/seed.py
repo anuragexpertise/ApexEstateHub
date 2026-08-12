@@ -477,15 +477,6 @@ def seed_accounts(cur, conn, society_id: int) -> int:
         "(SELECT COALESCE(MAX(id),1) FROM accounts))"
     )
     conn.commit()
-
-    # fn_fy_closing_report needs the society's Dep account passed in
-    # explicitly (see comment on societies.dep_account_id) — point it at
-    # the Depreciation account (231) seeded just above.
-    cur.execute(
-        "UPDATE societies SET dep_account_id = 231 WHERE id = %s AND dep_account_id IS NULL",
-        (society_id,),
-    )
-    conn.commit()
     return created
 
 
