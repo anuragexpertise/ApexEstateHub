@@ -4121,14 +4121,14 @@ BEGIN
     ),
     leaf_final AS (
         SELECT
-            id, name, parent_account_id, drcr_account, has_bf,
+            lc.id, lc.name, lc.parent_account_id, lc.drcr_account, lc.has_bf,
             -- Depreciation reduces a Dr-natured asset's balance, which in
             -- this Cr-positive frame means its value moves TOWARD zero —
             -- i.e. it's added back, not subtracted.
-            own_bf, (own_movement_raw + depreciation_charge) AS own_movement,
-            depreciation_charge,
-            (own_bf + own_movement_raw + depreciation_charge) AS own_closing
-        FROM leaf_closing
+            lc.own_bf, (lc.own_movement_raw + lc.depreciation_charge) AS own_movement,
+            lc.depreciation_charge,
+            (lc.own_bf + lc.own_movement_raw + lc.depreciation_charge) AS own_closing
+        FROM leaf_closing lc
     ),
     -- Every account paired with every ancestor of itself (including itself),
     -- walking up parent_account_id to the root. Summing own_closing grouped
