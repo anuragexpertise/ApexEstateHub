@@ -3520,12 +3520,20 @@ BEGIN
 END;
 $$;
 
+-- Fixed (2026-08): p_financial_year was SMALLINT. Plain integer literals/
+-- Python ints default to `integer` (int4), and int4→int2 is only an
+-- "assignment" cast in Postgres, not "implicit" — so it's NOT applied
+-- during function-call resolution. Every caller (loaders.py's plain `%s`
+-- placeholders, and any raw `SELECT fn(...)` testing) hit
+-- "function ... does not exist / no function matches" as a result. INT
+-- is what a literal/Python int actually resolves to, so this — and every
+-- other function in this FY-parameter family below — now takes INT.
 DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy (INT, INT, SMALLINT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_bf_amount_fy(
     p_society_id     INT,
     p_account_id     INT,
-    p_financial_year SMALLINT
+    p_financial_year INT
 )
 RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -3581,12 +3589,15 @@ $$;
 -- "Half depreciation if asset date > 1 Sep of the year").
 -- ════════════════════════════════════════════════════════════════
 
+-- Fixed (2026-08): same SMALLINT->INT fix as fn_resolve_bf_amount_fy
+-- above, same reason — plain integer literals/Python ints don't
+-- implicitly cast to smallint for function-call resolution.
 DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, SMALLINT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_account_depreciation(
     p_society_id     INT,
     p_account_id     INT,
-    p_financial_year SMALLINT
+    p_financial_year INT
 )
 RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -3631,12 +3642,16 @@ $$;
 -- SECTION 5: LEDGER v2 — FY-aware BF + depreciation-aware closing
 -- ════════════════════════════════════════════════════════════════
 
+-- Fixed (2026-08): same SMALLINT->INT fix — this backs the live Admin
+-- Ledger screen (via loaders.py, plain `%s` placeholders passing a
+-- Python int), which was silently broken by this exact type-resolution
+-- issue every time it was called.
 DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, SMALLINT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_society_id     INT,
     p_account_id     INT,
-    p_financial_year SMALLINT
+    p_financial_year INT
 )
 RETURNS TABLE (
     row_date      DATE,
@@ -4017,9 +4032,26 @@ BEGIN
 END;
 $$;
 
+-- Fixed (2026-08): two issues compounded here.
+-- 1. p_fy was SMALLINT — same resolution failure as the other three
+--    functions above ("function fn_fy_closing_report(integer, integer)
+--    does not exist" when called with plain integers, which is what
+--    both loaders.py and any raw SQL literal test naturally pass).
+-- 2. CREATE OR REPLACE FUNCTION only replaces a function whose signature
+--    (name + exact parameter types) already matches. This function's
+--    signature changed twice across recent patches — first losing its
+--    p_depreciation_acc_id third parameter, now changing p_fy's type —
+--    and neither change was paired with a DROP FUNCTION IF EXISTS for
+--    the signature being replaced, so every prior version is still
+--    sitting in the database as an orphaned overload rather than being
+--    replaced. Both are dropped explicitly below before the current
+--    (INT, INT) version is created.
+DROP FUNCTION IF EXISTS fn_fy_closing_report (INT, SMALLINT, INT) CASCADE;  -- original: explicit p_depreciation_acc_id param
+DROP FUNCTION IF EXISTS fn_fy_closing_report (INT, SMALLINT) CASCADE;       -- previous patch: ILIKE fix, still SMALLINT
+
 CREATE OR REPLACE FUNCTION fn_fy_closing_report(
     p_society_id             INT,
-    p_fy                     SMALLINT
+    p_fy                     INT
 )
 RETURNS TABLE (
     account_id           INT,
