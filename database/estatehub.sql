@@ -4088,7 +4088,7 @@ BEGIN
     WHERE a.society_id = p_society_id;
 
     RETURN QUERY
-    WITH leaf_closing AS (
+    WITH RECURSIVE leaf_closing AS (
         SELECT
             a.id,
             a.name::TEXT,
