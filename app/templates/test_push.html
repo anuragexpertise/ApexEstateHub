@@ -104,7 +104,7 @@
     <script>
         // Get VAPID public key from your .env (this must match)
         // Replace this with your actual VAPID_PUBLIC from .env
-        const applicationServerKey = 'BO0o95BSGi5hps3FJC0tDxLxUBZl6lMgwlo4mDzof2-Afxg7y2D-WTL7-WP2ssIDgAGsAdTTxdpqy7j-DiOJokY';
+        const applicationServerKey = 'BEt0PWHsRXaFpKuu97n257C8Qy1Kztn47AJhTPJ7dF1coXQOB7JAqTl98pgNl1BKu1LHPajFUHgq5DwT36ydOdc';
         
         // Display VAPID key
         document.getElementById('vapidKey').textContent = applicationServerKey;
@@ -239,8 +239,17 @@
                 
             } catch (err) {
                 log(`❌ Error: ${err.message}`, 'error');
-                console.error(err);
-                showStatus(`Error: ${err.message}`, 'error');
+                console.error('Full error object:', err);
+                console.error('Error name:', err.name);
+                console.error('Error stack:', err.stack);
+                if (err.name === 'RegistrationFailedError') {
+                    log('💡 This usually means:', 'info');
+                    log('   - Site must be served over HTTPS (localhost is OK)', 'info');
+                    log('   - VAPID public key may be invalid', 'info');
+                    log('   - Browser push service may be unreachable', 'info');
+                    log('   - Try in Chrome/Edge with a fresh profile', 'info');
+                }
+                showStatus(`Error: ${err.message} (${err.name || 'unknown'})`, 'error');
             }
         }
         
