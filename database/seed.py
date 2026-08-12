@@ -122,10 +122,10 @@ ACCOUNTS = [
     (213,   "Property Income",            "PropInc",    "Property Income",            21,  "Cr",  False,  "Cr", 0, 100),
     (22,    "Gifts Received",             "Gifts",      "Gifts Received",              2,  "Cr",  False,  "Cr", 0, 100),
     (23,    "Income Expenditure A/c",     "InExp",      "Income Expenditure Account",  2,  "Cr",  False,  "Cr", 0, 100),
-    (231,   "Vehicle Expenditure",        "vehexp",     "Vehicle Expenditure",        23,  "Dr", False,  "Dr", 0, 100),
+    (231,   "Depreciation",               "Dep",        "Depreciation Account",       23,  "Dr", False,  "Dr", 0, 100),
     (232,   "Rent",                       "rent",       "Rent",                       23,  "Dr", False,  "Dr", 0, 100),
     (233,   "Miscellaneous",              "misc",       "Miscellaneous",              23,  "Dr", False,  "Dr", 0, 100),
-    (234,   "Depreciation",               "Dep",        "Depreciation Account",       23,  "Dr", False,  "Dr", 0, 100),
+    (234,   "Vehicle Expenditure",        "vehexp",     "Vehicle Expenditure",        23,  "Dr", False,  "Dr", 0, 100),
     (235,   "Salary",                     "Salary",     "Salary",                     23,  "Dr", False,  "Dr", 0, 100),
     (236,   "Phone",                      "Phone",      "Phone",                      23,  "Dr", False,  "Dr", 0, 100),
     (237,   "Electricity",                "Elec",       "Electricity",                23,  "Dr", False,  "Dr", 0, 100),
@@ -186,7 +186,7 @@ SOCIETY = {
     "calc_start_date":  "2026-04-01",
     "payment_qr":       "sunrise_qr.png",
     "logo":             "sunrise_logo.png",
-    "login_background": "sunrise_bg.jpg",
+    "login_background": "sunrise_bg.png",
 }
 
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024"}
@@ -480,9 +480,9 @@ def seed_accounts(cur, conn, society_id: int) -> int:
 
     # fn_fy_closing_report needs the society's Dep account passed in
     # explicitly (see comment on societies.dep_account_id) — point it at
-    # the Depreciation account (234) seeded just above.
+    # the Depreciation account (231) seeded just above.
     cur.execute(
-        "UPDATE societies SET dep_account_id = 234 WHERE id = %s AND dep_account_id IS NULL",
+        "UPDATE societies SET dep_account_id = 231 WHERE id = %s AND dep_account_id IS NULL",
         (society_id,),
     )
     conn.commit()
@@ -950,12 +950,12 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     desc = (f"Depreciation on Instruments @ {INSTRUMENT_FULL_RATE}% "
             f"(full ₹{dep_full} + half-year ₹{dep_half} on post-1-Sep additions)")
 
-    # Dr Depreciation A/c (234) / Cr Instruments A/c (64)
+    # Dr Depreciation A/c (231) / Cr Instruments A/c (64)
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Dr',%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Dr',%s,231,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     cur.execute(
@@ -983,7 +983,7 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Cr',%s,234,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Cr',%s,231,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
