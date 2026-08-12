@@ -71,6 +71,18 @@ def get_conn():
             _dsn(),
             cursor_factory=psycopg2.extras.RealDictCursor,
             connect_timeout=20,
+            # Without these, a blocked statement waits INDEFINITELY with
+            # zero output — the exact "terminal just sits there" symptom.
+            # Postgres default lock_timeout/statement_timeout is 0 (no
+            # limit) unless set here or on the server/role. lock_timeout
+            # fires fast and specifically on lock contention (most likely
+            # cause: another session — e.g. the live app, or a previous
+            # migrate.py/seed.py run that was Ctrl-C'd mid-transaction —
+            # still holding a lock on a table this script needs).
+            # statement_timeout is a broader backstop for any other kind
+            # of runaway query. Both raise a normal psycopg2 exception
+            # (55P03 / 57014) instead of hanging silently.
+            options="-c lock_timeout=15000 -c statement_timeout=180000",
         )
         conn.autocommit = False
         return conn
@@ -306,7 +318,37 @@ def main():
             from seed import run_seed  # when run as `python3 database/migrate.py`
         except ImportError:
             from database.seed import run_seed  # when imported as a package
-        run_seed(conn)
+        try:
+            run_seed(conn)
+        except psycopg2.errors.LockNotAvailable:
+            print()
+            print("  ❌  Seeding stopped: timed out waiting for a database lock.")
+            print("      Something else is holding a lock on a table this script")
+            print("      needs — most likely another connection to the same DB")
+            print("      (e.g. the live app, or a previous migrate.py/seed.py run")
+            print("      that was interrupted mid-transaction and left idle).")
+            print("      Run this in psql / Aiven console to find and end it:")
+            print()
+            print("        SELECT pid, state, query_start, state_change, query")
+            print("        FROM pg_stat_activity")
+            print("        WHERE datname = current_database() AND pid <> pg_backend_pid()")
+            print("          AND state <> 'idle'")
+            print("        ORDER BY query_start;")
+            print()
+            print("      Idle-in-transaction sessions are the usual culprit —")
+            print("      SELECT pg_terminate_backend(<pid>) to clear one, then re-run.")
+            conn.rollback()
+            conn.close()
+            sys.exit(1)
+        except psycopg2.errors.QueryCanceled:
+            print()
+            print("  ❌  Seeding stopped: a statement exceeded the 3-minute timeout.")
+            print("      This is a slower failure than a lock wait — check whether")
+            print("      the DB itself is under load, or a single statement is")
+            print("      doing far more work than expected.")
+            conn.rollback()
+            conn.close()
+            sys.exit(1)
         conn = None  # run_seed() closes the connection itself
     else:
         print("  Seed skipped.  Log in as master admin to create a society.")
