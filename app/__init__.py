@@ -69,7 +69,7 @@ def create_app(config_name: str | None = None) -> Flask:
         app.register_blueprint(api_bp,  url_prefix="/api")
         app.register_blueprint(web_bp)
         app.register_blueprint(scan_bp)
-        app.register_blueprint(push_bp, url_prefix="/api/push")
+        app.register_blueprint(push_bp)
         log.info("Blueprints registered ✓")
     except Exception as exc:
         log.warning("Blueprint registration partial: %s", exc)
