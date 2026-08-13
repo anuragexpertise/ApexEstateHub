@@ -921,5 +921,44 @@ def register_shell_callbacks(app):
         except Exception as e:
             print(f"Mark all read error: {e}")
             raise PreventUpdate
+
+    # ── 11. DRILL-BACK BUTTON ──────────────────────────────────────────────────
+    @app.callback(
+        Output("drill-back-btn", "style"),
+        Input("drilldown-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _toggle_drill_back(store):
+        stack = (store or {}).get("stack") or []
+        visible = len(stack) > 1
+        return {"display": "block"} if visible else {"display": "none"}
+
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Output("kpi-row", "style", allow_duplicate=True),
+        Input("drill-back-btn", "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _drill_back(n_clicks, store, auth):
+        if not n_clicks:
+            raise PreventUpdate
+        store = store or {}
+        stack = store.get("stack") or []
+        if len(stack) <= 1:
+            raise PreventUpdate
+        from app.dash_apps.drilldown.state import navigate_back
+        from app.dash_apps.callbacks.drilldown_callbacks import _render_current
+        new_store = navigate_back(store, len(stack) - 2)
+        hide_kpis = len(new_store.get("stack", [])) > 1
+        try:
+            content, bc, db_err = _render_current(new_store, auth)
+        except Exception:
+            content, bc, db_err = html.Div("Error loading page."), [], "Error"
+        kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+        return new_store, content, bc, kpi_style
     
     print("  ✓ Shell callbacks registered")

@@ -4,6 +4,8 @@ from pywebpush import webpush, WebPushException
 from dotenv import load_dotenv
 import logging
 
+from database.db_manager import db
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -506,3 +508,28 @@ def notify_dues_overdue(user_id, amount):
     title = "⚠️ Dues Overdue"
     body = f"₹{float(amount):,.2f} is now overdue. Please clear it to avoid a failed gate pass."
     return send_push_notification(user_id, title, body, url="/dashboard/owner-receivables")
+
+
+def notify_channel_created(society_id, channel_name, channel_type, apartment_id=None):
+    """Notify relevant users when a new alert channel is created.
+    School Bus: notify all apartment owners.
+    Taxi/Visitor: notify the linked apartment owner only.
+    """
+    from app.services.alert_service import get_channel_subscribers
+    if channel_type == "school_bus":
+        targets = get_notification_targets(society_id, roles=["apartment"])
+        if not targets:
+            return 0, 0
+        body = f"New school bus channel: {channel_name}"
+        return send_bulk_push(targets, "🚌 New Bus Channel", body, url="/dashboard/channels", society_id=society_id)
+    elif channel_type in ("taxi", "visitor") and apartment_id:
+        row = db._execute(
+            "SELECT u.id FROM users u JOIN apartments a ON a.id=u.linked_id WHERE a.id=%s AND u.role='apartment'",
+            (apartment_id,), fetch_one=True
+        )
+        if row:
+            uid = row["id"]
+            title = "🚕 New Taxi Channel" if channel_type == "taxi" else "👤 New Visitor Channel"
+            body = f"{channel_name} is now active for your flat."
+            return send_push_notification(uid, title, body, url="/dashboard/channels", society_id=society_id)
+    return 0, 0
