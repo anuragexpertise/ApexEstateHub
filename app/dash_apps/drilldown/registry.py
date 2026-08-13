@@ -202,6 +202,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_bank_balance": {"target": "list_cashbook", "label": "Cashbook"}, # to do
     "kpi_cash_in_hand": {"target": "list_cashbook", "label": "Cash in Hand"}, # to do
+    "kpi_cashbook_open": {"target": "list_cashbook", "label": "Cashbook"},
     "kpi_societies_calc_start_date": {
         "target": "list_societies",
         "label": "Calc Start Date",

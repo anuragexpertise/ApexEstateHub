@@ -279,7 +279,29 @@ def register_login_callbacks(app):
 
         raise PreventUpdate
 
-    # ── 7. PATTERN CLEAR BUTTON ────────────────────────────────────
+    # ── 7. CLOSE FORGOT PASSWORD MODAL ───────────────────────────────────────
+    @app.callback(
+        Output("forgot-password-modal", "is_open", allow_duplicate=True),
+        Input("close-forgot-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_forgot_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 8. CLOSE RESET PASSWORD MODAL ────────────────────────────────────────
+    @app.callback(
+        Output("reset-password-modal", "is_open", allow_duplicate=True),
+        Input("close-reset-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_reset_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 9. PATTERN CLEAR BUTTON ────────────────────────────────────
     app.clientside_callback(
         """
         function(n) {

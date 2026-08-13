@@ -3346,6 +3346,11 @@ def _save_channel(db, d, sid, is_edit, pk):
         is_recurring=is_recurring,
     )
     if ok:
+        try:
+            import app.services.push_service as PushService
+            PushService.notify_channel_created(sid, ch_name, ch_type, apartment_id=apartment_id)
+        except Exception as e:
+            print(f"⚠️  Channel creation push notify failed: {e}")
         return True, "Channel created", None
     return False, msg or "Failed to create channel.", None
 

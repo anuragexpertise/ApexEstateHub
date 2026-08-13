@@ -3272,65 +3272,6 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
             ], width=12, md=6, lg=4, className="mb-3")
         )
 
-    # Create Channel Form (admin only)
-    apt_options = []
-    if is_admin and society_id:
-        try:
-            apt_rows = db._execute(
-                "SELECT id, flat_number FROM apartments WHERE society_id=%s ORDER BY flat_number",
-                (society_id,), fetch_all=True,
-            ) or []
-            apt_options = [{"label": f"Flat {r['flat_number']}", "value": r["id"]} for r in apt_rows]
-        except Exception as e:
-            print(f"render_subscribable_alert_manager: apartment list error: {e}")
-
-    create_channel_card = dbc.Card([
-        dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
-        dbc.CardBody([
-            dbc.Row([
-                dbc.Col([
-                    dbc.Label("Channel Type"),
-                    dbc.Select(id="channel-type-input", options=[
-                        {"label": "School Bus", "value": "school_bus"},
-                        {"label": "Taxi", "value": "taxi"},
-                        {"label": "Visitor", "value": "visitor"},
-                    ], value="school_bus"),
-                ], width=4),
-                dbc.Col([
-                    dbc.Label("Channel Name"),
-                    dbc.Input(id="channel-name-input", placeholder="e.g. DPS Bus #12 or Uber Taxi"),
-                ], width=5),
-                dbc.Col([
-                    dbc.Label("Identifier (Reg # / Ref)"),
-                    dbc.Input(id="channel-identifier-input", placeholder="e.g. MH-02-1234"),
-                ], width=3),
-            ], className="mb-3"),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Label("Target Apartment (required for Taxi / Visitor — this is who gets the push and can Approve/Deny)"),
-                    dbc.Select(
-                        id="channel-apartment-input",
-                        options=apt_options,
-                        placeholder="Select flat…",
-                    ),
-                ], width=12, id="channel-apartment-input-wrap", style={"display": "none"}),
-            ], className="mb-3"),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Switch(
-                        id="channel-recurring-switch",
-                        label="Recurring Channel (ON = Daily Recurring | OFF = One-Time / Per-Day)",
-                        value=True,
-                    ),
-                ], width=8),
-                dbc.Col([
-                    dbc.Button("Create Channel", id="channel-create-btn", color="primary", className="w-100",
-                               style={"borderRadius": "8px", "fontWeight": "600"}),
-                ], width=4),
-            ]),
-        ]),
-    ], className="mb-4", style={"borderRadius": "12px", "boxShadow": "0 2px 8px rgba(0,0,0,0.05)"})
-
     return html.Div([
         create_channel_card if is_admin else None,
         html.H5("Gate Entry Pass Status (Yellow = Pending | Green = PASS | Red = Denied)",

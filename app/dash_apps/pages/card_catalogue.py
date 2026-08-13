@@ -564,6 +564,19 @@ KPI_CARDS = {
         "title": "Open Ledger", "group": "chart",
     },
 
+    # Nav tile for the Cashbook list (fn_cashbook_paired_v3). Unlike
+    # kpi_ledger_open — which must land on list_accounts first because
+    # fn_account_ledger_fy is a single-account report and needs an
+    # account_id it doesn't have at KPI-click time — the cashbook loader
+    # is society-wide with no required account_id, so this tile can jump
+    # straight to list_cashbook (see DRILLDOWN_MAP in registry.py).
+    "kpi_cashbook_open": {
+        "query": "SELECT COUNT(*) AS v FROM transactions WHERE society_id=%s AND status='paid'",
+        "params": 1, "format": "number",
+        "icon": "fa-book", "color": "#17976e",
+        "title": "Open Cashbook", "group": "chart",
+    },
+
     # Nav tile for the FY Closing Report (fn_fy_closing_report). Shared
     # across Admin/Owner/Vendor/Security — see the "financials" context
     # arrays below and the special-case dispatch in drilldown_callbacks.py
@@ -1030,6 +1043,7 @@ DEFAULT_LAYOUTS = {
             "kpi_expenses_total",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
+            "kpi_cashbook_open",
             "kpi_ledger_open",
             "kpi_fy_closing_report",
         ],
@@ -1090,7 +1104,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
         ],
-        "cashbook": [],
+        "cashbook": ["kpi_receipts_month", "kpi_expenses_month"],
         "owner_receipts": ["kpi_receipts_total"],
         "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
         # Per the Concerns workflow spec: Owner/Concerns tab shows "not
@@ -1117,7 +1131,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pass_expiry",
         ],
         "vendor_receipts": ["kpi_receipts_total"],
-        "cashbook": [],
+        "cashbook": ["kpi_receipts_total"],
         # Per the Concerns workflow spec: Vendor/Concerns tab shows
         # "invited", "assigned", and "resolved".
         "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],

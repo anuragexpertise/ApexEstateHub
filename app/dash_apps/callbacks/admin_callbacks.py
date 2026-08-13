@@ -30,6 +30,66 @@ colliding.
 from dash import Input, Output, State, html, no_update
 from datetime import datetime
 
+from app.security.guards import require_session
+from app.services.society_service import create_society
+
 
 def register_admin_callbacks(app):
+    # ── 0. CREATE SOCIETY (Master portal) ─────────────────────────────────────
+    @app.callback(
+        Output("master-create-result", "children"),
+        Input("master-create-society-btn", "n_clicks"),
+        State("new-society-name", "value"),
+        State("new-society-email", "value"),
+        State("new-society-password", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_create_society(n_clicks, name, email, password):
+        if not n_clicks or not name or not email or not password:
+            raise PreventUpdate
+        if len(password) < 8:
+            return html.Div([
+                html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                "Password must be at least 8 characters.",
+            ], className="alert alert-warning mt-2")
+        try:
+            sid = create_society({
+                "name": name.strip(),
+                "admin_email": email.strip(),
+                "admin_password": password,
+            })
+            if sid:
+                return html.Div([
+                    html.I(className="fas fa-check-circle me-2", style={"color": "#17976e"}),
+                    f"Society '{name}' created successfully! (ID: {sid})",
+                ], className="alert alert-success mt-2")
+            return html.Div([
+                html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
+                "Failed to create society. Please try again.",
+            ], className="alert alert-danger mt-2")
+        except Exception as e:
+            return html.Div([
+                html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
+                f"Error: {str(e)[:120]}",
+            ], className="alert alert-danger mt-2")
+
+    # ── 1. CLEAR CREATE-SOCIETY FORM ──────────────────────────────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var fields = ['new-society-name','new-society-email','new-society-password'];
+            fields.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); }
+            });
+            return '';
+        }
+        """,
+        Output("new-society-name", "value", allow_duplicate=True),
+        Input("master-clear-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
     print("  ✓ Admin callbacks registered (manual QR validate moved to qr_callbacks.py)")

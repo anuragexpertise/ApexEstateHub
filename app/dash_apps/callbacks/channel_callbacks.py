@@ -127,6 +127,35 @@ def register_channel_callbacks(app):
             ok, msg = respond_to_alert(int(alert_event_id), user_id, "approve")
             store = {"refresh": True}
             toast = {"type": "success" if ok else "error", "message": msg or "Action failed"}
+            if ok:
+                try:
+                    import app.services.push_service as PushService
+                    from database.db_manager import db
+                    evt = db._execute(
+                        "SELECT ae.channel_id, ac.name, ac.channel_type FROM alert_events ae "
+                        "LEFT JOIN alert_channels ac ON ac.id=ae.channel_id WHERE ae.id=%s",
+                        (alert_event_id,), fetch_one=True
+                    )
+                    if evt and evt.get("channel_id"):
+                        subs = db._execute(
+                            "SELECT u.id FROM alert_subscriptions sub "
+                            "JOIN users u ON u.linked_id=sub.apartment_id AND u.role='apartment' "
+                            "WHERE sub.channel_id=%s",
+                            (evt["channel_id"],), fetch_all=True
+                        ) or []
+                        for s in subs:
+                            try:
+                                PushService.send_push_notification(
+                                    s["id"],
+                                    "✅ Channel Approved",
+                                    f"{evt.get('name','Channel')} ({evt.get('channel_type','')}) has been approved.",
+                                    url="/dashboard/channels",
+                                    society_id=society_id,
+                                )
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.error(f"Channel approval push notify failed: {e}")
             return toast, store
         except Exception as e:
             logger.error(f"approve_channel_alert error: {e}")

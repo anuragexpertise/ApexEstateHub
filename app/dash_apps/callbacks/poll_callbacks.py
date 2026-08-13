@@ -141,3 +141,24 @@ def register_poll_callbacks(app):
         except Exception as e:
             logger.error(f"Error saving poll (edit={is_edit}): {e}")
             return html.Div(f"Error saving poll: {e}", className="alert alert-danger mt-2")
+
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var fields = ['poll-edit-id','poll-title-input','poll-desc-input',
+                          'poll-choice-1','poll-choice-2','poll-choice-3',
+                          'poll-choice-4','poll-choice-5','poll-ends-at'];
+            fields.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); }
+            });
+            var cnt = document.getElementById('poll-choice-count');
+            if (cnt) { cnt.value = '2'; cnt.dispatchEvent(new Event('input',{bubbles:true})); }
+            return '';
+        }
+        """,
+        Output("poll-title-input", "value", allow_duplicate=True),
+        Input("poll-clear-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )

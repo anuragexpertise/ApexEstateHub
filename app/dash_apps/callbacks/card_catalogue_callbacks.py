@@ -359,6 +359,11 @@ def register_card_catalogue_callbacks(app):
                         "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
                         (vendor_id,),
                     ),
+                    "kpi_receipts_total": (
+                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        "WHERE entity_id=%s AND role='vendor' AND status='confirmed'",
+                        (vendor_id,),
+                    ),
                     "kpi_receivables_total": (
                         "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
                         "FROM receivables WHERE entity_id=%s AND role='vendor' "
