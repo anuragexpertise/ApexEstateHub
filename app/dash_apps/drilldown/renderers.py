@@ -127,7 +127,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("apartment", "event_ticket_items"): {"view"},
     ("security", "cashbook"):     {"view"},
     ("security", "ledger"):       set(),
-    ("security", "financials"):   {"view"},
+    # ("security", "financials") removed (2026-08) along with the tab —
+    # see card_catalogue.py / portal_pages.py / app_shell.py.
     ("security", "*"):            set(),
     ("apartment", "polls"):       {"view"},
     ("vendor", "polls"):          {"view"},
@@ -380,7 +381,9 @@ def render_list_card(card_id: str, title: str, icon: str,
                       filters: dict | None = None,
                       sort: dict | None = None,
                       col_filters: dict | None = None,
-                      filter_options: dict | None = None) -> html.Div:
+                      filter_options: dict | None = None,
+                      fy_options: list[int] | None = None,
+                      selected_fy: int | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
@@ -394,7 +397,7 @@ def render_list_card(card_id: str, title: str, icon: str,
     # ── Resolve permissions for this role × entity ─────────────────────────
     allowed = _perms_for(role, entity)
     # cashbook/ledger rows are paired display constructs from
-    # fn_cashbook_paired_v2 / fn_account_ledger_fy — they carry no single
+    # fn_cashbook_paired_v3 / fn_account_ledger_fy — they carry no single
     # `id` column, so a per-row View/Edit/Delete button would resolve to
     # pk="0" for every row and silently open the same (wrong) profile
     # each time. These two are read-only reports; row-level actions never
@@ -686,6 +689,39 @@ def render_list_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "11px", "borderRadius": "8px",
                        "fontWeight": "600"},
             ))
+
+    # FY select + "Export" button for Cashbook / Ledger — these two are the
+    # entities whose underlying query is itself FY-scoped (see
+    # drilldown_callbacks.py's `list_` branch, which resolves fy_options /
+    # selected_fy and merges financial_year into `filters` before the SQL
+    # call). The dropdown here is the only place that FY can be changed —
+    # previously there was none; both views silently defaulted to the
+    # current FY with no way to look at a prior year on-screen (the plain
+    # CSV/XLS buttons below export whatever page is currently on-screen,
+    # not a full-FY workbook in the CB2025-2026.xlsx reference layout,
+    # which is what the dedicated Export button produces instead).
+    if entity in ("cashbook", "ledger") and fy_options:
+        header_right.append(dbc.Select(
+            id={"type": "list-fy-select", "entity": entity},
+            options=[{"label": f"FY {fy}-{str(fy + 1)[-2:]}", "value": fy}
+                     for fy in fy_options],
+            value=selected_fy,
+            size="sm",
+            style={"width": "110px", "fontSize": "11px",
+                   "borderRadius": "8px", "display": "inline-block"},
+        ))
+        export_label = "Export Cashbook" if entity == "cashbook" else "Export Ledger"
+        header_right.append(dbc.Button(
+            [html.I(className="fas fa-file-excel me-1"), export_label],
+            id={"type": "btn-fy-export", "entity": entity},
+            size="sm", color="primary", outline=True,
+            disabled=(entity == "ledger" and not (filters or {}).get("account_id")),
+            title=("Open an account's ledger first" if entity == "ledger"
+                   and not (filters or {}).get("account_id") else None),
+            style={"fontSize": "11px", "borderRadius": "8px",
+                   "fontWeight": "600"},
+        ))
+        header_right.append(dcc.Download(id={"type": "fy-export-trigger", "entity": entity}))
 
     header_right += [
         dbc.Input(

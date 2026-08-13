@@ -1112,7 +1112,6 @@ DEFAULT_LAYOUTS = {
         "financials": [
             "kpi_receipts_total",
             "kpi_ven_charges_count",
-            "kpi_fy_closing_report",
         ],
         "vendor_passes": [
             "kpi_my_pass_expiry",
@@ -1138,9 +1137,13 @@ DEFAULT_LAYOUTS = {
         "payables": [
             "kpi_security_salaries_due",
         ],
-        "financials": [
-            "kpi_fy_closing_report",
-        ],
+        # "financials" removed (2026-08): its only card was
+        # kpi_fy_closing_report, which was pulled from the Security
+        # portal entirely (society-wide Balance Sheet / Capital Account /
+        # Income & Expenditure detail isn't appropriate for gate staff).
+        # With no cards left, the tab itself was removed too — see
+        # app_shell.py, shell_callbacks.py, portal_pages.py, and
+        # renderers.py's _PORTAL_PERMS for the matching removals.
         "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "security_receipt": ["kpi_receipts_month"],
         "security_receipts": ["kpi_security_receipts"],

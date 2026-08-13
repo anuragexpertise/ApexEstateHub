@@ -662,7 +662,7 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     acc_id INT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
     bf_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (bf_amount >= 0),
-    is_auto_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE if written by fn_close_financial_year
+    is_auto_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- FALSE once a human hand-edits this row (see drilldown_callbacks.py); no automatic writer exists as of 2026-08 (fn_close_financial_year removed)
     remarks VARCHAR(200),
     created_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -3790,17 +3790,16 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 12: CASHBOOK (paired Cr/Dr over transactions table)
--- fn_cashbook_paired (v1) has been retired — loaders.py and
--- cashbook_export.py now both call fn_cashbook_paired_v2 (Cash/Chq
--- split, fixed multi-leg pairing, FY-scoped BF via brought_forward).
--- ════════════════════════════════════════════════════════════════
-
--- fn_cashbook_paired_v2 — fixes the multi-leg journal duplication bug in
--- the old v1 (a journal with 1 Cr + 2 Dr legs repeated the Cr amount on
--- every row instead of once-then-blank), splits amounts into Cash vs Chq
--- columns by transaction mode, and includes rc_acc_id/pc_acc_id (ledger
--- folio) columns. Now the only cashbook function — loaders.py and
--- cashbook_export.py both call this.
+-- fn_cashbook_paired (v1) and fn_cashbook_paired_v2 have both been
+-- retired — v2's replacement (v3, below) is the only cashbook function
+-- left in this schema. loaders.py and cashbook_export.py both call it.
+-- (NOTE 2026-08: this comment previously still said "v2" here — v2 was
+-- already gone from this schema file with nothing left to CREATE it, so
+-- that was stale/misleading, not just imprecise. loaders.py's `cashbook`
+-- entity handler had in fact been left calling fn_cashbook_paired_v2
+-- directly — a function that doesn't exist in the database — which broke
+-- the live Cashbook list view for every portal. Fixed alongside this
+-- comment; see loaders.py's `entity == "cashbook"` branches.)
 DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
     INT,
     INT,
@@ -4182,22 +4181,25 @@ $$;
 -- upstream (an unbalanced transaction, or a bug here) — surface it as an
 -- error rather than rendering a Balance Sheet that doesn't balance.
 
--- TODO before deploying:
+-- TODO before deploying (2026-08 status):
 --   1. Requires the account_category migration to be dropped/ignored
 --      (superseded by the has_bf correction discussed) and the has_bf
 --      corrections in seed.py to be applied first — this function is
 --      only correct once has_bf is TRUE on every genuine carrying
 --      Asset-side account (per your confirmation) and FALSE on Income
 --      Expenditure A/c and the one-off Capital-Account-direct items.
---   2. fn_resolve_bf_amount_fy's own no-row fallback still sums children
---      via drcr_account rather than entry_side — for has_bf=TRUE leaf
---      accounts this shouldn't ever be hit (a BF row should exist), but
---      worth reviewing together with the Phase 3 balance-calc fix.
---   3. Not tested against a live PG16 instance — run pglast + a real DB
+--      STILL OPEN — verify against the live schema before relying on
+--      real closing figures.
+--   2. Not tested against a live PG16 instance — run pglast + a real DB
 --      pass, including a case with a depreciable asset that has both
 --      opening WDV and an in-year purchase, to confirm
 --      fn_account_depreciation's two components both flow through
---      correctly.
+--      correctly. STILL OPEN.
+--
+-- (Previously a 3rd item here said fn_resolve_bf_amount_fy's no-row
+-- fallback still summed children via drcr_account rather than
+-- entry_side. That's been fixed — see fn_resolve_bf_amount_fy's own
+-- comment — so it's removed rather than left as a misleading TODO.)
 -- ═════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
@@ -4993,73 +4995,28 @@ $$;
 -- SECTION 21: LEDGER FUNCTIONS
 -- ============================================================
 
--- Year-end close: compute each has_bf account's closing balance as of
--- 31-Mar of p_financial_year, and write it as the OPENING balance for
--- p_financial_year + 1. p_overwrite=FALSE (default) never touches a row
--- that already exists — protects manual admin overrides. Pass TRUE to
--- force a recompute.
+-- fn_close_financial_year — REMOVED (2026-08).
+--
+-- It computed each has_bf account's closing balance by self-joining
+-- transactions back to accounts on the SAME account (`a2.id = t.acc_id`
+-- where `t.acc_id = rec.acc_id`), so `a2.drcr_account` was always equal
+-- to `rec.drcr_account` for every row. The CASE meant to net Dr vs Cr
+-- therefore always resolved the same way regardless of each individual
+-- transaction's actual direction — the exact class of bug that was fixed
+-- in fn_accounts_list / fn_account_profile / fn_account_ledger_fy /
+-- fn_resolve_bf_amount_fy by switching them onto per-transaction
+-- t.entry_side. This function was never fixed the same way, and — unlike
+-- those four — was never called from anywhere in the Python layer either
+-- (grep confirms zero callers), so it was dead code carrying a live bug.
+--
+-- It's also redundant with the design fn_fy_closing_report already
+-- implements: that function computes every account's FY closing figure
+-- (including the full parent-hierarchy rollup) purely on read, with no
+-- need to persist anything to `brought_forward`. If a persisted year-end
+-- close is wanted later (locking a year's numbers so they don't shift if
+-- a back-dated transaction is entered), rebuild it keyed off entry_side
+-- from scratch rather than resurrecting this version.
 DROP FUNCTION IF EXISTS fn_close_financial_year (INT, SMALLINT, BOOLEAN) CASCADE;
-
-CREATE OR REPLACE FUNCTION fn_close_financial_year(
-    p_society_id     INT,
-    p_financial_year SMALLINT,
-    p_overwrite      BOOLEAN DEFAULT FALSE
-)
-RETURNS INT LANGUAGE plpgsql AS $$
-DECLARE
-    v_fy_end   DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
-    v_count    INT := 0;
-    rec        RECORD;
-    v_closing  NUMERIC(15,2);
-    v_drcr     VARCHAR(2);
-BEGIN
-    FOR rec IN
-        SELECT a.id AS acc_id, a.drcr_account
-        FROM accounts a
-        WHERE a.society_id = p_society_id AND a.has_bf = TRUE
-    LOOP
-        -- Closing balance = opening BF for THIS fy + net movement during it
-        SELECT
-            fn_resolve_bf_amount_fy(p_society_id, rec.acc_id, p_financial_year)
-            + COALESCE(SUM(CASE WHEN rec.drcr_account = 'Cr' THEN
-                              CASE WHEN a2.drcr_account = 'Cr' THEN t.amount ELSE -t.amount END
-                          ELSE
-                              CASE WHEN a2.drcr_account = 'Dr' THEN t.amount ELSE -t.amount END
-                          END), 0)
-        INTO v_closing
-        FROM transactions t
-        JOIN accounts a2 ON a2.id = t.acc_id
-        WHERE t.acc_id = rec.acc_id
-          AND t.society_id = p_society_id
-          AND t.status = 'paid'
-          AND t.trx_date BETWEEN MAKE_DATE(p_financial_year, 4, 1) AND v_fy_end;
- 
-        v_drcr := CASE WHEN v_closing < 0 THEN
-                        CASE WHEN rec.drcr_account = 'Dr' THEN 'Cr' ELSE 'Dr' END
-                   ELSE rec.drcr_account END;
- 
-        INSERT INTO brought_forward (
-            society_id, financial_year, acc_id, drcr_bf, bf_amount,
-            is_auto_calculated, remarks, created_at
-        ) VALUES (
-            p_society_id, p_financial_year + 1, rec.acc_id, v_drcr, ABS(v_closing),
-            TRUE, 'Auto-calculated at year-end close of FY' || p_financial_year, NOW()
-        )
-        ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE
-            SET drcr_bf = EXCLUDED.drcr_bf,
-                bf_amount = EXCLUDED.bf_amount,
-                is_auto_calculated = TRUE,
-                updated_at = NOW()
-            WHERE p_overwrite = TRUE AND brought_forward.is_auto_calculated = TRUE;
-            -- Never overwrites a row an admin hand-edited (is_auto_calculated=FALSE),
-            -- even with p_overwrite=TRUE.
- 
-        v_count := v_count + 1;
-    END LOOP;
- 
-    RETURN v_count;
-END;
-$$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains

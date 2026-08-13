@@ -721,16 +721,9 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Financials (NEW) ────────────────────────────────────────────────────
-    if active_tab == "financials":
-        return html.Div([
-            _page_title("fa-book", c, "Financials", "society-wide financial position"),
-            _kpi_row_dynamic(
-                "security", "financials", sid,
-                cols=KPI_GRID_COLS,
-            ),
-            _divider(), _drill_panel(),
-        ], className="portal-page")
+    # "financials" tab removed (2026-08) — its only card was the
+    # society-wide FY Closing Report, pulled from Security entirely (see
+    # card_catalogue.py). Security's own Cashbook tab below is unaffected.
 
     if active_tab in ("cashbook", "security_cashbook"):
         return html.Div([
