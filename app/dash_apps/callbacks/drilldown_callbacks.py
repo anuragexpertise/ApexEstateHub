@@ -55,6 +55,7 @@ from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
 from database.db_manager import db
+from database import cashbook_export, ledger_export
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
@@ -362,6 +363,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-prev", "entity": ALL}, "n_clicks"),
         Input({"type": "list-page-next", "entity": ALL}, "n_clicks"),
         Input({"type": "list-search", "entity": ALL}, "value"),
+        Input({"type": "list-fy-select", "entity": ALL}, "value"),
         Input({"type": "list-sort", "entity": ALL, "column": ALL}, "n_clicks"),
         Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
         Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
@@ -1218,6 +1220,19 @@ def register_drilldown_callbacks(app):
             store.setdefault("list_pages", {})[entity] = 1
             hide_kpis = True
 
+        # ── Financial-year select (cashbook / ledger) ───────────────────────
+        # Unlike list-filter/list-search (which filter already-loaded rows
+        # client-side), this has to change the underlying SQL call — both
+        # fn_cashbook_paired_v3 and fn_account_ledger_fy take the FY as a
+        # real argument. So it's stored separately (list_fy) and read
+        # straight into `filters["financial_year"]` in _render_card below,
+        # before loaders.load_list runs — not merged into list_filter.
+        elif trig_type == "list-fy-select":
+            entity = id_dict.get("entity")
+            store.setdefault("list_fy", {})[entity] = trig["value"]
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+
         # ── Pagination ────────────────────────────────────────────────────
         elif trig_type in ("list-page-prev", "list-page-next"):
             entity = id_dict.get("entity")
@@ -1626,6 +1641,60 @@ def register_drilldown_callbacks(app):
         csv_str = loaders.export_csv(entity, filters)
         return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
 
+    # ── 3b. CASHBOOK / LEDGER FY EXPORT ─────────────────────────────────────────
+    # Full-FY workbook in the CB2025-2026.xlsx reference layout — distinct from
+    # the generic CSV/XLS buttons above, which just dump whatever page of rows
+    # is currently on-screen. Cashbook needs no account_id (society + FY +
+    # entity scoping); Ledger needs the account_id the drilldown is currently
+    # scoped to (set when navigating in via Account profile -> "View Ledger").
+    @app.callback(
+        Output({"type": "fy-export-trigger", "entity": MATCH}, "data"),
+        Input({"type": "btn-fy-export", "entity": MATCH}, "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def download_fy_export(n_clicks, store, auth):
+        if not n_clicks:
+            return no_update
+        entity = ctx.triggered_id.get("entity")
+        store = store or {}
+        sid = get_current_society_id()
+        if not sid:
+            return no_update
+        filters = nav_state.get_filters(store)
+        filters = _apply_portal_filters(filters, auth or {})
+        fy = (store.get("list_fy") or {}).get(entity)
+        if not fy:
+            fy_options = loaders.get_available_financial_years(sid)
+            fy = fy_options[-1] if fy_options else None
+        if not fy:
+            return no_update
+
+        if entity == "cashbook":
+            entity_id = (filters.get("apartment_id") or filters.get("vendor_id")
+                         or filters.get("security_id") or filters.get("entity_id"))
+            entity_role = (
+                "apartment" if filters.get("apartment_id")
+                else "vendor" if filters.get("vendor_id")
+                else "security" if filters.get("security_id") else None
+            )
+            data = cashbook_export.generate_cashbook_excel_fy(
+                None, sid, fy, entity_id=entity_id, entity_role=entity_role
+            )
+            filename = f"Cashbook_{fy}-{fy+1}.xlsx"
+        elif entity == "ledger":
+            account_id = filters.get("account_id")
+            if not account_id:
+                return no_update
+            data = ledger_export.generate_ledger_excel(None, sid, fy, account_id)
+            filename = f"Ledger_{fy}-{fy+1}.xlsx"
+        else:
+            return no_update
+
+        return dcc.send_bytes(lambda buf: buf.write(data), filename=filename)
+
     # ── 4. XLS DOWNLOAD ───────────────────────────────────────────────────────
     @app.callback(
         Output({"type": "xls-download-trigger", "entity": MATCH}, "data"),
@@ -1838,6 +1907,24 @@ def _render_card(
         col_filters = (store.get("list_filter") or {}).get(entity, {})
         page_size = loaders.PAGE_SIZE
 
+        # Cashbook and Ledger are the two list entities whose query is
+        # itself FY-scoped (fn_cashbook_paired_v3 / fn_account_ledger_fy
+        # both take financial_year as a real SQL argument, unlike the
+        # column filters above which only filter already-loaded rows).
+        # This has to be resolved and merged into `filters` before ANY
+        # loaders.load_list call below, including the filter_options
+        # prefetch, or the FY select would silently do nothing.
+        fy_options, selected_fy = [], None
+        if entity in ("cashbook", "ledger"):
+            fy_sid = get_current_society_id()
+            fy_options = loaders.get_available_financial_years(fy_sid) if fy_sid else []
+            selected_fy = (store.get("list_fy") or {}).get(entity)
+            if selected_fy not in fy_options:
+                selected_fy = fy_options[-1] if fy_options else None
+            if selected_fy:
+                filters = dict(filters)
+                filters["financial_year"] = selected_fy
+
         # Distinct filter options per column (cached in store so we don't
         # re-fetch the full set on every pagination/sort interaction).
         filter_options = (store.get("list_filter_options") or {}).get(entity)
@@ -1911,6 +1998,8 @@ def _render_card(
             sort=sort,
             col_filters=col_filters,
             filter_options=filter_options,
+            fy_options=fy_options,
+            selected_fy=selected_fy,
         )
 
     # ── profile ───────────────────────────────────────────────────────────────
@@ -3380,8 +3469,12 @@ def _current_fy() -> int:
 
 def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount, user_id=None):
     """Manual admin edit via Settings -> Accounts always wins over an
-    auto-calculated year-end value — sets is_auto_calculated=FALSE so
-    fn_close_financial_year() won't clobber it on a future run."""
+    auto-calculated year-end value — sets is_auto_calculated=FALSE.
+    (fn_close_financial_year, the year-end-close function this flag was
+    originally written to protect against, was removed 2026-08 — it had
+    an unfixed entry_side bug and no callers. The is_auto_calculated flag
+    is left in place since it's still meaningful: it distinguishes a
+    hand-entered BF from anything a future auto-close might write.)"""
     fy = _current_fy()
     db._execute(
         "INSERT INTO brought_forward "

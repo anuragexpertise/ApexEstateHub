@@ -12,7 +12,7 @@ Entity map for load_list():
   gate_logs       → fn_gate_logs_named
   receipts        → fn_receipts_list
   expenses        → fn_expenses_list
-  cashbook        → fn_cashbook_paired_v2 (Cash/Chq split, FY-scoped)
+  cashbook        → fn_cashbook_paired_v3 (Cash/Chq split, FY-scoped)
   receivables     → fn_receivables_named   (read-only, all portals)
   payables        → fn_payables_named      (read-only, all portals)
   assets          → fn_asset_list          (admin CRUD + view)
@@ -708,7 +708,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         ) if not eid else None
         fy = filters.get("financial_year", _current_fy())
         fy_start, fy_end = _fy_date_range(fy)
-        return ("SELECT * FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+        # Fixed (2026-08): this called fn_cashbook_paired_v2, which no
+        # longer exists in the schema (superseded by v3 — see SECTION 12
+        # in estatehub.sql) — every "Cashbook" list view in every portal
+        # was throwing a "function does not exist" DB error. v3 takes the
+        # same (society_id, entity_id, entity_role, search, start, end)
+        # positional args v2 did, so this is a drop-in rename.
+        return ("SELECT * FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset))
 
     # ── RECEIVABLES ─────────────────────────────────────────────────────
@@ -1266,12 +1272,14 @@ def load_list(
             ) if not eid else None
             fy = filters.get("financial_year", _current_fy())
             fy_start, fy_end = _fy_date_range(fy)
+            # Fixed (2026-08): same fn_cashbook_paired_v2 -> v3 rename as
+            # the paginated branch above (SECTION 12 in estatehub.sql).
             rows = db._execute(
-                "SELECT * FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
+                "SELECT * FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_cashbook_paired_v2(%s,%s,%s,%s,%s,%s)",
+                "SELECT COUNT(*) AS n FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s)",
                 (sid, p_eid, p_etype, s, fy_start, fy_end), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))

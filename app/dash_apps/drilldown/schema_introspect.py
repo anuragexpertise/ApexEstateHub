@@ -549,7 +549,7 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
 }
 
 
-# Cashbook is backed by fn_cashbook_paired_v2(), which returns a paired
+# Cashbook is backed by fn_cashbook_paired_v3(), which returns a paired
 # credit/debit layout with rc_*/pc_* columns already split into Cash vs
 # Chq (cheque/UPI/card/bank/crypto) sub-columns. The generic transactions
 # table introspection produces columns that do not match this output,

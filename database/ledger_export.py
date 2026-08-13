@@ -7,27 +7,32 @@ matching the ld.xlsx reference layout supplied 2026-08:
 
   Date | A/c | Description | CB F No. | Debit | Credit | Dr or Cr | Balance
 
-DEPENDS ON: transactions.entry_side (Phase 1 migration) for correct
-Debit/Credit column placement and Dr-or-Cr labeling — see the same caveat
-as cashbook_export.py. This module does not fall back to inferring
-direction from accounts.drcr_account.
+DEPENDS ON: fn_account_ledger_fy (estatehub.sql SECTION 5), which already
+implements the full year-end cascade — FY-scoped BF resolution, per-
+transaction entry_side netting, the depreciation split for depreciable
+accounts, and the C/F-to-hierarchy-parent closing row — via row_type
+'bf' | 'txn' | 'depreciation' | 'closing'. This module is a thin
+Excel-formatting layer over that function's output; it does NOT
+reimplement any of the closing arithmetic itself.
 
-STATUS OF THE YEAR-END CLOSE (depreciation split, C/F to hierarchy parent,
-Dep -> Income & Expenditure, profit -> Capital Account -> Balance Sheet):
-NOT implemented in this pass. That cascade touches every account in the
-hierarchy simultaneously (a leaf account's C/F becomes a line in its
-parent's ledger, which itself closes to its parent, and so on up to the
-Balance Sheet, with a side-branch through the Depreciation and
-Income & Expenditure accounts) and needs its own design + testing before
-it's trusted to produce correct closing figures. `_compute_closing_row`
-below is the seam where that logic plugs in once it exists — right now it
-returns a placeholder C/F that just zeroes the account against itself,
-which is NOT correct and is flagged loudly in the generated sheet so it
-can't be mistaken for a real closing figure.
+Fixed (2026-08): this module previously queried `transactions` directly
+and computed its own running balance, then wrote a placeholder C/F row
+(`_compute_closing_row`) that zeroed the account against itself and was
+explicitly flagged as not implementing the real cascade. That cascade
+already exists in fn_account_ledger_fy — the placeholder just wasn't
+pointed at it. Rewritten to call fn_account_ledger_fy directly instead of
+duplicating (and under-implementing) its logic.
 
-Entity/user scoping mirrors cashbook_export.py: entity_id / entity_role
-scope the underlying transactions to a specific owner/vendor/security user
-when the caller isn't on the admin "ALL" view.
+Entity/user scoping: NONE. fn_account_ledger_fy takes no entity_id /
+entity_role — it's an account-level ledger (every transaction posted to
+this one account, across the whole society), not an entity-scoped one.
+This matches the live "Account Ledger" drilldown view (loaders.py's
+`entity == "ledger"` branch, reached via profile_account -> show_ledger),
+which has never taken entity scoping either. Both are consistent with
+`ledger` being an admin-only entity (renderers.py's _PORTAL_PERMS gives
+every non-admin role an empty permission set for it) — no other portal
+can reach a ledger export, so there is nothing to scope by entity in the
+first place.
 """
 
 from __future__ import annotations
@@ -41,12 +46,11 @@ _FONT_BODY   = Font(name="Arial", size=9)
 _FONT_HEADER = Font(name="Arial", size=9, bold=True)
 _FONT_TITLE  = Font(name="Arial", size=10, bold=True)
 _FONT_BFCF   = Font(name="Arial", size=9, bold=True, italic=True)
-_FONT_WARN   = Font(name="Arial", size=9, bold=True, italic=True, color="9C0006")
 
 _FILL_HEADER = PatternFill("solid", fgColor="D9E1F2")
 _FILL_BF     = PatternFill("solid", fgColor="E2EFDA")
 _FILL_CF     = PatternFill("solid", fgColor="FCE4D6")
-_FILL_WARN   = PatternFill("solid", fgColor="FFC7CE")
+_FILL_DEP    = PatternFill("solid", fgColor="FFF2CC")
 
 _ALIGN_C = Alignment(horizontal="center", vertical="center")
 _ALIGN_L = Alignment(horizontal="left",   vertical="center")
@@ -60,20 +64,12 @@ _FMT_AMT  = '#,##0.00;[Red](#,##0.00);"-"'
 
 _COL_WIDTHS = {"A": 11, "B": 12, "C": 32, "D": 8, "E": 11, "F": 11, "G": 8, "H": 12}
 
-
-def _compute_closing_row(account: dict, fy_running_balance: float) -> dict:
-    """
-    PLACEHOLDER — see module docstring. Returns a C/F row that balances
-    the account against itself, which does NOT implement depreciation,
-    hierarchy transfer, or the Dep/Income&Expenditure/Capital Account
-    cascade. Replace this once that engine is designed.
-    """
-    return {
-        "to_account": "(unresolved — see closing engine TODO)",
-        "amount": abs(fy_running_balance),
-        "side": "Cr" if fy_running_balance > 0 else "Dr",
-        "is_placeholder": True,
-    }
+_ROW_STYLE = {
+    "bf":           (_FONT_BFCF, _FILL_BF),
+    "closing":      (_FONT_BFCF, _FILL_CF),
+    "depreciation": (_FONT_BODY, _FILL_DEP),
+    "txn":          (_FONT_BODY, PatternFill()),
+}
 
 
 def generate_ledger_excel(
@@ -81,56 +77,32 @@ def generate_ledger_excel(
     society_id: int,
     fy: int,
     account_id: int,
-    entity_id: int | None = None,
-    entity_role: str | None = None,
 ) -> bytes:
     """
-    Builds a single-account ledger sheet for the given FY. Requires
-    transactions.entry_side to exist.
+    Builds a single-account ledger sheet for the given FY, sourced
+    entirely from fn_account_ledger_fy(society_id, account_id, fy) — see
+    module docstring for why no entity_id/entity_role params are taken.
     """
     from database.db_manager import db as _db
     if db is None:
         db = _db
 
     acc = db._execute(
-        "SELECT id, name, drcr_account, has_bf, drcr_bf, depreciation_percent, "
-        "hierarchy_parent_id, is_cash_or_bank "
-        "FROM accounts WHERE id=%s AND society_id=%s",
+        "SELECT id, name FROM accounts WHERE id=%s AND society_id=%s",
         (account_id, society_id), fetch_one=True,
     )
     if not acc:
         raise ValueError(f"Account {account_id} not found for society {society_id}")
 
-    soc = db._execute(
-        "SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True
-    ) or {}
-    society_name = soc.get("name", "Society")
     asst_year = f"{fy}-{fy+1}"
 
-    bf_amount = 0.0
-    bf_side = None
-    if acc.get("has_bf"):
-        bf_row = db._execute(
-            "SELECT bf_amount, drcr_bf FROM brought_forward "
-            "WHERE acc_id=%s AND society_id=%s AND financial_year=%s",
-            (account_id, society_id, fy), fetch_one=True,
-        )
-        if bf_row:
-            bf_amount = float(bf_row["bf_amount"] or 0)
-            bf_side = bf_row["drcr_bf"]
-
-    fy_start = date(fy, 4, 1)
-    fy_end = date(fy + 1, 3, 31)
-    txn_rows = db._execute(
-        "SELECT t.trx_date, t.acc_particulars, t.journal_id, t.amount, t.entry_side, "
-        "       (SELECT r.receipt_number FROM receipts r WHERE r.transaction_id=t.id) AS cb_f_no "
-        "FROM transactions t "
-        "WHERE t.acc_id=%s AND t.society_id=%s AND t.status='paid' "
-        "  AND t.trx_date BETWEEN %s AND %s "
-        "  AND (%s IS NULL OR t.entity_id=%s) "
-        "ORDER BY t.trx_date, t.id",
-        (account_id, society_id, fy_start, fy_end, entity_id, entity_id),
-        fetch_all=True,
+    # Insertion order out of fn_account_ledger_fy is already correct
+    # (bf -> txns by date -> depreciation -> closing); no ORDER BY here,
+    # since sorting by row_date alone would shuffle the depreciation and
+    # closing rows, which share the same FY-end date.
+    ledger_rows = db._execute(
+        "SELECT * FROM fn_account_ledger_fy(%s,%s,%s)",
+        (society_id, account_id, fy), fetch_all=True,
     ) or []
 
     wb = Workbook()
@@ -158,72 +130,32 @@ def generate_ledger_excel(
         cell.alignment, cell.border = _ALIGN_C, _BORDER_ALL
     ws.row_dimensions[5].height = 6
 
-    running_balance = 0.0
     current_row = 6
-
-    if acc.get("has_bf") and bf_side:
-        bf_debit  = bf_amount if bf_side == "Dr" else None
-        bf_credit = bf_amount if bf_side == "Cr" else None
-        running_balance = bf_amount if bf_side == "Dr" else -bf_amount
-        row = {1: fy_start, 2: "Balance", 3: "B/F", 5: bf_debit, 6: bf_credit,
-               7: bf_side, 8: abs(running_balance)}
-        for col, val in row.items():
-            cell = ws.cell(row=current_row, column=col, value=val)
-            cell.font, cell.fill = _FONT_BFCF, _FILL_BF
-            cell.border = _BORDER_ALL
-            cell.alignment = _ALIGN_R if col in (5, 6, 8) else _ALIGN_L
-            if col == 1:
-                cell.number_format = _FMT_DATE
-            elif col in (5, 6, 8):
-                cell.number_format = _FMT_AMT
-        current_row += 1
-
-    for r in txn_rows:
-        entry_side = r["entry_side"]
-        amt = float(r["amount"] or 0)
-        debit  = amt if entry_side == "Dr" else None
-        credit = amt if entry_side == "Cr" else None
-        running_balance += amt if entry_side == "Dr" else -amt
-        row_side = "Dr" if running_balance >= 0 else "Cr"
+    for r in ledger_rows:
+        row_type = r.get("row_type") or "txn"
+        font, fill = _ROW_STYLE.get(row_type, (_FONT_BODY, PatternFill()))
+        debit  = float(r["debit"])  if r.get("debit")  else None
+        credit = float(r["credit"]) if r.get("credit") else None
+        balance = float(r.get("balance") or 0)
+        drcr = None
+        if row_type in ("bf", "txn", "depreciation"):
+            drcr = "Dr" if debit and not credit else ("Cr" if credit and not debit else None)
 
         row = {
-            1: r["trx_date"], 2: acc["name"], 3: r.get("acc_particulars") or "",
-            4: r.get("cb_f_no") or r.get("journal_id"),
-            5: debit, 6: credit, 7: row_side, 8: abs(running_balance),
+            1: r.get("row_date"), 2: r.get("parent_name") if row_type == "closing" else acc["name"],
+            3: r.get("particulars") or "",
+            5: debit, 6: credit, 7: drcr, 8: abs(balance) if balance is not None else None,
         }
         for col, val in row.items():
             cell = ws.cell(row=current_row, column=col, value=val)
-            cell.font = _FONT_BODY
+            cell.font, cell.fill = font, fill
             cell.border = _BORDER_ALL
             cell.alignment = _ALIGN_R if col in (5, 6, 8) else _ALIGN_L
-            if col == 1:
+            if col == 1 and val:
                 cell.number_format = _FMT_DATE
             elif col in (5, 6, 8):
                 cell.number_format = _FMT_AMT
         current_row += 1
-
-    # ── C/F row ──────────────────────────────────────────────────────────
-    closing = _compute_closing_row(acc, running_balance)
-    cf_debit  = closing["amount"] if closing["side"] == "Cr" else None   # opposite side zeroes it out
-    cf_credit = closing["amount"] if closing["side"] == "Dr" else None
-    row = {1: fy_end, 2: closing["to_account"], 3: "C/F",
-           5: cf_debit, 6: cf_credit, 7: None, 8: 0}
-    font = _FONT_WARN if closing.get("is_placeholder") else _FONT_BFCF
-    fill = _FILL_WARN if closing.get("is_placeholder") else _FILL_CF
-    for col, val in row.items():
-        cell = ws.cell(row=current_row, column=col, value=val)
-        cell.font, cell.fill = font, fill
-        cell.border = _BORDER_ALL
-        cell.alignment = _ALIGN_R if col in (5, 6, 8) else _ALIGN_L
-        if col == 1:
-            cell.number_format = _FMT_DATE
-        elif col in (5, 6, 8):
-            cell.number_format = _FMT_AMT
-    if closing.get("is_placeholder"):
-        warn_row = current_row + 1
-        ws.cell(row=warn_row, column=2,
-                value="⚠ Closing engine not yet implemented — this C/F is a placeholder, not a real figure.")
-        ws.cell(row=warn_row, column=2).font = _FONT_WARN
 
     ws.freeze_panes = "A6"
 
