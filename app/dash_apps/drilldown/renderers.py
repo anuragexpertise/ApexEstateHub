@@ -3420,6 +3420,13 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
     return dbc.Card([
         dbc.CardHeader(html.H6("Create New Channel", style={"fontWeight": "700", "margin": 0})),
         dbc.CardBody([
+            dbc.Alert(
+                [html.I(className="fas fa-info-circle me-2"),
+                 "New channels start active and can receive alerts right away."],
+                color="info",
+                style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                       "borderRadius": "8px", "marginBottom": "12px"},
+            ),
             dcc.Input(id={"type": "form-entity-pk", "entity": "channel"}, type="hidden", value=""),
             dbc.Row([
                 dbc.Col([

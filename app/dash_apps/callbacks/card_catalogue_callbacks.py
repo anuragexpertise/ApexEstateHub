@@ -72,6 +72,38 @@ def invalidate_kpi_cache(card_id=None):
                 _KPI_CACHE.pop(key, None)
 
 
+def _style_kpi_value(card_id, value, raw):
+    """Post-process specific KPI values for conditional styling."""
+    if card_id == "kpi_my_pass_expiry" and raw not in (None, "", "—"):
+        try:
+            if isinstance(raw, str):
+                for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        raw_date = datetime.strptime(raw.strip(), fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    return value
+            elif isinstance(raw, datetime):
+                raw_date = raw.date()
+            elif isinstance(raw, date):
+                raw_date = raw
+            else:
+                return value
+            diff = (raw_date - date.today()).days
+            if diff < 0:
+                color = "#de5c52"
+            elif diff <= 7:
+                color = "#e59620"
+            else:
+                color = "#17976e"
+            return html.Span(value, style={"color": color, "fontWeight": "700"})
+        except Exception:
+            pass
+    return value
+
+
 # Card_ids that _scoped_override() (below) personalises per-entity, grouped by
 # role. Mirrors the "overrides" dict keys inside _scoped_override exactly —
 # kept in sync manually since that function is a closure defined inside
@@ -558,6 +590,7 @@ def register_card_catalogue_callbacks(app):
                 for slot, (idx, card_id, q, params, fmt, ckey, is_scoped) in enumerate(pending):
                     raw = value_by_slot.get(slot)
                     value = format_kpi_value(raw, fmt)
+                    value = _style_kpi_value(card_id, value, raw)
                     _set_cached(ckey, value)
                     results[idx] = value
             else:
@@ -579,6 +612,7 @@ def register_card_catalogue_callbacks(app):
                             row = db._execute(q, params, fetch_one=True)
                             raw = (row or {}).get("v")
                             value = format_kpi_value(raw, fmt)
+                            value = _style_kpi_value(card_id, value, raw)
                             _set_cached(ckey, value)
                             results[idx] = value
                         except Exception as exc:
