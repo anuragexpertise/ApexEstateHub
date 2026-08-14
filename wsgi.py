@@ -22,31 +22,6 @@ from app import create_app, create_dash_app
 flask_app = create_app(os.getenv('FLASK_CONFIG', 'production'))
 dash_app = create_dash_app(flask_app)
 server = dash_app.server  # ← gunicorn will import and use this
-# application= server
-# ════════════════════════════════════════════════════════════════
-# GUNICORN WORKER CONFIGURATION (optional)
-# ════════════════════════════════════════════════════════════════
-
-def when_ready(server):
-    """Called when gunicorn server starts."""
-    print(f"✅ EstateHub production server is ready")
-
-def post_fork(server, worker):
-    """Called after a worker is forked."""
-    print(f"🔄 Worker {worker.pid} started")
-    try:
-        from app.services.redis_broker import broker
-        broker.start(lambda payload: broker.dispatch_to_listeners(payload))
-    except Exception as exc:
-        print(f"⚠️  SSE Redis broker not started in worker {worker.pid}: {exc}")
-
-def post_worker_exit(server, worker):
-    """Called after a worker exits."""
-    print(f"🔄 Worker {worker.pid} exited")
-
-# ════════════════════════════════════════════════════════════════
-# LOCAL TESTING ONLY (remove for production)
-# ════════════════════════════════════════════════════════════════
 
 if __name__ == '__main__':
     # For local testing only - use run.py instead!

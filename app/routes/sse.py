@@ -35,6 +35,7 @@ def events():
         return Response("Unauthorized", status=401, mimetype="text/plain")
 
     user_id = int(current_user.get_id())
+    society_id = getattr(current_user, 'society_id', None)
 
     def _stream():
         queue = []
@@ -44,7 +45,7 @@ def events():
             with lock:
                 queue.append(payload)
 
-        broker.register(user_id, _local_push)
+        broker.register(user_id, society_id, _local_push)
 
         try:
             yield f": connected user={user_id}\n\n"
