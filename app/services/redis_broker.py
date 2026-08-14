@@ -44,20 +44,20 @@ class RedisBroker:
     def __init__(self) -> None:
         self._subscriber_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._listeners: dict[int, list] = defaultdict(list)
+        self._listeners: dict[int, list[tuple[int, any]]] = defaultdict(list)
         self._lock = threading.Lock()
         self._on_message_cb = None
 
-    def register(self, user_id: int, stream):
+    def register(self, user_id: int, society_id: int, stream):
         with self._lock:
-            self._listeners[user_id].append(stream)
+            self._listeners[user_id].append((society_id, stream))
 
     def unregister(self, user_id: int, stream):
         with self._lock:
-            try:
-                self._listeners[user_id].remove(stream)
-            except ValueError:
-                pass
+            if user_id in self._listeners:
+                self._listeners[user_id] = [
+                    (soc, s) for soc, s in self._listeners[user_id] if s is not stream
+                ]
 
     def publish(self, payload: dict):
         """
@@ -128,22 +128,23 @@ class RedisBroker:
         """
         target_user = payload.get("user_id")
         society_id = payload.get("society_id")
-        data = json.dumps(payload) + "\n"
         dead: list[tuple] = []
         with self._lock:
             if target_user:
-                for stream in self._listeners.get(target_user, []):
+                for stream_society_id, stream in self._listeners.get(target_user, []):
                     try:
-                        stream.write(f"data: {data}\n\n")
+                        stream(payload)
                     except Exception:
                         dead.append((target_user, stream))
             if society_id:
-                for uid, streams in self._listeners.items():
+                for uid, entries in self._listeners.items():
                     if uid == target_user:
                         continue
-                    for stream in streams:
+                    for stream_society_id, stream in entries:
+                        if stream_society_id != society_id:
+                            continue
                         try:
-                            stream.write(f"data: {data}\n\n")
+                            stream(payload)
                         except Exception:
                             dead.append((uid, stream))
         for uid, stream in dead:

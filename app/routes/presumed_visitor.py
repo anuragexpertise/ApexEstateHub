@@ -9,8 +9,7 @@ is needed there.
 """
 
 from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
-from app.security.guards import require_session
+from flask_login import login_required
 import logging
 
 from app.services.alert_service import create_walk_in_visitor, get_presumed_visitors
@@ -21,7 +20,7 @@ presumed_bp = Blueprint('presumed_visitor', __name__)
 
 
 @presumed_bp.route('/api/owner/presumed-visitors', methods=['POST'])
-@require_session
+@login_required
 def create_presumed_visitor():
     """
     Owner pre-registers an expected visitor.
@@ -99,7 +98,7 @@ def create_presumed_visitor():
 
 
 @presumed_bp.route('/api/owner/presumed-visitors', methods=['GET'])
-@require_session
+@login_required
 def list_presumed_visitors():
     user_id = int(current_user.get_id())
     role = getattr(current_user, 'role', '')
