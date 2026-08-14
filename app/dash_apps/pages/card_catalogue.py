@@ -1104,7 +1104,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
         ],
-        "cashbook": ["kpi_receipts_month", "kpi_expenses_month"],
+        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         "owner_receipts": ["kpi_receipts_total"],
         "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
         # Per the Concerns workflow spec: Owner/Concerns tab shows "not
@@ -1131,7 +1131,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pass_expiry",
         ],
         "vendor_receipts": ["kpi_receipts_total"],
-        "cashbook": ["kpi_receipts_total"],
+        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
         # Per the Concerns workflow spec: Vendor/Concerns tab shows
         # "invited", "assigned", and "resolved".
         "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],

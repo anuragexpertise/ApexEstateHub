@@ -57,11 +57,15 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
     return html.Div([
         html.H4("Edit Poll" if is_edit else "Create New Poll",
                 className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
-        html.Small(
-            "Admin-only: choices can't be changed once someone has voted"
-            if is_edit else
-            "Admin-only: create a new poll for your society",
-            style={"color": "#aaa", "fontSize": "12px"}),
+        dbc.Alert(
+            [html.I(className="fas fa-info-circle me-2"),
+             "Admin-only: choices can't be changed once someone has voted"
+             if is_edit else
+             "Admin-only: create a new poll for your society"],
+            color="info" if not is_edit else "warning",
+            style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                   "borderRadius": "8px", "marginBottom": "8px"},
+        ),
         html.Hr(style={"margin": "16px 0", "opacity": "0.12"}),
         dbc.Form([
             dcc.Input(id="poll-edit-id", type="hidden", value=str(prefill.get("id") or "")),
