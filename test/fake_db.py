@@ -175,92 +175,110 @@ class FakeDB:
             return {f"p{i}": v for i, v in enumerate(params)}
         return {}
 
+    def _match_single(self, row: dict, part: str, p: dict, pctr: int) -> tuple[bool, int]:
+        """Evaluate a single condition (no AND/OR). Returns (matched, new_pctr)."""
+        part = part.strip()
+        if not part:
+            return True, pctr
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s*=\s*(?:%\(\w+\)s|%s)\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            idx = pctr + part.count("%s") - 1
+            val = self._resolve_param(col, part, p, index=idx)
+            if str(row.get(col)).lower() != str(val).lower():
+                return False, pctr
+            return True, pctr + part.count("%s")
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s*ILIKE\s*(?:%\(\w+\)s|%s)\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            idx = pctr + part.count("%s") - 1
+            val = self._resolve_param(col, part, p, index=idx)
+            pattern = str(val).replace("%", "")
+            if pattern not in str(row.get(col, "")):
+                return False, pctr
+            return True, pctr + part.count("%s")
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s+IS\s+NULL\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            if row.get(col) is not None:
+                return False, pctr
+            return True, pctr
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s+IS\s+NOT\s+NULL\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            if row.get(col) is None:
+                return False, pctr
+            return True, pctr
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s*!=\s*(?:%\(\w+\)s|%s)\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            idx = pctr + part.count("%s") - 1
+            val = self._resolve_param(col, part, p, index=idx)
+            if str(row.get(col)).lower() == str(val).lower():
+                return False, pctr
+            return True, pctr + part.count("%s")
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s*(>=|<=|>|<)\s*(?:%\(\w+\)s|%s)\)?", part, re.IGNORECASE)
+        if m:
+            col, op = m.group(1), m.group(2)
+            idx = pctr + part.count("%s") - 1
+            val = self._resolve_param(col, part, p, index=idx)
+            rv = row.get(col)
+            try:
+                rv_f = float(rv) if rv is not None else 0
+                val_f = float(val)
+                if op == ">" and not (rv_f > val_f):
+                    return False, pctr
+                if op == ">=" and not (rv_f >= val_f):
+                    return False, pctr
+                if op == "<" and not (rv_f < val_f):
+                    return False, pctr
+                if op == "<=" and not (rv_f <= val_f):
+                    return False, pctr
+            except (TypeError, ValueError):
+                pass
+            return True, pctr + part.count("%s")
+        m = re.match(r"\(?(?:\w+\.)?(\w+)\s*=\s*ANY\s*\(%s\)\)?", part, re.IGNORECASE)
+        if m:
+            col = m.group(1)
+            val = self._resolve_param(col, part, p)
+            if isinstance(val, (list, tuple)):
+                if row.get(col) not in [str(x) for x in val]:
+                    return False, pctr
+            return True, pctr + part.count("%s")
+        return True, pctr + part.count("%s")
+
     def _match_where(self, row: dict, where_clause: str, params, param_offset=0) -> bool:
-        """Very naive WHERE matcher — handles =, ILIKE, IS NULL, IS NOT NULL, IN."""
+        """Very naive WHERE matcher — handles =, ILIKE, IS NULL, IS NOT NULL, IN, AND, OR."""
         p = self._dict_params(params)
         if not where_clause:
             return True
         wc = where_clause.strip()
         if wc.upper().startswith("WHERE"):
             wc = wc[4:].strip()
-        parts = re.split(r"\bAND\b", wc, flags=re.IGNORECASE)
+        # Split by top-level AND
+        and_parts = re.split(r"\bAND\b", wc, flags=re.IGNORECASE)
         global_pctr = param_offset
-        for part in parts:
-            part = part.strip()
-            if not part:
+        for and_part in and_parts:
+            and_part = and_part.strip()
+            if not and_part:
                 continue
-            m = re.match(r"(\w+)\s*=\s*(?:%\(\w+\)s|%s)", part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                idx = global_pctr + part.count("%s") - 1
-                val = self._resolve_param(col, part, p, index=idx)
-                if str(row.get(col)).lower() != str(val).lower():
+            # Check if this AND part contains OR
+            if re.search(r"\bOR\b", and_part, flags=re.IGNORECASE):
+                or_parts = re.split(r"\bOR\b", and_part, flags=re.IGNORECASE)
+                or_matched = False
+                or_pctr = global_pctr
+                for or_part in or_parts:
+                    matched, or_pctr = self._match_single(row, or_part, p, or_pctr)
+                    if matched:
+                        or_matched = True
+                        break
+                if not or_matched:
                     return False
-                global_pctr += part.count("%s")
-                continue
-            m = re.match(r'(\w+)\s*ILIKE\s*(?:%\(\w+\)s|%s)', part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                idx = global_pctr + part.count("%s") - 1
-                val = self._resolve_param(col, part, p, index=idx)
-                pattern = str(val).replace("%", "")
-                if pattern not in str(row.get(col, "")):
+                global_pctr = or_pctr
+            else:
+                matched, global_pctr = self._match_single(row, and_part, p, global_pctr)
+                if not matched:
                     return False
-                global_pctr += part.count("%s")
-                continue
-            m = re.match(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                if row.get(col) is not None:
-                    return False
-                continue
-            m = re.match(r"(\w+)\s+IS\s+NOT\s+NULL", part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                if row.get(col) is None:
-                    return False
-                continue
-            m = re.match(r"(\w+)\s*!=\s*(?:%\(\w+\)s|%s)", part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                idx = global_pctr + part.count("%s") - 1
-                val = self._resolve_param(col, part, p, index=idx)
-                if str(row.get(col)).lower() == str(val).lower():
-                    return False
-                global_pctr += part.count("%s")
-                continue
-            m = re.match(r"(\w+)\s*(>=|<=|>|<)\s*(?:%\(\w+\)s|%s)", part, re.IGNORECASE)
-            if m:
-                col, op = m.group(1), m.group(2)
-                idx = global_pctr + part.count("%s") - 1
-                val = self._resolve_param(col, part, p, index=idx)
-                rv = row.get(col)
-                try:
-                    rv_f = float(rv) if rv is not None else 0
-                    val_f = float(val)
-                    if op == ">" and not (rv_f > val_f):
-                        return False
-                    if op == ">=" and not (rv_f >= val_f):
-                        return False
-                    if op == "<" and not (rv_f < val_f):
-                        return False
-                    if op == "<=" and not (rv_f <= val_f):
-                        return False
-                except (TypeError, ValueError):
-                    pass
-                global_pctr += part.count("%s")
-                continue
-            m = re.match(r"(\w+)\s*=\s*ANY\s*\(%s\)", part, re.IGNORECASE)
-            if m:
-                col = m.group(1)
-                val = self._resolve_param(col, part, p)
-                if isinstance(val, (list, tuple)):
-                    if row.get(col) not in [str(x) for x in val]:
-                        return False
-                global_pctr += part.count("%s")
-                continue
-            # No pattern matched — count %s to keep global index in sync
-            global_pctr += part.count("%s")
         return True
 
     def _resolve_param(self, col, part, params, index=0):
@@ -315,7 +333,7 @@ class FakeDB:
         where = where_m.group(1).strip() if where_m else ""
         rows = [r for r in self.tables[table] if self._match_where(r, where, params)]
         # ORDER
-        order_m = re.search(r"ORDER\s+BY\s+(\w+)(?:\s+(ASC|DESC))?", rest, re.IGNORECASE)
+        order_m = re.search(r"ORDER\s+BY\s+(?:\w+\.)?(\w+)(?:\s+(ASC|DESC))?", rest, re.IGNORECASE)
         if order_m:
             col = order_m.group(1).lower()
             direction = (order_m.group(2) or "ASC").upper()
@@ -329,7 +347,7 @@ class FakeDB:
             rows = rows[offset:offset + limit]
         if fetch_one:
             return rows[0] if rows else None
-        return rows if fetch_all else (rows[0] if rows else None)
+        return rows if fetch_all else rows
 
     def _handle_insert(self, sql, params, fetch_one):
         table = self._table_from_sql(sql)
@@ -592,8 +610,11 @@ class FakeDB:
         sid = p.get("p0") or p.get("society_id")
         acc_id = p.get("p1") or p.get("account_id")
         fy = p.get("p2") or p.get("fy")
+        fy_start = f"{fy}-04-01"
+        fy_end = f"{fy + 1}-03-31"
         txs = [r for r in self.tables.get("transactions", [])
-               if r.get("society_id") == sid and r.get("acc_id") == acc_id]
+               if r.get("society_id") == sid and r.get("acc_id") == acc_id
+               and fy_start <= (r.get("trx_date") or "") <= fy_end]
         return txs if fetch_all else (txs[0] if txs else None)
 
     def _fn_trial_balance(self, p, fetch_one, fetch_all):

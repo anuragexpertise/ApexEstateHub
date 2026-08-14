@@ -19,7 +19,7 @@ from app.dash_apps.drilldown import loaders
 def _seed_financial_world(patched_db):
     patched_db.tables.setdefault("societies", []).append({
         "id": 1, "name": "Sunrise", "plan": "Free", "plan_validity": "2027-12-31",
-        "calc_start_date": "2026-04-01",
+        "calc_start_date": date(2026, 4, 1),
     })
     patched_db.tables.setdefault("users", []).append({
         "id": 1, "email": "admin@sun.com", "role": "admin", "society_id": 1,
@@ -35,7 +35,7 @@ def _seed_financial_world(patched_db):
         {"id": 2311, "society_id": 1, "name": "Society Maintenance Charge",
          "tab_name": "IncExp", "drcr_account": "Cr", "has_bf": False},
     ])
-    # Seed transactions for FY 2025-26
+    # Seed transactions for FY 2025-26 — balanced books
     patched_db.tables.setdefault("transactions", []).extend([
         {"id": 1, "society_id": 1, "acc_id": 2311, "amount": 12000, "entry_side": "Cr",
          "mode": "cash", "status": "paid", "trx_date": "2025-04-05",
@@ -46,6 +46,9 @@ def _seed_financial_world(patched_db):
         {"id": 3, "society_id": 1, "acc_id": 633, "amount": 12000, "entry_side": "Dr",
          "mode": "cash", "status": "paid", "trx_date": "2025-04-05",
          "particulars": "Cash received", "updated_by": 1},
+        {"id": 4, "society_id": 1, "acc_id": 6311, "amount": 12000, "entry_side": "Dr",
+         "mode": "bank", "status": "paid", "trx_date": "2025-04-05",
+         "particulars": "Bank receipt", "updated_by": 1},
     ])
 
 
