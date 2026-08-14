@@ -281,7 +281,7 @@ def generate_cashbook_excel_fy(
     month, year = 4, fy
     for _ in range(12):
         month_start = date(year, month, 1)
-        month_end = date(year + 1, 4, 1) if month == 3 else date(year, month + 1, 1)
+        month_end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
         month_rows = [r for r in all_rows if month_start <= r["row_date"] < month_end]
 
         ws = wb.create_sheet(title=month_start.strftime("%b"))
@@ -289,8 +289,8 @@ def generate_cashbook_excel_fy(
             ws, month_rows, opening_balance, society_name, pan, asst_year, month_start, filename
         )
 
-        if month == 3:
-            month, year = 4, year + 1
+        if month == 12:
+            month, year = 1, year + 1
         else:
             month += 1
 
