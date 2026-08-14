@@ -575,10 +575,29 @@ def register_shell_callbacks(app):
             if (window.initializePushNotifications) {
                 window.initializePushNotifications();
             }
+            if (window.EstateHubSSE && window.EstateHubSSE.start) {
+                window.EstateHubSSE.start();
+            }
             return window.dash_clientside.no_update;
         }
         """,
         Output("push-init-dummy", "children"),
+        Input("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(auth) {
+            if (!auth || !auth.authenticated) {
+                if (window.EstateHubSSE && window.EstateHubSSE.stop) {
+                    window.EstateHubSSE.stop();
+                }
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("push-init-dummy", "children", allow_duplicate=True),
         Input("auth-store", "data"),
         prevent_initial_call=True,
     )

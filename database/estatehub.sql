@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS users (
     -- See app/services/qr_service.py _current_qr_version's ADM branch.
     qr_version INT NOT NULL DEFAULT 1,
     login_method VARCHAR(20) DEFAULT 'password',
+    -- push_subscription is DEPRECATED; use push_subscriptions table instead.
+    -- Kept here for migration compatibility only.
     push_subscription TEXT,
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
@@ -87,6 +89,21 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users (id)
 );
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id            SERIAL PRIMARY KEY,
+    user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint      TEXT NOT NULL,
+    p256dh        TEXT NOT NULL,
+    auth          TEXT NOT NULL,
+    user_agent    TEXT,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_used_at  TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id, endpoint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 
 ALTER TABLE societies DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 
@@ -748,6 +765,7 @@ CREATE TABLE IF NOT EXISTS visitors (
     security_user_id INT REFERENCES users(id),
     entered_at       TIMESTAMP,
     exited_at        TIMESTAMP,
+    source           VARCHAR(20) NOT NULL DEFAULT 'security' CHECK (source IN ('owner', 'security')),
     created_at       TIMESTAMP DEFAULT NOW()
 );
 

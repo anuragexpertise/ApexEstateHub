@@ -182,10 +182,10 @@ def subscribe_push():
 @login_required
 def unsubscribe_push():
     try:
-        db._execute(
-            'UPDATE users SET push_subscription = NULL WHERE id = %s',
-            (current_user.id,)
-        )
+        from app.services.push_service import get_push_subscriptions, remove_push_subscription
+        subs = get_push_subscriptions(current_user.id)
+        for sub in subs:
+            remove_push_subscription(current_user.id, sub["endpoint"])
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

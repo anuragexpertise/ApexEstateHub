@@ -8,6 +8,20 @@ from app.services.push_service import send_push_notification
 logger = logging.getLogger(__name__)
 
 
+def _publish_alert_event(society_id: int, user_id: int | None, event_type: str, data: dict):
+    try:
+        from app.services.redis_broker import broker
+        payload = {
+            "type": event_type,
+            "society_id": society_id,
+            "user_id": user_id,
+            "data": data,
+        }
+        broker.publish(payload)
+    except Exception as exc:
+        logger.debug("SSE publish skipped: %s", exc)
+
+
 def create_alert_channel(
     society_id: int,
     channel_type: str,
@@ -185,6 +199,14 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
                 (existing["id"],), fetch_one=True,
             )
             if won:
+                _publish_alert_event(society_id, channel.get("owner_user_id"), "channel_alert", {
+                    "action": "call",
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                    "channel_id": channel_id,
+                    "channel_type": channel_type,
+                    "name": name,
+                })
                 return True, "Calling owner for verbal confirmation", {
                     "action": "call",
                     "phone": channel.get("owner_phone"),
@@ -235,6 +257,15 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             """, (society_id, channel_id, triggered_by_user_id,
                   datetime.now() + timedelta(minutes=30)), fetch_one=True)
 
+            _publish_alert_event(society_id, None, "channel_alert", {
+                "action": "resolved",
+                "state": "resolved",
+                "event_id": event_row["id"],
+                "channel_id": channel_id,
+                "channel_type": channel_type,
+                "name": name,
+            })
+
             return True, "School Bus notified: subscribers alerted (auto-PASS)", {
                 "state": "resolved",
                 "event_id": event_row["id"],
@@ -257,6 +288,15 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             VALUES (%s, %s, 'pending', %s, NOW(), %s)
             RETURNING id
         """, (society_id, channel_id, triggered_by_user_id, expires_at), fetch_one=True)
+
+        _publish_alert_event(society_id, channel.get("owner_user_id"), "channel_alert", {
+            "action": "pending",
+            "state": "pending",
+            "event_id": event_row["id"],
+            "channel_id": channel_id,
+            "channel_type": channel_type,
+            "name": name,
+        })
 
         return True, "Entry IN initiated: Pending owner approval (Yellow)", {
             "state": "pending",
@@ -324,6 +364,14 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
                SET state = %s
              WHERE id = %s
         """, (new_state, alert_event_id))
+
+        _publish_alert_event(event["society_id"], owner_user_id, "alert_response", {
+            "action": action,
+            "state": new_state,
+            "alert_event_id": alert_event_id,
+            "channel_id": event.get("channel_id"),
+            "visitor_id": event.get("visitor_id"),
+        })
 
         # For visitor-linked alerts, also update the visitor's status so the
         # database stays consistent. Without this, the alert shows resolved
@@ -420,6 +468,14 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
                 (existing["id"],), fetch_one=True,
             )
             if won:
+                _publish_alert_event(society_id, visitor.get("owner_user_id"), "visitor_alert", {
+                    "action": "call",
+                    "state": "calling",
+                    "alert_event_id": existing["id"],
+                    "visitor_id": visitor_id,
+                    "visitor_name": name,
+                    "flat_number": visitor.get("flat_number", ""),
+                })
                 return True, "Calling owner for verbal confirmation", {
                     "action": "call",
                     "phone": visitor.get("owner_phone"),
@@ -459,6 +515,15 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
             ok, msg = send_push_notification(visitor["owner_user_id"], title, body, society_id=society_id)
             if not ok:
                 logger.warning(f"Visitor push failed for user {visitor['owner_user_id']}: {msg}")
+
+        _publish_alert_event(society_id, visitor.get("owner_user_id"), "visitor_alert", {
+            "action": "pending",
+            "state": "pending",
+            "event_id": event_row["id"],
+            "visitor_id": visitor_id,
+            "visitor_name": name,
+            "flat_number": visitor.get("flat_number", ""),
+        })
 
         return True, "Visitor alert sent: Pending owner approval (Yellow)", {
             "state": "pending",
@@ -531,6 +596,13 @@ def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
             "   AND state IN ('pending','calling')",
             (new_state, visitor_id),
         )
+
+        _publish_alert_event(visitor["society_id"], owner_user_id, "visitor_response", {
+            "action": action,
+            "state": new_state,
+            "visitor_id": visitor_id,
+            "visitor_status": visitor_status,
+        })
 
         return True, f"Visitor alert response recorded: {new_state.upper()}"
     except Exception as e:
@@ -640,6 +712,7 @@ def get_presumed_visitors(society_id: int):
         rows = db._execute("""
             SELECT v.id as visitor_id, v.name, v.mobile, v.purpose, v.vehicle_number,
                    v.visit_date, v.visit_time_from, v.visit_time_to, v.status,
+                   v.source,
                    a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
