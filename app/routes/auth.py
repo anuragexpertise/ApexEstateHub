@@ -43,17 +43,29 @@ def login():
 
     user_dict = None
 
-    if method == 'password' and password:
-        from app.services.auth_service import authenticate_user
-        user_dict = authenticate_user(email, password, society_id)
-    elif method == 'pin' and pin:
-        from app.services.auth_service import authenticate_pin
-        user_dict = authenticate_pin(email, pin, society_id)
-    elif method == 'pattern' and pattern:
-        from app.services.auth_service import authenticate_pattern
-        user_dict = authenticate_pattern(email, pattern, society_id)
-    else:
-        return jsonify({'success': False, 'message': 'Invalid authentication method'}), 400
+    try:
+        if method == 'password' and password:
+            from app.services.auth_service import authenticate_user
+            user_dict = authenticate_user(email, password, society_id)
+        elif method == 'pin' and pin:
+            from app.services.auth_service import authenticate_pin
+            user_dict = authenticate_pin(email, pin, society_id)
+        elif method == 'pattern' and pattern:
+            from app.services.auth_service import authenticate_pattern
+            user_dict = authenticate_pattern(email, pattern, society_id)
+        else:
+            return jsonify({'success': False, 'message': 'Invalid authentication method'}), 400
+    except Exception as exc:
+        # DB/network failure during auth — never let this 500 uncaught.
+        # A bare 500 has no JSON body, which login.html's fetch().then(r=>r.json())
+        # can't parse; it falls into a generic catch and mislabels a DB outage
+        # as a network error. Returning real JSON here keeps the message accurate.
+        import logging
+        logging.getLogger(__name__).exception("Login DB/service error (method=%s)", method)
+        return jsonify({
+            'success': False,
+            'message': 'Service temporarily unavailable — please try again shortly',
+        }), 503
 
     if not user_dict:
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
@@ -91,18 +103,30 @@ def refresh_token():
         payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
         if payload.get('type') != 'refresh':
             raise ValueError('Not a refresh token')
-        user = User.get(payload['user_id'])
-        if not user:
-            return jsonify({'success': False, 'message': 'User not found'}), 401
-        role = user.role
-        if role == 'admin' and user.society_id is None:
-            role = 'master'
-        access_token, _ = generate_tokens(user.id, user.email, role)
-        return jsonify({'success': True, 'access_token': access_token})
     except jwt.ExpiredSignatureError:
         return jsonify({'success': False, 'message': 'Refresh token expired'}), 401
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 401
+    except Exception:
+        return jsonify({'success': False, 'message': 'Invalid refresh token'}), 401
+
+    try:
+        user = User.get(payload['user_id'])
+    except Exception:
+        # DB/network failure looking up the user — distinct from "bad token"
+        import logging
+        logging.getLogger(__name__).exception("Token refresh DB error")
+        return jsonify({
+            'success': False,
+            'message': 'Service temporarily unavailable — please try again shortly',
+        }), 503
+
+    if not user:
+        return jsonify({'success': False, 'message': 'User not found'}), 401
+
+    role = user.role
+    if role == 'admin' and user.society_id is None:
+        role = 'master'
+    access_token, _ = generate_tokens(user.id, user.email, role)
+    return jsonify({'success': True, 'access_token': access_token})
 
 
 # ── Logout ────────────────────────────────────────────────────

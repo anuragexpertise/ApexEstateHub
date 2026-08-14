@@ -190,6 +190,15 @@ function qrCameraController(
         .catch(function(err){
             S.scanning = false;
             console.warn('scan-qr error:', err);
+            // Previously silent: a guard at the gate with a flaky connection
+            // saw the camera preview keep running with no indication scans
+            // were failing. Reuse the same status() line used for camera
+            // errors elsewhere in this file so the failure is visible.
+            if (!navigator.onLine) {
+                status('No network connection — scan paused');
+            } else {
+                status('Connection lost — retrying…');
+            }
         });
     }
 

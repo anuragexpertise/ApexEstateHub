@@ -20,6 +20,11 @@ def create_dash_app(flask_app):
     external_scripts = [
         "https://unpkg.com/dash.nprogress@latest/dist/dash.nprogress.js",
         "/static/js/push.js",
+        # Global fallback for callback failures (dropped DB/network mid-
+        # navigation) — see error-monitor.js docstring. Dash's pinned
+        # version (<2.15.0) predates the official on_error/set_props API,
+        # so this fills that gap at the browser level instead.
+        "/static/js/error-monitor.js",
     ]
     external_stylesheets = [
         dbc.themes.BOOTSTRAP,
