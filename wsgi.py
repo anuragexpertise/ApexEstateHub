@@ -34,6 +34,11 @@ def when_ready(server):
 def post_fork(server, worker):
     """Called after a worker is forked."""
     print(f"🔄 Worker {worker.pid} started")
+    try:
+        from app.services.redis_broker import broker
+        broker.start(lambda payload: broker.dispatch_to_listeners(payload))
+    except Exception as exc:
+        print(f"⚠️  SSE Redis broker not started in worker {worker.pid}: {exc}")
 
 def post_worker_exit(server, worker):
     """Called after a worker exits."""

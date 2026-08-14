@@ -764,7 +764,7 @@ def shell_layout() -> html.Div:
             html.Div(id="dnd-init-dummy",            style={"display": "none"}),
             dcc.Input(id="dnd-order-capture", value="",
                       debounce=False,                style={"display": "none"}),
-            dcc.Interval(id="notifications-interval", interval=30_000, n_intervals=0),
+            dcc.Interval(id="notifications-interval", interval=120_000, n_intervals=0),
             html.Div(id="push-init-dummy", style={"display": "none"}),
 
             html.Div(
@@ -887,5 +887,93 @@ def shell_layout() -> html.Div:
                 ]),
             ], id="channel-subscribers-modal", size="lg", is_open=False, centered=True,
                style={"zIndex": "20060"}),
+
+            # SSE client script (injected once, manages EventSource lifecycle)
+            html.Script("""
+                (function() {
+                    var es = null;
+                    var audioCtx = null;
+                    var toastContainer = document.getElementById('toast-container');
+
+                    function playTone() {
+                        try {
+                            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            var osc = audioCtx.createOscillator();
+                            var gain = audioCtx.createGain();
+                            osc.connect(gain);
+                            gain.connect(audioCtx.destination);
+                            osc.frequency.value = 800;
+                            osc.type = 'sine';
+                            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+                            osc.start(audioCtx.currentTime);
+                            osc.stop(audioCtx.currentTime + 0.4);
+                        } catch (e) {
+                            console.debug('Tone play failed', e);
+                        }
+                    }
+
+                    function showToast(message, type) {
+                        if (!toastContainer) return;
+                        var colors = {
+                            info: '#d1ecf1',
+                            success: '#d4edda',
+                            warning: '#fff3cd',
+                            error: '#f8d7da',
+                        };
+                        var el = document.createElement('div');
+                        el.style.cssText = 'padding:10px 14px;margin-bottom:8px;border-radius:8px;font-size:13px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:' + (colors[type] || colors.info) + ';border:1px solid #c3e6cb;box-shadow:0 4px 12px rgba(0,0,0,.08);animation:toastIn .3s ease';
+                        el.textContent = message;
+                        toastContainer.appendChild(el);
+                        setTimeout(function() {
+                            el.style.opacity = '0';
+                            el.style.transition = 'opacity .3s';
+                            setTimeout(function() { el.remove(); }, 300);
+                        }, 4000);
+                    }
+
+                    function startSSE() {
+                        if (es) return;
+                        try {
+                            es = new EventSource('/api/sse/events');
+                            es.addEventListener('open', function() {
+                                console.log('SSE connected');
+                            });
+                            es.addEventListener('error', function() {
+                                console.debug('SSE error, will retry');
+                            });
+                            es.addEventListener('message', function(e) {
+                                try {
+                                    var payload = JSON.parse(e.data);
+                                    var data = payload.data || {};
+                                    var title = data.name || data.visitor_name || data.channel_type || 'Alert';
+                                    var body = '';
+                                    if (payload.type === 'channel_alert') body = 'Channel alert: ' + title + ' — ' + (data.state || '');
+                                    else if (payload.type === 'visitor_alert') body = 'Visitor arrived: ' + title;
+                                    else if (payload.type === 'alert_response') body = 'Alert updated: ' + (data.state || '');
+                                    else if (payload.type === 'visitor_response') body = 'Visitor status: ' + (data.state || '');
+                                    else if (payload.type === 'presumed_visitor_created') body = 'New presumed visitor: ' + title;
+                                    else body = JSON.stringify(data);
+                                    showToast(body, 'info');
+                                    playTone();
+                                } catch (err) {
+                                    console.debug('SSE message parse error', err);
+                                }
+                            });
+                        } catch (e) {
+                            console.debug('SSE start failed', e);
+                        }
+                    }
+
+                    function stopSSE() {
+                        if (es) {
+                            es.close();
+                            es = null;
+                        }
+                    }
+
+                    window.EstateHubSSE = { start: startSSE, stop: stopSSE };
+                })();
+            """),
         ]
     )

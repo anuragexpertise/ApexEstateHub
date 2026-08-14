@@ -30,6 +30,7 @@ Usage
 import os
 import sys
 import argparse
+import json
 import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -205,6 +206,26 @@ def run_migrations(conn):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE vendors ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
+
+        # push_subscriptions: one row per browser/device per user (replaces
+        # the single users.push_subscription TEXT column).
+        """CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id            SERIAL PRIMARY KEY,
+            user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            endpoint      TEXT NOT NULL,
+            p256dh        TEXT NOT NULL,
+            auth          TEXT NOT NULL,
+            user_agent    TEXT,
+            created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_used_at  TIMESTAMP DEFAULT NOW(),
+            UNIQUE(user_id, endpoint)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)",
+
+        # visitors: source column to distinguish owner-preapproved vs security walk-in
+        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'security' CHECK (source IN ('owner', 'security'))",
+        "ALTER TABLE visitors ALTER COLUMN source SET DEFAULT 'security'",
     ]
 
     ok = 0
@@ -225,6 +246,9 @@ def run_migrations(conn):
                 print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
 
     print(f"  ✓ Migrations applied: {ok} ok, {skipped} skipped")
+
+    # ── Data migration: users.push_subscription → push_subscriptions ────────
+    _migrate_push_subscriptions(conn)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -356,6 +380,51 @@ def main():
     if conn is not None:
         conn.close()
     _summary()
+
+
+def _migrate_push_subscriptions(conn):
+    """
+    Migrate any existing users.push_subscription JSON blob into the new
+    push_subscriptions table (one row per user, using the single legacy
+    subscription as that user's desktop subscription).
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, push_subscription
+                  FROM users
+                 WHERE push_subscription IS NOT NULL
+            """)
+            rows = cur.fetchall()
+            if not rows:
+                print("  ✓ Push subscriptions: nothing to migrate")
+                return
+
+            migrated = 0
+            for row in rows:
+                try:
+                    sub = json.loads(row["push_subscription"]) if isinstance(row["push_subscription"], str) else row["push_subscription"]
+                except Exception:
+                    continue
+                endpoint = sub.get("endpoint", "")
+                p256dh = sub.get("keys", {}).get("p256dh", "")
+                auth = sub.get("keys", {}).get("auth", "")
+                if not endpoint:
+                    continue
+                try:
+                    cur.execute("""
+                        INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (user_id, endpoint) DO NOTHING
+                    """, (row["id"], endpoint, p256dh, auth, "legacy-migration"))
+                    migrated += 1
+                except Exception:
+                    pass
+            conn.commit()
+            print(f"  ✓ Push subscriptions: migrated {migrated}/{len(rows)}")
+    except Exception as exc:
+        print(f"  ⚠ Push subscription migration failed: {exc}")
+        conn.rollback()
 
 
 def _summary():

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, render_template
-from app.services.push_service import save_push_subscription, send_push_notification
+from app.services.push_service import save_push_subscription, remove_push_subscription, send_push_notification, get_push_subscriptions
 from app.auth.jwt_handler import verify_token
 import logging
 import os
@@ -29,7 +29,6 @@ def subscribe():
         if not data or not data.get('endpoint'):
             return jsonify({'error': 'Invalid subscription data'}), 400
         
-        # Get user_id from JWT token in Authorization header
         auth_header = request.headers.get('Authorization', '')
         token = auth_header.replace('Bearer ', '')
         
@@ -46,7 +45,6 @@ def subscribe():
         if not user_id:
             return jsonify({'error': 'User ID not found in token'}), 401
         
-        # Save subscription using your push service
         success = save_push_subscription(user_id, data)
         
         if success:
@@ -63,7 +61,6 @@ def subscribe():
 def send_test():
     """Send a test notification to the current user"""
     try:
-        # Get user_id from JWT token
         auth_header = request.headers.get('Authorization', '')
         token = auth_header.replace('Bearer ', '')
         
@@ -80,7 +77,6 @@ def send_test():
         if not user_id:
             return jsonify({'error': 'User ID not found in token'}), 401
         
-        # Send test notification
         success, message = send_push_notification(
             user_id,
             title="🔔 Test Notification from EsateHub",
@@ -115,12 +111,16 @@ def delete_subscription():
 
         user_id = payload.get('user_id')
         
-        # Clear subscription in database
-        from database.db_manager import db
-        db._execute(
-            "UPDATE users SET push_subscription = NULL WHERE id = :user_id",
-            {"user_id": user_id}
-        )
+        data = request.get_json() or {}
+        endpoint = data.get('endpoint')
+        if endpoint:
+            remove_push_subscription(user_id, endpoint)
+        else:
+            from database.db_manager import db
+            db._execute(
+                "DELETE FROM push_subscriptions WHERE user_id = %s",
+                (user_id,),
+            )
         
         logger.info(f"Push subscription deleted for user {user_id}")
         return jsonify({'message': 'Subscription deleted successfully'}), 200
@@ -151,8 +151,8 @@ def save_fcm_token():
         user_id = payload.get('user_id')
         from database.db_manager import db
         db._execute(
-            "UPDATE users SET push_token = :token, push_enabled = TRUE WHERE id = :user_id",
-            {"token": fcm_token, "user_id": user_id}
+            "UPDATE users SET push_token = %s, push_enabled = TRUE WHERE id = %s",
+            (fcm_token, user_id)
         )
         logger.info(f"FCM token saved for user {user_id}")
         return jsonify({'message': 'FCM token saved'}), 200
@@ -177,8 +177,8 @@ def delete_fcm_token():
         user_id = payload.get('user_id')
         from database.db_manager import db
         db._execute(
-            "UPDATE users SET push_token = NULL, push_enabled = FALSE WHERE id = :user_id",
-            {"user_id": user_id}
+            "UPDATE users SET push_token = NULL, push_enabled = FALSE WHERE id = %s",
+            (user_id,)
         )
         logger.info(f"FCM token deleted for user {user_id}")
         return jsonify({'message': 'FCM token removed'}), 200

@@ -8,10 +8,8 @@ from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 
-# Get VAPID keys from environment (matching your .env)
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE') or os.getenv('VAPID_PRIVATE_KEY')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC') or os.getenv('VAPID_PUBLIC_KEY')
 VAPID_CLAIM_EMAIL = os.getenv('VAPID_EMAIL') or os.getenv('VAPID_CLAIM_EMAIL', 'master@estatehub.com')
@@ -39,12 +37,27 @@ def _send_fcm(fcm_token, title, body, data=None):
 
 
 def save_push_subscription(user_id, subscription_info):
-    """Save push subscription to database"""
+    """Save a push subscription to the multi-row push_subscriptions table."""
     try:
-        from database.db_manager import db
+        sub = subscription_info if isinstance(subscription_info, dict) else json.loads(subscription_info)
+        endpoint = sub.get("endpoint", "")
+        keys = sub.get("keys", {})
+        p256dh = keys.get("p256dh", "")
+        auth = keys.get("auth", "")
+        user_agent = ""
+        if hasattr(subscription_info, "get"):
+            user_agent = subscription_info.get("user_agent", "")
+        if not endpoint:
+            return False
         db._execute(
-            """UPDATE users SET push_subscription = :subscription WHERE id = :user_id""",
-            {"subscription": json.dumps(subscription_info), "user_id": user_id}
+            """INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (user_id, endpoint) DO UPDATE
+                 SET p256dh = EXCLUDED.p256dh,
+                     auth = EXCLUDED.auth,
+                     user_agent = EXCLUDED.user_agent,
+                     last_used_at = NOW()""",
+            (user_id, endpoint, p256dh, auth, user_agent),
         )
         logger.info(f"Push subscription saved for user {user_id}")
         return True
@@ -52,49 +65,58 @@ def save_push_subscription(user_id, subscription_info):
         logger.error(f"Push save error: {e}")
         return False
 
-def get_push_subscription(user_id):
-    """Get push subscription from database"""
+
+def get_push_subscriptions(user_id):
+    """Return all active push subscriptions for a user as dicts."""
     try:
-        from database.db_manager import db
-        row = db._execute(
-            "SELECT push_subscription FROM users WHERE id = :user_id",
-            {"user_id": user_id}, 
-            fetch_one=True
+        rows = db._execute(
+            "SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = %s",
+            (user_id,),
+            fetch_all=True,
         )
-        if row and row.get('push_subscription'):
-            return json.loads(row['push_subscription'])
+        return rows or []
     except Exception as e:
         logger.error(f"Push get error: {e}")
-    return None
+        return []
+
+
+def remove_push_subscription(user_id, endpoint):
+    """Remove a specific subscription (by endpoint) for a user."""
+    try:
+        db._execute(
+            "DELETE FROM push_subscriptions WHERE user_id = %s AND endpoint = %s",
+            (user_id, endpoint),
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Push remove error: {e}")
+        return False
+
 
 def _create_notification(user_id, title, body, society_id=None, url=None):
     """Persist a notification row so the in-app inbox can surface it."""
     try:
-        from database.db_manager import db
         if society_id is None:
             row = db._execute(
-                "SELECT society_id FROM users WHERE id = :user_id",
-                {"user_id": user_id}, fetch_one=True
+                "SELECT society_id FROM users WHERE id = %s",
+                (user_id,), fetch_one=True
             )
             society_id = row["society_id"] if row else None
         db._execute(
             """INSERT INTO notifications (user_id, society_id, title, body, url, notification_type, read, created_at)
-               VALUES (:user_id, :society_id, :title, :body, :url, 'push', FALSE, NOW())""",
-            {"user_id": user_id, "society_id": society_id, "title": title, "body": body,
-             "url": url or '/dashboard/'}
+               VALUES (%s, %s, %s, %s, %s, 'push', FALSE, NOW())""",
+            (user_id, society_id, title, body, url or '/dashboard/')
         )
     except Exception as e:
         logger.error(f"create_notification error: {e}")
 
+
 def send_push_notification(user_id, title, body, icon=None, url=None, society_id=None):
-    """Send push notification to user.
+    """Send push notification to user across all their active subscriptions.
 
     The in-app notification (which drives the dashboard toast/inbox via
-    polling) is always persisted first, independent of whether the actual
-    browser push succeeds. Push delivery requires VAPID keys to be
-    configured AND the user to have an active push_subscription; neither
-    of those should gate the in-app notification, or users who haven't
-    opted into browser push would never see anything at all.
+    polling or SSE) is always persisted first, independent of whether the
+    actual browser push succeeds.
     """
     _create_notification(user_id, title, body, society_id=society_id, url=url)
 
@@ -102,53 +124,53 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
         logger.warning("Push notifications disabled: VAPID keys not configured. In-app notification still recorded.")
         return False, "VAPID keys not configured"
 
-    subscription = get_push_subscription(user_id)
-    if not subscription:
-        logger.warning(f"No subscription found for user {user_id}. In-app notification still recorded.")
-        return False, "No subscription found"
+    subs = get_push_subscriptions(user_id)
+    if not subs:
+        logger.warning(f"No subscriptions found for user {user_id}. In-app notification still recorded.")
+        return False, "No subscriptions found"
 
-    try:
-        notification_data = {
-            'title': title,
-            'body': body,
-            'icon': icon or '/static/assets/EH_logo.png',
-            'url': url or '/dashboard/',
-        }
-
-        webpush(
-            subscription_info=subscription,
-            data=json.dumps(notification_data),
-            vapid_private_key=VAPID_PRIVATE_KEY,
-            vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
-        )
-        logger.info(f"Push notification sent to user {user_id}: {title}")
-    except WebPushException as e:
-        logger.error(f"WebPush error: {e}")
-        if hasattr(e, 'response') and e.response:
-            logger.error(f"Response: {e.response.read()}")
-        return False, str(e)
-    except Exception as e:
-        logger.error(f"Push notification error: {e}")
-        return False, str(e)
-
-    # Best-effort mobile push via FCM (does not affect web push outcome).
-    try:
-        from database.db_manager import db
-        row = db._execute(
-            "SELECT push_token, push_enabled FROM users WHERE id = :user_id",
-            {"user_id": user_id}, fetch_one=True
-        )
-        if row and row.get("push_enabled") and row.get("push_token"):
-            _send_fcm(
-                row["push_token"],
-                title,
-                body,
-                data={"url": url or '/dashboard/', "type": "alert"},
+    success_count = 0
+    last_error = None
+    for sub in subs:
+        try:
+            subscription_info = {
+                "endpoint": sub["endpoint"],
+                "keys": {
+                    "p256dh": sub["p256dh"],
+                    "auth": sub["auth"],
+                },
+            }
+            notification_data = {
+                'title': title,
+                'body': body,
+                'icon': icon or '/static/assets/EH_logo.png',
+                'url': url or '/dashboard/',
+            }
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(notification_data),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
             )
-    except Exception as e:
-        logger.error(f"FCM lookup/send error: {e}")
+            success_count += 1
+            db._execute(
+                "UPDATE push_subscriptions SET last_used_at = NOW() WHERE id = %s",
+                (sub["id"],),
+            )
+        except WebPushException as e:
+            logger.error(f"WebPush error for user {user_id} sub {sub['id']}: {e}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response: {e.response.read()}")
+            last_error = str(e)
+            if e.response and e.response.status_code in (404, 410):
+                db._execute("DELETE FROM push_subscriptions WHERE id = %s", (sub["id"],))
+        except Exception as e:
+            logger.error(f"Push notification error for user {user_id} sub {sub['id']}: {e}")
+            last_error = str(e)
 
-    return True, "Notification sent"
+    if success_count == 0 and last_error:
+        return False, last_error
+    return True, f"Sent to {success_count}/{len(subs)} subscriptions"
 
 def send_payment_reminder(user_id, amount, due_date):
     """Send payment reminder notification"""

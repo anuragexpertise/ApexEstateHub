@@ -146,11 +146,15 @@ def create_app(config_name: str | None = None) -> Flask:
         from app.routes.web   import web_bp
         from app.routes.scan  import scan_bp
         from app.routes.push_routes import push_bp
+        from app.routes.sse   import sse_bp
+        from app.routes.presumed_visitor import presumed_bp
         app.register_blueprint(auth_bp, url_prefix="/auth")
         app.register_blueprint(api_bp,  url_prefix="/api")
         app.register_blueprint(web_bp)
         app.register_blueprint(scan_bp)
         app.register_blueprint(push_bp)
+        app.register_blueprint(sse_bp)
+        app.register_blueprint(presumed_bp)
         log.info("Blueprints registered ✓")
     except Exception as exc:
         log.warning("Blueprint registration partial: %s", exc)
