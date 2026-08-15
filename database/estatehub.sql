@@ -3733,7 +3733,7 @@ DECLARE
     v_transfer_amt  NUMERIC(15,2);
 BEGIN
     SELECT a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
-           COALESCE(p.name, '--') AS parent_name
+           a.has_bf, COALESCE(p.tab_name, p.name, '--') AS parent_name
       INTO v_acc
       FROM accounts a
       LEFT JOIN accounts p ON p.id = a.parent_account_id
@@ -3748,7 +3748,17 @@ BEGIN
  
     v_balance := v_bf;
  
-    IF v_bf <> 0 THEN
+    -- Fixed (2026-08): gated on accounts.has_bf — previously this emitted a
+    -- B/F row for ANY account with a nonzero fn_resolve_bf_amount_fy
+    -- result, including has_bf=FALSE P&L leaves that resolve a nonzero
+    -- figure purely from that function's child-account-sum fallback (see
+    -- fn_resolve_bf_amount_fy's comment) rather than a real carried
+    -- balance. has_bf=TRUE is what actually marks an account as carrying
+    -- its own balance forward across FYs (CapAc, bank/cash accounts,
+    -- depreciable assets, Sundry Debtors, etc. — see the ACCOUNTS seed
+    -- table); has_bf=FALSE accounts (expense/income leaves) should never
+    -- show a B/F line of their own.
+    IF v_acc.has_bf AND v_bf <> 0 THEN
         RETURN QUERY SELECT
             v_fy_start - INTERVAL '1 day', 'Balance B/F'::TEXT,
             CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
@@ -3806,15 +3816,22 @@ BEGIN
     IF COALESCE(v_acc.is_depreciable, FALSE) AND COALESCE(v_acc.depreciation_percent, 100) < 100 THEN
         v_dep_amount := fn_account_depreciation(p_society_id, p_account_id, p_financial_year);
         IF v_dep_amount > 0 THEN
+            -- Fixed (2026-08): was `WHERE name = 'Dep'`, but the seeded
+            -- Depreciation account's actual name is "Depreciation" — its
+            -- tab_name is 'Dep' (see seed.py's ACCOUNTS row, id=231). That
+            -- match never hit, so v_dep_acc_id was always NULL and the
+            -- COALESCE below always silently fell back to the literal
+            -- string 'Dep' as the parent_name shown on this row, whether
+            -- or not the account actually existed.
             SELECT id INTO v_dep_acc_id FROM accounts
-            WHERE society_id = p_society_id AND name = 'Dep' LIMIT 1;
+            WHERE society_id = p_society_id AND tab_name = 'Dep' LIMIT 1;
  
             RETURN QUERY SELECT
                 v_fy_end, ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
                 CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
                 CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
                 (v_final_balance - v_dep_amount), 'depreciation'::TEXT,
-                COALESCE((SELECT name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
+                COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
  
             v_transfer_amt := v_final_balance - v_dep_amount;
         END IF;
@@ -3879,12 +3896,26 @@ DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
 -- the correct side of the cashbook instead of silently vanishing from the
 -- join or landing on the wrong side.
 --
--- Multi-bank-account default: all is_cash_or_bank=TRUE accounts pool into
--- a single Cash/Chq pair of columns per the CB2025-2026.xlsx reference
--- layout (mode='cash' -> Cash column, mode<>'cash' -> Chq column,
--- regardless of which specific bank account the row's opposite leg hit).
--- If per-bank-account cashbooks are wanted instead, add
--- p_bank_account_id and filter both cr_rows/dr_rows on it.
+-- Fixed (2026-08): opening balance was sourced from every
+-- is_cash_or_bank=TRUE account pooled together — but is_cash_or_bank is
+-- never actually set anywhere in seed.py/migrate.py's account seeding (it
+-- defaults FALSE per the accounts table's DEFAULT FALSE), so that WHERE
+-- clause silently matched zero accounts and the opening balance was always
+-- 0 regardless of what brought_forward actually held. The Cashbook is the
+-- physical Cash-in-hand register specifically (CB2024-2025.xlsx confirms
+-- 'CiH' is its own ledger, distinct from 'ICICI'/'SBI' bank ledgers, which
+-- have their own account pages and never appear in the cashbook) — so this
+-- now resolves the single 'CiH' account by tab_name rather than pooling an
+-- unpopulated flag across every bank/cash account.
+--
+-- Fixed (2026-08): rc_account_name/pc_account_name now display
+-- accounts.tab_name (falling back to accounts.name when tab_name is NULL,
+-- e.g. on older rows seeded before tab_name was populated) instead of the
+-- full accounts.name — matching the CB2024-2025.xlsx reference's short
+-- account codes ('CiH', 'ICICI', 'Salary', 'Misc.', ...) in the Cr/Dr
+-- Account columns. tab_name is also what ledger_export.py now uses for
+-- each account's Ledger sheet name, so the same short code identifies an
+-- account consistently across both exports.
 
 CREATE OR REPLACE FUNCTION fn_cashbook_paired_v3(
     p_society_id  INT,
@@ -3918,7 +3949,7 @@ BEGIN
     INTO v_opening_balance
     FROM accounts a
     JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-    WHERE a.society_id = p_society_id AND a.is_cash_or_bank = TRUE
+    WHERE a.society_id = p_society_id AND a.tab_name = 'CiH'
       AND bf.financial_year = v_fy;
 
     RETURN QUERY
@@ -3926,7 +3957,7 @@ BEGIN
         -- entry_side = 'Cr' means this leg is the receipt side of its
         -- journal pair, regardless of the account's own natural type.
         SELECT t.id, t.journal_id, t.trx_date,
-               a.id AS acc_id, a.name::TEXT AS account_name,
+               a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
                COALESCE(t.acc_particulars,'')::TEXT AS particulars,
                CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
@@ -3950,7 +3981,7 @@ BEGIN
     ),
     dr_rows AS (
         SELECT t.id, t.journal_id, t.trx_date,
-               a.id AS acc_id, a.name::TEXT AS account_name,
+               a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
                COALESCE(t.acc_particulars,'')::TEXT AS particulars,
                CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
@@ -4105,15 +4136,18 @@ BEGIN
     v_month_end     := (v_month_start + INTERVAL '1 month')::DATE;
     v_fy_start      := make_date(p_fy, 4, 1);
 
-    -- Same brought_forward aggregate fn_cashbook_paired_v3 uses for its
-    -- FY-opening balance.
+    -- Fixed (2026-08): same is_cash_or_bank -> tab_name='CiH' correction as
+    -- fn_cashbook_paired_v3 — is_cash_or_bank is never populated by
+    -- seed.py/migrate.py (defaults FALSE), so this always resolved to 0
+    -- regardless of brought_forward. The Cashbook is the CiH register
+    -- specifically, not a pool of every cash/bank account.
     SELECT COALESCE(SUM(
         CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
     ), 0)
     INTO v_fy_opening
     FROM accounts a
     JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-    WHERE a.society_id = p_society_id AND a.is_cash_or_bank = TRUE
+    WHERE a.society_id = p_society_id AND a.tab_name = 'CiH'
       AND bf.financial_year = p_fy;
 
     -- Net physical-cash movement (entry_side-driven; mode='cash' only --
@@ -4141,10 +4175,12 @@ BEGIN
 
     v_month_opening := v_fy_opening + v_pre_month_delta;
 
+    -- Fixed (2026-08): account_name now displays tab_name (falling back
+    -- to name if unset) — same rationale as fn_cashbook_paired_v3 above.
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
         SELECT t.id, t.journal_id, t.trx_date,
-               a.id AS acc_id, a.name::TEXT AS account_name,
+               a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
                COALESCE(t.acc_particulars,'')::TEXT AS particulars,
                CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
@@ -4166,7 +4202,7 @@ BEGIN
     ),
     dr_rows AS (
         SELECT t.id, t.journal_id, t.trx_date,
-               a.id AS acc_id, a.name::TEXT AS account_name,
+               a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
                COALESCE(t.acc_particulars,'')::TEXT AS particulars,
                CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
