@@ -131,7 +131,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
-    is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
