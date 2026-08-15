@@ -33,104 +33,104 @@ def create_default_accounts(db, society_id: int):
     # ═══════════════════════════════════════════════════════════════════════
     # ACCOUNT DEFINITIONS FROM EstateAcc.xlsx
     # ═══════════════════════════════════════════════════════════════════════
-    # Format: (id, name, tab_name, header, parent_id, drcr_account, has_bf, drcr_bf, bf_amount, depreciation_percent)
+    # Format: (id, name, tab_name, header, parent_id, drcr_account, has_bf, drcr_bf, depreciation_percent)
     
     accounts = [
         # ───────────────────────────────────────────────────────────────────
         # ROOT & BALANCE SHEET STRUCTURE
         # ───────────────────────────────────────────────────────────────────
-        (1,     'Balance Sheet Root',        'Bal',         'Balance Sheet',               1,    'Dr',  True,  'Dr',  0,   100),
-        (2,     'Capital Account',           'CapAc',       'Capital Account',             1,    'Cr',  True,  'Cr',  0,   100),
+        (1,     'Balance Sheet Root',        'Bal',         'Balance Sheet',               1,    'Dr',  True,  'Dr',   100),
+        (2,     'Capital Account',           'CapAc',       'Capital Account',             1,    'Cr',  True,  'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # INCOME ACCOUNTS (Under Capital Account - All Cr)
         # ───────────────────────────────────────────────────────────────────
-        (21,    'Income Other Source',       'IncOther',    'Income other source',         2,    'Cr',  True,  'Cr',  0,   100),
-        (211,   'Interest Income',           'IncInt',      'Interest Income',            21,    'Cr',  True,  'Cr',  0,   100),
-        (2111,  'Bank Interest',             'IntBK',       'Bank Interest',             211,    'Cr',  True,  'Cr',  0,   100),
-        (21111, 'Saving Interest',           'IntSav',      'Saving Interest',          2111,    'Cr',  True,  'Cr',  0,   100),
-        (2112,  'Exempt Income',             'IncExmpt',    'Exempt Income',             211,    'Cr',  True,  'Cr',  0,   100),
-        (21112, 'FD Interest',               'IntFD',       'FD Interest',              2111,    'Cr',  True,  'Cr',  0,   100),
-        (21113, 'Due Interest',              'IntDue',      'Due Interest',             2111,    'Cr',  True,  'Cr',  0,   100),
-        (212,   'Selling Asset',             'SellAs',      'Selling Asset',              21,    'Cr',  True,  'Cr',  0,   100),
-        (213,   'Property Income',           'PropInc',     'Property Income',            21,    'Cr',  True,  'Cr',  0,   100),
-        (22,    'Gifts Received',            'Gifts',       'Gifts Received',              2,    'Cr',  True,  'Cr',  0,   100),
+        (21,    'Income Other Source',       'IncOther',    'Income other source',         2,    'Cr',  True,  'Cr',   100),
+        (211,   'Interest Income',           'IncInt',      'Interest Income',            21,    'Cr',  True,  'Cr',   100),
+        (2111,  'Bank Interest',             'IntBK',       'Bank Interest',             211,    'Cr',  True,  'Cr',   100),
+        (21111, 'Saving Interest',           'IntSav',      'Saving Interest',          2111,    'Cr',  True,  'Cr',   100),
+        (2112,  'Exempt Income',             'IncExmpt',    'Exempt Income',             211,    'Cr',  True,  'Cr',   100),
+        (21112, 'FD Interest',               'IntFD',       'FD Interest',              2111,    'Cr',  True,  'Cr',   100),
+        (21113, 'Due Interest',              'IntDue',      'Due Interest',             2111,    'Cr',  True,  'Cr',   100),
+        (212,   'Selling Asset',             'SellAs',      'Selling Asset',              21,    'Cr',  True,  'Cr',   100),
+        (213,   'Property Income',           'PropInc',     'Property Income',            21,    'Cr',  True,  'Cr',   100),
+        (22,    'Gifts Received',            'Gifts',       'Gifts Received',              2,    'Cr',  True,  'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # INCOME & EXPENSE ACCOUNT (Mixed)
         # ───────────────────────────────────────────────────────────────────
-        (23,    'Income Expenditure A/c',    'InExp',       'Income Expenditure Account',  2,    'Cr',  True,  'Cr',  0,   100),
+        (23,    'Income Expenditure A/c',    'InExp',       'Income Expenditure Account',  2,    'Cr',  True,  'Cr',   100),
         
         # Sub-accounts under Income Expenditure (Expenses - Dr)
-        (231,   'Vehicle Expenditure',       'vehexp',      'Vehicle Expenditure',        23,    'Dr',  False, 'Dr',  0,   100),
-        (232,   'Rent',                      'rent',        'Rent',                       23,    'Dr',  False, 'Dr',  0,   100),
-        (233,   'Miscellaneous',             'misc',        'Miscellaneous',              23,    'Dr',  False, 'Dr',  0,   100),
-        (234,   'Depreciation',              'Dep',         'Depreciation Account',       23,    'Dr',  False, 'Dr',  0,   100),
-        (235,   'Salary',                    'Salary',      'Salary',                     23,    'Dr',  False, 'Dr',  0,   100),
-        (236,   'Phone',                     'Phone',       'Phone',                      23,    'Dr',  False, 'Dr',  0,   100),
-        (237,   'Electricity',               'Elec',        'Electricity',                23,    'Dr',  False, 'Dr',  0,   100),
-        (238,   'Water Tax',                 'WTax',        'Water Tax',                  23,    'Dr',  False, 'Dr',  0,   100),
-        (239,   'House Tax',                 'HTax',        'House Tax',                  23,    'Dr',  False, 'Dr',  0,   100),
-        (2310,  'Insurance',                 'Insur',       'Insurance',                  23,    'Dr',  False, 'Dr',  0,   100),
-        (2312,  'Repair and Maintenance',    'RM',          'Repair and Maintanence',     23,    'Dr',  False, 'Dr',  0,   100),
-        (2313,  'Stationery',                'Stationery',  'Stationery',                 23,    'Dr',  False, 'Dr',  0,   100),
-        (2314,  'Generator',                 'Gen.',        'Generator',                  23,    'Dr',  False, 'Dr',  0,    15),
-        (2315,  'Accountant',                'Accountant',  'Accountant',                 23,    'Dr',  False, 'Dr',  0,   100),
-        (2316,  'Audit Fee',                 'AuditF',      'Audit Fee',                  23,    'Dr',  False, 'Dr',  0,   100),
+        (231,   'Vehicle Expenditure',       'vehexp',      'Vehicle Expenditure',        23,    'Dr',  False, 'Dr',   100),
+        (232,   'Rent',                      'rent',        'Rent',                       23,    'Dr',  False, 'Dr',   100),
+        (233,   'Miscellaneous',             'misc',        'Miscellaneous',              23,    'Dr',  False, 'Dr',   100),
+        (234,   'Depreciation',              'Dep',         'Depreciation Account',       23,    'Dr',  False, 'Dr',   100),
+        (235,   'Salary',                    'Salary',      'Salary',                     23,    'Dr',  False, 'Dr',   100),
+        (236,   'Phone',                     'Phone',       'Phone',                      23,    'Dr',  False, 'Dr',   100),
+        (237,   'Electricity',               'Elec',        'Electricity',                23,    'Dr',  False, 'Dr',   100),
+        (238,   'Water Tax',                 'WTax',        'Water Tax',                  23,    'Dr',  False, 'Dr',   100),
+        (239,   'House Tax',                 'HTax',        'House Tax',                  23,    'Dr',  False, 'Dr',   100),
+        (2310,  'Insurance',                 'Insur',       'Insurance',                  23,    'Dr',  False, 'Dr',   100),
+        (2312,  'Repair and Maintenance',    'RM',          'Repair and Maintanence',     23,    'Dr',  False, 'Dr',   100),
+        (2313,  'Stationery',                'Stationery',  'Stationery',                 23,    'Dr',  False, 'Dr',   100),
+        (2314,  'Generator',                 'Gen.',        'Generator',                  23,    'Dr',  False, 'Dr',    15),
+        (2315,  'Accountant',                'Accountant',  'Accountant',                 23,    'Dr',  False, 'Dr',   100),
+        (2316,  'Audit Fee',                 'AuditF',      'Audit Fee',                  23,    'Dr',  False, 'Dr',   100),
         
         # Sub-accounts under Income Expenditure (Income - Cr)
-        (2311,  'Society Maintenance Charge','SocM',        'Society Maintanence Charge', 23,    'Cr',  True,  'Cr',  0,   100),
-        (2317,  'Society Fine',              'SocF',        'Society Fine Charge',        23,    'Cr',  True,  'Cr',  0,   100),
-        (2318,  'Society Charge',            'SocC',        'Society Charge',               23,    'Cr',  True,  'Cr',  0,   100),
+        (2311,  'Society Maintenance Charge','SocM',        'Society Maintanence Charge', 23,    'Cr',  True,  'Cr',   100),
+        (2317,  'Society Fine',              'SocF',        'Society Fine Charge',        23,    'Cr',  True,  'Cr',   100),
+        (2318,  'Society Charge',            'SocC',        'Society Charge',               23,    'Cr',  True,  'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # OTHER CAPITAL ACCOUNT ITEMS
         # ───────────────────────────────────────────────────────────────────
-        (24,    'Duties Paid',               'DutyP',       'Duties Paid',                 2,    'Cr',  False, 'Cr',  0,   100),
-        (25,    'Taxes Paid',                'TaxP',        'Taxes paid',                  2,    'Cr',  False, 'Cr',  0,   100),
-        (26,    'Provisions',                'Prov',        'Provisions',                  2,    'Cr',  True,  'Cr',  0,   100),
-        (27,    'Gifts Given',               'GiftGiven',   'Gifts Given',                 2,    'Dr',  False, 'Dr',  0,   100),
-        (28,    'Income Tax',                'ITax',        'Income Tax',                  2,    'Dr',  False, 'Dr',  0,   100),
-        (29,    'TDS to IT',                 'TDSIT',       'TDS Paid',                    2,    'Dr',  False, 'Dr',  0,   100),
+        (24,    'Duties Paid',               'DutyP',       'Duties Paid',                 2,    'Cr',  False, 'Cr',   100),
+        (25,    'Taxes Paid',                'TaxP',        'Taxes paid',                  2,    'Cr',  False, 'Cr',   100),
+        (26,    'Provisions',                'Prov',        'Provisions',                  2,    'Cr',  True,  'Cr',   100),
+        (27,    'Gifts Given',               'GiftGiven',   'Gifts Given',                 2,    'Dr',  False, 'Dr',   100),
+        (28,    'Income Tax',                'ITax',        'Income Tax',                  2,    'Dr',  False, 'Dr',   100),
+        (29,    'TDS to IT',                 'TDSIT',       'TDS Paid',                    2,    'Dr',  False, 'Dr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # LIABILITIES
         # ───────────────────────────────────────────────────────────────────
-        (3,     'Loans & Advances Taken',    'LAT',         'Loans And Advances Taken',    1,    'Cr',  True,  'Cr',  0,   100),
-        (4,     'Current Liabilities',       'CurLb',       'Current Liabilities',         1,    'Cr',  True,  'Cr',  0,   100),
-        (9,     'Sundry Creditors',          'S Cr',        'Sundry Creditors',            1,    'Cr',  True,  'Cr',  0,   100),
+        (3,     'Loans & Advances Taken',    'LAT',         'Loans And Advances Taken',    1,    'Cr',  True,  'Cr',   100),
+        (4,     'Current Liabilities',       'CurLb',       'Current Liabilities',         1,    'Cr',  True,  'Cr',   100),
+        (9,     'Sundry Creditors',          'S Cr',        'Sundry Creditors',            1,    'Cr',  True,  'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # ASSETS
         # ───────────────────────────────────────────────────────────────────
-        (5,     'Immovable Assets',          'ImAs',        'Immovable Assets',            1,    'Dr',  False, 'Dr',  0,   100),
-        (6,     'Movable Assets',            'MAs',         'Movable Assets',              1,    'Dr',  False, 'Dr',  0,   100),
+        (5,     'Immovable Assets',          'ImAs',        'Immovable Assets',            1,    'Dr',  False, 'Dr',   100),
+        (6,     'Movable Assets',            'MAs',         'Movable Assets',              1,    'Dr',  False, 'Dr',   100),
         
         # Movable Assets - Sub-accounts
-        (61,    'Furniture',                 'Fur',         'Furniture',                   6,    '',  False, 'Dr',  0,    10),
-        (62,    'Investments',               'Inv',         'Investments',                 6,    '',  False, 'Dr',  0,   100),
-        (63,    'Current Assets',            'CurAs',       'Current Assets',              6,    '',  False, 'Dr',  0,   100),
-        (64,    'Instruments',               'Inst',        'Instruments',                 6,    '',  False, 'Dr',  0,    15),
-        (641,   'Water Harvesting',          'WaterHarv',   'Water Harvesting',           64,    '',  False, 'Cr',  0,    40),
-        (65,    'Car',                       'Car',         'Car',                         6,    '',  False, 'Dr',  0,    15),
+        (61,    'Furniture',                 'Fur',         'Furniture',                   6,    '',  False, 'Dr',    10),
+        (62,    'Investments',               'Inv',         'Investments',                 6,    '',  False, 'Dr',   100),
+        (63,    'Current Assets',            'CurAs',       'Current Assets',              6,    '',  False, 'Dr',   100),
+        (64,    'Instruments',               'Inst',        'Instruments',                 6,    '',  False, 'Dr',    15),
+        (641,   'Water Harvesting',          'WaterHarv',   'Water Harvesting',           64,    '',  False, 'Cr',    40),
+        (65,    'Car',                       'Car',         'Car',                         6,    '',  False, 'Dr',    15),
         
         # Current Assets - Sub-accounts
-        (631,   'Bank Accounts',             'BkAc',        'Bank Accounts',              63,    '',  False, 'Dr',  0,   100),
-        (6311,  'ICICI A/c – Society',       'ICICI',     'ICICI A/c – Society',         631,    '',  False, 'Dr',  0,   100),
-        (632,   'Deposits (Assets)',         'Dp',          'Deposits (Assets)',          63,    'Dr',  False, 'Dr',  0,   100),
-        (633,   'Cash-in-hand',              'CiH',         'Cash-in-hand',               63,    'Dr',  False, 'Dr',  0,   100),
+        (631,   'Bank Accounts',             'BkAc',        'Bank Accounts',              63,    '',  False, 'Dr',   100),
+        (6311,  'ICICI A/c – Society',       'ICICI',     'ICICI A/c – Society',         631,    '',  False, 'Dr',   100),
+        (632,   'Deposits (Assets)',         'Dp',          'Deposits (Assets)',          63,    'Dr',  False, 'Dr',   100),
+        (633,   'Cash-in-hand',              'CiH',         'Cash-in-hand',               63,    'Dr',  False, 'Dr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # LOANS & ADVANCES GIVEN (ASSETS)
         # ───────────────────────────────────────────────────────────────────
-        (7,     'Loans & Advances Given',    'LAG',         'Loans  & Advances Given',     1,    'Dr',  False, 'Dr',  0,   100),
-        (71,    'Loans Given',               'LoanG',       'Loans Given',                 7,    'Dr',  False, 'Cr',  0,   100),
-        (72,    'Advances Given',            'AdvG',        'Advances Given',              6,    'Dr',  False, 'Cr',  0,   100),
+        (7,     'Loans & Advances Given',    'LAG',         'Loans  & Advances Given',     1,    'Dr',  False, 'Dr',   100),
+        (71,    'Loans Given',               'LoanG',       'Loans Given',                 7,    'Dr',  False, 'Cr',   100),
+        (72,    'Advances Given',            'AdvG',        'Advances Given',              6,    'Dr',  False, 'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # SUNDRY DEBTORS (ASSETS)
         # ───────────────────────────────────────────────────────────────────
-        (8,     'Sundry Debtors',            'SDr',         'Sundry Debitors',             1,    'Dr',  False, 'Dr',  0,   100),
+        (8,     'Sundry Debtors',            'SDr',         'Sundry Debitors',             1,    'Dr',  False, 'Dr',   100),
     ]
 
 
@@ -141,7 +141,7 @@ def create_default_accounts(db, society_id: int):
     created_count = 0
     skipped_count = 0
     
-    for acc_id, name, tab, header, parent, drcr_ac, has_bf, drcr_bf, bf_amt, dep_pct in accounts:
+    for acc_id, name, tab, header, parent, drcr_ac, has_bf, drcr_bf, dep_pct in accounts:
         try:
             # Check if account already exists
             existing = db._execute(
@@ -154,9 +154,9 @@ def create_default_accounts(db, society_id: int):
                 skipped_count += 1
                 continue
             
-            # Insert account. bf_amount is intentionally NOT inserted here —
-            # opening balances now live in the brought_forward table
-            # (per financial year), entered via Settings -> Accounts.
+            # Insert account. accounts.bf_amount no longer exists (dropped —
+            # dead column). Opening balances live in the brought_forward
+            # table (per financial year), entered via Settings -> Accounts.
             db._execute(
                 """
                 INSERT INTO accounts(
