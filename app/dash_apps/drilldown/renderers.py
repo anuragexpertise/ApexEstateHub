@@ -383,7 +383,9 @@ def render_list_card(card_id: str, title: str, icon: str,
                       col_filters: dict | None = None,
                       filter_options: dict | None = None,
                       fy_options: list[int] | None = None,
-                      selected_fy: int | None = None) -> html.Div:
+                      selected_fy: int | None = None,
+                      month_options: list[dict] | None = None,
+                      selected_month: int | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
@@ -640,6 +642,23 @@ def render_list_card(card_id: str, title: str, icon: str,
                 body_rows[i].style = {"backgroundColor": "#fff3cd"}
             elif row_type == "depreciation":
                 body_rows[i].style = {"backgroundColor": "#e2e3ff"}
+
+    # Cashbook B/F ('CiH' opening) in yellow, C/F ('CiH' closing) in green —
+    # same row_type convention as the ledger block above, populated by
+    # _shape_cashbook_month_rows() only when the Month Selector is active.
+    # Plain whole-FY cashbook rows (no month selected) never carry
+    # row_type, so this is a no-op for the existing flat-list view.
+    if entity == "cashbook" and rows:
+        for i, row in enumerate(rows):
+            if i >= len(body_rows):
+                break
+            row_dict = (row.to_dict(include_calculated=True)
+                        if hasattr(row, "to_dict") else dict(row))
+            row_type = row_dict.get("row_type")
+            if row_type == "bf":
+                body_rows[i].style = {"backgroundColor": "#fff3cd", "fontWeight": "700"}
+            elif row_type == "closing":
+                body_rows[i].style = {"backgroundColor": "#d4edda", "fontWeight": "700"}
         
 
     if not body_rows:
@@ -710,6 +729,25 @@ def render_list_card(card_id: str, title: str, icon: str,
             style={"width": "110px", "fontSize": "11px",
                    "borderRadius": "8px", "display": "inline-block"},
         ))
+        # Month Selector — cashbook only (ledger is a whole-FY account view,
+        # not month-scoped). Narrows fn_cashbook_month_page to one calendar
+        # month so month_opening_balance/month_closing_balance ('CiH' B/F
+        # and C/F) can be computed and shown per the CB2025-2026.xlsx
+        # reference layout — see loaders.py's cashbook branch and
+        # _shape_cashbook_month_rows(). Includes a blank "All months"
+        # option to fall back to the plain whole-FY fn_cashbook_paired_v3
+        # view (no B/F/C/F rows, just the flat paired list).
+        if entity == "cashbook" and month_options:
+            header_right.append(dbc.Select(
+                id={"type": "list-month-select", "entity": entity},
+                options=[{"label": "All months", "value": ""}] + [
+                    {"label": m["label"], "value": m["value"]} for m in month_options
+                ],
+                value=selected_month if selected_month else "",
+                size="sm",
+                style={"width": "100px", "fontSize": "11px",
+                       "borderRadius": "8px", "display": "inline-block"},
+            ))
         export_label = "Export Cashbook" if entity == "cashbook" else "Export Ledger"
         header_right.append(dbc.Button(
             [html.I(className="fas fa-file-excel me-1"), export_label],
@@ -727,6 +765,11 @@ def render_list_card(card_id: str, title: str, icon: str,
         dbc.Input(
             id={"type": "list-search", "entity": entity},
             placeholder="Search…", size="sm", debounce=True,
+            # fn_cashbook_month_page (Month Selector active) has no
+            # p_search param — see loaders.py's cashbook branch — so the
+            # box is disabled rather than silently accepting text that
+            # does nothing.
+            disabled=(entity == "cashbook" and bool(selected_month)),
             style={"width": "130px", "fontSize": "12px",
                    "borderRadius": "8px"},
         ),

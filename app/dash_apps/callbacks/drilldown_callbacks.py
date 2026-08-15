@@ -364,6 +364,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-page-next", "entity": ALL}, "n_clicks"),
         Input({"type": "list-search", "entity": ALL}, "value"),
         Input({"type": "list-fy-select", "entity": ALL}, "value"),
+        Input({"type": "list-month-select", "entity": ALL}, "value"),
         Input({"type": "list-sort", "entity": ALL, "column": ALL}, "n_clicks"),
         Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
         Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
@@ -1233,6 +1234,18 @@ def register_drilldown_callbacks(app):
             store.setdefault("list_pages", {})[entity] = 1
             hide_kpis = True
 
+        # ── Month select (cashbook only) ─────────────────────────────────────
+        # Same reasoning as list-fy-select just above: fn_cashbook_month_page
+        # takes the month as a real SQL argument, so it's stored separately
+        # (list_month) and read into `filters["month"]` in _render_card below.
+        # "" (the "All months" option) clears back to the plain whole-FY
+        # fn_cashbook_paired_v3 view.
+        elif trig_type == "list-month-select":
+            entity = id_dict.get("entity")
+            store.setdefault("list_month", {})[entity] = trig["value"] or None
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+
         # ── Pagination ────────────────────────────────────────────────────
         elif trig_type in ("list-page-prev", "list-page-next"):
             entity = id_dict.get("entity")
@@ -1925,6 +1938,20 @@ def _render_card(
                 filters = dict(filters)
                 filters["financial_year"] = selected_fy
 
+        # Month Selector — cashbook only. No default month: an unset
+        # selection means "All months" (the plain whole-FY
+        # fn_cashbook_paired_v3 view, no B/F/C/F rows), same as it behaved
+        # before this feature existed — so, unlike selected_fy above, this
+        # is only merged into `filters["month"]` when the person has
+        # actually picked one from the store.
+        month_options, selected_month = [], None
+        if entity == "cashbook":
+            month_options = loaders.get_month_options()
+            selected_month = (store.get("list_month") or {}).get(entity)
+            if selected_month:
+                filters = dict(filters)
+                filters["month"] = selected_month
+
         # Distinct filter options per column (cached in store so we don't
         # re-fetch the full set on every pagination/sort interaction).
         filter_options = (store.get("list_filter_options") or {}).get(entity)
@@ -1945,6 +1972,28 @@ def _render_card(
             rows, _ = loaders.load_list(
                 entity, filters, page=1, search=search, page_size=100_000
             )
+
+            # Cashbook's 'CiH' B/F and C/F rows (see _shape_cashbook_month_rows
+            # in loaders.py) are synthetic markers, not real transactions —
+            # they must stay pinned at the very top/bottom regardless of
+            # sort direction or active filters, not get shuffled in among
+            # whatever they're sorted/filtered against. Pull them out before
+            # filtering/sorting runs on `rows` below, and re-attach them
+            # after slicing.
+            bf_row = closing_row = None
+            if entity == "cashbook":
+                txn_rows = []
+                for r in rows:
+                    rd = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
+                    row_type = rd.get("row_type")
+                    if row_type == "bf":
+                        bf_row = r
+                    elif row_type == "closing":
+                        closing_row = r
+                    else:
+                        txn_rows.append(r)
+                rows = txn_rows
+
             # ── Column-level filtering (case-insensitive substring on display value) ──
             col_filters = {
                 k: v for k, v in (col_filters or {}).items() if v not in (None, "")
@@ -1978,6 +2027,18 @@ def _render_card(
             total = len(rows)
             start = (page - 1) * page_size
             page_rows = rows[start: start + page_size]
+
+            # Re-pin B/F at the top of the first page and C/F at the bottom
+            # of the last page — same placement as the non-sorted path
+            # (_shape_cashbook_month_rows / renderers.py), just computed
+            # against the post-filter/sort page count instead of
+            # fn_cashbook_month_page's own is_first_page/is_last_page.
+            if entity == "cashbook":
+                total_pages = max(1, -(-total // page_size))
+                if bf_row is not None and page == 1:
+                    page_rows = [bf_row] + page_rows
+                if closing_row is not None and page >= total_pages:
+                    page_rows = page_rows + [closing_row]
         else:
             rows, total = loaders.load_list(
                 entity, filters, page=page, search=search, page_size=page_size
@@ -2000,6 +2061,8 @@ def _render_card(
             filter_options=filter_options,
             fy_options=fy_options,
             selected_fy=selected_fy,
+            month_options=month_options,
+            selected_month=selected_month,
         )
 
     # ── profile ───────────────────────────────────────────────────────────────
