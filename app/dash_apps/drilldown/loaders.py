@@ -444,6 +444,30 @@ def fy_label(fy: int) -> str:
     return f"{fy}-{str(fy + 1)[-2:]}"
 
 
+# Calendar months in FY display order (Apr..Mar), for the Cashbook KPI
+# card's Month Selector. fn_cashbook_month_page takes p_month as a plain
+# calendar month (1-12) and resolves the calendar year itself from
+# (fy, month) — see that function's header comment for the Dec->Jan
+# rollover reasoning this mirrors.
+MONTH_OPTIONS: list[dict] = [
+    {"value": m, "label": lbl} for m, lbl in [
+        (4, "Apr"), (5, "May"), (6, "Jun"), (7, "Jul"), (8, "Aug"), (9, "Sep"),
+        (10, "Oct"), (11, "Nov"), (12, "Dec"), (1, "Jan"), (2, "Feb"), (3, "Mar"),
+    ]
+]
+
+
+def get_month_options() -> list[dict]:
+    """[{'value': 4, 'label': 'Apr'}, ...] in FY display order (Apr..Mar)."""
+    return MONTH_OPTIONS
+
+
+def _current_fy_month() -> int:
+    """Today's plain calendar month (1-12) — default selection for the
+    Cashbook KPI card's Month Selector."""
+    return date.today().month
+
+
 def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | None]:
     """
     Wraps fn_fy_closing_report(society_id, fy). The function resolves the
@@ -466,6 +490,56 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
 # ════════════════════════════════════════════════════════════════════════════
 # LOAD LIST
 # ════════════════════════════════════════════════════════════════════════════
+
+def _shape_cashbook_month_rows(raw_rows: list[dict]) -> tuple[list[dict], int]:
+    """
+    Turns fn_cashbook_month_page's flat per-row output (month_opening_balance
+    / month_closing_balance / total_row_count / is_first_page / is_last_page
+    repeated on every row) into the row list render_list_card actually
+    displays: a synthetic 'CiH'/'B/F' row_type='bf' row on the page that
+    starts the month, the real transaction rows as row_type='txn', and a
+    synthetic 'CiH'/'C/F' row_type='closing' row on the page that ends the
+    month — bracketing whatever page is currently in view, per spec, rather
+    than only ever showing on page 1 / the last page.
+
+    A month with zero transactions returns a single synthetic SQL row with
+    all rc_/pc_ fields NULL (is_first_page = is_last_page = TRUE) — that
+    becomes just the B/F row here (skipped as a transaction row, and the
+    C/F append below reuses the same balance since opening == closing).
+    """
+    if not raw_rows:
+        return [], 0
+
+    meta = raw_rows[0]
+    opening = meta.get("month_opening_balance")
+    closing = meta.get("month_closing_balance")
+    total = int(meta.get("total_row_count") or 0)
+    is_first = bool(meta.get("is_first_page"))
+    is_last = bool(meta.get("is_last_page"))
+    month_start = meta.get("row_date")
+
+    shaped: list[dict] = []
+    if is_first:
+        shaped.append({
+            "row_type": "bf", "row_date": month_start,
+            "rc_account_name": "CiH", "rc_particulars": "B/F",
+            "running_balance": opening,
+        })
+
+    for r in raw_rows:
+        if r.get("rc_account_name") is None and r.get("pc_account_name") is None:
+            continue  # the synthetic empty-month row — already represented by the B/F row above
+        shaped.append({**r, "row_type": "txn"})
+
+    if is_last:
+        shaped.append({
+            "row_type": "closing", "row_date": month_start,
+            "pc_account_name": "CiH", "pc_particulars": "C/F",
+            "running_balance": closing,
+        })
+
+    return shaped, total
+
 
 def _build_list_sql(entity: str, filters: dict, page: int = 1,
                     page_size: int = PAGE_SIZE) -> tuple[str, tuple]:
@@ -714,6 +788,21 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         # was throwing a "function does not exist" DB error. v3 takes the
         # same (society_id, entity_id, entity_role, search, start, end)
         # positional args v2 did, so this is a drop-in rename.
+        #
+        # Month Selector (2026-08): when filters["month"] is set (Financials
+        # > KPI Cashbook card), route through fn_cashbook_month_page instead
+        # — it resolves month_opening_balance/month_closing_balance chained
+        # across the FY (not just this month's own transactions, which is
+        # what a plain date-range filter on v3 would give you) and paginates
+        # internally, so page/page_size go straight into the function call
+        # rather than an outer LIMIT/OFFSET. Search isn't supported in this
+        # mode yet — fn_cashbook_month_page has no p_search param — so it's
+        # dropped rather than silently ignored-but-still-shown in the UI;
+        # renderers.py disables the search box whenever a month is selected.
+        month = filters.get("month")
+        if month:
+            return ("SELECT * FROM fn_cashbook_month_page(%s,%s,%s,%s,%s,%s,%s)",
+                    (sid, fy, month, p_eid, p_etype, page, page_size))
         return ("SELECT * FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset))
 
@@ -1272,8 +1361,35 @@ def load_list(
             ) if not eid else None
             fy = filters.get("financial_year", _current_fy())
             fy_start, fy_end = _fy_date_range(fy)
-            # Fixed (2026-08): same fn_cashbook_paired_v2 -> v3 rename as
-            # the paginated branch above (SECTION 12 in estatehub.sql).
+
+            # Month Selector (2026-08): fn_cashbook_month_page returns
+            # month_opening_balance / month_closing_balance / total_row_count
+            # / is_first_page / is_last_page on every row (see that
+            # function's header comment in estatehub.sql), which
+            # _shape_cashbook_month_rows() turns into synthetic 'CiH'/'B/F'
+            # and 'CiH'/'C/F' row_type rows — same row_type convention
+            # render_list_card already uses for the ledger's bf/closing
+            # highlighting — bracketing the real transaction rows so B/F and
+            # C/F stay visible on whichever page is currently in view.
+            # Pagination is internal to the function (page/page_size are
+            # real arguments, not an outer LIMIT/OFFSET), and total_row_count
+            # from the function is the authoritative count — no separate
+            # COUNT(*) query needed here.
+            month = filters.get("month")
+            if month:
+                raw_rows = db._execute(
+                    "SELECT * FROM fn_cashbook_month_page(%s,%s,%s,%s,%s,%s,%s)",
+                    (sid, fy, month, p_eid, p_etype, page, page_size), fetch_all=True,
+                ) or []
+                shaped, total = _shape_cashbook_month_rows(raw_rows)
+                return shaped, total
+
+            # Fixed (2026-08): this called fn_cashbook_paired_v2, which no
+            # longer exists in the schema (superseded by v3 — see SECTION 12
+            # in estatehub.sql) — every "Cashbook" list view in every portal
+            # was throwing a "function does not exist" DB error. v3 takes the
+            # same (society_id, entity_id, entity_role, search, start, end)
+            # positional args v2 did, so this is a drop-in rename.
             rows = db._execute(
                 "SELECT * FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset), fetch_all=True,

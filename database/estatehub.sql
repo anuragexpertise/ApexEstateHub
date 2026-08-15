@@ -4013,6 +4013,233 @@ BEGIN
 END;
 $$;
 
+-- fn_cashbook_month_page
+-- =======================
+-- Paginated single-month cashbook feed for the Financials > KPI (open
+-- Cashbook) card: Month Selector + Financial Year Selector in the header,
+-- rows paginated underneath, with 'CiH' B/F on the first entry and 'CiH'
+-- C/F on the last entry of the month per the CB2025-2026.xlsx reference
+-- layout — everything else is a plain cash-increase/decrease row.
+--
+-- Built on the same cr_rows/dr_rows/paired pattern as
+-- fn_cashbook_paired_v3 (entry_side-driven pairing, not drcr_account —
+-- see that function's header comment), re-scoped to one calendar month so
+-- pagination doesn't have to slice a full-FY result set app-side.
+--
+-- month_opening_balance / month_closing_balance are returned on EVERY row
+-- (and on the synthetic empty-month row below), so the card can display
+-- the calculated B/F and C/F regardless of which page is currently in
+-- view, per spec — not just on page 1 / the last page. running_balance
+-- is computed over the FULL month before OFFSET/LIMIT is applied, so
+-- page 2+ continues the running total correctly instead of restarting
+-- from month_opening_balance at the top of the page.
+--
+-- Calendar/FY mapping: p_month is a plain calendar month (1-12); month>=4
+-- belongs to calendar year p_fy, month<4 belongs to p_fy+1 (e.g. FY2025
+-- Jan = Jan 2026), computed once via a CASE rather than an incrementing
+-- (month, year) loop variable — this is the class of bug flagged against
+-- generate_cashbook_excel_fy's Dec->Jan rollover.
+--
+-- A month with zero transactions returns exactly one synthetic row (all
+-- rc_/pc_ columns NULL, row_date = month_start, running_balance =
+-- month_opening_balance = month_closing_balance, total_row_count = 0)
+-- instead of an empty result set, so the card always has something to
+-- render B/F and C/F from.
+DROP FUNCTION IF EXISTS fn_cashbook_month_page (
+    INT, INT, INT, INT, TEXT, INT, INT
+) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_cashbook_month_page(
+    p_society_id  INT,
+    p_fy          INT,
+    p_month       INT,
+    p_entity_id   INT  DEFAULT NULL,
+    p_entity_role TEXT DEFAULT NULL,
+    p_page        INT  DEFAULT 1,
+    p_page_size   INT  DEFAULT 15
+)
+RETURNS TABLE (
+    row_date               DATE,
+    rc_acc_id               INT,
+    rc_account_name          TEXT,
+    rc_entity_name           TEXT,
+    rc_particulars           TEXT,
+    rc_cash                  NUMERIC(15,2),
+    rc_chq                   NUMERIC(15,2),
+    pc_acc_id                INT,
+    pc_account_name          TEXT,
+    pc_entity_name            TEXT,
+    pc_particulars           TEXT,
+    pc_cash                  NUMERIC(15,2),
+    pc_chq                   NUMERIC(15,2),
+    running_balance          NUMERIC(15,2),
+    month_opening_balance    NUMERIC(15,2),
+    month_closing_balance    NUMERIC(15,2),
+    total_row_count          BIGINT,
+    total_pages              INT,
+    is_first_page             BOOLEAN,
+    is_last_page              BOOLEAN
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_calendar_year   INT;
+    v_month_start     DATE;
+    v_month_end       DATE;
+    v_fy_start        DATE;
+    v_fy_opening      NUMERIC(15,2);
+    v_pre_month_delta NUMERIC(15,2);
+    v_month_opening   NUMERIC(15,2);
+    v_month_closing   NUMERIC(15,2);
+    v_total_rows      BIGINT;
+    v_total_pages     INT;
+    v_offset          INT;
+BEGIN
+    IF p_month IS NULL OR p_month NOT BETWEEN 1 AND 12 THEN
+        RAISE EXCEPTION 'p_month must be between 1 and 12, got %', p_month;
+    END IF;
+    IF p_page IS NULL OR p_page < 1 THEN p_page := 1; END IF;
+    IF p_page_size IS NULL OR p_page_size < 1 THEN p_page_size := 15; END IF;
+
+    v_calendar_year := CASE WHEN p_month >= 4 THEN p_fy ELSE p_fy + 1 END;
+    v_month_start   := make_date(v_calendar_year, p_month, 1);
+    v_month_end     := (v_month_start + INTERVAL '1 month')::DATE;
+    v_fy_start      := make_date(p_fy, 4, 1);
+
+    -- Same brought_forward aggregate fn_cashbook_paired_v3 uses for its
+    -- FY-opening balance.
+    SELECT COALESCE(SUM(
+        CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
+    ), 0)
+    INTO v_fy_opening
+    FROM accounts a
+    JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+    WHERE a.society_id = p_society_id AND a.is_cash_or_bank = TRUE
+      AND bf.financial_year = p_fy;
+
+    -- Net physical-cash movement (entry_side-driven; mode='cash' only --
+    -- Chq/UPI legs never touch cash-in-hand) for every prior month in this
+    -- FY, under the same entity_id/entity_role scoping
+    -- fn_cashbook_paired_v3 applies to its cr_rows/dr_rows.
+    SELECT COALESCE(SUM(
+        CASE WHEN t.entry_side = 'Cr' THEN t.amount
+             WHEN t.entry_side = 'Dr' THEN -t.amount
+             ELSE 0 END
+    ), 0)
+    INTO v_pre_month_delta
+    FROM transactions t
+    JOIN accounts a ON a.id = t.acc_id
+    LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
+    LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
+    LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+    WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+      AND t.trx_date >= v_fy_start AND t.trx_date < v_month_start
+      AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
+      AND (p_entity_role IS NULL OR
+           (p_entity_role = 'apartment' AND ap.id IS NOT NULL) OR
+           (p_entity_role = 'vendor' AND v.id IS NOT NULL) OR
+           (p_entity_role = 'security' AND s.id IS NOT NULL));
+
+    v_month_opening := v_fy_opening + v_pre_month_delta;
+
+    CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
+    WITH cr_rows AS (
+        SELECT t.id, t.journal_id, t.trx_date,
+               a.id AS acc_id, a.name::TEXT AS account_name,
+               COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
+               COALESCE(t.acc_particulars,'')::TEXT AS particulars,
+               CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
+               CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
+               ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        WHERE t.society_id = p_society_id AND t.status = 'paid'
+          AND t.entry_side = 'Cr'
+          AND t.trx_date >= v_month_start AND t.trx_date < v_month_end
+          AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
+          AND (p_entity_role IS NULL OR
+               (p_entity_role = 'apartment' AND ap.id IS NOT NULL) OR
+               (p_entity_role = 'vendor' AND v.id IS NOT NULL) OR
+               (p_entity_role = 'security' AND s.id IS NOT NULL))
+    ),
+    dr_rows AS (
+        SELECT t.id, t.journal_id, t.trx_date,
+               a.id AS acc_id, a.name::TEXT AS account_name,
+               COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
+               COALESCE(t.acc_particulars,'')::TEXT AS particulars,
+               CASE WHEN t.mode = 'cash' THEN t.amount ELSE 0 END AS cash_amt,
+               CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
+               ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        WHERE t.society_id = p_society_id AND t.status = 'paid'
+          AND t.entry_side = 'Dr'
+          AND t.trx_date >= v_month_start AND t.trx_date < v_month_end
+          AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
+          AND (p_entity_role IS NULL OR
+               (p_entity_role = 'apartment' AND ap.id IS NOT NULL) OR
+               (p_entity_role = 'vendor' AND v.id IS NOT NULL) OR
+               (p_entity_role = 'security' AND s.id IS NOT NULL))
+    ),
+    paired AS (
+        SELECT COALESCE(c.trx_date, d.trx_date) AS row_date,
+               COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
+               c.acc_id AS rc_acc_id, c.account_name AS rc_account_name,
+               c.entity_name AS rc_entity_name, c.particulars AS rc_particulars,
+               c.cash_amt AS rc_cash, c.chq_amt AS rc_chq,
+               d.acc_id AS pc_acc_id, d.account_name AS pc_account_name,
+               d.entity_name AS pc_entity_name, d.particulars AS pc_particulars,
+               d.cash_amt AS pc_cash, d.chq_amt AS pc_chq
+        FROM cr_rows c
+        FULL OUTER JOIN dr_rows d
+          ON COALESCE(c.journal_id, -c.id) = COALESCE(d.journal_id, -d.id)
+         AND c.rn = d.rn
+    )
+    SELECT p.*,
+           ROW_NUMBER() OVER (ORDER BY p.row_date, p.pair_key) AS ord,
+           v_month_opening + SUM(COALESCE(p.rc_cash,0) - COALESCE(p.pc_cash,0))
+               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS running_balance
+    FROM paired p;
+
+    SELECT COUNT(*) INTO v_total_rows FROM _cb_month_rows;
+    v_total_pages := GREATEST(1, CEIL(v_total_rows::NUMERIC / p_page_size)::INT);
+    IF p_page > v_total_pages THEN p_page := v_total_pages; END IF;
+    v_offset := (p_page - 1) * p_page_size;
+
+    IF v_total_rows = 0 THEN
+        v_month_closing := v_month_opening;
+        RETURN QUERY
+        SELECT v_month_start, NULL::INT, NULL::TEXT, NULL::TEXT, NULL::TEXT,
+               NULL::NUMERIC(15,2), NULL::NUMERIC(15,2),
+               NULL::INT, NULL::TEXT, NULL::TEXT, NULL::TEXT,
+               NULL::NUMERIC(15,2), NULL::NUMERIC(15,2),
+               v_month_opening,
+               v_month_opening, v_month_closing,
+               0::BIGINT, 1, TRUE, TRUE;
+        RETURN;
+    END IF;
+
+    SELECT running_balance INTO v_month_closing
+    FROM _cb_month_rows ORDER BY ord DESC LIMIT 1;
+
+    RETURN QUERY
+    SELECT r.row_date, r.rc_acc_id, r.rc_account_name, r.rc_entity_name, r.rc_particulars,
+           r.rc_cash, r.rc_chq, r.pc_acc_id, r.pc_account_name, r.pc_entity_name, r.pc_particulars,
+           r.pc_cash, r.pc_chq, r.running_balance,
+           v_month_opening, v_month_closing,
+           v_total_rows, v_total_pages,
+           (p_page = 1), (p_page = v_total_pages)
+    FROM _cb_month_rows r
+    ORDER BY r.ord
+    OFFSET v_offset LIMIT p_page_size;
+END;
+$$;
+
 -- ═══════════════-- fn_fy_closing_report
 -- ======================
 -- The closing engine. For a given society + financial year, computes every
