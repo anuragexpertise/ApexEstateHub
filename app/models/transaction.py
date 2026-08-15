@@ -34,7 +34,6 @@ class Account(db.Model):
     drcr_account = db.Column(db.String(2), nullable=True)  # Dr, Cr
     has_bf = db.Column(db.Boolean, default=False)
     drcr_bf = db.Column(db.String(2), nullable=True)  # Dr, Cr
-    bf_amount = db.Column(db.Numeric(12, 2), nullable=True)
     depreciation_percent = db.Column(db.Numeric(5, 2), default=100)
     is_depreciable = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())

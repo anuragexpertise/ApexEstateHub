@@ -129,7 +129,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     ),
     has_bf BOOLEAN DEFAULT FALSE,
     drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
-    bf_amount NUMERIC(12, 2) DEFAULT 0.00,
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
     is_cash_or_bank BOOLEAN NOT NULL DEFAULT FALSE,

@@ -226,6 +226,13 @@ def run_migrations(conn):
         # visitors: source column to distinguish owner-preapproved vs security walk-in
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'security' CHECK (source IN ('owner', 'security'))",
         "ALTER TABLE visitors ALTER COLUMN source SET DEFAULT 'security'",
+
+        # accounts.bf_amount: dead column. Opening balances live in the
+        # FY-scoped brought_forward table (acc_id + society_id +
+        # financial_year); nothing has read accounts.bf_amount since that
+        # migration and seed.py / default_accounts_estateacc.py never
+        # insert into it. Drop it from existing installations.
+        "ALTER TABLE accounts DROP COLUMN IF EXISTS bf_amount",
     ]
 
     ok = 0
