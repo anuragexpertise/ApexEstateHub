@@ -88,11 +88,18 @@ def generate_ledger_excel(
         db = _db
 
     acc = db._execute(
-        "SELECT id, name FROM accounts WHERE id=%s AND society_id=%s",
+        "SELECT id, name, tab_name FROM accounts WHERE id=%s AND society_id=%s",
         (account_id, society_id), fetch_one=True,
     )
     if not acc:
         raise ValueError(f"Account {account_id} not found for society {society_id}")
+
+    # tab_name is what this sheet is actually named after (2026-08) — the
+    # short code from the chart of accounts (CiH, ICICI, Dep, ...), same
+    # convention the Cashbook's Cr/Dr Account columns now use — falling
+    # back to the full `name` only for accounts seeded before tab_name was
+    # populated.
+    tab = acc.get("tab_name") or acc["name"]
 
     asst_year = f"{fy}-{fy+1}"
 
@@ -107,14 +114,14 @@ def generate_ledger_excel(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = (acc.get("name") or "Ledger")[:31]
+    ws.title = tab[:31]
 
     for col_letter, width in _COL_WIDTHS.items():
         ws.column_dimensions[col_letter].width = width
 
     ws.row_dimensions[1].height = 6
     title = {
-        1: f"{acc['name']}.xlsx", 3: acc["name"], 5: "LEDGER",
+        1: f"{tab}.xlsx", 3: acc["name"], 5: "LEDGER",
         7: "Asst. Yr.", 8: asst_year,
     }
     for col, val in title.items():
@@ -141,8 +148,11 @@ def generate_ledger_excel(
         if row_type in ("bf", "txn", "depreciation"):
             drcr = "Dr" if debit and not credit else ("Cr" if credit and not debit else None)
 
+        # parent_name from fn_account_ledger_fy is already tab_name-first
+        # (COALESCE(p.tab_name, p.name, '--')) — see estatehub.sql — so no
+        # extra resolution needed here for the closing row's A/c column.
         row = {
-            1: r.get("row_date"), 2: r.get("parent_name") if row_type == "closing" else acc["name"],
+            1: r.get("row_date"), 2: r.get("parent_name") if row_type == "closing" else tab,
             3: r.get("particulars") or "",
             5: debit, 6: credit, 7: drcr, 8: abs(balance) if balance is not None else None,
         }

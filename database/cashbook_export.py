@@ -145,8 +145,12 @@ def _write_month_sheet(
         cell.font, cell.fill = _FONT_HEADER, _FILL_HEADER
         cell.alignment, cell.border = _ALIGN_C, _BORDER_ALL
 
+    # Fixed (2026-08): B/F account column now shows 'CiH' — matching
+    # CB2024-2025.xlsx (B6='CiH', C6='B/F') and the Cashbook's only-CiH-
+    # has-a-B/F-row rule — rather than the generic label 'Balance', which
+    # didn't identify which account this opening balance belongs to.
     bf_row = {
-        1: month_dt, 2: "Balance", 3: "B/F",
+        1: month_dt, 2: "CiH", 3: "B/F",
         5: opening_balance if opening_balance >= 0 else None,
         12: abs(opening_balance) if opening_balance < 0 else None,
     }
@@ -208,7 +212,8 @@ def _write_month_sheet(
 
     cf_row = current_row
     prev = cf_row - 1
-    ws.cell(row=cf_row, column=9,  value="Balance")
+    # Same 'CiH' fix as the B/F row above (was the generic label 'Balance').
+    ws.cell(row=cf_row, column=9,  value="CiH")
     ws.cell(row=cf_row, column=10, value="C/F")
     ws.cell(row=cf_row, column=12, value=f"=O{prev}")
     ws.cell(row=cf_row, column=7,  value=f"=G{prev}")
@@ -259,10 +264,14 @@ def generate_cashbook_excel_fy(
     asst_year = f"{fy}-{fy+1}"
     filename = f"{filename_prefix}_{fy}-{fy+1}.xlsx"
 
+    # Fixed (2026-08): is_cash_or_bank -> tab_name='CiH', same fix and same
+    # reasoning as fn_cashbook_paired_v3 in estatehub.sql — is_cash_or_bank
+    # is never populated by seed.py/migrate.py (defaults FALSE), so this
+    # always resolved to 0. The workbook's opening balance is CiH's alone.
     bf_row = db._execute(
         "SELECT COALESCE(SUM(CASE WHEN bf.drcr_bf='Dr' THEN bf.bf_amount ELSE -bf.bf_amount END),0) AS bf "
         "FROM accounts a JOIN brought_forward bf ON bf.acc_id=a.id AND bf.society_id=a.society_id "
-        "WHERE a.society_id=%s AND a.is_cash_or_bank=TRUE AND bf.financial_year=%s",
+        "WHERE a.society_id=%s AND a.tab_name='CiH' AND bf.financial_year=%s",
         (society_id, fy), fetch_one=True,
     ) or {}
     opening_balance = float(bf_row.get("bf", 0))
