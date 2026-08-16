@@ -345,6 +345,29 @@ def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
           f"({len(bf_accounts)} accounts with has_bf=TRUE)")
 
 
+def seed_primary_bank_account(cur, conn, society_id: int):
+    """Points societies.primary_bank_account_id at SBI (id=6311, tab
+    'SBI') — the single bank leg fn_resolve_bank_leg resolves to for
+    every non-cash transaction (cheque/upi/card/bank/crypto). Without
+    this, the very first non-cash Receipt/Expense/etc. after a fresh seed
+    would hit fn_resolve_bank_leg's RAISE EXCEPTION and fail outright."""
+    cur.execute(
+        """SELECT a.id FROM accounts a JOIN accounts p ON p.id = a.parent_account_id
+           WHERE a.society_id = %s AND a.tab_name = 'SBI' AND p.tab_name = 'BkAc'""",
+        (society_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        log.warning("SBI account not found — primary_bank_account_id left unset")
+        return
+    cur.execute(
+        "UPDATE societies SET primary_bank_account_id = %s WHERE id = %s",
+        (row["id"], society_id),
+    )
+    conn.commit()
+    print(f"  ✓ primary_bank_account_id -> SBI (id={row['id']})")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATION
 # ═════════════════════════════════════════════════════════════════════════════
@@ -364,6 +387,7 @@ def run_seed(conn):
     admin_uid = seed_society_admin(cur, conn, society_id)
 
     seed_brought_forward(cur, conn, society_id, admin_uid)
+    seed_primary_bank_account(cur, conn, society_id)
 
     conn.close()
 

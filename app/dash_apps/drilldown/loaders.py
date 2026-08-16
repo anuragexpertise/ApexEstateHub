@@ -502,8 +502,10 @@ def _shape_cashbook_month_rows(raw_rows: list[dict]) -> tuple[list[dict], int]:
     month — bracketing whatever page is currently in view, per spec, rather
     than only ever showing on page 1 / the last page.
 
-    A month with zero transactions returns a single synthetic SQL row with
-    all rc_/pc_ fields NULL (is_first_page = is_last_page = TRUE) — that
+    Column names match fn_cashbook_paired_v3/fn_cashbook_month_page's
+    cr_*/dr_*/cih_running contract (2026-08) — see estatehub.sql. A month
+    with zero transactions returns a single synthetic SQL row with all
+    cr_/dr_ fields NULL (is_first_page = is_last_page = TRUE) — that
     becomes just the B/F row here (skipped as a transaction row, and the
     C/F append below reuses the same balance since opening == closing).
     """
@@ -522,20 +524,20 @@ def _shape_cashbook_month_rows(raw_rows: list[dict]) -> tuple[list[dict], int]:
     if is_first:
         shaped.append({
             "row_type": "bf", "row_date": month_start,
-            "rc_account_name": "CiH", "rc_particulars": "B/F",
-            "running_balance": opening,
+            "cr_account_name": "CiH", "cr_particulars": "B/F",
+            "cih_running": opening,
         })
 
     for r in raw_rows:
-        if r.get("rc_account_name") is None and r.get("pc_account_name") is None:
+        if r.get("cr_account_name") is None and r.get("dr_account_name") is None:
             continue  # the synthetic empty-month row — already represented by the B/F row above
         shaped.append({**r, "row_type": "txn"})
 
     if is_last:
         shaped.append({
             "row_type": "closing", "row_date": month_start,
-            "pc_account_name": "CiH", "pc_particulars": "C/F",
-            "running_balance": closing,
+            "dr_account_name": "CiH", "dr_particulars": "C/F",
+            "cih_running": closing,
         })
 
     return shaped, total

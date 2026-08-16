@@ -139,6 +139,64 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
 
+-- societies.primary_bank_account_id (2026-08)
+-- ==============================================
+-- Single default bank account used for every non-cash transaction leg
+-- (cheque/upi/card/bank/crypto alike) society-wide. See
+-- fn_resolve_bank_leg below for how writer functions consume this.
+-- Added here (after `accounts`, which it forward-references) rather than
+-- inline on the societies CREATE TABLE above, same late-ALTER-TABLE
+-- pattern already used for societies_created_by_fkey just above.
+--
+-- The FK alone can't express "must be a child of THIS society's own Bank
+-- Accounts header" — a trigger (defense-in-depth alongside the FK)
+-- enforces both (a) the referenced account belongs to this same society,
+-- and (b) its parent_account_id is that society's 'BkAc' (Bank Accounts)
+-- header account. Per-mode bank routing (UPI -> ICICI, Cheque -> SBI,
+-- etc.) may replace this single column later; for now every non-cash
+-- mode routes through it uniformly.
+ALTER TABLE societies
+ADD COLUMN IF NOT EXISTS primary_bank_account_id INT REFERENCES accounts (id);
+
+DROP FUNCTION IF EXISTS fn_trg_validate_primary_bank_account () CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_trg_validate_primary_bank_account()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    v_acc_society_id INT;
+    v_parent_tab     TEXT;
+BEGIN
+    IF NEW.primary_bank_account_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT a.society_id, p.tab_name
+      INTO v_acc_society_id, v_parent_tab
+      FROM accounts a
+      LEFT JOIN accounts p ON p.id = a.parent_account_id
+     WHERE a.id = NEW.primary_bank_account_id;
+
+    IF v_acc_society_id IS NULL THEN
+        RAISE EXCEPTION 'primary_bank_account_id % does not exist', NEW.primary_bank_account_id;
+    END IF;
+    IF v_acc_society_id <> NEW.id THEN
+        RAISE EXCEPTION 'primary_bank_account_id % belongs to a different society (society %, not %)',
+            NEW.primary_bank_account_id, v_acc_society_id, NEW.id;
+    END IF;
+    IF v_parent_tab IS DISTINCT FROM 'BkAc' THEN
+        RAISE EXCEPTION 'primary_bank_account_id % is not a child of the Bank Accounts (BkAc) header account',
+            NEW.primary_bank_account_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_primary_bank_account ON societies;
+CREATE TRIGGER trg_validate_primary_bank_account
+    BEFORE INSERT OR UPDATE OF primary_bank_account_id ON societies
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_validate_primary_bank_account();
+
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -1879,31 +1937,108 @@ $$;
 --   otherwise   → Cash-in-hand (633) if present, else first Dr account
 -- ════════════════════════════════════════════════════════════════
 DROP FUNCTION IF EXISTS fn_resolve_cash_account (INT, VARCHAR) CASCADE;
+DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR) CASCADE;
 
-CREATE OR REPLACE FUNCTION fn_resolve_cash_account(p_society_id INT, p_mode VARCHAR)
+-- fn_resolve_bank_leg
+-- ====================
+-- Replaces fn_resolve_cash_account (2026-08). The old function always
+-- resolved SOME account — CiH for mode='cash', a name-matched "SBI A/c"
+-- for the literal mode='bank', and (bug) CiH again for every OTHER
+-- non-cash mode (cheque/upi/card/crypto), since only that one literal
+-- string hit the SBI branch. Every money-writing function then wrote a
+-- second leg to whatever got resolved, which is what caused the
+-- double-sided cashbook display bug: a cash-mode transaction's
+-- "completing" CiH leg landed on the OPPOSITE side of the cashbook from
+-- where the real transaction happened (e.g. a PropInc cash receipt's
+-- completing Dr-CiH leg showed up on the Payment side, as if money had
+-- also been paid out).
+--
+-- New contract:
+--   mode = 'cash'  -> NULL. No second leg gets written at all — see each
+--                     writer function below (`IF v_bank_acc IS NOT NULL
+--                     THEN ... END IF;`). CIH Running in the cashbook is
+--                     derived by directly summing every cash-mode
+--                     transaction's own entry_side (see
+--                     fn_cih_balance_asof below), not by reading a
+--                     dedicated CiH ledger account — CiH now has NO
+--                     transaction rows of its own.
+--   mode <> 'cash' -> societies.primary_bank_account_id, the single
+--                     society-wide bank leg for every non-cash mode
+--                     (cheque/upi/card/bank/crypto alike). Raises loudly
+--                     if not configured, rather than silently falling
+--                     back to CiH like the old function did.
+CREATE OR REPLACE FUNCTION fn_resolve_bank_leg(p_society_id INT, p_mode VARCHAR)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc_id INT;
 BEGIN
-    IF p_mode = 'bank' THEN
-        SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = p_society_id AND drcr_account = 'Dr'
-          AND name ILIKE '%SBI A/c - Society%'
-        LIMIT 1;
-    ELSE
-        SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = p_society_id AND drcr_account = 'Dr'
-          AND name ILIKE '%Cash-in-hand%'
-        LIMIT 1;
+    IF p_mode = 'cash' THEN
+        RETURN NULL;
     END IF;
 
+    SELECT primary_bank_account_id INTO v_acc_id
+    FROM societies WHERE id = p_society_id;
+
     IF v_acc_id IS NULL THEN
-        SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = p_society_id AND drcr_account = 'Dr'
-        ORDER BY id ASC LIMIT 1;
+        RAISE EXCEPTION 'No primary_bank_account_id configured for society % — set Settings > Accounts > Primary Bank Account before recording a non-cash (%) transaction', p_society_id, p_mode;
     END IF;
 
     RETURN v_acc_id;
+END;
+$$;
+
+-- fn_cih_balance_asof
+-- ====================
+-- Single source of truth for "what is CiH's balance as of this date",
+-- since CiH no longer has any transaction rows of its own to sum (cash-
+-- mode legs post directly to the real income/expense/asset account —
+-- see fn_resolve_bank_leg above). Computes: this date's FY's
+-- brought_forward CiH row, plus the net Cr(+)/Dr(-) effect of every
+-- mode='cash' transaction from that FY's start through p_as_of_date
+-- inclusive, across ANY account (cash-mode legs can land on Salary,
+-- PropInc, TDStoIT, an asset account, anywhere — CIH Running doesn't
+-- care which account, only that mode='cash').
+--
+-- Shared by:
+--   - fn_cashbook_month_page (month_opening_balance / month_closing_balance)
+--   - fn_account_ledger_fy's CiH branch (its C/F figure)
+--   - fn_dashboard_stats (live cash_balance)
+-- so all three are guaranteed to always agree — none of them re-derive
+-- this formula independently.
+DROP FUNCTION IF EXISTS fn_cih_balance_asof (INT, DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_cih_balance_asof(p_society_id INT, p_as_of_date DATE)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy       INT;
+    v_fy_start DATE;
+    v_bf       NUMERIC(15,2);
+    v_delta    NUMERIC(15,2);
+BEGIN
+    v_fy := EXTRACT(YEAR FROM p_as_of_date)::INT
+            - CASE WHEN EXTRACT(MONTH FROM p_as_of_date) < 4 THEN 1 ELSE 0 END;
+    v_fy_start := make_date(v_fy, 4, 1);
+
+    SELECT COALESCE(SUM(
+        CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
+    ), 0)
+    INTO v_bf
+    FROM accounts a
+    JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+    WHERE a.society_id = p_society_id AND a.tab_name = 'CiH'
+      AND bf.financial_year = v_fy;
+
+    SELECT COALESCE(SUM(
+        CASE WHEN t.entry_side = 'Cr' THEN t.amount
+             WHEN t.entry_side = 'Dr' THEN -t.amount
+             ELSE 0 END
+    ), 0)
+    INTO v_delta
+    FROM transactions t
+    WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+      AND t.trx_date >= v_fy_start AND t.trx_date <= p_as_of_date;
+
+    RETURN v_bf + v_delta;
 END;
 $$;
 
@@ -1928,7 +2063,7 @@ DECLARE
     v_rec    receipts%ROWTYPE;
     v_trx_id INT;
     v_journal_id INT;
-    v_cash_acc INT;
+    v_bank_acc INT;
     v_mode VARCHAR(20);
     v_number VARCHAR(64);
 BEGIN
@@ -1939,7 +2074,7 @@ BEGIN
     IF v_rec.acc_id IS NULL        THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Error: No income account on this receipt'; RETURN NEXT; RETURN; END IF;
 
     v_mode := COALESCE(p_mode, v_rec.mode);
-    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, v_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Cr: income account (the receipt's acc_id)
@@ -1954,12 +2089,12 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     -- Dr: cash / bank paired side (double-entry)
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Dr', v_rec.receipt_date, v_cash_acc, v_rec.entity_id,
+            v_rec.society_id, 'Dr', v_rec.receipt_date, v_bank_acc, v_rec.entity_id,
             'Cash received - ' || v_rec.particulars,
             v_rec.amount, v_mode, 'paid',
             p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id
@@ -1995,7 +2130,7 @@ DECLARE
     v_rec    expenses%ROWTYPE;
     v_trx_id INT;
     v_journal_id INT;
-    v_cash_acc INT;
+    v_bank_acc INT;
     v_mode VARCHAR(20);
     v_number VARCHAR(64);
 BEGIN
@@ -2006,7 +2141,7 @@ BEGIN
     IF v_rec.acc_id IS NULL        THEN expense_id := p_expense_id; receipt_number := v_rec.receipt_number; msg := 'Error: No expense account on this row'; RETURN NEXT; RETURN; END IF;
 
     v_mode := COALESCE(p_mode, v_rec.mode);
-    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, v_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, v_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Dr: expense account
@@ -2021,12 +2156,12 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     -- Cr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Cr', v_rec.expense_date, v_cash_acc, v_rec.entity_id,
+            v_rec.society_id, 'Cr', v_rec.expense_date, v_bank_acc, v_rec.entity_id,
             'Cash paid - ' || v_rec.particulars,
             v_rec.amount, v_mode, 'paid',
             p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id
@@ -2087,7 +2222,7 @@ DECLARE
     v_int_acc     INT;
     v_trx_id      INT;
     v_journal_id  INT;
-    v_cash_acc    INT;
+    v_bank_acc    INT;
     v_new_paid    NUMERIC(15,2);
 BEGIN
     SELECT * INTO v_rec FROM receivables WHERE id = p_receivable_id FOR UPDATE;
@@ -2112,7 +2247,7 @@ BEGIN
     v_int_post := GREATEST(COALESCE(v_int_post, 0), 0);
     v_base_post := v_take - v_int_post;
 
-    v_cash_acc := fn_resolve_cash_account(v_rec.society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     IF v_int_acc IS NOT NULL AND v_int_post > 0 THEN
@@ -2148,12 +2283,12 @@ BEGIN
     END IF;
 
     -- Dr: cash / bank paired side (actual amount received, not the full residual)
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_rec.acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Dr', CURRENT_DATE, v_cash_acc, v_rec.entity_id,
+            v_rec.society_id, 'Dr', CURRENT_DATE, v_bank_acc, v_rec.entity_id,
             'Cash received - ' || REPLACE(v_rec.description, ' + Interest', ''),
             v_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         );
@@ -2196,7 +2331,7 @@ DECLARE
     v_remaining  NUMERIC(15,2) := p_amount;
     v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     rec          RECORD;
     v_take        NUMERIC(15,2);
     v_row_residual NUMERIC(15,2);
@@ -2232,7 +2367,7 @@ BEGIN
         LIMIT 1;
     END IF;
 
-    v_cash_acc := fn_resolve_cash_account(v_society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Cr: income side (one journal line for the whole payment)
@@ -2246,12 +2381,12 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     -- Dr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_society_id, 'Dr', CURRENT_DATE, v_cash_acc, p_apartment_id,
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id,
             'Cash received - Maintenance Payment',
             p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_trx_id, v_journal_id
         );
@@ -2391,7 +2526,7 @@ DECLARE
     v_pay        payables%ROWTYPE;
     v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     v_tds_acc    INT;
     v_tds_amt    NUMERIC(15,2) := 0;
     v_net_amt    NUMERIC(15,2);
@@ -2404,7 +2539,7 @@ BEGIN
         RETURN 'Error: TDS % must be between 0 and 100';
     END IF;
 
-    v_cash_acc := fn_resolve_cash_account(v_pay.society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_pay.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     IF COALESCE(p_tds_pct, 0) > 0 THEN
@@ -2446,12 +2581,12 @@ BEGIN
     END IF;
 
     -- Cr: cash/bank, full gross amount either way
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_pay.acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, 'Cr', CURRENT_DATE, v_cash_acc, v_pay.entity_id,
+            v_pay.society_id, 'Cr', CURRENT_DATE, v_bank_acc, v_pay.entity_id,
             'Cash paid - ' || v_pay.description,
             v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         );
@@ -2494,7 +2629,7 @@ DECLARE
     v_receipt_id  INT;
     v_pass_id     INT;
     v_desc        TEXT;
-    v_cash_acc    INT;
+    v_bank_acc    INT;
     v_journal_id  INT;
     v_is_admin    BOOLEAN;
     v_status      VARCHAR(20);
@@ -2546,7 +2681,7 @@ BEGIN
     v_desc := COALESCE(p_particulars,
         'Vendor Pass (' || p_pass_type || ') - ' || COALESCE(v_vendor_name,''));
 
-    v_cash_acc := fn_resolve_cash_account(v_society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
@@ -2583,12 +2718,12 @@ BEGIN
             );
 
             -- Dr: cash / bank paired side
-            IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+            IF v_bank_acc IS NOT NULL THEN
                 INSERT INTO transactions(
                     society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                     amount, mode, status, created_by, created_at, source_table, source_id, journal_id
                 ) VALUES (
-                    v_society_id, 'Dr', p_issued_date, v_cash_acc, v_vendor_id,
+                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_vendor_id,
                     'Cash received - ' || v_desc,
                     v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
                 );
@@ -2646,7 +2781,7 @@ DECLARE
     v_acc_id       INT;
     v_is_ticket_ac BOOLEAN;
     v_amount       NUMERIC(10,2);
-    v_cash_acc     INT;
+    v_bank_acc     INT;
     v_receipt_id   INT;
     v_ticket_id    INT;
     v_desc         TEXT;
@@ -2687,7 +2822,7 @@ BEGIN
         'Event Ticket x' || v_total_qty || ' - ' || COALESCE(v_event.title,'') ||
         ' - ' || COALESCE(v_flat_number,''));
 
-    v_cash_acc   := fn_resolve_cash_account(v_society_id, p_mode);
+    v_bank_acc   := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
@@ -2722,12 +2857,12 @@ BEGIN
                 v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
 
-            IF v_cash_acc IS NOT NULL AND v_cash_acc <> v_acc_id THEN
+            IF v_bank_acc IS NOT NULL THEN
                 INSERT INTO transactions(
                     society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                     amount, mode, status, created_by, created_at, source_table, source_id, journal_id
                 ) VALUES (
-                    v_society_id, 'Dr', p_issued_date, v_cash_acc, v_apt_id,
+                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_apt_id,
                     'Cash received - ' || v_desc,
                     v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
                 );
@@ -2781,7 +2916,7 @@ DECLARE
     v_asset_id   INT;
     v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     v_dep_rate   NUMERIC(5,2);
     v_desc       TEXT;
 BEGIN
@@ -2803,7 +2938,7 @@ BEGIN
     ) RETURNING id INTO v_asset_id;
 
     v_desc := COALESCE(p_particulars, 'Asset Purchase - ' || p_asset_name);
-    v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Dr: asset class account
@@ -2816,12 +2951,12 @@ BEGIN
     ) RETURNING id INTO v_trx_id;
 
     -- Cr: cash / bank paired side
-    IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+    IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, 'Cr', p_purchase_date, v_cash_acc, v_asset_id,
+            p_society_id, 'Cr', p_purchase_date, v_bank_acc, v_asset_id,
             'Cash paid - ' || v_desc,
             p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'assets', v_asset_id, v_journal_id
         );
@@ -2847,7 +2982,7 @@ LANGUAGE plpgsql AS $$
 DECLARE
     v_asset      assets%ROWTYPE;
     v_acc_id     INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     v_receipt_id INT;
     v_trx_id     INT;
     v_journal_id INT;
@@ -2877,18 +3012,31 @@ BEGIN
     v_gain_loss := p_sale_value - v_book_value;
 
     v_desc := COALESCE(p_particulars, 'Asset Sale - ' || v_asset.asset_name);
-    v_cash_acc := fn_resolve_cash_account(v_asset.society_id, p_mode);
+    v_bank_acc := fn_resolve_bank_leg(v_asset.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
-    -- Dr: cash / bank (sale proceeds)
-    INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-    ) VALUES (
-        v_asset.society_id, 'Dr', p_sale_date, v_cash_acc, p_asset_id,
-        'Cash received - ' || v_desc,
-        p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
-    ) RETURNING id INTO v_trx_id;
+    -- Fixed (2026-08): this leg was previously written unconditionally
+    -- (no IF v_bank_acc IS NOT NULL guard, unlike every other writer
+    -- function) — mode='cash' now resolves v_bank_acc to NULL (see
+    -- fn_resolve_bank_leg), so an unconditional INSERT here would have
+    -- written a transaction with acc_id=NULL for every cash-mode
+    -- disposal. Skipped entirely for cash mode instead, same as every
+    -- other writer function — CIH Running is derived from the OTHER
+    -- (asset/gain-loss) legs' own entry_side, not from a dedicated CiH
+    -- leg. v_trx_id is captured from the always-present asset write-off
+    -- leg below instead, since this one may not run.
+    --
+    -- Dr: cash / bank (sale proceeds) — non-cash mode only
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_asset.society_id, 'Dr', p_sale_date, v_bank_acc, p_asset_id,
+            'Cash received - ' || v_desc,
+            p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+        );
+    END IF;
 
     -- Cr: asset class account (book value removal)
     INSERT INTO transactions(
@@ -2898,7 +3046,7 @@ BEGIN
         v_asset.society_id, 'Cr', p_sale_date, v_asset.acc_id, p_asset_id,
         'Asset written off - ' || v_asset.asset_name,
         v_book_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
-    );
+    ) RETURNING id INTO v_trx_id;
 
     -- Cr (balancing): gain, or Dr (balancing): loss via the sale income account
     IF v_gain_loss <> 0 THEN
@@ -2964,7 +3112,7 @@ DECLARE
     v_receipt_id INT;
     v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     v_drcr       VARCHAR(2);
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
@@ -3001,7 +3149,7 @@ BEGIN
     ) RETURNING id INTO v_receipt_id;
 
     IF v_status = 'confirmed' THEN
-        v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+        v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode);
         v_journal_id := NEXTVAL('seq_transaction_number');
 
         -- entry_side mirrors fn_save_expense's convention, just the opposite
@@ -3019,12 +3167,12 @@ BEGIN
             p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
-        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+        IF v_bank_acc IS NOT NULL THEN
             INSERT INTO transactions(
                 society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Dr', p_receipt_date, v_cash_acc, p_entity_id,
+                p_society_id, 'Dr', p_receipt_date, v_bank_acc, p_entity_id,
                 'Cash received - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
@@ -3067,7 +3215,7 @@ DECLARE
     v_expense_id INT;
     v_trx_id     INT;
     v_journal_id INT;
-    v_cash_acc   INT;
+    v_bank_acc   INT;
     v_tds_acc    INT;
     v_tds_amt    NUMERIC(15,2) := 0;
     v_net_amt    NUMERIC(15,2);
@@ -3110,7 +3258,7 @@ BEGIN
     ) RETURNING id INTO v_expense_id;
  
     IF v_status = 'confirmed' THEN
-        v_cash_acc := fn_resolve_cash_account(p_society_id, p_mode);
+        v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode);
         v_journal_id := NEXTVAL('seq_transaction_number');
  
         -- Resolve TDS only if a percentage was actually asked for and the
@@ -3156,12 +3304,12 @@ BEGIN
         -- Leg 2: cash/bank, Cr, always the FULL gross amount — matches
         -- the confirmed example (Cr ICICI 1000 whether or not TDS splits
         -- the Dr side into 900+100).
-        IF v_cash_acc IS NOT NULL AND v_cash_acc <> p_acc_id THEN
+        IF v_bank_acc IS NOT NULL THEN
             INSERT INTO transactions(
                 society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Cr', p_expense_date, v_cash_acc, p_entity_id,
+                p_society_id, 'Cr', p_expense_date, v_bank_acc, p_entity_id,
                 'Cash paid - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             );
@@ -3732,7 +3880,7 @@ DECLARE
     v_transfer_amt  NUMERIC(15,2);
 BEGIN
     SELECT a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
-           a.has_bf, COALESCE(p.tab_name, p.name, '--') AS parent_name
+           a.has_bf, a.tab_name, COALESCE(p.tab_name, p.name, '--') AS parent_name
       INTO v_acc
       FROM accounts a
       LEFT JOIN accounts p ON p.id = a.parent_account_id
@@ -3746,6 +3894,38 @@ BEGIN
     v_bf := ABS(v_bf);
  
     v_balance := v_bf;
+
+    -- CiH special case (2026-08): CiH no longer has ANY transaction rows
+    -- of its own — cash-mode legs post directly to the real
+    -- income/expense/asset account (see fn_resolve_bank_leg), so the
+    -- itemized-transaction loop below would find nothing and the closing
+    -- transfer would silently equal just the opening balance, missing a
+    -- full year of cash movement. Per spec, CiH's ledger has exactly TWO
+    -- records: the B/F row (opening, same as any other has_bf account)
+    -- and a C/F row using fn_cih_balance_asof — the same shared formula
+    -- the Cashbook card's CIH Running column uses — so this figure can
+    -- never drift out of sync with what the Cashbook itself shows.
+    -- Returned unconditionally (not gated on <> 0 like the generic
+    -- closing row below) since "two records, always" is the spec, not
+    -- "two records unless the balance happens to net to zero".
+    IF v_acc.tab_name = 'CiH' THEN
+        IF v_bf <> 0 THEN
+            RETURN QUERY SELECT
+                v_fy_start - INTERVAL '1 day', 'B/F'::TEXT,
+                CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
+                CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
+                v_balance, 'bf'::TEXT, v_acc.parent_name;
+        END IF;
+
+        v_final_balance := fn_cih_balance_asof(p_society_id, v_fy_end);
+        -- CiH is Dr-natured; closing (crediting) it to zero, per the same
+        -- Debit/Credit convention as the generic closing row below.
+        RETURN QUERY SELECT
+            v_fy_end, ('C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            0::NUMERIC(15,2), v_final_balance,
+            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
+        RETURN;
+    END IF;
  
     -- Fixed (2026-08): gated on accounts.has_bf — previously this emitted a
     -- B/F row for ANY account with a nonzero fn_resolve_bf_amount_fy
@@ -3837,12 +4017,25 @@ BEGIN
     END IF;
  
     -- Closing row: transfer remainder to parent, balance -> 0
+    --
+    -- Fixed (2026-08): flipped Debit/Credit — the "zeroing" figure that
+    -- closes an account out to carry its balance to its parent is the
+    -- OPPOSITE of the account's own natural side, same as any standard
+    -- closing entry (crediting a Dr-natured account's ledger reduces its
+    -- running balance to 0; debiting it would have pushed the balance
+    -- further AWAY from zero, reading as a fourth same-side entry rather
+    -- than a close-out). This does not change the account's own nature
+    -- or the actual value carried forward — brought_forward next FY and
+    -- the parent's own rollup are untouched either way — it only fixes
+    -- which column this display row's figure lands in, matching
+    -- CB2024-2025.xlsx's BkAc->CurAs example (a Dr-natured BkAc's C/F row
+    -- shows in the Credit column).
     IF v_transfer_amt <> 0 THEN
         RETURN QUERY SELECT
             v_fy_end,
             ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
-            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
             CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
             0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
     END IF;
 END;
@@ -3885,37 +4078,46 @@ DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
 
 -- fn_cashbook_paired_v3
 -- ======================
--- Draft replacement for fn_cashbook_paired_v2. NOT tested against a live
--- schema yet — depends on the entry_side migration (transactions.entry_side
--- CHAR(2) CHECK IN ('Dr','Cr')) already designed but not yet deployed.
+-- entry_side is the single source of truth for which side of the
+-- cashbook a leg lands on: entry_side='Cr' (money in) -> Cr Account/Cr
+-- Cash/Cr Chq columns, entry_side='Dr' (money out) -> Dr Account/Dr
+-- Cash/Dr Chq columns — never a.drcr_account (the account's own natural
+-- type), which is what let a non-natural-direction leg (refund,
+-- correction, TDS split) land on the wrong side or vanish from the join.
 --
--- Key change from v2: the receipt/payment split now comes from the
--- transaction's own entry_side, not from a.drcr_account. This is what makes
--- a non-natural-direction leg (refund, correction, TDS/GST split) land on
--- the correct side of the cashbook instead of silently vanishing from the
--- join or landing on the wrong side.
+-- Column contract rewritten (2026-08) to match CB2024-2025.xlsx's
+-- Cr Account / Dr Account layout directly, simplified per spec: no
+-- separate Cash1/Cash2/Cash Total columns (the app only ever has one
+-- cash leg per side), one CIH Running column (not separate "Cash
+-- Receipts Running Total" / "Cash Payments Running Total" — those are
+-- workbook scratch columns, not something worth storing). Cr LF / Dr LF
+-- (ledger folio) are deliberately NOT included yet — added once the
+-- Ledger Index/pagination exists to assign folio numbers against.
 --
--- Fixed (2026-08): opening balance was sourced from every
--- is_cash_or_bank=TRUE account pooled together — but is_cash_or_bank is
--- never actually set anywhere in seed.py/migrate.py's account seeding (it
--- defaults FALSE per the accounts table's DEFAULT FALSE), so that WHERE
--- clause silently matched zero accounts and the opening balance was always
--- 0 regardless of what brought_forward actually held. The Cashbook is the
--- physical Cash-in-hand register specifically (CB2024-2025.xlsx confirms
--- 'CiH' is its own ledger, distinct from 'ICICI'/'SBI' bank ledgers, which
--- have their own account pages and never appear in the cashbook) — so this
--- now resolves the single 'CiH' account by tab_name rather than pooling an
--- unpopulated flag across every bank/cash account.
+-- Fixed (2026-08): every money-writing function (fn_save_receipt,
+-- fn_save_expense, fn_buy_asset, fn_verify_payment, ...) now writes a
+-- bank/cash-completing leg ONLY for non-cash modes (see
+-- fn_resolve_bank_leg) — a cash-mode transaction has exactly ONE leg,
+-- posted to the real income/expense/asset account, never to CiH itself.
+-- CiH has NO transaction rows of its own any more. That means:
+--   - cr_rows/dr_rows below need no CiH-exclusion filter (there is
+--     nothing to exclude — a cash-mode journal simply has no counterpart
+--     leg to pair against, and naturally lands as a single-sided row via
+--     the FULL OUTER JOIN below, same as CB2024-2025.xlsx's blank-side
+--     daily rows).
+--   - cih_running (below) is a plain cumulative sum of every row's Cr
+--     Cash minus Dr Cash — correct with no double-counting, since each
+--     cash-mode leg now contributes to exactly one side of exactly one
+--     row, never both.
+--   - Non-cash (cheque/upi/card/bank/crypto) legs still show BOTH
+--     accounts on one row (e.g. Cr SBI paired with Dr Salary) — those
+--     Cash columns stay 0 either way (informational, in the Chq columns
+--     only) since they never touched physical cash-in-hand.
 --
--- Fixed (2026-08): rc_account_name/pc_account_name now display
--- accounts.tab_name (falling back to accounts.name when tab_name is NULL,
--- e.g. on older rows seeded before tab_name was populated) instead of the
--- full accounts.name — matching the CB2024-2025.xlsx reference's short
--- account codes ('CiH', 'ICICI', 'Salary', 'Misc.', ...) in the Cr/Dr
--- Account columns. tab_name is also what ledger_export.py now uses for
--- each account's Ledger sheet name, so the same short code identifies an
--- account consistently across both exports.
-
+-- Opening balance is resolved via fn_cih_balance_asof (the same shared
+-- formula fn_cashbook_month_page and fn_account_ledger_fy's CiH branch
+-- use), rather than re-deriving brought_forward + cumulative movement
+-- independently here.
 CREATE OR REPLACE FUNCTION fn_cashbook_paired_v3(
     p_society_id  INT,
     p_entity_id   INT  DEFAULT NULL,
@@ -3925,36 +4127,25 @@ CREATE OR REPLACE FUNCTION fn_cashbook_paired_v3(
     p_end_date    DATE DEFAULT NULL
 )
 RETURNS TABLE (
-    row_date         DATE,
-    rc_acc_id INT, rc_account_name  TEXT, rc_entity_name TEXT, rc_particulars TEXT,
-    rc_cash NUMERIC(15,2), rc_chq NUMERIC(15,2),
-    pc_acc_id INT, pc_account_name  TEXT, pc_entity_name TEXT, pc_particulars TEXT,
-    pc_cash NUMERIC(15,2), pc_chq NUMERIC(15,2),
-    running_balance  NUMERIC(15,2)
+    row_date        DATE,
+    cr_acc_id       INT, cr_account_name TEXT, cr_entity_name TEXT, cr_particulars TEXT,
+    cr_cash NUMERIC(15,2), cr_chq NUMERIC(15,2),
+    dr_acc_id       INT, dr_account_name TEXT, dr_entity_name TEXT, dr_particulars TEXT,
+    dr_cash NUMERIC(15,2), dr_chq NUMERIC(15,2),
+    cih_running     NUMERIC(15,2)
 )
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_opening_balance NUMERIC(15,2);
-    v_fy SMALLINT;
 BEGIN
-    v_fy := CASE WHEN p_start_date IS NULL THEN fn_current_financial_year()
-                 ELSE EXTRACT(YEAR FROM p_start_date)::SMALLINT
-                      - CASE WHEN EXTRACT(MONTH FROM p_start_date) < 4 THEN 1 ELSE 0 END
-            END;
-
-    SELECT COALESCE(SUM(
-        CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
-    ), 0)
-    INTO v_opening_balance
-    FROM accounts a
-    JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-    WHERE a.society_id = p_society_id AND a.tab_name = 'CiH'
-      AND bf.financial_year = v_fy;
+    v_opening_balance := fn_cih_balance_asof(
+        p_society_id,
+        COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1)) - INTERVAL '1 day'
+    );
 
     RETURN QUERY
     WITH cr_rows AS (
-        -- entry_side = 'Cr' means this leg is the receipt side of its
-        -- journal pair, regardless of the account's own natural type.
+        -- entry_side = 'Cr' means this leg is the receipt (money-in) side.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -3979,6 +4170,7 @@ BEGIN
           AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%' OR t.acc_particulars ILIKE '%'||p_search||'%')
     ),
     dr_rows AS (
+        -- entry_side = 'Dr' means this leg is the payment (money-out) side.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -4005,39 +4197,32 @@ BEGIN
     paired AS (
         SELECT COALESCE(c.trx_date, d.trx_date) AS row_date,
                COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
-               c.acc_id AS rc_acc_id, c.account_name AS rc_account_name,
-               c.entity_name AS rc_entity_name, c.particulars AS rc_particulars,
-               c.cash_amt AS rc_cash, c.chq_amt AS rc_chq,
-               d.acc_id AS pc_acc_id, d.account_name AS pc_account_name,
-               d.entity_name AS pc_entity_name, d.particulars AS pc_particulars,
-               d.cash_amt AS pc_cash, d.chq_amt AS pc_chq
+               c.acc_id AS cr_acc_id, c.account_name AS cr_account_name,
+               c.entity_name AS cr_entity_name, c.particulars AS cr_particulars,
+               c.cash_amt AS cr_cash, c.chq_amt AS cr_chq,
+               d.acc_id AS dr_acc_id, d.account_name AS dr_account_name,
+               d.entity_name AS dr_entity_name, d.particulars AS dr_particulars,
+               d.cash_amt AS dr_cash, d.chq_amt AS dr_chq
         FROM cr_rows c
         FULL OUTER JOIN dr_rows d
           -- Pair leg N on the Cr side with leg N on the Dr side, within the
-          -- same journal_id. journal_id is assumed always positive (a real
-          -- FK-like sequence value); COALESCE(journal_id, -id) then can't
-          -- collide between an unmatched Cr row and an unmatched Dr row,
-          -- since transaction ids are globally unique across both sides —
-          -- each solo leg gets its own private key and is guaranteed to
-          -- fall through to the unmatched branch of this FULL OUTER JOIN.
-          --
-          -- For an N Dr : 1 Cr journal (or 1 Dr : N Cr), only rn=1 on each
-          -- side finds a same-rn counterpart at the same key; every leg
-          -- beyond that (rn=2, 3, ...) has no match on the opposite side
-          -- and is naturally preserved by the FULL OUTER JOIN as its own
-          -- row with the other side's columns NULL — no extra WHERE
-          -- filtering needed, and none is applied, since any such filter
-          -- risks re-introducing exactly the leftover-leg-dropping bug
-          -- this replaces.
+          -- same journal_id. A cash-mode leg has no counterpart at all in
+          -- its own journal any more (see header comment) and simply falls
+          -- through to the unmatched branch of this FULL OUTER JOIN, one
+          -- side blank — exactly CB2024-2025.xlsx's blank-side daily rows.
+          -- For an N Dr : 1 Cr journal (e.g. a non-cash salary's Cr Bank +
+          -- Dr Salary + Dr TDStoIT), only rn=1 on each side finds a
+          -- same-rn counterpart; rn=2+ has no match and is preserved as
+          -- its own row, other side blank — no extra WHERE filtering,
+          -- since that risks re-dropping legitimate uneven-leg rows.
           ON COALESCE(c.journal_id, -c.id) = COALESCE(d.journal_id, -d.id)
          AND c.rn = d.rn
     )
-
-    SELECT p.row_date, p.rc_acc_id, p.rc_account_name, p.rc_entity_name, p.rc_particulars,
-           p.rc_cash, p.rc_chq, p.pc_acc_id, p.pc_account_name, p.pc_entity_name, p.pc_particulars,
-           p.pc_cash, p.pc_chq,
-           v_opening_balance + SUM(COALESCE(p.rc_cash,0) - COALESCE(p.pc_cash,0))
-               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS running_balance
+    SELECT p.row_date, p.cr_acc_id, p.cr_account_name, p.cr_entity_name, p.cr_particulars,
+           p.cr_cash, p.cr_chq, p.dr_acc_id, p.dr_account_name, p.dr_entity_name, p.dr_particulars,
+           p.dr_cash, p.dr_chq,
+           v_opening_balance + SUM(COALESCE(p.cr_cash,0) - COALESCE(p.dr_cash,0))
+               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS cih_running
     FROM paired p
     ORDER BY p.row_date, p.pair_key;
 END;
@@ -4048,19 +4233,22 @@ $$;
 -- Paginated single-month cashbook feed for the Financials > KPI (open
 -- Cashbook) card: Month Selector + Financial Year Selector in the header,
 -- rows paginated underneath, with 'CiH' B/F on the first entry and 'CiH'
--- C/F on the last entry of the month per the CB2025-2026.xlsx reference
+-- C/F on the last entry of the month per the CB2024-2025.xlsx reference
 -- layout — everything else is a plain cash-increase/decrease row.
 --
 -- Built on the same cr_rows/dr_rows/paired pattern as
--- fn_cashbook_paired_v3 (entry_side-driven pairing, not drcr_account —
--- see that function's header comment), re-scoped to one calendar month so
--- pagination doesn't have to slice a full-FY result set app-side.
+-- fn_cashbook_paired_v3 (entry_side-driven pairing — see that function's
+-- header comment), re-scoped to one calendar month so pagination doesn't
+-- have to slice a full-FY result set app-side.
+--
+-- Column contract matches fn_cashbook_paired_v3's cr_/dr_ rename
+-- (2026-08) — see that function's header for the full rationale.
 --
 -- month_opening_balance / month_closing_balance are returned on EVERY row
 -- (and on the synthetic empty-month row below), so the card can display
 -- the calculated B/F and C/F regardless of which page is currently in
--- view, per spec — not just on page 1 / the last page. running_balance
--- is computed over the FULL month before OFFSET/LIMIT is applied, so
+-- view, per spec — not just on page 1 / the last page. cih_running is
+-- computed over the FULL month before OFFSET/LIMIT is applied, so
 -- page 2+ continues the running total correctly instead of restarting
 -- from month_opening_balance at the top of the page.
 --
@@ -4071,7 +4259,7 @@ $$;
 -- generate_cashbook_excel_fy's Dec->Jan rollover.
 --
 -- A month with zero transactions returns exactly one synthetic row (all
--- rc_/pc_ columns NULL, row_date = month_start, running_balance =
+-- cr_/dr_ columns NULL, row_date = month_start, cih_running =
 -- month_opening_balance = month_closing_balance, total_row_count = 0)
 -- instead of an empty result set, so the card always has something to
 -- render B/F and C/F from.
@@ -4090,19 +4278,19 @@ CREATE OR REPLACE FUNCTION fn_cashbook_month_page(
 )
 RETURNS TABLE (
     row_date               DATE,
-    rc_acc_id               INT,
-    rc_account_name          TEXT,
-    rc_entity_name           TEXT,
-    rc_particulars           TEXT,
-    rc_cash                  NUMERIC(15,2),
-    rc_chq                   NUMERIC(15,2),
-    pc_acc_id                INT,
-    pc_account_name          TEXT,
-    pc_entity_name            TEXT,
-    pc_particulars           TEXT,
-    pc_cash                  NUMERIC(15,2),
-    pc_chq                   NUMERIC(15,2),
-    running_balance          NUMERIC(15,2),
+    cr_acc_id               INT,
+    cr_account_name          TEXT,
+    cr_entity_name           TEXT,
+    cr_particulars           TEXT,
+    cr_cash                  NUMERIC(15,2),
+    cr_chq                   NUMERIC(15,2),
+    dr_acc_id                INT,
+    dr_account_name          TEXT,
+    dr_entity_name            TEXT,
+    dr_particulars           TEXT,
+    dr_cash                  NUMERIC(15,2),
+    dr_chq                   NUMERIC(15,2),
+    cih_running               NUMERIC(15,2),
     month_opening_balance    NUMERIC(15,2),
     month_closing_balance    NUMERIC(15,2),
     total_row_count          BIGINT,
@@ -4115,9 +4303,6 @@ DECLARE
     v_calendar_year   INT;
     v_month_start     DATE;
     v_month_end       DATE;
-    v_fy_start        DATE;
-    v_fy_opening      NUMERIC(15,2);
-    v_pre_month_delta NUMERIC(15,2);
     v_month_opening   NUMERIC(15,2);
     v_month_closing   NUMERIC(15,2);
     v_total_rows      BIGINT;
@@ -4133,49 +4318,20 @@ BEGIN
     v_calendar_year := CASE WHEN p_month >= 4 THEN p_fy ELSE p_fy + 1 END;
     v_month_start   := make_date(v_calendar_year, p_month, 1);
     v_month_end     := (v_month_start + INTERVAL '1 month')::DATE;
-    v_fy_start      := make_date(p_fy, 4, 1);
 
-    -- Fixed (2026-08): same is_cash_or_bank -> tab_name='CiH' correction as
-    -- fn_cashbook_paired_v3 — is_cash_or_bank is never populated by
-    -- seed.py/migrate.py (defaults FALSE), so this always resolved to 0
-    -- regardless of brought_forward. The Cashbook is the CiH register
-    -- specifically, not a pool of every cash/bank account.
-    SELECT COALESCE(SUM(
-        CASE WHEN bf.drcr_bf = 'Dr' THEN bf.bf_amount ELSE -bf.bf_amount END
-    ), 0)
-    INTO v_fy_opening
-    FROM accounts a
-    JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
-    WHERE a.society_id = p_society_id AND a.tab_name = 'CiH'
-      AND bf.financial_year = p_fy;
+    -- Fixed (2026-08): opening balance now comes from fn_cih_balance_asof
+    -- (as of the day before this month starts) instead of independently
+    -- re-deriving brought_forward + a cumulative-movement sum here — same
+    -- shared formula fn_cashbook_paired_v3 and fn_account_ledger_fy's CiH
+    -- branch use, so all three can never drift out of sync with each
+    -- other. (The old inline version was also subtly broken: it summed
+    -- mode='cash' transactions across ALL accounts including CiH itself,
+    -- which — back when a cash-mode journal still wrote a CiH-completing
+    -- leg — meant every journal's two opposite-signed legs cancelled to
+    -- net 0. That's moot now anyway, since CiH has no transaction rows of
+    -- its own to sum; see fn_resolve_bank_leg.)
+    v_month_opening := fn_cih_balance_asof(p_society_id, v_month_start - INTERVAL '1 day');
 
-    -- Net physical-cash movement (entry_side-driven; mode='cash' only --
-    -- Chq/UPI legs never touch cash-in-hand) for every prior month in this
-    -- FY, under the same entity_id/entity_role scoping
-    -- fn_cashbook_paired_v3 applies to its cr_rows/dr_rows.
-    SELECT COALESCE(SUM(
-        CASE WHEN t.entry_side = 'Cr' THEN t.amount
-             WHEN t.entry_side = 'Dr' THEN -t.amount
-             ELSE 0 END
-    ), 0)
-    INTO v_pre_month_delta
-    FROM transactions t
-    JOIN accounts a ON a.id = t.acc_id
-    LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-    LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
-    LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
-    WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
-      AND t.trx_date >= v_fy_start AND t.trx_date < v_month_start
-      AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
-      AND (p_entity_role IS NULL OR
-           (p_entity_role = 'apartment' AND ap.id IS NOT NULL) OR
-           (p_entity_role = 'vendor' AND v.id IS NOT NULL) OR
-           (p_entity_role = 'security' AND s.id IS NOT NULL));
-
-    v_month_opening := v_fy_opening + v_pre_month_delta;
-
-    -- Fixed (2026-08): account_name now displays tab_name (falling back
-    -- to name if unset) — same rationale as fn_cashbook_paired_v3 above.
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
         SELECT t.id, t.journal_id, t.trx_date,
@@ -4224,12 +4380,12 @@ BEGIN
     paired AS (
         SELECT COALESCE(c.trx_date, d.trx_date) AS row_date,
                COALESCE(c.journal_id, -c.id, -d.id) AS pair_key,
-               c.acc_id AS rc_acc_id, c.account_name AS rc_account_name,
-               c.entity_name AS rc_entity_name, c.particulars AS rc_particulars,
-               c.cash_amt AS rc_cash, c.chq_amt AS rc_chq,
-               d.acc_id AS pc_acc_id, d.account_name AS pc_account_name,
-               d.entity_name AS pc_entity_name, d.particulars AS pc_particulars,
-               d.cash_amt AS pc_cash, d.chq_amt AS pc_chq
+               c.acc_id AS cr_acc_id, c.account_name AS cr_account_name,
+               c.entity_name AS cr_entity_name, c.particulars AS cr_particulars,
+               c.cash_amt AS cr_cash, c.chq_amt AS cr_chq,
+               d.acc_id AS dr_acc_id, d.account_name AS dr_account_name,
+               d.entity_name AS dr_entity_name, d.particulars AS dr_particulars,
+               d.cash_amt AS dr_cash, d.chq_amt AS dr_chq
         FROM cr_rows c
         FULL OUTER JOIN dr_rows d
           ON COALESCE(c.journal_id, -c.id) = COALESCE(d.journal_id, -d.id)
@@ -4237,8 +4393,8 @@ BEGIN
     )
     SELECT p.*,
            ROW_NUMBER() OVER (ORDER BY p.row_date, p.pair_key) AS ord,
-           v_month_opening + SUM(COALESCE(p.rc_cash,0) - COALESCE(p.pc_cash,0))
-               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS running_balance
+           v_month_opening + SUM(COALESCE(p.cr_cash,0) - COALESCE(p.dr_cash,0))
+               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS cih_running
     FROM paired p;
 
     SELECT COUNT(*) INTO v_total_rows FROM _cb_month_rows;
@@ -4259,13 +4415,13 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT running_balance INTO v_month_closing
+    SELECT cih_running INTO v_month_closing
     FROM _cb_month_rows ORDER BY ord DESC LIMIT 1;
 
     RETURN QUERY
-    SELECT r.row_date, r.rc_acc_id, r.rc_account_name, r.rc_entity_name, r.rc_particulars,
-           r.rc_cash, r.rc_chq, r.pc_acc_id, r.pc_account_name, r.pc_entity_name, r.pc_particulars,
-           r.pc_cash, r.pc_chq, r.running_balance,
+    SELECT r.row_date, r.cr_acc_id, r.cr_account_name, r.cr_entity_name, r.cr_particulars,
+           r.cr_cash, r.cr_chq, r.dr_acc_id, r.dr_account_name, r.dr_entity_name, r.dr_particulars,
+           r.dr_cash, r.dr_chq, r.cih_running,
            v_month_opening, v_month_closing,
            v_total_rows, v_total_pages,
            (p_page = 1), (p_page = v_total_pages)
@@ -5062,15 +5218,16 @@ RETURNS TABLE (
     total_transactions BIGINT
 )
 LANGUAGE plpgsql STABLE AS $$
-DECLARE
-    v_cash_acc_ids INT[];
 BEGIN
-    SELECT ARRAY_AGG(id) INTO v_cash_acc_ids
-    FROM accounts
-    WHERE society_id = p_society_id
-      AND drcr_account = 'Dr'
-      AND (name ILIKE '%Cash%' OR name ILIKE '%Bank%' OR name ILIKE '%SBI%');
-
+    -- Fixed (2026-08): cash_balance previously summed
+    -- `transactions WHERE acc_id = ANY(name-ILIKE-matched cash/bank
+    -- accounts)` — but CiH no longer has any transaction rows of its own
+    -- (cash-mode legs post directly to the real income/expense/asset
+    -- account; see fn_resolve_bank_leg), so that sum would silently
+    -- settle to 0 regardless of actual cash position. Delegates to
+    -- fn_cih_balance_asof(CURRENT_DATE) instead — the same shared
+    -- formula the Cashbook card and CiH's own ledger use, so this stat
+    -- can't drift out of sync with either of them.
     RETURN QUERY
     SELECT
         (SELECT COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC(15,2)
@@ -5082,10 +5239,7 @@ BEGIN
         (SELECT COALESCE(SUM(p.amount), 0)::NUMERIC(15,2)
          FROM payables p WHERE p.society_id = p_society_id AND p.status = 'pending')
             AS total_payables,
-        (SELECT COALESCE(SUM(CASE WHEN a.drcr_account='Cr' THEN t.amount ELSE -t.amount END), 0)::NUMERIC(15,2)
-         FROM transactions t JOIN accounts a ON a.id = t.acc_id
-         WHERE t.society_id = p_society_id AND t.status = 'paid'
-           AND a.id = ANY(v_cash_acc_ids))
+        fn_cih_balance_asof(p_society_id, CURRENT_DATE)
             AS cash_balance,
         (SELECT COUNT(*)::INT FROM apartments ap WHERE ap.society_id = p_society_id AND ap.active = TRUE)
             AS total_apartments,
