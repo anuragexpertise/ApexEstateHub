@@ -1189,7 +1189,7 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
             voter = users.get(email)
             if not voter:
                 continue
-            cur.execute("SELECT * FROM fn_cast_vote(%s,%s,%s)", (poll_id, voter["user_id"], choice))
+            cur.execute("SELECT * FROM fn_cast_vote(%s,%s,%s::SMALLINT)", (poll_id, voter["user_id"], choice))
             conn.commit()
         print(f"    ↳ {len(p['voters'])} votes cast")
 
