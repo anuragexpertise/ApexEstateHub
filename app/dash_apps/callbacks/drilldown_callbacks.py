@@ -1973,22 +1973,32 @@ def _render_card(
                 entity, filters, page=1, search=search, page_size=100_000
             )
 
-            # Cashbook's 'CiH' B/F and C/F rows (see _shape_cashbook_month_rows
-            # in loaders.py) are synthetic markers, not real transactions —
-            # they must stay pinned at the very top/bottom regardless of
-            # sort direction or active filters, not get shuffled in among
-            # whatever they're sorted/filtered against. Pull them out before
-            # filtering/sorting runs on `rows` below, and re-attach them
-            # after slicing.
+            # Cashbook's 'CiH' B/F and C/F rows are synthetic markers, not
+            # real transactions — they must stay pinned at the very
+            # top/bottom regardless of sort direction or active filters,
+            # not get shuffled in among whatever they're sorted/filtered
+            # against. Pull them out before filtering/sorting runs on
+            # `rows` below, and re-attach them after slicing.
+            #
+            # Two shapes to detect here (2026-08): the Month Selector view
+            # tags them with row_type='bf'/'closing' (see
+            # _shape_cashbook_month_rows in loaders.py); the whole-FY view
+            # (no month selected) gets them straight from
+            # fn_cashbook_paired_v3 itself now (see that function's header
+            # comment in estatehub.sql) with no row_type at all — detected
+            # there by cr_account_name/dr_account_name == 'CiH' instead,
+            # since that's the one account name that function guarantees
+            # never appears on a real transaction row (see
+            # fn_resolve_bank_leg — CiH itself never gets its own leg).
             bf_row = closing_row = None
             if entity == "cashbook":
                 txn_rows = []
                 for r in rows:
                     rd = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
                     row_type = rd.get("row_type")
-                    if row_type == "bf":
+                    if row_type == "bf" or rd.get("cr_account_name") == "CiH":
                         bf_row = r
-                    elif row_type == "closing":
+                    elif row_type == "closing" or rd.get("dr_account_name") == "CiH":
                         closing_row = r
                     else:
                         txn_rows.append(r)

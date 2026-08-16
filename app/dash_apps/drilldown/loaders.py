@@ -1392,6 +1392,17 @@ def load_list(
             # was throwing a "function does not exist" DB error. v3 takes the
             # same (society_id, entity_id, entity_role, search, start, end)
             # positional args v2 did, so this is a drop-in rename.
+            #
+            # v3's own output now brackets the real transaction rows with a
+            # synthetic 'CiH'/'B/F' row first and a 'CiH'/'C/F' row last (see
+            # that function's header comment) — CiH is the one account whose
+            # B/F belongs in the Cashbook itself rather than its own Ledger
+            # sheet. Since those synthetic rows sort strictly first/last,
+            # this plain external LIMIT/OFFSET naturally shows B/F only on
+            # page 1 and C/F only on the last page with no changes needed
+            # here — same page-1/last-page placement
+            # _shape_cashbook_month_rows() achieves for the Month Selector
+            # view below, just achieved inside the SQL function instead.
             rows = db._execute(
                 "SELECT * FROM fn_cashbook_paired_v3(%s,%s,%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, p_eid, p_etype, s, fy_start, fy_end, page_size, offset), fetch_all=True,
