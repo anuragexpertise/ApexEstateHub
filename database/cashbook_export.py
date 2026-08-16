@@ -6,11 +6,18 @@ Produces the traditional paired Indian society cashbook, one sheet per
 month, all months of a financial year in a single workbook — matching the
 CB2025-2026.xlsx reference layout supplied 2026-08.
 
-DEPENDS ON: fn_cashbook_paired_v3 (see fn_cashbook_paired_v3.sql), which
-requires the entry_side migration to be deployed first. Until then this
-module will raise if entry_side doesn't exist on transactions — it does NOT
-silently fall back to fn_cashbook_paired_v2's buggy drcr_account-inferred
-join, since that would reproduce the exact bug this rewrite exists to fix.
+DEPENDS ON: fn_cashbook_paired_v3 (see estatehub.sql), which requires the
+entry_side migration to be deployed first. Until then this module will
+raise if entry_side doesn't exist on transactions — it does NOT silently
+fall back to fn_cashbook_paired_v2's buggy drcr_account-inferred join,
+since that would reproduce the exact bug this rewrite exists to fix.
+
+Column source (2026-08): every money-writing function now writes a
+bank/cash-completing leg ONLY for non-cash modes (fn_resolve_bank_leg) —
+a cash-mode transaction has exactly one leg, posted straight to the real
+income/expense/asset account, never to CiH. fn_cashbook_paired_v3's
+output columns are named cr_*/dr_* accordingly (not the old rc_*/pc_*),
+and its running-balance column is `cih_running`.
 
 Column layout (A–O) — unchanged from the original single-month version:
   A  Date (receipt side)
@@ -64,7 +71,7 @@ This generator currently always shows the underlying per-account rows.
 
 from __future__ import annotations
 import io
-from datetime import date
+from datetime import date, timedelta
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -175,17 +182,17 @@ def _write_month_sheet(
         fill = _FILL_ALT if i % 2 == 0 else None
         row_data = {
             1: r.get("row_date") or None,
-            2: r.get("rc_account_name") or None,
-            3: _particulars(r, "rc_") or None,
-            4: r.get("rc_acc_id") or None,
-            5: float(r.get("rc_cash") or 0) or None,
-            6: float(r.get("rc_chq") or 0) or None,
+            2: r.get("cr_account_name") or None,
+            3: _particulars(r, "cr_") or None,
+            4: r.get("cr_acc_id") or None,
+            5: float(r.get("cr_cash") or 0) or None,
+            6: float(r.get("cr_chq") or 0) or None,
             8: r.get("row_date") or None,
-            9: r.get("pc_account_name") or None,
-            10: _particulars(r, "pc_") or None,
-            11: r.get("pc_acc_id") or None,
-            12: float(r.get("pc_cash") or 0) or None,
-            13: float(r.get("pc_chq") or 0) or None,
+            9: r.get("dr_account_name") or None,
+            10: _particulars(r, "dr_") or None,
+            11: r.get("dr_acc_id") or None,
+            12: float(r.get("dr_cash") or 0) or None,
+            13: float(r.get("dr_chq") or 0) or None,
         }
         for col, val in row_data.items():
             cell = ws.cell(row=current_row, column=col, value=val)
@@ -233,7 +240,7 @@ def _write_month_sheet(
     # Excel formula), so the next month's opening balance doesn't depend on
     # spreadsheet recalculation having happened.
     closing_balance = opening_balance + sum(
-        float(r.get("rc_cash") or 0) - float(r.get("pc_cash") or 0) for r in rows
+        float(r.get("cr_cash") or 0) - float(r.get("dr_cash") or 0) for r in rows
     )
     return closing_balance
 
@@ -264,19 +271,20 @@ def generate_cashbook_excel_fy(
     asst_year = f"{fy}-{fy+1}"
     filename = f"{filename_prefix}_{fy}-{fy+1}.xlsx"
 
-    # Fixed (2026-08): is_cash_or_bank -> tab_name='CiH', same fix and same
-    # reasoning as fn_cashbook_paired_v3 in estatehub.sql — is_cash_or_bank
-    # is never populated by seed.py/migrate.py (defaults FALSE), so this
-    # always resolved to 0. The workbook's opening balance is CiH's alone.
+    fy_start = date(fy, 4, 1)
+
+    # Fixed (2026-08): sourced via fn_cih_balance_asof — the same shared
+    # helper fn_cashbook_month_page and fn_account_ledger_fy's CiH branch
+    # use, rather than re-deriving the brought_forward lookup inline here
+    # a third time. (This also carries forward the earlier
+    # is_cash_or_bank -> tab_name='CiH' fix: is_cash_or_bank is never
+    # populated by seed.py/migrate.py, so a query against it always
+    # resolved to 0 regardless of what brought_forward actually held.)
     bf_row = db._execute(
-        "SELECT COALESCE(SUM(CASE WHEN bf.drcr_bf='Dr' THEN bf.bf_amount ELSE -bf.bf_amount END),0) AS bf "
-        "FROM accounts a JOIN brought_forward bf ON bf.acc_id=a.id AND bf.society_id=a.society_id "
-        "WHERE a.society_id=%s AND a.tab_name='CiH' AND bf.financial_year=%s",
-        (society_id, fy), fetch_one=True,
+        "SELECT fn_cih_balance_asof(%s, %s) AS bf",
+        (society_id, fy_start - timedelta(days=1)), fetch_one=True,
     ) or {}
     opening_balance = float(bf_row.get("bf", 0))
-
-    fy_start = date(fy, 4, 1)
 
     all_rows = db._execute(
         "SELECT * FROM fn_cashbook_paired_v3(%s, %s, %s, NULL, %s, %s) ORDER BY row_date",

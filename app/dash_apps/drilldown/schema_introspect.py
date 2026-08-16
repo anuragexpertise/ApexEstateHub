@@ -550,23 +550,30 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
 
 
 # Cashbook is backed by fn_cashbook_paired_v3(), which returns a paired
-# credit/debit layout with rc_*/pc_* columns already split into Cash vs
-# Chq (cheque/UPI/card/bank/crypto) sub-columns. The generic transactions
-# table introspection produces columns that do not match this output,
-# so we override the list columns for cashbook explicitly.
+# credit/debit layout with cr_*/dr_* columns already split into Cash vs
+# Chq (cheque/UPI/card/bank/crypto) sub-columns (2026-08: renamed from
+# rc_*/pc_* to match CB2024-2025.xlsx's own Cr Account/Dr Account
+# terminology directly, since entry_side='Cr'/'Dr' is now the single
+# source of truth for which side a leg lands on — see that function's
+# header comment in estatehub.sql). The generic transactions table
+# introspection produces columns that do not match this output, so we
+# override the list columns for cashbook explicitly.
+#
+# Cr LF / Dr LF (ledger folio) deliberately not included yet — added once
+# the Ledger Index/pagination exists to assign folio numbers against.
 _CASHBOOK_LIST_COLUMNS = [
     {"name": "Date",         "field": "row_date",         "sortable": True},
-    {"name": "Cr Account",   "field": "rc_account_name",  "sortable": True},
-    {"name": "Cr Entity",    "field": "rc_entity_name",   "sortable": False},
-    {"name": "Cr Particulars","field": "rc_particulars",  "sortable": False},
-    {"name": "Cr Cash",      "field": "rc_cash",          "sortable": True, "format": "currency"},
-    {"name": "Cr Chq",       "field": "rc_chq",           "sortable": True, "format": "currency"},
-    {"name": "Dr Account",   "field": "pc_account_name",  "sortable": True},
-    {"name": "Dr Entity",    "field": "pc_entity_name",   "sortable": False},
-    {"name": "Dr Particulars","field": "pc_particulars",  "sortable": False},
-    {"name": "Dr Cash",      "field": "pc_cash",          "sortable": True, "format": "currency"},
-    {"name": "Dr Chq",       "field": "pc_chq",           "sortable": True, "format": "currency"},
-    {"name": "Running Bal",  "field": "running_balance",  "sortable": True, "format": "currency"},
+    {"name": "Cr Account",   "field": "cr_account_name",  "sortable": True},
+    {"name": "Cr Entity",    "field": "cr_entity_name",   "sortable": False},
+    {"name": "Cr Particulars","field": "cr_particulars",  "sortable": False},
+    {"name": "Cr Cash",      "field": "cr_cash",          "sortable": True, "format": "currency"},
+    {"name": "Cr Chq",       "field": "cr_chq",           "sortable": True, "format": "currency"},
+    {"name": "Dr Account",   "field": "dr_account_name",  "sortable": True},
+    {"name": "Dr Entity",    "field": "dr_entity_name",   "sortable": False},
+    {"name": "Dr Particulars","field": "dr_particulars",  "sortable": False},
+    {"name": "Dr Cash",      "field": "dr_cash",          "sortable": True, "format": "currency"},
+    {"name": "Dr Chq",       "field": "dr_chq",           "sortable": True, "format": "currency"},
+    {"name": "CIH Running",  "field": "cih_running",      "sortable": True, "format": "currency"},
 ]
 
 # Ledger is backed by fn_account_ledger_fy(), which returns a virtual
