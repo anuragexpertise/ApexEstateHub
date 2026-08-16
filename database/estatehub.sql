@@ -4140,7 +4140,11 @@ DECLARE
 BEGIN
     v_opening_balance := fn_cih_balance_asof(
         p_society_id,
-        COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1)) - INTERVAL '1 day'
+        -- Fixed: DATE - INTERVAL yields a timestamp in Postgres, which
+        -- silently failed to match fn_cih_balance_asof(INT, DATE) at all
+        -- ("function ... does not exist") rather than just misbehaving —
+        -- needs an explicit ::DATE cast back down.
+        (COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1)) - INTERVAL '1 day')::DATE
     );
 
     RETURN QUERY
@@ -4330,7 +4334,9 @@ BEGIN
     -- leg — meant every journal's two opposite-signed legs cancelled to
     -- net 0. That's moot now anyway, since CiH has no transaction rows of
     -- its own to sum; see fn_resolve_bank_leg.)
-    v_month_opening := fn_cih_balance_asof(p_society_id, v_month_start - INTERVAL '1 day');
+    -- Fixed: DATE - INTERVAL yields a timestamp, not a DATE — same cast
+    -- fix as fn_cashbook_paired_v3's opening-balance call above.
+    v_month_opening := fn_cih_balance_asof(p_society_id, (v_month_start - INTERVAL '1 day')::DATE);
 
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
