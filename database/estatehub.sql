@@ -4137,14 +4137,20 @@ RETURNS TABLE (
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_opening_balance NUMERIC(15,2);
+    v_range_start      DATE;
 BEGIN
+    -- Same range-start resolution fn_cih_balance_asof's call below already
+    -- used inline; captured into a variable so the synthetic B/F row (see
+    -- header comment) can reuse the exact same date without re-deriving it.
+    v_range_start := COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1));
+
     v_opening_balance := fn_cih_balance_asof(
         p_society_id,
         -- Fixed: DATE - INTERVAL yields a timestamp in Postgres, which
         -- silently failed to match fn_cih_balance_asof(INT, DATE) at all
         -- ("function ... does not exist") rather than just misbehaving —
         -- needs an explicit ::DATE cast back down.
-        (COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1)) - INTERVAL '1 day')::DATE
+        (v_range_start - INTERVAL '1 day')::DATE
     );
 
     RETURN QUERY
@@ -4221,14 +4227,59 @@ BEGIN
           -- since that risks re-dropping legitimate uneven-leg rows.
           ON COALESCE(c.journal_id, -c.id) = COALESCE(d.journal_id, -d.id)
          AND c.rn = d.rn
+    ),
+    real_rows AS (
+        SELECT p.row_date, p.pair_key, p.cr_acc_id, p.cr_account_name, p.cr_entity_name, p.cr_particulars,
+               p.cr_cash, p.cr_chq, p.dr_acc_id, p.dr_account_name, p.dr_entity_name, p.dr_particulars,
+               p.dr_cash, p.dr_chq,
+               v_opening_balance + SUM(COALESCE(p.cr_cash,0) - COALESCE(p.dr_cash,0))
+                   OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS cih_running,
+               1 AS sort_bucket
+        FROM paired p
+    ),
+    -- Fixed (2026-08): CiH's B/F was computed (v_opening_balance, above)
+    -- and silently folded into every real row's cih_running total, but
+    -- never itself surfaced as a visible row — every OTHER account's B/F
+    -- lives on that account's own Ledger sheet, but CiH's B/F belongs IN
+    -- the Cashbook (it has no transaction rows of its own to build a
+    -- Ledger view from at all — see fn_resolve_bank_leg / the CiH branch
+    -- in fn_account_ledger_fy). bf_row/cf_row below bracket real_rows the
+    -- same way _shape_cashbook_month_rows() already brackets
+    -- fn_cashbook_month_page's output for the Month-Selector view — and,
+    -- since bf_row sorts first and cf_row sorts last (sort_bucket 0/2),
+    -- the caller's existing external LIMIT/OFFSET pagination naturally
+    -- shows B/F only on page 1 and C/F only on the last page, with no
+    -- pagination-side changes needed.
+    bf_row AS (
+        SELECT v_range_start AS row_date, 0 AS pair_key,
+               NULL::INT AS cr_acc_id, 'CiH'::TEXT AS cr_account_name, NULL::TEXT AS cr_entity_name, 'B/F'::TEXT AS cr_particulars,
+               v_opening_balance AS cr_cash, NULL::NUMERIC(15,2) AS cr_chq,
+               NULL::INT AS dr_acc_id, NULL::TEXT AS dr_account_name, NULL::TEXT AS dr_entity_name, NULL::TEXT AS dr_particulars,
+               NULL::NUMERIC(15,2) AS dr_cash, NULL::NUMERIC(15,2) AS dr_chq,
+               v_opening_balance AS cih_running,
+               0 AS sort_bucket
+    ),
+    cf_row AS (
+        SELECT p_end_date AS row_date, 0 AS pair_key,
+               NULL::INT AS cr_acc_id, NULL::TEXT AS cr_account_name, NULL::TEXT AS cr_entity_name, NULL::TEXT AS cr_particulars,
+               NULL::NUMERIC(15,2) AS cr_cash, NULL::NUMERIC(15,2) AS cr_chq,
+               NULL::INT AS dr_acc_id, 'CiH'::TEXT AS dr_account_name, NULL::TEXT AS dr_entity_name, 'C/F'::TEXT AS dr_particulars,
+               NULL::NUMERIC(15,2) AS dr_cash, NULL::NUMERIC(15,2) AS dr_chq,
+               fn_cih_balance_asof(p_society_id, p_end_date) AS cih_running,
+               2 AS sort_bucket
+        WHERE p_end_date IS NOT NULL
     )
-    SELECT p.row_date, p.cr_acc_id, p.cr_account_name, p.cr_entity_name, p.cr_particulars,
-           p.cr_cash, p.cr_chq, p.dr_acc_id, p.dr_account_name, p.dr_entity_name, p.dr_particulars,
-           p.dr_cash, p.dr_chq,
-           v_opening_balance + SUM(COALESCE(p.cr_cash,0) - COALESCE(p.dr_cash,0))
-               OVER (ORDER BY p.row_date, p.pair_key ROWS UNBOUNDED PRECEDING) AS cih_running
-    FROM paired p
-    ORDER BY p.row_date, p.pair_key;
+    SELECT row_date, cr_acc_id, cr_account_name, cr_entity_name, cr_particulars,
+           cr_cash, cr_chq, dr_acc_id, dr_account_name, dr_entity_name, dr_particulars,
+           dr_cash, dr_chq, cih_running
+    FROM (
+        SELECT * FROM bf_row
+        UNION ALL
+        SELECT * FROM real_rows
+        UNION ALL
+        SELECT * FROM cf_row
+    ) all_rows
+    ORDER BY sort_bucket, row_date, pair_key;
 END;
 $$;
 

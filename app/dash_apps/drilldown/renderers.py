@@ -643,11 +643,14 @@ def render_list_card(card_id: str, title: str, icon: str,
             elif row_type == "depreciation":
                 body_rows[i].style = {"backgroundColor": "#e2e3ff"}
 
-    # Cashbook B/F ('CiH' opening) in yellow, C/F ('CiH' closing) in green —
-    # same row_type convention as the ledger block above, populated by
-    # _shape_cashbook_month_rows() only when the Month Selector is active.
-    # Plain whole-FY cashbook rows (no month selected) never carry
-    # row_type, so this is a no-op for the existing flat-list view.
+    # Cashbook B/F ('CiH' opening) in yellow, C/F ('CiH' closing) in green.
+    # Two shapes to detect (2026-08): the Month Selector view tags these
+    # with row_type='bf'/'closing' (_shape_cashbook_month_rows() in
+    # loaders.py); the whole-FY view (no month selected) gets them
+    # straight from fn_cashbook_paired_v3 itself now, with no row_type at
+    # all — detected there by cr_account_name/dr_account_name == 'CiH'
+    # instead, matching the same detection drilldown_callbacks.py's
+    # sort/filter path uses to keep these rows pinned.
     if entity == "cashbook" and rows:
         for i, row in enumerate(rows):
             if i >= len(body_rows):
@@ -655,9 +658,9 @@ def render_list_card(card_id: str, title: str, icon: str,
             row_dict = (row.to_dict(include_calculated=True)
                         if hasattr(row, "to_dict") else dict(row))
             row_type = row_dict.get("row_type")
-            if row_type == "bf":
+            if row_type == "bf" or row_dict.get("cr_account_name") == "CiH":
                 body_rows[i].style = {"backgroundColor": "#fff3cd", "fontWeight": "700"}
-            elif row_type == "closing":
+            elif row_type == "closing" or row_dict.get("dr_account_name") == "CiH":
                 body_rows[i].style = {"backgroundColor": "#d4edda", "fontWeight": "700"}
         
 
