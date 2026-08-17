@@ -4269,9 +4269,17 @@ BEGIN
                2 AS sort_bucket
         WHERE p_end_date IS NOT NULL
     )
-    SELECT row_date, cr_acc_id, cr_account_name, cr_entity_name, cr_particulars,
-           cr_cash, cr_chq, dr_acc_id, dr_account_name, dr_entity_name, dr_particulars,
-           dr_cash, dr_chq, cih_running
+    -- Fixed: unqualified column names here were ambiguous between the
+    -- all_rows subquery's own columns and the RETURNS TABLE output
+    -- columns of the same name, which PL/pgSQL implicitly declares as
+    -- variables in scope for the whole function body ("row_date" could
+    -- mean either) — explicit all_rows. qualification on every reference,
+    -- including inside ORDER BY, resolves it.
+    SELECT all_rows.row_date, all_rows.cr_acc_id, all_rows.cr_account_name,
+           all_rows.cr_entity_name, all_rows.cr_particulars,
+           all_rows.cr_cash, all_rows.cr_chq, all_rows.dr_acc_id, all_rows.dr_account_name,
+           all_rows.dr_entity_name, all_rows.dr_particulars,
+           all_rows.dr_cash, all_rows.dr_chq, all_rows.cih_running
     FROM (
         SELECT * FROM bf_row
         UNION ALL
@@ -4279,7 +4287,7 @@ BEGIN
         UNION ALL
         SELECT * FROM cf_row
     ) all_rows
-    ORDER BY sort_bucket, row_date, pair_key;
+    ORDER BY all_rows.sort_bucket, all_rows.row_date, all_rows.pair_key;
 END;
 $$;
 
@@ -4472,8 +4480,14 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT cih_running INTO v_month_closing
-    FROM _cb_month_rows ORDER BY ord DESC LIMIT 1;
+    -- Fixed: bare `cih_running` here is ambiguous — it's both this
+    -- function's own RETURNS TABLE output column (implicitly a variable
+    -- in scope throughout the function body) and a column on
+    -- _cb_month_rows, same ambiguity class fn_cashbook_paired_v3 hit.
+    -- Table-qualified to resolve it; `ord` isn't a RETURNS TABLE column so
+    -- it was never actually ambiguous, but qualified too for consistency.
+    SELECT _cb_month_rows.cih_running INTO v_month_closing
+    FROM _cb_month_rows ORDER BY _cb_month_rows.ord DESC LIMIT 1;
 
     RETURN QUERY
     SELECT r.row_date, r.cr_acc_id, r.cr_account_name, r.cr_entity_name, r.cr_particulars,
