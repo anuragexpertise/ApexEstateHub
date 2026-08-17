@@ -4144,14 +4144,37 @@ BEGIN
     -- header comment) can reuse the exact same date without re-deriving it.
     v_range_start := COALESCE(p_start_date, MAKE_DATE(fn_current_financial_year()::INT, 4, 1));
 
-    v_opening_balance := fn_cih_balance_asof(
-        p_society_id,
-        -- Fixed: DATE - INTERVAL yields a timestamp in Postgres, which
-        -- silently failed to match fn_cih_balance_asof(INT, DATE) at all
-        -- ("function ... does not exist") rather than just misbehaving —
-        -- needs an explicit ::DATE cast back down.
-        (v_range_start - INTERVAL '1 day')::DATE
-    );
+    -- Fixed: was fn_cih_balance_asof(society_id, v_range_start - 1 day) --
+    -- subtracting a day to get "the balance right before this range"
+    -- crosses a fiscal-year boundary whenever v_range_start is a FY's own
+    -- first day (1-Apr): e.g. v_range_start=2026-04-01 minus a day is
+    -- 2026-03-31, which fn_cih_balance_asof's OWN (correct, in isolation)
+    -- FY-resolution maps to FY2025 — a fiscal year this system never
+    -- seeds a brought_forward row for, since each FY's BF is entered
+    -- directly (there's no assumption that FY2025 "closed into" FY2026's
+    -- BF). That silently returned 0 instead of FY2026's real seeded BF,
+    -- which is exactly why the B/F row could show ₹0.00 while the C/F row
+    -- (correctly calling fn_cih_balance_asof(v_end_date), never crossing
+    -- a boundary since a FY's own end date always resolves to that same
+    -- FY) showed the right closing figure a full BF-amount higher.
+    --
+    -- Fixed by calling fn_cih_balance_asof with v_range_start itself
+    -- (always resolves to the FY that owns it — no boundary-crossing
+    -- risk, since a FY's own first day is unambiguously part of that FY)
+    -- and then subtracting off any transactions dated exactly on
+    -- v_range_start, so the result is still "balance strictly before this
+    -- range's own transactions" rather than double-counting whatever
+    -- happened on v_range_start itself into both the B/F figure and that
+    -- day's own visible row.
+    v_opening_balance := fn_cih_balance_asof(p_society_id, v_range_start)
+        - COALESCE((
+            SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                             WHEN t.entry_side = 'Dr' THEN -t.amount
+                             ELSE 0 END)
+            FROM transactions t
+            WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+              AND t.trx_date = v_range_start
+        ), 0);
 
     RETURN QUERY
     WITH cr_rows AS (
@@ -4382,20 +4405,33 @@ BEGIN
     v_month_start   := make_date(v_calendar_year, p_month, 1);
     v_month_end     := (v_month_start + INTERVAL '1 month')::DATE;
 
-    -- Fixed (2026-08): opening balance now comes from fn_cih_balance_asof
-    -- (as of the day before this month starts) instead of independently
-    -- re-deriving brought_forward + a cumulative-movement sum here — same
-    -- shared formula fn_cashbook_paired_v3 and fn_account_ledger_fy's CiH
-    -- branch use, so all three can never drift out of sync with each
-    -- other. (The old inline version was also subtly broken: it summed
-    -- mode='cash' transactions across ALL accounts including CiH itself,
-    -- which — back when a cash-mode journal still wrote a CiH-completing
-    -- leg — meant every journal's two opposite-signed legs cancelled to
-    -- net 0. That's moot now anyway, since CiH has no transaction rows of
-    -- its own to sum; see fn_resolve_bank_leg.)
-    -- Fixed: DATE - INTERVAL yields a timestamp, not a DATE — same cast
-    -- fix as fn_cashbook_paired_v3's opening-balance call above.
-    v_month_opening := fn_cih_balance_asof(p_society_id, (v_month_start - INTERVAL '1 day')::DATE);
+    -- Fixed (2026-08): opening balance comes from fn_cih_balance_asof —
+    -- same shared formula fn_cashbook_paired_v3 and fn_account_ledger_fy's
+    -- CiH branch use, so all three can never drift out of sync with each
+    -- other.
+    --
+    -- Fixed: was fn_cih_balance_asof(society_id, v_month_start - 1 day) —
+    -- only actually wrong for April (p_month=4), where v_month_start is
+    -- also the FY's own first day, so subtracting a day crosses into the
+    -- PRIOR fiscal year (e.g. 2026-04-01 minus a day is 2026-03-31 =
+    -- FY2025), which this system never seeds a brought_forward row for —
+    -- each FY's BF is entered directly, with no assumption that the prior
+    -- FY "closed into" this one. That silently returned 0 for April
+    -- instead of the FY's real seeded BF. Every other month (May..Mar)
+    -- was unaffected, since subtracting a day stays within the same FY.
+    -- Same fix as fn_cashbook_paired_v3's opening-balance call above:
+    -- call with v_month_start itself (always resolves to the FY that
+    -- owns it) and subtract that day's own transactions back out, rather
+    -- than asking for a date that can cross into a different FY.
+    v_month_opening := fn_cih_balance_asof(p_society_id, v_month_start)
+        - COALESCE((
+            SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                             WHEN t.entry_side = 'Dr' THEN -t.amount
+                             ELSE 0 END)
+            FROM transactions t
+            WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+              AND t.trx_date = v_month_start
+        ), 0);
 
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
