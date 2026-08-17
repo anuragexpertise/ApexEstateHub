@@ -186,13 +186,13 @@ ACCOUNTS = [
     (2322,  "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                   23,  "Dr", False,  "Dr", 100),
     (24,    "Duties Paid",                "DutyP",      "Duties Paid",                 2,  "Cr", False,  "Cr", 100),
     (25,    "Taxes Paid",                 "TaxP",       "Taxes Paid",                  2,  "Cr", False,  "Cr", 100),
-    (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr",  False,  "Cr", 100),
+    (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr", False,  "Cr", 100),
     (27,    "Gifts Given",                "GiftGiven",  "Gifts Given",                 2,  "Dr", False,  "Dr", 100),
     (28,    "Income Tax",                 "ITax",       "Income Tax",                  2,  "Dr", False,  "Dr", 100),
     (29,    "TDS to IT",                  "TDSIT",      "TDS Paid",                    2,  "Dr", False,  "Dr", 100),
-    (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  False,  "Cr", 100),
-    (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  False,  "Cr", 100),
-    (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", False,  "Dr", 100),
+    (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  True,  "Cr", 100),
+    (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr", False,  "Cr", 100),
+    (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True,  "Dr", 100),
     (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", False,  "Dr", 100),
     (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  "Dr",  10),
     (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True,  "Dr", 100),
@@ -492,10 +492,16 @@ BF_FY = 2026
 BF_VALUES = {
     633:  100_000.00,    # CiH — Cash-in-hand
     2:  1_000_000.00,    # CapAc — Capital Account
+    3:  0.00,    #  Loan & Advances Taken
+    5:  0.00,    # ImAs — Immovable Assets
+    7:  0.00,         # Loans & Advances Given
     6312:  50_000.00,    # ICICI
     6311:  50_000.00,    # SBI
     61:    10_000.00,    # Furniture
     62:    10_000.00,    # Investments
+    632:        0.00,    # Deposits (Assets)
+    64:         0.00,    # Instruments
+    65:         0.00,    # Car
     9:          0.00,    # Sundry Creditors ("SCr")
     8:          0.00,    # Sundry Debtors
 }
