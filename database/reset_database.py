@@ -9,11 +9,17 @@ Usage:
     python3 database/reset_database.py
     python3 database/reset_database.py --yes
     python3 database/reset_database.py --sql dashestatehub.sql
+    python3 database/reset_database.py --yes --after seed   # non-interactive
 
 Steps:
     1. Connect to PostgreSQL
-    2. Execute estatehub.sql (idempotent)
-    3. Verify tables/functions/views
+    2. Drop and recreate the public schema (the actual "reset")
+    3. Ask what to do next:
+         1) Run Schema only
+         2) Run Schema & seed
+         3) None — leave blank database
+    4. (unless "None") Execute estatehub.sql (idempotent), optionally seed,
+       then verify tables/functions/views
 """
 
 import os
@@ -97,6 +103,84 @@ def execute_sql_file(conn, sql_file):
 
 
 # ------------------------------------------------------------------
+# Post-reset action: schema only / schema + seed / leave blank
+# ------------------------------------------------------------------
+
+_ACTION_LABELS = {
+    "schema": "Run Schema only",
+    "seed":   "Run Schema & seed",
+    "none":   "None — leave blank database",
+}
+
+
+def prompt_post_reset_action(args) -> str:
+    """Returns 'schema', 'seed', or 'none'. Non-interactive via --after;
+    otherwise prompts, same as reset's own --yes/RESET confirmation does
+    for the destructive step itself."""
+    if args.after:
+        return args.after
+
+    print()
+    print("  What would you like to do next?")
+    print("    1) Run Schema only")
+    print("    2) Run Schema & seed")
+    print("    3) None — leave blank database")
+    print()
+    try:
+        choice = input("  Choice [1-3, default 1]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        choice = "1"
+    return {"1": "schema", "2": "seed", "3": "none", "": "schema"}.get(choice, "schema")
+
+
+def run_seed_demo_data(conn):
+    """Delegates to database/seed.py's run_seed(conn), which commits and
+    closes `conn` itself (same contract migrate.py's --seed flow relies
+    on) — the caller must not touch `conn` again after this returns.
+    Mirrors migrate.py's LockNotAvailable/QueryCanceled handling for the
+    same reasons: seeding runs many individual statements, so a lock wait
+    or a slow-statement timeout here is a lot more likely (and a lot more
+    opaque without a specific message) than during the single-shot schema
+    install above."""
+    try:
+        from seed import run_seed  # when run as `python3 database/reset_database.py`
+    except ImportError:
+        from database.seed import run_seed  # when imported as a package
+
+    try:
+        run_seed(conn)
+    except psycopg2.errors.LockNotAvailable:
+        print()
+        print("  ❌  Seeding stopped: timed out waiting for a database lock.")
+        print("      Something else is holding a lock on a table this script")
+        print("      needs — most likely another connection to the same DB")
+        print("      (e.g. the live app, or a previous migrate.py/seed.py run")
+        print("      that was interrupted mid-transaction and left idle).")
+        print("      Run this in psql / Aiven console to find and end it:")
+        print()
+        print("        SELECT pid, state, query_start, state_change, query")
+        print("        FROM pg_stat_activity")
+        print("        WHERE datname = current_database() AND pid <> pg_backend_pid()")
+        print("          AND state <> 'idle'")
+        print("        ORDER BY query_start;")
+        print()
+        print("      Idle-in-transaction sessions are the usual culprit —")
+        print("      SELECT pg_terminate_backend(<pid>) to clear one, then re-run.")
+        conn.rollback()
+        conn.close()
+        sys.exit(1)
+    except psycopg2.errors.QueryCanceled:
+        print()
+        print("  ❌  Seeding stopped: a statement exceeded its timeout.")
+        print("      This is a slower failure than a lock wait — check whether")
+        print("      the DB itself is under load, or a single statement is")
+        print("      doing far more work than expected.")
+        conn.rollback()
+        conn.close()
+        sys.exit(1)
+
+
+# ------------------------------------------------------------------
 # Validation
 # ------------------------------------------------------------------
 
@@ -160,7 +244,15 @@ def main():
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="Skip confirmation"
+        help="Skip the RESET confirmation prompt"
+    )
+
+    parser.add_argument(
+        "--after",
+        choices=["schema", "seed", "none"],
+        default=None,
+        help="Skip the post-reset prompt: 'schema' (schema only), "
+             "'seed' (schema + demo data), or 'none' (leave blank)."
     )
 
     args = parser.parse_args()
@@ -210,8 +302,35 @@ def main():
 
         print("✓ Fresh public schema created")
 
+        action = prompt_post_reset_action(args)
+        print(f"\n→ {_ACTION_LABELS[action]}")
+
+        if action == "none":
+            conn.close()
+            conn = None
+            print("\n" + "=" * 70)
+            print("DATABASE RESET SUCCESSFUL — blank database (no schema installed)")
+            print("=" * 70)
+            print("Run this script again (or database/migrate.py) when you're")
+            print("ready to install the schema.")
+            return
+
         execute_sql_file(conn, sql_file)
 
+        if action == "seed":
+            # run_seed_demo_data() commits and closes `conn` itself (same
+            # contract migrate.py's --seed flow relies on) — do not reuse
+            # `conn`/`cur` after this call. validate() below reconnects
+            # with a fresh connection specifically because of this.
+            run_seed_demo_data(conn)
+            conn = None
+
+        # Reconnect for validation regardless of path taken above, since
+        # a 'seed' action already closed the original connection and a
+        # fresh one keeps this step uniform across both remaining actions
+        # rather than conditionally reusing a maybe-closed cursor.
+        conn = connect()
+        cur = conn.cursor()
         validate(cur)
 
         print("\n" + "=" * 70)
