@@ -11,7 +11,7 @@
 #   - Sundry Debtors: Dr when credit given, Cr when payment received
 #   - Sundry Creditors: Cr when credit taken, Dr when paid
 # 
-# • Income: ALWAYS Cr (money coming IN)
+# • Income: ALWAYSCr (money coming IN)
 # • Expenses: ALWAYS Dr (money going OUT)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -98,7 +98,7 @@ def create_default_accounts(db, society_id: int):
         # ───────────────────────────────────────────────────────────────────
         (3,     'Loans & Advances Taken',    'LAT',         'Loans And Advances Taken',    1,    'Cr',  True,  'Cr',   100),
         (4,     'Current Liabilities',       'CurLb',       'Current Liabilities',         1,    'Cr',  True,  'Cr',   100),
-        (9,     'Sundry Creditors',          'S Cr',        'Sundry Creditors',            1,    'Cr',  True,  'Cr',   100),
+        (9,     'Sundry Creditors',          'SCr',        'Sundry Creditors',            1,    'Cr',  True,  'Cr',   100),
         
         # ───────────────────────────────────────────────────────────────────
         # ASSETS
