@@ -206,7 +206,7 @@ ACCOUNTS = [
     (65,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  "Dr",  15),
     (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True,  "Dr", 100),
     (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", True,  "Dr", 100),
-    (9,     "Sundry Creditors",           "S Cr",       "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
+    (9,     "Sundry Creditors",           "SCr",       "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
 ]
 
 SOCIETY_ID = 1  # fixed identity, independent of migrate.py's demo path
@@ -496,7 +496,7 @@ BF_VALUES = {
     6311:  50_000.00,    # SBI
     61:    10_000.00,    # Furniture
     62:    10_000.00,    # Investments
-    9:          0.00,    # Sundry Creditors ("S Cr")
+    9:          0.00,    # Sundry Creditors ("SCr")
     8:          0.00,    # Sundry Debtors
 }
 
