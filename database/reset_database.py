@@ -137,18 +137,36 @@ def run_seed_demo_data(conn):
     """Delegates to database/seed.py's run_seed(conn), which commits and
     closes `conn` itself (same contract migrate.py's --seed flow relies
     on) — the caller must not touch `conn` again after this returns.
+
+    Deliberately does NOT reuse the `conn` passed in. Every function in
+    seed.py accesses rows by column name (row["id"], row["linked_id"],
+    ...), which only works when the connection itself was opened with
+    cursor_factory=psycopg2.extras.RealDictCursor — exactly how seed.py's
+    own get_conn() connects, but NOT how this script's connect() above
+    does (validate() below needs plain positional/tuple access instead,
+    so that one stays as-is). Passing this script's connection straight
+    into run_seed() failed immediately on the first named-column access
+    with "tuple indices must be integers or slices, not str" — so this
+    closes it and opens a fresh one the way seed.py itself would, instead
+    of trying to reconfigure or share a single connection across two
+    different row-access conventions.
+
     Mirrors migrate.py's LockNotAvailable/QueryCanceled handling for the
     same reasons: seeding runs many individual statements, so a lock wait
     or a slow-statement timeout here is a lot more likely (and a lot more
     opaque without a specific message) than during the single-shot schema
     install above."""
-    try:
-        from seed import run_seed  # when run as `python3 database/reset_database.py`
-    except ImportError:
-        from database.seed import run_seed  # when imported as a package
+    conn.close()
 
     try:
-        run_seed(conn)
+        from seed import run_seed, get_conn as seed_get_conn
+    except ImportError:
+        from database.seed import run_seed, get_conn as seed_get_conn
+
+    seed_conn = seed_get_conn()
+
+    try:
+        run_seed(seed_conn)
     except psycopg2.errors.LockNotAvailable:
         print()
         print("  ❌  Seeding stopped: timed out waiting for a database lock.")
@@ -166,8 +184,8 @@ def run_seed_demo_data(conn):
         print()
         print("      Idle-in-transaction sessions are the usual culprit —")
         print("      SELECT pg_terminate_backend(<pid>) to clear one, then re-run.")
-        conn.rollback()
-        conn.close()
+        seed_conn.rollback()
+        seed_conn.close()
         sys.exit(1)
     except psycopg2.errors.QueryCanceled:
         print()
@@ -175,8 +193,8 @@ def run_seed_demo_data(conn):
         print("      This is a slower failure than a lock wait — check whether")
         print("      the DB itself is under load, or a single statement is")
         print("      doing far more work than expected.")
-        conn.rollback()
-        conn.close()
+        seed_conn.rollback()
+        seed_conn.close()
         sys.exit(1)
 
 
