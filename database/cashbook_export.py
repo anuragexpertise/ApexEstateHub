@@ -71,7 +71,7 @@ This generator currently always shows the underlying per-account rows.
 
 from __future__ import annotations
 import io
-from datetime import date, timedelta
+from datetime import date
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -280,9 +280,29 @@ def generate_cashbook_excel_fy(
     # is_cash_or_bank -> tab_name='CiH' fix: is_cash_or_bank is never
     # populated by seed.py/migrate.py, so a query against it always
     # resolved to 0 regardless of what brought_forward actually held.)
+    #
+    # Fixed: was fn_cih_balance_asof(society_id, fy_start - 1 day) —
+    # subtracting a day from the FY's own first day crosses into the
+    # PRIOR fiscal year (fy_start=2026-04-01 minus a day is 2026-03-31 =
+    # FY2025), which this system never seeds a brought_forward row for —
+    # each FY's BF is entered directly, with no assumption that the prior
+    # FY "closed into" this one. That silently returned 0 for the opening
+    # balance instead of the FY's real seeded BF. Same fix as the two SQL
+    # functions with this identical pattern (fn_cashbook_paired_v3,
+    # fn_cashbook_month_page): call with fy_start itself (always resolves
+    # to the FY that owns it) and subtract that day's own transactions
+    # back out inline, rather than asking for a date that can cross into
+    # a different FY.
     bf_row = db._execute(
-        "SELECT fn_cih_balance_asof(%s, %s) AS bf",
-        (society_id, fy_start - timedelta(days=1)), fetch_one=True,
+        """SELECT fn_cih_balance_asof(%s, %s) - COALESCE((
+               SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                                WHEN t.entry_side = 'Dr' THEN -t.amount
+                                ELSE 0 END)
+               FROM transactions t
+               WHERE t.society_id = %s AND t.status = 'paid' AND t.mode = 'cash'
+                 AND t.trx_date = %s
+           ), 0) AS bf""",
+        (society_id, fy_start, society_id, fy_start), fetch_one=True,
     ) or {}
     opening_balance = float(bf_row.get("bf", 0))
 
