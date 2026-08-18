@@ -3843,6 +3843,77 @@ BEGIN
 END;
 $$;
 
+-- fn_account_depreciation_split
+-- ===============================
+-- Same three components fn_account_depreciation sums into one total, but
+-- returned as (full_amount, half_amount) instead — for
+-- fn_account_ledger_fy's ledger display, which shows these as two
+-- distinct rows ('Full Depreciation' on opening WDV + pre-1-Sep
+-- additions, 'Half post-30Sep Depreciation' on post-1-Sep additions)
+-- rather than one combined figure. full_amount + half_amount always
+-- equals fn_account_depreciation's own total for the same arguments —
+-- this doesn't recompute the total differently, just doesn't collapse
+-- the two rates together before returning.
+--
+-- fn_account_depreciation itself is left as a single-total function
+-- rather than changed to return this same pair, since its 3 existing
+-- call sites (fn_fy_closing_report, fn_trial_balance, fn_balance_sheet)
+-- all consume it as a plain scalar in a SUM/aggregate context, not
+-- something that would benefit from the split.
+DROP FUNCTION IF EXISTS fn_account_depreciation_split (INT, INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_account_depreciation_split(
+    p_society_id     INT,
+    p_account_id     INT,
+    p_financial_year INT
+)
+RETURNS TABLE (full_amount NUMERIC(15,2), half_amount NUMERIC(15,2))
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_dep_pct      NUMERIC(5,2);
+    v_is_dep       BOOLEAN;
+    v_opening_wdv  NUMERIC(15,2);
+    v_dep_opening  NUMERIC(15,2) := 0;
+    v_dep_full_additions NUMERIC(15,2) := 0;
+    v_dep_half_additions NUMERIC(15,2) := 0;
+    v_half_cutoff  DATE := MAKE_DATE(p_financial_year, 9, 1);
+    v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
+    v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
+BEGIN
+    SELECT depreciation_percent, is_depreciable
+      INTO v_dep_pct, v_is_dep
+      FROM accounts WHERE id = p_account_id AND society_id = p_society_id;
+
+    IF NOT FOUND OR NOT COALESCE(v_is_dep, FALSE) OR COALESCE(v_dep_pct, 100) >= 100 THEN
+        RETURN QUERY SELECT 0::NUMERIC(15,2), 0::NUMERIC(15,2);
+        RETURN;
+    END IF;
+
+    v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
+    v_dep_opening := GREATEST(v_opening_wdv, 0) * v_dep_pct / 100.0;
+
+    SELECT COALESCE(SUM(purchase_value * v_dep_pct / 100.0), 0)
+    INTO v_dep_full_additions
+    FROM assets
+    WHERE society_id = p_society_id AND acc_id = p_account_id
+      AND purchase_date BETWEEN v_fy_start AND v_fy_end
+      AND purchase_date < v_half_cutoff
+      AND disposed = FALSE;
+
+    SELECT COALESCE(SUM(purchase_value * v_dep_pct / 100.0 * 0.5), 0)
+    INTO v_dep_half_additions
+    FROM assets
+    WHERE society_id = p_society_id AND acc_id = p_account_id
+      AND purchase_date BETWEEN v_fy_start AND v_fy_end
+      AND purchase_date >= v_half_cutoff
+      AND disposed = FALSE;
+
+    RETURN QUERY SELECT
+        ROUND(v_dep_opening + v_dep_full_additions, 2)::NUMERIC(15,2),
+        ROUND(v_dep_half_additions, 2)::NUMERIC(15,2);
+END;
+$$;
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 5: LEDGER v2 — FY-aware BF + depreciation-aware closing
 -- ════════════════════════════════════════════════════════════════
@@ -3864,7 +3935,7 @@ RETURNS TABLE (
     debit         NUMERIC(15,2),
     credit        NUMERIC(15,2),
     balance       NUMERIC(15,2),
-    row_type      TEXT,       -- 'bf' | 'txn' | 'depreciation' | 'closing'
+    row_type      TEXT,       -- 'bf' | 'txn' | 'full_depreciation' | 'half_depreciation' | 'closing'
     parent_name   TEXT
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -3875,7 +3946,10 @@ DECLARE
     v_bf_drcr      VARCHAR(2);
     v_balance      NUMERIC(15,2);
     v_dep_acc_id   INT;
-    v_dep_amount   NUMERIC(15,2) := 0;
+    v_dep_full     NUMERIC(15,2) := 0;
+    v_dep_half     NUMERIC(15,2) := 0;
+    v_dep_acc_tab  TEXT;
+    v_running_balance NUMERIC(15,2);
     v_final_balance NUMERIC(15,2);
     v_transfer_amt  NUMERIC(15,2);
 BEGIN
@@ -3992,9 +4066,25 @@ BEGIN
     v_transfer_amt := v_final_balance;
  
     -- Depreciation split (only for is_depreciable accounts with % < 100)
+    --
+    -- Fixed (2026-08): was one combined row ("Depreciation @ X% (full ... +
+    -- half-year ...)"), now split into two rows per spec — 'Full
+    -- Depreciation' (opening WDV + pre-1-Sep additions, at the full rate)
+    -- and 'Half post-30Sep Depreciation' (post-1-Sep additions, at half
+    -- rate) — via fn_account_depreciation_split, which returns the same
+    -- two components fn_account_depreciation itself sums together
+    -- (full_amount + half_amount always equals fn_account_depreciation's
+    -- single total for the same arguments; see that function's header).
+    -- row_type uses snake_case ('full_depreciation'/'half_depreciation')
+    -- for consistency with this function's existing 'bf'/'txn'/'closing'
+    -- tags — the human-readable "Full Depreciation"/"Half post-30Sep
+    -- Depreciation" labels live in `particulars` instead.
     IF COALESCE(v_acc.is_depreciable, FALSE) AND COALESCE(v_acc.depreciation_percent, 100) < 100 THEN
-        v_dep_amount := fn_account_depreciation(p_society_id, p_account_id, p_financial_year);
-        IF v_dep_amount > 0 THEN
+        SELECT full_amount, half_amount
+          INTO v_dep_full, v_dep_half
+          FROM fn_account_depreciation_split(p_society_id, p_account_id, p_financial_year);
+
+        IF v_dep_full > 0 OR v_dep_half > 0 THEN
             -- Fixed (2026-08): was `WHERE name = 'Dep'`, but the seeded
             -- Depreciation account's actual name is "Depreciation" — its
             -- tab_name is 'Dep' (see seed.py's ACCOUNTS row, id=231). That
@@ -4004,15 +4094,31 @@ BEGIN
             -- or not the account actually existed.
             SELECT id INTO v_dep_acc_id FROM accounts
             WHERE society_id = p_society_id AND tab_name = 'Dep' LIMIT 1;
- 
+
+            v_dep_acc_tab := COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
+            v_running_balance := v_final_balance;
+        END IF;
+
+        IF v_dep_full > 0 THEN
+            v_running_balance := v_running_balance - v_dep_full;
             RETURN QUERY SELECT
-                v_fy_end, ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
-                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
-                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_amount ELSE 0::NUMERIC(15,2) END,
-                (v_final_balance - v_dep_amount), 'depreciation'::TEXT,
-                COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
- 
-            v_transfer_amt := v_final_balance - v_dep_amount;
+                v_fy_end, ('Full Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
+                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_full ELSE 0::NUMERIC(15,2) END,
+                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_full ELSE 0::NUMERIC(15,2) END,
+                v_running_balance, 'full_depreciation'::TEXT, v_dep_acc_tab;
+        END IF;
+
+        IF v_dep_half > 0 THEN
+            v_running_balance := v_running_balance - v_dep_half;
+            RETURN QUERY SELECT
+                v_fy_end, ('Half post-30Sep Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
+                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_half ELSE 0::NUMERIC(15,2) END,
+                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_half ELSE 0::NUMERIC(15,2) END,
+                v_running_balance, 'half_depreciation'::TEXT, v_dep_acc_tab;
+        END IF;
+
+        IF v_dep_full > 0 OR v_dep_half > 0 THEN
+            v_transfer_amt := v_final_balance - v_dep_full - v_dep_half;
         END IF;
     END IF;
  
@@ -4834,7 +4940,94 @@ $$;
 -- SECTION 14: ACCOUNTS LIST / PROFILE
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_accounts_list CASCADE;
+-- fn_accounts_hierarchy
+-- =======================
+-- Depth-first chart-of-accounts listing (parent immediately followed by
+-- all its descendants, recursively), for the Accounts list card's
+-- TreeView and the Ledger card's Ledger Account selector — both need the
+-- same "walk the tree in hierarchy order" traversal, so this is the one
+-- shared source for it rather than duplicating a recursive CTE in two
+-- places.
+--
+-- Sort key: sort_path is each account's own id zero-padded and
+-- dot-joined with every ancestor's id (root first), so a plain
+-- ORDER BY sort_path yields exactly the depth-first tree order — a
+-- child's path is always a prefix-extension of its parent's, so it
+-- always sorts immediately after its parent and before any of the
+-- parent's later siblings.
+--
+-- Same current_balance formula as fn_accounts_list/fn_account_profile
+-- (nets per-transaction entry_side, not the account's fixed
+-- drcr_account), with one addition: CiH has no transaction rows of its
+-- own any more (cash-mode legs post to the real account instead — see
+-- fn_resolve_bank_leg), so summing transactions.acc_id=CiH now always
+-- gives 0 movement regardless of actual activity. CiH's balance is
+-- computed via fn_cih_balance_asof(CURRENT_DATE) instead — same shared
+-- formula the Cashbook card's CIH Running and the ledger's CiH branch
+-- already use.
+DROP FUNCTION IF EXISTS fn_accounts_hierarchy (INT, TEXT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_accounts_hierarchy(
+    p_society_id INT,
+    p_search     TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    id INT, name TEXT, tab_name TEXT, header TEXT, parent_account_id INT,
+    parent_tab_name TEXT, drcr_account TEXT, has_bf BOOLEAN,
+    is_depreciable BOOLEAN, depth INT,
+    bf_amount NUMERIC(15,2), current_balance NUMERIC(15,2),
+    transaction_count INT
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    WITH RECURSIVE tree AS (
+        SELECT a.id, a.parent_account_id, 0 AS depth,
+               LPAD(a.id::TEXT, 10, '0') AS sort_path
+        FROM accounts a
+        WHERE a.society_id = p_society_id AND a.parent_account_id IS NULL
+        UNION ALL
+        SELECT c.id, c.parent_account_id, t.depth + 1,
+               t.sort_path || '.' || LPAD(c.id::TEXT, 10, '0')
+        FROM accounts c
+        JOIN tree t ON c.parent_account_id = t.id
+        WHERE c.society_id = p_society_id
+    ),
+    balances AS (
+        SELECT a.id,
+               COALESCE(MAX(bf.bf_amount), 0)::NUMERIC(15,2) AS bf_amount,
+               CASE WHEN a.tab_name = 'CiH' THEN fn_cih_balance_asof(p_society_id, CURRENT_DATE)
+                    ELSE (CASE WHEN a.drcr_account = 'Cr'
+                               THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                                       WHEN t.entry_side='Dr' THEN -t.amount
+                                                       ELSE 0 END), 0)
+                               ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                                                       WHEN t.entry_side='Cr' THEN -t.amount
+                                                       ELSE 0 END), 0)
+                          END + COALESCE(MAX(bf.bf_amount), 0))
+               END::NUMERIC(15,2) AS current_balance,
+               COUNT(t.id)::INT AS transaction_count
+        FROM accounts a
+        LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+        LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
+                                     AND bf.financial_year = fn_current_financial_year()
+        WHERE a.society_id = p_society_id
+        GROUP BY a.id, a.tab_name, a.drcr_account
+    )
+    SELECT a.id, a.name::TEXT, a.tab_name::TEXT, a.header::TEXT, a.parent_account_id,
+           p.tab_name::TEXT, a.drcr_account::TEXT, a.has_bf, a.is_depreciable,
+           tree.depth, b.bf_amount, b.current_balance, b.transaction_count
+    FROM accounts a
+    JOIN tree ON tree.id = a.id
+    JOIN balances b ON b.id = a.id
+    LEFT JOIN accounts p ON p.id = a.parent_account_id
+    WHERE a.society_id = p_society_id
+      AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%' OR a.tab_name ILIKE '%'||p_search||'%')
+    ORDER BY tree.sort_path;
+END;
+$$;
+
+
 
 CREATE OR REPLACE FUNCTION fn_accounts_list(
     p_society_id INT,

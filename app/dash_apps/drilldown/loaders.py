@@ -468,6 +468,20 @@ def _current_fy_month() -> int:
     return date.today().month
 
 
+def get_account_options(society_id: int) -> list[dict]:
+    """[{'id': 633, 'label': 'CiH', 'depth': 2}, ...] in depth-first tree
+    order, for the Ledger card's Ledger Account selector. Backed by
+    fn_accounts_hierarchy — same shared source of truth the Accounts list
+    card's TreeView uses (see render_accounts_tree_card in renderers.py),
+    so the dropdown's ordering always matches the tree's."""
+    rows = db._execute(
+        "SELECT id, COALESCE(tab_name, name) AS label, depth "
+        "FROM fn_accounts_hierarchy(%s, NULL)",
+        (society_id,), fetch_all=True,
+    ) or []
+    return [{"id": r["id"], "label": r["label"], "depth": r["depth"]} for r in rows]
+
+
 def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | None]:
     """
     Wraps fn_fy_closing_report(society_id, fy). The function resolves the
@@ -863,8 +877,18 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
 
     # ── ACCOUNTS ────────────────────────────────────────────────────────
     if entity == "accounts":
-        return ("SELECT * FROM fn_accounts_list(%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, page_size, offset))
+        # Fixed (2026-08): fn_accounts_list's own ORDER BY was
+        # `tab_name NULLS LAST, id` — alphabetical, not hierarchical, so a
+        # child account could sort anywhere relative to its parent.
+        # fn_accounts_hierarchy walks the tree depth-first instead (see
+        # that function's header in estatehub.sql) — every child
+        # immediately follows its parent, which is what the Accounts
+        # TreeView (render_accounts_tree_card) needs to build correctly.
+        # No LIMIT/OFFSET here: the TreeView renders the whole chart of
+        # accounts at once (a few dozen rows, typically) rather than
+        # paginating a tree row-by-row, which doesn't nest sensibly across
+        # a page boundary.
+        return ("SELECT * FROM fn_accounts_hierarchy(%s, %s)", (sid, s))
 
     # ── LEDGER ─────────────────────────────────────────────────────────
     if entity == "ledger":
@@ -1480,14 +1504,19 @@ def load_list(
 
         # ── ACCOUNTS ────────────────────────────────────────────────────────
         if entity == "accounts":
+            # Same fn_accounts_list -> fn_accounts_hierarchy switch as
+            # _build_list_sql above, same reasoning — see that branch's
+            # comment. No LIMIT/OFFSET/search here either: the TreeView
+            # always renders every account so the hierarchy is complete,
+            # with `s` (the search box) applied client-side by the tree
+            # renderer instead of narrowing the SQL result, since a
+            # SQL-side search would silently drop a matched child's
+            # ancestor chain and break the nesting.
             rows = db._execute(
-                "SELECT * FROM fn_accounts_list(%s,%s) LIMIT %s OFFSET %s",
-                (sid, s, page_size, offset), fetch_all=True,
+                "SELECT * FROM fn_accounts_hierarchy(%s, NULL)",
+                (sid,), fetch_all=True,
             ) or []
-            cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM accounts WHERE society_id=%s", (sid,), fetch_one=True,
-            )
-            return rows, int((cnt or {}).get("n", len(rows)))
+            return rows, len(rows)
 
         # ── LEDGER ─────────────────────────────────────────────────────────
         if entity == "ledger":

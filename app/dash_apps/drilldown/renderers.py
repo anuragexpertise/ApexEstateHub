@@ -374,6 +374,131 @@ def render_kpi_card(card_id: str, title: str, icon: str, value: str,
 # LIST CARD RENDERER  — portal-aware action buttons
 # ════════════════════════════════════════════════════════════════════════════
 
+def _build_accounts_tree(rows: list[dict]) -> list[dict]:
+    """Turns fn_accounts_hierarchy's flat depth-first row list into a
+    nested {row, children} tree. Relies on the rows already being in
+    depth-first order (guaranteed by that function's own sort_path
+    ORDER BY) — for any row at depth D, its parent is always the most
+    recently seen row at depth D-1, since depth-first traversal always
+    finishes emitting a node's own row immediately before descending into
+    its first child."""
+    roots: list[dict] = []
+    children_at_depth: dict[int, list[dict]] = {-1: roots}
+    for r in rows:
+        row_dict = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
+        depth = row_dict.get("depth") or 0
+        node = {"row": row_dict, "children": []}
+        parent_children = children_at_depth.get(depth - 1, roots)
+        parent_children.append(node)
+        children_at_depth[depth] = node["children"]
+    return roots
+
+
+def _fmt_account_amount(v) -> str:
+    if v is None:
+        return "—"
+    v = float(v)
+    sign = "-" if v < 0 else ""
+    return f"{sign}₹{abs(v):,.2f}"
+
+
+def _render_account_tree_node(node: dict, entity: str) -> html.Details:
+    """One <details>/<summary> tree node, recursing into node['children'].
+    Reuses the same {"type": "list-row", "entity": entity, "pk": ...}
+    click target every other list card's table row already uses for
+    navigation (see the html.Tr construction earlier in this file) — the
+    existing drilldown_callbacks.py handler for that pattern needs no
+    changes to work here too, since it only cares about the id shape, not
+    which component fired it."""
+    r = node["row"]
+    depth = r.get("depth") or 0
+    children = node["children"]
+    pk_val = str(r.get("id") or "0")
+
+    label_bits = [
+        html.Span(r.get("tab_name") or r.get("name") or "", style={"fontWeight": "700"}),
+        html.Span(f"  {r.get('name') or ''}", style={"color": "#8a97a8", "fontSize": "11px"}),
+    ]
+    if r.get("has_bf"):
+        label_bits.append(dbc.Badge("BF", color="info", className="ms-2",
+                                     style={"fontSize": "9px"}))
+    if r.get("is_depreciable"):
+        label_bits.append(dbc.Badge("Dep", color="secondary", className="ms-1",
+                                     style={"fontSize": "9px"}))
+
+    summary = html.Summary(
+        html.Div([
+            html.Div(label_bits, style={"display": "flex", "alignItems": "center"}),
+            html.Small(_fmt_account_amount(r.get("current_balance")),
+                       style={"color": "#15304f", "fontWeight": "600"}),
+        ], style={"display": "flex", "justifyContent": "space-between",
+                  "alignItems": "center", "gap": "10px"}),
+        id={"type": "list-row", "entity": entity, "pk": pk_val},
+        n_clicks=0,
+        style={"cursor": "pointer", "padding": "5px 8px", "borderRadius": "6px",
+               "listStyle": "none"},
+    )
+
+    body = [summary]
+    if children:
+        body.append(html.Div(
+            [_render_account_tree_node(c, entity) for c in children],
+            style={"paddingLeft": "18px",
+                   "borderLeft": "1px dashed rgba(120,148,181,0.3)",
+                   "marginLeft": "6px"},
+        ))
+
+    return html.Details(
+        body,
+        open=(depth < 2),  # root + first level expanded by default; deeper nodes collapsed
+        style={"marginBottom": "1px"},
+    )
+
+
+def render_accounts_tree_card(title: str, icon: str, rows: list[dict], entity: str,
+                               total_rows: int, header_right: list) -> html.Div:
+    """TreeView for the Accounts list card — parent/child nodes nested by
+    fn_accounts_hierarchy's depth column, native <details>/<summary>
+    (zero extra JS/CSS dependency — every browser supports these
+    natively) rather than a third-party tree-view package. No pagination:
+    the whole chart of accounts (a few dozen rows, typically) renders at
+    once, since a tree doesn't nest sensibly across a page boundary."""
+    tree = _build_accounts_tree(rows)
+    if not tree:
+        body_content = html.Div([
+            html.I(className="fas fa-inbox me-2", style={"color": "#ccc", "fontSize": "20px"}),
+            html.Div("No accounts found", style={"color": "#aaa", "fontSize": "13px", "marginTop": "4px"}),
+        ], className="text-center", style={"padding": "28px 0"})
+    else:
+        body_content = html.Div([_render_account_tree_node(n, entity) for n in tree])
+
+    return html.Div([
+        html.Div(
+            html.Div([
+                html.Div([
+                    html.I(className=f"fas {icon} me-2", style={"color": COLORS["primary"]}),
+                    html.Strong(title, style={"fontSize": "13px"}),
+                    dbc.Badge(str(total_rows), color="primary", className="ms-2",
+                              style={"fontSize": "10px"}),
+                ], style={"display": "flex", "alignItems": "center"}),
+                html.Div(header_right,
+                         style={"display": "flex", "alignItems": "center",
+                                "gap": "6px", "flexWrap": "wrap"}),
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center", "flexWrap": "wrap", "gap": "8px"}),
+            style={"padding": "10px 16px",
+                   "background": "linear-gradient(180deg,rgba(255,255,255,0.85),rgba(248,251,255,0.95))"},
+        ),
+        html.Div(body_content, style={"padding": "12px 16px", "maxHeight": "560px",
+                                       "overflowY": "auto"}),
+    ], style={
+        "borderRadius": "16px",
+        "border": "1px solid rgba(255,255,255,0.65)",
+        "boxShadow": "0 10px 30px rgba(15,23,42,0.08)",
+        "overflow": "hidden",
+    })
+
+
 def render_list_card(card_id: str, title: str, icon: str,
                       columns: list[dict], rows: list[dict],
                       entity: str, page: int = 1, total_rows: int = 0,
@@ -385,7 +510,9 @@ def render_list_card(card_id: str, title: str, icon: str,
                       fy_options: list[int] | None = None,
                       selected_fy: int | None = None,
                       month_options: list[dict] | None = None,
-                      selected_month: int | None = None) -> html.Div:
+                      selected_month: int | None = None,
+                      account_options: list[dict] | None = None,
+                      selected_account_id: int | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
@@ -622,10 +749,12 @@ def render_list_card(card_id: str, title: str, icon: str,
         )
 
     # Ledger row highlighting: BF in yellow, closing in green, negative balance in red.
-    # fn_account_ledger_fy returns row_type ('bf' | 'txn' | 'depreciation' | 'closing')
-    # and particulars like 'Balance B/F' / 'Balance C/F -> X' — NOT an is_closing
-    # boolean or the literal string 'Brought Forward' that this block checked for
-    # previously, which meant the highlighting never actually fired.
+    # fn_account_ledger_fy returns row_type ('bf' | 'txn' |
+    # 'full_depreciation' | 'half_depreciation' | 'closing') and
+    # particulars like 'Balance B/F' / 'Balance C/F -> X' — NOT an
+    # is_closing boolean or the literal string 'Brought Forward' that this
+    # block checked for previously, which meant the highlighting never
+    # actually fired.
     if entity == "ledger" and rows:
         for i, row in enumerate(rows):
             if i >= len(body_rows):
@@ -640,7 +769,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                 body_rows[i].style = {"backgroundColor": "#f8d7da"}
             elif row_type == "bf":
                 body_rows[i].style = {"backgroundColor": "#fff3cd"}
-            elif row_type == "depreciation":
+            elif row_type in ("full_depreciation", "half_depreciation"):
                 body_rows[i].style = {"backgroundColor": "#e2e3ff"}
 
     # Cashbook B/F ('CiH' opening) in yellow, C/F ('CiH' closing) in green.
@@ -723,6 +852,26 @@ def render_list_card(card_id: str, title: str, icon: str,
     # not a full-FY workbook in the CB2025-2026.xlsx reference layout,
     # which is what the dedicated Export button produces instead).
     if entity in ("cashbook", "ledger") and fy_options:
+        # Ledger Account selector — lets you switch which account's ledger
+        # is showing directly from the card header, instead of only ever
+        # being reachable by navigating back to Settings > Accounts and
+        # drilling into a specific account's profile each time (the only
+        # path that previously set filters["account_id"] at all — see
+        # registry.py's profile_account "show_ledger" action). Indented by
+        # depth (fn_accounts_hierarchy's tree order) so the flat <select>
+        # still reads hierarchically even though a dropdown can't nest.
+        if entity == "ledger" and account_options:
+            header_right.append(dbc.Select(
+                id={"type": "list-account-select", "entity": entity},
+                options=[
+                    {"label": ("\u00A0\u00A0" * a["depth"]) + a["label"], "value": a["id"]}
+                    for a in account_options
+                ],
+                value=selected_account_id,
+                size="sm",
+                style={"width": "170px", "fontSize": "11px",
+                       "borderRadius": "8px", "display": "inline-block"},
+            ))
         header_right.append(dbc.Select(
             id={"type": "list-fy-select", "entity": entity},
             options=[{"label": f"FY {fy}-{str(fy + 1)[-2:]}", "value": fy}
@@ -793,6 +942,16 @@ def render_list_card(card_id: str, title: str, icon: str,
             size="sm", color="warning", outline=True,
             style={"fontSize": "11px", "borderRadius": "8px", "fontWeight": "600"},
         ))
+
+    # Accounts renders as a TreeView (parent/child nodes nested by
+    # fn_accounts_hierarchy's depth), not the flat sortable/paginated
+    # table every other entity uses — a chart of accounts is inherently
+    # hierarchical (accounts.parent_account_id), and a flat table with a
+    # "Parent" column doesn't convey that structure the way actual nesting
+    # does. header_right (search/CSV/New, built above) carries over
+    # unchanged; only the body swaps from table+pager to tree.
+    if entity == "accounts":
+        return render_accounts_tree_card(title, icon, rows, entity, total_rows, header_right)
 
     return html.Div([
         html.Div(
