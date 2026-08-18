@@ -440,9 +440,9 @@ CONCERNS = [
 # model — both mode='cash', so each posts a single Dr leg only.
 SIMPLE_ASSETS = [
     {"asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
-     "purchase_date": "2026-05-15", "purchase_value": 500000, "acc_id": 2314},
+     "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314},
     {"asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
-     "purchase_date": "2026-06-20", "purchase_value": 75000,  "acc_id": 62},
+     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 62},
 ]
 
 # Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').
