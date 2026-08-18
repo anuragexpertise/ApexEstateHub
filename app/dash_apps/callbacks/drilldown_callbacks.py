@@ -365,6 +365,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-search", "entity": ALL}, "value"),
         Input({"type": "list-fy-select", "entity": ALL}, "value"),
         Input({"type": "list-month-select", "entity": ALL}, "value"),
+        Input({"type": "list-account-select", "entity": ALL}, "value"),
         Input({"type": "list-sort", "entity": ALL, "column": ALL}, "n_clicks"),
         Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
         Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
@@ -1246,6 +1247,21 @@ def register_drilldown_callbacks(app):
             store.setdefault("list_pages", {})[entity] = 1
             hide_kpis = True
 
+        # ── Ledger Account select (ledger only) ──────────────────────────────
+        # Same reasoning as list-fy-select/list-month-select above:
+        # fn_account_ledger_fy takes account_id as a real SQL argument, so
+        # it's stored separately (list_account) and read into
+        # `filters["account_id"]` in _render_card below. This is now a
+        # SECOND way account_id can get set (the first being
+        # registry.py's profile_account "show_ledger" action, which
+        # prefills it via navigate_to) — this dropdown lets you switch
+        # accounts without leaving the Ledger card at all.
+        elif trig_type == "list-account-select":
+            entity = id_dict.get("entity")
+            store.setdefault("list_account", {})[entity] = trig["value"] or None
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+
         # ── Pagination ────────────────────────────────────────────────────
         elif trig_type in ("list-page-prev", "list-page-next"):
             entity = id_dict.get("entity")
@@ -1952,6 +1968,25 @@ def _render_card(
                 filters = dict(filters)
                 filters["month"] = selected_month
 
+        # Ledger Account selector — ledger only. account_id can already be
+        # set two ways by this point: the store (this dropdown, once
+        # used) or filters itself (registry.py's profile_account
+        # "show_ledger" action prefilled it via navigate_to, the original
+        # and only path before this dropdown existed). The store takes
+        # priority once set; falling back to whatever's already in
+        # filters keeps the drill-down entry path working exactly as
+        # before for anyone who hasn't touched the dropdown yet.
+        account_options, selected_account_id = [], None
+        if entity == "ledger":
+            led_sid = get_current_society_id()
+            account_options = loaders.get_account_options(led_sid) if led_sid else []
+            selected_account_id = (store.get("list_account") or {}).get(entity)
+            if selected_account_id is None:
+                selected_account_id = filters.get("account_id")
+            if selected_account_id:
+                filters = dict(filters)
+                filters["account_id"] = selected_account_id
+
         # Distinct filter options per column (cached in store so we don't
         # re-fetch the full set on every pagination/sort interaction).
         filter_options = (store.get("list_filter_options") or {}).get(entity)
@@ -2073,6 +2108,8 @@ def _render_card(
             selected_fy=selected_fy,
             month_options=month_options,
             selected_month=selected_month,
+            account_options=account_options,
+            selected_account_id=selected_account_id,
         )
 
     # ── profile ───────────────────────────────────────────────────────────────

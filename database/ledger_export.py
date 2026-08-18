@@ -11,9 +11,11 @@ DEPENDS ON: fn_account_ledger_fy (estatehub.sql SECTION 5), which already
 implements the full year-end cascade — FY-scoped BF resolution, per-
 transaction entry_side netting, the depreciation split for depreciable
 accounts, and the C/F-to-hierarchy-parent closing row — via row_type
-'bf' | 'txn' | 'depreciation' | 'closing'. This module is a thin
-Excel-formatting layer over that function's output; it does NOT
-reimplement any of the closing arithmetic itself.
+'bf' | 'txn' | 'full_depreciation' | 'half_depreciation' | 'closing'
+(2026-08: the single 'depreciation' tag split into these two, matching
+that function's own Full-rate/Half-rate-post-1-Sep row split). This
+module is a thin Excel-formatting layer over that function's output; it
+does NOT reimplement any of the closing arithmetic itself.
 
 Fixed (2026-08): this module previously queried `transactions` directly
 and computed its own running balance, then wrote a placeholder C/F row
@@ -65,10 +67,11 @@ _FMT_AMT  = '#,##0.00;[Red](#,##0.00);"-"'
 _COL_WIDTHS = {"A": 11, "B": 12, "C": 32, "D": 8, "E": 11, "F": 11, "G": 8, "H": 12}
 
 _ROW_STYLE = {
-    "bf":           (_FONT_BFCF, _FILL_BF),
-    "closing":      (_FONT_BFCF, _FILL_CF),
-    "depreciation": (_FONT_BODY, _FILL_DEP),
-    "txn":          (_FONT_BODY, PatternFill()),
+    "bf":                (_FONT_BFCF, _FILL_BF),
+    "closing":           (_FONT_BFCF, _FILL_CF),
+    "full_depreciation": (_FONT_BODY, _FILL_DEP),
+    "half_depreciation": (_FONT_BODY, _FILL_DEP),
+    "txn":               (_FONT_BODY, PatternFill()),
 }
 
 
@@ -145,7 +148,7 @@ def generate_ledger_excel(
         credit = float(r["credit"]) if r.get("credit") else None
         balance = float(r.get("balance") or 0)
         drcr = None
-        if row_type in ("bf", "txn", "depreciation"):
+        if row_type in ("bf", "txn", "full_depreciation", "half_depreciation"):
             drcr = "Dr" if debit and not credit else ("Cr" if credit and not debit else None)
 
         # parent_name from fn_account_ledger_fy is already tab_name-first
