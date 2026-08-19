@@ -149,7 +149,7 @@ def _one(cur, sql, params=None):
 
 # (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, drcr_bf, dep_pct)
 ACCOUNTS = [
-    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, None, 100),
+    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, "Cr", 100),
     (2,     "Capital Account",            "CapAc",      "Capital Account",             1,  "Cr",  True,  "Cr", 100),
     (21,    "Income Other Source",        "IncOther",   "Income other source",         2,  "Cr",  True,  "Cr", 100),
     (211,   "Interest Income",            "IncInt",     "Interest Income",            21,  "Cr",  True,  "Cr", 100),
