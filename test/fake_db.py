@@ -538,6 +538,8 @@ class FakeDB:
     def _fn_accounts_list(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id") or p.get("sid")
         rows = [r for r in self.tables.get("accounts", []) if r.get("society_id") == sid]
+        # Filter out root (id=1) which now has drcr_account=None
+        rows = [r for r in rows if r.get("drcr_account") is not None]
         return rows if fetch_all else (rows[0] if rows else None)
 
     def _fn_gate_logs_named(self, p, fetch_one, fetch_all):
@@ -641,25 +643,20 @@ class FakeDB:
         accounts = [r for r in self.tables.get("accounts", []) if r.get("society_id") == sid]
         dr_rows, cr_rows = [], []
         for a in accounts:
+            drcr = a.get("drcr_account")
+            if drcr is None:
+                # Root or unmapped account — skip in fake balance sheet
+                continue
             txs = [r for r in self.tables.get("transactions", [])
                    if r.get("society_id") == sid and r.get("acc_id") == a.get("id")]
             dr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Dr")
             cr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Cr")
-            # Fixed (2026-08): "dr or cr" silently discarded whichever side
-            # was truthy-first — an account with BOTH dr and cr activity
-            # (e.g. a Dr-natured Cash-in-hand account with a refund/reversal
-            # posted as entry_side='Cr') reported gross dr only, dropping
-            # the cr movement entirely instead of netting it. Same bug
-            # class as the drcr_account-vs-entry_side confusion already
-            # fixed in fn_accounts_list/fn_account_profile/fn_account_ledger_fy
-            # in estatehub.sql — net per-transaction entry_side into the
-            # account's own natural (drcr_account) direction.
-            if a.get("drcr_account") == "Dr":
+            if drcr == "Dr":
                 amount = dr - cr
             else:
                 amount = cr - dr
             row = {"account_name": a.get("name", ""), "amount": amount}
-            if a.get("drcr_account") == "Dr":
+            if drcr == "Dr":
                 dr_rows.append(row)
             else:
                 cr_rows.append(row)

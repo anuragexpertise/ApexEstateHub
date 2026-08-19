@@ -6,7 +6,6 @@ Builds entity metadata directly from information_schema / pg_catalog.
 
 Key v3 changes:
   - accounts.category REMOVED — categorisation is via acc_id + drcr_account
-  - drcr_account = '' (empty string) treated identically to NULL in dropdowns
   - New entities: receivables, payables, assets
   - apt_charges: apt_maintenance_acc_id / apt_interest_acc_id rendered
     as account dropdowns (options_from injected manually, not from FK)

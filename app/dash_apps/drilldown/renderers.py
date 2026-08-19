@@ -2256,7 +2256,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                     _rows = db._execute(
                         "SELECT id, COALESCE(tab_name,'') AS tab_name, name "
                         "FROM accounts "
-                        "WHERE society_id=%s AND (drcr_account=%s OR drcr_account IS NULL) "
+                        "WHERE society_id=%s AND drcr_account=%s "
                         "ORDER BY tab_name, name",
                         (society_id, _drcr),
                         fetch_all=True,
