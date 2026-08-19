@@ -889,27 +889,46 @@ a {
     color: #667eea !important;
 }
 
-/* Ledger Index tree +/- icons */
+/* Ledger Index tree — row grid + toggle icons */
 .ledger-index-tree summary {
     list-style: none;
-    position: relative;
-    padding-left: 20px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background .12s ease;
 }
 .ledger-index-tree summary::-webkit-details-marker {
     display: none;
 }
-.ledger-index-tree summary::before {
-    content: '+';
-    position: absolute;
-    left: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-weight: 700;
-    color: #1d74d8;
-    font-size: 14px;
-    width: 14px;
-    text-align: center;
+.ledger-index-tree summary:hover {
+    background: rgba(23,151,110,0.07);
 }
-.ledger-index-tree details[open] > summary::before {
-    content: '−';
+/* Toggle chip: a real, always-visible element (not a squeezed ::before)
+   so it can never get crowded out by a row's own padding. */
+.ledger-index-tree .li-caret {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: rgba(29,116,216,0.14);
+    color: #1d74d8;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 700;
+}
+.ledger-index-tree .li-caret::before {
+    content: '+';
+}
+.ledger-index-tree details[open] > summary .li-caret::before {
+    content: '\2212'; /* minus sign */
+}
+/* Leaf rows (no children) keep the column width but show no toggle */
+.ledger-index-tree .li-caret-leaf {
+    background: transparent;
+}
+.ledger-index-tree .li-caret-leaf::before {
+    content: '';
 }

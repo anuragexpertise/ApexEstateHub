@@ -2560,6 +2560,15 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
     else:
         tree = _build_accounts_tree(rows)
 
+        # Single shared column template — used for the header AND every tree
+        # row at every depth. Depth indentation is applied *inside* the
+        # Account cell only (see `indent` below), never by shrinking a row's
+        # own wrapping container, so the B/F..Dr/Cr columns land on the same
+        # pixel positions as the header regardless of how deep a node is
+        # nested.
+        LEDGER_GRID_COLS = "2fr 1fr 1fr 1fr 1fr 1fr 0.8fr"
+        LEDGER_INDENT_PX = 16  # indentation added to the Account cell per depth level
+
         def _node_amount(v):
             if v is None:
                 return "—"
@@ -2588,33 +2597,45 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
 
             side_color = "#17976e" if display_side == "Cr" else ("#c0392b" if display_side == "Dr" else "#15304f")
 
+            # Explicit, always-rendered toggle icon (a "+"/"−" chip driven by
+            # CSS via the `li-caret` class) rather than a CSS ::before marker
+            # squeezed into leftover padding — that approach was getting
+            # crowded out whenever a node's own padding shrank the space
+            # reserved for it, making the toggle unreadable.
+            caret = html.Span(className="li-caret" if children else "li-caret li-caret-leaf")
+
+            account_cell = html.Div(
+                [caret, html.Div(label_bits, style={"display": "flex", "alignItems": "center", "flexWrap": "wrap"})],
+                style={"display": "flex", "alignItems": "center",
+                       "paddingLeft": f"{depth * LEDGER_INDENT_PX}px", "minWidth": 0},
+            )
+
+            row_cells = [
+                account_cell,
+                html.Div(_node_amount(r.get("own_bf")), style={"fontSize": "11px", "color": "#555", "textAlign": "right"}),
+                html.Div(_node_amount(r.get("own_movement")), style={"fontSize": "11px", "color": "#555", "textAlign": "right"}),
+                html.Div(_node_amount(r.get("depreciation_charge")), style={"fontSize": "11px", "color": "#555", "textAlign": "right"}),
+                html.Div(_node_amount(r.get("own_closing")), style={"fontSize": "11px", "color": "#555", "textAlign": "right"}),
+                html.Div(_node_amount(total_closing), style={"fontSize": "12px", "fontWeight": "700", "color": side_color, "textAlign": "right"}),
+                html.Div(display_side, style={"fontSize": "11px", "fontWeight": "700", "color": side_color, "textAlign": "right"}),
+            ]
+
             summary = html.Summary(
-                html.Div([
-                    html.Div(label_bits, style={"display": "flex", "alignItems": "center"}),
-                    html.Div([
-                        html.Span(_node_amount(r.get("own_bf")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
-                        html.Span(_node_amount(r.get("own_movement")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
-                        html.Span(_node_amount(r.get("depreciation_charge")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
-                        html.Span(_node_amount(r.get("own_closing")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
-                        html.Span(_node_amount(total_closing), style={"fontSize": "12px", "fontWeight": "700", "color": side_color, "marginRight": "8px"}),
-                        html.Span(display_side, style={"fontSize": "11px", "fontWeight": "700", "color": side_color}),
-                    ], style={"display": "flex", "alignItems": "center", "gap": "4px"}),
-                ], style={"display": "flex", "justifyContent": "space-between",
-                          "alignItems": "center", "gap": "10px"}),
+                html.Div(row_cells, style={"display": "grid", "gridTemplateColumns": LEDGER_GRID_COLS,
+                                            "alignItems": "center", "columnGap": "8px", "padding": "6px 8px"}),
                 id={"type": "list-row", "entity": "accounts", "pk": pk_val},
                 n_clicks=0,
-                style={"cursor": "pointer", "padding": "6px 8px", "borderRadius": "6px",
-                       "listStyle": "none"},
+                className="ledger-node-summary",
             )
 
             body = [summary]
             if children:
-                body.append(html.Div(
-                    [_render_node(c) for c in children],
-                    style={"paddingLeft": "18px",
-                           "borderLeft": "1px dashed rgba(120,148,181,0.3)",
-                           "marginLeft": "6px"},
-                ))
+                # No padding/margin/border on this wrapper — anything here
+                # would shrink the available width for every descendant row
+                # and throw off column alignment a little more at each
+                # nesting level. All visual nesting instead comes from the
+                # Account cell's own indentation above.
+                body.append(html.Div([_render_node(c) for c in children]))
 
             return html.Details(
                 body,
@@ -2632,7 +2653,7 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
             html.Div("Own Closing", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
             html.Div("Total Closing", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
             html.Div("Dr/Cr", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
-        ], style={"display": "grid", "gridTemplateColumns": "2fr 1fr 1fr 1fr 1fr 1fr 0.8fr",
+        ], style={"display": "grid", "gridTemplateColumns": LEDGER_GRID_COLS, "columnGap": "8px",
                   "borderBottom": "1px solid rgba(120,148,181,0.2)", "background": "rgba(248,251,255,0.97)"})
 
         body = html.Div(tree_nodes, className="ledger-index-tree", style={"padding": "8px 12px", "maxHeight": "560px", "overflowY": "auto"})
