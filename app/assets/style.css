@@ -888,3 +888,28 @@ a {
 .dnd-handle:hover {
     color: #667eea !important;
 }
+
+/* Ledger Index tree +/- icons */
+.ledger-index-tree summary {
+    list-style: none;
+    position: relative;
+    padding-left: 20px;
+}
+.ledger-index-tree summary::-webkit-details-marker {
+    display: none;
+}
+.ledger-index-tree summary::before {
+    content: '+';
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-weight: 700;
+    color: #1d74d8;
+    font-size: 14px;
+    width: 14px;
+    text-align: center;
+}
+.ledger-index-tree details[open] > summary::before {
+    content: '−';
+}

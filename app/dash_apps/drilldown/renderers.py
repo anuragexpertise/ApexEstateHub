@@ -769,7 +769,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                 body_rows[i].style = {"backgroundColor": "#f8d7da"}
             elif row_type == "bf":
                 body_rows[i].style = {"backgroundColor": "#fff3cd"}
-            elif row_type in ("full_depreciation", "half_depreciation"):
+            elif row_type in ("full_depreciation", "half_depreciation", "depreciation"):
                 body_rows[i].style = {"backgroundColor": "#e2e3ff"}
 
     # Cashbook B/F ('CiH' opening) in yellow, C/F ('CiH' closing) in green.
@@ -1631,6 +1631,285 @@ def render_profile_card(card_id: str, title: str, icon: str,
         "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
         "backdropFilter": "blur(12px)", "overflow": "hidden",
     })
+
+
+def render_account_profile_card(card_id: str, title: str, icon: str,
+                                entity: str, record: dict,
+                                fields: list[dict], actions: list[dict] | None = None,
+                                color: str = "#1d74d8",
+                                auth_data: dict | None = None,
+                                filters: dict | None = None,
+                                ledger_rows: list[dict] | None = None,
+                                fy_options: list | None = None,
+                                selected_fy: int | None = None,
+                                society_id: int | None = None) -> html.Div:
+    """Account profile page that includes both the account fields and the
+    ledger transaction table below it, matching the CB2024-2025.xlsx layout."""
+    from app.dash_apps.drilldown.registry import to_plural
+
+    auth_data  = auth_data or {}
+    role  = auth_data.get("role", "guest")
+    allowed    = _perms_for(role, entity)
+    entity_plural = to_plural(entity)
+    hidden = _context_hidden_fields(filters)
+
+    record_dict = (record.to_dict(include_calculated=True)
+                   if hasattr(record, "to_dict") else record)
+    pk_val = record_dict.get("id", "")
+
+    # ── Resolve the society_id used for asset URL construction ───────────
+    img_society_id = (
+        record_dict.get("society_id")
+        if record_dict.get("society_id") is not None
+        else society_id
+    )
+    img_entity_pk = pk_val
+
+    visible_fields = [
+        f for f in fields
+        if f.get("field") not in hidden
+        and _field_visible(entity_plural, f.get("field"), role)
+    ]
+
+    def _field_cell(f: dict) -> html.Div:
+        val = _display_value(f["field"], record_dict)
+        fmt = f.get("format")
+        if fmt in _FIELD_FORMATTERS and val is not None:
+            val = _FIELD_FORMATTERS[fmt](val)
+        elif val is None:
+            val = "—"
+        elif isinstance(val, bool):
+            val = html.Span("✓ Active" if val else "✗ Inactive",
+                            style={"color": "#17976e" if val else "#de5c52", "fontWeight": "600"})
+        elif isinstance(val, (date, datetime)):
+            val = _format_datetime(val)
+        elif isinstance(val, Decimal):
+            val = f"₹{val:,.2f}"
+        elif isinstance(val, str):
+            val = _humanize_string(val)
+        else:
+            val = str(val)
+
+        return html.Div([
+            html.Div([
+                html.I(className=f.get("icon", "fas fa-circle-dot"),
+                       style={"color": color, "fontSize": "9px",
+                              "marginRight": "5px"}),
+                html.Span(f["label"],
+                          style={"color": "#7d8ea3", "fontSize": "10px",
+                                 "fontWeight": "600", "textTransform": "uppercase"}),
+            ], style={"marginBottom": "3px"}),
+            html.Div(val, style={
+                "fontSize": "13px", "fontWeight": "500", "color": "#15304f",
+                "wordBreak": "break-word",
+            }),
+        ], style={
+            "padding": "10px 12px",
+            "background": "rgba(248,251,255,0.6)",
+            "borderRadius": "10px",
+            "border": "1px solid rgba(200,215,235,0.35)",
+        })
+
+    text_cells = [_field_cell(f) for f in visible_fields]
+
+    # ── Ledger table ────────────────────────────────────────────────────
+    ledger_section = []
+    if ledger_rows is not None:
+        ledger_columns = [
+            {"name": "Date", "field": "row_date"},
+            {"name": "Account", "field": "account_name"},
+            {"name": "Entity", "field": "entity_name"},
+            {"name": "Particulars", "field": "particulars"},
+            {"name": "CB Folio", "field": "cb_folio"},
+            {"name": "Debit", "field": "debit", "format": "currency"},
+            {"name": "Credit", "field": "credit", "format": "currency"},
+            {"name": "Running Balance", "field": "running_balance", "format": "currency"},
+        ]
+
+        def _ledger_row(r):
+            rd = r.to_dict(include_calculated=True) if hasattr(r, "to_dict") else dict(r)
+            row_type = rd.get("row_type")
+            style = {}
+            if row_type == "bf":
+                style = {"backgroundColor": "#fff3cd", "fontWeight": "700"}
+            elif row_type == "closing":
+                style = {"backgroundColor": "#d4edda", "fontWeight": "700"}
+            elif row_type == "depreciation":
+                style = {"backgroundColor": "#e2e3ff"}
+            elif rd.get("running_balance", 0) < 0:
+                style = {"backgroundColor": "#f8d7da"}
+
+            cells = []
+            for c in ledger_columns:
+                field_key = c.get("field") or c.get("name") or ""
+                val = _display_value(field_key, rd)
+                fmt = c.get("format")
+                if fmt in _FIELD_FORMATTERS and val is not None:
+                    val = _FIELD_FORMATTERS[fmt](val)
+                elif val is None:
+                    val = "—"
+                elif isinstance(val, (date, datetime)):
+                    val = _format_datetime(val)
+                elif isinstance(val, (Decimal, float)):
+                    val = f"₹{float(val):,.2f}"
+                elif isinstance(val, str):
+                    val = _humanize_string(val)
+                else:
+                    val = str(val)
+                cells.append(html.Td(val, style={
+                    "fontSize": "12px", "verticalAlign": "middle", "padding": "6px 8px",
+                }))
+            return html.Tr(cells, style=style)
+
+        header_cells = []
+        for c in ledger_columns:
+            header_cells.append(html.Th(c["name"], style={
+                "fontSize": "11px", "fontWeight": "700", "color": "#7d8ea3",
+                "padding": "8px",
+            }))
+
+        body_rows = [_ledger_row(r) for r in (ledger_rows or [])]
+        if not body_rows:
+            body_rows = [html.Tr(html.Td(
+                html.Div([
+                    html.I(className="fas fa-inbox me-2",
+                           style={"color": "#ccc", "fontSize": "20px"}),
+                    html.Div("No ledger entries found",
+                             style={"color": "#aaa", "fontSize": "13px",
+                                    "marginTop": "4px"}),
+                ], className="text-center", style={"padding": "16px 0"}),
+                colSpan=len(ledger_columns),
+            ))]
+
+        ledger_table = dbc.Table([
+            html.Thead(html.Tr(header_cells)),
+            html.Tbody(body_rows),
+        ], bordered=False, hover=True, responsive=True, size="sm",
+           style={"marginTop": "4px", "marginBottom": "0"})
+
+        # FY selector + Export for ledger
+        fy_opts = fy_options or []
+        sel_fy = selected_fy
+        ledger_header = html.Div([
+            html.Div([
+                html.I(className="fas fa-book me-2", style={"color": color}),
+                html.Strong("Ledger", style={"fontSize": "13px"}),
+                dbc.Badge(f"FY {sel_fy}-{str(sel_fy + 1)[-2:]}" if sel_fy else "—",
+                          color="primary", className="ms-2",
+                          style={"fontSize": "10px"}),
+            ], style={"display": "flex", "alignItems": "center", "marginBottom": "8px"}),
+            html.Div([
+                dbc.Select(
+                    id={"type": "list-fy-select", "entity": "ledger"},
+                    options=[{"label": f"FY {fy}-{str(fy + 1)[-2:]}", "value": fy}
+                             for fy in fy_opts],
+                    value=sel_fy,
+                    size="sm",
+                    style={"width": "110px", "fontSize": "11px",
+                           "borderRadius": "8px", "display": "inline-block"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-1"), "Export Ledger"],
+                    id={"type": "btn-fy-export", "entity": "ledger"},
+                    size="sm", color="primary", outline=True,
+                    disabled=(not pk_val),
+                    title=("Open an account first" if not pk_val else None),
+                    style={"fontSize": "11px", "borderRadius": "8px",
+                           "fontWeight": "600"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "ledger"}),
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px", "flexWrap": "wrap"}),
+        ], style={"padding": "10px 16px",
+                   "background": "linear-gradient(180deg,rgba(255,255,255,0.85),rgba(248,251,255,0.95))"})
+
+        ledger_section = html.Div([
+            ledger_header,
+            html.Div(ledger_table, style={"overflowX": "auto", "maxHeight": "420px",
+                                          "overflowY": "auto", "padding": "0 16px 12px"}),
+        ], style={
+            "borderRadius": "16px",
+            "border": "1px solid rgba(255,255,255,0.65)",
+            "boxShadow": "0 10px 30px rgba(15,23,42,0.08)",
+            "overflow": "hidden",
+            "marginTop": "16px",
+        })
+
+    # ── Action buttons filtered by role ─────────────────────────────────
+    action_btns = []
+    for act in (actions or []):
+        act_id = act.get("action_id", "")
+        act_roles = act.get("roles")
+        if act_roles and role not in act_roles:
+            continue
+        if act_id == "edit" and "edit" not in allowed:
+            continue
+        if act_id == "delete" and "delete" not in allowed:
+            continue
+        act_label = act["label"]
+        act_color = act.get("color", "primary")
+        act_icon = act.get("icon", "fa-bolt")
+        action_btns.append(dbc.Button(
+            [html.I(className=f"fas {act_icon} me-2"), act_label],
+            id={"type": "profile-action", "entity": entity, "pk": str(pk_val),
+                "action": act_id, "target": act.get("target_card") or ""},
+            n_clicks=0, color=act_color, size="sm",
+            className="me-2 mb-2",
+            style={"borderRadius": "10px", "fontWeight": "600"},
+        ))
+
+    return html.Div([
+        html.Div(
+            html.Div([
+                html.Div([
+                    html.Div(
+                        html.I(className=f"fas {icon}",
+                               style={"color": "#fff", "fontSize": "16px"}),
+                        style={
+                            "width": "38px", "height": "38px",
+                            "borderRadius": "10px",
+                            "background": f"linear-gradient(135deg,{color},{color}aa)",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center", "marginRight": "12px",
+                        },
+                    ),
+                    html.Div([
+                        html.Strong(title, style={"fontSize": "14px"}),
+                        html.Div(f"ID: {pk_val}",
+                                 style={"fontSize": "11px", "color": "#999"}),
+                    ]),
+                ], style={"display": "flex", "alignItems": "center"}),
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        html.Div([
+            html.Div(
+                text_cells,
+                style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(2, 1fr)",
+                    "gap": "10px",
+                    "marginBottom": "14px",
+                },
+            ) if text_cells else None,
+            html.Div(ledger_section) if ledger_section else None,
+            html.Div([
+                html.Hr(style={"margin": "4px 0 12px", "opacity": "0.2"}),
+                html.Div(action_btns,
+                         style={"display": "flex", "flexWrap": "wrap",
+                                "gap": "6px"}),
+            ]) if action_btns else None,
+        ], style={"padding": "16px", "maxHeight": "620px",
+                  "overflowY": "auto"}),
+    ], style={
+        "borderRadius": "16px", "border": f"1px solid {color}22",
+        "boxShadow": f"0 10px 30px {color}18",
+        "background": "linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.88))",
+        "backdropFilter": "blur(12px)", "overflow": "hidden",
+    })
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # FORM CARD RENDERER
 # ════════════════════════════════════════════════════════════════════════════
@@ -2216,6 +2495,159 @@ def model_to_display(record) -> dict:
     if hasattr(record, "to_dict"):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# LEDGER INDEX CARD — FY Closing Report as a tree with BF / Movement / Dep /
+# Own Closing / Total Closing columns. Clicking a node opens that account's
+# profile (which now includes its ledger table).
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_fy: int | None,
+                              society_id: int | None = None) -> html.Div:
+    color = "#17976e"
+
+    def _fy_label(fy):
+        return f"{fy}-{str(fy + 1)[-2:]}"
+
+    pills = html.Div([
+        html.Div(
+            _fy_label(fy),
+            id={"type": "kpi-card-div", "card_id": f"kpi_fy_closing_report__{fy}"},
+            n_clicks=0,
+            style={
+                "padding": "6px 14px", "borderRadius": "20px", "fontSize": "12px",
+                "fontWeight": "700", "cursor": "pointer", "display": "inline-block",
+                "marginRight": "8px", "marginBottom": "8px",
+                "background": color if fy == selected_fy else "#fff",
+                "color": "#fff" if fy == selected_fy else "#555",
+                "border": f"1px solid {color}" if fy == selected_fy else "1px solid #e0e0e0",
+            },
+        )
+        for fy in fy_options
+    ], style={"marginBottom": "12px"})
+
+    header = html.Div([
+        html.Div([
+            html.Div(html.I(className="fas fa-columns",
+                            style={"color": "#fff", "fontSize": "16px"}),
+                     style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                            "background": f"linear-gradient(135deg,{color},{color}aa)",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center", "marginRight": "12px"}),
+            html.Div([
+                html.Strong("Ledger Index", style={"fontSize": "14px"}),
+                html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
+                         style={"fontSize": "11px", "color": "#999"}),
+            ]),
+        ], style={"display": "flex", "alignItems": "center"}),
+        html.Div([
+            pills,
+            dbc.Button(
+                [html.I(className="fas fa-file-excel me-1"), "Export Ledger"],
+                id={"type": "btn-fy-export", "entity": "ledger_index"},
+                size="sm", color="primary", outline=True,
+                style={"fontSize": "11px", "borderRadius": "8px", "fontWeight": "600"},
+            ),
+            dcc.Download(id={"type": "fy-export-trigger", "entity": "ledger_index"}),
+        ], style={"display": "flex", "alignItems": "center", "gap": "8px", "flexWrap": "wrap"}),
+    ], style={"padding": "12px 16px",
+              "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
+
+    if not rows:
+        body = dbc.Alert("No accounts found for this financial year.", color="secondary",
+                          style={"borderRadius": "10px"})
+    else:
+        tree = _build_accounts_tree(rows)
+
+        def _node_amount(v):
+            if v is None:
+                return "—"
+            v = float(v)
+            sign = "-" if v < 0 else ""
+            return f"{sign}₹{abs(v):,.2f}"
+
+        def _render_node(node: dict) -> html.Details:
+            r = node["row"]
+            depth = r.get("depth") or 0
+            children = node["children"]
+            pk_val = str(r.get("account_id") or "0")
+            display_side = r.get("display_side", "")
+            total_closing = r.get("total_closing")
+
+            label_bits = [
+                html.Span(r.get("tab_name") or r.get("account_name") or "", style={"fontWeight": "700"}),
+                html.Span(f"  {r.get('account_name') or ''}", style={"color": "#8a97a8", "fontSize": "11px"}),
+            ]
+            if r.get("has_bf"):
+                label_bits.append(dbc.Badge("BF", color="info", className="ms-2",
+                                             style={"fontSize": "9px"}))
+            if r.get("is_depreciable"):
+                label_bits.append(dbc.Badge("Dep", color="secondary", className="ms-1",
+                                             style={"fontSize": "9px"}))
+
+            side_color = "#17976e" if display_side == "Cr" else ("#c0392b" if display_side == "Dr" else "#15304f")
+
+            summary = html.Summary(
+                html.Div([
+                    html.Div(label_bits, style={"display": "flex", "alignItems": "center"}),
+                    html.Div([
+                        html.Span(_node_amount(r.get("own_bf")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
+                        html.Span(_node_amount(r.get("own_movement")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
+                        html.Span(_node_amount(r.get("depreciation_charge")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
+                        html.Span(_node_amount(r.get("own_closing")), style={"fontSize": "11px", "color": "#555", "marginRight": "10px"}),
+                        html.Span(_node_amount(total_closing), style={"fontSize": "12px", "fontWeight": "700", "color": side_color, "marginRight": "8px"}),
+                        html.Span(display_side, style={"fontSize": "11px", "fontWeight": "700", "color": side_color}),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "4px"}),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "gap": "10px"}),
+                id={"type": "list-row", "entity": "accounts", "pk": pk_val},
+                n_clicks=0,
+                style={"cursor": "pointer", "padding": "6px 8px", "borderRadius": "6px",
+                       "listStyle": "none"},
+            )
+
+            body = [summary]
+            if children:
+                body.append(html.Div(
+                    [_render_node(c) for c in children],
+                    style={"paddingLeft": "18px",
+                           "borderLeft": "1px dashed rgba(120,148,181,0.3)",
+                           "marginLeft": "6px"},
+                ))
+
+            return html.Details(
+                body,
+                open=(depth < 2),
+                style={"marginBottom": "1px"},
+            )
+
+        tree_nodes = [_render_node(n) for n in tree] if tree else []
+
+        header_row = html.Div([
+            html.Div("Account", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "padding": "8px"}),
+            html.Div("B/F", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+            html.Div("Movement", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+            html.Div("Dep", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+            html.Div("Own Closing", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+            html.Div("Total Closing", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+            html.Div("Dr/Cr", style={"fontWeight": "700", "fontSize": "11px", "color": "#7d8ea3", "textAlign": "right", "padding": "8px"}),
+        ], style={"display": "grid", "gridTemplateColumns": "2fr 1fr 1fr 1fr 1fr 1fr 0.8fr",
+                  "borderBottom": "1px solid rgba(120,148,181,0.2)", "background": "rgba(248,251,255,0.97)"})
+
+        body = html.Div(tree_nodes, className="ledger-index-tree", style={"padding": "8px 12px", "maxHeight": "560px", "overflowY": "auto"})
+
+        content = html.Div([header_row, body], style={"borderTop": "1px solid rgba(120,148,181,0.2)"})
+
+    return html.Div([
+        header,
+        html.Div(content if rows else body, style={"padding": "12px 16px"}),
+    ], style={
+        "borderRadius": "16px",
+        "border": f"1px solid {color}22",
+        "boxShadow": f"0 10px 30px {color}18",
+        "overflow": "hidden",
+    })
 
 
 # ════════════════════════════════════════════════════════════════════════════

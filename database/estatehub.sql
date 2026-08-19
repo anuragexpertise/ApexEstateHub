@@ -3923,6 +3923,7 @@ $$;
 -- Python int), which was silently broken by this exact type-resolution
 -- issue every time it was called.
 DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, SMALLINT) CASCADE;
+DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_society_id     INT,
@@ -3930,13 +3931,16 @@ CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_financial_year INT
 )
 RETURNS TABLE (
-    row_date      DATE,
-    particulars   TEXT,
-    debit         NUMERIC(15,2),
-    credit        NUMERIC(15,2),
-    balance       NUMERIC(15,2),
-    row_type      TEXT,       -- 'bf' | 'txn' | 'full_depreciation' | 'half_depreciation' | 'closing'
-    parent_name   TEXT
+    row_date        DATE,
+    account_name    TEXT,
+    entity_name     TEXT,
+    particulars     TEXT,
+    cb_folio        INT,
+    debit           NUMERIC(15,2),
+    credit          NUMERIC(15,2),
+    running_balance NUMERIC(15,2),
+    row_type        TEXT,
+    parent_name     TEXT
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc          RECORD;
@@ -3949,24 +3953,25 @@ DECLARE
     v_dep_full     NUMERIC(15,2) := 0;
     v_dep_half     NUMERIC(15,2) := 0;
     v_dep_acc_tab  TEXT;
+    v_dep_total    NUMERIC(15,2) := 0;
     v_running_balance NUMERIC(15,2);
     v_final_balance NUMERIC(15,2);
     v_transfer_amt  NUMERIC(15,2);
 BEGIN
-    SELECT a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
+    SELECT a.id, a.name, a.drcr_account, a.is_depreciable, a.depreciation_percent, a.parent_account_id,
            a.has_bf, a.tab_name, COALESCE(p.tab_name, p.name, '--') AS parent_name
-      INTO v_acc
-      FROM accounts a
-      LEFT JOIN accounts p ON p.id = a.parent_account_id
-     WHERE a.id = p_account_id AND a.society_id = p_society_id;
- 
+       INTO v_acc
+       FROM accounts a
+       LEFT JOIN accounts p ON p.id = a.parent_account_id
+      WHERE a.id = p_account_id AND a.society_id = p_society_id;
+
     IF NOT FOUND THEN RETURN; END IF;
- 
+
     -- Resolve BF (signed: +ve = natural Dr, -ve = natural Cr, per fn_resolve_bf_amount_fy)
     v_bf := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
     v_bf_drcr := CASE WHEN v_bf >= 0 THEN 'Dr' ELSE 'Cr' END;
     v_bf := ABS(v_bf);
- 
+
     v_balance := v_bf;
 
     -- CiH special case (2026-08): CiH no longer has ANY transaction rows
@@ -3985,22 +3990,23 @@ BEGIN
     IF v_acc.tab_name = 'CiH' THEN
         IF v_bf <> 0 THEN
             RETURN QUERY SELECT
-                v_fy_start - INTERVAL '1 day', 'B/F'::TEXT,
+                v_fy_start - INTERVAL '1 day', COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'B/F'::TEXT,
+                NULL::INT,
                 CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
                 CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
                 v_balance, 'bf'::TEXT, v_acc.parent_name;
         END IF;
 
         v_final_balance := fn_cih_balance_asof(p_society_id, v_fy_end);
-        -- CiH is Dr-natured; closing (crediting) it to zero, per the same
-        -- Debit/Credit convention as the generic closing row below.
         RETURN QUERY SELECT
-            v_fy_end, ('C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
+            ('C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            NULL::INT,
             0::NUMERIC(15,2), v_final_balance,
             0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
         RETURN;
     END IF;
- 
+
     -- Fixed (2026-08): gated on accounts.has_bf — previously this emitted a
     -- B/F row for ANY account with a nonzero fn_resolve_bf_amount_fy
     -- result, including has_bf=FALSE P&L leaves that resolve a nonzero
@@ -4013,31 +4019,49 @@ BEGIN
     -- show a B/F line of their own.
     IF v_acc.has_bf AND v_bf <> 0 THEN
         RETURN QUERY SELECT
-            v_fy_start - INTERVAL '1 day', 'Balance B/F'::TEXT,
+            v_fy_start - INTERVAL '1 day', COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'Balance B/F'::TEXT,
+            NULL::INT,
             CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
             CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
             v_balance, 'bf'::TEXT, v_acc.parent_name;
     END IF;
- 
+
     -- Transaction rows, running balance
     RETURN QUERY
     WITH txns AS (
         SELECT t.trx_date,
                t.acc_particulars::TEXT,
+               CASE 
+                   WHEN EXTRACT(MONTH FROM t.trx_date) >= 4 
+                   THEN EXTRACT(MONTH FROM t.trx_date) - 3 
+                   ELSE EXTRACT(MONTH FROM t.trx_date) + 9 
+               END::INT AS cb_folio,
                COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0) AS debit,
-               COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0) AS credit
+               COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0) AS credit,
+               CASE v_acc.drcr_account
+                   WHEN 'Cr' THEN COALESCE(SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                                                    WHEN t.entry_side = 'Dr' THEN -t.amount
+                                                    ELSE 0 END), 0)
+                   ELSE COALESCE(SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount
+                                         WHEN t.entry_side = 'Cr' THEN -t.amount
+                                         ELSE 0 END), 0)
+               END AS net_delta,
+               COALESCE(MAX(CASE WHEN t.role = 'apartment' THEN COALESCE(ap.flat_number, '') END),
+                        MAX(CASE WHEN t.role = 'vendor' THEN COALESCE(v.name, '') END),
+                        MAX(CASE WHEN t.role = 'security' THEN COALESCE(s.name, '') END), '')::TEXT AS entity_name
         FROM transactions t
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = t.society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = t.society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = t.society_id AND t.role = 'security'
         WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-        GROUP BY t.trx_date, t.acc_particulars
+        GROUP BY t.trx_date, t.acc_particulars, v_acc.drcr_account
         ORDER BY t.trx_date ASC
     )
     SELECT
-        tx.trx_date, tx.acc_particulars, tx.debit, tx.credit,
-        CASE v_acc.drcr_account
-            WHEN 'Cr' THEN v_balance + tx.credit - tx.debit
-            ELSE v_balance - tx.credit + tx.debit
-        END,
+        tx.trx_date, COALESCE(v_acc.tab_name, v_acc.name::TEXT), tx.entity_name, tx.acc_particulars, tx.cb_folio,
+        tx.debit, tx.credit,
+        v_bf + SUM(tx.net_delta) OVER (ORDER BY tx.trx_date, tx.acc_particulars ROWS UNBOUNDED PRECEDING),
         'txn'::TEXT, v_acc.parent_name
     FROM txns tx;
 
@@ -4062,66 +4086,32 @@ BEGIN
     FROM transactions t
     WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
- 
+
     v_transfer_amt := v_final_balance;
- 
-    -- Depreciation split (only for is_depreciable accounts with % < 100)
-    --
-    -- Fixed (2026-08): was one combined row ("Depreciation @ X% (full ... +
-    -- half-year ...)"), now split into two rows per spec — 'Full
-    -- Depreciation' (opening WDV + pre-1-Sep additions, at the full rate)
-    -- and 'Half post-30Sep Depreciation' (post-1-Sep additions, at half
-    -- rate) — via fn_account_depreciation_split, which returns the same
-    -- two components fn_account_depreciation itself sums together
-    -- (full_amount + half_amount always equals fn_account_depreciation's
-    -- single total for the same arguments; see that function's header).
-    -- row_type uses snake_case ('full_depreciation'/'half_depreciation')
-    -- for consistency with this function's existing 'bf'/'txn'/'closing'
-    -- tags — the human-readable "Full Depreciation"/"Half post-30Sep
-    -- Depreciation" labels live in `particulars` instead.
+
+    -- Depreciation (only for is_depreciable accounts with % < 100)
     IF COALESCE(v_acc.is_depreciable, FALSE) AND COALESCE(v_acc.depreciation_percent, 100) < 100 THEN
-        SELECT full_amount, half_amount
-          INTO v_dep_full, v_dep_half
+        SELECT full_amount + half_amount
+          INTO v_dep_total
           FROM fn_account_depreciation_split(p_society_id, p_account_id, p_financial_year);
 
-        IF v_dep_full > 0 OR v_dep_half > 0 THEN
-            -- Fixed (2026-08): was `WHERE name = 'Dep'`, but the seeded
-            -- Depreciation account's actual name is "Depreciation" — its
-            -- tab_name is 'Dep' (see seed.py's ACCOUNTS row, id=231). That
-            -- match never hit, so v_dep_acc_id was always NULL and the
-            -- COALESCE below always silently fell back to the literal
-            -- string 'Dep' as the parent_name shown on this row, whether
-            -- or not the account actually existed.
+        IF v_dep_total > 0 THEN
             SELECT id INTO v_dep_acc_id FROM accounts
             WHERE society_id = p_society_id AND tab_name = 'Dep' LIMIT 1;
 
             v_dep_acc_tab := COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
-            v_running_balance := v_final_balance;
-        END IF;
-
-        IF v_dep_full > 0 THEN
-            v_running_balance := v_running_balance - v_dep_full;
+            v_running_balance := v_final_balance - v_dep_total;
             RETURN QUERY SELECT
-                v_fy_end, ('Full Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
-                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_full ELSE 0::NUMERIC(15,2) END,
-                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_full ELSE 0::NUMERIC(15,2) END,
-                v_running_balance, 'full_depreciation'::TEXT, v_dep_acc_tab;
-        END IF;
-
-        IF v_dep_half > 0 THEN
-            v_running_balance := v_running_balance - v_dep_half;
-            RETURN QUERY SELECT
-                v_fy_end, ('Half post-30Sep Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
-                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_half ELSE 0::NUMERIC(15,2) END,
-                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_half ELSE 0::NUMERIC(15,2) END,
-                v_running_balance, 'half_depreciation'::TEXT, v_dep_acc_tab;
-        END IF;
-
-        IF v_dep_full > 0 OR v_dep_half > 0 THEN
-            v_transfer_amt := v_final_balance - v_dep_full - v_dep_half;
+                v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
+                ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
+                NULL::INT,
+                CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_total ELSE 0::NUMERIC(15,2) END,
+                CASE WHEN v_acc.drcr_account = 'Dr' THEN v_dep_total ELSE 0::NUMERIC(15,2) END,
+                v_running_balance, 'depreciation'::TEXT, v_dep_acc_tab;
+            v_transfer_amt := v_final_balance - v_dep_total;
         END IF;
     END IF;
- 
+
     -- Closing row: transfer remainder to parent, balance -> 0
     --
     -- Fixed (2026-08): flipped Debit/Credit — the "zeroing" figure that
@@ -4138,8 +4128,9 @@ BEGIN
     -- shows in the Credit column).
     IF v_transfer_amt <> 0 THEN
         RETURN QUERY SELECT
-            v_fy_end,
+            v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
             ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
+            NULL::INT,
             CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
             CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
             0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
@@ -4742,9 +4733,10 @@ CREATE OR REPLACE FUNCTION fn_fy_closing_report(
     p_society_id             INT,
     p_fy                     INT
 )
-RETURNS TABLE (
+ RETURNS TABLE (
     account_id           INT,
     account_name         TEXT,
+    tab_name             TEXT,
     parent_account_id    INT,
     drcr_account         TEXT,
     has_bf               BOOLEAN,
@@ -4752,11 +4744,13 @@ RETURNS TABLE (
     own_movement         NUMERIC(15,2),   -- Cr-positive; this FY's direct transactions only
     depreciation_charge  NUMERIC(15,2),   -- positive amount, added back to own_closing (a Dr-natured asset's Cr-positive value moves toward zero as it depreciates)
     own_closing          NUMERIC(15,2),   -- own_bf + own_movement + depreciation_charge (this account alone, no descendants)
-    total_closing         NUMERIC(15,2),   -- own_closing summed across this account + its entire subtree
-    display_side          TEXT,            -- 'Dr' or 'Cr', sign of total_closing
-    display_amount         NUMERIC(15,2)    -- ABS(total_closing)
-)
-LANGUAGE plpgsql STABLE AS $$
+    total_closing        NUMERIC(15,2),   -- own_closing summed across this account + its entire subtree
+    display_side         TEXT,            -- 'Dr' or 'Cr', sign of total_closing
+     display_amount       NUMERIC(15,2),   -- ABS(total_closing)
+     depth                INT,
+     sort_path            TEXT
+ )
+ LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
     v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
@@ -4777,16 +4771,26 @@ BEGIN
     WHERE a.society_id = p_society_id;
 
     RETURN QUERY
-    WITH RECURSIVE leaf_closing AS (
+    WITH RECURSIVE tree AS (
+        SELECT a.id, a.parent_account_id, 0 AS depth,
+               LPAD(a.id::TEXT, 10, '0') AS sort_path
+        FROM accounts a
+        WHERE a.society_id = p_society_id AND a.parent_account_id IS NULL
+        UNION ALL
+        SELECT c.id, c.parent_account_id, t.depth + 1,
+               t.sort_path || '.' || LPAD(c.id::TEXT, 10, '0')
+        FROM accounts c
+        JOIN tree t ON c.parent_account_id = t.id
+        WHERE c.society_id = p_society_id
+    ),
+    leaf_closing AS (
         SELECT
             a.id,
             a.name::TEXT,
+            a.tab_name::TEXT,
             a.parent_account_id,
             a.drcr_account::TEXT,
             a.has_bf,
-            -- fn_resolve_bf_amount_fy returns Dr-positive by its own
-            -- convention, so negate it here to land in this function's
-            -- Cr-positive frame.
             CASE WHEN a.has_bf THEN -fn_resolve_bf_amount_fy(p_society_id, a.id, p_fy) ELSE 0 END AS own_bf,
             COALESCE((
                 SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
@@ -4797,20 +4801,19 @@ BEGIN
                   AND t.status = 'paid'
                   AND t.trx_date BETWEEN v_fy_start AND v_fy_end
             ), 0)
-            -- Dep account additionally picks up every depreciable
-            -- account's charge for the FY, since nothing posts a literal
-            -- transaction to Dep under this presentational model. Dep is
-            -- Dr-natured and this is an expense increase (a Dr-like
-            -- movement), so it's SUBTRACTED here in Cr-positive terms.
             - CASE WHEN a.id = v_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
               AS own_movement_raw,
-            fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge
+            fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge,
+            tree.depth,
+            tree.sort_path
         FROM accounts a
+        JOIN tree ON tree.id = a.id
         WHERE a.society_id = p_society_id
     ),
     leaf_final AS (
         SELECT
-            lc.id, lc.name, lc.parent_account_id, lc.drcr_account, lc.has_bf,
+            lc.id, lc.name, lc.tab_name, lc.parent_account_id, lc.drcr_account, lc.has_bf,
+            lc.depth, lc.sort_path,
             -- Depreciation reduces a Dr-natured asset's balance, which in
             -- this Cr-positive frame means its value moves TOWARD zero —
             -- i.e. it's added back, not subtracted.
@@ -4839,14 +4842,16 @@ BEGIN
         GROUP BY anc.ancestor_id
     )
     SELECT
-        lf.id, lf.name, lf.parent_account_id, lf.drcr_account, lf.has_bf,
+        lf.id, lf.name, lf.tab_name, lf.parent_account_id, lf.drcr_account, lf.has_bf,
         lf.own_bf, lf.own_movement, lf.depreciation_charge, lf.own_closing,
         r.total_closing,
         CASE WHEN r.total_closing >= 0 THEN 'Cr' ELSE 'Dr' END,
-        ABS(r.total_closing)
+        ABS(r.total_closing),
+        lf.depth,
+        lf.sort_path
     FROM leaf_final lf
     JOIN rollup r ON r.id = lf.id
-    ORDER BY lf.id;
+    ORDER BY lf.sort_path;
 END;
 $$;
 

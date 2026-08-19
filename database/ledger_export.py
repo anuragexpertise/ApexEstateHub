@@ -69,6 +69,7 @@ _COL_WIDTHS = {"A": 11, "B": 12, "C": 32, "D": 8, "E": 11, "F": 11, "G": 8, "H":
 _ROW_STYLE = {
     "bf":                (_FONT_BFCF, _FILL_BF),
     "closing":           (_FONT_BFCF, _FILL_CF),
+    "depreciation":      (_FONT_BODY, _FILL_DEP),
     "full_depreciation": (_FONT_BODY, _FILL_DEP),
     "half_depreciation": (_FONT_BODY, _FILL_DEP),
     "txn":               (_FONT_BODY, PatternFill()),
@@ -146,16 +147,16 @@ def generate_ledger_excel(
         font, fill = _ROW_STYLE.get(row_type, (_FONT_BODY, PatternFill()))
         debit  = float(r["debit"])  if r.get("debit")  else None
         credit = float(r["credit"]) if r.get("credit") else None
-        balance = float(r.get("balance") or 0)
+        balance = float(r.get("running_balance") or 0)
         drcr = None
-        if row_type in ("bf", "txn", "full_depreciation", "half_depreciation"):
+        if row_type in ("bf", "txn", "depreciation", "full_depreciation", "half_depreciation"):
             drcr = "Dr" if debit and not credit else ("Cr" if credit and not debit else None)
 
         # parent_name from fn_account_ledger_fy is already tab_name-first
         # (COALESCE(p.tab_name, p.name, '--')) — see estatehub.sql — so no
         # extra resolution needed here for the closing row's A/c column.
         row = {
-            1: r.get("row_date"), 2: r.get("parent_name") if row_type == "closing" else tab,
+            1: r.get("row_date"), 2: r.get("parent_name") if row_type == "closing" else (r.get("account_name") or tab),
             3: r.get("particulars") or "",
             5: debit, 6: credit, 7: drcr, 8: abs(balance) if balance is not None else None,
         }
@@ -168,6 +169,78 @@ def generate_ledger_excel(
                 cell.number_format = _FMT_DATE
             elif col in (5, 6, 8):
                 cell.number_format = _FMT_AMT
+        current_row += 1
+
+    ws.freeze_panes = "A6"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def generate_fy_closing_excel(
+    db,
+    society_id: int,
+    fy: int,
+) -> bytes:
+    """
+    Builds a single-sheet FY Closing Report workbook sourced from
+    fn_fy_closing_report(society_id, fy).
+    """
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    rows = db._execute(
+        "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
+        (society_id, fy), fetch_all=True,
+    ) or []
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "FY Closing"
+
+    for col_letter, width in {"A": 28, "B": 14, "C": 14, "D": 14, "E": 14, "F": 14, "G": 8}.items():
+        ws.column_dimensions[col_letter].width = width
+
+    ws.row_dimensions[1].height = 6
+    title = {1: "FY Closing Report", 3: f"FY {fy}-{str(fy + 1)[-2:]}", 5: "Asst. Yr."}
+    for col, val in title.items():
+        cell = ws.cell(row=2, column=col, value=val)
+        cell.font, cell.alignment = _FONT_TITLE, _ALIGN_C
+    ws.row_dimensions[3].height = 6
+
+    headers = {1: "Account", 2: "B/F", 3: "Movement", 4: "Dep.", 5: "Own Closing",
+               6: "Total Closing", 7: "Dr/Cr"}
+    for col, hdr in headers.items():
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font, cell.fill = _FONT_HEADER, _FILL_HEADER
+        cell.alignment, cell.border = _ALIGN_C, _BORDER_ALL
+    ws.row_dimensions[5].height = 6
+
+    current_row = 6
+    for r in rows:
+        drcr = r.get("display_side")
+        row = {
+            1: r.get("account_name"),
+            2: float(r.get("own_bf") or 0),
+            3: float(r.get("own_movement") or 0),
+            4: float(r.get("depreciation_charge") or 0),
+            5: float(r.get("own_closing") or 0),
+            6: float(r.get("display_amount") or 0),
+            7: drcr,
+        }
+        for col, val in row.items():
+            cell = ws.cell(row=current_row, column=col, value=val)
+            cell.font, cell.fill = _FONT_BODY, PatternFill()
+            cell.border = _BORDER_ALL
+            cell.alignment = _ALIGN_R if col in (2, 3, 4, 5, 6) else _ALIGN_L
+            if col in (2, 3, 4, 5, 6):
+                cell.number_format = _FMT_AMT
+            if col == 7 and val:
+                cell.font = Font(name="Arial", size=9, bold=True,
+                                 color="red" if val == "Dr" else "green")
         current_row += 1
 
     ws.freeze_panes = "A6"

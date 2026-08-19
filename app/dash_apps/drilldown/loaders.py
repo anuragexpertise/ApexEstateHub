@@ -901,6 +901,14 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             (sid, p_account_id, fy),
         )
 
+    # ── LEDGER INDEX ────────────────────────────────────────────────────
+    if entity == "ledger_index":
+        fy = filters.get("financial_year", _current_fy())
+        return (
+            "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
+            (sid, fy),
+        )
+
     # ── SOCIETIES ───────────────────────────────────────────────────────
     if entity == "societies":
         return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
@@ -1527,6 +1535,16 @@ def load_list(
             rows = db._execute(
                 "SELECT * FROM fn_account_ledger_fy(%s,%s,%s) ORDER BY row_date, particulars",
                 (sid, p_account_id, fy),
+                fetch_all=True,
+            ) or []
+            return rows, len(rows)
+
+        # ── LEDGER INDEX ────────────────────────────────────────────────────
+        if entity == "ledger_index":
+            fy = filters.get("financial_year", _current_fy())
+            rows = db._execute(
+                "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
+                (sid, fy),
                 fetch_all=True,
             ) or []
             return rows, len(rows)
