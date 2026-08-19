@@ -444,7 +444,7 @@ SIMPLE_ASSETS = [
     {"company_name": "Jackson","asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
      "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314},
     {"company_name": "Samsung","asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
-     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 62},
+     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 64},
 ]
 
 # Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').

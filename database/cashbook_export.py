@@ -312,6 +312,30 @@ def generate_cashbook_excel_fy(
         fetch_all=True,
     ) or []
 
+    # Fixed (2026-08): fn_cashbook_paired_v3 brackets its own output with a
+    # synthetic 'CiH'/'B/F' row (dated the range's own first day) and a
+    # synthetic 'CiH'/'C/F' row (dated the range's last day) — added for
+    # the paginated Month-Selector card (fn_cashbook_month_page shares the
+    # same shape), where the SQL function IS the only source of B/F/C/F.
+    # This exporter is not that caller: _write_month_sheet below already
+    # writes its own correct B/F (row 5, from the Python-computed
+    # opening_balance) and C/F (last row, from that month's own closing
+    # balance) for every one of the 12 sheets. Without this filter, the
+    # single FY-wide synthetic bf_row lands inside whichever month's date
+    # slice contains fy_start (always Apr) alongside _write_month_sheet's
+    # own B/F row — doubling the opening balance shown in Apr, which then
+    # cascades: Apr's returned closing_balance is correct (computed from
+    # `rows`, i.e. the real transactions only — the synthetic row is data,
+    # not something summed into closing_balance), but the doubled Apr
+    # sheet still misrepresents that month's actual cashbook. Likewise the
+    # synthetic cf_row (dated the FY's last day) lands in Mar's slice as a
+    # spurious extra trailing "CiH C/F" row alongside the sheet's real one.
+    # Both synthetic rows are identifiable and only identifiable by having
+    # neither a Cr nor a Dr leg of their own (cr_acc_id and dr_acc_id both
+    # NULL) — every real cashbook row, cash or non-cash, always has at
+    # least one leg's acc_id populated.
+    all_rows = [r for r in all_rows if r["cr_acc_id"] is not None or r["dr_acc_id"] is not None]
+
     wb = Workbook()
     wb.remove(wb.active)
 
