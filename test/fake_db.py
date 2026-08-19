@@ -645,7 +645,20 @@ class FakeDB:
                    if r.get("society_id") == sid and r.get("acc_id") == a.get("id")]
             dr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Dr")
             cr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Cr")
-            row = {"account_name": a.get("name", ""), "amount": dr or cr}
+            # Fixed (2026-08): "dr or cr" silently discarded whichever side
+            # was truthy-first — an account with BOTH dr and cr activity
+            # (e.g. a Dr-natured Cash-in-hand account with a refund/reversal
+            # posted as entry_side='Cr') reported gross dr only, dropping
+            # the cr movement entirely instead of netting it. Same bug
+            # class as the drcr_account-vs-entry_side confusion already
+            # fixed in fn_accounts_list/fn_account_profile/fn_account_ledger_fy
+            # in estatehub.sql — net per-transaction entry_side into the
+            # account's own natural (drcr_account) direction.
+            if a.get("drcr_account") == "Dr":
+                amount = dr - cr
+            else:
+                amount = cr - dr
+            row = {"account_name": a.get("name", ""), "amount": amount}
             if a.get("drcr_account") == "Dr":
                 dr_rows.append(row)
             else:
