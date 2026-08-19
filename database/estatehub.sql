@@ -4792,15 +4792,29 @@ BEGIN
             a.drcr_account::TEXT,
             a.has_bf,
             CASE WHEN a.has_bf THEN -fn_resolve_bf_amount_fy(p_society_id, a.id, p_fy) ELSE 0 END AS own_bf,
-            COALESCE((
-                SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
-                                 WHEN t.entry_side = 'Dr' THEN -t.amount
-                                 ELSE 0 END)
-                FROM transactions t
-                WHERE t.acc_id = a.id AND t.society_id = p_society_id
-                  AND t.status = 'paid'
-                  AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-            ), 0)
+            CASE 
+                WHEN a.tab_name = 'CiH' THEN 
+                    COALESCE((
+                        SELECT SUM(
+                            CASE WHEN t.entry_side = 'Dr' THEN t.amount
+                                 WHEN t.entry_side = 'Cr' THEN -t.amount
+                                 ELSE 0 END
+                        )
+                        FROM transactions t
+                        WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+                          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+                    ), 0)
+                ELSE 
+                    COALESCE((
+                        SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                                         WHEN t.entry_side = 'Dr' THEN -t.amount
+                                         ELSE 0 END)
+                        FROM transactions t
+                        WHERE t.acc_id = a.id AND t.society_id = p_society_id
+                          AND t.status = 'paid'
+                          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+                    ), 0)
+            END
             - CASE WHEN a.id = v_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
               AS own_movement_raw,
             fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge,
@@ -5058,14 +5072,17 @@ BEGIN
         -- previously meant every transaction on a Dr-natured account
         -- (e.g. Bank/Cash) subtracted regardless of whether it was a
         -- receipt or a payment.
-        (CASE WHEN a.drcr_account = 'Cr'
-              THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
-                                      WHEN t.entry_side='Dr' THEN -t.amount
-                                      ELSE 0 END), 0)
-              ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
-                                      WHEN t.entry_side='Cr' THEN -t.amount
-                                      ELSE 0 END), 0)
-         END + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
+        (CASE 
+                WHEN a.tab_name = 'CiH' THEN fn_cih_balance_asof(p_society_id, CURRENT_DATE)
+                ELSE (CASE WHEN a.drcr_account = 'Cr'
+                      THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                              WHEN t.entry_side='Dr' THEN -t.amount
+                                              ELSE 0 END), 0)
+                      ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                                              WHEN t.entry_side='Cr' THEN -t.amount
+                                              ELSE 0 END), 0)
+                   END + COALESCE(MAX(bf.bf_amount), 0))
+             END)::NUMERIC(15,2),
         COUNT(t.id)::INT,
         COALESCE(p.name,'—')::VARCHAR(100)
     FROM accounts a
@@ -5106,14 +5123,17 @@ LANGUAGE SQL STABLE AS $$
         COALESCE(MAX(bf.bf_amount), 0)::NUMERIC(12,2),
         a.depreciation_percent::NUMERIC(5,2), a.is_depreciable::BOOLEAN,
         COALESCE(p.name,'—')::VARCHAR(100),
-        (CASE WHEN a.drcr_account = 'Cr'
-              THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
-                                      WHEN t.entry_side='Dr' THEN -t.amount
-                                      ELSE 0 END), 0)
-              ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
-                                      WHEN t.entry_side='Cr' THEN -t.amount
-                                      ELSE 0 END), 0)
-         END + COALESCE(MAX(bf.bf_amount), 0))::NUMERIC(15,2),
+        (CASE 
+                WHEN a.tab_name = 'CiH' THEN fn_cih_balance_asof(p_society_id, CURRENT_DATE)
+                ELSE (CASE WHEN a.drcr_account = 'Cr'
+                      THEN COALESCE(SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                              WHEN t.entry_side='Dr' THEN -t.amount
+                                              ELSE 0 END), 0)
+                      ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
+                                              WHEN t.entry_side='Cr' THEN -t.amount
+                                              ELSE 0 END), 0)
+                   END + COALESCE(MAX(bf.bf_amount), 0))
+             END)::NUMERIC(15,2),
         a.created_at::TIMESTAMP
     FROM accounts a
     LEFT JOIN accounts p ON p.id = a.parent_account_id

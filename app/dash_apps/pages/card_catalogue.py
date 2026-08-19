@@ -250,8 +250,6 @@ KPI_CARDS = {
 
     # ══════════════════════════════════════════════════════════════════════
     # CASHBOOK / BALANCE — derived from transactions (the ledger)
-    # drcr_account = '' treated as NULL (balance-sheet / asset accounts)
-    # for running balance they are routed by source_table in fn_cashbook_paired
     # For KPI purposes: Cr transactions = income, Dr transactions = outflow
     # ══════════════════════════════════════════════════════════════════════
 

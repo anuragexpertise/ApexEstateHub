@@ -2510,7 +2510,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
         if role == "accounts_cr":
             rows = db._execute(
                 "SELECT id, tab_name, name, drcr_account FROM accounts "
-                "WHERE society_id=%s AND (drcr_account='Cr' OR drcr_account IS NULL OR drcr_account='') "
+                "WHERE society_id=%s AND drcr_account='Cr' "
                 "ORDER BY CASE WHEN drcr_account='Cr' THEN 1 ELSE 2 END, tab_name, name",
                 (society_id,), fetch_all=True,
             ) or []
@@ -2523,7 +2523,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
         if role == "accounts_dr":
             rows = db._execute(
                 "SELECT id, tab_name, name, drcr_account FROM accounts "
-                "WHERE society_id=%s AND (drcr_account='Dr' OR drcr_account IS NULL OR drcr_account='') "
+                "WHERE society_id=%s AND drcr_account='Dr' "
                 "ORDER BY CASE WHEN drcr_account='Dr' THEN 1 ELSE 2 END, tab_name, name",
                 (society_id,), fetch_all=True,
             ) or []
@@ -2536,7 +2536,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
         if role == "accounts_asset":
             rows = db._execute(
                 "SELECT id, tab_name, name FROM accounts "
-                "WHERE society_id=%s AND (drcr_account IS NULL OR drcr_account='') "
+                "WHERE society_id=%s AND drcr_account IN ('Dr','Cr') "
                 "ORDER BY tab_name, name",
                 (society_id,), fetch_all=True,
             ) or []
