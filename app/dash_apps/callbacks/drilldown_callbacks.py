@@ -1719,6 +1719,9 @@ def register_drilldown_callbacks(app):
                 return no_update
             data = ledger_export.generate_ledger_excel(None, sid, fy, account_id)
             filename = f"Ledger_{fy}-{fy+1}.xlsx"
+        elif entity == "ledger_index":
+            data = ledger_export.generate_fy_closing_excel(None, sid, fy)
+            filename = f"Ledger_Index_{fy}-{fy+1}.xlsx"
         else:
             return no_update
 
@@ -1944,7 +1947,7 @@ def _render_card(
         # loaders.load_list call below, including the filter_options
         # prefetch, or the FY select would silently do nothing.
         fy_options, selected_fy = [], None
-        if entity in ("cashbook", "ledger"):
+        if entity in ("cashbook", "ledger", "ledger_index"):
             fy_sid = get_current_society_id()
             fy_options = loaders.get_available_financial_years(fy_sid) if fy_sid else []
             selected_fy = (store.get("list_fy") or {}).get(entity)
@@ -2090,6 +2093,12 @@ def _render_card(
             )
             page_rows = rows
 
+        if entity == "ledger_index":
+            return renderers.render_ledger_index_card(
+                rows=rows, fy_options=fy_options, selected_fy=selected_fy,
+                society_id=filters.get("society_id"),
+            )
+
         return renderers.render_list_card(
             card_id=card_id,
             title=meta.get("list_title", entity.title()),
@@ -2122,6 +2131,41 @@ def _render_card(
         record = loaders.load_profile(singular, pk, filters.get("society_id"), user_id=user_id)
         if not record:
             return _empty_state("Record not found")
+
+        if singular == "account":
+            sid_val = filters.get("society_id")
+            fy_opts = loaders.get_available_financial_years(sid_val) if sid_val else []
+            sel_fy = prefill.get("fy") or (fy_opts[-1] if fy_opts else None)
+            ledger_rows = []
+            if sid_val and pk and sel_fy:
+                ledger_rows = loaders.load_list(
+                    "ledger", {"society_id": sid_val, "account_id": pk, "financial_year": sel_fy},
+                    page=1, search="", page_size=10_000,
+                )[0] if False else []
+                # load_list returns (rows, total); fetch directly for full-year view
+                ledger_rows = db._execute(
+                    "SELECT * FROM fn_account_ledger_fy(%s,%s,%s) ORDER BY row_date, particulars",
+                    (sid_val, pk, sel_fy),
+                    fetch_all=True,
+                ) or []
+
+            return renderers.render_account_profile_card(
+                card_id=card_id,
+                title=meta.get("profile_title", singular.title()),
+                icon=meta.get("profile_icon", "fa-user"),
+                entity=singular,
+                record=record,
+                fields=meta.get("profile_fields", []),
+                actions=meta.get("profile_actions", []),
+                color=meta.get("profile_color", "#1d74d8"),
+                auth_data=auth,
+                filters=filters,
+                ledger_rows=ledger_rows,
+                fy_options=fy_opts,
+                selected_fy=sel_fy,
+                society_id=sid_val,
+            )
+
         return renderers.render_profile_card(
             card_id=card_id,
             title=meta.get("profile_title", singular.title()),

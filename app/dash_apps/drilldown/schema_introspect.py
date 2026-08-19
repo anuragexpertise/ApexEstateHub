@@ -582,12 +582,13 @@ _CASHBOOK_LIST_COLUMNS = [
 # 'txn' | 'depreciation' | 'closing').
 _LEDGER_LIST_COLUMNS = [
     {"name": "Date",         "field": "row_date",         "sortable": True},
+    {"name": "Account",      "field": "account_name",     "sortable": True},
+    {"name": "Entity",       "field": "entity_name",      "sortable": True},
     {"name": "Particulars",  "field": "particulars",      "sortable": False},
+    {"name": "CB Folio",     "field": "cb_folio",         "sortable": True},
     {"name": "Debit",        "field": "debit",            "sortable": True, "format": "currency"},
     {"name": "Credit",       "field": "credit",           "sortable": True, "format": "currency"},
-    {"name": "Balance",      "field": "balance",          "sortable": True, "format": "currency"},
-    {"name": "Row Type",     "field": "row_type",         "sortable": False}, # to do: hide this in the UI, only for internal use
-    {"name": "Parent",       "field": "parent_name",      "sortable": False}, # to do: hide this in the UI, only for internal use
+    {"name": "Running Balance", "field": "running_balance", "sortable": True, "format": "currency"},
 ]
 
 

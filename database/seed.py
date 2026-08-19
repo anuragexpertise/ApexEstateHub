@@ -439,18 +439,18 @@ CONCERNS = [
 # correct double-entry pairs under the current (2026-08) cash/non-cash
 # model — both mode='cash', so each posts a single Dr leg only.
 SIMPLE_ASSETS = [
-    {"asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
+    {"company_name": "Jackson","asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
      "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314},
-    {"asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
+    {"company_name": "Samsung","asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
      "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 62},
 ]
 
 # Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').
 # One purchase before 1-Sep (full rate) and one after (half rate).
 INSTRUMENT_PURCHASES = [
-    {"asset_name": "PA System (Community Hall)", "asset_SNo": "PA-2026-01",
+    {"company_name": "LG","asset_name": "PA System (Community Hall)", "asset_SNo": "PA-2026-01",
      "purchase_date": "2026-06-10", "purchase_value": 8000.00, "half_rate": False},
-    {"asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
+    {"company_name": "Huwaei","asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
      "purchase_date": "2026-10-05", "purchase_value": 6000.00, "half_rate": True},
 ]
 INSTRUMENT_FULL_RATE = 15.0   # accounts.depreciation_percent for acc 64
