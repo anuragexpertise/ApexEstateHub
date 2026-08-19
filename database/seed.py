@@ -28,11 +28,13 @@ What it seeds (society_id = 1, "Sunrise Residency"):
   * Opening (BF) balances — round numbers for easy inspection, per an
     explicit request: CiH 100,000 Dr, CapAc 1,000,000 Cr, ICICI 50,000 Dr,
     SBI 50,000 Dr, Furniture 10,000 Dr, Investments 10,000 Dr, Sundry
-    Creditors 0, Sundry Debtors 0. Deliberately NOT netted to zero (Dr
-    220,000 vs Cr 1,000,000) — nothing here enforces double-entry balance
-    on brought_forward, and these values were chosen for legibility, not
-    as a realistic opening trial balance. Swap BF_VALUES below if you'd
-    rather they tie out.
+    Creditors 0, Sundry Debtors 780,000 Dr. NOW netted to zero (2026-08):
+    Sundry Debtors carries the balancing 780,000 Dr receivable so that
+    Assets (CiH+SBI+ICICI+Furniture+Investments+SDr = 1,000,000 Dr) equals
+    Liabilities+Equity (CapAc = 1,000,000 Cr) exactly. Confirmed by
+    summing fn_fy_closing_report's own_bf across every has_bf=TRUE
+    account: 0.00. If you edit any BF_VALUES entry, recompute Sundry
+    Debtors' figure so the books keep tying out.
   * Two distinct apartment maintenance-charge histories:
         - A-101: society-default rate-based (apartment_size * rate)
         - B-202: apartment-specific FIXED apt_maintenance_amount,
@@ -503,7 +505,16 @@ BF_VALUES = {
     64:         0.00,    # Instruments
     65:         0.00,    # Car
     9:          0.00,    # Sundry Creditors ("SCr")
-    8:          0.00,    # Sundry Debtors
+    8:    780_000.00,    # Sundry Debtors ("SDr") -- opening receivable
+                         #   balance, naturally Dr-sided (drcr_bf='Dr' on
+                         #   account 8 in ACCOUNTS above, no override
+                         #   needed). This is the deliberate balancing
+                         #   figure that brings the Bal-root total_closing
+                         #   to exactly 0.00 for the seeded BF_FY -- see
+                         #   the note in this module's docstring. If you
+                         #   change any other BF_VALUES entry, recompute
+                         #   this one so the books still tie out (own_bf
+                         #   sums to zero across every has_bf=TRUE account).
 }
 
 
