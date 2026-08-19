@@ -88,6 +88,26 @@ class TestScenarioG_FinancialYearClose:
         # In our fake, both sides should equal the seeded transaction totals
         assert bs["total_dr"] == bs["total_cr"]
 
+    def test_balance_sheet_nets_mixed_direction_transactions(self, patched_db):
+        """Regression: a Dr-natured account with BOTH dr and cr activity
+        (e.g. Cash-in-hand receiving cash, then paying part of it back out
+        as a refund) must report the NET amount, not just whichever side
+        happened to be truthy first."""
+        _seed_financial_world(patched_db)
+        # 633 = Cash-in-hand (Dr-natured). Seeded with one Dr 12000 already.
+        # Add a Cr 3000 refund paid out of cash.
+        patched_db.tables["transactions"].append({
+            "id": 20, "society_id": 1, "acc_id": 633, "amount": 3000,
+            "entry_side": "Cr", "mode": "cash", "status": "paid",
+            "trx_date": "2025-07-01", "particulars": "Refund paid out", "updated_by": 1,
+        })
+        bs = patched_db._fn_balance_sheet(
+            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=False
+        )
+        cash = next((r for r in bs.get("dr_side", []) if "Cash" in r.get("account_name", "")), None)
+        assert cash is not None
+        assert cash["amount"] == 9000.0  # 12000 Dr - 3000 Cr, netted
+
     def test_ledger_fy_scoped_returns_entries(self, patched_db):
         _seed_financial_world(patched_db)
         ledger = patched_db._fn_account_ledger_fy(
