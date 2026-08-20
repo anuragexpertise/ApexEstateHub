@@ -369,6 +369,20 @@ def run_migrations(conn):
         "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_mode_check",
         "ALTER TABLE transactions ADD CONSTRAINT transactions_mode_check "
         "CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto', 'journal'))",
+
+        # transactions.role: discriminator for entity_id, mirroring
+        # receipts/expenses/payables.role. Without it, resolving an entity's
+        # display name (apartments/vendors/security_staff) has to join on
+        # entity_id alone, which can false-match if IDs collide across
+        # those tables (e.g. apartment id=5 and vendor id=5 both "matching"
+        # the same transactions row). 'assets' covers asset purchase/sale/
+        # writeoff legs, where entity_id references assets.id — a distinct
+        # ID space, not apartment/vendor/security — so it deliberately
+        # doesn't match any of those joins.
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS role VARCHAR(10)",
+        "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_role_check",
+        "ALTER TABLE transactions ADD CONSTRAINT transactions_role_check "
+        "CHECK (role IN ('apartment', 'vendor', 'security', 'other', 'assets'))",
     ]
 
     ok = 0
