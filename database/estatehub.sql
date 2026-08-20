@@ -629,6 +629,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     entity_id INTEGER,
     acc_particulars VARCHAR(200),
     amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    -- 'journal': a pure book entry with no cash or bank movement at all
+    -- (e.g. Dr Depreciation/Cr Asset). Distinct from 'cash', which means
+    -- physical rupees moved — see fn_resolve_bank_leg and
+    -- fn_cashbook_paired_v3's header comment for why the two must not be
+    -- conflated.
     mode VARCHAR(10) DEFAULT 'cash' CHECK (
         mode IN (
             'cash',
@@ -636,7 +641,8 @@ CREATE TABLE IF NOT EXISTS transactions (
             'upi',
             'card',
             'bank',
-            'crypto'
+            'crypto',
+            'journal'
         )
     ),
     payment_gateway_id VARCHAR(50),
@@ -1972,7 +1978,10 @@ RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc_id INT;
 BEGIN
-    IF p_mode = 'cash' THEN
+    -- 'journal' (pure book entry, e.g. depreciation) needs no completing
+    -- leg at all, same as 'cash' — both legs of a journal entry are
+    -- always written explicitly by the caller.
+    IF p_mode IN ('cash', 'journal') THEN
         RETURN NULL;
     END IF;
 
@@ -4276,6 +4285,15 @@ BEGIN
     RETURN QUERY
     WITH cr_rows AS (
         -- entry_side = 'Cr' means this leg is the receipt (money-in) side.
+        -- mode <> 'journal' excludes pure book entries (e.g. depreciation)
+        -- from the Cashbook entirely — they involve no cash or bank
+        -- movement at all, so they belong only on the relevant accounts'
+        -- Ledger sheets (fn_account_ledger_fy), never here. Fixed (2026-08):
+        -- previously such entries had no honest mode of their own and were
+        -- posted with mode='cash' (see database/seed.py), which meant this
+        -- CASE only ever routed them into the Cash vs Chq/UPI column split
+        -- — never excluded them — so a depreciation journal displayed as a
+        -- phantom cash transaction in the Cashbook.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -4290,6 +4308,7 @@ BEGIN
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Cr'
+          AND t.mode <> 'journal'
           AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
           AND (p_end_date IS NULL OR t.trx_date <= p_end_date)
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
@@ -4301,6 +4320,7 @@ BEGIN
     ),
     dr_rows AS (
         -- entry_side = 'Dr' means this leg is the payment (money-out) side.
+        -- mode <> 'journal': see cr_rows above — same exclusion, same reason.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -4315,6 +4335,7 @@ BEGIN
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Dr'
+          AND t.mode <> 'journal'
           AND (p_start_date IS NULL OR t.trx_date >= p_start_date)
           AND (p_end_date IS NULL OR t.trx_date <= p_end_date)
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
@@ -4532,6 +4553,8 @@ BEGIN
 
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
+        -- mode <> 'journal' excludes pure book entries (e.g. depreciation)
+        -- from the Cashbook — see fn_cashbook_paired_v3's header comment.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -4546,6 +4569,7 @@ BEGIN
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Cr'
+          AND t.mode <> 'journal'
           AND t.trx_date >= v_month_start AND t.trx_date < v_month_end
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
           AND (p_entity_role IS NULL OR
@@ -4554,6 +4578,7 @@ BEGIN
                (p_entity_role = 'security' AND s.id IS NOT NULL))
     ),
     dr_rows AS (
+        -- mode <> 'journal': see cr_rows above.
         SELECT t.id, t.journal_id, t.trx_date,
                a.id AS acc_id, COALESCE(a.tab_name, a.name)::TEXT AS account_name,
                COALESCE(ap.flat_number, v.name, s.name, '')::TEXT AS entity_name,
@@ -4568,6 +4593,7 @@ BEGIN
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Dr'
+          AND t.mode <> 'journal'
           AND t.trx_date >= v_month_start AND t.trx_date < v_month_end
           AND (p_entity_id IS NULL OR t.entity_id = p_entity_id)
           AND (p_entity_role IS NULL OR

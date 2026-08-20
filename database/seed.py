@@ -1007,41 +1007,47 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     desc = (f"Depreciation on Instruments @ {INSTRUMENT_FULL_RATE}% "
             f"(full ₹{dep_full} + half-year ₹{dep_half} on post-1-Sep additions)")
 
-    # Dr Depreciation A/c (231) / Cr Instruments A/c (64) — neither leg
-    # touches cash/bank, so this pair is unaffected by the cash/non-cash
-    # split; both legs always write regardless of mode.
+    # Dr Depreciation A/c (231) / Cr Instruments A/c (64) — a pure book
+    # entry, no cash or bank movement at all, so mode='journal' (not
+    # 'cash'). Fixed (2026-08): this used to be posted as mode='cash',
+    # which doesn't corrupt fn_cih_balance_asof's actual figure (a
+    # balanced Dr/Cr pair nets to zero regardless of mode), but
+    # fn_cashbook_paired_v3 read mode='cash' as "physical rupees" and
+    # displayed this journal as a phantom cash transaction in the
+    # Cashbook — it belongs only on the Instruments/Dep ledger sheets.
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Dr',%s,231,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Dr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Cr',%s,64,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Cr',%s,64,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     conn.commit()
     print(f"  ✓ Depreciation journal posted: Dr Dep A/c ₹{total_dep} / Cr Instruments ₹{total_dep}")
 
     # 4) Transfer total depreciation to Income & Expenditure A/c (23).
+    # Also mode='journal' — see note above.
     journal_id2 = _one(cur, "SELECT NEXTVAL('seq_transaction_number') AS n")["n"]
     desc2 = "Depreciation transferred to Income & Expenditure A/c"
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Dr',%s,23,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Dr',%s,23,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id)
-           VALUES (%s,'Cr',%s,231,%s,%s,'cash','paid',%s,'depreciation_seed',%s)""",
+           VALUES (%s,'Cr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
