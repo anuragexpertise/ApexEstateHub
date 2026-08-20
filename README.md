@@ -400,6 +400,8 @@ Navigate to **Admin → Customize → KPI Audit** and click **Run Full Audit**:
 | `expenses` | Manual debits | Admin | confirmed immediately | On create |
 | `transactions` | Immutable ledger | All of above | paid | Source of truth |
 
+`transactions.role` (`'apartment' / 'vendor' / 'security' / 'other' / 'assets'`) is written on every insert alongside `entity_id`, mirroring the `role` column already on `receivables`/`receipts`/`payables`/`expenses`. It exists because `entity_id` alone is not a safe join key — an apartment id and a vendor id can collide — so any query resolving an entity's display name (`fn_account_ledger_fy`, `fn_cashbook_paired_v3`, `fn_cashbook_month_page`) must join `apartments`/`vendors`/`security_staff` **with `AND t.role = '...'`**, not on `entity_id` alone. `role = 'assets'` covers asset purchase/sale/writeoff legs, where `entity_id` points at `assets.id` — a distinct ID space that should never match an entity-name join.
+
 ### Two Financial Engines — Use Only Engine 1
 
 **Engine 1 (canonical):** `fn_verify_receivable()` / `fn_verify_payment()` → INSERT into `transactions`. Called by Python `loaders.verify_receivable()` / `loaders.verify_payment()`.
@@ -687,7 +689,9 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | `fn_security_list(society_id, search)` | Security list with salary/duty status |
 | `fn_receivables_named(society_id, search, status, entity_id, entity_role)` | Receivables with account names |
 | `fn_receipts_list(society_id, search, entity_id, entity_role)` | Receipts with entity names |
-| `fn_cashbook_paired(society_id, entity_id, entity_role, search, start, end)` | Paired Cr/Dr cashbook |
+| `fn_cashbook_paired_v3(society_id, entity_id, entity_role, search, start, end)` | Paired Cr/Dr cashbook, mode-excludes `'journal'` entries; entity name/role filter keyed off `transactions.role` |
+| `fn_cashbook_month_page(society_id, month, entity_id, entity_role)` | Single-month Cashbook page (12 monthly sheets, Apr–Mar); same `transactions.role`-keyed entity join as `fn_cashbook_paired_v3` |
+| `fn_account_ledger_fy(account_id, society_id, financial_year)` | Per-account ledger folio for the Ledger Index card drilldown; resolves entity name via `transactions.role`-keyed join |
 | `fn_accounts_list / fn_account_profile` | Chart of accounts |
 | `fn_societies_list / fn_society_profile` | Master portal society data |
 | `fn_gate_logs_named(society_id, search, date)` | Gate access with entity names |
@@ -812,6 +816,7 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 | `portal-content-store` guard blocked KPI refresh | KPI callback gated on store having `rendered=True` then crashed | Removed blocking guard |
 | Camera `mode` captured before `stopCamera()` clears `S.mode` | Wrong mode (`null`) sent to validate callback | Saved `currentMode` before `stopCamera()` call |
 | Leftover `render_default_profile` in `shell_callbacks.py` | Pylance undefined-variable errors on `loaders`, `renderers`, `nav_state` | Delete that callback block — functionality moved to `drilldown_callbacks.py` |
+| `fn_account_ledger_fy` referenced `t.role` | `Error: column t.role does not exist` on Ledger Index card → IncExp drilldown | Added `transactions.role` column (mirrors `receipts`/`expenses`/`payables`.role); every `INSERT INTO transactions` now writes it; `fn_account_ledger_fy` / `fn_cashbook_paired_v3` / `fn_cashbook_month_page` join `apartments`/`vendors`/`security_staff` on `entity_id` **and** `role`, since `entity_id` alone can collide across those tables |
 
 ---
 
