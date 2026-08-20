@@ -627,6 +627,20 @@ CREATE TABLE IF NOT EXISTS transactions (
     trx_date DATE NOT NULL,
     acc_id INT REFERENCES accounts (id),
     entity_id INTEGER,
+    -- Discriminator for entity_id, mirroring receipts/expenses/payables.role.
+    -- Without this, joining apartments/vendors/security_staff on entity_id
+    -- alone risks a false match if IDs collide across those tables. 'assets'
+    -- covers asset purchase/sale/writeoff legs, where entity_id references
+    -- assets.id (a distinct ID space, not apartment/vendor/security).
+    role VARCHAR(10) CHECK (
+        role IN (
+            'apartment',
+            'vendor',
+            'security',
+            'other',
+            'assets'
+        )
+    ),
     acc_particulars VARCHAR(200),
     amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
     -- 'journal': a pure book entry with no cash or bank movement at all
@@ -2088,10 +2102,10 @@ BEGIN
 
     -- Cr: income account (the receipt's acc_id)
     INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        v_rec.society_id, 'Cr', v_rec.receipt_date, v_rec.acc_id, v_rec.entity_id,
+        v_rec.society_id, 'Cr', v_rec.receipt_date, v_rec.acc_id, v_rec.entity_id, v_rec.role,
         v_rec.particulars,
         v_rec.amount, v_mode, 'paid',
         p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id
@@ -2100,10 +2114,10 @@ BEGIN
     -- Dr: cash / bank paired side (double-entry)
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Dr', v_rec.receipt_date, v_bank_acc, v_rec.entity_id,
+            v_rec.society_id, 'Dr', v_rec.receipt_date, v_bank_acc, v_rec.entity_id, v_rec.role,
             'Cash received - ' || v_rec.particulars,
             v_rec.amount, v_mode, 'paid',
             p_confirmed_by, NOW(), 'receipts', v_rec.id, v_journal_id
@@ -2155,10 +2169,10 @@ BEGIN
 
     -- Dr: expense account
     INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        v_rec.society_id, 'Dr', v_rec.expense_date, v_rec.acc_id, v_rec.entity_id,
+        v_rec.society_id, 'Dr', v_rec.expense_date, v_rec.acc_id, v_rec.entity_id, v_rec.role,
         v_rec.particulars,
         v_rec.amount, v_mode, 'paid',
         p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id
@@ -2167,10 +2181,10 @@ BEGIN
     -- Cr: cash / bank paired side
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Cr', v_rec.expense_date, v_bank_acc, v_rec.entity_id,
+            v_rec.society_id, 'Cr', v_rec.expense_date, v_bank_acc, v_rec.entity_id, v_rec.role,
             'Cash paid - ' || v_rec.particulars,
             v_rec.amount, v_mode, 'paid',
             p_confirmed_by, NOW(), 'expenses', v_rec.id, v_journal_id
@@ -2262,30 +2276,30 @@ BEGIN
     IF v_int_acc IS NOT NULL AND v_int_post > 0 THEN
         -- Line 1: base maintenance income (Cr)
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id,
+            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id, v_rec.role,
             REPLACE(v_rec.description, ' + Interest', ''),
             v_base_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
         -- Line 2: interest income to separate account (Cr)
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_int_acc, v_rec.entity_id,
+            v_rec.society_id, 'Cr', CURRENT_DATE, v_int_acc, v_rec.entity_id, v_rec.role,
             'Interest on ' || REPLACE(v_rec.description, ' + Interest', ''),
             v_int_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         );
     ELSE
         -- Single line: amount received goes to maintenance income account (Cr)
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id,
+            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id, v_rec.role,
             v_rec.description,
             v_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
@@ -2294,10 +2308,10 @@ BEGIN
     -- Dr: cash / bank paired side (actual amount received, not the full residual)
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_rec.society_id, 'Dr', CURRENT_DATE, v_bank_acc, v_rec.entity_id,
+            v_rec.society_id, 'Dr', CURRENT_DATE, v_bank_acc, v_rec.entity_id, v_rec.role,
             'Cash received - ' || REPLACE(v_rec.description, ' + Interest', ''),
             v_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
         );
@@ -2381,10 +2395,10 @@ BEGIN
 
     -- Cr: income side (one journal line for the whole payment)
     INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, journal_id
     ) VALUES (
-        v_society_id, 'Cr', CURRENT_DATE, v_acc_id, p_apartment_id,
+        v_society_id, 'Cr', CURRENT_DATE, v_acc_id, p_apartment_id, 'apartment',
         COALESCE(p_particulars, 'Maintenance Payment'),
         p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
     ) RETURNING id INTO v_trx_id;
@@ -2392,10 +2406,10 @@ BEGIN
     -- Dr: cash / bank paired side
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id,
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
             'Cash received - Maintenance Payment',
             p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_trx_id, v_journal_id
         );
@@ -2561,29 +2575,29 @@ BEGIN
 
         -- Dr: net expense amount, to the payable's own expense account
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id, v_pay.role,
             v_pay.description,
             v_net_amt, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
         -- Dr: TDS amount, to the TDS account
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, 'Dr', CURRENT_DATE, v_tds_acc, v_pay.entity_id,
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_tds_acc, v_pay.entity_id, v_pay.role,
             'TDS on ' || v_pay.description,
             v_tds_amt, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         );
     ELSE
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id,
+            v_pay.society_id, 'Dr', CURRENT_DATE, v_pay.acc_id, v_pay.entity_id, v_pay.role,
             v_pay.description,
             v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         ) RETURNING id INTO v_trx_id;
@@ -2592,10 +2606,10 @@ BEGIN
     -- Cr: cash/bank, full gross amount either way
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_pay.society_id, 'Cr', CURRENT_DATE, v_bank_acc, v_pay.entity_id,
+            v_pay.society_id, 'Cr', CURRENT_DATE, v_bank_acc, v_pay.entity_id, v_pay.role,
             'Cash paid - ' || v_pay.description,
             v_pay.amount, p_mode, 'paid', p_confirmed_by, NOW(), 'payables', v_pay.id, v_journal_id
         );
@@ -2719,20 +2733,20 @@ BEGIN
         IF v_status = 'confirmed' THEN
             -- Cr: income account
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_society_id, 'Cr', p_issued_date, v_acc_id, v_vendor_id, v_desc,
+                v_society_id, 'Cr', p_issued_date, v_acc_id, v_vendor_id, 'vendor', v_desc,
                 v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
 
             -- Dr: cash / bank paired side
             IF v_bank_acc IS NOT NULL THEN
                 INSERT INTO transactions(
-                    society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                    society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                     amount, mode, status, created_by, created_at, source_table, source_id, journal_id
                 ) VALUES (
-                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_vendor_id,
+                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_vendor_id, 'vendor',
                     'Cash received - ' || v_desc,
                     v_rate, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
                 );
@@ -2859,19 +2873,19 @@ BEGIN
 
         IF v_status = 'confirmed' THEN
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_society_id, 'Cr', p_issued_date, v_acc_id, v_apt_id, v_desc,
+                v_society_id, 'Cr', p_issued_date, v_acc_id, v_apt_id, 'apartment', v_desc,
                 v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
 
             IF v_bank_acc IS NOT NULL THEN
                 INSERT INTO transactions(
-                    society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                    society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                     amount, mode, status, created_by, created_at, source_table, source_id, journal_id
                 ) VALUES (
-                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_apt_id,
+                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_apt_id, 'apartment',
                     'Cash received - ' || v_desc,
                     v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
                 );
@@ -2952,20 +2966,20 @@ BEGIN
 
     -- Dr: asset class account
     INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        p_society_id, 'Dr', p_purchase_date, p_acc_id, v_asset_id, v_desc,
+        p_society_id, 'Dr', p_purchase_date, p_acc_id, v_asset_id, 'assets', v_desc,
         p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'assets', v_asset_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
 
     -- Cr: cash / bank paired side
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, 'Cr', p_purchase_date, v_bank_acc, v_asset_id,
+            p_society_id, 'Cr', p_purchase_date, v_bank_acc, v_asset_id, 'assets',
             'Cash paid - ' || v_desc,
             p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'assets', v_asset_id, v_journal_id
         );
@@ -3038,10 +3052,10 @@ BEGIN
     -- Dr: cash / bank (sale proceeds) — non-cash mode only
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_asset.society_id, 'Dr', p_sale_date, v_bank_acc, p_asset_id,
+            v_asset.society_id, 'Dr', p_sale_date, v_bank_acc, p_asset_id, 'assets',
             'Cash received - ' || v_desc,
             p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
         );
@@ -3049,10 +3063,10 @@ BEGIN
 
     -- Cr: asset class account (book value removal)
     INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
-        v_asset.society_id, 'Cr', p_sale_date, v_asset.acc_id, p_asset_id,
+        v_asset.society_id, 'Cr', p_sale_date, v_asset.acc_id, p_asset_id, 'assets',
         'Asset written off - ' || v_asset.asset_name,
         v_book_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
@@ -3062,20 +3076,20 @@ BEGIN
         IF v_gain_loss > 0 THEN
             -- Gain: Cr income account
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_asset.society_id, 'Cr', p_sale_date, v_acc_id, p_asset_id,
+                v_asset.society_id, 'Cr', p_sale_date, v_acc_id, p_asset_id, 'assets',
                 'Gain on sale - ' || v_asset.asset_name,
                 v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
             );
         ELSE
             -- Loss: Dr loss account (the same income account, debited)
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_asset.society_id, 'Dr', p_sale_date, v_acc_id, p_asset_id,
+                v_asset.society_id, 'Dr', p_sale_date, v_acc_id, p_asset_id, 'assets',
                 'Loss on sale - ' || v_asset.asset_name,
                 -v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
             );
@@ -3169,19 +3183,19 @@ BEGIN
         -- transaction row NULL on the one column the balance/ledger readers
         -- (fn_account_ledger_fy, v_financial_trial_balance, etc.) key off.
         INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            p_society_id, 'Cr', p_receipt_date, p_acc_id, p_entity_id, p_particulars,
+            p_society_id, 'Cr', p_receipt_date, p_acc_id, p_entity_id, p_role, p_particulars,
             p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
         ) RETURNING id INTO v_trx_id;
 
         IF v_bank_acc IS NOT NULL THEN
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Dr', p_receipt_date, v_bank_acc, p_entity_id,
+                p_society_id, 'Dr', p_receipt_date, v_bank_acc, p_entity_id, p_role,
                 'Cash received - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
@@ -3283,29 +3297,29 @@ BEGIN
  
             -- Leg 1a: net expense amount, Dr, to the chosen expense account
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_particulars,
+                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_role, p_particulars,
                 v_net_amt, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             ) RETURNING id INTO v_trx_id;
  
             -- Leg 1b: TDS amount, Dr, to the TDS account
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Dr', p_expense_date, v_tds_acc, p_entity_id,
+                p_society_id, 'Dr', p_expense_date, v_tds_acc, p_entity_id, p_role,
                 'TDS on ' || p_particulars,
                 v_tds_amt, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             );
         ELSE
             -- No TDS configured/requested — original single Dr leg, full amount.
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_particulars,
+                p_society_id, 'Dr', p_expense_date, p_acc_id, p_entity_id, p_role, p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             ) RETURNING id INTO v_trx_id;
         END IF;
@@ -3315,10 +3329,10 @@ BEGIN
         -- the Dr side into 900+100).
         IF v_bank_acc IS NOT NULL THEN
             INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, acc_particulars,
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                p_society_id, 'Cr', p_expense_date, v_bank_acc, p_entity_id,
+                p_society_id, 'Cr', p_expense_date, v_bank_acc, p_entity_id, p_role,
                 'Cash paid - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             );
@@ -4070,9 +4084,9 @@ BEGIN
                END AS net_delta,
                COALESCE(MAX(ap.flat_number), MAX(v.name), MAX(s.name), '')::TEXT AS entity_name
         FROM transactions t
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = t.society_id
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = t.society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = t.society_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = t.society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = t.society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = t.society_id AND t.role = 'security'
         WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
         GROUP BY t.trx_date, t.acc_particulars, v_acc.drcr_account
@@ -4314,9 +4328,9 @@ BEGIN
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Cr'
           AND t.mode <> 'journal'
@@ -4341,9 +4355,9 @@ BEGIN
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Dr'
           AND t.mode <> 'journal'
@@ -4575,9 +4589,9 @@ BEGIN
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Cr'
           AND t.mode <> 'journal'
@@ -4599,9 +4613,9 @@ BEGIN
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
         JOIN accounts a ON a.id = t.acc_id
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
         WHERE t.society_id = p_society_id AND t.status = 'paid'
           AND t.entry_side = 'Dr'
           AND t.mode <> 'journal'
