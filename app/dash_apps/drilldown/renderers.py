@@ -2368,7 +2368,7 @@ def _concern_wait_banner(entity_plural: str, prefill: dict) -> html.Div | None:
     return dbc.Alert(
         [
             html.I(className="fas fa-hourglass-half me-2"),
-            "Submitted — please wait for bids from vendors/security. Once bids arrive, the Invite and Assign buttons below will let you pick a candidate.",
+            "After submitting, please wait for bids from vendors/security. Once bids arrive, the Invite and Assign buttons on the concern profile will let you pick a candidate.",
         ],
         color="info",
         style={"fontSize": "13px", "fontWeight": "600", "flex": "0 0 auto", "maxWidth": "260px"},

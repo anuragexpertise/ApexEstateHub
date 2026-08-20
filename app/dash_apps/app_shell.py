@@ -411,7 +411,7 @@ def _assign_to_modal() -> dbc.Modal:
                     dbc.Alert(
                         [
                             html.I(className="fas fa-info-circle me-2"),
-                            "Please select invitees to assign",
+                            "Please select people to assign",
                         ],
                         color="info",
                         style={"fontSize": "13px", "fontWeight": "600",
