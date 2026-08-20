@@ -4068,13 +4068,11 @@ BEGIN
                                          WHEN t.entry_side = 'Cr' THEN -t.amount
                                          ELSE 0 END), 0)
                END AS net_delta,
-               COALESCE(MAX(CASE WHEN t.role = 'apartment' THEN COALESCE(ap.flat_number, '') END),
-                        MAX(CASE WHEN t.role = 'vendor' THEN COALESCE(v.name, '') END),
-                        MAX(CASE WHEN t.role = 'security' THEN COALESCE(s.name, '') END), '')::TEXT AS entity_name
+               COALESCE(MAX(ap.flat_number), MAX(v.name), MAX(s.name), '')::TEXT AS entity_name
         FROM transactions t
-        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = t.society_id AND t.role = 'apartment'
-        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = t.society_id AND t.role = 'vendor'
-        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = t.society_id AND t.role = 'security'
+        LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = t.society_id
+        LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = t.society_id
+        LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = t.society_id
         WHERE t.acc_id = p_account_id AND t.society_id = p_society_id AND t.status = 'paid'
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
         GROUP BY t.trx_date, t.acc_particulars, v_acc.drcr_account
