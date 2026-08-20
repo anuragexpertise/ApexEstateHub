@@ -1073,8 +1073,66 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
 # RECEIPTS / SALARY (payables + expenses) / RECEIVABLES / ADVANCE CREDIT
 # ═════════════════════════════════════════════════════════════════════════════
 
+# Varied receipt types spread across the FY to build a cash cushion before
+# the big May/Jun/Oct asset purchases (see seed_instruments_depreciation /
+# seed_simple_assets) and to demo the range of Cr-natured income accounts.
+# Only mode='cash' rows move the Running CiH figure (fn_cih_balance_asof
+# sums Cr(+)/Dr(-) across mode='cash' transactions only); 'bank'/'upi'/
+# 'cheque' rows are here purely for account/mode variety in the Ledger and
+# don't touch CiH. Ordered by receipt_date — keep it that way; the running
+# balance was hand-verified against seed_instruments_depreciation's and
+# seed_simple_assets' purchase dates to never go negative (see table below).
+#
+#   date        cash Δ      running CiH   note
+#   2026-04-01      —          100,000    BF
+#   2026-04-08   +3,500        103,500    scrap sale
+#   2026-04-22   +1,000        104,500    NOC fee
+#   2026-05-03     +500        105,000    late fine
+#   2026-05-15  -50,000         55,000    Generator purchase
+#   2026-06-10   -8,000         47,000    PA System purchase
+#   2026-06-20   -7,500         39,500    Projector purchase
+#   2026-07-10   +2,000         41,500    hall booking fee (existing)
+#   2026-09-05   +4,000         45,500    Diwali Mela stall booking
+#   2026-10-05   -6,000         39,500    CCTV Recorder purchase
+#                                39,500    (Dec/Feb rows below are bank/upi/
+#                                          cheque — no CiH effect)
+RECEIPT_TYPES = [
+    # (date, acc_id, particulars, amount, entity_key, role, mode)
+    ("2026-04-08", 212,   "Old Furniture Sold (scrap dealer pickup)", 3500.00,
+     None, "other", "cash"),
+    ("2026-04-22", 2318,  "NOC / Ownership Transfer Fee - A-102", 1000.00,
+     "owner4", "apartment", "cash"),
+    ("2026-05-03", 2317,  "Late Maintenance Payment Fine - A-201", 500.00,
+     "owner2", "apartment", "cash"),
+    ("2026-07-20", 21111, "Savings Bank Interest Credited (SBI)", 850.00,
+     None, "other", "bank"),
+    ("2026-09-05", 23192, "Diwali Mela Stall Booking Fee", 4000.00,
+     "vendor1", "vendor", "cash"),
+    ("2026-12-25", 22,    "Corporate Sponsorship Gift - Winter Fete", 2500.00,
+     "vendor2", "vendor", "cheque"),
+    ("2027-02-14", 2319,  "Community Event Ticket Sales", 1200.00,
+     None, "other", "upi"),
+]
+
+
 def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
-                              security_user_id: int, apt1_id: int):
+                              security_user_id: int, apt1_id: int,
+                              users: dict = None):
+    users = users or {}
+
+    def _linked(email_prefix):
+        for email, info in users.items():
+            if email.startswith(email_prefix + "@"):
+                return info["linked_id"]
+        return None
+
+    entity_lookup = {
+        "owner2":  _linked("owner2"),
+        "owner4":  _linked("owner4"),
+        "vendor1": _linked("vendor1"),
+        "vendor2": _linked("vendor2"),
+    }
+
     # Admin-created, CONFIRMED receipt (e.g. hall booking fee). mode='cash'
     # -> fn_save_receipt posts a single Cr PropInc leg only.
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
@@ -1099,6 +1157,23 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
         )
         conn.commit()
         print("  ✓ Receipt (security, UNCONFIRMED/pending): Visitor Parking Fee ₹300")
+
+    # Varied receipt types (scrap sale, NOC fee, late fine, bank interest,
+    # event/stall booking, gift, ticket sales) — see RECEIPT_TYPES above.
+    # All admin-created -> CONFIRMED immediately, same as the hall-booking
+    # receipt above.
+    for date, acc_id, particulars, amount, entity_key, role, mode in RECEIPT_TYPES:
+        if _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
+                (society_id, particulars)):
+            continue
+        entity_id = entity_lookup.get(entity_key) if entity_key else None
+        cur.execute(
+            "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (society_id, acc_id, particulars, amount,
+             entity_id, role, mode, date, admin_uid, None, None, None),
+        )
+        conn.commit()
+        print(f"  ✓ Receipt (admin, CONFIRMED, mode={mode}): {particulars} ₹{amount:g}")
 
     # Salary handling:
     # a) Roster-driven auto-generator: creates PENDING payables for
@@ -1266,7 +1341,7 @@ def run_seed(conn):
     seed_simple_assets(cur, conn, society_id, admin_uid)
     seed_instruments_depreciation(cur, conn, society_id, admin_uid)
 
-    seed_receipts_and_salary(cur, conn, society_id, admin_uid, security_uid_1, apt1_id)
+    seed_receipts_and_salary(cur, conn, society_id, admin_uid, security_uid_1, apt1_id, users)
     seed_advance_credit_demo(cur, conn, society_id, apt2_id, admin_uid)
 
     seed_polls(cur, conn, society_id, admin_uid, users)
