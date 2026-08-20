@@ -347,6 +347,28 @@ def run_migrations(conn):
         # migration and seed.py / default_accounts_estateacc.py never
         # insert into it. Drop it from existing installations.
         "ALTER TABLE accounts DROP COLUMN IF EXISTS bf_amount",
+
+        # transactions.mode: add 'journal' — a book entry with NO cash or
+        # bank movement at all (e.g. Dr Depreciation/Cr Asset, and its
+        # transfer to Income & Expenditure). Until now such entries had no
+        # honest mode to use: 'cash' was being reused to mean "don't
+        # auto-generate a completing bank leg" (see fn_resolve_bank_leg,
+        # which treats mode='cash' as "no bank leg needed"), but
+        # fn_cih_balance_asof and fn_cashbook_paired_v3 both also read
+        # mode='cash' to mean "this is physical rupees, show it in the
+        # Cashbook's Cash column" — so a depreciation journal marked
+        # 'cash' displayed as a phantom cash transaction in the Cashbook
+        # (see database/seed.py's seed_instruments_depreciation, now
+        # fixed to use 'journal'). It doesn't corrupt fn_cih_balance_asof's
+        # actual balance figure (a balanced Dr/Cr pair on the same mode
+        # always nets to zero regardless of which mode), only what the
+        # Cashbook visually shows — but 'journal' gives it a mode that
+        # means what it says, and fn_cashbook_paired_v3 (below) now
+        # excludes it from the Cashbook outright rather than relying on
+        # that zero-net coincidence.
+        "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_mode_check",
+        "ALTER TABLE transactions ADD CONSTRAINT transactions_mode_check "
+        "CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto', 'journal'))",
     ]
 
     ok = 0
