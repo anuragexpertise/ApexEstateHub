@@ -240,7 +240,7 @@ def generate_fy_closing_excel(
                 cell.number_format = _FMT_AMT
             if col == 7 and val:
                 cell.font = Font(name="Arial", size=9, bold=True,
-                                 color="red" if val == "Dr" else "green")
+                                 color="FFFF0000" if val == "Dr" else "FF008000")
         current_row += 1
 
     ws.freeze_panes = "A6"
