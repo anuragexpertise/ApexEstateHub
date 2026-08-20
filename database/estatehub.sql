@@ -3945,8 +3945,8 @@ $$;
 -- Ledger screen (via loaders.py, plain `%s` placeholders passing a
 -- Python int), which was silently broken by this exact type-resolution
 -- issue every time it was called.
-DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, SMALLINT) CASCADE;
 DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, INT) CASCADE;
+
 
 CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_society_id     INT,
@@ -4024,20 +4024,20 @@ BEGIN
             -- it first only because it's the account most people click
             -- first with a nonzero seeded BF.
             RETURN QUERY SELECT
-                (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'B/F'::TEXT,
+                (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT, 'B/F'::TEXT,
                 NULL::INT,
                 CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
                 CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
-                v_balance, 'bf'::TEXT, v_acc.parent_name;
+                v_balance, 'bf'::TEXT, v_acc.parent_name::TEXT;
         END IF;
 
         v_final_balance := fn_cih_balance_asof(p_society_id, v_fy_end);
         RETURN QUERY SELECT
-            v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
+            v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
             ('C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
             NULL::INT,
             0::NUMERIC(15,2), v_final_balance,
-            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
+            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name::TEXT;
         RETURN;
     END IF;
 
@@ -4055,11 +4055,11 @@ BEGIN
         -- Fixed (2026-08): same DATE-vs-timestamp cast issue as the CiH
         -- branch above — see that comment.
         RETURN QUERY SELECT
-            (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'Balance B/F'::TEXT,
+            (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT, 'Balance B/F'::TEXT,
             NULL::INT,
             CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
             CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
-            v_balance, 'bf'::TEXT, v_acc.parent_name;
+            v_balance, 'bf'::TEXT, v_acc.parent_name::TEXT;
     END IF;
 
     -- Transaction rows, running balance
@@ -4093,10 +4093,10 @@ BEGIN
         ORDER BY t.trx_date ASC
     )
     SELECT
-        tx.trx_date, COALESCE(v_acc.tab_name, v_acc.name::TEXT), tx.entity_name, tx.acc_particulars, tx.cb_folio,
+        tx.trx_date, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), tx.entity_name, tx.acc_particulars, tx.cb_folio,
         tx.debit, tx.credit,
         v_bf + SUM(tx.net_delta) OVER (ORDER BY tx.trx_date, tx.acc_particulars ROWS UNBOUNDED PRECEDING),
-        'txn'::TEXT, v_acc.parent_name
+        'txn'::TEXT, v_acc.parent_name::TEXT
     FROM txns tx;
 
     -- Final balance before depreciation/closing — net movement is
@@ -4136,7 +4136,7 @@ BEGIN
             v_dep_acc_tab := COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
             v_running_balance := v_final_balance - v_dep_total;
             RETURN QUERY SELECT
-                v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
+                v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
                 ('Depreciation @ ' || v_acc.depreciation_percent || '% -> Dep A/c')::TEXT,
                 NULL::INT,
                 CASE WHEN v_acc.drcr_account = 'Cr' THEN v_dep_total ELSE 0::NUMERIC(15,2) END,
@@ -4162,12 +4162,12 @@ BEGIN
     -- shows in the Credit column).
     IF v_transfer_amt <> 0 THEN
         RETURN QUERY SELECT
-            v_fy_end, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT,
+            v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
             ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
             NULL::INT,
             CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
             CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
-            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name;
+            0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name::TEXT;
     END IF;
 END;
 $$;
