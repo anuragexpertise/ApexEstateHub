@@ -3998,8 +3998,19 @@ BEGIN
     -- "two records unless the balance happens to net to zero".
     IF v_acc.tab_name = 'CiH' THEN
         IF v_bf <> 0 THEN
+            -- Fixed (2026-08): row_date is declared DATE, but
+            -- `DATE - INTERVAL` evaluates to timestamp without time zone
+            -- in Postgres, not date — RETURN QUERY enforces an exact type
+            -- match against the RETURNS TABLE signature (no implicit
+            -- narrowing cast), so this raised "structure of query does
+            -- not match function result type ... Returned type timestamp
+            -- without time zone does not match expected type date".
+            -- Every account with has_bf=TRUE hits this same expression
+            -- (see the identical fix a few lines below); CapAc surfaced
+            -- it first only because it's the account most people click
+            -- first with a nonzero seeded BF.
             RETURN QUERY SELECT
-                v_fy_start - INTERVAL '1 day', COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'B/F'::TEXT,
+                (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'B/F'::TEXT,
                 NULL::INT,
                 CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
                 CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
@@ -4027,8 +4038,10 @@ BEGIN
     -- table); has_bf=FALSE accounts (expense/income leaves) should never
     -- show a B/F line of their own.
     IF v_acc.has_bf AND v_bf <> 0 THEN
+        -- Fixed (2026-08): same DATE-vs-timestamp cast issue as the CiH
+        -- branch above — see that comment.
         RETURN QUERY SELECT
-            v_fy_start - INTERVAL '1 day', COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'Balance B/F'::TEXT,
+            (v_fy_start - INTERVAL '1 day')::DATE, COALESCE(v_acc.tab_name, v_acc.name::TEXT), ''::TEXT, 'Balance B/F'::TEXT,
             NULL::INT,
             CASE WHEN v_bf_drcr = 'Dr' THEN v_bf ELSE 0 END,
             CASE WHEN v_bf_drcr = 'Cr' THEN v_bf ELSE 0 END,
