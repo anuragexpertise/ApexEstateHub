@@ -1083,19 +1083,7 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
 # balance was hand-verified against seed_instruments_depreciation's and
 # seed_simple_assets' purchase dates to never go negative (see table below).
 #
-#   date        cash Δ      running CiH   note
-#   2026-04-01      —          100,000    BF
-#   2026-04-08   +3,500        103,500    scrap sale
-#   2026-04-22   +1,000        104,500    NOC fee
-#   2026-05-03     +500        105,000    late fine
-#   2026-05-15  -50,000         55,000    Generator purchase
-#   2026-06-10   -8,000         47,000    PA System purchase
-#   2026-06-20   -7,500         39,500    Projector purchase
-#   2026-07-10   +2,000         41,500    hall booking fee (existing)
-#   2026-09-05   +4,000         45,500    Diwali Mela stall booking
-#   2026-10-05   -6,000         39,500    CCTV Recorder purchase
-#                                39,500    (Dec/Feb rows below are bank/upi/
-#                                          cheque — no CiH effect)
+
 RECEIPT_TYPES = [
     # (date, acc_id, particulars, amount, entity_key, role, mode)
     ("2026-04-08", 212,   "Old Furniture Sold (scrap dealer pickup)", 3500.00,
@@ -1110,7 +1098,7 @@ RECEIPT_TYPES = [
      "vendor1", "vendor", "cash"),
     ("2026-12-25", 22,    "Corporate Sponsorship Gift - Winter Fete", 2500.00,
      "vendor2", "vendor", "cheque"),
-    ("2027-02-14", 2319,  "Community Event Ticket Sales", 1200.00,
+    ("2027-02-14", 2318,  "Community Event Ticket Sales", 1200.00,
      None, "other", "upi"),
 ]
 
@@ -1139,7 +1127,7 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
                 (society_id, "Community Hall Booking Fee")):
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (society_id, 213, "Community Hall Booking Fee", 2000.00,
+            (society_id, 2318, "Community Hall Booking Fee", 2000.00,
              apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, None, None),
         )
         conn.commit()
