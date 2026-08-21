@@ -92,6 +92,19 @@ _ROW_STYLE = {
 # and handled separately as the Bal sheet.
 _ROOT_TAB_NAME = "Bal"
 
+# Closing/rollup accounts that must appear last, in this exact order,
+# rather than sorted alphabetically with everything else. Bal (the
+# structural root) isn't in this list — it's built and appended
+# separately after the main account loop, so it always lands last.
+_TAIL_ORDER = ["Dep", "InExp", "CapAc"]
+
+
+def _account_sort_key(acc: dict):
+    tab = (acc.get("tab_name") or acc.get("name") or "").strip()
+    if tab in _TAIL_ORDER:
+        return (1, _TAIL_ORDER.index(tab), "")
+    return (0, 0, tab.lower())
+
 
 def _unique_sheet_title(base: str, used_titles: set[str]) -> str:
     """
@@ -364,6 +377,12 @@ def generate_ledger_index_excel(
     root = next((a for a in accounts if not a.get("parent_account_id")), None)
     non_root_accounts = [a for a in accounts
                           if (a.get("tab_name") or "").strip().lower() != _ROOT_TAB_NAME.lower()]
+
+    # Sheet order: alphabetical by tab_name, but ending with the four
+    # closing/rollup accounts in a fixed sequence — Dep, InExp, CapAc,
+    # then Bal (Bal is the structural root, appended separately below
+    # the loop, so it naturally lands last regardless of this sort).
+    non_root_accounts = sorted(non_root_accounts, key=_account_sort_key)
 
     closing_rows = db._execute(
         "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
