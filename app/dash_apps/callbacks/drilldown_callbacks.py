@@ -1718,10 +1718,20 @@ def register_drilldown_callbacks(app):
             if not account_id:
                 return no_update
             data = ledger_export.generate_ledger_excel(None, sid, fy, account_id)
-            filename = f"Ledger_{fy}-{fy+1}.xlsx"
+            acc = db._execute(
+                "SELECT tab_name FROM accounts WHERE id=%s AND society_id=%s",
+                (account_id, sid), fetch_one=True,
+            ) or {}
+            tab = acc.get("tab_name") or "Account"
+            filename = f"Ledger_{tab}_{fy}-{fy+1}.xlsx"
         elif entity == "ledger_index":
-            data = ledger_export.generate_fy_closing_excel(None, sid, fy)
-            filename = f"Ledger_Index_{fy}-{fy+1}.xlsx"
+            # Full ledger book — Index + a sheet per account (Dep/InExp/
+            # CapAc included, since they're just ordinary accounts) + a
+            # closing Bal sheet — matching the CB2024-2025.xlsx reference
+            # layout (2026-08). Was generate_fy_closing_excel (a single
+            # flat summary sheet); that's still available standalone.
+            data = ledger_export.generate_ledger_index_excel(None, sid, fy)
+            filename = f"Ledger_{fy}-{fy+1}.xlsx"
         else:
             return no_update
 
