@@ -4032,11 +4032,18 @@ BEGIN
         END IF;
 
         v_final_balance := fn_cih_balance_asof(p_society_id, v_fy_end);
+        -- Fixed (2026-08): same signed-value-into-a-fixed-column bug as
+        -- the generic closing row below — always dropped v_final_balance
+        -- straight into Credit, so cash run overdrawn (a genuine
+        -- possibility once cash-mode transactions can post to any
+        -- account) showed as a negative Credit instead of flipping to
+        -- Debit with the magnitude.
         RETURN QUERY SELECT
             v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
             ('C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
             NULL::INT,
-            0::NUMERIC(15,2), v_final_balance,
+            CASE WHEN v_final_balance < 0 THEN ABS(v_final_balance) ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN v_final_balance >= 0 THEN v_final_balance ELSE 0::NUMERIC(15,2) END,
             0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name::TEXT;
         RETURN;
     END IF;
@@ -4160,13 +4167,30 @@ BEGIN
     -- which column this display row's figure lands in, matching
     -- CB2024-2025.xlsx's BkAc->CurAs example (a Dr-natured BkAc's C/F row
     -- shows in the Credit column).
+    -- Fixed (2026-08): v_transfer_amt was assumed to always be
+    -- non-negative in the account's own natural direction, so this CASE
+    -- just dropped the raw signed value straight into whichever column
+    -- drcr_account picked, unconditionally. That breaks whenever an
+    -- account's balance for the year actually sits on the OPPOSITE side
+    -- from its own nature (e.g. a Dr-natured expense account net-
+    -- credited, or a Dr-natured cash-derived account run overdrawn) —
+    -- v_transfer_amt comes out negative there, and it landed in the
+    -- column as a literal negative number instead of flipping columns
+    -- with its magnitude, same failure mode as fn_fy_closing_report's
+    -- display_side/display_amount was built to avoid. Fixed the same
+    -- way: derive which column from the SIGN of v_transfer_amt (XORed
+    -- against drcr_account, since a natural-side-negative balance is
+    -- actually sitting on the opposite side), and use ABS() so neither
+    -- column ever shows a signed number.
     IF v_transfer_amt <> 0 THEN
         RETURN QUERY SELECT
             v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
             ('Balance C/F -> ' || COALESCE(v_acc.parent_name, 'Parent'))::TEXT,
             NULL::INT,
-            CASE WHEN v_acc.drcr_account = 'Cr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
-            CASE WHEN v_acc.drcr_account = 'Dr' THEN v_transfer_amt ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN (v_acc.drcr_account = 'Cr') = (v_transfer_amt >= 0)
+                 THEN ABS(v_transfer_amt) ELSE 0::NUMERIC(15,2) END,
+            CASE WHEN (v_acc.drcr_account = 'Dr') = (v_transfer_amt >= 0)
+                 THEN ABS(v_transfer_amt) ELSE 0::NUMERIC(15,2) END,
             0::NUMERIC(15,2), 'closing'::TEXT, v_acc.parent_name::TEXT;
     END IF;
 END;
