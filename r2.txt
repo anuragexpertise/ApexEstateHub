@@ -1,0 +1,897 @@
+Complete Phase 2 using @/home/at/Documents/ApexEstateHub/chs_rwa_compliance_agent_tasklist.md
+## Phase 2 — GST engine
+
+This is the biggest gap and the one with the most billing-engine surface area, since GST has to be evaluated **per-apartment, per-month**, not just once per society.
+
+**2a. Threshold-check logic**
+GST only applies when *both* conditions hold: society turnover > ₹20L *and* that specific member's monthly maintenance > ₹7,500. That second condition means the check can't be done once at the society level — `fn_auto_generate_receivables` needs to evaluate it per apartment, per billing cycle, since two flats in the same society can have different maintenance rates (the schema already supports per-apartment overrides via `apt_charges_fines_basis.apt_maintenance_amount`) and therefore different GST liability.
+
+**2b. Exempt-component separation**
+Statutory pass-through collections (property tax, water charges billed at actual recovery) must stay GST-exempt even when the rest of the bill crosses the threshold. This means a single "maintenance" line can no longer be one lump sum for GST purposes — it needs a breakdown between GST-applicable components and pass-through exempt components. This connects directly to the fund-splitting requirement in Phase 3, since both need the same underlying capability: a bill that resolves into several distinctly-taxed/distinctly-allocated line items instead of one number.
+
+**2c. SAC 9995 + tax account additions**
+Add GST output-tax accounts (CGST payable, SGST payable) to the chart of accounts, following the same pattern the TDS account already uses (`fn_resolve_tds_account`) — a `fn_resolve_gst_accounts` equivalent. The receivable/receipt generation path needs a third leg (base amount → income account, GST amount → GST payable accounts) analogous to how `fn_verify_payment` already splits a payment into a net-expense leg and a TDS leg.
+
+**2d. GST return support**
+Not full GSTR-1/3B filing automation (out of scope for a v1), but the system should be able to produce the underlying data — taxable value, exempt value, tax collected by rate — as a report, since that's what actually gets typed into the GST portal each period.
+## Phase 2 — Bill splitting: detailed design
+
+I traced this all the way through `fn_pay_apartment_dues_fifo` and `fn_apply_receivable_interest` to see how a multi-line bill would actually behave once money starts moving, not just how it gets created. That surfaced a real, previously-invisible risk — covered below, since it's the part most likely to quietly corrupt the ledger if missed.
+
+### The core decision: multiple `receivables` rows per bill period, not a JSON breakdown
+
+Confirmed against `fn_pay_apartment_dues_fifo`, `fn_apply_receivable_interest`, and `fn_check_orphan_receivables`/`fn_check_duplicate_receivables` — all three already operate as row-level `FOR ... LOOP`s over `receivables`, not as single-row lookups. That means "one row per fund line" slots into existing machinery with far less rewriting than a single-row-with-JSON-breakdown approach, which would require every one of those functions to learn how to parse and partially settle a nested structure. Reuse over reinvention here.
+
+**Grouping key:** add `bill_group_id UUID` (or a `bill_id` referencing a new lightweight `bills` header table — see below) to `receivables`, generated once per apartment per billing cycle, shared across every line (`SocM`, `SinkFund`, `RepFund`, GST-on-`SocM` if applicable). This is purely a display/grouping key — FIFO settlement, interest, and status tracking all continue to operate per-row exactly as they do today. The UI collection screen groups by `bill_group_id` so a resident sees one consolidated "₹6,200 due — Apr 2027" line, not four separate charges, even though four `receivables` rows exist underneath.
+
+I'd lean toward the UUID-on-existing-table approach over a new `bills` header table for v1 — it's a smaller migration, and a header table only earns its keep once you need bill-level metadata (a single PDF invoice number, a single due-date override at the bill level rather than per-line) that doesn't fit naturally on `receivables` itself. That's a real future need, but not one this phase requires.
+
+### Rewriting `fn_auto_generate_receivables`
+
+Currently: one `INSERT INTO receivables` per apartment per month, one `acc_id`. Restructured:
+
+1. Resolve the billing basis as today (`apt_charges_fines_basis`, prorated for partial months) — but where it currently produces one `v_base`, it now needs to look up **all active fund-rate lines** for that apartment/period: `apt_maintenance_rate`, plus the new `apt_sinking_fund_rate` and `apt_repair_fund_rate` from Phase 1's schema extension.
+2. Generate `v_base_maint`, `v_base_sinking`, `v_base_repair` — same proration math (`overlap_days / days_in_month`) applied independently to each, since a mid-month rate change or a mid-month move-in should prorate every fund line consistently, not just maintenance.
+3. **GST check happens here, per line, per apartment** — this is where Phase 1's per-apartment maintenance amount and the ₹7,500 threshold actually get evaluated (confirmed: `apt_charges_fines_basis.apt_maintenance_amount` already varies per apartment, so this can't be hoisted out to a society-level check). If `v_base_maint > 7500` AND society turnover > ₹20L, compute a GST line (`v_gst_amt = v_base_maint * 0.18`) as an **additional row**, not baked into `v_base_maint` itself — GST must be separately visible on the bill and separately postable to CGST/SGST payable accounts, not folded into taxable-value income.
+4. Sinking Fund / Repair Fund lines are **not** GST-eligible under the exempt-collection carve-out (statutory pass-through), so they get no GST line regardless of amount — worth double-checking against current CBIC circulars at implementation time, since GST-on-society-collections has had contested interpretations, but the safe default is: GST only on the maintenance component that crosses the per-member threshold.
+5. Insert one `receivables` row per line, all sharing the new `bill_group_id`, each with the fund's own `acc_id` (Sinking Fund / Repair Fund / GST-payable accounts from Phase 1/3's chart-of-accounts additions).
+
+### The risk I found: `fn_pay_apartment_dues_fifo` posts one lump ledger leg, not one per account
+
+This is the part that actually matters most. Right now, `fn_pay_apartment_dues_fifo` takes the *entire* payment amount and posts it as a **single** `Cr` transaction leg against `v_acc_id` — resolved once, from whichever receivable is oldest — then separately loops through `receivables` rows updating `paid_amount`/`paid_principal` bookkeeping. The bookkeeping loop is already correctly multi-row; **the actual general-ledger posting is not.**
+
+Concretely: today, if a resident pays ₹6,200 covering one maintenance row and one sinking-fund row, this function would credit the *entire* ₹6,200 to whichever account belongs to the single oldest receivable — the sinking fund contribution would never reach the Sinking Fund account in the ledger at all, even though `receivables.paid_amount` correctly shows it as settled. The dues-tracking would look right; the trial balance would be wrong. And since the mutuality tax report and the fund-escrow reporting from Phase 1/3 both read off the ledger, not off `receivables`, this isn't a cosmetic gap — it would silently misstate exactly the numbers this whole compliance effort exists to get right.
+
+**Required fix:** rewrite the settlement loop to accumulate `v_take` per distinct `acc_id` (a local hash/array of account→amount, built up across the existing FIFO loop iterations) and, after the loop completes, emit **one `Cr` transaction leg per distinct account actually settled**, each for its accumulated amount, all sharing the same `journal_id` so they remain one atomic payment event. This is a genuine rewrite of the posting section, not a schema-only or generation-only change — flagging it now so it's estimated and reviewed as its own unit of work, not discovered mid-implementation of Phase 2.
+
+### Interest — a policy decision, not just a mechanical one
+
+`fn_apply_receivable_interest` already loops per-row and would apply interest independently to each overdue line once split. That's mechanically fine, but raises a real bye-law question: should an overdue Sinking Fund contribution accrue the same late-interest as overdue maintenance, or are escrow/reserve fund contributions typically penalty-exempt under your users' bye-laws? I don't know the answer generically — it varies by society's own bye-law text — so I'd add a `charges_interest BOOLEAN` flag to the per-fund rate configuration (alongside the new `apt_sinking_fund_rate`/`apt_repair_fund_rate` fields) rather than hardcoding either behavior, and default it to `TRUE` (matching current maintenance behavior) unless told otherwise.
+
+### Advance credit
+
+`fn_pay_apartment_dues_fifo`'s excess-payment handling (the `IF v_remaining > 0` block banking overpayment as a `status='credit'` row) currently books the whole excess against `v_acc_id` — same single-account assumption as the main settlement path, same fix needed: once every open line across every fund is settled, remaining excess should probably default to the *maintenance* account specifically (not sinking/repair — a resident overpaying likely intends it as a maintenance credit, not an unsolicited extra fund contribution), which is actually simpler than the main settlement fix, just needs the fallback `v_acc_id` resolution to explicitly target the maintenance account rather than "whichever row happened to be oldest."
+
+### Sequencing for this phase specifically
+
+1. Phase 1 schema fields must land first (`apt_sinking_fund_rate`, `apt_repair_fund_rate`, `charges_interest`, the new fund accounts in the chart of accounts, GST payable accounts).
+2. `bill_group_id` migration on `receivables` (additive, nullable, backfill not required for historical rows).
+3. Rewrite `fn_auto_generate_receivables` to emit multi-line bills.
+4. Rewrite `fn_pay_apartment_dues_fifo`'s posting section (the account-grouping fix) — **before** turning on multi-line generation in production, since enabling split billing without this fix is exactly the silent-ledger-corruption scenario above.
+5. UI: bill collection screens grouped by `bill_group_id`; admin ledger/ledger-index views (the `Bal`/rollup work from earlier) need the new fund accounts wired into the same hierarchy so they show up correctly in exports.
+6. Test against the existing `test_scenario_b_receipt_ledger.py`-style scenario tests — this phase specifically needs a new scenario test asserting that a single lump payment against a multi-line bill produces the correct *per-account* ledger legs, not just correct `receivables.status` values, since that's precisely the failure mode that wouldn't show up in a test that only checks dues-tracking.
+
+`fn_check_orphan_receivables` is fine (entity-existence check, unaffected by row count). Two more findings below, then the rollout checklist.
+
+### `fn_verify_receivable` (manual receipt entry) — actually the safe path, and the template to copy
+
+Unlike the FIFO bulk-pay function, `fn_verify_receivable` operates on one `receivables` row at a time, and already posts each row's amount to *that row's own* `acc_id`. Once multi-line billing exists, this function needs no fix — but there's a UX gap: if a resident's consolidated bill is three rows (maintenance/sinking/repair) under one `bill_group_id`, an admin manually verifying a paper receipt shouldn't have to enter three separate receipts for what the resident experienced as one payment.
+
+**Add `fn_verify_receivable_by_bill_group(p_bill_group_id, p_confirmed_by, p_mode, p_amount)`** — a thin wrapper that loops over every row sharing that group and calls the existing `fn_verify_receivable` per row (FIFO-ordered within the group if the payment doesn't cover the full group total). This is low-risk specifically *because* it just orchestrates the already-correct single-row function rather than reimplementing posting logic — and it's the same "one Cr leg per row" pattern the FIFO rewrite needs, just already proven correct here. Worth building this wrapper first, actually, since it validates the grouping/proration logic on the lower-risk path before touching the bulk FIFO function.
+
+### Found a second integrity-checker gap: `fn_check_duplicate_receivables` will false-positive on every split bill
+
+```sql
+GROUP BY r.entity_id, r.role, r.period_month
+HAVING COUNT(*) > 1
+```
+
+This flags *any* apartment with more than one receivable row in the same month as a duplicate — with no awareness of `acc_id` at all. Today that's correct, because one row per apartment per month is the invariant. Once split billing ships, every single consolidated bill (3+ legitimate rows, same period, different accounts) becomes a false positive. Left unfixed, this either buries real duplicates in noise or trains whoever reviews this report to ignore it entirely — the worse of the two outcomes, since it silently defeats a check the system relies on for data-integrity confidence.
+
+**Fix:** `GROUP BY r.entity_id, r.role, r.period_month, r.acc_id` instead — same account, same period, more than one row is still a real duplicate; different accounts, same period is now the expected shape.
+
+---
+
+### Rollout checklist for Phase 2, in dependency order
+
+1. **Schema (additive, no behavior change yet):** `apt_sinking_fund_rate`, `apt_repair_fund_rate`, `charges_interest` on `apt_charges_fines_basis`; `bill_group_id` on `receivables`; new fund/GST-payable accounts in the chart of accounts (Phase 1/3 dependency).
+2. **Fix `fn_check_duplicate_receivables`** to include `acc_id` in the grouping — do this *before* any multi-line bills exist, so it's already correct and silent when Phase 2 goes live, not scrambling to catch up after.
+3. **Build `fn_verify_receivable_by_bill_group`** — proves out the grouping/FIFO-within-group logic on the safe, already-correct single-row posting primitive.
+4. **Rewrite `fn_pay_apartment_dues_fifo`'s posting section** — group settled amounts by `acc_id`, emit one `Cr` leg per distinct account under one `journal_id`; fix the advance-credit fallback to explicitly target the maintenance account. This is the highest-risk change in the phase and should land *before* step 5, not after.
+5. **Rewrite `fn_auto_generate_receivables`** to emit multi-line bills with `bill_group_id`, including the per-apartment GST threshold check.
+6. **New scenario test** (alongside the existing `test_scenario_b_receipt_ledger.py` style): seed a multi-line bill, settle it via both `fn_pay_apartment_dues_fifo` and `fn_verify_receivable_by_bill_group`, assert the resulting *ledger* — not just `receivables.status` — attributes each rupee to the correct account. This is the test that would have caught the original single-account-posting bug, so it's the one regression guard that actually matters here.
+7. **UI:** billing/collection screens grouped by `bill_group_id`; the `Bal`-sheet rollup and Cashbook views need the new fund accounts wired into the hierarchy (mechanically free once the accounts exist, per the earlier ledger-export work — they'll just show up as new siblings under `Bal`/`CapAc`).
+8. **GST/TDS report views (Phase 2d/4d)** come last, since they're read-only aggregations over data that only becomes correct once steps 1–6 are done — building them earlier just means re-verifying them against corrected data later.
+
+Good — clean pattern to follow (`fn_resolve_X_account`, name-resolved, `NULL` = not configured). Now let's design both reports on top of it.
+
+## Phase 2d — GST return support
+
+### Data source: the ledger, not `receivables`
+
+Once Phase 2's split-billing lands, GST collected lives as `Cr` legs on the new CGST/SGST payable accounts (resolved via `fn_resolve_gst_accounts`, same pattern as `fn_resolve_tds_account` above), tagged `source_table='receivables'` / `source_id` back to the specific bill line. That's the join path — same principle as everything else this session: the ledger is the single source of truth, intermediate tables (`receivables`) are working state, not the record.
+
+**New function: `fn_gst_summary_fy(p_society_id, p_fy)`**
+
+Returns one row per month within the FY (GST periodicity is monthly for most societies, quarterly for QRMP-eligible ones — I'd build monthly and let the Excel layer sub-total into quarters, since monthly-to-quarterly is a free rollup but quarterly-to-monthly loses information):
+
+```
+period_month | taxable_value | cgst_collected | sgst_collected | exempt_value | total_bills_gst_applicable | total_bills_exempt
+```
+
+- `taxable_value` — sum of the maintenance-component base amount on every `receivables` row that had a GST line generated for it (join on `bill_group_id`, filter to lines where a sibling GST-line row exists in the same group).
+- `exempt_value` — sum of Sinking Fund / Repair Fund lines, plus maintenance lines that stayed under the ₹7,500 per-member threshold, plus statutory pass-through items — everything that's *not* `taxable_value`, from the same billing data.
+- `cgst_collected`/`sgst_collected` — straight sums of the `Cr` legs on the two GST payable accounts for that month, from `transactions`.
+
+This mirrors `fn_fy_closing_report`'s shape closely enough that the Excel formatter can reuse most of `ledger_export.py`'s existing styling helpers (`_FONT_HEADER`, `_FILL_HEADER`, `_FMT_AMT`, the row-writing loop) rather than inventing a new visual language — worth building this as `database/gst_export.py` alongside `ledger_export.py` and `cashbook_export.py`, following the same `generate_X_excel(db, society_id, fy)` signature convention so it slots into the existing `download_fy_export` callback dispatch (`entity == "gst_summary"`) the same way `ledger_index`/`ledger`/`cashbook` already do.
+
+### What the sheet needs to look like
+
+Two sheets, since GSTR-1 (outward supplies, what you *filed*) and GSTR-3B (summary return, what you *paid*) ask for the numbers in slightly different shapes:
+
+- **"Taxable Supplies"** — month-by-month taxable value, tax rate (18% split 9%/9%), CGST, SGST, matching GSTR-1's Table 4/5 outward-supply shape closely enough to transcribe by hand into the portal.
+- **"Summary"** — one FY-total row: total taxable value, total tax collected, total exempt value, total turnover (taxable + exempt) — this is the number that also feeds back into Phase 1c's turnover threshold check for *next* year, so it's worth exposing as its own queryable value (`fn_gst_summary_fy`'s final row, or a small `fn_society_turnover_fy` helper), not just buried in a spreadsheet cell.
+
+**Deliberately not building:** GSTIN-matching, e-invoice IRN generation, or a GSTN API integration. Those require registration as a GST Suvidha Provider or ASP and are a different scale of project — flagging this boundary explicitly so it's a documented decision, not a silent gap someone discovers later assuming it was in scope.
+
+---
+
+## Phase 4d — Form 16A / 26Q export
+
+### Data source: same principle, `transactions` joined back through `expenses`
+
+TDS deducted lives as `Dr` legs on the TDS-payable account (`fn_resolve_tds_account`, already exists), tagged `source_table='expenses'` / `source_id`. Since `expenses` has `entity_id`+`role='vendor'` but no PAN (that's Phase 1's job — `vendors.pan_number`), the report needs a three-way join: `transactions` (the actual deducted amount, dated) → `expenses` (which vendor, which TDS section — Phase 1's `accounts.tds_section` inherited onto the expense) → `vendors` (PAN, name, GSTIN).
+
+**New function: `fn_tds_summary_fy(p_society_id, p_fy, p_quarter)`** — quarterly, not monthly, since 26Q is a quarterly return (Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar — note this straddles the April–March FY boundary in the *same* pattern the FY itself already uses, so no new date-math beyond what `fn_fy_closing_report` already does for FY boundaries).
+
+```
+vendor_name | vendor_pan | tds_section | gross_amount_paid | tds_deducted | net_paid | payment_date
+```
+
+One row per TDS-bearing payment (not aggregated per vendor) — 26Q actually wants per-transaction deduction records, not vendor totals, since deduction date matters for interest-on-late-deduction calculations if a filing is ever late. A separate **vendor-summary sheet** (one row per vendor, section, cumulative annual total) is still useful as a human-readable cross-check against Phase 4b's ₹1,00,000 annual-threshold tracking — that's actually the same query, just grouped differently, so build it as a second sheet in the same workbook rather than a second report.
+
+**Vendors with no PAN captured** (a real possibility per Phase 1's design — TDS can be deducted before PAN is on file) should be flagged distinctly on the report, not silently blanked — a missing PAN on a 26Q line is a filing-blocking problem, and it's much better for this report to surface it loudly (a highlighted row, a warning count in the summary) than for someone to discover it at actual filing time.
+
+**Deliberately not building:** actual TRACES/26Q e-filing (requires a Tax Deduction Account Number registration flow and a specific government-mandated file format/validation utility, again a different-scale integration) — same "structured report, not filing automation" boundary as 2d, for the same reason.
+
+---
+
+### Where these two land in the sequencing
+
+Both are genuinely last, and now I can say precisely why in terms of the actual data dependencies traced above, not just generally: `fn_gst_summary_fy` requires Phase 2's `bill_group_id`+GST-line generation to exist and be correctly posted (which itself required the `fn_pay_apartment_dues_fifo` account-grouping fix, since a GST line incorrectly lumped into the maintenance account by that bug would make this report wrong in a way that's hard to detect — the total collected would look right, the *taxable-vs-exempt split* wouldn't). `fn_tds_summary_fy` requires Phase 1's `vendors.pan_number`/`accounts.tds_section` fields and Phase 4a/4b's rate-table and cumulative-threshold logic. Building either earlier just means re-verifying it against corrected upstream data later — the same reasoning as the original phase ordering, now anchored to the specific tables and functions each report actually reads from.
+
+EARLIER RESPONSE:
+Now I need to rewrite fn_pay_apartment_dues_fifo. This is the highest risk task. The key change is:
+
+Remove the single Cr leg before the loop
+In the loop, accumulate v_take per acc_id
+After the loop, emit one Cr leg per distinct acc_id
+Fix advance credit to use maintenance account
+Let me carefully construct the new function. I need to keep all the existing FIFO logic intact, just change the posting section.
+
+Current flow:
+
+Resolve v_acc_id from oldest receivable (or fallback to maintenance)
+Post single Cr leg for full p_amount to v_acc_id
+Post Dr leg to bank
+Loop through receivables updating paid_amount/paid_principal
+If excess remains, insert advance credit row using v_acc_id
+New flow:
+
+Resolve v_acc_id from oldest receivable (or fallback to maintenance) - still needed for advance credit fallback
+Loop through receivables updating paid_amount/paid_principal, accumulating per acc_id
+After loop, emit one Cr leg per distinct acc_id for its accumulated amount
+Post Dr leg to bank for total amount
+If excess remains, insert advance credit row using EXPLICIT maintenance account
+Actually, let me think about this more carefully. The current function posts the Cr leg BEFORE the loop, and the Dr leg also BEFORE the loop. Then the loop just updates receivables.
+
+For the rewrite, I need to:
+
+Keep the loop mostly intact for updating receivables
+But accumulate the amounts per acc_id during the loop
+After the loop, post the Cr legs
+The Dr leg should still be posted (once, for the total)
+Wait, actually looking more carefully at the current code:
+
+Line 2432-2440: Posts Cr leg for FULL p_amount to v_acc_id
+Line 2442-2451: Posts Dr leg for FULL p_amount to bank
+Line 2454-2500: Loop updates receivables rows
+The problem is that if p_amount = 6200, and it covers maintenance (3200) + sinking (3000), the Cr leg posts 6200 to whichever account is oldest. But the loop correctly updates both rows' paid_amount.
+
+For the fix, I need to:
+
+Remove the upfront Cr leg posting
+In the loop, track how much goes to each acc_id
+After the loop, post one Cr leg per distinct acc_id
+Keep the Dr leg as is (it's for the total cash received)
+Actually, I can keep the Dr leg where it is or move it - it doesn't matter much since it's always the total. But for clean double-entry, I should probably post all Cr legs first, then the Dr leg. Or I could post the Dr leg upfront since it doesn't depend on the per-acc_id split.
+
+Let me keep it simple: accumulate during loop, then post Cr legs after loop, Dr leg can stay where it is or move - I'll keep it near the Cr legs for clarity.
+
+Actually, looking at the current code more carefully, the Dr leg references v_trx_id (the Cr leg's returned id) in its source_id. Let me check...
+
+Line 2450: 'receivables', v_trx_id, v_journal_id - yes, the Dr leg's source_id references the Cr leg's id.
+
+So if I emit multiple Cr legs, the Dr leg should probably reference the first one, or we should rethink this. Actually, for double-entry, all legs of one journal should share the same journal_id. The source_id on the Dr leg points to the Cr leg's id - this is just for traceability. If there are multiple Cr legs, I can point the Dr leg to the first Cr leg, or to NULL, or to the receivable row.
+
+Actually, looking at other functions like fn_verify_receivable, the Dr leg also references the receivable row via source_id. In fn_pay_apartment_dues_fifo, the Dr leg references v_trx_id which is the first Cr leg.
+
+For simplicity, I'll keep the Dr leg pointing to the first Cr leg's id. Or better yet, I can make the Dr leg source_id reference the payable/receivable context more broadly. But to minimize changes, I'll just make sure the first Cr leg's id is captured and used.
+
+Let me rewrite the function carefully:
+
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_confirmed_by INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL
+)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id INT;
+    v_maint_acc_id INT;  -- explicit maintenance account for advance-credit fallback
+    v_desc       TEXT;
+    v_remaining  NUMERIC(15,2) := p_amount;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_bank_acc   INT;
+    rec          RECORD;
+    v_take        NUMERIC(15,2);
+    v_row_residual NUMERIC(15,2);
+    v_row_int      NUMERIC(15,2);
+    v_row_prin     NUMERIC(15,2);
+    v_pay_int      NUMERIC(15,2);
+    v_pay_prin     NUMERIC(15,2);
+    v_fallback_int_acc INT;
+    v_acc_totals   NUMERIC(15,2);  -- accumulated amount per acc_id
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN
+        RAISE EXCEPTION 'Amount must be > 0';
+    END IF;
+
+    SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
+
+    SELECT id INTO v_fallback_int_acc FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    -- Resolve maintenance account explicitly (for advance-credit fallback
+    -- and as the default when no open receivables exist yet).
+    SELECT id INTO v_maint_acc_id FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Society Maintenance Charge%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    FOR rec IN
+        SELECT id, amount, paid_amount, paid_principal, base_amount,
+               interest_amount, acc_id, confirmed_by FROM receivables
+        WHERE entity_id = p_apartment_id AND role = 'apartment'
+          AND status IN ('pending','partial')
+        ORDER BY due_date ASC NULLS LAST, id ASC
+        FOR UPDATE
+    LOOP
+        EXIT WHEN v_remaining <= 0;
+
+        v_row_residual := rec.amount - rec.paid_amount;
+        v_row_int      := LEAST(
+            rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
+            v_row_residual);
+        v_row_int      := GREATEST(v_row_int, 0);
+        v_row_prin     := v_row_residual - v_row_int;
+
+        v_pay_int  := LEAST(v_remaining, v_row_int);
+        v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
+        v_take     := v_pay_int + v_pay_prin;
+        IF v_take <= 0 THEN CONTINUE; END IF;
+
+        UPDATE receivables
+             SET paid_amount    = rec.paid_amount + v_take,
+                 paid_principal = rec.paid_principal + v_pay_prin,
+                 status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
+                                        THEN 'paid' ELSE 'partial' END,
+                 confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
+                 confirmed_at   = NOW()
+             WHERE id = rec.id;
+
+        -- Accumulate per acc_id for the posting phase below.
+        -- Interest legs always go to the row's own interest_acc_id if set,
+        -- otherwise they fold into the base amount's acc_id.
+        IF v_pay_int > 0 THEN
+            IF rec.interest_acc_id IS NOT NULL THEN
+                -- Base principal to the row's acc_id
+                v_acc_totals := COALESCE(v_acc_totals, 0) + v_pay_prin;
+                -- Interest to the interest_acc_id
+                INSERT INTO transactions(
+                    society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                    amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+                ) VALUES (
+                    v_society_id, 'Cr', CURRENT_DATE, rec.interest_acc_id, p_apartment_id, 'apartment',
+                    'Interest on ' || COALESCE(p_particulars, 'Maintenance Payment'),
+                    v_pay_int, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', rec.id, v_journal_id
+                ) RETURNING id INTO v_trx_id;
+            ELSE
+                v_acc_totals := COALESCE(v_acc_totals, 0) + v_take;
+            END IF;
+        ELSE
+            v_acc_totals := COALESCE(v_acc_totals, 0) + v_pay_prin;
+        END IF;
+
+        v_remaining := v_remaining - v_take;
+    END LOOP;
+
+    -- Emit ONE Cr leg per distinct acc_id actually settled, all sharing
+    -- the same journal_id. This is the core fix: previously the entire
+    -- lump payment was credited to whichever single acc_id belonged to
+    -- the oldest receivable, silently misattributing every other line.
+    IF v_acc_totals IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Maintenance Payment'),
+            v_acc_totals, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+        ) RETURNING id INTO v_trx_id;
+    END IF;
+
+    -- Dr: cash / bank paired side (actual amount received)
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            'Cash received - Maintenance Payment',
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_trx_id, v_journal_id
+        );
+    END IF;
+
+    -- Excess beyond every currently-open due is banked as an advance-credit
+    -- row (status='credit') rather than discarded. Use the maintenance account
+    -- explicitly — overpayment is intended as a maintenance credit, not an
+    -- unsolicited extra fund contribution.
+    IF v_remaining > 0 THEN
+        INSERT INTO receivables (
+            society_id, entity_id, role, acc_id, interest_acc_id,
+            description, base_amount, amount, paid_amount, paid_principal,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_apartment_id, 'apartment', v_maint_acc_id,
+            COALESCE(v_fallback_int_acc, v_maint_acc_id),
+            'Advance Credit', v_remaining, v_remaining, 0, 0,
+            'credit', p_confirmed_by, NOW(), NOW()
+        );
+    END IF;
+
+    RETURN QUERY SELECT v_trx_id,
+        (p_amount - v_remaining)::NUMERIC(15,2),
+        v_remaining::NUMERIC(15,2),
+        v_journal_id;
+END;
+$$;
+Wait, I have a bug in my logic. I'm accumulating ALL base amounts into v_acc_totals, but if there are multiple rows with different acc_ids, they should each get their own Cr leg. But I'm using a single v_acc_totals variable.
+
+I need to use an associative array (or a temp table approach) to track per-acc_id totals. In PL/pgSQL, I can use a record array or a simple key-value approach.
+
+Actually, the simplest approach in PL/pgSQL is to use a temporary table or a series of variables. But since the number of distinct accounts per bill is small (typically 3-4), I can just track them in a simple structure.
+
+Let me use a different approach: collect the distinct acc_ids and their totals in a temporary table, then insert from that.
+
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(...)
+LANGUAGE plpgsql AS $$
+DECLARE
+    ...
+    TYPE acc_total_map IS RECORD (
+        acc_id INT,
+        total NUMERIC(15,2)
+    );
+    v_acc_totals acc_total_map[];
+    ...
+BEGIN
+    ...
+    -- In the loop:
+    -- Find or add the acc_id in the array
+    ...
+    -- After the loop:
+    FOR i IN 1..array_upper(v_acc_totals, 1) LOOP
+        INSERT INTO transactions(...) VALUES (... v_acc_totals[i].acc_id, v_acc_totals[i].total ...);
+    END LOOP;
+    ...
+END;
+$$;
+Hmm, PL/pgSQL arrays of records can be tricky. Let me use a simpler approach: a temp table or just a few scalar variables since we know the max number of accounts is small.
+
+Actually, the cleanest approach is to use a unlogged temp table or just do it with a simple key-value tracking using a loop. But in PL/pgSQL, the simplest robust approach is:
+
+DECLARE
+    ...
+    v_acc_1 INT; v_tot_1 NUMERIC(15,2);
+    v_acc_2 INT; v_tot_2 NUMERIC(15,2);
+    v_acc_3 INT; v_tot_3 NUMERIC(15,2);
+    v_acc_4 INT; v_tot_4 NUMERIC(15,2);
+    v_acc_count INT := 0;
+    ...
+Then in the loop, for each distinct acc_id, find or create a slot. After the loop, insert from each slot.
+
+This is a bit verbose but very reliable and doesn't require any PL/pgSQL features that might have version issues.
+
+Actually, let me think about this differently. The task description says: "accumulate v_take into a local per-acc_id structure instead of a single running total. After the loop, emit one Cr transaction leg per distinct acc_id actually touched, for its accumulated amount, all sharing the same journal_id."
+
+So I need per-acc_id accumulation. Let me use a simple temp table approach with a DECLARE block:
+
+Actually, I can just use a regular table variable approach. In PL/pgSQL I can declare a table-like structure... but actually the simplest and most readable approach is to use a JSONB or hstore accumulator, but that requires extensions.
+
+Let me just use the array-of-record approach properly:
+
+DECLARE
+    v_acc_entry RECORD;
+    v_acc_totals NUMERIC(15,2)[] := ARRAY[]::NUMERIC(15,2)[];
+    v_acc_ids INT[] := ARRAY[]::INT[];
+    v_idx INT;
+BEGIN
+    ...
+    -- In loop, after computing v_take:
+    IF v_take > 0 THEN
+        -- Find existing entry for this acc_id
+        v_idx := NULL;
+        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+            IF v_acc_ids[i] = rec.acc_id THEN
+                v_idx := i;
+                EXIT;
+            END IF;
+        END LOOP;
+
+        IF v_idx IS NULL THEN
+            v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+            v_acc_totals := array_append(v_acc_totals, v_take);
+        ELSE
+            v_acc_totals[v_idx] := v_acc_totals[v_idx] + v_take;
+        END IF;
+    END IF;
+    ...
+This is clean enough. Let me write the full function now.
+
+Wait, actually I realize there's another issue. The current code's interest handling is more complex. Looking at fn_verify_receivable:
+
+If interest_acc_id is set and there's interest to post, it posts TWO legs: one Cr to acc_id for base, one Cr to interest_acc_id for interest
+If no interest_acc_id or no interest, it posts ONE leg to acc_id for the full amount
+For fn_pay_apartment_dues_fifo, I should mirror this behavior per row. But wait, the current function doesn't do this at all - it just posts one lump Cr leg. That's actually part of the bug - it doesn't split interest vs principal in the ledger either.
+
+Looking at the current function more carefully:
+
+It computes v_pay_int and v_pay_prin per row
+It updates paid_amount and paid_principal correctly
+But it posts ONE Cr leg for the FULL p_amount upfront
+So the interest/principal split is tracked in receivables but NOT posted to separate ledger accounts. For the fix, I should:
+
+For each row, if there's interest portion AND the row has interest_acc_id, post interest to interest_acc_id
+Post principal portion to the row's acc_id
+If no interest_acc_id, post the full v_take to acc_id
+Let me rewrite this more carefully.
+
+Actually, looking at the current code again, I see that the upfront Cr leg uses v_acc_id which comes from the OLDEST receivable. And the Dr leg also uses the full p_amount. The loop then correctly updates paid_amount/paid_principal.
+
+For my rewrite, I need to be careful about:
+
+The Dr leg should still be for the full p_amount (cash received)
+The Cr legs should be split per account
+Interest should go to interest_acc_id if set
+The advance credit should use the maintenance account
+Let me also check: does the current code handle the case where a row has interest_acc_id set? Looking at line 2410-2413, it resolves v_fallback_int_acc but never uses it in the posting (only in the advance credit block). So currently, interest is NOT posted to a separate account in the FIFO path - it's all lumped into the main acc_id.
+
+For the rewrite, I should fix this too - post interest to interest_acc_id when it exists. This is consistent with fn_verify_receivable's behavior.
+
+Let me write the complete new function:
+
+DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_confirmed_by INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL
+)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id INT;
+    v_maint_acc_id INT;
+    v_desc       TEXT;
+    v_remaining  NUMERIC(15,2) := p_amount;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_bank_acc   INT;
+    rec          RECORD;
+    v_take        NUMERIC(15,2);
+    v_row_residual NUMERIC(15,2);
+    v_row_int      NUMERIC(15,2);
+    v_row_prin     NUMERIC(15,2);
+    v_pay_int      NUMERIC(15,2);
+    v_pay_prin     NUMERIC(15,2);
+    v_fallback_int_acc INT;
+    v_acc_ids      INT[] := ARRAY[]::INT[];
+    v_acc_totals   NUMERIC(15,2)[] := ARRAY[]::NUMERIC(15,2)[];
+    v_acc_idx      INT;
+    v_i            INT;
+    v_first_trx_id INT;
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN
+        RAISE EXCEPTION 'Amount must be > 0';
+    END IF;
+
+    SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
+
+    SELECT id INTO v_fallback_int_acc FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    -- Resolve maintenance account explicitly — used for advance-credit
+    -- fallback (overpayment is a maintenance credit, not a fund contribution).
+    SELECT id INTO v_maint_acc_id FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Society Maintenance Charge%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    IF v_maint_acc_id IS NULL THEN
+        RAISE EXCEPTION 'Maintenance account not found for society %', v_society_id;
+    END IF;
+
+    v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    FOR rec IN
+        SELECT id, amount, paid_amount, paid_principal, base_amount,
+               interest_amount, interest_acc_id, acc_id, confirmed_by
+          FROM receivables
+         WHERE entity_id = p_apartment_id AND role = 'apartment'
+           AND status IN ('pending','partial')
+         ORDER BY due_date ASC NULLS LAST, id ASC
+         FOR UPDATE
+    LOOP
+        EXIT WHEN v_remaining <= 0;
+
+        v_row_residual := rec.amount - rec.paid_amount;
+        v_row_int      := LEAST(
+            rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
+            v_row_residual);
+        v_row_int      := GREATEST(v_row_int, 0);
+        v_row_prin     := v_row_residual - v_row_int;
+
+        v_pay_int  := LEAST(v_remaining, v_row_int);
+        v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
+        v_take     := v_pay_int + v_pay_prin;
+        IF v_take <= 0 THEN CONTINUE; END IF;
+
+        UPDATE receivables
+             SET paid_amount    = rec.paid_amount + v_take,
+                 paid_principal = rec.paid_principal + v_pay_prin,
+                 status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
+                                        THEN 'paid' ELSE 'partial' END,
+                 confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
+                 confirmed_at   = NOW()
+             WHERE id = rec.id;
+
+        -- Post interest leg first if this row has a separate interest account
+        IF v_pay_int > 0 AND rec.interest_acc_id IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_society_id, 'Cr', CURRENT_DATE, rec.interest_acc_id, p_apartment_id, 'apartment',
+                'Interest on ' || COALESCE(p_particulars, 'Maintenance Payment'),
+                v_pay_int, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', rec.id, v_journal_id
+            ) RETURNING id INTO v_trx_id;
+            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+        END IF;
+
+        -- Accumulate principal portion for the row's acc_id
+        IF v_pay_prin > 0 THEN
+            v_acc_idx := NULL;
+            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                IF v_acc_ids[i] = rec.acc_id THEN
+                    v_acc_idx := i;
+                    EXIT;
+                END IF;
+            END LOOP;
+
+            IF v_acc_idx IS NULL THEN
+                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+                v_acc_totals := array_append(v_acc_totals, v_pay_prin);
+            ELSE
+                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_prin;
+            END IF;
+        END IF;
+
+        -- If no separate interest account, the interest portion also goes
+        -- to the row's acc_id (same as fn_verify_receivable's ELSE branch).
+        IF v_pay_int > 0 AND rec.interest_acc_id IS NULL THEN
+            v_acc_idx := NULL;
+            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                IF v_acc_ids[i] = rec.acc_id THEN
+                    v_acc_idx := i;
+                    EXIT;
+                END IF;
+            END LOOP;
+
+            IF v_acc_idx IS NULL THEN
+                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+                v_acc_totals := array_append(v_acc_totals, v_pay_int);
+            ELSE
+                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_int;
+            END IF;
+        END IF;
+
+        v_remaining := v_remaining - v_take;
+    END LOOP;
+
+    -- Emit ONE Cr leg per distinct acc_id actually settled, all sharing
+    -- the same journal_id. This is the core fix: previously the entire
+    -- lump payment was credited to whichever single acc_id belonged to
+    -- the oldest receivable, silently misattributing every other line.
+    IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
+        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, journal_id
+            ) VALUES (
+                v_society_id, 'Cr', CURRENT_DATE, v_acc_ids[i], p_apartment_id, 'apartment',
+                COALESCE(p_particulars, 'Maintenance Payment'),
+                v_acc_totals[i], p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+            ) RETURNING id INTO v_trx_id;
+            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+        END LOOP;
+    END IF;
+
+    -- Dr: cash / bank paired side (actual amount received)
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            'Cash received - Maintenance Payment',
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_first_trx_id, v_journal_id
+        );
+    END IF;
+
+    -- Excess beyond every currently-open due is banked as an advance-credit
+    -- row (status='credit') rather than discarded. Use the maintenance account
+    -- explicitly — overpayment is intended as a maintenance credit, not an
+    -- unsolicited extra fund contribution.
+    IF v_remaining > 0 THEN
+        INSERT INTO receivables (
+            society_id, entity_id, role, acc_id, interest_acc_id,
+            description, base_amount, amount, paid_amount, paid_principal,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_apartment_id, 'apartment', v_maint_acc_id,
+            COALESCE(v_fallback_int_acc, v_maint_acc_id),
+            'Advance Credit', v_remaining, v_remaining, 0, 0,
+            'credit', p_confirmed_by, NOW(), NOW()
+        );
+    END IF;
+
+    RETURN QUERY SELECT v_first_trx_id,
+        (p_amount - v_remaining)::NUMERIC(15,2),
+        v_remaining::NUMERIC(15,2),
+        v_journal_id;
+END;
+$$;
+This is getting quite long. Let me make sure the logic is correct:
+
+v_maint_acc_id is resolved once at the start
+In the loop, for each row:
+Update receivables as before
+If interest portion > 0 and interest_acc_id is set, post interest Cr leg immediately
+Accumulate principal (and interest if no separate interest_acc_id) per acc_id in arrays
+After loop, post one Cr leg per distinct acc_id
+Post Dr leg to bank
+Advance credit uses v_maint_acc_id
+Wait, there's an issue with the interest leg. If I post interest legs inside the loop, they all share the same journal_id but are interleaved with the accumulation. That's fine - they're all part of the same journal.
+
+But wait, what if there's no row with interest_acc_id but there IS interest? Then the interest gets accumulated into the base acc_id's total, which is correct (same as fn_verify_receivable's ELSE branch).
+
+Actually, I realize there might be a simpler approach. Instead of tracking per-acc_id totals in arrays, I could just post the Cr legs inside the loop as I process each row, since each row's acc_id is known at that point. But that would mean posting Cr legs before knowing the total, which is fine for double-entry - each leg is independent.
+
+Wait, but if I post inside the loop, I need to make sure I don't post the full v_take if part of it is interest that goes to a different account. Let me think...
+
+Actually, the simplest correct approach is:
+
+For each row in the loop:
+If interest portion and interest_acc_id: post interest Cr leg
+Post principal Cr leg to rec.acc_id
+After loop, post Dr leg to bank
+But this changes the order of operations from the current code (which posts Cr and Dr before the loop). It shouldn't matter functionally, but it IS a bigger change.
+
+Actually, I think the cleanest approach that matches the task description is:
+
+Loop through rows, updating receivables and accumulating per-acc_id
+After loop, post all Cr legs
+Post Dr leg
+This groups all the income-side legs together, then the cash side, which is cleaner for auditing.
+
+Let me refine my implementation. I'll post the interest legs inside the loop (they're per-row and don't depend on the accumulation), and accumulate the principal portions for batch posting after the loop.
+
+Actually, for even cleaner code, let me post ALL Cr legs inside the loop. Each row's portion is known when we process that row. The only reason to batch them is if we want to minimize the number of INSERT statements, but that's not a real concern for a few rows.
+
+But the task description specifically says: "After the loop, emit one Cr transaction leg per distinct acc_id actually touched, for its accumulated amount, all sharing the same journal_id."
+
+So I should accumulate and batch post. Let me stick with that approach but make it cleaner.
+
+One more issue: what about the case where a bill has multiple rows with the SAME acc_id? For example, two maintenance rows for different periods but same account. In that case, we should still emit ONE Cr leg for the total of both rows. My array accumulation handles this correctly.
+
+OK let me finalize the function. I'll be careful about:
+
+The v_first_trx_id tracking - it should capture the ID of the FIRST transaction leg inserted (whether it's an interest leg or a principal leg), so the Dr leg can reference it
+The arrays start empty and grow as needed
+The advance credit uses v_maint_acc_id
+Let me write this out properly.
+
+/home/at/Documents/ApexEstateHub/database/estatehub.sql -- Bulk FIFO payment across monthly rows (Pay Dues button). -- Posts ONE journal (income side + cash Dr side) for the whole payment. -- FIX (2026-08): the income side now emits ONE Cr leg per DISTINCT acc_id -- actually settled, rather than a single lump leg against whichever account -- belonged to the oldest receivable. Without this, split bills (maintenance -- + sinking + repair) silently misattribute every rupee beyond the first -- row's account to the wrong ledger account — dues tracking looks correct, -- the trial balance is wrong. DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo( p_apartment_id INT, p_amount NUMERIC, p_mode VARCHAR DEFAULT 'cash', p_confirmed_by INT DEFAULT NULL, p_particulars TEXT DEFAULT NULL ) RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT) LANGUAGE plpgsql AS $$ DECLARE v_society_id INT; v_maint_acc_id INT; v_desc TEXT; v_remaining NUMERIC(15,2) := p_amount; v_trx_id INT; v_journal_id INT; v_bank_acc INT; rec RECORD; v_take NUMERIC(15,2); v_row_residual NUMERIC(15,2); v_row_int NUMERIC(15,2); v_row_prin NUMERIC(15,2); v_pay_int NUMERIC(15,2); v_pay_prin NUMERIC(15,2); v_fallback_int_acc INT; v_acc_ids INT[] := ARRAY[]::INT[]; v_acc_totals NUMERIC(15,2)[] := ARRAY[]::NUMERIC(15,2)[]; v_acc_idx INT; i INT; v_first_trx_id INT; BEGIN IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+
+SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
+
+SELECT id INTO v_fallback_int_acc FROM accounts
+WHERE society_id = v_society_id
+  AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr'
+LIMIT 1;
+
+-- Resolve maintenance account explicitly — used for advance-credit
+-- fallback (overpayment is a maintenance credit, not a fund contribution).
+SELECT id INTO v_maint_acc_id FROM accounts
+WHERE society_id = v_society_id
+  AND name ILIKE '%Society Maintenance Charge%'
+  AND drcr_account = 'Cr'
+LIMIT 1;
+
+IF v_maint_acc_id IS NULL THEN
+    RAISE EXCEPTION 'Maintenance account not found for society %', v_society_id;
+END IF;
+
+v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
+v_journal_id := NEXTVAL('seq_transaction_number');
+
+FOR rec IN
+    SELECT id, amount, paid_amount, paid_principal, base_amount,
+           interest_amount, interest_acc_id, acc_id, confirmed_by
+      FROM receivables
+     WHERE entity_id = p_apartment_id AND role = 'apartment'
+       AND status IN ('pending','partial')
+     ORDER BY due_date ASC NULLS LAST, id ASC
+     FOR UPDATE
+LOOP
+    EXIT WHEN v_remaining <= 0;
+
+    v_row_residual := rec.amount - rec.paid_amount;
+    v_row_int      := LEAST(
+        rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
+        v_row_residual);
+    v_row_int      := GREATEST(v_row_int, 0);
+    v_row_prin     := v_row_residual - v_row_int;
+
+    v_pay_int  := LEAST(v_remaining, v_row_int);
+    v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
+    v_take     := v_pay_int + v_pay_prin;
+    IF v_take <= 0 THEN CONTINUE; END IF;
+
+    UPDATE receivables
+         SET paid_amount    = rec.paid_amount + v_take,
+             paid_principal = rec.paid_principal + v_pay_prin,
+             status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
+                                    THEN 'paid' ELSE 'partial' END,
+             confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
+             confirmed_at   = NOW()
+         WHERE id = rec.id;
+
+    -- Post interest leg immediately if this row has a separate interest
+    -- account (mirrors fn_verify_receivable's two-leg behavior).
+    IF v_pay_int > 0 AND rec.interest_acc_id IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, rec.interest_acc_id, p_apartment_id, 'apartment',
+            'Interest on ' || COALESCE(p_particulars, 'Maintenance Payment'),
+            v_pay_int, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', rec.id, v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+    END IF;
+
+    -- Accumulate principal (and interest when no separate interest_acc_id)
+    -- per acc_id for batch posting after the loop.
+    IF v_pay_prin > 0 THEN
+        v_acc_idx := NULL;
+        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+            IF v_acc_ids[i] = rec.acc_id THEN
+                v_acc_idx := i;
+                EXIT;
+            END IF;
+        END LOOP;
+
+        IF v_acc_idx IS NULL THEN
+            v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+            v_acc_totals := array_append(v_acc_totals, v_pay_prin);
+        ELSE
+            v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_prin;
+        END IF;
+    END IF;
+
+    IF v_pay_int > 0 AND rec.interest_acc_id IS NULL THEN
+        v_acc_idx := NULL;
+        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+            IF v_acc_ids[i] = rec.acc_id THEN
+                v_acc_idx := i;
+                EXIT;
+            END IF;
+        END LOOP;
+
+        IF v_acc_idx IS NULL THEN
+            v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+            v_acc_totals := array_append(v_acc_totals, v_pay_int);
+        ELSE
+            v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_int;
+        END IF;
+    END IF;
+
+    v_remaining := v_remaining - v_take;
+END LOOP;
+
+-- Emit ONE Cr leg per distinct acc_id actually settled, all sharing
+-- the same journal_id. This is the core fix: previously the entire
+-- lump payment was credited to whichever single acc_id belonged to
+-- the oldest receivable, silently misattributing every other line.
+IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
+    FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, v_acc_ids[i], p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Maintenance Payment'),
+            v_acc_totals[i], p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+    END LOOP;
+END IF;
+
+-- Dr: cash / bank paired side (actual amount received)
+IF v_bank_acc IS NOT NULL THEN
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+        'Cash received - Maintenance Payment',
+        p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_first_trx_id, v_journal_id
+    );
+END IF;
+
+-- Excess beyond every currently-open due is banked as an advance-credit
+-- row (status='credit') rather than discarded. Use the maintenance account
+-- explicitly — overpayment is intended as a maintenance credit, not an
+-- unsolicited extra fund contribution.
+IF v_remaining > 0 THEN
+    INSERT INTO receivables (
+        society_id, entity_id, role, acc_id, interest_acc_id,
+        description, base_amount, amount, paid_amount, paid_principal,
+        status, confirmed_by, confirmed_at, created_at
+    ) VALUES (
+        v_society_id, p_apartment_id, 'apartment', v_maint_acc_id,
+        COALESCE(v_fallback_int_acc, v_maint_acc_id),
+        'Advance Credit', v_remaining, v_remaining, 0, 0,
+        'credit', p_confirmed_by, NOW(), NOW()
+    );
+END IF;
+
+RETURN QUERY SELECT v_first_trx_id,
+    (p_amount - v_remaining)::NUMERIC(15,2),
+    v_remaining::NUMERIC(15,2),
+    v_journal_id;
+END; $$;
+
+
+Please check for syntax errors, return types within functions

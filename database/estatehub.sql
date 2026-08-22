@@ -1746,7 +1746,11 @@ BEGIN
 END;
 $$;
 
--- Generates one receivable row per apartment per calendar month.
+-- Generates multi-line receivable rows per apartment per calendar month.
+-- Each bill is split into: maintenance + sinking fund + repair fund + GST
+-- (if applicable). All lines for one apartment/period share one bill_group_id.
+DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -1761,17 +1765,28 @@ DECLARE
     v_overlap_days       INT;
     apt           RECORD;
     charge        RECORD;
-    v_base        NUMERIC(10,2);
+    v_base_maint  NUMERIC(10,2);
+    v_base_sinking NUMERIC(10,2);
+    v_base_repair  NUMERIC(10,2);
+    v_gst_cgst    NUMERIC(10,2);
+    v_gst_sgst    NUMERIC(10,2);
     v_due_date    DATE;
     v_desc        TEXT;
-    -- fallback account IDs resolved once per society call
+    v_bill_group_id UUID;
     v_fallback_maint_acc  INT;
     v_fallback_int_acc    INT;
+    v_sinking_acc_id      INT;
+    v_repair_acc_id       INT;
+    v_cgst_acc_id         INT;
+    v_sgst_acc_id         INT;
+    v_society_turnover    NUMERIC(15,2);
+    v_current_fy          INT;
+    v_cached_fy           INT := -1;
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
-    IF v_society_calc_start IS NULL THEN RETURN; END IF;
+    IF NOT FOUND THEN RETURN; END IF;
 
-    -- Resolve fallback accounts ONCE (same logic as fn_pay_apartment_dues_fifo)
+    -- Resolve fallback accounts once per society
     SELECT id INTO v_fallback_maint_acc FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Society Maintenance Charge%'
@@ -1781,6 +1796,32 @@ BEGIN
     SELECT id INTO v_fallback_int_acc FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Due Interest%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    -- Resolve fund / GST accounts once per society (NULL = not configured,
+    -- caller skips that line)
+    SELECT id INTO v_sinking_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%Sinking Fund%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    SELECT id INTO v_repair_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%Repair Fund%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    SELECT id INTO v_cgst_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%CGST Payable%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
+
+    SELECT id INTO v_sgst_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE '%SGST Payable%'
       AND drcr_account = 'Cr'
     LIMIT 1;
 
@@ -1806,15 +1847,16 @@ BEGIN
             v_days_in_month := (v_month_end - v_month_start + 1);
 
             SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
-                   apt_interest_pct, start_date, end_date
-            INTO charge
-            FROM apt_charges_fines_basis
-            WHERE society_id = p_society_id AND apt_status = TRUE
-              AND (apt_id = apt.id OR apt_id IS NULL)
-              AND start_date <= v_month_end
-              AND (end_date IS NULL OR end_date >= v_month_start)
-            ORDER BY apt_id NULLS LAST, start_date DESC
-            LIMIT 1;
+                   apt_interest_pct, start_date, end_date,
+                   apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest
+              INTO charge
+              FROM apt_charges_fines_basis
+             WHERE society_id = p_society_id AND apt_status = TRUE
+               AND (apt_id = apt.id OR apt_id IS NULL)
+               AND start_date <= v_month_end
+               AND (end_date IS NULL OR end_date >= v_month_start)
+             ORDER BY apt_id NULLS LAST, start_date DESC
+             LIMIT 1;
 
             IF charge.apt_maintenance_rate IS NULL THEN
                 charge.apt_maintenance_amount := NULL;
@@ -1823,6 +1865,9 @@ BEGIN
                 charge.apt_interest_pct       := 1.75;
                 charge.start_date             := v_month_start;
                 charge.end_date               := v_month_end;
+                charge.apt_sinking_fund_rate  := 0;
+                charge.apt_repair_fund_rate   := 0;
+                charge.charges_interest       := TRUE;
             END IF;
 
             v_overlap_start := GREATEST(v_month_start, charge.start_date, v_calc_start);
@@ -1834,27 +1879,116 @@ BEGIN
                 CONTINUE;
             END IF;
 
+            -- Maintenance base amount (existing logic, unchanged)
             IF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
-                v_base := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
+                v_base_maint := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE
-                v_base := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
+                v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            END IF;
+
+            -- Sinking fund and repair fund (per-sq-ft, same proration)
+            v_base_sinking := ROUND(apt.apartment_size * COALESCE(charge.apt_sinking_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            v_base_repair  := ROUND(apt.apartment_size * COALESCE(charge.apt_repair_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
+
+            -- GST threshold check (per-apartment maintenance > 7500 AND society turnover > 20L)
+            v_current_fy := CASE WHEN EXTRACT(MONTH FROM v_month) >= 4 THEN EXTRACT(YEAR FROM v_month)::INT ELSE (EXTRACT(YEAR FROM v_month)::INT - 1) END;
+            IF v_current_fy != v_cached_fy THEN
+                SELECT fn_society_turnover_fy(p_society_id, v_current_fy) INTO v_society_turnover;
+                v_cached_fy := v_current_fy;
+            END IF;
+
+            IF v_base_maint > 7500 AND COALESCE(v_society_turnover, 0) > 2000000 THEN
+                v_gst_cgst := ROUND(v_base_maint * 0.09, 2);
+                v_gst_sgst := ROUND(v_base_maint * 0.09, 2);
+            ELSE
+                v_gst_cgst := 0;
+                v_gst_sgst := 0;
             END IF;
 
             v_due_date := (v_month + ((COALESCE(charge.apt_due_day,5) - 1) * INTERVAL '1 day'))::DATE;
-            v_desc     := 'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY');
+            v_bill_group_id := gen_random_uuid();
 
-            INSERT INTO receivables (
-                society_id, entity_id, role,
-                acc_id, interest_acc_id,
-                description, period_month,
-                base_amount, amount, paid_principal, due_date, status, created_at
-            ) VALUES (
-                p_society_id, apt.id, 'apartment',
-                v_fallback_maint_acc, v_fallback_int_acc,
-                v_desc, v_month,
-                v_base, v_base, 0, v_due_date, 'pending', NOW()
-            )
-            ON CONFLICT DO NOTHING;
+            -- Maintenance line
+            IF v_base_maint > 0 THEN
+                INSERT INTO receivables (
+                    society_id, entity_id, role, bill_group_id,
+                    acc_id, interest_acc_id,
+                    description, period_month,
+                    base_amount, amount, paid_principal, due_date, status, created_at
+                ) VALUES (
+                    p_society_id, apt.id, 'apartment', v_bill_group_id,
+                    v_fallback_maint_acc,
+                    CASE WHEN charge.charges_interest THEN v_fallback_int_acc ELSE NULL END,
+                    'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
+                    v_base_maint, v_base_maint, 0, v_due_date, 'pending', NOW()
+                )
+                ON CONFLICT DO NOTHING;
+            END IF;
+
+            -- Sinking fund line
+            IF v_base_sinking > 0 AND v_sinking_acc_id IS NOT NULL THEN
+                INSERT INTO receivables (
+                    society_id, entity_id, role, bill_group_id,
+                    acc_id, interest_acc_id,
+                    description, period_month,
+                    base_amount, amount, paid_principal, due_date, status, created_at
+                ) VALUES (
+                    p_society_id, apt.id, 'apartment', v_bill_group_id,
+                    v_sinking_acc_id,
+                    CASE WHEN charge.charges_interest THEN v_fallback_int_acc ELSE NULL END,
+                    'Sinking Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
+                    v_base_sinking, v_base_sinking, 0, v_due_date, 'pending', NOW()
+                )
+                ON CONFLICT DO NOTHING;
+            END IF;
+
+            -- Repair fund line
+            IF v_base_repair > 0 AND v_repair_acc_id IS NOT NULL THEN
+                INSERT INTO receivables (
+                    society_id, entity_id, role, bill_group_id,
+                    acc_id, interest_acc_id,
+                    description, period_month,
+                    base_amount, amount, paid_principal, due_date, status, created_at
+                ) VALUES (
+                    p_society_id, apt.id, 'apartment', v_bill_group_id,
+                    v_repair_acc_id,
+                    CASE WHEN charge.charges_interest THEN v_fallback_int_acc ELSE NULL END,
+                    'Repair Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
+                    v_base_repair, v_base_repair, 0, v_due_date, 'pending', NOW()
+                )
+                ON CONFLICT DO NOTHING;
+            END IF;
+
+            -- GST lines (CGST + SGST, both required for a valid GST collection)
+            IF v_gst_cgst > 0 AND v_cgst_acc_id IS NOT NULL THEN
+                INSERT INTO receivables (
+                    society_id, entity_id, role, bill_group_id,
+                    acc_id, interest_acc_id,
+                    description, period_month,
+                    base_amount, amount, paid_principal, due_date, status, created_at
+                ) VALUES (
+                    p_society_id, apt.id, 'apartment', v_bill_group_id,
+                    v_cgst_acc_id, NULL,
+                    'CGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
+                    v_gst_cgst, v_gst_cgst, 0, v_due_date, 'pending', NOW()
+                )
+                ON CONFLICT DO NOTHING;
+            END IF;
+
+            IF v_gst_sgst > 0 AND v_sgst_acc_id IS NOT NULL THEN
+                INSERT INTO receivables (
+                    society_id, entity_id, role, bill_group_id,
+                    acc_id, interest_acc_id,
+                    description, period_month,
+                    base_amount, amount, paid_principal, due_date, status, created_at
+                ) VALUES (
+                    p_society_id, apt.id, 'apartment', v_bill_group_id,
+                    v_sgst_acc_id, NULL,
+                    'SGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
+                    v_gst_sgst, v_gst_sgst, 0, v_due_date, 'pending', NOW()
+                )
+                ON CONFLICT DO NOTHING;
+            END IF;
 
             v_month := (v_month + INTERVAL '1 month')::DATE;
         END LOOP;
@@ -3766,7 +3900,7 @@ CREATE OR REPLACE FUNCTION fn_receivables_named(
 RETURNS TABLE (
     id INT, society_id INT, entity_id INT, role VARCHAR(10), entity_name TEXT,
     acc_id INT, account_name TEXT, interest_acc_id INT, interest_account_name TEXT,
-    description TEXT, period_month DATE,
+    description TEXT, period_month DATE, bill_group_id UUID,
     base_amount NUMERIC(10,2), interest_amount NUMERIC(10,2),
     amount NUMERIC(10,2), paid_amount NUMERIC(10,2), residual NUMERIC(10,2),
     due_date DATE, status VARCHAR(20), days_overdue INT,
@@ -3785,7 +3919,7 @@ BEGIN
         COALESCE(a.name,'—')::TEXT,
         r.interest_acc_id::INT,
         COALESCE(ia.name,'—')::TEXT,
-        r.description::TEXT, r.period_month::DATE,
+        r.description::TEXT, r.period_month::DATE, r.bill_group_id::UUID,
         r.base_amount::NUMERIC(10,2), r.interest_amount::NUMERIC(10,2),
         r.amount::NUMERIC(10,2), r.paid_amount::NUMERIC(10,2),
         (r.amount - r.paid_amount)::NUMERIC(10,2),
