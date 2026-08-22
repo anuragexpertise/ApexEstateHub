@@ -847,6 +847,39 @@ CREATE TABLE IF NOT EXISTS society_compliance_settings (
 
 CREATE INDEX IF NOT EXISTS idx_society_compliance_settings_society ON society_compliance_settings (society_id);
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- KPI RULE LINKS — external "Rules & Regulations" links surfaced in the
+-- compliance-settings banner (and any future KPI context). Stored in the DB
+-- rather than hardcoded so admins can add/retire links without a code deploy,
+-- and so state-specific statutes (UP Apartment Act, Maharashtra Bye-Laws,
+-- etc.) can coexist with Union-law links (CBIC, Income Tax) that apply
+-- nationwide. The banner renderer joins these by category + state at render
+-- time.
+-- ════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS kpi_rule_links (
+    id SERIAL PRIMARY KEY,
+    category VARCHAR(50) NOT NULL CHECK (category IN (
+        'sinking_fund', 'repair_fund', 'fund_gst', 'fund_interest',
+        'gst_registered', 'tds_no_pan', 'rera', 'apartment_act',
+        'cooperative_act', 'income_tax_mutuality', 'other'
+    )),
+    state VARCHAR(10) NOT NULL DEFAULT 'ALL'
+        CHECK (state IN ('ALL','UP','MH','KA','TN','DL','RJ','MP','WB','GJ','TS','AP','BR','HR','PB','KL')),
+    label VARCHAR(200) NOT NULL,
+    url TEXT NOT NULL,
+    description TEXT,
+    sort_order INT NOT NULL DEFAULT 100,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    effective_from DATE,
+    effective_to DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_category ON kpi_rule_links (category);
+CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_state ON kpi_rule_links (state);
+CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_active ON kpi_rule_links (is_active);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,

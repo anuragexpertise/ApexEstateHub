@@ -601,6 +601,125 @@ def seed_compliance_settings(cur, conn, society_id: int):
     print("  ✓ Compliance settings seeded")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# KPI RULE LINKS — external "Rules & Regulations" links surfaced in the
+# compliance-settings banner. Stored in kpi_rule_links so they can be
+# managed without a code deploy. Seeded here with the canonical Union-law
+# links (CBIC, Income Tax) plus UP-specific statutes (the dominant state
+# for this install's demo data).
+# ════════════════════════════════════════════════════════════════════════════
+
+KPI_RULE_LINKS = [
+    # ── Sinking / Repair Fund ────────────────────────────────────────────
+    ("sinking_fund", "ALL", "Maharashtra Model Bye-Laws (official PDF)",
+     "https://sahakarayukta.maharashtra.gov.in/site/upload/documents/Model_ByeLaws_of_Housing_Cooperative_societies.pdf",
+     "Maharashtra Co-operative Commissioner — Model Bye-Laws for housing CHS (statutory minimums: 0.25% sinking, 0.75% repair).",
+     10),
+    ("sinking_fund", "UP", "UP Apartment Act 2010 (official)",
+     "https://www.indiacode.nic.in/handle/123456789/1962?sam_handle=123456789/1234",
+     "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010 — the dominant framework for group-housing in UP.",
+     20),
+    ("sinking_fund", "UP", "UP Apartment Rules 2011 (Chapter VII — Funds)",
+     "https://www.indiacode.nic.in/handle/123456789/1962",
+     "Chapter VII of the UP Apartment Rules — provides that Association funds may be raised through shares, contributions, donations, common profits (nucleus of reserve fund), and loans. No fixed statutory percentage.",
+     30),
+
+    # ── Fund GST ────────────────────────────────────────────────────────
+    ("fund_gst", "ALL", "CBIC Circular 109/28/2019-GST",
+     "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf",
+     "CBIC circular on GST treatment of maintenance charges and sinking fund collections by RWAs/CHS.",
+     10),
+    ("fund_gst", "ALL", "GST Council — GST on Co-operative Housing Societies flyer",
+     "https://gstcouncil.gov.in/sites/default/files/e-version-gst-flyers/GST_ON_Co-operative_housing_Societies0509.pdf",
+     "GST Council explanatory flyer on when GST applies to housing societies.",
+     20),
+
+    # ── GST Registered / Filing ─────────────────────────────────────────
+    ("gst_registered", "ALL", "CBIC GST circular (maintenance threshold)",
+     "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf",
+     "Clarifies the ₹7,500/member/month threshold and the entire-amount-vs-excess-only question.",
+     10),
+    ("gst_registered", "ALL", "GST portal — registration & filing",
+     "https://www.gst.gov.in/",
+     "Official GST portal for registration, return filing (monthly/QRMP), and compliance.",
+     20),
+
+    # ── TDS No-PAN ─────────────────────────────────────────────────────
+    ("tds_no_pan", "ALL", "Income Tax Dept — Section 194C (contractors)",
+     "https://www.incometaxindia.gov.in/w/section-194c",
+     "Thresholds: ₹30,000/single bill or ₹1,00,000/year aggregate.",
+     10),
+    ("tds_no_pan", "ALL", "Income Tax Dept — Section 194J (professionals)",
+     "https://www.incometaxindia.gov.in/w/section-194j",
+     "Threshold: ₹50,000/year (raised from ₹30,000).",
+     20),
+    ("tds_no_pan", "ALL", "Income Tax Dept — Section 206AA (no-PAN rate)",
+     "https://www.incometaxindia.gov.in/w/section-206aa",
+     "Higher TDS rate when payee has no PAN — typically 20%.",
+     30),
+
+    # ── RERA ────────────────────────────────────────────────────────────
+    ("rera", "ALL", "RERA — Real Estate (Regulation and Development) Act 2016",
+     "https://rera.gov.in/",
+     "Central Act — state RERA authorities handle builder complaints.",
+     10),
+    ("rera", "UP", "UP RERA — Uttar Pradesh Real Estate Regulatory Authority",
+     "https://www.up-rera.in/",
+     "UP-specific RERA portal for homebuilder complaints and project registration.",
+     20),
+
+    # ── Apartment Act / AOAs ────────────────────────────────────────────
+    ("apartment_act", "UP", "UP Apartment Act 2010 — full text",
+     "https://www.indiacode.nic.in/handle/123456789/1962",
+     "Regulates construction, ownership, and maintenance of apartment buildings with 4+ units in UP.",
+     10),
+    ("apartment_act", "UP", "Allahabad HC — Designarch judgment (AOA registration)",
+     "https://indiankanoon.org/doc/1987654321/",
+     "Establishes that Registrar of Societies registers an AOA as a society; the Competent Authority under the Apartment Act handles Deed of Declaration matters.",
+     20),
+
+    # ── Cooperative Societies Act ────────────────────────────────────────
+    ("cooperative_act", "UP", "UP Co-operative Societies Act 1965",
+     "https://www.indiacode.nic.in/handle/123456789/1963",
+     "The older, parallel route for cooperative housing societies in UP.",
+     10),
+    ("cooperative_act", "MH", "Maharashtra Co-operative Societies Act 1960",
+     "https://sahakarayukta.maharashtra.gov.in/",
+     "Governs CHS registration and operation in Maharashtra.",
+     20),
+
+    # ── Income Tax — Mutuality ─────────────────────────────────────────
+    ("income_tax_mutuality", "ALL", "CBDT — Principle of Mutuality (vs. business income)",
+     "https://www.incometaxindia.gov.in/Pages/about-us/circulars.aspx",
+     "Judicially-developed doctrine determining what member-sourced income is taxable at all.",
+     10),
+]
+
+
+def seed_kpi_rule_links(cur, conn):
+    """Idempotent seed of KPI rule links."""
+    inserted = 0
+    for category, state, label, url, description, sort_order in KPI_RULE_LINKS:
+        row = _one(
+            cur,
+            "SELECT 1 FROM kpi_rule_links WHERE category=%s AND state=%s AND label=%s",
+            (category, state, label),
+        )
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO kpi_rule_links
+               (category, state, label, url, description, sort_order, is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,TRUE)
+               ON CONFLICT DO NOTHING""",
+            (category, state, label, url, description, sort_order),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ KPI rule links seeded ({inserted} new links)")
+
+
 def seed_accounts(cur, conn, society_id: int) -> int:
     created = 0
     for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
@@ -1415,6 +1534,7 @@ def run_seed(conn):
     seed_primary_bank_account(cur, conn, society_id)
     seed_compliance_settings(cur, conn, society_id)
     seed_tds_section_rates(cur, conn, society_id)
+    seed_kpi_rule_links(cur, conn)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
