@@ -2370,8 +2370,85 @@ BEGIN
 END;
 $$;
 
+-- Bill-group verify wrapper: settles a whole bill_group_id as one payment,
+-- calling fn_verify_receivable per row (FIFO within the group). Low-risk
+-- because it reuses the already-correct single-row primitive rather than
+-- reimplementing posting logic.
+DROP FUNCTION IF EXISTS fn_verify_receivable_by_bill_group (UUID, INT, VARCHAR, NUMERIC) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_verify_receivable_by_bill_group(
+    p_bill_group_id UUID,
+    p_confirmed_by  INT,
+    p_mode          VARCHAR DEFAULT 'cash',
+    p_amount        NUMERIC DEFAULT NULL
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_rec       RECORD;
+    v_remaining NUMERIC(15,2);
+    v_take      NUMERIC(15,2);
+    v_residual  NUMERIC(15,2);
+    v_msg       TEXT;
+    v_first     BOOLEAN := TRUE;
+BEGIN
+    IF p_amount IS NOT NULL AND p_amount <= 0 THEN
+        RETURN 'Error: amount must be > 0';
+    END IF;
+
+    SELECT COALESCE(SUM(amount - paid_amount), 0)::NUMERIC(15,2)
+      INTO v_remaining
+      FROM receivables
+     WHERE bill_group_id = p_bill_group_id
+       AND status IN ('pending','partial');
+
+    IF v_remaining <= 0 THEN
+        RETURN 'Nothing outstanding on this bill group';
+    END IF;
+
+    IF p_amount IS NOT NULL AND p_amount < v_remaining THEN
+        v_remaining := p_amount;
+    END IF;
+
+    FOR v_rec IN
+        SELECT id, amount, paid_amount, base_amount, interest_amount,
+               paid_principal, interest_acc_id, acc_id, description
+          FROM receivables
+         WHERE bill_group_id = p_bill_group_id
+           AND status IN ('pending','partial')
+         ORDER BY due_date ASC NULLS LAST, id ASC
+         FOR UPDATE
+    LOOP
+        EXIT WHEN v_remaining <= 0;
+
+        v_residual := v_rec.amount - v_rec.paid_amount;
+        IF v_residual <= 0 THEN CONTINUE; END IF;
+
+        v_take := LEAST(v_remaining, v_residual);
+
+        SELECT fn_verify_receivable(v_rec.id, p_confirmed_by, p_mode, v_take)
+          INTO v_msg;
+
+        v_remaining := v_remaining - v_take;
+        IF v_first THEN
+            RETURN v_msg;
+            v_first := FALSE;
+        END IF;
+    END LOOP;
+
+    RETURN COALESCE(v_msg, 'Bill group verified');
+END;
+$$;
+
 -- Bulk FIFO payment across monthly rows (Pay Dues button).
 -- Posts ONE journal (income side + cash Dr side) for the whole payment.
+-- FIX (2026-08): the income side now emits ONE Cr leg per DISTINCT acc_id
+-- actually settled, rather than a single lump leg against whichever account
+-- belonged to the oldest receivable. Without this, split bills (maintenance
+-- + sinking + repair) silently misattribute every rupee beyond the first
+-- row's account to the wrong ledger account — dues tracking looks correct,
+-- the trial balance is wrong. Also routes advance-credit overpayment to the
+-- maintenance account explicitly, not "whichever row was oldest", and keeps
+-- the journal balanced (overpayment is recognized as a maintenance Cr leg).
 DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
@@ -2385,8 +2462,7 @@ RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journa
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id INT;
-    v_acc_id     INT;
-    v_desc       TEXT;
+    v_maint_acc_id INT;  -- explicit maintenance account for advance-credit fallback
     v_remaining  NUMERIC(15,2) := p_amount;
     v_trx_id     INT;
     v_journal_id INT;
@@ -2399,6 +2475,10 @@ DECLARE
     v_pay_int      NUMERIC(15,2);
     v_pay_prin     NUMERIC(15,2);
     v_fallback_int_acc INT;
+    v_acc_ids      INT[] := ARRAY[]::INT[];
+    v_acc_totals   NUMERIC(15,2)[] := ARRAY[]::NUMERIC(15,2)[];
+    v_acc_idx      INT;
+    v_first_trx_id INT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         RAISE EXCEPTION 'Amount must be > 0';
@@ -2412,52 +2492,30 @@ BEGIN
       AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr'
     LIMIT 1;
 
-    SELECT acc_id, description INTO v_acc_id, v_desc
-    FROM receivables
-    WHERE entity_id = p_apartment_id AND role = 'apartment'
-      AND status IN ('pending','partial')
-    ORDER BY due_date ASC NULLS LAST LIMIT 1;
+    -- Resolve maintenance account explicitly — used for advance-credit
+    -- fallback (overpayment is a maintenance credit, not a fund contribution)
+    -- and as the home for any overpaid amount when no open dues exist.
+    SELECT id INTO v_maint_acc_id FROM accounts
+    WHERE society_id = v_society_id
+      AND name ILIKE '%Society Maintenance Charge%'
+      AND drcr_account = 'Cr'
+    LIMIT 1;
 
-    IF v_acc_id IS NULL THEN
-        SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = v_society_id
-          AND name ILIKE '%Society Maintenance Charge%'
-          AND drcr_account = 'Cr'
-        LIMIT 1;
+    IF v_maint_acc_id IS NULL THEN
+        RAISE EXCEPTION 'Maintenance account not found for society %', v_society_id;
     END IF;
 
     v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
-    -- Cr: income side (one journal line for the whole payment)
-    INSERT INTO transactions(
-        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-        amount, mode, status, created_by, created_at, source_table, journal_id
-    ) VALUES (
-        v_society_id, 'Cr', CURRENT_DATE, v_acc_id, p_apartment_id, 'apartment',
-        COALESCE(p_particulars, 'Maintenance Payment'),
-        p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
-    ) RETURNING id INTO v_trx_id;
-
-    -- Dr: cash / bank paired side
-    IF v_bank_acc IS NOT NULL THEN
-        INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
-            'Cash received - Maintenance Payment',
-            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_trx_id, v_journal_id
-        );
-    END IF;
-
     FOR rec IN
         SELECT id, amount, paid_amount, paid_principal, base_amount,
-               interest_amount, confirmed_by FROM receivables
-        WHERE entity_id = p_apartment_id AND role = 'apartment'
-          AND status IN ('pending','partial')
-        ORDER BY due_date ASC NULLS LAST, id ASC
-        FOR UPDATE
+               interest_amount, interest_acc_id, acc_id, confirmed_by
+          FROM receivables
+         WHERE entity_id = p_apartment_id AND role = 'apartment'
+           AND status IN ('pending','partial')
+         ORDER BY due_date ASC NULLS LAST, id ASC
+         FOR UPDATE
     LOOP
         EXIT WHEN v_remaining <= 0;
 
@@ -2482,25 +2540,123 @@ BEGIN
                  confirmed_at   = NOW()
              WHERE id = rec.id;
 
+        -- Post interest leg immediately if this row has a separate interest
+        -- account (mirrors fn_verify_receivable's two-leg behavior).
+        IF v_pay_int > 0 AND rec.interest_acc_id IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_society_id, 'Cr', CURRENT_DATE, rec.interest_acc_id, p_apartment_id, 'apartment',
+                'Interest on ' || COALESCE(p_particulars, 'Maintenance Payment'),
+                v_pay_int, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', rec.id, v_journal_id
+            ) RETURNING id INTO v_trx_id;
+            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+        END IF;
+
+        -- Accumulate principal portion for the row's acc_id (batch-posted after
+        -- the loop so each distinct account gets exactly one Cr leg).
+        IF v_pay_prin > 0 THEN
+            v_acc_idx := NULL;
+            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                IF v_acc_ids[i] = rec.acc_id THEN
+                    v_acc_idx := i;
+                    EXIT;
+                END IF;
+            END LOOP;
+            IF v_acc_idx IS NULL THEN
+                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+                v_acc_totals := array_append(v_acc_totals, v_pay_prin);
+            ELSE
+                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_prin;
+            END IF;
+        END IF;
+
+        -- When there is no separate interest account, the interest portion also
+        -- rolls into the row's own acc_id (fn_verify_receivable ELSE branch).
+        IF v_pay_int > 0 AND rec.interest_acc_id IS NULL THEN
+            v_acc_idx := NULL;
+            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                IF v_acc_ids[i] = rec.acc_id THEN
+                    v_acc_idx := i;
+                    EXIT;
+                END IF;
+            END LOOP;
+            IF v_acc_idx IS NULL THEN
+                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
+                v_acc_totals := array_append(v_acc_totals, v_pay_int);
+            ELSE
+                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_int;
+            END IF;
+        END IF;
+
         v_remaining := v_remaining - v_take;
     END LOOP;
 
-    -- Excess beyond every currently-open due is banked as an advance-credit
-    -- row (status='credit') rather than discarded.
+    -- Emit ONE Cr leg per distinct acc_id actually settled, all sharing the
+    -- same journal_id. This is the core fix: previously the entire lump
+    -- payment was credited to whichever single acc_id belonged to the oldest
+    -- receivable, silently misattributing every other line.
+    IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
+        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, journal_id
+            ) VALUES (
+                v_society_id, 'Cr', CURRENT_DATE, v_acc_ids[i], p_apartment_id, 'apartment',
+                COALESCE(p_particulars, 'Maintenance Payment'),
+                v_acc_totals[i], p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+            ) RETURNING id INTO v_trx_id;
+            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+        END LOOP;
+    END IF;
+
+    -- Overpayment (or a payment with no open dues at all) is banked as a
+    -- maintenance Cr leg so the journal stays balanced, then recorded as an
+    -- advance-credit receivable. Routed to maintenance explicitly, not to
+    -- whichever row happened to be oldest.
+    IF v_remaining > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Maintenance Payment') || ' (Advance)',
+            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+    END IF;
+
+    -- Dr: cash / bank paired side (actual amount received). References the
+    -- first Cr leg posted so the journal is traceable as one event.
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            'Cash received - Maintenance Payment',
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_first_trx_id, v_journal_id
+        );
+    END IF;
+
+    -- Advance-credit receivable marker (status='credit') for any excess beyond
+    -- every currently-open due. Not a separate ledger entry — the overpayment
+    -- Cr leg above already recognizes the cash as maintenance income.
     IF v_remaining > 0 THEN
         INSERT INTO receivables (
             society_id, entity_id, role, acc_id, interest_acc_id,
             description, base_amount, amount, paid_amount, paid_principal,
             status, confirmed_by, confirmed_at, created_at
         ) VALUES (
-            v_society_id, p_apartment_id, 'apartment', v_acc_id,
-            COALESCE(v_fallback_int_acc, v_acc_id),
+            v_society_id, p_apartment_id, 'apartment', v_maint_acc_id,
+            COALESCE(v_fallback_int_acc, v_maint_acc_id),
             'Advance Credit', v_remaining, v_remaining, 0, 0,
             'credit', p_confirmed_by, NOW(), NOW()
         );
     END IF;
 
-    RETURN QUERY SELECT v_trx_id,
+    RETURN QUERY SELECT v_first_trx_id,
         (p_amount - v_remaining)::NUMERIC(15,2),
         v_remaining::NUMERIC(15,2),
         v_journal_id;
@@ -4999,7 +5155,37 @@ BEGIN
         lf.sort_path
     FROM leaf_final lf
     JOIN rollup r ON r.id = lf.id
-    ORDER BY lf.sort_path;
+        ORDER BY lf.sort_path;
+END;
+$$;
+
+-- Trailing / FY-scoped turnover from Cr-side income transactions.
+-- Used for the GST threshold check (society-level ₹20L) and for
+-- determining filing cadence. Computed on demand, never stored.
+DROP FUNCTION IF EXISTS fn_society_turnover_fy (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_society_turnover_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_total    NUMERIC(15,2);
+BEGIN
+    SELECT COALESCE(SUM(t.amount), 0)::NUMERIC(15,2)
+      INTO v_total
+      FROM transactions t
+      JOIN accounts a ON a.id = t.acc_id
+     WHERE t.society_id = p_society_id
+       AND t.status = 'paid'
+       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+       AND t.entry_side = 'Cr'
+       AND a.drcr_account = 'Cr'
+       AND a.tab_name NOT IN ('BkAc', 'CiH', 'Dp', 'SCr');
+
+    RETURN COALESCE(v_total, 0);
 END;
 $$;
 
