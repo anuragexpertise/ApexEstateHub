@@ -56,7 +56,7 @@ from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export
+from database import cashbook_export, ledger_export, tds_export, gst_export
 from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -1813,6 +1813,9 @@ def register_drilldown_callbacks(app):
             # containing today; override via store["tds_quarter"] (1..4).
             data = tds_export.generate_tds_summary_excel(None, sid, fy, quarter=_resolve_tds_quarter(store))
             filename = f"TDS26Q_FY{fy}-Q{_resolve_tds_quarter(store)}.xlsx"
+        elif entity == "gst_summary":
+            data = gst_export.generate_gst_summary_excel(None, sid, fy)
+            filename = f"GSTSummary_FY{fy}-{fy+1}.xlsx"
         else:
             return no_update
 
