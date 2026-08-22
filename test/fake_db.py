@@ -607,10 +607,10 @@ class FakeDB:
         fy_start = f"{int(fy)}-04-01"
         fy_end = f"{int(fy) + 1}-03-31"
         # Cr-positive net movement per account this FY (mirrors the real
-        # fn_fy_closing_report's per-account leaf closing closely enough to
-        # verify fund segregation: each account is its OWN row, never folded
-        # into a single total). BF is ignored here (the seeded funds carry 0
-        # opening balance); the grouping-by-account is the property under test.
+        # fn_fy_closing_report's per-account leaf closing). The report returns
+        # ONE ROW PER ACCOUNT in the chart — accounts with no activity this FY
+        # still appear with a zero closing, exactly like the live function — so
+        # each fund is its own row, never folded into a single total.
         movements: dict[int, float] = {}
         for t in self.tables.get("transactions", []):
             if (t.get("society_id") != sid or t.get("status") != "paid"
@@ -624,21 +624,18 @@ class FakeDB:
             elif side == "Dr":
                 movements[acc] = movements.get(acc, 0.0) - amt
         rows = []
-        for acc_id, net in movements.items():
-            acc = next((a for a in self.tables.get("accounts", [])
-                        if a.get("id") == acc_id and a.get("society_id") == sid), None)
-            if acc is None or acc.get("drcr_account") is None:
+        for acc in self.tables.get("accounts", []):
+            if acc.get("society_id") != sid or acc.get("drcr_account") is None:
                 continue
-            # Own movement (Cr-positive). display_side: Cr total shows as Cr,
-            # negative shows as Dr, matching the real fn_fy_closing_report's
-            # convention at the leaf level.
-            own = net
+            own = movements.get(acc.get("id"), 0.0)
+            # display_side: Cr-natured total shows as Cr, negative as Dr,
+            # matching the real fn_fy_closing_report's leaf convention.
             if acc.get("drcr_account") == "Cr":
                 display_side = "Cr" if own >= 0 else "Dr"
             else:
                 display_side = "Dr" if own >= 0 else "Cr"
             rows.append({
-                "account_id": acc_id,
+                "account_id": acc.get("id"),
                 "account_name": acc.get("name"),
                 "tab_name": acc.get("tab_name"),
                 "parent_account_id": acc.get("parent_account_id"),
