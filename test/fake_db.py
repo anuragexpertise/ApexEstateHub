@@ -804,6 +804,207 @@ class FakeDB:
         rows = [r for r in self.tables.get("security_staff", []) if r.get("society_id") == sid]
         return rows if fetch_all else (rows[0] if rows else None)
 
+    def _fn_resolve_bank_leg(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        for acc in self.tables.get("accounts", []):
+            if acc.get("society_id") == sid and "Bank" in (acc.get("name") or ""):
+                return acc.get("id", 633)
+        return 633
+
+    def _fn_resolve_gst_accounts(self, p, fetch_one, fetch_all):
+        return {"cgst_acc_id": 401, "sgst_acc_id": 402}
+
+    def _fn_society_turnover_fy(self, p, fetch_one, fetch_all):
+        return 2500000.0
+
+    def _fn_verify_receivable(self, p, fetch_one, fetch_all):
+        rec_id = p.get("p0") or p.get("receivable_id")
+        confirmed_by = p.get("p1") or p.get("confirmed_by")
+        mode = p.get("p2") or p.get("mode", "cash")
+        amount = p.get("p3") or p.get("amount")
+        rec = next((r for r in self.tables.get("receivables", []) if r.get("id") == rec_id), None)
+        if not rec:
+            return {"msg": "error: receivable not found"}
+        residual = float(rec.get("amount", 0)) - float(rec.get("paid_amount", 0))
+        take = float(amount) if amount is not None else residual
+        take = min(take, residual)
+        rec["paid_amount"] = float(rec.get("paid_amount", 0)) + take
+        rec["status"] = "paid" if rec["paid_amount"] >= float(rec.get("amount", 0)) else "partial"
+        rec["confirmed_by"] = confirmed_by
+        rec["confirmed_at"] = datetime.utcnow().isoformat()
+        tid = self._next_id("transactions")
+        self.tables["transactions"].append({
+            "id": tid,
+            "society_id": rec.get("society_id"),
+            "acc_id": rec.get("acc_id"),
+            "amount": take,
+            "mode": mode,
+            "status": "paid",
+            "trx_date": date.today().isoformat(),
+            "particulars": rec.get("description"),
+            "entry_side": "Cr",
+            "entity_id": rec.get("entity_id"),
+            "role": rec.get("role"),
+            "source_table": "receivables",
+            "source_id": rec_id,
+            "journal_id": 9999,
+        })
+        return {"msg": "verified"}
+
+    def _fn_verify_receivable_by_bill_group(self, p, fetch_one, fetch_all):
+        bill_group_id = p.get("p0") or p.get("bill_group_id")
+        confirmed_by = p.get("p1") or p.get("confirmed_by")
+        mode = p.get("p2") or p.get("mode", "cash")
+        amount = p.get("p3") or p.get("amount")
+        recs = [r for r in self.tables.get("receivables", [])
+                if r.get("bill_group_id") == bill_group_id and r.get("status") in ("pending", "partial")]
+        recs.sort(key=lambda r: (r.get("due_date") or "", r.get("id", 0)))
+        remaining = float(amount) if amount is not None else sum(
+            float(r.get("amount", 0)) - float(r.get("paid_amount", 0)) for r in recs)
+        for rec in recs:
+            if remaining <= 0:
+                break
+            residual = float(rec.get("amount", 0)) - float(rec.get("paid_amount", 0))
+            take = min(remaining, residual)
+            rec["paid_amount"] = float(rec.get("paid_amount", 0)) + take
+            rec["status"] = "paid" if rec["paid_amount"] >= float(rec.get("amount", 0)) else "partial"
+            rec["confirmed_by"] = confirmed_by
+            rec["confirmed_at"] = datetime.utcnow().isoformat()
+            tid = self._next_id("transactions")
+            self.tables["transactions"].append({
+                "id": tid,
+                "society_id": rec.get("society_id"),
+                "acc_id": rec.get("acc_id"),
+                "amount": take,
+                "mode": mode,
+                "status": "paid",
+                "trx_date": date.today().isoformat(),
+                "particulars": rec.get("description"),
+                "entry_side": "Cr",
+                "entity_id": rec.get("entity_id"),
+                "role": rec.get("role"),
+                "source_table": "receivables",
+                "source_id": rec.get("id"),
+                "journal_id": 9999,
+            })
+            remaining -= take
+        return {"msg": "Bill group verified"}
+
+    def _fn_pay_apartment_dues_fifo(self, p, fetch_one, fetch_all):
+        apt_id = p.get("p0") or p.get("apartment_id")
+        amount = float(p.get("p1") or p.get("amount", 0))
+        mode = p.get("p2") or p.get("mode", "cash")
+        confirmed_by = p.get("p3") or p.get("confirmed_by")
+        particulars = p.get("p4") or p.get("particulars", "Maintenance Payment")
+        recs = [r for r in self.tables.get("receivables", [])
+                if r.get("entity_id") == apt_id and r.get("role") == "apartment"
+                and r.get("status") in ("pending", "partial")]
+        recs.sort(key=lambda r: (r.get("due_date") or "", r.get("id", 0)))
+        remaining = amount
+        acc_totals = {}
+        for rec in recs:
+            if remaining <= 0:
+                break
+            residual = float(rec.get("amount", 0)) - float(rec.get("paid_amount", 0))
+            take = min(remaining, residual)
+            rec["paid_amount"] = float(rec.get("paid_amount", 0)) + take
+            rec["status"] = "paid" if rec["paid_amount"] >= float(rec.get("amount", 0)) else "partial"
+            rec["confirmed_by"] = confirmed_by
+            rec["confirmed_at"] = datetime.utcnow().isoformat()
+            acc_id = rec.get("acc_id")
+            acc_totals[acc_id] = acc_totals.get(acc_id, 0) + take
+            remaining -= take
+        journal_id = 9999
+        first_trx_id = None
+        society_id = recs[0].get("society_id") if recs else 1
+        for acc_id, total in acc_totals.items():
+            tid = self._next_id("transactions")
+            self.tables["transactions"].append({
+                "id": tid,
+                "society_id": society_id,
+                "acc_id": acc_id,
+                "amount": total,
+                "mode": mode,
+                "status": "paid",
+                "trx_date": date.today().isoformat(),
+                "particulars": particulars,
+                "entry_side": "Cr",
+                "entity_id": apt_id,
+                "role": "apartment",
+                "source_table": "receivables",
+                "journal_id": journal_id,
+            })
+            if first_trx_id is None:
+                first_trx_id = tid
+        if first_trx_id is not None:
+            tid = self._next_id("transactions")
+            self.tables["transactions"].append({
+                "id": tid,
+                "society_id": society_id,
+                "acc_id": 633,
+                "amount": amount,
+                "mode": mode,
+                "status": "paid",
+                "trx_date": date.today().isoformat(),
+                "particulars": "Cash received - Maintenance Payment",
+                "entry_side": "Dr",
+                "entity_id": apt_id,
+                "role": "apartment",
+                "source_table": "receivables",
+                "source_id": first_trx_id,
+                "journal_id": journal_id,
+            })
+        # Excess overpayment: bank as maintenance Cr leg + advance-credit receivable
+        if remaining > 0:
+            tid = self._next_id("transactions")
+            self.tables["transactions"].append({
+                "id": tid,
+                "society_id": society_id,
+                "acc_id": 2311,
+                "amount": remaining,
+                "mode": mode,
+                "status": "paid",
+                "trx_date": date.today().isoformat(),
+                "particulars": f"{particulars} (Advance)",
+                "entry_side": "Cr",
+                "entity_id": apt_id,
+                "role": "apartment",
+                "source_table": "receivables",
+                "journal_id": journal_id,
+            })
+            self.tables["receivables"].append({
+                "id": self._next_id("receivables"),
+                "society_id": society_id,
+                "entity_id": apt_id,
+                "role": "apartment",
+                "acc_id": 2311,
+                "interest_acc_id": 2113,
+                "description": "Advance Credit",
+                "period_month": None,
+                "base_amount": remaining,
+                "interest_amount": 0,
+                "interest_months_applied": 0,
+                "amount": remaining,
+                "paid_amount": 0,
+                "paid_principal": 0,
+                "due_date": None,
+                "status": "credit",
+                "confirmed_by": confirmed_by,
+                "confirmed_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat(),
+                "bill_group_id": None,
+            })
+        allocated = amount - remaining
+        return {
+            "transaction_id": first_trx_id,
+            "allocated": allocated,
+            "unallocated": remaining,
+            "journal_id": journal_id,
+        }
+
+    def _fn_apply_receivable_interest(self, p, fetch_one, fetch_all):
+        return None
+
 
 def reset_fake_db():
     FakeDB._instance = None
