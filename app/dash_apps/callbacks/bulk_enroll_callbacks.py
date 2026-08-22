@@ -260,14 +260,20 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:
             apt_r = db._execute(
                 "INSERT INTO apartments"
-                "(society_id, flat_number, owner_name, mobile, apartment_size, active, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                "(society_id, flat_number, owner_name, mobile, apartment_size, "
+                "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
                 (
                     sid,
                     flat,
                     row.get("owner_name") or None,
                     row.get("mobile")     or None,
                     _safe_int(row.get("apartment_size")),
+                    row.get("alt_mobile") or None,
+                    row.get("alt_address") or None,
+                    row.get("owner_photo") or None,
+                    row.get("id_proof") or None,
+                    row.get("apt_calc_start_date") or None,
                     user_id,
                 ),
                 fetch_one=True,
@@ -334,15 +340,22 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
         try:
             ven_r = db._execute(
                 "INSERT INTO vendors"
-                "(society_id, business_name, name, service_type, mobile, active, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                "(society_id, business_name, name, service_type, mobile, service_description, "
+                "photo, logo, license, active, created_by, pan_number, gstin) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
                 (
                     sid,
                     biz_name,
                     name,
                     row.get("service_type") or None,
                     row.get("mobile")       or None,
+                    row.get("service_description") or None,
+                    row.get("photo") or None,
+                    row.get("logo") or None,
+                    row.get("license") or None,
                     user_id,
+                    row.get("pan_number") or None,
+                    row.get("gstin") or None,
                 ),
                 fetch_one=True,
             )
@@ -401,14 +414,16 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
         try:
             sec_r = db._execute(
                 "INSERT INTO security_staff"
-                "(society_id, name, mobile, shift, salary_per_shift, active, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
                 (
                     sid,
                     name,
                     row.get("mobile")            or None,
                     row.get("shift")             or None,
                     _safe_float(row.get("salary_per_shift")),
+                    row.get("photo") or None,
+                    row.get("id_proof") or None,
                     user_id,
                 ),
                 fetch_one=True,

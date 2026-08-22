@@ -3309,6 +3309,10 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                     "WHERE linked_id=%s AND role='apartment' AND society_id=%s",
                     params,
                 )
+            # Coerce boolean string from dropdown
+            apt_active = d.get("active", True)
+            if isinstance(apt_active, str):
+                apt_active = apt_active.lower() == "true"
             r = db._execute(
                 "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
                 "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
@@ -3319,7 +3323,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 (
                     d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
                     d.get("alt_mobile"), d.get("alt_address"), d.get("apt_calc_start_date"),
-                    d.get("active", True), d.get("owner_photo"), d.get("id_proof"),
+                    apt_active, d.get("owner_photo"), d.get("id_proof"),
                     d.get("user_id"), pk, sid,
                 ),
                 fetch_one=True,
@@ -3391,15 +3395,18 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 params,
             )
         if role == "security":
+            sec_active = d.get("active", True)
+            if isinstance(sec_active, str):
+                sec_active = sec_active.lower() == "true"
             db._execute(
                 "UPDATE security_staff SET name=%s,mobile=%s,shift=%s,"
-                "salary_per_shift=%s,joining_date=%s,"
+                "salary_per_shift=%s,joining_date=%s,active=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
-                 d.get("salary_per_shift"), d.get("joining_date"),
+                 d.get("salary_per_shift"), d.get("joining_date"), sec_active,
                  d.get("photo"), d.get("id_proof"), d.get("user_id"), pk, sid),
             )
         else:
@@ -3409,9 +3416,12 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 return False, "Invalid PAN format (expected: ABCDE1234F)", None
             if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
                 return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
+            ven_active = d.get("active", True)
+            if isinstance(ven_active, str):
+                ven_active = ven_active.lower() == "true"
             db._execute(
                 "UPDATE vendors SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
-                "service_description=%s,"
+                "service_description=%s,active=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
                 "license=COALESCE(NULLIF(%s, ''), license),"
@@ -3420,7 +3430,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
-                 d.get("service_description"),
+                 d.get("service_description"), ven_active,
                  d.get("photo"), d.get("logo"), d.get("license"),
                  pan, gstin, d.get("user_id"), pk, sid),
             )

@@ -3579,13 +3579,13 @@ BEGIN
     INSERT INTO receipts(
         society_id, user_id, entity_id, role, receipt_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
-        source_reference, created_at
+        source_reference, created_at, created_by
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_receipt_date, p_acc_id, p_particulars,
         p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
-        p_source_reference, NOW()
+        p_source_reference, NOW(), p_created_by
     ) RETURNING id INTO v_receipt_id;
 
     IF v_status = 'confirmed' THEN
@@ -3689,13 +3689,13 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
-        source_reference, created_at, tds_section
+        source_reference, created_at, created_by, tds_pct, tds_section
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_expense_date, p_acc_id, p_particulars,
         p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
-        p_source_reference, NOW(), p_tds_section
+        p_source_reference, NOW(), p_created_by, p_tds_pct, p_tds_section
     ) RETURNING id INTO v_expense_id;
  
     IF v_status = 'confirmed' THEN
