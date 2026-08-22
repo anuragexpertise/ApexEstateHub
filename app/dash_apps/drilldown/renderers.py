@@ -269,6 +269,46 @@ def _display_value(field_key: str, row_dict: dict):
     return row_dict.get(field_key)
 
 
+# State-code patterns for _resolve_society_state — ordered so multi-word
+# states (e.g. "uttar pradesh") match before their 2-letter abbreviation
+# could false-positive on some other substring.
+_STATE_ADDR_PATTERNS: dict[str, list[str]] = {
+    "UP": ["uttar pradesh", ", up ", " up -", ",up-", " up "],
+    "MH": ["maharashtra", ", mh ", " mh -", ",mh-", " mh "],
+    "KA": ["karnataka", ", ka ", " ka -", ",ka-", " ka "],
+    "TN": ["tamil nadu", ", tn ", " tn -", ",tn-", " tn "],
+    "DL": ["delhi", ", dl ", " dl -", ",dl-", "new delhi"],
+    "RJ": ["rajasthan", ", rj ", " rj -", ",rj-", " rj "],
+    "MP": ["madhya pradesh", ", mp ", " mp -", ",mp-", " mp "],
+    "WB": ["west bengal", ", wb ", " wb -", ",wb-", " wb "],
+    "GJ": ["gujarat", ", gj ", " gj -", ",gj-", " gj "],
+    "TS": ["telangana", ", ts ", " ts -", ",ts-", " ts "],
+    "AP": ["andhra pradesh", ", ap ", " ap -", ",ap-", " ap "],
+    "BR": ["bihar", ", br ", " br -", ",br-", " br "],
+    "HR": ["haryana", ", hr ", " hr -", ",hr-", " hr "],
+    "PB": ["punjab", ", pb ", " pb -", ",pb-", " pb "],
+    "KL": ["kerala", ", kl ", " kl -", ",kl-", " kl "],
+}
+
+
+def _resolve_society_state(record_dict: dict, society_id: int | None) -> str:
+    """Best-effort extraction of a society's 2-letter state code from its
+    stored address or a state column. Falls back to 'ALL' when unknown —
+    the banner then shows only Union-law links."""
+    if not society_id:
+        return "ALL"
+    state = (record_dict or {}).get("state")
+    if state and isinstance(state, str) and len(state) == 2:
+        return state.upper()
+    address = (record_dict or {}).get("address", "") or ""
+    addr_lower = address.lower()
+    for code, patterns in _STATE_ADDR_PATTERNS.items():
+        for pat in patterns:
+            if pat in addr_lower:
+                return code
+    return "ALL"
+
+
 
 # ── Fields hidden because the current view is already scoped to them ──────
 def _context_hidden_fields(filters: dict | None) -> set[str]:
@@ -1593,7 +1633,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
             *(_channel_banners if _channel_banners else []),
 
             # ── Compliance settings rule reference (RWA/CHS GST/TDS/fund banner) ─
-            _compliance_rules_banner(entity_plural),
+            _compliance_rules_banner(entity_plural, _resolve_society_state(record_dict, society_id)),
 
             # ── Images (full-width, stacked) ─────────────────────────
             html.Div(image_section) if image_section else None,
@@ -2339,7 +2379,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             ], style={"flex": "1", "minWidth": "260px"}),
             _payment_qr_banner(entity_plural, society_id, prefill),
             _concern_wait_banner(entity_plural, prefill),
-            _compliance_rules_banner(entity_plural),
+            _compliance_rules_banner(entity_plural, _resolve_society_state(prefill, society_id)),
         ], style={"padding": "16px", "maxHeight": "520px",
                   "overflowY": "auto", "display": "flex",
                   "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
@@ -2440,32 +2480,41 @@ def render_payment_qr_widget(society_id, label: str = "Scan to pay the society")
 # on society_compliance_settings, so the person setting them doesn't have to
 # already know CHS/RWA tax law to set them correctly. General information
 # only, not legal/tax advice — every section says so, and points at primary
-# sources (CBIC, Income Tax Dept, the Maharashtra Cooperative Commissioner's
-# office) rather than asserting a definitive answer, since several of these
-# (GST-on-funds treatment, TDS thresholds, state bye-law rates) are genuinely
-# contested, revised periodically, or state-specific. See the [FLAG —
-# PROFESSIONAL REVIEW] items in chs_rwa_compliance_agent_tasklist.md — this
-# banner exists precisely because those decisions were never actually put to
-# a user before the settings/toggles shipped; it's the next-best thing to
-# asking, surfaced at the point the admin actually makes the choice.
+# sources (CBIC, Income Tax Dept, state statutes) rather than asserting a
+# definitive answer, since several of these (GST-on-funds treatment, TDS
+# thresholds, state bye-law rates) are genuinely contested, revised
+# periodically, or state-specific.
+#
+# External links are stored in kpi_rule_links (DB) and fetched per-category
+# at render time, scoped to the society's state + 'ALL'. Admins can add /
+# retire links without a code deploy via the KPI Rule Links admin page.
 # ════════════════════════════════════════════════════════════════════════════
 
-def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
+def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> html.Div | None:
     if entity_plural != "compliance_settings":
         return None
 
-    def _rule_block(title: str, body: list, links: list[tuple[str, str]]) -> html.Div:
+    from app.services.kpi_rule_links_service import get_links_for_categories, get_categories
+
+    categories = get_categories()
+    cat_keys = list(categories.keys())
+
+    links_by_cat = get_links_for_categories(cat_keys, state=society_state)
+
+    def _rule_block(title: str, body: list, cat_key: str) -> html.Div:
+        links = links_by_cat.get(cat_key, [])
+        link_elements = [
+            html.A(label, href=url, target="_blank", rel="noopener noreferrer",
+                   style={"fontSize": "11px", "marginRight": "12px",
+                          "color": COLORS["info"], "textDecoration": "none"})
+            for label, url in [(lk.label, lk.url) for lk in links]
+        ]
         return html.Div([
             html.Div(title, style={"fontWeight": "700", "fontSize": "12.5px",
                                     "color": COLORS["primary"], "marginBottom": "3px"}),
             html.Div(body, style={"fontSize": "12px", "color": "#3a4a5c",
                                    "lineHeight": "1.5", "marginBottom": "4px"}),
-            html.Div([
-                html.A(label, href=url, target="_blank", rel="noopener noreferrer",
-                       style={"fontSize": "11px", "marginRight": "12px",
-                              "color": COLORS["info"], "textDecoration": "none"})
-                for label, url in links
-            ]),
+            html.Div(link_elements) if link_elements else None,
         ], style={"marginBottom": "14px", "paddingBottom": "10px",
                    "borderBottom": "1px solid rgba(0,0,0,0.06)"})
 
@@ -2480,27 +2529,20 @@ def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
                                      "marginBottom": "12px"}),
 
         _rule_block(
-            "Sinking Fund / Repair Fund Rate Basis",
+            categories.get("sinking_fund", "Sinking Fund / Repair Fund Rate Basis"),
             [
-                "Maharashtra's Model Bye-Laws set statutory minimums of 0.25% "
-                "of construction cost/year for the Sinking Fund and 0.75% for "
-                "the Repair & Maintenance Fund — but most societies operationalize "
-                "this as a per-sq-ft rate set by the General Body rather than "
-                "recomputing construction cost each year. Other states' "
-                "Cooperative Societies Acts set their own rates — cooperative "
-                "societies are a State subject, so check your own state's Act "
-                "and your society's registered bye-laws, not just Maharashtra's.",
-                html.Br(),
-                html.Span("Maharashtra's Model Bye-Laws are being revised right now — "
-                          "a draft is open for objections until 27 Aug 2026.",
-                          style={"fontStyle": "italic", "color": COLORS["warning"]}),
+                "Statutory minimums vary by state — Maharashtra's Model Bye-Laws "
+                "set 0.25% of construction cost/year for the Sinking Fund and 0.75% "
+                "for the Repair & Maintenance Fund, while UP's Apartment Rules 2011 "
+                "set no fixed percentage (the rate is whatever the AOA's own bye-laws "
+                "or General Body decide). Cooperative societies are a State subject — "
+                "check your own state's Act and your society's registered bye-laws.",
             ],
-            [("Maharashtra Model Bye-Laws (official PDF)",
-              "https://sahakarayukta.maharashtra.gov.in/site/upload/documents/Model_ByeLaws_of_Housing_Cooperative_societies.pdf")],
+            "sinking_fund",
         ),
 
         _rule_block(
-            "Fund GST Exempt",
+            categories.get("fund_gst", "Fund GST Exempt"),
             [
                 "Whether Sinking/Repair Fund collections sit outside GST at all, "
                 "or are treated like any other RWA collection subject to the same "
@@ -2509,25 +2551,22 @@ def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
                 "in some readings, contested in others. Default here is exempt; "
                 "verify with a GST practitioner before filing on that basis.",
             ],
-            [("CBIC Circular 109/28/2019-GST",
-              "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf")],
+            "fund_gst",
         ),
 
         _rule_block(
-            "Fund Charges Interest",
+            categories.get("fund_interest", "Fund Charges Interest"),
             [
                 "Whether overdue Sinking/Repair Fund contributions accrue the "
                 "same late-payment interest as overdue maintenance is a bye-law "
                 "question, not a fixed rule — check what your society's own "
-                "registered bye-laws specify, and note Maharashtra's pending "
-                "revision would cap penal interest at 12% simple (down from 21%, "
-                "no longer compoundable) once notified.",
+                "registered bye-laws specify.",
             ],
-            [],
+            "fund_interest",
         ),
 
         _rule_block(
-            "GST Registered / GSTIN / GST Filing Cadence",
+            categories.get("gst_registered", "GST Registered / GSTIN / GST Filing Cadence"),
             [
                 "GST applies only when BOTH hold: society turnover exceeds ₹20 "
                 "lakh/year AND a member's own monthly maintenance exceeds ₹7,500. "
@@ -2539,12 +2578,11 @@ def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
                 "QRMP/quarterly) is chosen at GST registration, not decided by "
                 "this system.",
             ],
-            [("CBIC GST circular", "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf"),
-             ("GST Council RWA flyer", "https://gstcouncil.gov.in/sites/default/files/e-version-gst-flyers/GST_ON_Co-operative_housing_Societies0509.pdf")],
+            "gst_registered",
         ),
 
         _rule_block(
-            "TDS No-PAN Action (warn vs. block)",
+            categories.get("tds_no_pan", "TDS No-PAN Action (warn vs. block)"),
             [
                 "Under Section 206AA, TDS can still be deducted from a vendor "
                 "with no PAN on file — at the higher no-PAN rate (typically 20%) "
@@ -2557,18 +2595,56 @@ def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
                 "the official page rather than relying on a number fixed in this "
                 "banner.",
             ],
-            [("Income Tax Dept — Section 194C", "https://www.incometaxindia.gov.in/w/section-194c"),
-             ("Income Tax Dept — current TDS rates", "https://www.incometaxindia.gov.in/w/tds-rates-1")],
+            "tds_no_pan",
         ),
 
-        html.Div(
-            "Mutual (member-sourced: maintenance, parking, transfer fees) vs. "
-            "non-mutual (tower rent, hall rental, FD interest) income "
-            "classification is a judicially-developed doctrine (Principle of "
-            "Mutuality), not a single numbered section — get this one checked "
-            "against your society's actual income mix, since it determines "
-            "what's taxable at all.",
-            style={"fontSize": "11.5px", "color": COLORS["muted"], "fontStyle": "italic"},
+        _rule_block(
+            categories.get("rera", "RERA"),
+            [
+                "The Real Estate (Regulation and Development) Act, 2016 operates "
+                "alongside state apartment/cooperative laws. Homeowners can approach "
+                "the state RERA authority for legal action on matters like builder "
+                "maintenance obligations even where the state's own dispute-resolution "
+                "mechanisms apply.",
+            ],
+            "rera",
+        ),
+
+        _rule_block(
+            categories.get("apartment_act", "Apartment Act / AOAs"),
+            [
+                "State-specific apartment acts (e.g., UP Apartment Act 2010) regulate "
+                "construction, ownership, and maintenance of apartment buildings with "
+                "four or more units, mandating formation of an Apartment Owners "
+                "Association (AOA). An AOA under such an Act isn't itself the "
+                "registration mechanism — the Registrar of Societies registers it as "
+                "a society under the Societies Registration Act 1860.",
+            ],
+            "apartment_act",
+        ),
+
+        _rule_block(
+            categories.get("cooperative_act", "Cooperative Societies Act"),
+            [
+                "The older, parallel registration route for cooperative housing "
+                "societies specifically (as opposed to apartment/condominium-style "
+                "AOAs). Each state has its own Cooperative Societies Act providing "
+                "for registration, operation, and management of cooperative societies.",
+            ],
+            "cooperative_act",
+        ),
+
+        _rule_block(
+            categories.get("income_tax_mutuality", "Income Tax — Mutuality Principle"),
+            [
+                "Mutual (member-sourced: maintenance, parking, transfer fees) vs. "
+                "non-mutual (tower rent, hall rental, FD interest) income "
+                "classification is a judicially-developed doctrine (Principle of "
+                "Mutuality), not a single numbered section — get this one checked "
+                "against your society's actual income mix, since it determines "
+                "what's taxable at all.",
+            ],
+            "income_tax_mutuality",
         ),
     ], style={
         "background": "linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,251,255,0.92))",
