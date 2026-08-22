@@ -3925,32 +3925,48 @@ def _save_account(db, d, sid, is_edit, pk):
 
 def _save_apt_charge(db, d, sid, is_edit, pk):
     # NOTE: apt_charges_fines_basis columns are id, society_id, apt_id,
-    # start_date, end_date, apt_maintenance_rate, apt_due_day,
-    # apt_interest_pct, apt_status, created_at. There is no
-    # apt_delay_fine / apt_fine column — those were stale leftovers
-    # from an older schema and caused every save to throw
-    # "column apt_delay_fine does not exist".
-    if is_edit:
-        # apt_status arrives as the string "true"/"false" from the
-        # schema-driven select control; cast explicitly rather than
-        # relying on implicit text→boolean coercion.
-        apt_status = d.get("apt_status")
-        if isinstance(apt_status, str):
-            apt_status = apt_status.lower() == "true"
+    # start_date, end_date, apt_maintenance_amount, apt_maintenance_rate,
+    # apt_due_day, apt_interest_pct, apt_status, apt_sinking_fund_rate,
+    # apt_repair_fund_rate, charges_interest, created_by, updated_by.
+    # There is no apt_delay_fine / apt_fine column — those were stale
+    # leftovers from an older schema.
+    apt_status = d.get("apt_status")
+    if isinstance(apt_status, str):
+        apt_status = apt_status.lower() == "true"
 
+    charges_interest = d.get("charges_interest")
+    if isinstance(charges_interest, str):
+        charges_interest = charges_interest.lower() == "true"
+
+    try:
+        maint_amount = float(d.get("apt_maintenance_amount") or 0)
+        rate         = float(d.get("apt_maintenance_rate") or 3.0)
+        due_day      = int(d.get("apt_due_day") or 5)
+        interest_pct = float(d.get("apt_interest_pct") or 1.75)
+        sinking_rate = float(d.get("apt_sinking_fund_rate") or 0)
+        repair_rate  = float(d.get("apt_repair_fund_rate") or 0)
+    except ValueError:
+        return False, "Invalid numeric value", None
+
+    if is_edit:
         db._execute(
             "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
-            " apt_maintenance_rate=%s, apt_due_day=%s, apt_interest_pct=%s, apt_status=%s,"
-            " updated_by=%s "
+            " apt_maintenance_amount=%s, apt_maintenance_rate=%s, apt_due_day=%s,"
+            " apt_interest_pct=%s, apt_status=%s, apt_sinking_fund_rate=%s,"
+            " apt_repair_fund_rate=%s, charges_interest=%s, updated_by=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("apt_id"),
                 d.get("start_date"),
                 d.get("end_date"),
-                d.get("apt_maintenance_rate"),
-                d.get("apt_due_day"),
-                d.get("apt_interest_pct"),
+                maint_amount,
+                rate,
+                due_day,
+                interest_pct,
                 apt_status if apt_status is not None else True,
+                sinking_rate,
+                repair_rate,
+                charges_interest if charges_interest is not None else True,
                 d.get("user_id"),
                 pk,
                 sid,
@@ -3960,25 +3976,25 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
 
     apt_id = d.get("apt_id")
     start_date = d.get("start_date") or dt_date.today().isoformat()
-    try:
-        rate         = float(d.get("apt_maintenance_rate") or 3.0)
-        due_day      = int(d.get("apt_due_day") or 5)
-        interest_pct = float(d.get("apt_interest_pct") or 1.75)
-    except ValueError:
-        return False, "Invalid numeric value", None
 
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
-        " apt_maintenance_rate, apt_due_day, apt_interest_pct, apt_status, created_by)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+        " apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_interest_pct,"
+        " apt_status, apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (
             sid,
             apt_id,
             start_date,
             d.get("end_date"),
+            maint_amount,
             rate,
             due_day,
             interest_pct,
+            apt_status if apt_status is not None else True,
+            sinking_rate,
+            repair_rate,
+            charges_interest if charges_interest is not None else True,
             d.get("user_id"),
         ),
         fetch_one=True,
