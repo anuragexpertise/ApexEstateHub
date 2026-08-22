@@ -839,7 +839,6 @@ CREATE TABLE IF NOT EXISTS society_compliance_settings (
     gst_registered BOOLEAN DEFAULT FALSE,
     gstin VARCHAR(15),
     tds_no_pan_action VARCHAR(10) DEFAULT 'warn' CHECK (tds_no_pan_action IN ('warn', 'block')),
-    tds_section_rates JSONB,
     default_export_format VARCHAR(20) DEFAULT 'structured' CHECK (default_export_format IN ('structured', 'gstn_offline', 'traces_26q')),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -7588,6 +7587,100 @@ BEGIN
             RETURN FALSE;
         END IF;
     END LOOP;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 16: GST SUMMARY — monthly GST report (Phase 2d)
+-- ════════════════════════════════════════════════════════════════
+-- One row per month: taxable_value, cgst_collected, sgst_collected,
+-- exempt_value, total_bills_gst_applicable, total_bills_exempt.
+-- Source: receivables (taxable/exempt split, joined via bill_group_id)
+-- and transactions (actual Cr legs on the CGST/SGST payable accounts,
+-- resolved via fn_resolve_gst_accounts).
+DROP FUNCTION IF EXISTS fn_gst_summary_fy (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_gst_summary_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    period_month DATE,
+    taxable_value NUMERIC(15,2),
+    cgst_collected NUMERIC(15,2),
+    sgst_collected NUMERIC(15,2),
+    exempt_value NUMERIC(15,2),
+    total_bills_gst_applicable BIGINT,
+    total_bills_exempt BIGINT
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_cgst_acc INT;
+    v_sgst_acc INT;
+BEGIN
+    SELECT id INTO v_cgst_acc FROM accounts
+    WHERE society_id = p_society_id AND drcr_account = 'Cr'
+      AND name ILIKE '%CGST Payable%'
+    LIMIT 1;
+
+    SELECT id INTO v_sgst_acc FROM accounts
+    WHERE society_id = p_society_id AND drcr_account = 'Cr'
+      AND name ILIKE '%SGST Payable%'
+    LIMIT 1;
+
+    RETURN QUERY
+    WITH bill_group_lines AS (
+        SELECT 
+            period_month,
+            bill_group_id,
+            SUM(CASE WHEN description LIKE 'Maintenance %' THEN base_amount ELSE 0 END) as maint_amount,
+            SUM(CASE WHEN description LIKE 'Sinking Fund %' OR description LIKE 'Repair Fund %' THEN base_amount ELSE 0 END) as fund_amount,
+            MAX(CASE WHEN description LIKE 'CGST on Maintenance %' OR description LIKE 'SGST on Maintenance %' THEN 1 ELSE 0 END) as has_gst
+        FROM receivables
+        WHERE society_id = p_society_id
+          AND period_month BETWEEN v_fy_start AND v_fy_end
+          AND bill_group_id IS NOT NULL
+        GROUP BY period_month, bill_group_id
+    ),
+    monthly_receivables AS (
+        SELECT 
+            period_month,
+            SUM(CASE WHEN has_gst = 1 THEN maint_amount ELSE 0 END) as taxable_value,
+            SUM(fund_amount) as exempt_value,
+            SUM(CASE WHEN has_gst = 1 THEN 0 ELSE maint_amount + fund_amount END) as exempt_from_bills,
+            COUNT(CASE WHEN has_gst = 1 THEN 1 END) as gst_bills,
+            COUNT(CASE WHEN has_gst = 0 THEN 1 END) as exempt_bills
+        FROM bill_group_lines
+        GROUP BY period_month
+    ),
+    monthly_transactions AS (
+        SELECT 
+            DATE_TRUNC('month', trx_date)::DATE as period_month,
+            COALESCE(SUM(CASE WHEN acc_id = v_cgst_acc THEN amount ELSE 0 END), 0) as cgst_collected,
+            COALESCE(SUM(CASE WHEN acc_id = v_sgst_acc THEN amount ELSE 0 END), 0) as sgst_collected
+        FROM transactions
+        WHERE society_id = p_society_id
+          AND trx_date BETWEEN v_fy_start AND v_fy_end
+          AND entry_side = 'Cr'
+          AND status = 'paid'
+          AND (
+              (v_cgst_acc IS NOT NULL AND acc_id = v_cgst_acc)
+              OR (v_sgst_acc IS NOT NULL AND acc_id = v_sgst_acc)
+          )
+        GROUP BY DATE_TRUNC('month', trx_date)::DATE
+    )
+    SELECT 
+        COALESCE(mr.period_month, mt.period_month) as period_month,
+        COALESCE(mr.taxable_value, 0) as taxable_value,
+        COALESCE(mt.cgst_collected, 0) as cgst_collected,
+        COALESCE(mt.sgst_collected, 0) as sgst_collected,
+        COALESCE(mr.exempt_value + mr.exempt_from_bills, 0) as exempt_value,
+        COALESCE(mr.gst_bills, 0) as total_bills_gst_applicable,
+        COALESCE(mr.exempt_bills, 0) as total_bills_exempt
+    FROM monthly_receivables mr
+    FULL OUTER JOIN monthly_transactions mt ON mt.period_month = mr.period_month
+    ORDER BY period_month;
 END;
 $$;
 

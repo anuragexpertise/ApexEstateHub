@@ -652,6 +652,104 @@ class FakeDB:
             return rows
         return rows[0] if rows else None
 
+    def _fn_gst_summary_fy(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        fy = p.get("p1") or p.get("fy")
+        if fy is None:
+            return [] if fetch_all else None
+        fy_start = f"{int(fy)}-04-01"
+        fy_end = f"{int(fy) + 1}-03-31"
+
+        cgst_acc = None
+        sgst_acc = None
+        for acc in self.tables.get("accounts", []):
+            if acc.get("society_id") != sid:
+                continue
+            name = (acc.get("name") or "").upper()
+            if "CGST" in name:
+                cgst_acc = acc.get("id")
+            if "SGST" in name:
+                sgst_acc = acc.get("id")
+
+        bill_groups: dict = {}
+        for r in self.tables.get("receivables", []):
+            if r.get("society_id") != sid:
+                continue
+            pm = r.get("period_month") or ""
+            if not (fy_start <= pm <= fy_end):
+                continue
+            bg = r.get("bill_group_id")
+            if not bg:
+                continue
+            key = (pm, bg)
+            if key not in bill_groups:
+                bill_groups[key] = {
+                    "maint_amount": 0.0,
+                    "fund_amount": 0.0,
+                    "has_gst": False,
+                }
+            desc = (r.get("description") or "").lower()
+            base = float(r.get("base_amount", 0) or 0)
+            if desc.startswith("maintenance"):
+                bill_groups[key]["maint_amount"] += base
+            elif desc.startswith("sinking fund") or desc.startswith("repair fund"):
+                bill_groups[key]["fund_amount"] += base
+            if "cgst" in desc or "sgst" in desc:
+                bill_groups[key]["has_gst"] = True
+
+        monthly: dict = {}
+        for (pm, _bg), vals in bill_groups.items():
+            entry = monthly.setdefault(pm, {
+                "taxable_value": 0.0,
+                "fund_amount": 0.0,
+                "exempt_maint": 0.0,
+                "gst_bills": 0,
+                "exempt_bills": 0,
+            })
+            if vals["has_gst"]:
+                entry["taxable_value"] += vals["maint_amount"]
+                entry["fund_amount"] += vals["fund_amount"]
+                entry["gst_bills"] += 1
+            else:
+                entry["exempt_maint"] += vals["maint_amount"] + vals["fund_amount"]
+                entry["exempt_bills"] += 1
+
+        txn_monthly: dict = {}
+        for t in self.tables.get("transactions", []):
+            if t.get("society_id") != sid or t.get("entry_side") != "Cr":
+                continue
+            trx_date = t.get("trx_date") or ""
+            if not (fy_start <= trx_date <= fy_end):
+                continue
+            acc = t.get("acc_id")
+            if acc not in (cgst_acc, sgst_acc):
+                continue
+            pm = trx_date[:7] + "-01"
+            if pm not in txn_monthly:
+                txn_monthly[pm] = {"cgst_collected": 0.0, "sgst_collected": 0.0}
+            if acc == cgst_acc:
+                txn_monthly[pm]["cgst_collected"] += float(t.get("amount", 0) or 0)
+            else:
+                txn_monthly[pm]["sgst_collected"] += float(t.get("amount", 0) or 0)
+
+        all_months = sorted(set(list(monthly.keys()) + list(txn_monthly.keys())))
+        rows = []
+        for pm in all_months:
+            mr = monthly.get(pm, {})
+            mt = txn_monthly.get(pm, {})
+            rows.append({
+                "period_month": pm,
+                "taxable_value": mr.get("taxable_value", 0.0),
+                "cgst_collected": mt.get("cgst_collected", 0.0),
+                "sgst_collected": mt.get("sgst_collected", 0.0),
+                "exempt_value": mr.get("fund_amount", 0.0) + mr.get("exempt_maint", 0.0),
+                "total_bills_gst_applicable": mr.get("gst_bills", 0),
+                "total_bills_exempt": mr.get("exempt_bills", 0),
+            })
+        if fetch_all:
+            return rows
+        return rows[0] if rows else None
+
     def _fn_account_ledger_fy(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
         acc_id = p.get("p1") or p.get("account_id")
