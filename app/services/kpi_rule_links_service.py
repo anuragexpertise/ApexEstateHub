@@ -201,3 +201,128 @@ def _row_to_link(r: dict) -> KpiRuleLink:
         effective_from=r.get("effective_from"),
         effective_to=r.get("effective_to"),
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# STATE COMPLIANCE THRESHOLDS — numeric statutory values (GST, TDS, fund %, etc.)
+# ════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class StateThreshold:
+    id: int | None = None
+    state: str = "ALL"
+    threshold_key: str = ""
+    value: float | None = None
+    value_text: str | None = None
+    unit: str = ""
+    effective_from: date | None = None
+    effective_to: date | None = None
+    notes: str = ""
+    is_active: bool = True
+
+
+def get_threshold(state: str, key: str) -> StateThreshold | None:
+    """Get the active threshold for a state+key. Falls back to 'ALL' if
+    no state-specific row exists (Union-law thresholds)."""
+    sql = """
+        SELECT * FROM state_compliance_thresholds
+        WHERE threshold_key = %s
+          AND is_active = TRUE
+          AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+          AND state IN (%s, 'ALL')
+        ORDER BY state <> 'ALL' DESC, effective_from DESC NULLS LAST
+        LIMIT 1
+    """
+    row = db._execute(sql, (key, state), fetch_one=True)
+    return _row_to_threshold(row) if row else None
+
+
+def get_all_thresholds_for_state(state: str) -> dict[str, StateThreshold]:
+    """Return {threshold_key: StateThreshold} for a given state — state-specific
+    rows take precedence over 'ALL' rows for the same key."""
+    sql = """
+        SELECT DISTINCT ON (threshold_key) *
+        FROM state_compliance_thresholds
+        WHERE is_active = TRUE
+          AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+          AND state IN (%s, 'ALL')
+        ORDER BY threshold_key, state <> 'ALL' DESC, effective_from DESC NULLS LAST
+    """
+    rows = db._execute(sql, (state,), fetch_all=True) or {}
+    return {r["threshold_key"]: _row_to_threshold(r) for r in rows}
+
+
+def get_threshold_value(state: str, key: str) -> float | None:
+    """Convenience: get just the numeric value (or None if no statutory floor)."""
+    t = get_threshold(state, key)
+    return t.value if t else None
+
+
+def get_threshold_text(state: str, key: str) -> str | None:
+    """Convenience: get the text value (e.g., 'Development Authority CEO')."""
+    t = get_threshold(state, key)
+    return t.value_text if t else None
+
+
+def list_all_thresholds(active_only: bool = True) -> list[StateThreshold]:
+    """List all threshold rows for admin management."""
+    sql = "SELECT * FROM state_compliance_thresholds"
+    if active_only:
+        sql += " WHERE is_active = TRUE"
+    sql += " ORDER BY state, threshold_key, effective_from DESC"
+    rows = db._execute(sql, fetch_all=True) or []
+    return [_row_to_threshold(r) for r in rows]
+
+
+def create_threshold(threshold: StateThreshold) -> int:
+    row = db._execute(
+        """INSERT INTO state_compliance_thresholds
+           (state, threshold_key, value, value_text, unit,
+            effective_from, effective_to, notes, is_active)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           RETURNING id""",
+        (threshold.state, threshold.threshold_key, threshold.value,
+         threshold.value_text, threshold.unit, threshold.effective_from,
+         threshold.effective_to, threshold.notes, threshold.is_active),
+        fetch_one=True,
+    )
+    return row["id"] if row else 0
+
+
+def update_threshold(threshold: StateThreshold) -> bool:
+    if not threshold.id:
+        return False
+    db._execute(
+        """UPDATE state_compliance_thresholds SET
+             state=%s, threshold_key=%s, value=%s, value_text=%s, unit=%s,
+             effective_from=%s, effective_to=%s, notes=%s, is_active=%s,
+             updated_at=NOW()
+           WHERE id=%s""",
+        (threshold.state, threshold.threshold_key, threshold.value,
+         threshold.value_text, threshold.unit, threshold.effective_from,
+         threshold.effective_to, threshold.notes, threshold.is_active,
+         threshold.id),
+    )
+    return True
+
+
+def delete_threshold(threshold_id: int) -> bool:
+    db._execute("DELETE FROM state_compliance_thresholds WHERE id = %s", (threshold_id,))
+    return True
+
+
+def _row_to_threshold(r: dict) -> StateThreshold:
+    return StateThreshold(
+        id=r.get("id"),
+        state=r.get("state", "ALL"),
+        threshold_key=r.get("threshold_key", ""),
+        value=r.get("value"),
+        value_text=r.get("value_text"),
+        unit=r.get("unit", ""),
+        effective_from=r.get("effective_from"),
+        effective_to=r.get("effective_to"),
+        notes=r.get("notes", "") or "",
+        is_active=r.get("is_active", True),
+    )

@@ -880,6 +880,57 @@ CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_category ON kpi_rule_links (catego
 CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_state ON kpi_rule_links (state);
 CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_active ON kpi_rule_links (is_active);
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- STATE COMPLIANCE THRESHOLDS — statutory rates and thresholds that vary by
+-- state (sinking/repair fund percentages, GST limits, TDS thresholds, etc.).
+-- Unlike kpi_rule_links (which stores external URLs), this stores the actual
+-- numeric values the system can validate against and surface as defaults
+-- when onboarding a society. NULL means "no statutory floor / not applicable"
+-- (e.g., UP sinking fund has no fixed percentage — it's whatever the AOA
+-- bye-laws specify).
+-- ════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
+    id SERIAL PRIMARY KEY,
+    state VARCHAR(10) NOT NULL
+        CHECK (state IN ('ALL','UP','MH','KA','TN','DL','RJ','MP','WB','GJ','TS','AP','BR','HR','PB','KL')),
+    threshold_key VARCHAR(60) NOT NULL CHECK (threshold_key IN (
+        'sinking_fund_pct_construction_cost',
+        'repair_fund_pct_construction_cost',
+        'sinking_fund_pct_sqft',
+        'repair_fund_pct_sqft',
+        'gst_turnover_lakh',
+        'gst_per_member_monthly',
+        'gst_rwa_collective_monthly',
+        'tds_194c_single_bill',
+        'tds_194c_annual_aggregate',
+        'tds_194j_annual_aggregate',
+        'tds_no_pan_rate',
+        'income_tax_basic_exemption_new_regime',
+        'income_tax_basic_exemption_old_regime',
+        'income_tax_surcharge_limit',
+        'rera_carpet_area_sqft',
+        'rera_project_units',
+        'rera_project_area_sqft',
+        'apartment_act_min_units',
+        'apartment_act_quorum_pct',
+        'apartment_act_competent_authority'
+    )),
+    value NUMERIC(12,4),
+    value_text TEXT,
+    unit VARCHAR(20),
+    effective_from DATE,
+    effective_to DATE,
+    notes TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_state_threshold UNIQUE (state, threshold_key, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_state_compliance_state ON state_compliance_thresholds (state);
+CREATE INDEX IF NOT EXISTS idx_state_compliance_key ON state_compliance_thresholds (threshold_key);
+CREATE INDEX IF NOT EXISTS idx_state_compliance_active ON state_compliance_thresholds (is_active);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,

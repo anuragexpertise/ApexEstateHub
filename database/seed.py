@@ -720,6 +720,137 @@ def seed_kpi_rule_links(cur, conn):
         print(f"  ✓ KPI rule links seeded ({inserted} new links)")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# STATE COMPLIANCE THRESHOLDS — statutory rates/thresholds by state.
+# Seeded for UP (the demo society's state) plus ALL-India Union thresholds.
+# NULL value means "no statutory floor" — the banner and validator treat that
+# as "check your own AOA bye-laws" rather than "here's a minimum".
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Key differences captured here:
+#   - UP sinking/repair fund: NO fixed statutory percentage (UP Apartment
+#     Rules 2011 Ch.VII leaves it to the AOA bye-laws / General Body).
+#   - Maharashtra: 0.25% sinking, 0.75% repair (of construction cost/year).
+#   - GST: Union-law thresholds (₹20L turnover + ₹7,500/member/month).
+#   - TDS: 194C (₹30K/₹1L), 194J (₹50K), 206AA (20% no-PAN rate).
+#   - RERA: varies by state on project registration thresholds.
+#   - Apartment Act: UP mandates AOA formation at 4+ units, 30% quorum.
+
+STATE_COMPLIANCE_THRESHOLDS = [
+    # ── Sinking Fund % (of construction cost / year) ─────────────────────
+    # UP has NO statutory floor — the rate comes from AOA bye-laws / buyer agreement
+    ("UP",  "sinking_fund_pct_construction_cost", None, NULL_NO_FLOOR,
+     "percent", "2026-04-01", None,
+     "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws or builder agreement (commonly 0.5% of flat price/year in practice)."),
+    ("MH",  "sinking_fund_pct_construction_cost", 0.25, None,
+     "percent", "2018-01-01", None,
+     "Maharashtra Model Bye-Laws — statutory minimum 0.25% of construction cost/year."),
+
+    # ── Repair Fund % (of construction cost / year) ──────────────────────
+    ("UP",  "repair_fund_pct_construction_cost", None, NULL_NO_FLOOR,
+     "percent", "2026-04-01", None,
+     "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws / General Body."),
+    ("MH",  "repair_fund_pct_construction_cost", 0.75, None,
+     "percent", "2018-01-01", None,
+     "Maharashtra Model Bye-Laws — statutory minimum 0.75% of construction cost/year."),
+
+    # ── GST: society turnover threshold (₹ lakh/year) ───────────────────
+    ("ALL", "gst_turnover_lakh", 20.00, None,
+     "lakh", "2017-07-01", None,
+     "GST registration mandatory only when aggregate turnover exceeds ₹20 lakh/year (₹10 lakh for special-category states — not applicable to most housing societies)."),
+
+    # ── GST: per-member monthly maintenance threshold ────────────────────
+    ("ALL", "gst_per_member_monthly", 7500.00, None,
+     "rupees", "2017-07-01", None,
+     "GST applies to maintenance charges ONLY when a single member's monthly contribution exceeds ₹7,500 (CBIC Circular 109/28/2019-GST). Once crossed, GST applies to ENTIRE amount, not just excess (Madras HC ruling contested)."),
+
+    # ── GST: collective RWA maintenance threshold ────────────────────────
+    ("ALL", "gst_rwa_collective_monthly", 7500.00, None,
+     "rupees", "2017-07-01", None,
+     "When aggregate maintenance collected from all members exceeds ₹7,500/month AND individual member exceeds ₹7,500, GST applies to that member's share."),
+
+    # ── TDS: Section 194C (contractors) ─────────────────────────────────
+    ("ALL", "tds_194c_single_bill", 30000.00, None,
+     "rupees", "2017-04-01", None,
+     "TDS 194C triggered on a single bill exceeding ₹30,000 (Finance Act 2025 raised from ₹30K; previously ₹15K/₹30K for equipment/others)."),
+    ("ALL", "tds_194c_annual_aggregate", 100000.00, None,
+     "rupees", "2017-04-01", None,
+     "TDS 194C triggered when annual aggregate payments to a contractor exceed ₹1,00,000."),
+
+    # ── TDS: Section 194J (professionals/technical services) ────────────
+    ("ALL", "tds_194j_annual_aggregate", 50000.00, None,
+     "rupees", "2025-04-01", None,
+     "TDS 194J threshold raised from ₹30,000 to ₹50,000/year by Finance Act 2025."),
+
+    # ── TDS: Section 206AA (no-PAN rate) ────────────────────────────────
+    ("ALL", "tds_no_pan_rate", 20.00, None,
+     "percent", "2010-04-01", None,
+     "When payee has no PAN, TDS deducted at higher of 20% or the applicable section rate (Section 206AA, ITA)."),
+
+    # ── Income Tax: basic exemption (new regime — default from FY25) ────
+    ("ALL", "income_tax_basic_exemption_new_regime", 300000.00, None,
+     "rupees", "2023-04-01", None,
+     "FY 2025-26 (new tax regime): basic exemption ₹3 lakh. No tax on income up to ₹7 lakh due to rebate u/s 87A."),
+
+    # ── Income Tax: basic exemption (old regime) ────────────────────────
+    ("ALL", "income_tax_basic_exemption_old_regime", 250000.00, None,
+     "rupees", "2023-04-01", None,
+     "FY 2025-26 (old tax regime): basic exemption ₹2.5 lakh (₹3 lakh for senior citizens, ₹5 lakh for super-senior)."),
+
+    # ── Income Tax: surcharge threshold ─────────────────────────────────
+    ("ALL", "income_tax_surcharge_limit", 5000000.00, None,
+     "rupees", "2023-04-01", None,
+     "Surcharge applies when total income exceeds ₹50 lakh (10% up to ₹1Cr, 15% up to ₹2Cr, 25% above ₹2Cr — new regime rates)."),
+
+    # ── RERA: project registration threshold (UP) ───────────────────────
+    ("UP",  "rera_project_units", 8.00, None,
+     "units", "2016-11-01", None,
+     "UP RERA: mandatory registration for projects with 8+ apartments OR area > 500 sq m (whichever is lower). Smaller projects exempt."),
+    ("UP",  "rera_project_area_sqft", 5382.00, None,
+     "sqft", "2016-11-01", None,
+     "UP RERA: mandatory registration when project area exceeds 500 sq m (~5,382 sq ft)."),
+
+    # ── Apartment Act: UP-specific formation rules ──────────────────────
+    ("UP",  "apartment_act_min_units", 4.00, None,
+     "units", "2010-07-22", None,
+     "UP Apartment Act 2010 applies only to apartment buildings with 4 or more units. Smaller buildings (1-3 flats) fall outside this Act."),
+    ("UP",  "apartment_act_quorum_pct", 30.00, None,
+     "percent", "2010-07-22", None,
+     "UP Apartment Act: AOA general body meetings require 30% quorum. If quorum not met, adjourned meeting can proceed with reduced quorum."),
+    ("UP",  "apartment_act_competent_authority", None, "Development Authority CEO",
+     "text", "2010-07-22", None,
+     "UP Apartment Act: Competent Authority is typically the CEO of the relevant development authority (NOIDA, Greater Noida, etc.) — NOT the Registrar of Societies (who registers the AOA itself under Societies Registration Act 1860)."),
+]
+
+NULL_NO_FLOOR = None
+
+
+def seed_state_compliance_thresholds(cur, conn):
+    """Idempotent seed of state-specific compliance thresholds."""
+    inserted = 0
+    for (state, key, val, val_text, unit, eff_from, eff_to, notes) in STATE_COMPLIANCE_THRESHOLDS:
+        row = _one(
+            cur,
+            "SELECT 1 FROM state_compliance_thresholds "
+            "WHERE state=%s AND threshold_key=%s AND effective_from=%s",
+            (state, key, eff_from),
+        )
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO state_compliance_thresholds
+               (state, threshold_key, value, value_text, unit,
+                effective_from, effective_to, notes, is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
+               ON CONFLICT DO NOTHING""",
+            (state, key, val, val_text, unit, eff_from, eff_to, notes),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
+
+
 def seed_accounts(cur, conn, society_id: int) -> int:
     created = 0
     for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
@@ -1535,6 +1666,7 @@ def run_seed(conn):
     seed_compliance_settings(cur, conn, society_id)
     seed_tds_section_rates(cur, conn, society_id)
     seed_kpi_rule_links(cur, conn)
+    seed_state_compliance_thresholds(cur, conn)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
