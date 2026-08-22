@@ -601,6 +601,16 @@ KPI_CARDS = {
         "title": "Vendor Charge Rules", "group": "active",
     },
 
+    # Nav tile for the Compliance Settings page. Click routes through
+    # DRILLDOWN_MAP to list_compliance_settings -> profile_compliance_setting,
+    # which renders the "Rules & Regulations" external links banner.
+    "kpi_compliance_settings": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-scale-balanced", "color": "#2563eb",
+        "title": "Compliance Settings", "group": "settings",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
