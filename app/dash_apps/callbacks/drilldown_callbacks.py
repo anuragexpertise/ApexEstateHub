@@ -56,7 +56,8 @@ from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export
+from database import cashbook_export, ledger_export, tds_export
+from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
@@ -1671,12 +1672,85 @@ def register_drilldown_callbacks(app):
         csv_str = loaders.export_csv(entity, filters)
         return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
 
+    # ── 3a. EXPENSE-FORM TDS AUTOFILL (Phase 4.3) ─────────────────────────────
+    # When the account dropdown (acc_id) or the linked vendor (entity_id)
+    # changes on the New/Edit Expense form, recompute the suggested TDS % /
+    # section / capital flags server-side and push them back into the form's
+    # tds_pct field + a warning banner. The field stays editable — this only
+    # pre-fills the correct default so the person entering the expense doesn't
+    # need to know current tax law. Block (vs warn) for a missing PAN is
+    # enforced again at save time in _save_expense_v3.
+    @app.callback(
+        Output({"type": "form-field", "entity": "expenses", "field": "tds_pct"}, "value"),
+        Output({"type": "form-field", "entity": "expenses", "field": "tds_section"}, "value"),
+        Output({"type": "tds-autofill", "entity": "expenses"}, "data"),
+        Input({"type": "form-field", "entity": "expenses", "field": "acc_id"}, "value"),
+        Input({"type": "form-field", "entity": "expenses", "field": "entity_id"}, "value"),
+        Input({"type": "form-field", "entity": "expenses", "field": "amount"}, "value"),
+        Input({"type": "form-field", "entity": "expenses", "field": "expense_date"}, "value"),
+        State("drilldown-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, store):
+        sid = get_current_society_id()
+        if not sid or not acc_id:
+            return no_update, no_update, no_update
+        try:
+            amt = float(amount) if amount not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            amt = 0.0
+        try:
+            vendor_id = int(entity_id) if entity_id not in (None, "") else None
+        except (TypeError, ValueError):
+            vendor_id = None
+        try:
+            acc = int(acc_id)
+        except (TypeError, ValueError):
+            return no_update, no_update, no_update
+
+        sug = tds_compliance.suggest_expense_tax_fields(
+            db, sid, acc, vendor_id, amt, expense_date=expense_date,
+        )
+        return (
+            sug["tds_pct"] if sug["tds_applies"] else 0,
+            sug["tds_section"] or "",
+            {
+                "tds_pct": sug["tds_pct"],
+                "tds_section": sug["tds_section"],
+                "tds_applies": sug["tds_applies"],
+                "tds_basis": sug["tds_basis"],
+                "pan_captured": sug["pan_captured"],
+                "pan_action": sug["pan_action"],
+                "pan_warning": sug["pan_warning"],
+                "is_capital": sug["is_capital"],
+                "is_depreciable": sug["is_depreciable"],
+                "depreciation_percent": sug["depreciation_percent"],
+            },
+        )
+
     # ── 3b. CASHBOOK / LEDGER FY EXPORT ─────────────────────────────────────────
     # Full-FY workbook in the CB2025-2026.xlsx reference layout — distinct from
     # the generic CSV/XLS buttons above, which just dump whatever page of rows
     # is currently on-screen. Cashbook needs no account_id (society + FY +
     # entity scoping); Ledger needs the account_id the drilldown is currently
     # scoped to (set when navigating in via Account profile -> "View Ledger").
+    def _resolve_tds_quarter(store: dict | None) -> int:
+        """Quarter (1..4) for the TDS 26Q export. Defaults to the quarter
+        containing today; overridable via store['tds_quarter']."""
+        raw = (store or {}).get("tds_quarter")
+        if raw not in (None, ""):
+            try:
+                q = int(raw)
+                if 1 <= q <= 4:
+                    return q
+            except (TypeError, ValueError):
+                pass
+        from datetime import date as _date
+        month = _date.today().month
+        # FY runs Apr-Mar: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar.
+        return ((month - 4) % 12) // 3 + 1
+
     @app.callback(
         Output({"type": "fy-export-trigger", "entity": MATCH}, "data"),
         Input({"type": "btn-fy-export", "entity": MATCH}, "n_clicks"),
@@ -1733,6 +1807,12 @@ def register_drilldown_callbacks(app):
             # flat summary sheet); that's still available standalone.
             data = ledger_export.generate_ledger_index_excel(None, sid, fy)
             filename = f"Ledger_{fy}-{fy+1}.xlsx"
+        elif entity == "tds_summary":
+            # Quarterly TDS return (Form 26Q) — structured rows the society's
+            # CA transcribes into the filing tool. Defaults to the quarter
+            # containing today; override via store["tds_quarter"] (1..4).
+            data = tds_export.generate_tds_summary_excel(None, sid, fy, quarter=_resolve_tds_quarter(store))
+            filename = f"TDS26Q_FY{fy}-Q{_resolve_tds_quarter(store)}.xlsx"
         else:
             return no_update
 
@@ -2757,6 +2837,44 @@ def _save_expense_v3(db, d, sid):
             (acc_id, sid), fetch_one=True,
         )
         tds_section = (row or {}).get("tds_section")
+
+    # Phase 4.3: server-side TDS determination keyed by the chosen account +
+    # linked vendor. Keeps the flat manual default honest for whoever is
+    # entering the expense, and enforces the society's no-PAN policy.
+    entity_id = d.get("entity_id")
+    vendor_id = None
+    try:
+        vendor_id = int(entity_id) if entity_id not in (None, "") else None
+    except (TypeError, ValueError):
+        vendor_id = None
+    tds_sug = tds_compliance.suggest_expense_tax_fields(
+        db, sid, acc_id, vendor_id, amt, expense_date=d.get("expense_date"),
+    )
+    if tds_sug["tds_applies"] and not tds_sug["pan_captured"] and tds_sug["pan_action"] == "block":
+        return False, tds_sug["pan_warning"], None
+    # Honour an explicit form value if present & valid, else use the computed default.
+    if tds_pct_raw not in (None, ""):
+        pass  # keep the validated tds_pct from above
+    elif tds_sug["tds_applies"]:
+        tds_pct = tds_sug["tds_pct"]
+        tds_section = tds_sug["tds_section"] or tds_section
+    else:
+        tds_pct = 0
+        tds_section = tds_sug["tds_section"] or tds_section
+
+    # Phase 5.2: a capital expense booked against a depreciable BS account
+    # needs an explicit depreciation-rate confirmation — don't silently create
+    # an under-depreciated asset. Ask, don't block (the asset module records the
+    # rate; here we just surface it so the entry isn't lost).
+    dep = tds_compliance.account_is_depreciable(db, sid, acc_id)
+    if tds_sug["is_capital"] and dep["is_depreciable"] and not d.get("depreciation_confirmed"):
+        return (
+            False,
+            f"This expense is CAPITAL (Balance-Sheet asset) against a depreciable "
+            f"account ({dep['depreciation_percent']}% depreciation). Confirm the "
+            f"depreciation rate before saving so the asset isn't left under-depreciated.",
+            None,
+        )
 
     try:
         r = db._execute(

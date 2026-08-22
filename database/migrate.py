@@ -383,6 +383,24 @@ def run_migrations(conn):
         "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_role_check",
         "ALTER TABLE transactions ADD CONSTRAINT transactions_role_check "
         "CHECK (role IN ('apartment', 'vendor', 'security', 'other', 'assets'))",
+
+        # ══ Indian CHS/RWA compliance: TDS (Phase 4/4d) + capital (Phase 5) ══
+        # tds_section_rates: CBDT section → rate + thresholds (safe to re-run).
+        """CREATE TABLE IF NOT EXISTS tds_section_rates (
+            id SERIAL PRIMARY KEY,
+            society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+            section VARCHAR(10) NOT NULL,
+            rate NUMERIC(5, 2) NOT NULL,
+            rate_no_pan NUMERIC(5, 2),
+            single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
+            annual_aggregate_threshold NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            effective_from DATE NOT NULL DEFAULT '2024-04-01',
+            effective_to DATE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, effective_from)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup "
+        "ON tds_section_rates (society_id, section, effective_from)",
     ]
 
     ok = 0

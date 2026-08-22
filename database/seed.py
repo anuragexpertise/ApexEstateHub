@@ -631,6 +631,49 @@ def seed_accounts(cur, conn, society_id: int) -> int:
     return created
 
 
+# ══ Indian CHS/RWA compliance: CBDT TDS section → rate + thresholds ══
+# Best-guess seed (FLAG — PROFESSIONAL REVIEW): confirm against the
+# applicable Finance Act before relying on these for a filing. Each
+# society gets the same set of rows (society_id-scoped table).
+#   194C: 1% (individual/HUF) / 2% (others); F30K single / F1L annual.
+#   194J: 10% professional/technical services, no threshold.
+# rate_no_pan = Section 206AA higher rate when the vendor has no PAN.
+TDS_SECTION_RATE_SEED = [
+    # (section, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
+    ('194C', 1.00, 2.00, 30000, 100000),
+    ('194C', 2.00, 4.00, 30000, 100000),
+    ('194J', 10.00, 20.00, 0, 0),
+]
+
+
+def seed_tds_section_rates(cur, conn, society_id: int):
+    inserted = 0
+    for i, (section, rate, rate_no_pan, single_thr, annual_thr) in enumerate(TDS_SECTION_RATE_SEED):
+        # Stagger effective_from per variant so the UNIQUE(society_id,section,
+        # effective_from) constraint keeps one "current" row per (section,rate).
+        eff_from = f"{2024 + i}-04-01"
+        row = _one(
+            cur,
+            "SELECT 1 FROM tds_section_rates "
+            "WHERE society_id=%s AND section=%s AND effective_from=%s",
+            (society_id, section, eff_from),
+        )
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO tds_section_rates
+               (society_id, section, rate, rate_no_pan,
+                single_bill_threshold, annual_aggregate_threshold, effective_from)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT DO NOTHING""",
+            (society_id, section, rate, rate_no_pan, single_thr, annual_thr, eff_from),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ TDS section rates seeded ({inserted} rows)")
+
+
 def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
     """Seed FY-scoped opening balances into brought_forward for every
     account where has_bf = TRUE (already flagged inline in ACCOUNTS
@@ -1371,6 +1414,7 @@ def run_seed(conn):
     seed_brought_forward(cur, conn, society_id, admin_uid)
     seed_primary_bank_account(cur, conn, society_id)
     seed_compliance_settings(cur, conn, society_id)
+    seed_tds_section_rates(cur, conn, society_id)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
