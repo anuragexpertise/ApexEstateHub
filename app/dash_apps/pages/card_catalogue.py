@@ -1079,6 +1079,7 @@ DEFAULT_LAYOUTS = {
             "kpi_accounts_count",
             "kpi_apt_charges_count",
             "kpi_ven_charges_count",
+            "kpi_compliance_settings",
             "kpi_time_qr",
         ],
         "channels": [
