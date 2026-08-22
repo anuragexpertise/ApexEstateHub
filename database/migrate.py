@@ -272,28 +272,7 @@ def run_migrations(conn):
         # visitors: ensure host_apartment_id column exists (older schema used apartment_id)
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_apartment_id INT REFERENCES apartments(id)",
 
-        # concerns_assigns: structured table for concern assignments (ADM/VND/SEC)
-        """CREATE TABLE IF NOT EXISTS concerns_assigns (
-            id SERIAL PRIMARY KEY,
-            concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
-            society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-            role VARCHAR(10) NOT NULL CHECK (role IN ('ADM', 'VND', 'SEC')),
-            entity_id INT NOT NULL,
-            assigned_by INT REFERENCES users (id),
-            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            UNIQUE (concern_id, role, entity_id)
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id)",
-        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id)",
-        "CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id)",
-
-        # concerns_assigns: audit columns for who resolved/closed an
-        # assignment row (added 2026-08 alongside the fn_sync_concern_status
-        # aggregation fix — see Concerns_Workflow_Review.md §3.4 / §2.9)
-        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS resolved_by INT REFERENCES users(id)",
-        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS closed_by INT REFERENCES users(id)",
-
-        # qr_payload columns for tables that existed before this column was introduced
+        # concerns: qr_payload column for audit/tracking
         "ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
         "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
         "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
@@ -320,22 +299,6 @@ def run_migrations(conn):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE vendors ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
         "ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
-
-        # push_subscriptions: one row per browser/device per user (replaces
-        # the single users.push_subscription TEXT column).
-        """CREATE TABLE IF NOT EXISTS push_subscriptions (
-            id            SERIAL PRIMARY KEY,
-            user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            endpoint      TEXT NOT NULL,
-            p256dh        TEXT NOT NULL,
-            auth          TEXT NOT NULL,
-            user_agent    TEXT,
-            created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-            last_used_at  TIMESTAMP DEFAULT NOW(),
-            UNIQUE(user_id, endpoint)
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)",
 
         # visitors: source column to distinguish owner-preapproved vs security walk-in
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'security' CHECK (source IN ('owner', 'security'))",
@@ -385,22 +348,6 @@ def run_migrations(conn):
         "CHECK (role IN ('apartment', 'vendor', 'security', 'other', 'assets'))",
 
         # ══ Indian CHS/RWA compliance: TDS (Phase 4/4d) + capital (Phase 5) ══
-        # tds_section_rates: CBDT section → rate + thresholds (safe to re-run).
-        """CREATE TABLE IF NOT EXISTS tds_section_rates (
-            id SERIAL PRIMARY KEY,
-            society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-            section VARCHAR(10) NOT NULL,
-            rate NUMERIC(5, 2) NOT NULL,
-            rate_no_pan NUMERIC(5, 2),
-            single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
-            annual_aggregate_threshold NUMERIC(12, 2) NOT NULL DEFAULT 0,
-            effective_from DATE NOT NULL DEFAULT '2024-04-01',
-            effective_to DATE,
-            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, effective_from)
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup "
-        "ON tds_section_rates (society_id, section, effective_from)",
     ]
 
     ok = 0
