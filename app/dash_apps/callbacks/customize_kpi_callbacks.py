@@ -71,6 +71,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_ven_charges_count", "admin", "settings", "Settings"),
     ("kpi_sec_charges_count", "admin", "settings", "Settings"),
     ("kpi_attendance_count", "admin", "settings", "Settings"),
+    ("kpi_compliance_settings", "admin", "settings", "Settings"),
     # ADMIN - Financials tab
     ("kpi_cash_in_hand", "admin", "financials", "Cashbook"),
     ("kpi_bank_balance", "admin", "financials", "Cashbook"),
