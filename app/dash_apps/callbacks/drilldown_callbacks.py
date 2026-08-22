@@ -47,6 +47,7 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 import json
 import io
+import re
 import pandas as pd
 import base64
 import os
@@ -2592,6 +2593,7 @@ def _save_entity(entity, card_id, data):
         if entity == "gate_log":        return _save_gate_log(db, data, sid)
         if entity == "society":         return _save_society(db, data, sid, is_edit, pk)
         if entity == "account":         return _save_account(db, data, sid, is_edit, pk)
+        if entity == "compliance_setting": return _save_compliance_settings(db, data, sid, is_edit, pk)
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
@@ -2747,9 +2749,18 @@ def _save_expense_v3(db, d, sid):
     if tds_pct < 0 or tds_pct > 100:
         return False, "TDS % must be between 0 and 100", None
 
+    # Auto-populate tds_section from the chosen account if not already set
+    tds_section = d.get("tds_section")
+    if not tds_section:
+        row = db._execute(
+            "SELECT tds_section FROM accounts WHERE id=%s AND society_id=%s",
+            (acc_id, sid), fetch_one=True,
+        )
+        tds_section = (row or {}).get("tds_section")
+
     try:
         r = db._execute(
-            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 acc_id,
@@ -2764,6 +2775,7 @@ def _save_expense_v3(db, d, sid):
                 d.get("transaction_id"),
                 d.get("source_reference"),
                 tds_pct,
+                tds_section,
             ),
             fetch_one=True,
         )
@@ -3267,15 +3279,24 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                  d.get("photo"), d.get("id_proof"), d.get("user_id"), pk, sid),
             )
         else:
+            pan = (d.get("pan_number") or "").strip().upper()
+            gstin = (d.get("gstin") or "").strip().upper()
+            if pan and not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]$', pan):
+                return False, "Invalid PAN format (expected: ABCDE1234F)", None
+            if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
+                return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
             db._execute(
                 "UPDATE vendors SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
                 "license=COALESCE(NULLIF(%s, ''), license),"
+                "pan_number=COALESCE(NULLIF(%s, ''), pan_number),"
+                "gstin=COALESCE(NULLIF(%s, ''), gstin),"
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
-                 d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"), pk, sid),
+                 d.get("photo"), d.get("logo"), d.get("license"),
+                 pan, gstin, d.get("user_id"), pk, sid),
             )
         return True, f"{role.title()} updated", pk
 
@@ -3299,11 +3320,18 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
              d.get("photo"), d.get("id_proof"), d.get("user_id")), fetch_one=True,
         )
     else:
+        pan = (d.get("pan_number") or "").strip().upper()
+        gstin = (d.get("gstin") or "").strip().upper()
+        if pan and not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]$', pan):
+            return False, "Invalid PAN format (expected: ABCDE1234F)", None
+        if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
+            return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
         dr = db._execute(
-            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by,pan_number,gstin) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
             (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
-             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id")), fetch_one=True,
+             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"),
+             pan or None, gstin or None), fetch_one=True,
         )
     domain_id = dr["id"] if dr else None
     if not domain_id:
@@ -3567,7 +3595,7 @@ def _save_society(db, d, sid, is_edit, pk):
                     _missing_files.append(field)
                     d[field] = ""
         caller_role = d.get("caller_role", "admin")
-        immutable_cols = {"name", "pan_number", "plan_validity", "calc_start_date"}
+        immutable_cols = {"name", "pan_number", "gstin", "plan_validity", "calc_start_date"}
         if caller_role == "master":
             db._execute(
                 "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
@@ -3575,7 +3603,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 "login_background=COALESCE(NULLIF(%s, ''), login_background),"
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
                 "secretary_name=%s,secretary_phone=%s,"
-                "plan_validity=%s,calc_start_date=%s,PAN_number=%s,"
+                "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"
                 "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr),updated_by=%s "
                 "WHERE id=%s",
                 (
@@ -3592,6 +3620,7 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("plan_validity"),
                     d.get("calc_start_date"),
                     d.get("pan_number"),
+                    d.get("gstin"),
                     d.get("payment_qr"),
                     d.get("user_id"),
                     pk,
@@ -3654,6 +3683,41 @@ def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount, user_id=None):
         "is_auto_calculated=FALSE, updated_at=NOW(), updated_by=%s",
         (sid, fy, acc_id, drcr_bf, bf_amount, user_id, user_id),
     )
+
+
+def _save_compliance_settings(db, d, sid, is_edit, pk):
+    if not is_edit:
+        return False, "Compliance settings cannot be created directly — use the society profile", None
+
+    def _bool(v):
+        if isinstance(v, str):
+            return v.lower() == "true"
+        return bool(v) if v is not None else None
+
+    fields = {
+        "sinking_fund_rate_basis": d.get("sinking_fund_rate_basis"),
+        "repair_fund_rate_basis": d.get("repair_fund_rate_basis"),
+        "fund_gst_exempt": _bool(d.get("fund_gst_exempt")),
+        "fund_charges_interest": _bool(d.get("fund_charges_interest")),
+        "gst_filing_cadence": d.get("gst_filing_cadence"),
+        "gst_registered": _bool(d.get("gst_registered")),
+        "gstin": (d.get("gstin") or "").strip().upper() or None,
+        "tds_no_pan_action": d.get("tds_no_pan_action"),
+        "default_export_format": d.get("default_export_format"),
+    }
+
+    set_parts, params = [], []
+    for col, val in fields.items():
+        set_parts.append(f"{col}=%s")
+        params.append(val)
+    params.extend([sid, pk])
+
+    db._execute(
+        f"UPDATE society_compliance_settings SET {', '.join(set_parts)}, updated_at=NOW() "
+        "WHERE society_id=%s AND id=%s RETURNING id",
+        params,
+    )
+    return True, "Compliance settings updated", pk
 
 
 def _save_account(db, d, sid, is_edit, pk):

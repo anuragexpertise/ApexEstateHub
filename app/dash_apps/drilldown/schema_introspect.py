@@ -50,6 +50,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     # list even after loaders.py grew a "channels" branch. See
     # NO_EDIT_ACTION and _COMPUTED_FIELDS below for the rest of the setup.
     "channels":     "alert_channels",
+    "compliance_settings": "society_compliance_settings",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -63,6 +64,8 @@ _SYSTEM_COLUMNS = {
     "roster_id",
     # asset-internal
     "last_depreciation_date",
+    # auto-generated grouping key
+    "bill_group_id",
 }
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
@@ -163,6 +166,8 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Pass Expiry",   "field": "pass_expiry",   "icon": "fa-calendar-alt"},
         {"label": "Gate Pass",     "field": "gate_pass",     "icon": "fa-qrcode",  "format": "gate_pass"},
         {"label": "Active Passes", "field": "active_passes", "icon": "fa-id-card"},
+        {"label": "PAN Number",    "field": "pan_number",    "icon": "fa-id-card"},
+        {"label": "GSTIN",         "field": "gstin",         "icon": "fa-id-card"},
     ],
     "security": [
         {"label": "Shifts Completed", "field": "shift_count",  "icon": "fa-clock", "format": "shift_count"},

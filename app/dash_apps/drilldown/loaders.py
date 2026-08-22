@@ -1730,6 +1730,18 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── COMPLIANCE SETTINGS (1 per society) ─────────────────────────
+        if entity == "compliance_settings":
+            rows = db._execute(
+                "SELECT * FROM society_compliance_settings WHERE society_id=%s LIMIT %s OFFSET %s",
+                (sid, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM society_compliance_settings WHERE society_id=%s",
+                (sid,), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
@@ -1777,6 +1789,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     "SELECT v.id, u.id AS user_id, u.email, v.society_id, "
                     "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
                     "  v.active, v.logo, v.license, v.photo, v.service_description, v.created_at, "
+                    "  v.pan_number, v.gstin, "
                     "  vp.pass_expiry, vp.gate_pass "
                     "FROM vendors v "
                     "LEFT JOIN users u ON u.linked_id=v.id AND u.role='vendor' "
@@ -1789,6 +1802,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     "SELECT v.id, u.id AS user_id, u.email, v.society_id, "
                     "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
                     "  v.active, v.logo, v.license, v.photo, v.created_at, "
+                    "  v.pan_number, v.gstin, "
                     "  NULL AS pass_expiry, FALSE AS gate_pass "
                     "FROM vendors v "
                     "LEFT JOIN users u ON u.linked_id=v.id AND u.role='vendor' "
@@ -1866,6 +1880,14 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         # ── SOCIETY ──────────────────────────────────────────────────────────
         if entity_singular == "society":
             r = db._execute("SELECT * FROM fn_society_profile(%s)", (pk,), fetch_one=True)
+            return dict(r) if r else None
+
+        # ── COMPLIANCE SETTING ─────────────────────────────────────────────
+        if entity_singular == "compliance_setting":
+            r = db._execute(
+                "SELECT * FROM society_compliance_settings WHERE id=%s AND society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
             return dict(r) if r else None
 
         # ── ACCOUNT ──────────────────────────────────────────────────────────

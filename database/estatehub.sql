@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS societies (
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT
+    created_by INT REFERENCES users (id),
+    gstin VARCHAR(15)
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -138,6 +139,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
+
+ALTER TABLE accounts
+ADD COLUMN IF NOT EXISTS income_nature VARCHAR(10) CHECK (income_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
+ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10);
 
 -- societies.primary_bank_account_id (2026-08)
 -- ==============================================
@@ -234,7 +239,9 @@ CREATE TABLE IF NOT EXISTS vendors (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
-    updated_by INT REFERENCES users (id)
+    updated_by INT REFERENCES users (id),
+    pan_number VARCHAR(10),
+    gstin VARCHAR(15)
 );
 
 CREATE TABLE IF NOT EXISTS security_staff (
@@ -470,6 +477,9 @@ CREATE TABLE IF NOT EXISTS receivables (
     created_by INT REFERENCES users (id)
 );
 
+ALTER TABLE receivables
+ADD COLUMN IF NOT EXISTS bill_group_id UUID DEFAULT gen_random_uuid();
+
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
 CREATE TABLE IF NOT EXISTS receipts (
     id SERIAL PRIMARY KEY,
@@ -567,6 +577,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id)
 );
+
+ALTER TABLE expenses
+ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10);
 
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
@@ -729,7 +742,10 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id)
+    updated_by INT REFERENCES users (id),
+    apt_sinking_fund_rate NUMERIC(10,2) DEFAULT 0,
+    apt_repair_fund_rate NUMERIC(10,2) DEFAULT 0,
+    charges_interest BOOLEAN DEFAULT TRUE
 );
 
 -- ── Vendor charges ─────────────────────────────────────────────
@@ -811,6 +827,26 @@ CREATE TABLE IF NOT EXISTS Dashboard_settings (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, key)
 );
+
+CREATE TABLE IF NOT EXISTS society_compliance_settings (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    sinking_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (sinking_fund_rate_basis IN ('per_sq_ft', 'construction_cost')),
+    repair_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (repair_fund_rate_basis IN ('per_sq_ft', 'construction_cost')),
+    fund_gst_exempt BOOLEAN DEFAULT TRUE,
+    fund_charges_interest BOOLEAN DEFAULT TRUE,
+    gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (gst_filing_cadence IN ('monthly', 'qrmp')),
+    gst_registered BOOLEAN DEFAULT FALSE,
+    gstin VARCHAR(15),
+    tds_no_pan_action VARCHAR(10) DEFAULT 'warn' CHECK (tds_no_pan_action IN ('warn', 'block')),
+    tds_section_rates JSONB,
+    default_export_format VARCHAR(20) DEFAULT 'structured' CHECK (default_export_format IN ('structured', 'gstn_offline', 'traces_26q')),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_society_compliance_settings UNIQUE (society_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_society_compliance_settings_society ON society_compliance_settings (society_id);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
@@ -3230,7 +3266,8 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
     p_cheque_no        VARCHAR DEFAULT NULL,
     p_trx_id           VARCHAR DEFAULT NULL,
     p_source_reference VARCHAR DEFAULT NULL,
-    p_tds_pct          NUMERIC DEFAULT 10
+    p_tds_pct          NUMERIC DEFAULT 10,
+    p_tds_section      VARCHAR DEFAULT NULL
 )
 RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
@@ -3271,13 +3308,13 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
-        source_reference, created_at
+        source_reference, created_at, tds_section
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_expense_date, p_acc_id, p_particulars,
         p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
-        p_source_reference, NOW()
+        p_source_reference, NOW(), p_tds_section
     ) RETURNING id INTO v_expense_id;
  
     IF v_status = 'confirmed' THEN
@@ -3401,8 +3438,28 @@ BEGIN
     WHERE society_id = p_society_id AND drcr_account = 'Dr'
       AND name ILIKE '%TDS to IT%'
     LIMIT 1;
- 
+  
     RETURN v_acc_id;  -- NULL if not found — caller treats that as "TDS not configured"
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_resolve_gst_accounts(p_society_id INT)
+RETURNS TABLE(cgst_acc_id INT, sgst_acc_id INT) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_cgst INT;
+    v_sgst INT;
+BEGIN
+    SELECT id INTO v_cgst FROM accounts
+    WHERE society_id = p_society_id AND drcr_account = 'Cr'
+      AND name ILIKE '%CGST Payable%'
+    LIMIT 1;
+
+    SELECT id INTO v_sgst FROM accounts
+    WHERE society_id = p_society_id AND drcr_account = 'Cr'
+      AND name ILIKE '%SGST Payable%'
+    LIMIT 1;
+
+    RETURN QUERY SELECT v_cgst, v_sgst;  -- NULLs if not found — caller treats that as "GST not configured"
 END;
 $$;
 
@@ -3462,7 +3519,8 @@ CREATE OR REPLACE FUNCTION fn_vendors_list(
 RETURNS TABLE (
     id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
     business_name VARCHAR(100), service_type VARCHAR(30), mobile VARCHAR(15), active BOOLEAN,
-    pass_expiry DATE, gate_pass BOOLEAN, active_passes INT
+    pass_expiry DATE, gate_pass BOOLEAN, active_passes INT,
+    pan_number VARCHAR(10), gstin VARCHAR(15)
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -3476,7 +3534,8 @@ BEGIN
         COALESCE(v.active,TRUE)::BOOLEAN,
         COALESCE(pass.pass_expiry, p_pass_max.expiry)::DATE,
         COALESCE(pass.pass_expiry >= CURRENT_DATE, FALSE),
-        (COALESCE(pass.active_passes, 0))::INT
+        COALESCE(pass.active_passes, 0)::INT,
+        v.pan_number::VARCHAR(10), v.gstin::VARCHAR(15)
     FROM vendors v
     LEFT JOIN users u ON u.linked_id = v.id AND u.role = 'vendor'
     LEFT JOIN LATERAL (
@@ -5233,7 +5292,7 @@ CREATE OR REPLACE FUNCTION fn_societies_list(
 )
 RETURNS TABLE (
     id INT, name VARCHAR(100), email VARCHAR(30), phone VARCHAR(20),
-    pan_number VARCHAR(10), secretary_name VARCHAR(100),
+    pan_number VARCHAR(10), gstin VARCHAR(15), secretary_name VARCHAR(100),
     plan VARCHAR(20), plan_status VARCHAR(10), plan_validity DATE,
     calc_start_date DATE,
     total_apartments INT, total_users INT, total_receivables NUMERIC(15,2),
@@ -5244,7 +5303,7 @@ BEGIN
     RETURN QUERY
     SELECT
         s.id::INT, s.name::VARCHAR(100), s.email::VARCHAR(100), s.phone::VARCHAR(20),
-        s.PAN_number::VARCHAR(10), s.secretary_name::VARCHAR(100),
+        s.PAN_number::VARCHAR(10), s.gstin::VARCHAR(15), s.secretary_name::VARCHAR(100),
         s.plan::VARCHAR(20),
         CASE WHEN s.plan='Free' THEN 'Free'
              WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
@@ -5271,7 +5330,7 @@ RETURNS TABLE (
     email VARCHAR(30), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
     plan_status VARCHAR(10), plan_validity DATE, calc_start_date DATE,
     secretary_name VARCHAR(100), secretary_phone VARCHAR(20), secretary_sign VARCHAR(100),
-    PAN_number VARCHAR(10), payment_qr VARCHAR(255),
+    PAN_number VARCHAR(10), gstin VARCHAR(15), payment_qr VARCHAR(255),
     total_apartments INT, total_vendors INT, total_security INT, total_users INT,
     total_receivables NUMERIC(15,2), created_at TIMESTAMP, _image_society_id INT
 )
@@ -5284,7 +5343,7 @@ LANGUAGE SQL STABLE AS $$
              ELSE 'Expired' END::VARCHAR(10),
         s.plan_validity::DATE, s.calc_start_date::DATE,
         s.secretary_name::VARCHAR(100), s.secretary_phone::VARCHAR(20), s.secretary_sign::VARCHAR(100),
-        s.PAN_number::VARCHAR(10), s.payment_qr::VARCHAR(255),
+        s.PAN_number::VARCHAR(10), s.gstin::VARCHAR(15), s.payment_qr::VARCHAR(255),
         (SELECT COUNT(*)::INT FROM apartments    WHERE society_id=s.id),
         (SELECT COUNT(*)::INT FROM vendors       WHERE society_id=s.id),
         (SELECT COUNT(*)::INT FROM security_staff WHERE society_id=s.id),
@@ -5800,12 +5859,12 @@ $$;
 DROP FUNCTION IF EXISTS fn_check_duplicate_receivables (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_duplicate_receivables(p_society_id INT)
-RETURNS TABLE (entity_id INT, role VARCHAR(10), period_month DATE, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
-    SELECT r.entity_id, r.role, r.period_month, COUNT(*) AS dup_count,
-           'Multiple receivables for same entity/role/period'::TEXT
+RETURNS TABLE (entity_id INT, role VARCHAR(10), period_month DATE, acc_id INT, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
+    SELECT r.entity_id, r.role, r.period_month, r.acc_id, COUNT(*) AS dup_count,
+           'Multiple receivables for same entity/role/period/account'::TEXT
     FROM receivables r
     WHERE r.society_id = p_society_id AND r.period_month IS NOT NULL
-    GROUP BY r.entity_id, r.role, r.period_month
+    GROUP BY r.entity_id, r.role, r.period_month, r.acc_id
     HAVING COUNT(*) > 1;
 $$;
 

@@ -1,0 +1,353 @@
+ 
+read repo latest https://github.com/anuragexpertise/ApexEstateHub.git
+
+In India, housing societies (Cooperative Housing Societies - CHS or Resident Welfare Associations - RWAs) operate under specific accounting standards dictated by State Cooperative Societies Acts (e.g., Maharashtra Cooperative Societies Act, 1960), the Income Tax Act, 1961, and GST Laws.
+
+1. Classification of Incomes
+
+* Mutual Incomes (Exempt from Income Tax): Under the Principle of Mutuality, income earned by a society from its own members for self-governance or common benefit is non-taxable.
+
+   * Examples: Monthly maintenance, parking fees, interest on late maintenance charges from members, and transfer fees (subject to state statutory limits).
+
+* Non-Mutual Incomes (Taxable): Incomes derived from external parties or financial investments.
+
+   * Examples: Rent from telecom towers on roofs, renting out common halls or grounds to third parties, advertising hoarding fees, and interest earned on Fixed Deposits (FDs) or savings accounts.
+
+   * Taxation: Taxed under "Income from Other Sources" at applicable slab rates/corporate rates after deducting direct expenses incurred to earn that income.
+
+2. Classification of Expenses
+
+* Revenue Expenses (Income & Expenditure Account):
+
+   * Operational: Security guard service fees, housekeeping, lift maintenance (AMC), garden maintenance, common area electricity/water bills.
+
+   * Administrative: Audit fees, accounting software costs, legal fees, manager salary.
+
+* Capital Expenses (Balance Sheet Assets):
+
+   * Examples: Purchasing solar panels, installing new CCTV camera networks, buying gym equipment, or major structural additions.
+
+3. Key Laws & Regulations Governing Software Architecture
+
+GST Compliance (CGST/SGST Acts)
+
+* Exemption Thresholds: GST (18%) is applicable only if both conditions are met:
+
+   1. The society's total annual turnover exceeds ₹20 Lakhs.
+
+   2. The individual member's monthly maintenance charge exceeds ₹7,500.
+
+* Exempt Receipts: Statutory collections (like property tax or water charges billed on actual recovery) are exempt from GST calculation.
+
+* Software Impact: Billing engines must dynamically check both the society threshold and member unit threshold before applying GST (SAC Code 9995).
+
+Reserve & Special Funds (State Cooperative Rules & Bye-Laws)
+
+* Specific line items cannot be merged into generic maintenance income or revenue funds; they must be escrowed or maintained as separate ledger accounts:
+
+   * Sinking Fund: Mandatory collection (typically 0.25% per annum of construction cost per flat) for long-term structural repairs or rebuilding.
+
+   * Repair & Maintenance Fund: Minimum statutory percentage allocated specifically for building repairs.
+
+   * Corpus Fund / Reserve Fund: One-time builder handovers or capital transfers.
+
+* Software Impact: Software must auto-allocate line items from single bill receipts into distinct reserve ledger accounts and balance sheets.
+
+Income Tax & TDS (Tax Deducted at Source - IT Act, 1961)
+
+* TDS Deduction: The society must deduct TDS when paying third-party service providers (e.g., Section 194C for security/cleaning contractors if payments exceed ₹30,000 per bill or ₹1,000,000 annually; Section 194J for professional services like audit or legal fees).
+
+* Software Impact: The vendor payout module must auto-calculate and withhold TDS during vendor voucher generation.
+
+Accounting Standards & Auditing
+
+* Societies must follow Double-Entry Accrual Accounting.
+
+* Financial Year runs strictly from April 1 to March 31.
+
+* Audit reports (Form ITR-5) and balance sheet submissions to the Registrar of Cooperative Societies are mandatory.
+
+
+Make a plan to incorporate all directives required for a Society management system. Do not write code
+
+There's a `VISION.md` — let's check that first, it likely states intent/roadmap already.This is marketing copy, not a technical roadmap — no help there. Let's check the actual chart of accounts, transactions schema, GST/TDS handling, and vendor payout logic already present.No GST implementation at all currently. Let's check TDS.No PAN/GSTIN capture on vendors, no cumulative annual TDS threshold tracking, no sinking/repair fund reserve accounts, no mutuality/non-mutuality income tagging. Let's check charges/billing table for maintenance/GST fields.Good, `apartment_size` (sq ft) already exists — usable for sinking fund construction-cost-based allocation. Now let's check the chart of accounts for existing fund-like accounts and depreciable-asset categories, and check the accounts' `header` field usage.No fund/reserve/GST accounts in the seed chart at all — confirms a genuine gap. Let's check the receivables/billing engine's charge-generation function to understand where fund-splitting would need to hook in.Confirmed — only the society itself has a PAN, no vendor PAN/GSTIN capture at all (needed for TDS deduction, Form 26Q/16A, and vendor GST input tracking). I have enough grounding now. Let me write the plan.# ApexEstateHub — Indian CHS/RWA Regulatory Compliance Plan
+
+I read through the current schema (`estatehub.sql`), the billing engine (`fn_auto_generate_receivables`), the TDS split logic (`fn_verify_payment`/`fn_save_expense`), and the chart of accounts (`seed.py`/`default_accounts_estateacc.py`) to ground this in what actually exists today, not a green-field design. Summary of where things stand before the plan:
+
+**Already in place:** double-entry engine with `entry_side`, FY-scoped closing (`fn_fy_closing_report`), a flat-percentage TDS split (`fn_resolve_tds_account`, `tds_pct` on `expenses`, default 10%), `apartment_size` on `apartments` (usable for area-proportional fund math), society-level `PAN_number`.
+
+**Missing entirely:** GST (no rate table, no threshold check, no SAC code, no vendor GSTIN); TDS section codes/thresholds (194C/194J) and annual cumulative tracking; vendor PAN/GSTIN capture; sinking/repair/corpus fund ledger accounts or bill-splitting; mutual-vs-non-mutual income classification; any ITR/audit-report export.
+
+Below is the plan, organized by your three regulatory areas, each broken into schema changes, engine changes, and UI/reporting changes — in dependency order, since several of these build on each other (mutuality tagging has to exist before tax reports can use it; fund accounts have to exist before the billing split can post to them).
+
+---
+
+## Phase 1 — Foundational tagging (blocks everything else)
+
+Nothing in Phase 2–4 can be built correctly until the chart of accounts and vendor records can carry the classifications the law actually cares about.
+
+**1a. Income mutuality tagging**
+Add a classification to `accounts` (or a new lookup table) distinguishing **mutual** (member-sourced: maintenance, parking, transfer fees, late-payment interest) from **non-mutual** (telecom tower rent, hall/ground rental to outsiders, FD/savings interest, advertising). This isn't cosmetic — it determines what's even taxable, so every downstream tax report keys off this field. Needs a one-time migration pass over the existing seed chart of accounts to classify each existing income account, plus a rule for new accounts created going forward (default to mutual, require explicit override to non-mutual, since getting this wrong under-taxes rather than over-taxes).
+
+**1b. Vendor PAN/GSTIN + expense categorization for TDS section**
+`vendors` currently has no PAN or GSTIN field at all — add both. Add a TDS-section classification to `expenses` (or infer it from the expense account: security/housekeeping → 194C, audit/legal/professional → 194J), since 194C and 194J have different threshold rules and rates. Without vendor PAN captured, TDS can be deducted but the compliance filing (Form 26Q, issuing Form 16A) has nothing to attach it to.
+
+**1c. Society GSTIN + turnover tracking**
+Add `GSTIN` to `societies` (currently only `PAN_number` exists), and a way to track rolling annual turnover — this is the threshold-check input for 1d below.
+
+---
+
+## Phase 2 — GST engine
+
+This is the biggest gap and the one with the most billing-engine surface area, since GST has to be evaluated **per-apartment, per-month**, not just once per society.
+
+**2a. Threshold-check logic**
+GST only applies when *both* conditions hold: society turnover > ₹20L *and* that specific member's monthly maintenance > ₹7,500. That second condition means the check can't be done once at the society level — `fn_auto_generate_receivables` needs to evaluate it per apartment, per billing cycle, since two flats in the same society can have different maintenance rates (the schema already supports per-apartment overrides via `apt_charges_fines_basis.apt_maintenance_amount`) and therefore different GST liability.
+
+**2b. Exempt-component separation**
+Statutory pass-through collections (property tax, water charges billed at actual recovery) must stay GST-exempt even when the rest of the bill crosses the threshold. This means a single "maintenance" line can no longer be one lump sum for GST purposes — it needs a breakdown between GST-applicable components and pass-through exempt components. This connects directly to the fund-splitting requirement in Phase 3, since both need the same underlying capability: a bill that resolves into several distinctly-taxed/distinctly-allocated line items instead of one number.
+
+**2c. SAC 9995 + tax account additions**
+Add GST output-tax accounts (CGST payable, SGST payable) to the chart of accounts, following the same pattern the TDS account already uses (`fn_resolve_tds_account`) — a `fn_resolve_gst_accounts` equivalent. The receivable/receipt generation path needs a third leg (base amount → income account, GST amount → GST payable accounts) analogous to how `fn_verify_payment` already splits a payment into a net-expense leg and a TDS leg.
+
+**2d. GST return support**
+Not full GSTR-1/3B filing automation (out of scope for a v1), but the system should be able to produce the underlying data — taxable value, exempt value, tax collected by rate — as a report, since that's what actually gets typed into the GST portal each period.
+
+---
+
+## Phase 3 — Reserve & special funds
+
+**3a. New fund ledger accounts**
+Add Sinking Fund, Repair & Maintenance Fund, and Corpus Fund as distinct accounts in the chart of accounts — likely under the Balance Sheet side (Reserve/Liability nature) rather than as Income, since bye-laws typically treat these as restricted reserves the society holds on members' behalf, not revenue it can spend freely. This is a meaningful classification decision I'd want your confirmation on before implementing, since it affects how these balances show up in the Balance Sheet vs. Income & Expenditure statement — get it wrong and the audited financials misrepresent what's actually spendable.
+
+**3b. Bill-splitting engine**
+`fn_auto_generate_receivables` currently writes one `receivables` row per apartment per month against one `acc_id`. To auto-allocate a single maintenance bill into base maintenance + sinking fund + repair fund, this needs to become a multi-line generator — either several `receivables` rows per apartment per month (one per fund, each with its own `acc_id`, sharing a common bill/due-date grouping key so they display together at collection time), or a parent "bill" concept with child line-items. Given the existing FIFO settlement engine (`fn_pay_apartment_dues_fifo`) already assumes one row = one payable unit, multiple `receivables` rows per bill period is the smaller, less risky change — it reuses the existing FIFO/interest/advance-credit machinery per fund-line rather than rewriting it to understand splits.
+
+**3c. Sinking fund rate basis**
+The statutory 0.25%-of-construction-cost-per-annum figure needs a construction-cost-per-flat input somewhere — `apartments` doesn't currently have one (only `apartment_size` in sq ft). Either add a construction-cost field per apartment, or key the sinking fund rate off `apartment_size` directly (per-sq-ft rate) if that's how your society's bye-laws actually phrase it — this varies enough by state/society that I'd want to know which basis your users need before locking in the field.
+
+**3d. Escrow reporting**
+Since bye-laws require these funds to be *maintained separately, not merged into general revenue*, the Balance Sheet export (the `Bal` sheet work from earlier) and the Cashbook need to keep these fund balances visibly distinct — which the existing chart-of-accounts-driven ledger/closing engine already supports structurally once the accounts exist (Phase 3a); this is mostly about not accidentally letting UI-level aggregation flatten them back into one number.
+
+---
+
+## Phase 4 — TDS section-awareness
+
+The flat-percentage TDS split already in place is a reasonable manual-entry tool, but it doesn't know about sections or thresholds — it deducts whatever percentage the person on the expense form types in.
+
+**4a. Per-section rate table**
+Add a lookup for section → rate → threshold (194C: 1%/2% depending on individual vs. company vendor, ₹30,000 single-bill or ₹1,00,000 annual aggregate; 194J: 10% professional/technical services), replacing the current flat default-10% assumption.
+
+**4b. Cumulative annual threshold tracking**
+194C's ₹1,00,000 annual aggregate threshold means a single ₹25,000 bill might not trigger TDS on its own, but the *fourth* ₹25,000 bill to the same vendor in the same FY does — this requires summing prior `expenses` for that vendor within the FY at voucher-creation time, not just looking at the current bill in isolation. This is a real logic addition to the vendor-payout module, not just a rate-table lookup.
+
+**4c. Auto-calculation instead of manual entry**
+Once 4a/4b exist, the vendor voucher form should auto-populate the TDS percentage and amount based on the vendor's service category and running annual total, rather than requiring the person creating the expense to know and manually type the correct rate — this is where the compliance value actually lands (manual TDS entry is exactly the kind of thing that gets forgotten or gotten wrong).
+
+**4d. Form 16A / 26Q data export**
+Same shape as the GST return support in 2d — not a filing integration, but a report pulling vendor PAN + TDS deducted + section, in the layout needed for quarterly TDS return filing.
+
+---
+
+## Phase 5 — Capital vs. revenue expense classification
+
+**5a. Explicit capital flag**
+`expenses` has no field distinguishing a capital purchase (solar panels, CCTV network, gym equipment) from a revenue expense — right now this is implicitly determined only by which `acc_id` the person picks on the expense form, with no guardrail. A capital-expense checkbox or an `is_capital` derivation from the chosen account's classification (Balance Sheet asset account vs. Income & Expenditure account) would prevent a large one-off purchase from accidentally being coded as a revenue expense and distorting the year's Income & Expenditure statement.
+
+**5b. Depreciable-asset registration hook**
+The system already has a working depreciation engine (`is_depreciable`, `depreciation_percent`, the `Dep` rollup work from earlier). Phase 5a's capital-expense flag should hook directly into asset registration, so a capital purchase automatically prompts for depreciation-rate setup rather than sitting as an undepreciated static balance.
+
+---
+
+## Sequencing and dependencies
+
+```
+Phase 1 (tagging)  ──┬──> Phase 2 (GST)     ──┐
+                      ├──> Phase 3 (funds)    ├──> reporting exports (2d, 4d)
+                      └──> Phase 4 (TDS)      ┘
+                                                Phase 5 (capital/revenue) — mostly independent,
+                                                can run in parallel with any of the above
+```
+
+Phase 1 is a hard prerequisite for 2 and 4 (can't threshold-check or section-classify what isn't tagged). Phase 3 is independent of GST/TDS but shares the "split one bill into multiple ledger legs" mechanism with Phase 2, so I'd build that splitting capability once and have both consume it, rather than building GST-splitting and fund-splitting as two separate code paths.
+
+**Open questions I'd want resolved before implementation starts:**
+- Sinking Fund basis: per-sq-ft rate, or actual construction-cost-per-flat (needs a new field either way, but changes what that field represents)
+- Fund accounts as Balance Sheet reserves vs. Income & Expenditure allocations — this is a real accounting-classification decision, not just a UI choice
+- Whether GST/TDS filing exports need to match a specific portal upload format (GSTN offline tool CSV, TRACES format) or a general readable report is sufficient for now
+
+Continuing with concrete detail — starting with a resolved position on the open questions (so the plan is actionable rather than stalled on them), then a field-level spec for Phase 1 since that's the blocking dependency.
+
+## Resolving the open questions
+
+**Sinking Fund basis — recommend per-sq-ft rate, not a new construction-cost field.**
+The statutory language (0.25% of construction cost per flat) is the legal basis, but almost every society bye-law I've seen operationalizes it as a fixed rate per sq. ft. per month, set once by the managing committee and revised periodically — not recomputed from actual construction cost each cycle. `apartments.apartment_size` already exists and `apt_charges_fines_basis` already has the exact pattern needed (`apt_maintenance_rate` per sq ft, with per-apartment override support). Reuse that pattern: add `apt_sinking_fund_rate` and `apt_repair_fund_rate` alongside `apt_maintenance_rate` in `apt_charges_fines_basis`, rather than introducing a separate construction-cost field nobody will keep updated. If your users actually need true construction-cost-based calculation later, that's an additive change, not a rework.
+
+**Fund accounts — recommend Balance Sheet (Liability/Reserve), not Income & Expenditure.**
+This one I'd treat as settled, not just recommended — it's not really a judgment call, it's how mutuality and restricted-reserve accounting actually work under cooperative society law. These funds are collected *in trust* for a specific future purpose (structural repair, rebuilding); a member's contribution to Sinking Fund isn't income the society earned, it's a liability the society owes back to the collective membership in the form of future building work. Booking it as Income & Expenditure would let it net against Income Tax computation and season the year's "surplus" figure incorrectly, and it would misstate reserves in the audited Balance Sheet. This directly determines the account's `drcr_account` polarity (Cr-natured liability/reserve account, parented under `Bal`'s liability branch — sibling to `CapAc`, not a child of `InExp`).
+
+**Filing export format — recommend a general structured report first, not a specific portal format.**
+GSTN's offline tool and TRACES both have their own quirky CSV/schema requirements that change periodically and aren't publicly stable APIs — building against one now risks it going stale before it's used. A clean structured report (taxable value / exempt value / tax by rate for GST; vendor PAN / section / amount / TDS for 26Q) gets 90% of the value and is portal-agnostic; add exact-format export only once a specific society's CA tells you which portal upload they actually use.
+
+## Phase 1 — field-level specification
+
+**`accounts` — mutuality tagging**
+Add `income_nature VARCHAR(10) CHECK (income_nature IN ('mutual','non_mutual')) DEFAULT 'mutual'` — nullable/inapplicable for non-income (expense/asset/liability) accounts, so this only matters where `drcr_account = 'Cr'` and the account sits under the Income branch. Migration: walk the existing seed chart, tag `SocM` (maintenance), `Pt` (parking), late-payment interest, transfer fees as `mutual`; tag `IntSav`/`IntFD`/`IntBK` (FD/savings interest), any tower-rent/hall-rental/advertising account as `non_mutual`. Since none of those last three exist yet in the seed chart today, they'd need to be added as new accounts under `IncOther` at the same time.
+
+**`vendors` — PAN/GSTIN**
+Add `pan_number VARCHAR(10)` and `gstin VARCHAR(15)`, both nullable at the schema level (many small vendors — a single plumber, a local guard agency — may not have GSTIN, and TDS can still apply without it), but the vendor-payout module should warn (not block) when generating a TDS voucher for a vendor with no PAN captured, since Form 16A generation needs it later.
+
+**`expenses` — TDS section**
+Add `tds_section VARCHAR(10)` (e.g. `'194C'`, `'194J'`, nullable — most expenses aren't TDS-relevant at all). Rather than a manual dropdown, default it from the chosen `acc_id`'s category: I'd add a `tds_section` column to `accounts` itself (nullable), pre-populate it on the existing Security/Housekeeping/AMC-type expense accounts as `194C` and Audit/Legal/Accounting-type accounts as `194J`, and have the expense form inherit it automatically when `acc_id` is picked — this is the same "derive from account, don't ask the human to know tax law" principle as 4c.
+
+**`societies` — GSTIN + turnover**
+Add `gstin VARCHAR(15)` alongside the existing `PAN_number`. For turnover tracking, rather than a stored running total (which drifts and needs manual reconciliation), I'd compute it on-demand from `fn_fy_closing_report`-style aggregation over Cr-side income transactions for the trailing 12 months — a view or function, not a column, so it's always correct against the ledger rather than a second source of truth that can fall out of sync.
+
+Want me to go deeper on Phase 2's bill-splitting mechanism next (the multi-line `receivables` generation, since that's the piece both GST and the funds work depend on), or would it be more useful to turn this into a concrete migration-ordering checklist you can hand to whoever implements it?
+
+## Phase 2 — Bill splitting: detailed design
+
+I traced this all the way through `fn_pay_apartment_dues_fifo` and `fn_apply_receivable_interest` to see how a multi-line bill would actually behave once money starts moving, not just how it gets created. That surfaced a real, previously-invisible risk — covered below, since it's the part most likely to quietly corrupt the ledger if missed.
+
+### The core decision: multiple `receivables` rows per bill period, not a JSON breakdown
+
+Confirmed against `fn_pay_apartment_dues_fifo`, `fn_apply_receivable_interest`, and `fn_check_orphan_receivables`/`fn_check_duplicate_receivables` — all three already operate as row-level `FOR ... LOOP`s over `receivables`, not as single-row lookups. That means "one row per fund line" slots into existing machinery with far less rewriting than a single-row-with-JSON-breakdown approach, which would require every one of those functions to learn how to parse and partially settle a nested structure. Reuse over reinvention here.
+
+**Grouping key:** add `bill_group_id UUID` (or a `bill_id` referencing a new lightweight `bills` header table — see below) to `receivables`, generated once per apartment per billing cycle, shared across every line (`SocM`, `SinkFund`, `RepFund`, GST-on-`SocM` if applicable). This is purely a display/grouping key — FIFO settlement, interest, and status tracking all continue to operate per-row exactly as they do today. The UI collection screen groups by `bill_group_id` so a resident sees one consolidated "₹6,200 due — Apr 2027" line, not four separate charges, even though four `receivables` rows exist underneath.
+
+I'd lean toward the UUID-on-existing-table approach over a new `bills` header table for v1 — it's a smaller migration, and a header table only earns its keep once you need bill-level metadata (a single PDF invoice number, a single due-date override at the bill level rather than per-line) that doesn't fit naturally on `receivables` itself. That's a real future need, but not one this phase requires.
+
+### Rewriting `fn_auto_generate_receivables`
+
+Currently: one `INSERT INTO receivables` per apartment per month, one `acc_id`. Restructured:
+
+1. Resolve the billing basis as today (`apt_charges_fines_basis`, prorated for partial months) — but where it currently produces one `v_base`, it now needs to look up **all active fund-rate lines** for that apartment/period: `apt_maintenance_rate`, plus the new `apt_sinking_fund_rate` and `apt_repair_fund_rate` from Phase 1's schema extension.
+2. Generate `v_base_maint`, `v_base_sinking`, `v_base_repair` — same proration math (`overlap_days / days_in_month`) applied independently to each, since a mid-month rate change or a mid-month move-in should prorate every fund line consistently, not just maintenance.
+3. **GST check happens here, per line, per apartment** — this is where Phase 1's per-apartment maintenance amount and the ₹7,500 threshold actually get evaluated (confirmed: `apt_charges_fines_basis.apt_maintenance_amount` already varies per apartment, so this can't be hoisted out to a society-level check). If `v_base_maint > 7500` AND society turnover > ₹20L, compute a GST line (`v_gst_amt = v_base_maint * 0.18`) as an **additional row**, not baked into `v_base_maint` itself — GST must be separately visible on the bill and separately postable to CGST/SGST payable accounts, not folded into taxable-value income.
+4. Sinking Fund / Repair Fund lines are **not** GST-eligible under the exempt-collection carve-out (statutory pass-through), so they get no GST line regardless of amount — worth double-checking against current CBIC circulars at implementation time, since GST-on-society-collections has had contested interpretations, but the safe default is: GST only on the maintenance component that crosses the per-member threshold.
+5. Insert one `receivables` row per line, all sharing the new `bill_group_id`, each with the fund's own `acc_id` (Sinking Fund / Repair Fund / GST-payable accounts from Phase 1/3's chart-of-accounts additions).
+
+### The risk I found: `fn_pay_apartment_dues_fifo` posts one lump ledger leg, not one per account
+
+This is the part that actually matters most. Right now, `fn_pay_apartment_dues_fifo` takes the *entire* payment amount and posts it as a **single** `Cr` transaction leg against `v_acc_id` — resolved once, from whichever receivable is oldest — then separately loops through `receivables` rows updating `paid_amount`/`paid_principal` bookkeeping. The bookkeeping loop is already correctly multi-row; **the actual general-ledger posting is not.**
+
+Concretely: today, if a resident pays ₹6,200 covering one maintenance row and one sinking-fund row, this function would credit the *entire* ₹6,200 to whichever account belongs to the single oldest receivable — the sinking fund contribution would never reach the Sinking Fund account in the ledger at all, even though `receivables.paid_amount` correctly shows it as settled. The dues-tracking would look right; the trial balance would be wrong. And since the mutuality tax report and the fund-escrow reporting from Phase 1/3 both read off the ledger, not off `receivables`, this isn't a cosmetic gap — it would silently misstate exactly the numbers this whole compliance effort exists to get right.
+
+**Required fix:** rewrite the settlement loop to accumulate `v_take` per distinct `acc_id` (a local hash/array of account→amount, built up across the existing FIFO loop iterations) and, after the loop completes, emit **one `Cr` transaction leg per distinct account actually settled**, each for its accumulated amount, all sharing the same `journal_id` so they remain one atomic payment event. This is a genuine rewrite of the posting section, not a schema-only or generation-only change — flagging it now so it's estimated and reviewed as its own unit of work, not discovered mid-implementation of Phase 2.
+
+### Interest — a policy decision, not just a mechanical one
+
+`fn_apply_receivable_interest` already loops per-row and would apply interest independently to each overdue line once split. That's mechanically fine, but raises a real bye-law question: should an overdue Sinking Fund contribution accrue the same late-interest as overdue maintenance, or are escrow/reserve fund contributions typically penalty-exempt under your users' bye-laws? I don't know the answer generically — it varies by society's own bye-law text — so I'd add a `charges_interest BOOLEAN` flag to the per-fund rate configuration (alongside the new `apt_sinking_fund_rate`/`apt_repair_fund_rate` fields) rather than hardcoding either behavior, and default it to `TRUE` (matching current maintenance behavior) unless told otherwise.
+
+### Advance credit
+
+`fn_pay_apartment_dues_fifo`'s excess-payment handling (the `IF v_remaining > 0` block banking overpayment as a `status='credit'` row) currently books the whole excess against `v_acc_id` — same single-account assumption as the main settlement path, same fix needed: once every open line across every fund is settled, remaining excess should probably default to the *maintenance* account specifically (not sinking/repair — a resident overpaying likely intends it as a maintenance credit, not an unsolicited extra fund contribution), which is actually simpler than the main settlement fix, just needs the fallback `v_acc_id` resolution to explicitly target the maintenance account rather than "whichever row happened to be oldest."
+
+### Sequencing for this phase specifically
+
+1. Phase 1 schema fields must land first (`apt_sinking_fund_rate`, `apt_repair_fund_rate`, `charges_interest`, the new fund accounts in the chart of accounts, GST payable accounts).
+2. `bill_group_id` migration on `receivables` (additive, nullable, backfill not required for historical rows).
+3. Rewrite `fn_auto_generate_receivables` to emit multi-line bills.
+4. Rewrite `fn_pay_apartment_dues_fifo`'s posting section (the account-grouping fix) — **before** turning on multi-line generation in production, since enabling split billing without this fix is exactly the silent-ledger-corruption scenario above.
+5. UI: bill collection screens grouped by `bill_group_id`; admin ledger/ledger-index views (the `Bal`/rollup work from earlier) need the new fund accounts wired into the same hierarchy so they show up correctly in exports.
+6. Test against the existing `test_scenario_b_receipt_ledger.py`-style scenario tests — this phase specifically needs a new scenario test asserting that a single lump payment against a multi-line bill produces the correct *per-account* ledger legs, not just correct `receivables.status` values, since that's precisely the failure mode that wouldn't show up in a test that only checks dues-tracking.
+
+`fn_check_orphan_receivables` is fine (entity-existence check, unaffected by row count). Two more findings below, then the rollout checklist.
+
+### `fn_verify_receivable` (manual receipt entry) — actually the safe path, and the template to copy
+
+Unlike the FIFO bulk-pay function, `fn_verify_receivable` operates on one `receivables` row at a time, and already posts each row's amount to *that row's own* `acc_id`. Once multi-line billing exists, this function needs no fix — but there's a UX gap: if a resident's consolidated bill is three rows (maintenance/sinking/repair) under one `bill_group_id`, an admin manually verifying a paper receipt shouldn't have to enter three separate receipts for what the resident experienced as one payment.
+
+**Add `fn_verify_receivable_by_bill_group(p_bill_group_id, p_confirmed_by, p_mode, p_amount)`** — a thin wrapper that loops over every row sharing that group and calls the existing `fn_verify_receivable` per row (FIFO-ordered within the group if the payment doesn't cover the full group total). This is low-risk specifically *because* it just orchestrates the already-correct single-row function rather than reimplementing posting logic — and it's the same "one Cr leg per row" pattern the FIFO rewrite needs, just already proven correct here. Worth building this wrapper first, actually, since it validates the grouping/proration logic on the lower-risk path before touching the bulk FIFO function.
+
+### Found a second integrity-checker gap: `fn_check_duplicate_receivables` will false-positive on every split bill
+
+```sql
+GROUP BY r.entity_id, r.role, r.period_month
+HAVING COUNT(*) > 1
+```
+
+This flags *any* apartment with more than one receivable row in the same month as a duplicate — with no awareness of `acc_id` at all. Today that's correct, because one row per apartment per month is the invariant. Once split billing ships, every single consolidated bill (3+ legitimate rows, same period, different accounts) becomes a false positive. Left unfixed, this either buries real duplicates in noise or trains whoever reviews this report to ignore it entirely — the worse of the two outcomes, since it silently defeats a check the system relies on for data-integrity confidence.
+
+**Fix:** `GROUP BY r.entity_id, r.role, r.period_month, r.acc_id` instead — same account, same period, more than one row is still a real duplicate; different accounts, same period is now the expected shape.
+
+---
+
+### Rollout checklist for Phase 2, in dependency order
+
+1. **Schema (additive, no behavior change yet):** `apt_sinking_fund_rate`, `apt_repair_fund_rate`, `charges_interest` on `apt_charges_fines_basis`; `bill_group_id` on `receivables`; new fund/GST-payable accounts in the chart of accounts (Phase 1/3 dependency).
+2. **Fix `fn_check_duplicate_receivables`** to include `acc_id` in the grouping — do this *before* any multi-line bills exist, so it's already correct and silent when Phase 2 goes live, not scrambling to catch up after.
+3. **Build `fn_verify_receivable_by_bill_group`** — proves out the grouping/FIFO-within-group logic on the safe, already-correct single-row posting primitive.
+4. **Rewrite `fn_pay_apartment_dues_fifo`'s posting section** — group settled amounts by `acc_id`, emit one `Cr` leg per distinct account under one `journal_id`; fix the advance-credit fallback to explicitly target the maintenance account. This is the highest-risk change in the phase and should land *before* step 5, not after.
+5. **Rewrite `fn_auto_generate_receivables`** to emit multi-line bills with `bill_group_id`, including the per-apartment GST threshold check.
+6. **New scenario test** (alongside the existing `test_scenario_b_receipt_ledger.py` style): seed a multi-line bill, settle it via both `fn_pay_apartment_dues_fifo` and `fn_verify_receivable_by_bill_group`, assert the resulting *ledger* — not just `receivables.status` — attributes each rupee to the correct account. This is the test that would have caught the original single-account-posting bug, so it's the one regression guard that actually matters here.
+7. **UI:** billing/collection screens grouped by `bill_group_id`; the `Bal`-sheet rollup and Cashbook views need the new fund accounts wired into the hierarchy (mechanically free once the accounts exist, per the earlier ledger-export work — they'll just show up as new siblings under `Bal`/`CapAc`).
+8. **GST/TDS report views (Phase 2d/4d)** come last, since they're read-only aggregations over data that only becomes correct once steps 1–6 are done — building them earlier just means re-verifying them against corrected data later.
+
+Good — clean pattern to follow (`fn_resolve_X_account`, name-resolved, `NULL` = not configured). Now let's design both reports on top of it.
+
+## Phase 2d — GST return support
+
+### Data source: the ledger, not `receivables`
+
+Once Phase 2's split-billing lands, GST collected lives as `Cr` legs on the new CGST/SGST payable accounts (resolved via `fn_resolve_gst_accounts`, same pattern as `fn_resolve_tds_account` above), tagged `source_table='receivables'` / `source_id` back to the specific bill line. That's the join path — same principle as everything else this session: the ledger is the single source of truth, intermediate tables (`receivables`) are working state, not the record.
+
+**New function: `fn_gst_summary_fy(p_society_id, p_fy)`**
+
+Returns one row per month within the FY (GST periodicity is monthly for most societies, quarterly for QRMP-eligible ones — I'd build monthly and let the Excel layer sub-total into quarters, since monthly-to-quarterly is a free rollup but quarterly-to-monthly loses information):
+
+```
+period_month | taxable_value | cgst_collected | sgst_collected | exempt_value | total_bills_gst_applicable | total_bills_exempt
+```
+
+- `taxable_value` — sum of the maintenance-component base amount on every `receivables` row that had a GST line generated for it (join on `bill_group_id`, filter to lines where a sibling GST-line row exists in the same group).
+- `exempt_value` — sum of Sinking Fund / Repair Fund lines, plus maintenance lines that stayed under the ₹7,500 per-member threshold, plus statutory pass-through items — everything that's *not* `taxable_value`, from the same billing data.
+- `cgst_collected`/`sgst_collected` — straight sums of the `Cr` legs on the two GST payable accounts for that month, from `transactions`.
+
+This mirrors `fn_fy_closing_report`'s shape closely enough that the Excel formatter can reuse most of `ledger_export.py`'s existing styling helpers (`_FONT_HEADER`, `_FILL_HEADER`, `_FMT_AMT`, the row-writing loop) rather than inventing a new visual language — worth building this as `database/gst_export.py` alongside `ledger_export.py` and `cashbook_export.py`, following the same `generate_X_excel(db, society_id, fy)` signature convention so it slots into the existing `download_fy_export` callback dispatch (`entity == "gst_summary"`) the same way `ledger_index`/`ledger`/`cashbook` already do.
+
+### What the sheet needs to look like
+
+Two sheets, since GSTR-1 (outward supplies, what you *filed*) and GSTR-3B (summary return, what you *paid*) ask for the numbers in slightly different shapes:
+
+- **"Taxable Supplies"** — month-by-month taxable value, tax rate (18% split 9%/9%), CGST, SGST, matching GSTR-1's Table 4/5 outward-supply shape closely enough to transcribe by hand into the portal.
+- **"Summary"** — one FY-total row: total taxable value, total tax collected, total exempt value, total turnover (taxable + exempt) — this is the number that also feeds back into Phase 1c's turnover threshold check for *next* year, so it's worth exposing as its own queryable value (`fn_gst_summary_fy`'s final row, or a small `fn_society_turnover_fy` helper), not just buried in a spreadsheet cell.
+
+**Deliberately not building:** GSTIN-matching, e-invoice IRN generation, or a GSTN API integration. Those require registration as a GST Suvidha Provider or ASP and are a different scale of project — flagging this boundary explicitly so it's a documented decision, not a silent gap someone discovers later assuming it was in scope.
+
+---
+
+## Phase 4d — Form 16A / 26Q export
+
+### Data source: same principle, `transactions` joined back through `expenses`
+
+TDS deducted lives as `Dr` legs on the TDS-payable account (`fn_resolve_tds_account`, already exists), tagged `source_table='expenses'` / `source_id`. Since `expenses` has `entity_id`+`role='vendor'` but no PAN (that's Phase 1's job — `vendors.pan_number`), the report needs a three-way join: `transactions` (the actual deducted amount, dated) → `expenses` (which vendor, which TDS section — Phase 1's `accounts.tds_section` inherited onto the expense) → `vendors` (PAN, name, GSTIN).
+
+**New function: `fn_tds_summary_fy(p_society_id, p_fy, p_quarter)`** — quarterly, not monthly, since 26Q is a quarterly return (Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar — note this straddles the April–March FY boundary in the *same* pattern the FY itself already uses, so no new date-math beyond what `fn_fy_closing_report` already does for FY boundaries).
+
+```
+vendor_name | vendor_pan | tds_section | gross_amount_paid | tds_deducted | net_paid | payment_date
+```
+
+One row per TDS-bearing payment (not aggregated per vendor) — 26Q actually wants per-transaction deduction records, not vendor totals, since deduction date matters for interest-on-late-deduction calculations if a filing is ever late. A separate **vendor-summary sheet** (one row per vendor, section, cumulative annual total) is still useful as a human-readable cross-check against Phase 4b's ₹1,00,000 annual-threshold tracking — that's actually the same query, just grouped differently, so build it as a second sheet in the same workbook rather than a second report.
+
+**Vendors with no PAN captured** (a real possibility per Phase 1's design — TDS can be deducted before PAN is on file) should be flagged distinctly on the report, not silently blanked — a missing PAN on a 26Q line is a filing-blocking problem, and it's much better for this report to surface it loudly (a highlighted row, a warning count in the summary) than for someone to discover it at actual filing time.
+
+**Deliberately not building:** actual TRACES/26Q e-filing (requires a Tax Deduction Account Number registration flow and a specific government-mandated file format/validation utility, again a different-scale integration) — same "structured report, not filing automation" boundary as 2d, for the same reason.
+
+---
+
+### Where these two land in the sequencing
+
+Both are genuinely last, and now I can say precisely why in terms of the actual data dependencies traced above, not just generally: `fn_gst_summary_fy` requires Phase 2's `bill_group_id`+GST-line generation to exist and be correctly posted (which itself required the `fn_pay_apartment_dues_fifo` account-grouping fix, since a GST line incorrectly lumped into the maintenance account by that bug would make this report wrong in a way that's hard to detect — the total collected would look right, the *taxable-vs-exempt split* wouldn't). `fn_tds_summary_fy` requires Phase 1's `vendors.pan_number`/`accounts.tds_section` fields and Phase 4a/4b's rate-table and cumulative-threshold logic. Building either earlier just means re-verifying it against corrected upstream data later — the same reasoning as the original phase ordering, now anchored to the specific tables and functions each report actually reads from.
+
+
+Chs rwa compliance agent tasklist:
+Good, confirmed exact registration point (`app/dash_apps/drilldown/registry.py`). Now I have everything needed for a precise, grounded agent task list.This is structured as a runbook an agent (or a developer) can work through sequentially, with every task grounded in the actual function/table names confirmed in the repo — not generic advice. Three things worth calling out about how it's organized:
+
+**`[ASK USER]` vs `[FLAG — PROFESSIONAL REVIEW]` are deliberately different markers.** The first is a product decision only you can make (sinking fund basis, filing cadence). The second is a legal/accounting classification an AI agent shouldn't decide alone even provisionally — fund-as-reserve-vs-income, GST-exemption-on-fund-collections, current TDS rates. I implemented recommended defaults for those so work isn't blocked, but they're marked non-final until a CA actually signs off.
+
+**Sequencing enforces the risk finding from earlier**, not just convenience: Task 2.2 (fix the duplicate-checker) and Task 2.6 (the `fn_pay_apartment_dues_fifo` rewrite) are explicitly gated *before* Task 2.9 (turning on multi-line billing), with the reasoning repeated inline so it survives being read out of order across sessions.
+
+**The closing section lists what this plan doesn't solve** — rate-update maintenance, mid-year threshold crossings, multi-society GSTIN independence, whether ITR-5 generation itself is even in scope — so those don't quietly vanish once the checklist below them starts getting checked off.
+
