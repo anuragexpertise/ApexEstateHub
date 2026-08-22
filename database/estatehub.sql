@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS societies (
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users (id),
+    created_by INT,
     gstin VARCHAR(15)
 );
 
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 ,
     income_nature VARCHAR(10) CHECK (income_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
-ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10)
+    tds_section VARCHAR(10)
 );
 
 CREATE TABLE IF NOT EXISTS apartments (
@@ -453,6 +453,8 @@ CREATE TABLE IF NOT EXISTS receipts (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id)
 );
+
+COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
 
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
 CREATE TABLE IF NOT EXISTS expenses (
@@ -1071,20 +1073,6 @@ ADD COLUMN IF NOT EXISTS primary_bank_account_id INT REFERENCES accounts (id);
 CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
 
 CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
-
--- ═══════════════════════════════════════════════════════════════════════════════
--- DOCUMENTATION: clarify receipts.user_id's dual role
--- ═══════════════════════════════════════════════════════════════════════════════
--- receipts.user_id is semantically "created_by" / "recorded_by" — the user
--- who entered the receipt (an admin entering it directly, or security/an
--- apartment owner submitting one that lands as status='pending'). It is
--- NOT who verified/approved it — that's confirmed_by, set separately by
--- fn_verify_receipt when an admin confirms a pending receipt. Left as
--- `user_id` rather than renamed to `created_by`, since dozens of existing
--- call sites (fn_save_receipt, fn_verify_receipt,
--- every receipts list/report query) already depend on this exact name;
--- renaming has no functional upside and meaningful regression risk.
-COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.'
 
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
@@ -2796,12 +2784,14 @@ BEGIN
         -- the loop so each distinct account gets exactly one Cr leg).
         IF v_pay_prin > 0 THEN
             v_acc_idx := NULL;
-            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
-                IF v_acc_ids[i] = rec.acc_id THEN
-                    v_acc_idx := i;
-                    EXIT;
-                END IF;
-            END LOOP;
+            IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
+                FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                    IF v_acc_ids[i] = rec.acc_id THEN
+                        v_acc_idx := i;
+                        EXIT;
+                    END IF;
+                END LOOP;
+            END IF;
             IF v_acc_idx IS NULL THEN
                 v_acc_ids := array_append(v_acc_ids, rec.acc_id);
                 v_acc_totals := array_append(v_acc_totals, v_pay_prin);
@@ -2814,12 +2804,14 @@ BEGIN
         -- rolls into the row's own acc_id (fn_verify_receivable ELSE branch).
         IF v_pay_int > 0 AND rec.interest_acc_id IS NULL THEN
             v_acc_idx := NULL;
-            FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
-                IF v_acc_ids[i] = rec.acc_id THEN
-                    v_acc_idx := i;
-                    EXIT;
-                END IF;
-            END LOOP;
+            IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
+                FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
+                    IF v_acc_ids[i] = rec.acc_id THEN
+                        v_acc_idx := i;
+                        EXIT;
+                    END IF;
+                END LOOP;
+            END IF;
             IF v_acc_idx IS NULL THEN
                 v_acc_ids := array_append(v_acc_ids, rec.acc_id);
                 v_acc_totals := array_append(v_acc_totals, v_pay_int);

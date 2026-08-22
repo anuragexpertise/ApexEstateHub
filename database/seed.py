@@ -736,6 +736,8 @@ def seed_kpi_rule_links(cur, conn):
 #   - RERA: varies by state on project registration thresholds.
 #   - Apartment Act: UP mandates AOA formation at 4+ units, 30% quorum.
 
+NULL_NO_FLOOR = None
+
 STATE_COMPLIANCE_THRESHOLDS = [
     # ── Sinking Fund % (of construction cost / year) ─────────────────────
     # UP has NO statutory floor — the rate comes from AOA bye-laws / buyer agreement
@@ -821,8 +823,6 @@ STATE_COMPLIANCE_THRESHOLDS = [
      "text", "2010-07-22", None,
      "UP Apartment Act: Competent Authority is typically the CEO of the relevant development authority (NOIDA, Greater Noida, etc.) — NOT the Registrar of Societies (who registers the AOA itself under Societies Registration Act 1860)."),
 ]
-
-NULL_NO_FLOOR = None
 
 
 def seed_state_compliance_thresholds(cur, conn):
@@ -1198,7 +1198,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                 apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
                 apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
                VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s)""",
-            (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, TRUE),
+             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True),
         )
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
@@ -1218,7 +1218,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                     apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
                     apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
                    VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
-                (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, TRUE),
+                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
