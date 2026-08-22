@@ -7356,3 +7356,313 @@ CREATE TRIGGER trg_concerns_assigns_sync_status
     AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_sync_concern_status();
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 15: INDIAN CHS/RWA COMPLIANCE — TDS (Phase 4)
+-- ════════════════════════════════════════════════════════════════
+-- CBDT TDS section → rate + thresholds. Rate is per-section; the
+-- single-bill and annual-aggregate thresholds drive the "does TDS
+-- apply to this bill" decision in fn_compute_tds_pct below.
+--
+-- [-WFLAG — PROFESSIONAL REVIEW- Rates here are a best-guess seed
+-- (194C: 1% individual/HUF, 2% others, F30K single / F1L annual;
+-- 194J: 10%, no threshold). Confirm against the applicable Finance
+-- Act before relying on these for an actual filing.]
+--
+-- effective_from / effective_to give each rate row a validity window
+-- (so a mid-year Finance-Act change can be added as a new row without
+-- invalidating historical FY reports). A NULL effective_to means
+-- "currently active". The lookup functions below resolve the row
+-- effective as of a given date.
+CREATE TABLE IF NOT EXISTS tds_section_rates (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    section VARCHAR(10) NOT NULL,
+    rate NUMERIC(5, 2) NOT NULL,
+    rate_no_pan NUMERIC(5, 2),
+    single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
+    annual_aggregate_threshold NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    effective_from DATE NOT NULL DEFAULT '2024-04-01',
+    effective_to DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup
+    ON tds_section_rates (society_id, section, effective_from);
+
+-- ── Resolve the active rate row for a section as of a given date ──
+DROP FUNCTION IF EXISTS fn_tds_section_rate (INT, VARCHAR, DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_tds_section_rate(
+    p_society_id INT,
+    p_section    VARCHAR,
+    p_as_of      DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    rate NUMERIC(5, 2),
+    rate_no_pan NUMERIC(5, 2),
+    single_bill_threshold NUMERIC(12, 2),
+    annual_aggregate_threshold NUMERIC(12, 2)
+) LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT r.rate,
+           COALESCE(r.rate_no_pan, r.rate),
+           r.single_bill_threshold,
+           r.annual_aggregate_threshold
+      FROM tds_section_rates r
+     WHERE r.society_id = p_society_id
+       AND r.section = p_section
+       AND r.effective_from <= p_as_of
+       AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
+     ORDER BY r.effective_from DESC
+     LIMIT 1;
+END;
+$$;
+
+-- ── Cumulative annual TDS tracking for one vendor/section (Phase 4.2) ──
+-- Sum of confirmed, TDS-relevant expense amounts for this vendor within
+-- the FY, excluding the row being edited (so a re-save doesn't double
+-- count itself). Drives the "has this vendor crossed the F1,00,000 annual
+-- aggregate" check. Threshold 0 in the rate row means "no aggregate test".
+DROP FUNCTION IF EXISTS fn_vendor_tds_cumulative_fy (INT, INT, VARCHAR, VARCHAR, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_vendor_tds_cumulative_fy(
+    p_society_id INT,
+    p_vendor_id  INT,
+    p_section    VARCHAR,
+    p_fy         VARCHAR,
+    p_exclude_expense_id INT DEFAULT NULL
+)
+RETURNS NUMERIC(15, 2) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := make_date(p_fy::INT, 4, 1);
+    v_fy_end   DATE := make_date(p_fy::INT + 1, 3, 31);
+    v_total    NUMERIC(15, 2);
+BEGIN
+    SELECT COALESCE(SUM(e.amount), 0)::NUMERIC(15, 2)
+      INTO v_total
+      FROM expenses e
+     WHERE e.society_id = p_society_id
+       AND e.entity_id = p_vendor_id
+       AND e.role = 'vendor'
+       AND e.tds_section = p_section
+       AND e.status = 'confirmed'
+       AND e.tds_pct > 0
+       AND e.expense_date BETWEEN v_fy_start AND v_fy_end
+       AND (p_exclude_expense_id IS NULL OR e.id <> p_exclude_expense_id);
+
+    RETURN COALESCE(v_total, 0);
+END;
+$$;
+
+-- ── Auto-compute TDS % for one bill (Phase 4.3) ──
+-- Applies the section rate only when the bill is actually TDS-relevant:
+--   * single-bill threshold met (amount >= single_bill_threshold), OR
+--   * annual aggregate threshold met (this vendor's FY cumulative, including
+--     this bill, crosses annual_aggregate_threshold; 0 = no aggregate test),
+--   * the rate row exists for the section.
+-- Returns 0 (and applies=FALSE) otherwise, so callers pre-fill the form
+-- with 0 and don't split. no_pan_uplift applies the higher rate when the
+-- vendor has no PAN on file (the caller passes p_pan_captured).
+DROP FUNCTION IF EXISTS fn_compute_tds_pct (INT, INT, VARCHAR, VARCHAR, NUMERIC, BOOLEAN) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_compute_tds_pct(
+    p_society_id      INT,
+    p_vendor_id       INT,
+    p_section         VARCHAR,
+    p_fy              VARCHAR,
+    p_amount          NUMERIC,
+    p_pan_captured    BOOLEAN DEFAULT TRUE
+)
+RETURNS TABLE (
+    tds_pct NUMERIC(5, 2),
+    applies BOOLEAN,
+    basis TEXT
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_rate     NUMERIC(5, 2);
+    v_rate_nopan NUMERIC(5, 2);
+    v_single   NUMERIC(12, 2);
+    v_annual   NUMERIC(12, 2);
+    v_cum      NUMERIC(15, 2);
+BEGIN
+    IF p_section IS NULL OR p_amount IS NULL OR p_amount <= 0 THEN
+        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'no-section-or-zero-amount'::TEXT;
+        RETURN;
+    END IF;
+
+    SELECT r.rate, COALESCE(r.rate_no_pan, r.rate),
+           r.single_bill_threshold, r.annual_aggregate_threshold
+      INTO v_rate, v_rate_nopan, v_single, v_annual
+      FROM tds_section_rates r
+     WHERE r.society_id = p_society_id
+       AND r.section = p_section
+       AND r.effective_from <= CURRENT_DATE
+       AND (r.effective_to IS NULL OR r.effective_to >= CURRENT_DATE)
+     ORDER BY r.effective_from DESC
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'section-not-configured'::TEXT;
+        RETURN;
+    END IF;
+
+    IF NOT p_pan_captured THEN
+        v_rate := v_rate_nopan;
+    END IF;
+
+    -- Single-bill test: threshold 0 means "no minimum single bill" (e.g. 194J).
+    -- Annual-aggregate test: threshold 0 means "aggregate test disabled".
+    IF p_amount >= v_single THEN
+        RETURN QUERY SELECT v_rate, TRUE, 'single-bill'::TEXT;
+        RETURN;
+    END IF;
+
+    IF v_annual > 0 THEN
+        v_cum := fn_vendor_tds_cumulative_fy(p_society_id, p_vendor_id, p_section, p_fy);
+        IF (v_cum + p_amount) >= v_annual THEN
+            RETURN QUERY SELECT v_rate, TRUE, 'annual-aggregate'::TEXT;
+            RETURN;
+        END IF;
+    END IF;
+
+    RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'below-threshold'::TEXT;
+END;
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 16: CAPITAL vs REVENUE EXPENSE (Phase 5)
+-- ════════════════════════════════════════════════════════════════
+-- An expense is CAPITAL (is_capital) when the chosen acc_id sits on the
+-- Balance-Sheet branch of the chart of accounts (asset/liability), as
+-- opposed to the Income & Expenditure (P&L) branch. Determined purely
+-- by walking the parent_account_id chain: if any ancestor (or the
+-- account itself) is a BS-header tab (MAs/ImAs/CurAs/SCr/CapAc/Bal...
+-- i.e. NOT the InExp node and not a child of it), it's a balance-sheet
+-- account → capital.
+DROP FUNCTION IF EXISTS fn_is_capital_account (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_is_capital_account(
+    p_society_id INT,
+    p_acc_id     INT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_cur     INT := p_acc_id;
+    v_tab     TEXT;
+    v_parent  INT;
+    v_depth   INT := 0;
+BEGIN
+    IF p_acc_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    LOOP
+        SELECT a.tab_name, a.parent_account_id
+          INTO v_tab, v_parent
+          FROM accounts a
+         WHERE a.id = v_cur AND a.society_id = p_society_id;
+
+        IF NOT FOUND THEN
+            RETURN FALSE;
+        END IF;
+
+        -- The Income & Expenditure node (and everything under it) is P&L.
+        IF v_tab = 'InExp' THEN
+            RETURN FALSE;
+        END IF;
+
+        -- A header/leaf on the Balance-Sheet side: reached a structural
+        -- node (root, MAs, ImAs, CurAs, SCr, CapAc, Bal...) without having
+        -- passed through InExp → capital.
+        IF v_parent IS NULL THEN
+            RETURN TRUE;
+        END IF;
+
+        v_cur := v_parent;
+        v_depth := v_depth + 1;
+        IF v_depth > 20 THEN
+            RETURN FALSE;
+        END IF;
+    END LOOP;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 17: TDS RETURN SUMMARY — Form 26Q quarterly (Phase 4d)
+-- ════════════════════════════════════════════════════════════════
+-- One row per TDS-deducted payment (per-transaction, NOT vendor-
+-- aggregated — 26Q wants individual deduction records with dates).
+-- Source: Dr legs on the TDS-payable account (fn_resolve_tds_account),
+-- tagged source_table='expenses'/source_id, joined through expenses →
+-- vendors. Straddles the FY boundary exactly like fn_fy_closing_report
+-- (Q1 Apr-Jun ... Q4 Jan-Mar), so quarter p_quarter is 1..4 within FY
+-- p_fy (the FY START year, e.g. 2026 = FY 1-Apr-2026..31-Mar-2027).
+--
+-- no_pan is flagged so the export can highlight filing-blocking rows.
+DROP FUNCTION IF EXISTS fn_tds_summary_fy (INT, VARCHAR, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_tds_summary_fy(
+    p_society_id INT,
+    p_fy         VARCHAR,
+    p_quarter    INT
+)
+RETURNS TABLE (
+    vendor_name VARCHAR(100),
+    vendor_pan  VARCHAR(10),
+    tds_section VARCHAR(10),
+    gross_amount_paid NUMERIC(15, 2),
+    tds_deducted NUMERIC(15, 2),
+    net_paid     NUMERIC(15, 2),
+    payment_date DATE,
+    no_pan      BOOLEAN
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_tds_acc  INT;
+    v_q_start  DATE;
+    v_q_end    DATE;
+    v_fy_year  INT;
+BEGIN
+    v_tds_acc := fn_resolve_tds_account(p_society_id);
+    IF v_tds_acc IS NULL THEN
+        RETURN;
+    END IF;
+
+    v_fy_year := p_fy::INT;
+    -- Quarter start month relative to FY (Apr=month 4 of v_fy_year).
+    -- Q1: Apr-Jun, Q2: Jul-Sep, Q3: Oct-Dec, Q4: Jan-Mar(next calendar year).
+    -- Month sequence is 4,7,10 then wraps to 1 (Jan) of the next calendar year.
+    v_q_start := make_date(
+        v_fy_year + CASE WHEN p_quarter >= 4 THEN 1 ELSE 0 END,
+        CASE WHEN p_quarter = 4 THEN 1 ELSE ((p_quarter - 1) * 3) + 4 END,
+        1
+    );
+    v_q_end := (v_q_start + INTERVAL '3 months' - INTERVAL '1 day')::DATE;
+
+    RETURN QUERY
+    SELECT v.business_name::VARCHAR(100),
+           v.pan_number::VARCHAR(10),
+           e.tds_section::VARCHAR(10),
+           e.amount AS gross_amount_paid,
+           tdr.amount AS tds_deducted,
+           (e.amount - tdr.amount) AS net_paid,
+           tdr.trx_date AS payment_date,
+           (v.pan_number IS NULL OR TRIM(v.pan_number) = '') AS no_pan
+      FROM transactions tdr
+      JOIN expenses e
+        ON e.id = tdr.source_id
+       AND e.society_id = p_society_id
+       AND e.status = 'confirmed'
+      JOIN vendors v
+        ON v.id = e.entity_id
+     WHERE tdr.society_id = p_society_id
+       AND tdr.acc_id = v_tds_acc
+       AND tdr.entry_side = 'Dr'
+       AND tdr.source_table = 'expenses'
+       AND tdr.trx_date BETWEEN v_q_start AND v_q_end
+     ORDER BY tdr.trx_date, e.id;
+END;
+$$;

@@ -100,6 +100,7 @@ class FakeDB:
             "assets": [],
             "brought_forward": [],
             "security_roster": [],
+            "tds_section_rates": [],
         }
         self._seq = {t: 1 for t in self.tables}
 
@@ -601,12 +602,58 @@ class FakeDB:
     def _fn_fy_closing_report(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
         fy = p.get("p1") or p.get("fy")
-        rows = [
-            {"account_name": "Cash-in-hand", "dr_total": 15000.0, "cr_total": 0, "balance": 15000.0},
-            {"account_name": "Bank", "dr_total": 85000.0, "cr_total": 0, "balance": 85000.0},
-            {"account_name": "Capital Account", "dr_total": 0, "cr_total": 100000.0, "balance": -100000.0},
-        ]
-        return rows if fetch_all else (rows[0] if rows else None)
+        if fy is None:
+            return [] if fetch_all else None
+        fy_start = f"{int(fy)}-04-01"
+        fy_end = f"{int(fy) + 1}-03-31"
+        # Cr-positive net movement per account this FY (mirrors the real
+        # fn_fy_closing_report's per-account leaf closing closely enough to
+        # verify fund segregation: each account is its OWN row, never folded
+        # into a single total). BF is ignored here (the seeded funds carry 0
+        # opening balance); the grouping-by-account is the property under test.
+        movements: dict[int, float] = {}
+        for t in self.tables.get("transactions", []):
+            if (t.get("society_id") != sid or t.get("status") != "paid"
+                    or not (fy_start <= (t.get("trx_date") or "") <= fy_end)):
+                continue
+            acc = t.get("acc_id")
+            amt = float(t.get("amount", 0) or 0)
+            side = t.get("entry_side")
+            if side == "Cr":
+                movements[acc] = movements.get(acc, 0.0) + amt
+            elif side == "Dr":
+                movements[acc] = movements.get(acc, 0.0) - amt
+        rows = []
+        for acc_id, net in movements.items():
+            acc = next((a for a in self.tables.get("accounts", [])
+                        if a.get("id") == acc_id and a.get("society_id") == sid), None)
+            if acc is None or acc.get("drcr_account") is None:
+                continue
+            # Own movement (Cr-positive). display_side: Cr total shows as Cr,
+            # negative shows as Dr, matching the real fn_fy_closing_report's
+            # convention at the leaf level.
+            own = net
+            if acc.get("drcr_account") == "Cr":
+                display_side = "Cr" if own >= 0 else "Dr"
+            else:
+                display_side = "Dr" if own >= 0 else "Cr"
+            rows.append({
+                "account_id": acc_id,
+                "account_name": acc.get("name"),
+                "tab_name": acc.get("tab_name"),
+                "parent_account_id": acc.get("parent_account_id"),
+                "drcr_account": acc.get("drcr_account"),
+                "has_bf": acc.get("has_bf", False),
+                "own_movement": own,
+                "own_closing": own,
+                "display_side": display_side,
+                "display_amount": abs(own),
+                "depth": 0,
+                "sort_path": "",
+            })
+        if fetch_all:
+            return rows
+        return rows[0] if rows else None
 
     def _fn_account_ledger_fy(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
@@ -811,6 +858,13 @@ class FakeDB:
                 return acc.get("id", 633)
         return 633
 
+    def _fn_resolve_tds_account(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        for acc in self.tables.get("accounts", []):
+            if acc.get("society_id") == sid and (acc.get("name") or "").upper().find("TDS") >= 0:
+                return acc.get("id")
+        return None
+
     def _fn_resolve_gst_accounts(self, p, fetch_one, fetch_all):
         return {"cgst_acc_id": 401, "sgst_acc_id": 402}
 
@@ -1004,6 +1058,141 @@ class FakeDB:
 
     def _fn_apply_receivable_interest(self, p, fetch_one, fetch_all):
         return None
+
+
+    def _today(self):
+        return date.today()
+
+    def _fn_tds_section_rate(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        section = p.get("p1") or p.get("section")
+        rows = [r for r in self.tables.get("tds_section_rates", [])
+                if r.get("society_id") == sid and r.get("section") == section]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: str(r.get("effective_from", "")), reverse=True)
+        return rows[0]
+
+    def _fn_vendor_tds_cumulative_fy(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        vid = p.get("p1") or p.get("vendor_id")
+        section = p.get("p2") or p.get("section")
+        fy = str(p.get("p3") or p.get("fy"))
+        exclude = p.get("p4") or p.get("exclude_expense_id")
+        if not vid or not section:
+            return {"cum": 0.0}
+        fy_start = f"{int(fy)}-04-01"
+        fy_end = f"{int(fy) + 1}-03-31"
+        total = 0.0
+        for e in self.tables.get("expenses", []):
+            if (e.get("society_id") == sid and e.get("entity_id") == vid
+                    and e.get("role") == "vendor"
+                    and e.get("tds_section") == section
+                    and e.get("status") == "confirmed"
+                    and float(e.get("tds_pct", 0) or 0) > 0
+                    and fy_start <= (e.get("expense_date") or "") <= fy_end
+                    and (exclude is None or e.get("id") != exclude)):
+                total += float(e.get("amount", 0) or 0)
+        return {"cum": total}
+
+    def _fn_compute_tds_pct(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        vid = p.get("p1") or p.get("vendor_id")
+        section = p.get("p2") or p.get("section")
+        fy = str(p.get("p3") or p.get("fy"))
+        amount = float(p.get("p4") or p.get("amount") or 0)
+        pan = p.get("p5", True)
+        if pan is None or pan == "True" or pan == "true":
+            pan = True
+        elif pan in ("False", "false"):
+            pan = False
+        if not section or amount <= 0:
+            return {"tds_pct": 0, "applies": False, "basis": "no-section-or-zero-amount"}
+        rate_row = self._fn_tds_section_rate({"p0": sid, "p1": section}, True, False)
+        if not rate_row or rate_row.get("rate") is None:
+            return {"tds_pct": 0, "applies": False, "basis": "section-not-configured"}
+        rate = float(rate_row.get("rate", 0))
+        if not pan:
+            rate = float(rate_row.get("rate_no_pan") or rate)
+        single = float(rate_row.get("single_bill_threshold", 0) or 0)
+        annual = float(rate_row.get("annual_aggregate_threshold", 0) or 0)
+        if single <= 0 or amount >= single:
+            return {"tds_pct": rate, "applies": True, "basis": "single-bill"}
+        if annual > 0:
+            cum = float(self._fn_vendor_tds_cumulative_fy(
+                {"p0": sid, "p1": vid, "p2": section, "p3": fy}, True, False).get("cum", 0))
+            if (cum + amount) >= annual:
+                return {"tds_pct": rate, "applies": True, "basis": "annual-aggregate"}
+        return {"tds_pct": 0, "applies": False, "basis": "below-threshold"}
+
+    def _fn_is_capital_account(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        acc_id = p.get("p1") or p.get("acc_id")
+        if acc_id is None:
+            return {"cap": False}
+        cur = acc_id
+        for _ in range(20):
+            row = next((a for a in self.tables.get("accounts", [])
+                        if a.get("id") == cur and a.get("society_id") == sid), None)
+            if not row:
+                return {"cap": False}
+            if row.get("tab_name") == "InExp":
+                return {"cap": False}
+            if row.get("parent_account_id") is None:
+                return {"cap": True}
+            cur = row.get("parent_account_id")
+        return {"cap": False}
+
+    def _fn_tds_summary_fy(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        fy = str(p.get("p1") or p.get("fy"))
+        quarter = int(p.get("p2") or p.get("quarter") or 1)
+        tds_acc = self._fn_resolve_tds_account({"p0": sid, "society_id": sid}, True, False)
+        if tds_acc is None:
+            return []
+        # quarter start (FY runs Apr-Mar)
+        fy_year = int(fy)
+        q_month = 1 if quarter == 4 else (quarter - 1) * 3 + 4
+        q_year = fy_year + 1 if quarter == 4 else fy_year
+        q_start = f"{q_year}-{q_month:02d}-01"
+        m = q_month + 2
+        y2 = q_year
+        if m > 12:
+            m -= 12
+            y2 += 1
+        import calendar
+        last_day = calendar.monthrange(y2, m)[1]
+        q_end = f"{y2}-{m:02d}-{last_day:02d}"
+        rows = []
+        tds_rows = [t for t in self.tables.get("transactions", [])
+                    if t.get("society_id") == sid and t.get("acc_id") == tds_acc
+                    and t.get("entry_side") == "Dr" and t.get("source_table") == "expenses"]
+        for t in tds_rows:
+            trx_date = t.get("trx_date") or ""
+            if not (q_start <= trx_date <= q_end):
+                continue
+            eid = t.get("source_id")
+            expense = next((e for e in self.tables.get("expenses", []) if e.get("id") == eid), None)
+            if not expense or expense.get("status") != "confirmed":
+                continue
+            vid = expense.get("entity_id")
+            vendor = next((v for v in self.tables.get("vendors", []) if v.get("id") == vid), None) or {}
+            pan = (vendor.get("pan_number") or "").strip()
+            gross = float(expense.get("amount", 0) or 0)
+            tds = float(t.get("amount", 0) or 0)
+            rows.append({
+                "vendor_name": vendor.get("business_name"),
+                "vendor_pan": vendor.get("pan_number"),
+                "tds_section": expense.get("tds_section"),
+                "gross_amount_paid": gross,
+                "tds_deducted": tds,
+                "net_paid": gross - tds,
+                "payment_date": trx_date,
+                "no_pan": not pan,
+            })
+        if fetch_one:
+            return rows[0] if rows else None
+        return rows
 
 
 def reset_fake_db():
