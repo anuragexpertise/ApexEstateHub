@@ -885,9 +885,9 @@ def register_qr_callbacks(app):
                     role_code = role_code_map.get(role, "ADM")
                     try:
                         db._execute(
-                            """INSERT INTO gate_access (society_id, role, entity_id, time_in)
-                               VALUES (%s, %s, %s, NOW())""",
-                            (society_id, role_code, user_id),
+                            """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
+                               VALUES (%s, %s, %s, NOW(), %s)""",
+                            (society_id, role_code, user_id, user_id),
                         )
                     except Exception as e:
                         print(f"Gate log error: {e}")
