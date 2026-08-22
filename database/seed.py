@@ -195,11 +195,11 @@ ACCOUNTS = [
     (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  True,  "Cr", 100),
     (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  True,  "Cr", 100),
     (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True,  "Dr", 100),
-    (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr",  True,  "Dr", 100),
+    (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", True,  "Dr", 100),
     (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  "Dr",  10),
     (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True,  "Dr", 100),
-    (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr",  True,  "Dr", 100),
-    (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr",  True,  "Dr", 100),
+    (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", True,  "Dr", 100),
+    (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", True,  "Dr", 100),
     (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", True,  "Dr", 100),
     (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", True,  "Dr", 100),
     (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", True,  "Dr", 100),
@@ -209,13 +209,45 @@ ACCOUNTS = [
     (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True,  "Dr", 100),
     (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", True,  "Dr", 100),
     (9,     "Sundry Creditors",           "SCr",       "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
+    (201,   "Sinking Fund Reserve",        "SinkFund",  "Sinking Fund Reserve",        1,  "Cr",  True,  "Cr", 100),
+    (202,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True,  "Cr", 100),
+    (203,   "Corpus Fund",                 "CorpusFund","Corpus Fund",                 1,  "Cr",  True,  "Cr", 100),
+    (401,   "CGST Payable",                "CGST",      "CGST Payable",                4,  "Cr",  True,  "Cr", 100),
+    (402,   "SGST Payable",                "SGST",      "SGST Payable",                4,  "Cr",  True,  "Cr", 100),
 ]
+
+# Compliance tagging for existing accounts (Phase 1)
+INCOME_NATURE_MAP = {
+    2311: 'mutual', 2317: 'mutual', 2318: 'mutual', 2319: 'mutual',
+    23191: 'mutual', 23192: 'mutual', 21113: 'mutual',
+    2111: 'non_mutual', 21111: 'non_mutual', 21112: 'non_mutual',
+    212: 'non_mutual', 213: 'non_mutual',
+}
+
+TDS_SECTION_MAP = {
+    2312: '194C', 2320: '194C', 2321: '194C', 2322: '194C',
+    2315: '194J', 2316: '194J',
+}
+
+# Compliance tagging for existing accounts (Phase 1)
+INCOME_NATURE_MAP = {
+    2311: 'mutual', 2317: 'mutual', 2318: 'mutual', 2319: 'mutual',
+    23191: 'mutual', 23192: 'mutual', 21113: 'mutual',
+    2111: 'non_mutual', 21111: 'non_mutual', 21112: 'non_mutual',
+    212: 'non_mutual', 213: 'non_mutual',
+}
+
+TDS_SECTION_MAP = {
+    2312: '194C', 2320: '194C', 2321: '194C', 2322: '194C',
+    2315: '194J', 2316: '194J',
+}
 
 SOCIETY_ID = 1  # fixed identity, independent of migrate.py's demo path
 
 SOCIETY = {
     "name":             "Sunrise Residency",
     "PAN_number":       "ABCDE1234X",
+    "gstin":            "27AAAAA0000A1Z5",
     "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
     "email":            "admin@sunriseresidency.com",
     "phone":            "9876543210",
@@ -251,10 +283,10 @@ USERS = [
      "apt_calc_start_date": "2026-06-01"},                 # fixed-amount history
     {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
      "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing",
-     "mobile": "9833333333", "service_description": "Best plumber in town"},
+     "mobile": "9833333333", "service_description": "Best plumber in town", "pan_number": "ABCDE1234F"},
     {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
      "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening",
-     "mobile": "9844444444", "service_description": "Best Gardener"},
+     "mobile": "9844444444", "service_description": "Best Gardener", "pan_number": "FGHIJ5678K"},
     {"role": "security",  "email": "guard1@sunriseresidency.com",   "password": "Guard1@2024",
      "name": "Ramu Singh",  "shift": "morning", "salary": 120, "mobile": "9855555555"},
     {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
@@ -530,12 +562,12 @@ def seed_society(cur, conn) -> int:
 
     cur.execute(
         """INSERT INTO societies
-           (id, name, PAN_number, address, email, phone, secretary_name,
+           (id, name, PAN_number, gstin, address, email, phone, secretary_name,
             secretary_phone, plan, plan_validity, calc_start_date,
             payment_qr, logo, login_background)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
-        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["address"],
+        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
          SOCIETY["secretary_phone"], SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
@@ -551,6 +583,24 @@ def seed_society(cur, conn) -> int:
     return SOCIETY_ID
 
 
+def seed_compliance_settings(cur, conn, society_id: int):
+    row = _one(cur, "SELECT 1 FROM society_compliance_settings WHERE society_id = %s", (society_id,))
+    if row:
+        print("  ✓ Compliance settings already exist — skipped.")
+        return
+
+    cur.execute(
+        """INSERT INTO society_compliance_settings
+           (society_id, sinking_fund_rate_basis, repair_fund_rate_basis,
+            fund_gst_exempt, fund_charges_interest, gst_filing_cadence,
+            gst_registered, gstin, tds_no_pan_action, default_export_format)
+           VALUES (%s,'per_sq_ft','per_sq_ft',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
+        (society_id, SOCIETY["gstin"]),
+    )
+    conn.commit()
+    print("  ✓ Compliance settings seeded")
+
+
 def seed_accounts(cur, conn, society_id: int) -> int:
     created = 0
     for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
@@ -562,10 +612,11 @@ def seed_accounts(cur, conn, society_id: int) -> int:
                 """INSERT INTO accounts
                    (id, society_id, name, tab_name, header, parent_account_id,
                     drcr_account, has_bf, drcr_bf, depreciation_percent,
-                    is_depreciable)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    is_depreciable, income_nature, tds_section)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (aid, society_id, name, tab, header, parent,
-                 drcr, has_bf, drcr_bf, dep, dep < 100),
+                 drcr, has_bf, drcr_bf, dep, dep < 100,
+                 INCOME_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
             )
             conn.commit()
             created += 1
@@ -708,12 +759,13 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO vendors
-                   (society_id,business_name,name,service_type,mobile,service_description,active,created_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id""",
+                   (society_id,business_name,name,service_type,mobile,service_description,active,created_by,
+                    pan_number,gstin)
+                   VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id""",
                 (society_id, u.get("business_name", u["name"]), u["name"],
                  u.get("service_type", "General"), u.get("mobile", ""),
                  u.get("service_description", "Best in town"),
-                 admin_uid),
+                 admin_uid, u.get("pan_number"), u.get("gstin")),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -850,9 +902,10 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         cur.execute(
             """INSERT INTO apt_charges_fines_basis
                (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
-                apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status)
-               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE)""",
-            (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75),
+                apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
+                apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
+               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s)""",
+            (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, TRUE),
         )
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
@@ -869,9 +922,10 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
             cur.execute(
                 """INSERT INTO apt_charges_fines_basis
                    (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
-                    apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status)
-                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE)""",
-                (society_id, b202, "2026-06-01", 3500.00, 5, 1.75),
+                    apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
+                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
+                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
+                (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, TRUE),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
@@ -1316,6 +1370,7 @@ def run_seed(conn):
 
     seed_brought_forward(cur, conn, society_id, admin_uid)
     seed_primary_bank_account(cur, conn, society_id)
+    seed_compliance_settings(cur, conn, society_id)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 

@@ -42,6 +42,7 @@ PK_MAP: dict = {
     "visitors": "id",
     "event_ticket_items": "id",
     "patrol_locations": "id",
+    "compliance_settings": "id",
 }
 
 
@@ -73,6 +74,7 @@ ENTITY_MAP: dict = {
     "visitors": "visitor",
     "event_ticket_items": "event_ticket",
     "patrol_locations": "patrol_location",
+    "compliance_settings": "compliance_setting",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -375,6 +377,10 @@ DRILLDOWN_MAP: dict = {
         "target": "list_security_roster",
         "label": "Security Roster",
     },
+    "kpi_compliance_settings": {
+        "target": "list_compliance_settings",
+        "label": "Compliance Settings",
+    },
 
 
     "kpi_late_fees_due": {"target": "list_receivables", "label": "Late Fees Due"},
@@ -455,6 +461,10 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_patrol_location",
         "label": "Patrol Location",
     },
+    "list_compliance_settings": {
+        "target": "profile_compliance_setting",
+        "label": "Compliance Settings",
+    },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {
         "actions": {
@@ -500,6 +510,10 @@ DRILLDOWN_MAP: dict = {
     "profile_society": {
         "actions": {
             "edit": {"target": "form_society_edit", "prefill": {"*": "*"}},
+            "compliance_settings": {
+                "target": "form_compliance_setting_edit",
+                "prefill": {"society_id": "id"},
+            },
         }
     },
     "profile_apt_charge": {
@@ -540,6 +554,11 @@ DRILLDOWN_MAP: dict = {
     },
     "profile_patrol_location": {
         "actions": {}
+    },
+    "profile_compliance_setting": {
+        "actions": {
+            "edit": {"target": "form_compliance_setting_edit", "prefill": {"*": "*"}},
+        }
     },
 }
 
