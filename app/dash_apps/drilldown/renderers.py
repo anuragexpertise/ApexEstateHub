@@ -1592,6 +1592,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
             # ── Channel lifecycle banners (active/inactive + pending alerts) ─
             *(_channel_banners if _channel_banners else []),
 
+            # ── Compliance settings rule reference (RWA/CHS GST/TDS/fund banner) ─
+            _compliance_rules_banner(entity_plural),
+
             # ── Images (full-width, stacked) ─────────────────────────
             html.Div(image_section) if image_section else None,
 
@@ -2336,6 +2339,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             ], style={"flex": "1", "minWidth": "260px"}),
             _payment_qr_banner(entity_plural, society_id, prefill),
             _concern_wait_banner(entity_plural, prefill),
+            _compliance_rules_banner(entity_plural),
         ], style={"padding": "16px", "maxHeight": "520px",
                   "overflowY": "auto", "display": "flex",
                   "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
@@ -2429,6 +2433,149 @@ def render_payment_qr_widget(society_id, label: str = "Scan to pay the society")
     except Exception as e:
         print(f"render_payment_qr_widget error: {e}")
         return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COMPLIANCE SETTINGS BANNER — plain-language rule reference for each toggle
+# on society_compliance_settings, so the person setting them doesn't have to
+# already know CHS/RWA tax law to set them correctly. General information
+# only, not legal/tax advice — every section says so, and points at primary
+# sources (CBIC, Income Tax Dept, the Maharashtra Cooperative Commissioner's
+# office) rather than asserting a definitive answer, since several of these
+# (GST-on-funds treatment, TDS thresholds, state bye-law rates) are genuinely
+# contested, revised periodically, or state-specific. See the [FLAG —
+# PROFESSIONAL REVIEW] items in chs_rwa_compliance_agent_tasklist.md — this
+# banner exists precisely because those decisions were never actually put to
+# a user before the settings/toggles shipped; it's the next-best thing to
+# asking, surfaced at the point the admin actually makes the choice.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _compliance_rules_banner(entity_plural: str) -> html.Div | None:
+    if entity_plural != "compliance_settings":
+        return None
+
+    def _rule_block(title: str, body: list, links: list[tuple[str, str]]) -> html.Div:
+        return html.Div([
+            html.Div(title, style={"fontWeight": "700", "fontSize": "12.5px",
+                                    "color": COLORS["primary"], "marginBottom": "3px"}),
+            html.Div(body, style={"fontSize": "12px", "color": "#3a4a5c",
+                                   "lineHeight": "1.5", "marginBottom": "4px"}),
+            html.Div([
+                html.A(label, href=url, target="_blank", rel="noopener noreferrer",
+                       style={"fontSize": "11px", "marginRight": "12px",
+                              "color": COLORS["info"], "textDecoration": "none"})
+                for label, url in links
+            ]),
+        ], style={"marginBottom": "14px", "paddingBottom": "10px",
+                   "borderBottom": "1px solid rgba(0,0,0,0.06)"})
+
+    return html.Div([
+        dbc.Alert([
+            html.I(className="fas fa-scale-balanced me-2"),
+            html.Strong("General information, not legal or tax advice. "),
+            "These toggles change how the system calculates GST, TDS, and fund "
+            "contributions — confirm each choice against your society's own "
+            "registered bye-laws and your CA before relying on it for a filing.",
+        ], color="warning", style={"fontSize": "12px", "padding": "8px 12px",
+                                     "marginBottom": "12px"}),
+
+        _rule_block(
+            "Sinking Fund / Repair Fund Rate Basis",
+            [
+                "Maharashtra's Model Bye-Laws set statutory minimums of 0.25% "
+                "of construction cost/year for the Sinking Fund and 0.75% for "
+                "the Repair & Maintenance Fund — but most societies operationalize "
+                "this as a per-sq-ft rate set by the General Body rather than "
+                "recomputing construction cost each year. Other states' "
+                "Cooperative Societies Acts set their own rates — cooperative "
+                "societies are a State subject, so check your own state's Act "
+                "and your society's registered bye-laws, not just Maharashtra's.",
+                html.Br(),
+                html.Span("Maharashtra's Model Bye-Laws are being revised right now — "
+                          "a draft is open for objections until 27 Aug 2026.",
+                          style={"fontStyle": "italic", "color": COLORS["warning"]}),
+            ],
+            [("Maharashtra Model Bye-Laws (official PDF)",
+              "https://sahakarayukta.maharashtra.gov.in/site/upload/documents/Model_ByeLaws_of_Housing_Cooperative_societies.pdf")],
+        ),
+
+        _rule_block(
+            "Fund GST Exempt",
+            [
+                "Whether Sinking/Repair Fund collections sit outside GST at all, "
+                "or are treated like any other RWA collection subject to the same "
+                "₹7,500/member/month threshold below, is genuinely unsettled — "
+                "CBIC's circular treats them as consideration for future services "
+                "in some readings, contested in others. Default here is exempt; "
+                "verify with a GST practitioner before filing on that basis.",
+            ],
+            [("CBIC Circular 109/28/2019-GST",
+              "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf")],
+        ),
+
+        _rule_block(
+            "Fund Charges Interest",
+            [
+                "Whether overdue Sinking/Repair Fund contributions accrue the "
+                "same late-payment interest as overdue maintenance is a bye-law "
+                "question, not a fixed rule — check what your society's own "
+                "registered bye-laws specify, and note Maharashtra's pending "
+                "revision would cap penal interest at 12% simple (down from 21%, "
+                "no longer compoundable) once notified.",
+            ],
+            [],
+        ),
+
+        _rule_block(
+            "GST Registered / GSTIN / GST Filing Cadence",
+            [
+                "GST applies only when BOTH hold: society turnover exceeds ₹20 "
+                "lakh/year AND a member's own monthly maintenance exceeds ₹7,500. "
+                "Both conditions must be crossed — one alone doesn't trigger it. "
+                "Per CBIC's Circular 109/28/2019-GST, once a member's charge "
+                "crosses ₹7,500, GST applies to the ENTIRE amount, not just the "
+                "excess (a Madras HC ruling has gone the other way on this point — "
+                "treat it as contested, not settled). Filing cadence (monthly vs. "
+                "QRMP/quarterly) is chosen at GST registration, not decided by "
+                "this system.",
+            ],
+            [("CBIC GST circular", "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf"),
+             ("GST Council RWA flyer", "https://gstcouncil.gov.in/sites/default/files/e-version-gst-flyers/GST_ON_Co-operative_housing_Societies0509.pdf")],
+        ),
+
+        _rule_block(
+            "TDS No-PAN Action (warn vs. block)",
+            [
+                "Under Section 206AA, TDS can still be deducted from a vendor "
+                "with no PAN on file — at the higher no-PAN rate (typically 20%) "
+                "rather than the normal Section 194C/194J rate. That means "
+                "\"warn\" is usually the right default: blocking the payment isn't "
+                "legally required, and many small vendors (individual plumbers, "
+                "local contractors) genuinely have no PAN. Current thresholds — "
+                "194C: ₹30,000/bill or ₹1,00,000/year; 194J: recently raised to "
+                "₹50,000/year (from ₹30,000) — are revised periodically, so check "
+                "the official page rather than relying on a number fixed in this "
+                "banner.",
+            ],
+            [("Income Tax Dept — Section 194C", "https://www.incometaxindia.gov.in/w/section-194c"),
+             ("Income Tax Dept — current TDS rates", "https://www.incometaxindia.gov.in/w/tds-rates-1")],
+        ),
+
+        html.Div(
+            "Mutual (member-sourced: maintenance, parking, transfer fees) vs. "
+            "non-mutual (tower rent, hall rental, FD interest) income "
+            "classification is a judicially-developed doctrine (Principle of "
+            "Mutuality), not a single numbered section — get this one checked "
+            "against your society's actual income mix, since it determines "
+            "what's taxable at all.",
+            style={"fontSize": "11.5px", "color": COLORS["muted"], "fontStyle": "italic"},
+        ),
+    ], style={
+        "background": "linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,251,255,0.92))",
+        "border": f"1px solid {COLORS['info']}33",
+        "borderRadius": "12px", "padding": "14px 16px", "marginTop": "8px",
+        "maxWidth": "420px", "maxHeight": "480px", "overflowY": "auto",
+    })
 
 
 def _payment_qr_banner(entity_plural: str, society_id, prefill: dict) -> html.Div | None:
