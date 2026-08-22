@@ -3343,9 +3343,10 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         # documented reasoning in bulk_enroll_callbacks.py.
         r = db._execute(
             "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-            "apartment_size,owner_photo,id_proof,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
             (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
+             d.get("alt_mobile"), d.get("alt_address"),
              d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
             fetch_one=True,
         )
@@ -3392,11 +3393,13 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         if role == "security":
             db._execute(
                 "UPDATE security_staff SET name=%s,mobile=%s,shift=%s,"
+                "salary_per_shift=%s,joining_date=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
+                 d.get("salary_per_shift"), d.get("joining_date"),
                  d.get("photo"), d.get("id_proof"), d.get("user_id"), pk, sid),
             )
         else:
@@ -3408,6 +3411,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
             db._execute(
                 "UPDATE vendors SET name=%s,business_name=%s,service_type=%s,mobile=%s,"
+                "service_description=%s,"
                 "photo=COALESCE(NULLIF(%s, ''), photo),"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
                 "license=COALESCE(NULLIF(%s, ''), license),"
@@ -3416,6 +3420,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("business_name"), d.get("service_type"), d.get("mobile"),
+                 d.get("service_description"),
                  d.get("photo"), d.get("logo"), d.get("license"),
                  pan, gstin, d.get("user_id"), pk, sid),
             )
@@ -3435,9 +3440,10 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     # vendor/security_staff row rather than leaving an orphan with no login.
     if role == "security":
         dr = db._execute(
-            "INSERT INTO security_staff(society_id,name,mobile,shift,photo,id_proof,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            "INSERT INTO security_staff(society_id,name,mobile,shift,salary_per_shift,joining_date,photo,id_proof,active,created_by) "
+            "VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
             (sid, d.get("name"), d.get("mobile"), d.get("shift"),
+             d.get("salary_per_shift"),
              d.get("photo"), d.get("id_proof"), d.get("user_id")), fetch_one=True,
         )
     else:
@@ -3448,9 +3454,10 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
             return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
         dr = db._execute(
-            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,photo,logo,license,active,created_by,pan_number,gstin) "
+            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,service_description,photo,logo,license,active,created_by,pan_number,gstin) "
             "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
             (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
+             d.get("service_description"),
              d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"),
              pan or None, gstin or None), fetch_one=True,
         )
@@ -3673,9 +3680,9 @@ def _save_gate_log(db, d, sid):
     if not eid:
         return False, "Entity ID required", None
     r = db._execute(
-        "INSERT INTO gate_access(society_id,role,entity_id,time_in) "
-        "VALUES(%s,%s,%s,NOW())",
-        (sid, d.get("role", "v"), eid),
+        "INSERT INTO gate_access(society_id,role,entity_id,time_in,created_by) "
+        "VALUES(%s,%s,%s,NOW(),%s)",
+        (sid, d.get("role", "v"), eid, d.get("user_id")),
     )
     return True, "Gate log created", None
 
@@ -3725,7 +3732,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
                 "secretary_name=%s,secretary_phone=%s,"
                 "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"
-                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr),updated_by=%s "
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) "
                 "WHERE id=%s",
                 (
                     d.get("name"),
@@ -3743,7 +3750,6 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("pan_number"),
                     d.get("gstin"),
                     d.get("payment_qr"),
-                    d.get("user_id"),
                     pk,
                 ),
             )
@@ -3754,7 +3760,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 "login_background=COALESCE(NULLIF(%s, ''), login_background),"
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
                 "secretary_name=%s,secretary_phone=%s,"
-                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr),updated_by=%s "
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) "
                 "WHERE id=%s",
                 (
                     d.get("email"),
@@ -3767,7 +3773,6 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("secretary_name"),
                     d.get("secretary_phone"),
                     d.get("payment_qr"),
-                    d.get("user_id"),
                     pk,
                 ),
             )
@@ -3904,8 +3909,8 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, depreciation_percent, is_depreciable, created_by"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, drcr_bf, depreciation_percent, is_depreciable, income_nature, tds_section, created_by"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
@@ -3915,6 +3920,8 @@ def _save_account(db, d, sid, is_edit, pk):
             drcr_bf,                             # drcr_bf mirrors drcr_account
             dep_pct,
             is_dep,
+            d.get("income_nature") or "mutual",
+            d.get("tds_section") or None,
             d.get("user_id"),
         ),
     )
@@ -4072,10 +4079,9 @@ def _save_security_roster(db, d, sid, is_edit, pk):
     if is_edit:
         try:
             db._execute(
-                "UPDATE security_roster SET security_id=%s, roster_date=%s, shift_type=%s,"
-                " updated_by=%s "
+                "UPDATE security_roster SET security_id=%s, roster_date=%s, shift_type=%s "
                 " WHERE id=%s AND society_id=%s",
-                (security_id, roster_date, shift_type, d.get("user_id"), pk, sid),
+                (security_id, roster_date, shift_type, pk, sid),
             )
         except Exception as e:
             if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
@@ -4085,9 +4091,9 @@ def _save_security_roster(db, d, sid, is_edit, pk):
 
     try:
         r = db._execute(
-            "INSERT INTO security_roster(society_id, security_id, roster_date, shift_type, assigned_by)"
-            " VALUES(%s,%s,%s,%s,%s) RETURNING id",
-            (sid, security_id, roster_date, shift_type, assigned_by),
+            "INSERT INTO security_roster(society_id, security_id, roster_date, shift_type, assigned_by, created_by)"
+            " VALUES(%s,%s,%s,%s,%s,%s) RETURNING id",
+            (sid, security_id, roster_date, shift_type, assigned_by, d.get("user_id")),
             fetch_one=True,
         )
     except Exception as e:
