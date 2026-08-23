@@ -181,6 +181,18 @@ def register_kpi_rule_links_callbacks(app):
         delete_link(link_id)
         return {"message": f"Deleted rule link #{link_id}", "type": "success"}
 
+    # ── Cancel / close modal ───────────────────────────────────────────
+    @app.callback(
+        Output("kpi-link-modal", "is_open", allow_duplicate=True),
+        Input("kpi-link-modal-cancel", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def cancel_link_modal(n_clicks):
+        if not n_clicks:
+            return no_update
+        return False
+
     print("  ✓ KPI Rule Links callbacks registered")
 
 

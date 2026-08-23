@@ -185,6 +185,25 @@ def register_assign_to_callbacks(app):
             raise PreventUpdate
         return False
 
+    # ── 2a. View toggle (list / grid) ───────────────────────────────────────────
+    @app.callback(
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Input({"type": "assign-view-toggle", "view": ALL}, "n_clicks"),
+        State("assign-to-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def toggle_assign_view(n_clicks_list, store):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            raise PreventUpdate
+        view = triggered.get("view", "list")
+        store = dict(store or {})
+        store["view"] = view
+        return store
+
     # ── 3. Entity-type card click OR search change → (re)load list ────────────
     # `assign-search` is a real Input here (not just a State read at click
     # time), and the currently-active role is tracked in assign-to-store, so
@@ -278,7 +297,8 @@ def register_assign_to_callbacks(app):
             )
             return empty, card_colors, card_outlines, store
 
-        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+        view = store.get("view", "list")
+        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view=view) for r in rows]
         return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
 
     # ── 4. Toggle selection on item click ────────────────────────────────────
@@ -347,7 +367,7 @@ def register_assign_to_callbacks(app):
                     rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
                 else:
                     rows = list_assignable_security(society_id, s, concern_id=concern_id)
-                items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view="list") for r in rows]
+                items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view=store.get("view", "list")) for r in rows]
                 list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
                     f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
                 )

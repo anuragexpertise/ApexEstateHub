@@ -1191,6 +1191,16 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": str(e)}}
                     return store, content, bc, {"display": "none"}, toast
 
+            # ── Create Channel (admin only) ─────────────────────────────────────
+            elif action == "create_channel" and entity == "channel":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can create channels"}}
+                    return store, content, bc, {"display": "none"}, toast
+                store = nav_state.navigate_to(
+                    store, "form_channel_new", "Create Channel",
+                )
+                hide_kpis = True
+
             else:
                 # ── Generic edit / other action ───────────────────────────────────
                 nav_target = (DRILLDOWN_MAP.get(f"profile_{entity}", {}).get("actions", {})
