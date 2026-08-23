@@ -1,4 +1,3 @@
-nohup: ignoring input
 📋 Registering callbacks...
   → Registering shell callbacks…
   ✓ Shell callbacks registered
@@ -6,9 +5,24 @@ nohup: ignoring input
   ✓ Login callbacks registered
 ✓ Drilldown callbacks registered (portal-aware)
   → Registering card catalogue callbacks…
-  ✓ Card catalogue callbacks registered
 ✓ Customize callbacks registered
+✓ QR callbacks registered (static QR + camera + emergency)
+✓ Camera callbacks registered
+  → Registering customize KPI callbacks...
+  ✓ Customize KPI callbacks registered
+  -> Registering list inspector callbacks...
+  ✓ List inspector callbacks registered
   → Registering debug callbacks…
+  ✓ Debug callbacks registered
+  ✓ NOC callbacks registered (Print / PDF / Email)
+  ✓ Admin callbacks registered (manual QR validate moved to qr_callbacks.py)
+  ✓ Form autofill callbacks registered (particulars suggestion)
+  OK Receipt callbacks registered (Print / PDF / Email)
+  ✓ Assign-to callbacks registered
+  ✓ Concern-bid callbacks registered
+  ✓ Invite-to callbacks registered
+  → Registering account callbacks…
+  ✓ Account callbacks registered
 ✅ All callbacks registered
 
 ======================================================================
@@ -24,5 +38,965 @@ URL: http://0.0.0.0:8050
 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on all addresses (0.0.0.0)
  * Running on http://127.0.0.1:8050
- * Running on http://10.209.108.22:8050
+ * Running on http://172.17.8.22:8050
 [33mPress CTRL+C to quit[0m
+127.0.0.1 - - [23/Aug/2026 22:19:33] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:56] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:57] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:57] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:57] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:57] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:58] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:24:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:24:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:24:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:24:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:57] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:58] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:25:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:00] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:18] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:19] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:21] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:21] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:42] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:43] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:26:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:26:45] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:06] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:07] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:07] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:07] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:07] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:08] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:41] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:42] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:44] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+/home/at/Documents/side hustle/ApexVenv/lib/python3.11/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 15 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  return self._jws.encode(
+127.0.0.1 - - [23/Aug/2026 22:27:48] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:50] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:50] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:50] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:50] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:52] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:27:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:27:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:18] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:28:18] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /static/js/push.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /static/js/error-monitor.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /static/assets/EH_logo.png HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "[36mGET /static/assets/EH_bk.jpg HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:19] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:20] "[36mGET /assets/1/sunrise_logo.png HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:21] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:22] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:22] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[36mGET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[36mGET /static/js/push.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[36mGET /static/js/error-monitor.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[36mGET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:23] "[36mGET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "[36mGET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "[36mGET /static/assets/EH_logo.png HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "[36mGET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "[36mGET /static/assets/EH_bk.jpg HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "[36mGET /assets/1/sunrise_logo.png HTTP/1.1[0m" 304 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:26] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:28:27] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:28:27] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:29] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:30] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:30] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:30] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:30] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:30] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:32] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:32] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:32] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:37] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:37] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:37] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:37] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.16s exec=0.16s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.18s exec=0.18s
+  ⟳ KPI refresh: 0 cache hit(s), 9 card(s) fetched in 1 batched query (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.32s exec=0.31s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.21s exec=0.20s
+  ⟳ KPI refresh: 19 cache hit(s), 84 card(s) fetched in 1 batched query (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/admin-portal
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ✓ KPI cache hits 9/9 (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ✓ KPI cache hits 103/103 (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ✓ KPI cache hits 9/9 (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.19s exec=0.19s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ✓ KPI cache hits 103/103 (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⟳ KPI refresh: 0 cache hit(s), 9 card(s) fetched in 1 batched query (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.22s exec=0.22s
+127.0.0.1 - - [23/Aug/2026 22:29:38] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:39] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:39] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:41] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:42] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:45] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:47] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:48] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:48] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:48] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:48] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:49] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:50] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:50] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:50] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:52] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:53] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:54] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:55] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:55] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:55] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:57] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:29:59] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:00] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:00] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:00] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:00] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:01] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:01] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:02] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:04] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:05] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:05] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:05] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:05] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:06] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:07] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:07] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:07] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:09] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:10] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:11] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:12] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:12] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:12] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:12] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:13] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:13] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:13] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:16] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:17] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:17] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:17] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:17] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:18] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:19] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:19] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:19] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:20] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:21] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:22] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.22s exec=0.22s
+  ⟳ KPI refresh: 19 cache hit(s), 84 card(s) fetched in 1 batched query (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.10s exec=0.10s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ✓ KPI cache hits 9/9 (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ✓ KPI cache hits 103/103 (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ✓ KPI cache hits 9/9 (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+  ⏱ DB query ok (attempt 1) total=0.15s exec=0.15s
+  ✓ KPI cache hits 103/103 (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.14s exec=0.14s
+✅ 1 societies loaded: ['Sunrise Residency']
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ✓ KPI cache hits 9/9 (groups: active guards, active pass, awaiting admin, channels, entries, inventory, pending dues, pending issues, scheduled) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ✓ KPI cache hits 103/103 (groups: across all, active, active guards, active pass, all rules, all time, apartment dues, attendance, awaiting admin, awaiting owner, awaiting verify, billing from, channels, chart, collected, done, enroll, enrolled, entries, events, fines, gate punch-clock, gate-pass, gate-pass OK, gross value, interest, inventory, maintenance, manual credits, manual debits, monthly, monthly payables, monthly receivables, net position, next 30 days, not clocked in, on duty, overdue, pending, pending dues, pending issues, pending salary, physical cash, platform, polling, prepaid, profile, registered, renewal needed, scheduled, settings, to pay, total, total Cr, unpaid shifts, validity, verified, verified this month) portal=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+
+🔍 load_societies — pathname=/dashboard/
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ 1 societies loaded: ['Sunrise Residency']
+
+✅ Society selected: 1
+
+✅ Injecting login form: Sunrise Residency
+
+🔐 Password login: admin@sunriseresidency.com
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.13s exec=0.13s
+✅ Password login success: admin@sunriseresidency.com
+
+🔍 load_societies — pathname=/dashboard/admin-portal
+  ⏱ DB query ok (attempt 1) total=0.11s exec=0.11s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+  ⏱ DB query ok (attempt 1) total=0.12s exec=0.12s
+127.0.0.1 - - [23/Aug/2026 22:30:23] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:23] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:24] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:24] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:25] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:25] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:26] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:26] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:26] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:28] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:29] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:30] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:31] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:31] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:31] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:33] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:34] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:36] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:37] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:37] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:37] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:37] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:37] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:39] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:39] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:39] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "[32mGET / HTTP/1.1[0m" 302 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/ HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/dashboard/assets/style.css?m=1787127687.14447 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/deps/polyfill@7.v2_14_2m1776105818.12.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/deps/react-dom@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/deps/prop-types@15.v2_14_2m1776105818.8.1.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/deps/react@16.v2_14_2m1776105818.14.0.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /static/js/push.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /static/js/error-monitor.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1778960904.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/dashboard/assets/camera_capture.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/dashboard/assets/pattern.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/dashboard/assets/layout.js?m=1785705476.0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_14_2m1776105817.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/dcc/dash_core_components-shared.v2_12_1m1776105818.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/html/dash_html_components.v2_0_15m1776105818.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:41] "GET /dashboard/_dash-component-suites/dash/dash_table/bundle.v5_2_8m1776105817.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /dashboard/_dash-layout HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /dashboard/_dash-dependencies HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /static/sw.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /dashboard/_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:42] "GET /static/assets/EH_bk.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "GET /static/assets/EH_logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:43] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:44] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:46] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:51] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:51] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:51] "[35m[1mPOST /dashboard/_dash-update-component HTTP/1.1[0m" 204 -
+127.0.0.1 - - [23/Aug/2026 22:30:51] "GET /api/push/vapid-public-key HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:51] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:52] "POST /dashboard/_dash-update-component HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 22:30:52] "GET /assets/1/sunrise_logo.png HTTP/1.1" 200 -
