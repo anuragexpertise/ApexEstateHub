@@ -18,3 +18,8 @@ migrations/
 *.diff
 *.patch
 *.xlsx
+*.json
+generate_button_manifest.py
+run.log
+run_button_audit.py
+targeted_audit.py

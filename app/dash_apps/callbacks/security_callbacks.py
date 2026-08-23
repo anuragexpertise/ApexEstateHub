@@ -730,3 +730,41 @@ def register_security_callbacks(app):
                 html.H5("Clocked Out"),
                 html.Small(now_str)
             ]), {"type": "success", "message": "Clocked out successfully"}
+
+    # ── 6. Owner Approve/Deny Gate Alert ─────────────────────────────────
+    @app.callback(
+        Output("gate-alert-toast", "data", allow_duplicate=True),
+        Output("gate-alerts-refresh", "children", allow_duplicate=True),
+        Input({"type": "owner-approve-alert-btn", "alert_event_id": ALL}, "n_clicks"),
+        Input({"type": "owner-deny-alert-btn", "alert_event_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def owner_respond_to_alert(_approve_clicks, _deny_clicks, auth):
+        if not ctx.triggered:
+            return no_update, no_update
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            return no_update, no_update
+        alert_event_id = triggered.get("alert_event_id")
+        if not alert_event_id:
+            return no_update, no_update
+        action = "approve" if triggered.get("type") == "owner-approve-alert-btn" else "deny"
+        role = get_current_user_role() or ""
+        if role != "apartment":
+            return {"type": "error", "message": "Only apartment owners can respond to alerts."}, no_update
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
+        if not society_id:
+            return {"type": "error", "message": "Session expired"}, no_update
+        try:
+            from app.services.alert_service import respond_to_alert
+            ok, msg = respond_to_alert(int(alert_event_id), user_id, action)
+            toast = {"type": "success" if ok else "error", "message": msg or "Action failed"}
+            return toast, render_gate_alerts_section(society_id)
+        except Exception as e:
+            logger.error(f"owner_respond_to_alert error: {e}")
+            return {"type": "error", "message": str(e)}, no_update
+
+    print("  ✓ Security callbacks registered")
