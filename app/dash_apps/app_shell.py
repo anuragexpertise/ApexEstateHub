@@ -9,6 +9,18 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 
+# ── Login modal body base style ────────────────────────────────────────────
+# Shared with shell_callbacks.py's inject_stage2/back_to_stage1, which swap
+# only backgroundImage (default EstateHub art vs. the selected society's
+# login_background) — everything else about the panel stays fixed here so
+# the two never drift apart.
+LOGIN_MODAL_BODY_BASE_STYLE = {
+    "backgroundSize": "cover",
+    "backgroundPosition": "center",
+    "minHeight": "400px",
+}
+
+
 # ── Role configuration ────────────────────────────────────────────────────────
 
 ROLE_CONFIG = {
@@ -127,9 +139,7 @@ def _login_modal() -> html.Div:
                     id="login-modal-body",
                     style={
                         "backgroundImage": "url(/static/assets/EH_bk.jpg)",
-                        "backgroundSize": "cover",
-                        "backgroundPosition": "center",
-                        "minHeight": "400px",
+                        **LOGIN_MODAL_BODY_BASE_STYLE,
                     },
                 ),
                 dbc.ModalFooter(

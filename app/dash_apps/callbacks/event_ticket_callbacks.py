@@ -33,7 +33,7 @@ Required addition to app_shell.py / the permanent layout:
 permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
-from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 
 
 def _ticket_html_js() -> str:
@@ -60,7 +60,8 @@ def _ticket_html_js() -> str:
     """
 
 
-_TICKET_PRINT_JS = LETTERHEAD_JS + _ticket_html_js() + r"""
+_TICKET_PRINT_JS = clientside_iife(
+    LETTERHEAD_JS + _ticket_html_js() + r"""
 function printEventTicket(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var w = window.open('', '_blank');
@@ -80,9 +81,12 @@ function printEventTicket(n_clicks, d) {
     setTimeout(function() { w.print(); }, 500);
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "printEventTicket",
+)
 
-_TICKET_PDF_JS = LETTERHEAD_JS + _ticket_html_js() + r"""
+_TICKET_PDF_JS = clientside_iife(
+    LETTERHEAD_JS + _ticket_html_js() + r"""
 function downloadEventTicketHtml(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var html = buildLetterheadDoc({
@@ -105,9 +109,11 @@ function downloadEventTicketHtml(n_clicks, d) {
     URL.revokeObjectURL(url);
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "downloadEventTicketHtml",
+)
 
-_TICKET_EMAIL_JS = r"""
+_TICKET_EMAIL_JS = clientside_iife(r"""
 function emailEventTicket(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var body = (
@@ -125,7 +131,9 @@ function emailEventTicket(n_clicks, d) {
     );
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "emailEventTicket",
+)
 
 
 def register_event_ticket_callbacks(app):

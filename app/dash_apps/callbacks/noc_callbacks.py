@@ -63,7 +63,7 @@ That single line is the only layout change needed.
 """
 
 from dash import Output, Input, State, clientside_callback, no_update
-from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 
 
 def _noc_to_html_js() -> str:
@@ -77,7 +77,8 @@ def _noc_to_html_js() -> str:
 
 
 # ── Print ──────────────────────────────────────────────────────────────────
-_NOC_PRINT_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
+_NOC_PRINT_JS = clientside_iife(
+    LETTERHEAD_JS + _noc_to_html_js() + r"""
 function printNoc(n_clicks, lh) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
@@ -94,7 +95,7 @@ function printNoc(n_clicks, lh) {
         logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
         qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
-        bodyHtml: '<div style="font-family:Georgia,serif;font-size:13pt;line-height:1.9">' + nocToHtml(text) + '</div>',
+        bodyHtml: '<div style="font-family:Georgia,serif;font-size:12pt;line-height:1.6">' + nocToHtml(text) + '</div>',
         printWidth: '700px',
     });
     w.document.write(doc);
@@ -104,10 +105,13 @@ function printNoc(n_clicks, lh) {
 
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "printNoc",
+)
 
 # ── Save as HTML (printable to PDF from browser) ──────────────────────────
-_NOC_PDF_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
+_NOC_PDF_JS = clientside_iife(
+    LETTERHEAD_JS + _noc_to_html_js() + r"""
 function downloadNocHtml(n_clicks, lh, flat) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
@@ -122,7 +126,7 @@ function downloadNocHtml(n_clicks, lh, flat) {
         logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
         qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
-        bodyHtml: '<div style="font-family:Georgia,serif;font-size:13pt;line-height:1.9">' + nocToHtml(text) + '</div>',
+        bodyHtml: '<div style="font-family:Georgia,serif;font-size:12pt;line-height:1.6">' + nocToHtml(text) + '</div>',
         printWidth: '700px',
     });
 
@@ -140,10 +144,12 @@ function downloadNocHtml(n_clicks, lh, flat) {
 
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "downloadNocHtml",
+)
 
 # ── Email ─────────────────────────────────────────────────────────────────
-_NOC_EMAIL_JS = r"""
+_NOC_EMAIL_JS = clientside_iife(r"""
 function emailNoc(n_clicks) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
@@ -157,19 +163,28 @@ function emailNoc(n_clicks) {
     );
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "emailNoc",
+)
 
 
 def register_noc_callbacks(app):
     """
-    Register three clientside callbacks for the NOC card buttons.
+    Register three clientside callbacks for the NOC card buttons plus two
+    server-side timestamp-stamping callbacks.
 
-    Output target: 'noc-action-store' (a dcc.Store in the permanent shell
-    layout).  We write no_update on every path, so the store never actually
-    changes — the Store is just a dummy Output anchor required by Dash.
+    The three clientside Print/PDF/Email callbacks target 'noc-action-store'
+    (a dcc.Store in the permanent shell layout).  The two server-side stamp
+    callbacks (last_printed_at / last_emailed_at) target the separate
+    'noc-action-store-print' / 'noc-action-store-email' dummy stores — they
+    must NOT share the clientside callbacks' output, otherwise Dash raises
+    DuplicateCallback (identical input/state signature → identical callback
+    id hash).  We write no_update on every path, so none of the stores ever
+    actually change — they are just dummy Output anchors required by Dash.
 
     IMPORTANT: add  dcc.Store(id='noc-action-store', storage_type='memory')
-    to app_shell.py alongside the other permanent stores.
+    (and the -print/-email siblings) to app_shell.py alongside the other
+    permanent stores.
     """
 
     # ── Print button ──────────────────────────────────────────────────────
@@ -201,7 +216,7 @@ def register_noc_callbacks(app):
 
     # ── Server-side timestamp tracking (mirrors receipt_callbacks.py) ──────
     @app.callback(
-        Output('noc-action-store', 'data', allow_duplicate=True),
+        Output('noc-action-store-print', 'data', allow_duplicate=True),
         Input('noc-btn-print', 'n_clicks'),
         State('noc-letterhead-data', 'data'),
         prevent_initial_call=True,
@@ -218,7 +233,7 @@ def register_noc_callbacks(app):
         return no_update
 
     @app.callback(
-        Output('noc-action-store', 'data', allow_duplicate=True),
+        Output('noc-action-store-email', 'data', allow_duplicate=True),
         Input('noc-btn-email', 'n_clicks'),
         State('noc-letterhead-data', 'data'),
         prevent_initial_call=True,

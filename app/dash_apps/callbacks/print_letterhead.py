@@ -103,11 +103,34 @@ function buildLetterheadDoc(o) {
 
     return (
         '<html><head><title>' + (o.title || 'Document') + '</title>' +
-        '<style>body{font-family:Arial,sans-serif;padding:40px;max-width:' + (o.printWidth || '650px') +
-        ';margin:auto;position:relative}@media print{body{padding:20px}}</style>' +
+        '<style>' +
+        '@page{size:A4;margin:10mm}' +
+        'html,body{margin:0}' +
+        'body{font-family:Arial,sans-serif;padding:24px;max-width:' + (o.printWidth || '650px') +
+        ';margin:auto;position:relative}' +
+        '@media print{body{padding:8px 4px}img{max-width:100%}}' +
+        '</style>' +
         '</head><body>' +
         bg + header + (o.bodyHtml || '') + footer +
         '</body></html>'
     );
 }
 """
+
+
+def clientside_iife(js: str, fn_name: str) -> str:
+    """
+    Wrap a clientside callback's JS source in an IIFE that returns the real
+    handler function.
+
+    Dash injects the inline JS by literally doing
+        ns["<hash>"] = <clientside_function>;
+    If <clientside_function> is several `function foo(){}` declarations (the
+    common "helpers + main function" pattern used by the print/PDF callbacks
+    here), only the FIRST declaration is assigned to ns["<hash>"] — so the
+    main handler is silently never called and the button does nothing. Wrapping
+    everything in `(function(){ ...; return <fn_name>; })()` makes the whole
+    thing a single expression that evaluates to the intended handler, fixing
+    every print/PDF flow at once.
+    """
+    return "(function(){\n" + js + "\nreturn " + fn_name + ";\n})();"

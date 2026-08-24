@@ -43,7 +43,7 @@ Required addition to app_shell.py / the permanent layout:
 rendered dynamically inside drill-content, not the permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
-from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 
 
 def _receipt_html_js() -> str:
@@ -73,7 +73,8 @@ def _receipt_html_js() -> str:
     """
 
 
-_RECEIPT_PRINT_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
+_RECEIPT_PRINT_JS = clientside_iife(
+    LETTERHEAD_JS + _receipt_html_js() + r"""
 function printReceipt(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var w = window.open('', '_blank');
@@ -93,9 +94,12 @@ function printReceipt(n_clicks, d) {
     setTimeout(function() { w.print(); }, 500);
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "printReceipt",
+)
 
-_RECEIPT_PDF_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
+_RECEIPT_PDF_JS = clientside_iife(
+    LETTERHEAD_JS + _receipt_html_js() + r"""
 function downloadReceiptHtml(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var html = buildLetterheadDoc({
@@ -118,9 +122,11 @@ function downloadReceiptHtml(n_clicks, d) {
     URL.revokeObjectURL(url);
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "downloadReceiptHtml",
+)
 
-_RECEIPT_EMAIL_JS = r"""
+_RECEIPT_EMAIL_JS = clientside_iife(r"""
 function emailReceipt(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
     var body = (
@@ -140,7 +146,9 @@ function emailReceipt(n_clicks, d) {
     );
     return window.dash_clientside.no_update;
 }
-"""
+""",
+    "emailReceipt",
+)
 
 
 def register_receipt_callbacks(app):

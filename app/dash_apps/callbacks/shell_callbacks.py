@@ -31,7 +31,7 @@ from dash import Input, Output, State, html, dcc, no_update, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from app.dash_apps.app_shell import ROLE_CONFIG
+from app.dash_apps.app_shell import ROLE_CONFIG, LOGIN_MODAL_BODY_BASE_STYLE
 from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
@@ -349,16 +349,24 @@ def register_shell_callbacks(app):
         return {"display": "none"}, {"display": "block"}, auth, cookie
 
     # ── 3. BACK TO STAGE 1 ────────────────────────────────────────────────────
+    # Resets the modal logo/background to the EstateHub defaults set in
+    # inject_stage2, so switching societies (or clearing a wrong pick)
+    # doesn't leave the previous society's branding showing behind stage 1.
     @app.callback(
         Output("login-stage-1", "style", allow_duplicate=True),
         Output("login-stage-2", "style", allow_duplicate=True),
+        Output("login-society-logo", "src",  allow_duplicate=True),
+        Output("login-modal-body",  "style", allow_duplicate=True),
         Input("back-to-stage1-btn", "n_clicks"),
         prevent_initial_call=True,
     )
     def back_to_stage1(n):
         if not n:
             raise PreventUpdate
-        return {"display": "block"}, {"display": "none"}
+        default_style = dict(LOGIN_MODAL_BODY_BASE_STYLE)
+        default_style["backgroundImage"] = "url(/static/assets/EH_bk.jpg)"
+        return ({"display": "block"}, {"display": "none"},
+                "/static/assets/EH_logo.png", default_style)
 
     # ── 4. COOKIE → AUTO-ADVANCE ──────────────────────────────────────────────
     @app.callback(
@@ -381,26 +389,52 @@ def register_shell_callbacks(app):
                {"society_id": sid, "authenticated": False}
 
     # ── 5. INJECT STAGE-2 CONTENT ─────────────────────────────────────────────
+    # Also swaps the modal header logo and modal-body background to the
+    # selected society's own branding (logo / login_background), falling
+    # back to the default EstateHub logo/background when the society hasn't
+    # uploaded either — see get_letterhead_assets in print_letterhead.py for
+    # the same resolution logic used on printed documents.
     @app.callback(
-        Output("login-stage-2", "children"),
+        Output("login-stage-2",     "children"),
+        Output("login-society-logo", "src",   allow_duplicate=True),
+        Output("login-modal-body",  "style",  allow_duplicate=True),
         Input("auth-store",     "data"),
         State("society-dropdown", "options"),
         prevent_initial_call=True,
     )
     def inject_stage2(auth, options):
         if not auth or auth.get("authenticated"):
-            return no_update
+            return no_update, no_update, no_update
         sid = auth.get("society_id")
         if not sid:
-            return no_update
+            return no_update, no_update, no_update
         society_name = next(
             (o["label"] for o in (options or [])
              if isinstance(o, dict) and o["value"] == sid),
             "Society",
         )
         print(f"\n✅ Injecting login form: {society_name}")
+
+        logo_src = "/static/assets/EH_logo.png"
+        body_style = dict(LOGIN_MODAL_BODY_BASE_STYLE)
+        body_style["backgroundImage"] = "url(/static/assets/EH_bk.jpg)"
+        try:
+            from app.dash_apps.drilldown.renderers import get_image_url
+            society_row = _db()._execute(
+                "SELECT logo, login_background FROM societies WHERE id = %s",
+                (sid,), fetch_one=True,
+            ) or {}
+            society_logo_url = get_image_url(society_row.get("logo"), None, "society", sid)
+            society_bg_url = get_image_url(society_row.get("login_background"), None, "society", sid)
+            if society_logo_url:
+                logo_src = society_logo_url
+            if society_bg_url:
+                body_style["backgroundImage"] = f"url({society_bg_url})"
+        except Exception as e:
+            print(f"⚠️  stage-2 branding lookup failed: {e}")
+
         from app.dash_apps.pages.login_system import login_layout
-        return login_layout(society_name)
+        return login_layout(society_name), logo_src, body_style
 
     # ── 6. MASTER LOGIN TOGGLE ────────────────────────────────────────────────
     @app.callback(
