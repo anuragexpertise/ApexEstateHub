@@ -3505,7 +3505,7 @@ def render_vendor_pass_card(
                 ),
             ]),
           ], style={"flex": "1", "minWidth": "260px"}),
-          render_payment_qr_widget(society_id) if caller_role not in ("admin", "master") else None,
+          render_payment_qr_widget(society_id),
         ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap",
                   "gap": "16px", "alignItems": "flex-start"}),
     ], style={
@@ -3752,7 +3752,7 @@ def render_event_ticket_card(
                 ),
             ]),
           ], style={"flex": "1", "minWidth": "260px"}),
-          (render_payment_qr_widget(society_id) if not is_admin else None),
+          render_payment_qr_widget(society_id),
         ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap",
                   "gap": "16px", "alignItems": "flex-start"}),
     ], style={
