@@ -2464,12 +2464,27 @@ def _render_card(
             sid_val = filters.get("society_id")
             apt     = loaders.load_profile("apartment", apt_id, sid_val) or {} if apt_id and sid_val else {}
             society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
+            eligible = prefill.get("eligible", True)
+            # Persist the NOC the moment an eligible apartment's NOC is
+            # opened, so it has a real id/certificate_no for the
+            # verification QR to point at (mirrors receipts/expenses,
+            # which already exist as DB rows before they're ever printed).
+            # Reuses any still-valid NOC already issued for this apartment
+            # instead of minting a new certificate every time the admin
+            # reopens the same apartment's NOC card.
+            noc_record = None
+            if eligible and apt_id and sid_val:
+                try:
+                    noc_record = _get_or_create_active_noc(db, sid_val, apt_id, get_current_user_id())
+                except Exception as e:
+                    print(f"⚠️  NOC issuance failed: {e}")
             return renderers.render_noc_card(
                 apt=apt,
                 society=society,
-                eligible=prefill.get("eligible", True),
+                eligible=eligible,
                 reason=prefill.get("reason", ""),
                 outstanding=float(prefill.get("outstanding") or 0),
+                noc_record=noc_record,
             )
 
         # ── Create / Edit Poll — dedicated form (bypasses schema-driven form,
@@ -3693,6 +3708,49 @@ def _save_channel(db, d, sid, is_edit, pk):
             print(f"⚠️  Channel creation push notify failed: {e}")
         return True, "Channel created", None
     return False, msg or "Failed to create channel.", None
+
+
+def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
+    """
+    Returns the apartment's currently-valid nocs row, creating one if none
+    exists. This is what gives a printed NOC a real id/certificate_no for
+    the verification QR (validate_noc_qr in qr_service.py) to check —
+    previously NOCs were pure preview text with no DB record at all.
+
+    certificate_no format: NOC/<society_id>/<year>/<id> — assigned after
+    insert since it embeds the row's own id.
+    """
+    from datetime import date, timedelta
+
+    existing = db._execute(
+        "SELECT * FROM nocs WHERE society_id=%s AND apartment_id=%s "
+        "AND status='valid' AND valid_until >= CURRENT_DATE "
+        "ORDER BY created_at DESC LIMIT 1",
+        (society_id, apartment_id), fetch_one=True,
+    )
+    if existing:
+        return dict(existing)
+
+    issued = date.today()
+    valid_until = issued + timedelta(days=30)
+    row = db._execute(
+        "INSERT INTO nocs(society_id, apartment_id, body_text, status, "
+        "issued_date, valid_until, created_by) "
+        "VALUES(%s,%s,'',%s,%s,%s,%s) RETURNING *",
+        (society_id, apartment_id, "valid", issued, valid_until, created_by),
+        fetch_one=True,
+    )
+    noc_id = row["id"]
+    certificate_no = f"NOC/{society_id}/{issued.year}/{noc_id}"
+
+    from app.services.qr_service import generate_qr_code
+    _qr_img, qr_payload = generate_qr_code(society_id, "NOC", noc_id)
+
+    updated = db._execute(
+        "UPDATE nocs SET certificate_no=%s, qr_payload=%s WHERE id=%s RETURNING *",
+        (certificate_no, qr_payload, noc_id), fetch_one=True,
+    )
+    return dict(updated)
 
 
 def _save_gate_log(db, d, sid):

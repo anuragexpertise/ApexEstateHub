@@ -15,12 +15,21 @@ receipts.last_printed_at / last_emailed_at already existed in estatehub.sql
 actually set anywhere — a second server-side callback here updates them
 when Print/Email are used, alongside the clientside print/email action.
 
+Branding (2026-08): Print/PDF now go through the shared letterhead
+(print_letterhead.py) — society logo, watermark background, secretary
+signature, and a verification QR (RPT role) are all resolved server-side
+in render_receipt_card and shipped as part of receipt-print-data, so the
+JS here only has to hand them to buildLetterheadDoc(). Email stays plain
+text (mail clients strip most inline styling/images anyway, and a mailto:
+link can't attach an image).
+
 Required addition to app_shell.py / the permanent layout:
     dcc.Store(id='receipt-action-store', storage_type='memory'),
 (same "dummy Output anchor" trick as noc-action-store, since this card is
 rendered dynamically inside drill-content, not the permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
 
 
 def _read_store_js(var_name: str) -> str:
@@ -39,14 +48,12 @@ def _read_store_js(var_name: str) -> str:
 
 
 def _receipt_html_js() -> str:
+    """Body-only table (society name/address/logo now come from the shared
+    letterhead header — see print_letterhead.py — so this no longer repeats
+    them itself)."""
     return """
     function receiptHtml(d) {
         return (
-            '<div style="text-align:center;margin-bottom:18px;border-bottom:1px dashed #ccc;padding-bottom:10px">' +
-            '<div style="font-weight:800;font-size:16px">' + d.society_name + '</div>' +
-            '<div style="font-size:11px;color:#777">' + (d.society_address || '') + '</div>' +
-            '</div>' +
-            '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' +
             '<table style="width:100%;font-size:13px;border-collapse:collapse">' +
             row('Date', d.date) +
             row('Received From', d.payer + ' (' + d.role + ')') +
@@ -67,19 +74,22 @@ def _receipt_html_js() -> str:
     """
 
 
-_RECEIPT_PRINT_JS = _receipt_html_js() + r"""
+_RECEIPT_PRINT_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
 function printReceipt(n_clicks) {
     if (!n_clicks) return window.dash_clientside.no_update;
 """ + _read_store_js("d") + r"""
     var w = window.open('', '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(
-        '<html><head><title>Receipt #' + d.receipt_no + '</title>' +
-        '<style>body{font-family:Arial,sans-serif;padding:40px;max-width:600px;margin:auto}' +
-        '@media print{body{padding:20px}}</style></head><body>'
-    );
-    w.document.write(receiptHtml(d));
-    w.document.write('</body></html>');
+    var doc = buildLetterheadDoc({
+        title: 'Receipt #' + d.receipt_no,
+        societyName: d.society_name, societyAddress: d.society_address,
+        logoUrl: d.logo_url, backgroundUrl: d.background_url,
+        signatureUrl: d.signature_url, secretaryName: d.secretary_name,
+        qrUrl: d.qr_url, qrCaption: d.qr_caption,
+        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' + receiptHtml(d),
+        printWidth: '600px',
+    });
+    w.document.write(doc);
     w.document.close();
     w.focus();
     setTimeout(function() { w.print(); }, 500);
@@ -87,15 +97,19 @@ function printReceipt(n_clicks) {
 }
 """
 
-_RECEIPT_PDF_JS = _receipt_html_js() + r"""
+_RECEIPT_PDF_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
 function downloadReceiptHtml(n_clicks) {
     if (!n_clicks) return window.dash_clientside.no_update;
 """ + _read_store_js("d") + r"""
-    var html = (
-        '<html><head><title>Receipt #' + d.receipt_no + '</title>' +
-        '<style>body{font-family:Arial,sans-serif;padding:40px;max-width:600px;margin:auto}</style>' +
-        '</head><body>' + receiptHtml(d) + '</body></html>'
-    );
+    var html = buildLetterheadDoc({
+        title: 'Receipt #' + d.receipt_no,
+        societyName: d.society_name, societyAddress: d.society_address,
+        logoUrl: d.logo_url, backgroundUrl: d.background_url,
+        signatureUrl: d.signature_url, secretaryName: d.secretary_name,
+        qrUrl: d.qr_url, qrCaption: d.qr_caption,
+        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' + receiptHtml(d),
+        printWidth: '600px',
+    });
     var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     var url  = URL.createObjectURL(blob);
     var a = document.createElement('a');

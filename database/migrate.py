@@ -280,6 +280,12 @@ def run_migrations(conn):
         "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE",
         "ALTER TABLE patrol_locations ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
 
+        # print branding (2026-08): letterhead (logo/watermark/signature/QR)
+        # rollout for receipts, NOCs, and event tickets — see
+        # app/dash_apps/callbacks/print_letterhead.py.
+        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP",
+        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP",
+
         # qr_version: per-entity counter for signed static-pass QR codes.
         # Scoped to apartment/vendor/security only — these are generated
         # live on every view via generate_static_qr_code (no stored

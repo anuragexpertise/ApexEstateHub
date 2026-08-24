@@ -152,6 +152,15 @@ _FK_LABEL_OVERRIDES = {
     "apt_maintenance_acc_id": "Maintenance Income Account",
     "apt_interest_acc_id": "Interest Income Account",
     "ven_pass_acc_id": "Pass Sale Account",
+    # Society branding (2026-08) — these four drive every printed document's
+    # letterhead (see app/dash_apps/callbacks/print_letterhead.py). Default
+    # auto-labels ("Login Background", "Secretary Sign", "Payment Qr") didn't
+    # make that dual purpose obvious, so admins editing the society profile
+    # get clearer names for what each upload actually controls.
+    "logo": "Society Logo (shown on every printed document)",
+    "login_background": "Background Image (login screen + printed watermark)",
+    "secretary_sign": "Secretary / Admin Signature (shown on every printed document)",
+    "payment_qr": "Payment QR Code (for collecting dues via UPI)",
 }
 
 # Computed / joined fields appended to profile/list from load_profile / load_list.
