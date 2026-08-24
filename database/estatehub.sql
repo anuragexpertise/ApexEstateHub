@@ -456,6 +456,39 @@ CREATE TABLE IF NOT EXISTS receipts (
 
 COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
 
+-- ── NOCS — persisted No-Objection Certificates, one row per issuance ──
+-- Previously NOCs were generated on the fly with no DB record at all, so
+-- there was nothing for a verification QR to point at. This gives every
+-- issued NOC a real id/certificate number, an audit trail (who issued it,
+-- when, for which apartment), and a status a security guard's scan can
+-- check (valid / expired / revoked) — mirrors the receipts/expenses
+-- pattern (qr_payload, last_printed_at, last_emailed_at) already in use.
+CREATE TABLE IF NOT EXISTS nocs (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    certificate_no VARCHAR(64) UNIQUE,
+    body_text TEXT NOT NULL, -- the exact text issued, so a later edit to the template doesn't change what a printed/verified NOC says
+    status VARCHAR(20) NOT NULL DEFAULT 'valid' CHECK (
+        status IN (
+            'valid',
+            'expired',
+            'revoked'
+        )
+    ),
+    issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    valid_until DATE NOT NULL, -- issued_date + 30 days, matches the "valid for 30 days" language already in the NOC template text
+    revoked_at TIMESTAMP,
+    revoked_by INT REFERENCES users (id),
+    qr_payload VARCHAR(255),
+    last_printed_at TIMESTAMP,
+    last_emailed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id)
+);
+
+COMMENT ON COLUMN nocs.status IS 'valid/expired are derived by validate_noc_qr() comparing valid_until to today; revoked is the only status ever written directly (via an explicit revoke action).';
+
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
 CREATE TABLE IF NOT EXISTS expenses (
     id SERIAL PRIMARY KEY,
@@ -872,6 +905,8 @@ CREATE TABLE IF NOT EXISTS event_ticket_items (
     ),
     scanned_at TIMESTAMP,
     scanned_by INT REFERENCES users (id),
+    last_printed_at TIMESTAMP,
+    last_emailed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
 );
 

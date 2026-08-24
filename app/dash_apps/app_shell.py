@@ -734,16 +734,44 @@ def shell_layout() -> html.Div:
             dcc.Store(id="noc-action-store-print",        storage_type="memory"),
             dcc.Store(id="noc-action-store-pdf",        storage_type="memory"),
             dcc.Store(id="noc-action-store-email",        storage_type="memory"),
+            # noc-action-store: dummy Output anchor actually targeted by
+            # noc_callbacks.py's clientside Print/PDF/Email callbacks and by
+            # its server-side last_printed_at/last_emailed_at stamping
+            # callbacks (2026-08 fix — the three -print/-pdf/-email stores
+            # above were registered but never targeted by anything, so the
+            # NOC print/PDF/email buttons had no working Output and would
+            # fail at runtime; left the unused ones in place rather than
+            # risk removing a store something else depends on).
+            dcc.Store(id="noc-action-store",        storage_type="memory"),
             # cam-delegation-dummy: dummy Output anchor for camera_callbacks.py's
             # click-delegation clientside callback. Deliberately separate from
             # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
             # scanner) — the two were previously colliding on the same store.
             dcc.Store(id="cam-delegation-dummy",    storage_type="memory"),
             # receipt-action-store: dummy Output anchor for receipt_callbacks.py's
-            # Print/Save-as-PDF/Email buttons on the receipt card (same pattern
-            # as noc-action-store — the card is rendered dynamically inside
-            # drill-content, not part of this permanent shell layout).
+            # server-side last_printed_at/last_emailed_at stamping callbacks
+            # (same pattern as noc-action-store — the card is rendered
+            # dynamically inside drill-content, not part of this permanent
+            # shell layout).
             dcc.Store(id="receipt-action-store",    storage_type="memory"),
+            # receipt-action-store-print/-pdf/-email: dummy Output anchors
+            # actually targeted by receipt_callbacks.py's clientside Print/
+            # Save-as-PDF/Email callbacks (2026-08 fix — these were targeted
+            # by the callbacks but never registered here, so the receipt
+            # print/PDF/email buttons had no working Output and would fail
+            # at runtime).
+            dcc.Store(id="receipt-action-store-print",  storage_type="memory"),
+            dcc.Store(id="receipt-action-store-pdf",    storage_type="memory"),
+            dcc.Store(id="receipt-action-store-email",  storage_type="memory"),
+            # event-ticket-action-store*: dummy Output anchors for
+            # event_ticket_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — event tickets previously had no
+            # print/download flow at all).
+            dcc.Store(id="event-ticket-action-store",       storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-print", storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-email", storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),

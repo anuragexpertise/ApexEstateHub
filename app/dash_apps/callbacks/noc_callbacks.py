@@ -25,6 +25,15 @@ Key facts that shape the implementation:
      value from the DOM at click time, so they always see the latest
      edited text even when Dash hasn't synced the value prop.
 
+Branding (2026-08): a NOC is now a persisted nocs row (see
+_get_or_create_active_noc in drilldown_callbacks.py) with a real
+certificate_no and a NOC-role verification QR, both resolved server-side
+in render_noc_card and shipped in the noc-letterhead-data Store. Print/PDF
+route the textarea text through the same buildLetterheadDoc() used for
+receipts (print_letterhead.py) so logo/watermark/signature/QR all appear.
+A second server-side callback stamps nocs.last_printed_at /
+last_emailed_at, mirroring receipts.
+
 Required addition to app_shell.py / the permanent layout
 ---------------------------------------------------------
 Add this Store alongside the other dcc.Store components in the shell:
@@ -34,36 +43,54 @@ Add this Store alongside the other dcc.Store components in the shell:
 That single line is the only layout change needed.
 """
 
-from dash import Output, Input, clientside_callback
+from dash import Output, Input, State, clientside_callback, no_update
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
+
+
+def _read_letterhead_js() -> str:
+    """Shared snippet: read the noc-letterhead-data Store's JSON payload
+    out of the DOM (same textContent trick used by receipt-print-data)."""
+    return """
+    var lhRaw = document.getElementById('noc-letterhead-data');
+    var lh = {};
+    if (lhRaw) {
+        try { lh = JSON.parse(lhRaw.textContent || lhRaw.innerText || '{}'); }
+        catch(e) { lh = {}; }
+    }
+    """
+
+
+def _noc_to_html_js() -> str:
+    return """
+    function nocToHtml(txt) {
+        return txt.split('\\n').map(function(l) {
+            return '<p style="margin:4px 0">' + (l || '&nbsp;') + '</p>';
+        }).join('');
+    }
+    """
 
 
 # ── Print ──────────────────────────────────────────────────────────────────
-_NOC_PRINT_JS = r"""
+_NOC_PRINT_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
 function printNoc(n_clicks) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
     var ta = document.getElementById('noc-textarea');
     var text = ta ? ta.value : '';
     if (!text) return window.dash_clientside.no_update;
-
-    function toHtml(txt) {
-        return txt.split('\n').map(function(l) {
-            return '<p style="margin:4px 0">' + (l || '&nbsp;') + '</p>';
-        }).join('');
-    }
-
+""" + _read_letterhead_js() + r"""
     var w = window.open('', '_blank');
     if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(
-        '<html><head><title>NOC</title>' +
-        '<style>' +
-        'body{font-family:Georgia,serif;padding:60px;font-size:13pt;' +
-        'line-height:1.9;max-width:700px;margin:auto}' +
-        '@media print{body{padding:20px}}' +
-        '</style></head><body>'
-    );
-    w.document.write(toHtml(text));
-    w.document.write('</body></html>');
+    var doc = buildLetterheadDoc({
+        title: 'NOC — ' + (lh.certificate_no || ''),
+        societyName: lh.society_name, societyAddress: lh.society_address,
+        logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
+        signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
+        qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
+        bodyHtml: '<div style="font-family:Georgia,serif;font-size:13pt;line-height:1.9">' + nocToHtml(text) + '</div>',
+        printWidth: '700px',
+    });
+    w.document.write(doc);
     w.document.close();
     w.focus();
     setTimeout(function() { w.print(); }, 500);
@@ -73,7 +100,7 @@ function printNoc(n_clicks) {
 """
 
 # ── Save as HTML (printable to PDF from browser) ──────────────────────────
-_NOC_PDF_JS = r"""
+_NOC_PDF_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
 function downloadNocHtml(n_clicks) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
@@ -90,22 +117,16 @@ function downloadNocHtml(n_clicks) {
     }
 
     if (!text) return window.dash_clientside.no_update;
-
-    function toHtml(txt) {
-        return txt.split('\n').map(function(l) {
-            return '<p style="margin:4px 0">' + (l || '&nbsp;') + '</p>';
-        }).join('');
-    }
-
-    var html = (
-        '<html><head><title>NOC</title>' +
-        '<style>' +
-        'body{font-family:Georgia,serif;padding:60px;font-size:13pt;' +
-        'line-height:1.9;max-width:700px;margin:auto}' +
-        '</style></head><body>' +
-        toHtml(text) +
-        '</body></html>'
-    );
+""" + _read_letterhead_js() + r"""
+    var html = buildLetterheadDoc({
+        title: 'NOC — ' + (lh.certificate_no || ''),
+        societyName: lh.society_name, societyAddress: lh.society_address,
+        logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
+        signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
+        qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
+        bodyHtml: '<div style="font-family:Georgia,serif;font-size:13pt;line-height:1.9">' + nocToHtml(text) + '</div>',
+        printWidth: '700px',
+    });
 
     var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     var url  = URL.createObjectURL(blob);
@@ -176,5 +197,40 @@ def register_noc_callbacks(app):
         Input('noc-btn-email', 'n_clicks'),
         prevent_initial_call=True,
     )
+
+    # ── Server-side timestamp tracking (mirrors receipt_callbacks.py) ──────
+    @app.callback(
+        Output('noc-action-store', 'data', allow_duplicate=True),
+        Input('noc-btn-print', 'n_clicks'),
+        State('noc-letterhead-data', 'data'),
+        prevent_initial_call=True,
+    )
+    def _stamp_noc_printed(n_clicks, lh_data):
+        noc_id = (lh_data or {}).get("id")
+        if not n_clicks or not noc_id:
+            return no_update
+        try:
+            from database.db_manager import db
+            db._execute("UPDATE nocs SET last_printed_at = NOW() WHERE id = %s", (int(noc_id),))
+        except Exception as e:
+            print(f"noc last_printed_at stamp error: {e}")
+        return no_update
+
+    @app.callback(
+        Output('noc-action-store', 'data', allow_duplicate=True),
+        Input('noc-btn-email', 'n_clicks'),
+        State('noc-letterhead-data', 'data'),
+        prevent_initial_call=True,
+    )
+    def _stamp_noc_emailed(n_clicks, lh_data):
+        noc_id = (lh_data or {}).get("id")
+        if not n_clicks or not noc_id:
+            return no_update
+        try:
+            from database.db_manager import db
+            db._execute("UPDATE nocs SET last_emailed_at = NOW() WHERE id = %s", (int(noc_id),))
+        except Exception as e:
+            print(f"noc last_emailed_at stamp error: {e}")
+        return no_update
 
     print("  ✓ NOC callbacks registered (Print / PDF / Email)")

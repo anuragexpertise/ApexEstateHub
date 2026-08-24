@@ -142,6 +142,15 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ receipt_callbacks failed: {e}")
 
+    # 13b. Event Ticket Print / Save / Email buttons (event-ticket-action-store
+    #      dummy Output — requires those stores added to app_shell.py). New
+    #      2026-08 — event tickets previously had no print/download flow.
+    try:
+        from .event_ticket_callbacks import register_event_ticket_callbacks
+        register_event_ticket_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ event_ticket_callbacks failed: {e}")
+
     # 14. Bulk Enroll (CSV upload for apartments/vendors/security on the
     #     Admin/Enroll tab). Requires "bulk-enroll-modal" +
     #     "bulk-enroll-entity-store" in app_shell.py, and a "Bulk Enroll"

@@ -109,6 +109,7 @@ ROLE_CODE_MAP = {
     "EXP": "expense",
     "AST": "asset",
     "ATD": "attendance_entry",
+    "NOC": "noc",
     # Legacy short codes for mapping compatibility
     "A": "admin",
     "O": "apartment",
@@ -129,6 +130,7 @@ ROLE_CODE_MAP_REV = {
     "expense": "EXP",
     "asset": "AST",
     "attendance_entry": "ATD",
+    "noc": "NOC",
 }
 
 
@@ -508,6 +510,58 @@ def validate_asset_qr(asset_id: int, society_id: int, security_user_id: int = No
         return {"status": "FAIL", "reason": f"Asset validation error: {str(e)}", "gate_action": "deny"}
 
 
+def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int = None) -> dict:
+    """
+    Verifies a printed NOC by its persisted nocs.id. status is derived here
+    rather than trusted from the stored column for the 'valid'/'expired'
+    cases — valid_until is the source of truth, so a NOC flips to expired
+    the moment it's scanned past its date even if nothing ever wrote
+    status='expired' back to the row. 'revoked' is the one status that IS
+    trusted as stored, since that's only ever set by an explicit revoke
+    action, never derived from a date.
+    """
+    try:
+        noc = db._execute(
+            "SELECT n.id, n.status, n.issued_date, n.valid_until, n.certificate_no, "
+            "a.flat_number, u.name AS owner_name "
+            "FROM nocs n "
+            "JOIN apartments a ON a.id = n.apartment_id "
+            "LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment' "
+            "WHERE n.id = %s AND n.society_id = %s",
+            (noc_id, society_id), fetch_one=True,
+        )
+        if not noc:
+            return {"status": "FAIL", "reason": "NOC not found", "gate_action": "deny"}
+
+        from datetime import date as _date
+        stored_status = noc.get("status")
+        if stored_status == "revoked":
+            effective_status = "revoked"
+        elif noc.get("valid_until") and noc["valid_until"] < _date.today():
+            effective_status = "expired"
+        else:
+            effective_status = "valid"
+
+        passed = effective_status == "valid"
+        return {
+            "status": "PASS" if passed else "FAIL",
+            "reason": None if passed else f"NOC is {effective_status}",
+            "user": {
+                "id": noc_id,
+                "name": f"NOC {noc.get('certificate_no') or noc_id} — "
+                        f"{noc.get('owner_name', 'Unknown')} (Flat {noc.get('flat_number', '')})",
+                "role": "noc",
+                "society_id": society_id,
+                "issued_date": str(noc.get("issued_date") or ""),
+                "valid_until": str(noc.get("valid_until") or ""),
+            },
+            "message": f"NOC is {effective_status}",
+            "gate_action": "allow" if passed else "deny",
+        }
+    except Exception as e:
+        return {"status": "FAIL", "reason": f"NOC validation error: {str(e)}", "gate_action": "deny"}
+
+
 ATTENDANCE_QR_EXPIRY_SECONDS = 60
 
 
@@ -637,6 +691,8 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             return validate_expense_qr(entity_id, qr_society_id, security_user_id)
         elif role == "asset":
             return validate_asset_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "noc":
+            return validate_noc_qr(entity_id, qr_society_id, security_user_id)
 
         if role == "apartment":
             user_row = db._execute(

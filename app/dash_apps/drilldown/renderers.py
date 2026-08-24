@@ -1199,6 +1199,11 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # owner can hand the screen to security / admin to scan at the gate.
     # Scans dispatch to validate_event_ticket_qr() (qr_service.py). Mirrors the
     # concern QR section above.
+    #
+    # Branding (2026-08): also adds Print/Save-as-PDF/Email buttons — event
+    # tickets previously had no print/download flow at all, only this
+    # in-app QR view. Buttons reuse the same letterhead as receipts/NOCs
+    # (print_letterhead.py); see event_ticket_callbacks.py.
     event_ticket_qr_section = []
     if entity == "event_ticket" and pk_val:
         try:
@@ -1208,8 +1213,32 @@ def render_profile_card(card_id: str, title: str, icon: str,
             if qr_img:
                 status = record_dict.get("status", "")
                 color = "#27ae60" if status == "used" else ("#e74c3c" if status == "cancelled" else "#27ae60")
+
+                from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+                society_row = db._execute(
+                    "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
+                    "FROM societies WHERE id = %s",
+                    (qr_society_id,), fetch_one=True,
+                ) or {}
+                letterhead = get_letterhead_assets(society_row, qr_society_id)
+                ticket_print_data = {
+                    "id": pk_val,
+                    "event_title": record_dict.get("event_title", "Event"),
+                    "event_date": str(record_dict.get("event_date") or ""),
+                    "event_time": str(record_dict.get("event_time") or ""),
+                    "venue": record_dict.get("venue", ""),
+                    "booking_reference": record_dict.get("booking_reference", ""),
+                    "ticket_type": record_dict.get("ticket_type", ""),
+                    "status": status,
+                    "qr_url": qr_img, "qr_payload": qr_payload, "qr_caption": QR_CAPTION,
+                    "society_name": letterhead["society_name"], "society_address": letterhead["society_address"],
+                    "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+                    "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+                }
+
                 event_ticket_qr_section.append(
                     html.Div([
+                        dcc.Store(id="event-ticket-print-data", data=ticket_print_data, storage_type="memory"),
                         html.Div([
                             html.I(className="fas fa-qrcode",
                                    style={"color": "#aaa", "fontSize": "10px",
@@ -1238,6 +1267,26 @@ def render_profile_card(card_id: str, title: str, icon: str,
                             style={"fontSize": "10px", "color": color,
                                    "fontWeight": "600", "marginTop": "4px"},
                         ),
+                        html.Div([
+                            html.Button(
+                                [html.I(className="fas fa-print me-2"), "Print"],
+                                id="event-ticket-btn-print", n_clicks=0,
+                                className="btn btn-outline-primary btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                            html.Button(
+                                [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                                id="event-ticket-btn-pdf", n_clicks=0,
+                                className="btn btn-outline-danger btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                            html.Button(
+                                [html.I(className="fas fa-envelope me-2"), "Email Ticket"],
+                                id="event-ticket-btn-email", n_clicks=0,
+                                className="btn btn-outline-info btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                        ], style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginTop": "10px"}),
                     ], style={
                         "marginBottom": "12px", "padding": "10px",
                         "background": "rgba(248,251,255,0.7)",
@@ -3720,7 +3769,7 @@ def render_event_ticket_card(
 
 def render_noc_card(apt: dict, society: dict,
                     eligible: bool = True, reason: str = "",
-                    outstanding: float = 0) -> html.Div:
+                    outstanding: float = 0, noc_record: dict | None = None) -> html.Div:
     from datetime import date as _date
     color     = "#15304f"
     flat_no   = apt.get("flat_number", "____")
@@ -3728,24 +3777,65 @@ def render_noc_card(apt: dict, society: dict,
     society_nm = society.get("name", "____")
     sec_name  = society.get("secretary_name") or society.get("contact_person", "____")
     today     = _date.today().strftime("%d %B %Y")
+    cert_no   = (noc_record or {}).get("certificate_no") or "PREVIEW — not yet issued"
 
-    noc_text = (
-        f"NO OBJECTION CERTIFICATE\n"
-        f"{society_nm}\n\n"
-        f"Date: {today}\n\n"
-        f"To Whom It May Concern,\n\n"
-        f"This is to certify that {owner}, resident of Flat No. {flat_no}, "
-        f"{society_nm}, has cleared all outstanding dues and has no pending "
-        f"liabilities towards the Society as of the date of this certificate.\n\n"
-        f"The Society has no objection to the above-named member undertaking any "
-        f"legal, financial, or administrative transactions related to the said property.\n\n"
-        f"This certificate is issued upon request and is valid for 30 days from "
-        f"the date of issue.\n\n\n"
-        f"Authorised Signatory\n\n"
-        f"{sec_name}\n"
-        f"Secretary / Authorised Representative\n"
-        f"{society_nm}"
-    )
+    # A reused (previously issued, still-valid) NOC keeps its original
+    # wording rather than being regenerated with today's date — that's
+    # what "certificate" means. A freshly-created record (body_text still
+    # empty, written as '' by _get_or_create_active_noc) gets the text
+    # below generated once and persisted back to that row.
+    existing_text = (noc_record or {}).get("body_text") or ""
+    if existing_text:
+        noc_text = existing_text
+    else:
+        noc_text = (
+            f"NO OBJECTION CERTIFICATE\n"
+            f"Certificate No: {cert_no}\n"
+            f"{society_nm}\n\n"
+            f"Date: {today}\n\n"
+            f"To Whom It May Concern,\n\n"
+            f"This is to certify that {owner}, resident of Flat No. {flat_no}, "
+            f"{society_nm}, has cleared all outstanding dues and has no pending "
+            f"liabilities towards the Society as of the date of this certificate.\n\n"
+            f"The Society has no objection to the above-named member undertaking any "
+            f"legal, financial, or administrative transactions related to the said property.\n\n"
+            f"This certificate is issued upon request and is valid for 30 days from "
+            f"the date of issue.\n\n\n"
+            f"Authorised Signatory\n\n"
+            f"{sec_name}\n"
+            f"Secretary / Authorised Representative\n"
+            f"{society_nm}"
+        )
+        if noc_record and noc_record.get("id"):
+            try:
+                db._execute(
+                    "UPDATE nocs SET body_text=%s WHERE id=%s",
+                    (noc_text, noc_record["id"]),
+                )
+            except Exception as e:
+                print(f"⚠️  NOC body_text persist failed: {e}")
+
+    # Letterhead branding + verification QR (NOC role) — same shared
+    # helper used by receipts; see print_letterhead.py. No QR is rendered
+    # for a not-yet-eligible preview since there's no noc_record yet.
+    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    society_id = apt.get("society_id") or society.get("id")
+    letterhead = get_letterhead_assets(society, society_id)
+    qr_url = ""
+    if noc_record and noc_record.get("id") and society_id:
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_img, _payload = generate_qr_code(society_id, "NOC", noc_record["id"])
+            qr_url = qr_img or ""
+        except Exception as e:
+            print(f"⚠️  NOC QR render failed: {e}")
+    noc_letterhead_data = {
+        "id": (noc_record or {}).get("id"),
+        "society_name": society_nm, "society_address": society.get("address", ""),
+        "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+        "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+        "qr_url": qr_url, "qr_caption": QR_CAPTION, "certificate_no": cert_no,
+    }
 
     # Eligibility banner
     if not eligible:
@@ -3767,6 +3857,7 @@ def render_noc_card(apt: dict, society: dict,
 
     return dbc.Card([
         dcc.Store(id="noc-flat-store", data=flat_no_safe, storage_type="memory"),
+        dcc.Store(id="noc-letterhead-data", data=noc_letterhead_data, storage_type="memory"),
         dbc.CardHeader(
             html.Div([
                 html.Div(html.I(className="fas fa-certificate",
@@ -3777,7 +3868,7 @@ def render_noc_card(apt: dict, society: dict,
                                 "justifyContent": "center", "marginRight": "12px"}),
                 html.Div([
                     html.Strong("No Objection Certificate", style={"fontSize": "14px"}),
-                    html.Div(f"Flat {flat_no} — {owner}",
+                    html.Div(f"Flat {flat_no} — {owner} — {cert_no}",
                              style={"fontSize": "11px", "color": "#999"}),
                 ]),
             ], style={"display": "flex", "alignItems": "center"}),
@@ -3874,12 +3965,33 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
     status     = (receipt.get("status") or "confirmed").title()
     society_nm = society.get("name", "—")
     society_addr = society.get("address", "")
+    society_id = receipt.get("society_id") or society.get("id")
+
+    # Letterhead branding (logo / watermark background / secretary signature)
+    # — shared with NOC and event-ticket prints, see print_letterhead.py.
+    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    letterhead = get_letterhead_assets(society, society_id)
+
+    # Verification QR — RPT role, points scanners at validate_receipt_qr()
+    # (already implemented in qr_service.py; previously generated for
+    # security-gate lookups only, never rendered onto the printed receipt).
+    qr_url = ""
+    if receipt_no and receipt_no != "—" and society_id:
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_img, _payload = generate_qr_code(society_id, "RPT", int(receipt_no))
+            qr_url = qr_img or ""
+        except Exception as e:
+            print(f"⚠️  receipt QR render failed: {e}")
 
     print_data = {
         "receipt_no": receipt_no, "date": r_date, "payer": payer,
         "role": role_lbl, "particulars": particulars, "account": account,
         "amount": f"{amount:,.2f}", "mode": mode, "ref": ref, "status": status,
         "society_name": society_nm, "society_address": society_addr,
+        "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+        "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+        "qr_url": qr_url, "qr_caption": QR_CAPTION,
     }
 
     def _row(label, value):
