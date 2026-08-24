@@ -62,7 +62,7 @@ LETTERHEAD_JS = r"""
 function buildLetterheadDoc(o) {
     var bg = o.backgroundUrl
         ? '<div style="position:fixed;inset:0;background-image:url(' + o.backgroundUrl + ');' +
-          'background-size:cover;background-position:center;opacity:0.06;z-index:-1"></div>'
+          'background-size:cover;background-position:center;opacity:0.2;z-index:-1"></div>'
         : '';
 
     var logo = o.logoUrl
