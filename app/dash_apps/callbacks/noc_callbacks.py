@@ -11,7 +11,9 @@ Key facts that shape the implementation:
   1. html.Textarea exposes `children`, NOT `value`, to Dash.
      Using State('noc-textarea', 'value') inside a Dash callback always
      returns None.  We therefore read the live DOM value in the JS
-     functions rather than relying on a Dash State prop.
+     functions rather than relying on a Dash State prop. This part is a
+     genuine DOM read of a real <textarea> element and works fine — a
+     textarea's .value always reflects what's currently typed.
 
   2. clientside_callback cannot have an Output that doesn't match any
      component in the layout *at registration time* unless
@@ -34,6 +36,23 @@ receipts (print_letterhead.py) so logo/watermark/signature/QR all appear.
 A second server-side callback stamps nocs.last_printed_at /
 last_emailed_at, mirroring receipts.
 
+BUGFIX (2026-08): the noc-letterhead-data and noc-flat-store dcc.Stores
+were previously read by scraping
+document.getElementById(<store-id>).textContent in the clientside JS.
+That never works — dcc.Store keeps its data in Dash's own client-side
+store, not as text in the DOM (see
+https://dash.plotly.com/sharing-data-between-callbacks — dcc.Store
+replaced the old "hidden div" pattern specifically because a div's
+innerHTML/textContent is NOT how dcc.Store exposes its data). textContent
+was always empty, so every Print/PDF click ended up building a document
+with a blank branding header (Print) or silently produced a generic
+filename (PDF) — the letterhead lookups were failing quietly, unlike the
+receipt version of the same bug (which returned no_update and did nothing
+at all, since receipts have no separate DOM-sourced textarea to fall back
+on). Fixed by passing both stores as proper State(...) arguments to each
+clientside_callback so the JS functions receive them as parameters
+instead of trying to read them out of the page.
+
 Required addition to app_shell.py / the permanent layout
 ---------------------------------------------------------
 Add this Store alongside the other dcc.Store components in the shell:
@@ -45,19 +64,6 @@ That single line is the only layout change needed.
 
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
-
-
-def _read_letterhead_js() -> str:
-    """Shared snippet: read the noc-letterhead-data Store's JSON payload
-    out of the DOM (same textContent trick used by receipt-print-data)."""
-    return """
-    var lhRaw = document.getElementById('noc-letterhead-data');
-    var lh = {};
-    if (lhRaw) {
-        try { lh = JSON.parse(lhRaw.textContent || lhRaw.innerText || '{}'); }
-        catch(e) { lh = {}; }
-    }
-    """
 
 
 def _noc_to_html_js() -> str:
@@ -72,13 +78,14 @@ def _noc_to_html_js() -> str:
 
 # ── Print ──────────────────────────────────────────────────────────────────
 _NOC_PRINT_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
-function printNoc(n_clicks) {
+function printNoc(n_clicks, lh) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
     var ta = document.getElementById('noc-textarea');
     var text = ta ? ta.value : '';
     if (!text) return window.dash_clientside.no_update;
-""" + _read_letterhead_js() + r"""
+    lh = lh || {};
+
     var w = window.open('', '_blank');
     if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
     var doc = buildLetterheadDoc({
@@ -101,23 +108,14 @@ function printNoc(n_clicks) {
 
 # ── Save as HTML (printable to PDF from browser) ──────────────────────────
 _NOC_PDF_JS = LETTERHEAD_JS + _noc_to_html_js() + r"""
-function downloadNocHtml(n_clicks) {
+function downloadNocHtml(n_clicks, lh, flat) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
-    var ta      = document.getElementById('noc-textarea');
-    var text    = ta ? ta.value : '';
-    var flatRaw = document.getElementById('noc-flat-store');
-    /* dcc.Store renders its value into a <div> with data-dash-store */
-    var flat = 'NOC';
-    if (flatRaw) {
-        try {
-            /* Dash stores the serialised value in the element's textContent */
-            flat = JSON.parse(flatRaw.textContent || flatRaw.innerText || '"NOC"');
-        } catch(e) { flat = 'NOC'; }
-    }
-
+    var ta   = document.getElementById('noc-textarea');
+    var text = ta ? ta.value : '';
     if (!text) return window.dash_clientside.no_update;
-""" + _read_letterhead_js() + r"""
+    lh = lh || {};
+
     var html = buildLetterheadDoc({
         title: 'NOC — ' + (lh.certificate_no || ''),
         societyName: lh.society_name, societyAddress: lh.society_address,
@@ -130,7 +128,7 @@ function downloadNocHtml(n_clicks) {
 
     var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     var url  = URL.createObjectURL(blob);
-    var filename = 'NOC_' + (typeof flat === 'string' ? flat : 'download') + '.html';
+    var filename = 'NOC_' + (typeof flat === 'string' && flat ? flat : 'download') + '.html';
 
     var a = document.createElement('a');
     a.href     = url;
@@ -179,6 +177,7 @@ def register_noc_callbacks(app):
         _NOC_PRINT_JS,
         Output('noc-action-store', 'data', allow_duplicate=True),
         Input('noc-btn-print', 'n_clicks'),
+        State('noc-letterhead-data', 'data'),
         prevent_initial_call=True,
     )
 
@@ -187,6 +186,8 @@ def register_noc_callbacks(app):
         _NOC_PDF_JS,
         Output('noc-action-store', 'data', allow_duplicate=True),
         Input('noc-btn-pdf', 'n_clicks'),
+        State('noc-letterhead-data', 'data'),
+        State('noc-flat-store', 'data'),
         prevent_initial_call=True,
     )
 

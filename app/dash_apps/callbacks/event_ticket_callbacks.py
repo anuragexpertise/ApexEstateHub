@@ -6,9 +6,10 @@ Event tickets previously had no print/download flow at all — the profile
 card only showed the in-app QR (see renderers.py's event_ticket_qr_section)
 so an owner could hand their phone to security, but couldn't print or save
 a copy. This mirrors receipt_callbacks.py / noc_callbacks.py: structured
-fields land in a hidden dcc.Store (id="event-ticket-print-data", written
-by render_profile_card's event_ticket_qr_section) and the buttons here
-build a printable page through the shared letterhead
+fields (written by render_profile_card's event_ticket_qr_section into a
+dcc.Store, id="event-ticket-print-data") are passed to each
+clientside_callback as a State(...) argument, and the buttons here build a
+printable page through the shared letterhead
 (app/dash_apps/callbacks/print_letterhead.py), which already carries the
 society logo, watermark background, secretary signature, and the ticket's
 own EVT verification QR.
@@ -16,6 +17,14 @@ own EVT verification QR.
 event_ticket_items.last_printed_at / last_emailed_at are new columns
 (added alongside this feature — see estatehub.sql / migrate.py) stamped
 by the server-side callbacks below, same pattern as receipts/nocs.
+
+BUGFIX (2026-08): an earlier version of this file tried to read
+event-ticket-print-data's JSON back out of the DOM via
+document.getElementById('event-ticket-print-data').textContent — that
+never works (see the note in noc_callbacks.py/receipt_callbacks.py for
+why: dcc.Store keeps its data in Dash's client-side store, not as DOM
+text), so every button silently did nothing. Fixed before this ever
+shipped by passing the store as a proper State(...) argument instead.
 
 Required addition to app_shell.py / the permanent layout:
     dcc.Store(id='event-ticket-action-store', storage_type='memory'),
@@ -25,18 +34,6 @@ permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
-
-
-def _read_store_js(var_name: str) -> str:
-    return f"""
-    var {var_name}Raw = document.getElementById('event-ticket-print-data');
-    var {var_name} = null;
-    if ({var_name}Raw) {{
-        try {{ {var_name} = JSON.parse({var_name}Raw.textContent || {var_name}Raw.innerText || 'null'); }}
-        catch(e) {{ {var_name} = null; }}
-    }}
-    if (!{var_name}) return window.dash_clientside.no_update;
-    """
 
 
 def _ticket_html_js() -> str:
@@ -64,9 +61,8 @@ def _ticket_html_js() -> str:
 
 
 _TICKET_PRINT_JS = LETTERHEAD_JS + _ticket_html_js() + r"""
-function printEventTicket(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function printEventTicket(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var w = window.open('', '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
     var doc = buildLetterheadDoc({
@@ -87,9 +83,8 @@ function printEventTicket(n_clicks) {
 """
 
 _TICKET_PDF_JS = LETTERHEAD_JS + _ticket_html_js() + r"""
-function downloadEventTicketHtml(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function downloadEventTicketHtml(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var html = buildLetterheadDoc({
         title: d.event_title + ' — Ticket',
         societyName: d.society_name, societyAddress: d.society_address,
@@ -113,9 +108,8 @@ function downloadEventTicketHtml(n_clicks) {
 """
 
 _TICKET_EMAIL_JS = r"""
-function emailEventTicket(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function emailEventTicket(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var body = (
         d.event_title + ' — Ticket\n' +
         'Booking Ref: ' + d.booking_reference + '\n\n' +
@@ -145,6 +139,7 @@ def register_event_ticket_callbacks(app):
         _TICKET_PRINT_JS,
         Output('event-ticket-action-store-print', 'data', allow_duplicate=True),
         Input('event-ticket-btn-print', 'n_clicks'),
+        State('event-ticket-print-data', 'data'),
         prevent_initial_call=True,
     )
 
@@ -152,6 +147,7 @@ def register_event_ticket_callbacks(app):
         _TICKET_PDF_JS,
         Output('event-ticket-action-store-pdf', 'data', allow_duplicate=True),
         Input('event-ticket-btn-pdf', 'n_clicks'),
+        State('event-ticket-print-data', 'data'),
         prevent_initial_call=True,
     )
 
@@ -159,6 +155,7 @@ def register_event_ticket_callbacks(app):
         _TICKET_EMAIL_JS,
         Output('event-ticket-action-store-email', 'data', allow_duplicate=True),
         Input('event-ticket-btn-email', 'n_clicks'),
+        State('event-ticket-print-data', 'data'),
         prevent_initial_call=True,
     )
 
