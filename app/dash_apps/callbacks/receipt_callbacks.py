@@ -5,10 +5,10 @@ Receipt Print / Save-as-PDF / Email — clientside callbacks.
 Same pattern as noc_callbacks.py, with one difference: NOC content is
 free-text (a textarea the admin can edit before issuing), but a receipt is
 a record of money already collected — it shouldn't be editable here. So
-instead of reading a textarea's live DOM value, these read a hidden
-dcc.Store (id="receipt-print-data", written by renderers.render_receipt_card)
-holding the receipt's fields as JSON, and build the printable HTML from
-that structured data.
+instead of reading a textarea's live DOM value, these take the receipt's
+fields (written by renderers.render_receipt_card into a dcc.Store,
+id="receipt-print-data") as a clientside_callback State argument, and
+build the printable HTML from that structured data.
 
 receipts.last_printed_at / last_emailed_at already existed in estatehub.sql
 (added for exactly this purpose, per the column comments) but were never
@@ -23,6 +23,20 @@ JS here only has to hand them to buildLetterheadDoc(). Email stays plain
 text (mail clients strip most inline styling/images anyway, and a mailto:
 link can't attach an image).
 
+BUGFIX (2026-08): the clientside functions used to try to read
+receipt-print-data's JSON back out of the DOM via
+document.getElementById('receipt-print-data').textContent. That doesn't
+work — dcc.Store keeps its data in Dash's client-side store, not as text
+in the DOM (see https://dash.plotly.com/sharing-data-between-callbacks —
+"This example used to be implemented with a 'hidden div' ... We no longer
+recommend [that] ... dcc.Store ... stores the data in the user's browser's
+memory instead of the browser's DOM"). That textContent read was always
+empty, so JSON.parse threw, d ended up null, and every Print/PDF/Email
+click silently no-op'd — this was why the buttons appeared to do nothing.
+Fixed by passing receipt-print-data as a proper State(...) argument to
+each clientside_callback instead, so the JS function receives the data
+directly as a parameter.
+
 Required addition to app_shell.py / the permanent layout:
     dcc.Store(id='receipt-action-store', storage_type='memory'),
 (same "dummy Output anchor" trick as noc-action-store, since this card is
@@ -30,21 +44,6 @@ rendered dynamically inside drill-content, not the permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS
-
-
-def _read_store_js(var_name: str) -> str:
-    """Shared snippet: read the receipt-print-data dcc.Store's JSON payload
-    out of the DOM (dcc.Store renders its value into the element's
-    textContent, same trick used by noc-flat-store in noc_callbacks.py)."""
-    return f"""
-    var {var_name}Raw = document.getElementById('receipt-print-data');
-    var {var_name} = null;
-    if ({var_name}Raw) {{
-        try {{ {var_name} = JSON.parse({var_name}Raw.textContent || {var_name}Raw.innerText || 'null'); }}
-        catch(e) {{ {var_name} = null; }}
-    }}
-    if (!{var_name}) return window.dash_clientside.no_update;
-    """
 
 
 def _receipt_html_js() -> str:
@@ -75,9 +74,8 @@ def _receipt_html_js() -> str:
 
 
 _RECEIPT_PRINT_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
-function printReceipt(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function printReceipt(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var w = window.open('', '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
     var doc = buildLetterheadDoc({
@@ -98,9 +96,8 @@ function printReceipt(n_clicks) {
 """
 
 _RECEIPT_PDF_JS = LETTERHEAD_JS + _receipt_html_js() + r"""
-function downloadReceiptHtml(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function downloadReceiptHtml(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var html = buildLetterheadDoc({
         title: 'Receipt #' + d.receipt_no,
         societyName: d.society_name, societyAddress: d.society_address,
@@ -124,9 +121,8 @@ function downloadReceiptHtml(n_clicks) {
 """
 
 _RECEIPT_EMAIL_JS = r"""
-function emailReceipt(n_clicks) {
-    if (!n_clicks) return window.dash_clientside.no_update;
-""" + _read_store_js("d") + r"""
+function emailReceipt(n_clicks, d) {
+    if (!n_clicks || !d) return window.dash_clientside.no_update;
     var body = (
         'Receipt #' + d.receipt_no + '\n' +
         d.society_name + '\n\n' +
@@ -165,6 +161,7 @@ def register_receipt_callbacks(app):
         _RECEIPT_PRINT_JS,
         Output('receipt-action-store-print', 'data', allow_duplicate=True),
         Input('receipt-btn-print', 'n_clicks'),
+        State('receipt-print-data', 'data'),
         prevent_initial_call=True,
     )
 
@@ -172,6 +169,7 @@ def register_receipt_callbacks(app):
         _RECEIPT_PDF_JS,
         Output('receipt-action-store-pdf', 'data', allow_duplicate=True),
         Input('receipt-btn-pdf', 'n_clicks'),
+        State('receipt-print-data', 'data'),
         prevent_initial_call=True,
     )
 
@@ -179,6 +177,7 @@ def register_receipt_callbacks(app):
         _RECEIPT_EMAIL_JS,
         Output('receipt-action-store-email', 'data', allow_duplicate=True),
         Input('receipt-btn-email', 'n_clicks'),
+        State('receipt-print-data', 'data'),
         prevent_initial_call=True,
     )
 
