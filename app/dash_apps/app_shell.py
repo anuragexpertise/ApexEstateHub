@@ -766,7 +766,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="receipt-action-store",    storage_type="memory"),
             # receipt-action-store-print/-pdf/-email: dummy Output anchors
             # actually targeted by receipt_callbacks.py's clientside Print/
-            # Save-as-PDF/Email callbacks (2026-08 fix — these were targeted
+            # Download/Email callbacks (2026-08 fix — these were targeted
             # by the callbacks but never registered here, so the receipt
             # print/PDF/email buttons had no working Output and would fail
             # at runtime).

@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/event_ticket_callbacks.py
 """
-Event Ticket Print / Save-as-PDF / Email — clientside callbacks.
+Event Ticket Print / Download / Email — clientside callbacks.
 
 Event tickets previously had no print/download flow at all — the profile
 card only showed the in-app QR (see renderers.py's event_ticket_qr_section)
@@ -139,7 +139,7 @@ function emailEventTicket(n_clicks, d) {
 def register_event_ticket_callbacks(app):
     """
     Register three clientside callbacks for the event-ticket QR section's
-    Print/Save-as-PDF/Email buttons, plus server-side last_printed_at/
+    Print/Download/Email buttons, plus server-side last_printed_at/
     last_emailed_at stamping — same shape as register_receipt_callbacks.
     """
 

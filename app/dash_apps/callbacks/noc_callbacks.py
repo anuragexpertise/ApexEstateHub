@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/noc_callbacks.py
 """
-NOC Print / PDF / Email — clientside callbacks.
+NOC Print / Download / Email — clientside callbacks.
 
 Why these callbacks exist separately
 -------------------------------------

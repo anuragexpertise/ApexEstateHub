@@ -1200,7 +1200,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # Scans dispatch to validate_event_ticket_qr() (qr_service.py). Mirrors the
     # concern QR section above.
     #
-    # Branding (2026-08): also adds Print/Save-as-PDF/Email buttons — event
+    # Branding (2026-08): also adds Print/Download/Email buttons — event
     # tickets previously had no print/download flow at all, only this
     # in-app QR view. Buttons reuse the same letterhead as receipts/NOCs
     # (print_letterhead.py); see event_ticket_callbacks.py.
@@ -1275,8 +1275,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
                                 style={"borderRadius": "10px", "fontWeight": "600"},
                             ),
                             html.Button(
-                                [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
-                                id="event-ticket-btn-pdf", n_clicks=0,
+                                [html.I(className="fas fa-download me-2"), "Download"],
+                                 id="event-ticket-btn-pdf", n_clicks=0,
                                 className="btn btn-outline-danger btn-sm",
                                 style={"borderRadius": "10px", "fontWeight": "600"},
                             ),
@@ -3914,7 +3914,7 @@ def render_noc_card(apt: dict, society: dict,
                            **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
                 ),
                 html.Button(
-                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                    [html.I(className="fas fa-download me-2"), "Download"],
                     id="noc-btn-pdf",
                     n_clicks=0,
                     disabled=not eligible,
@@ -4041,7 +4041,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
-                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                    [html.I(className="fas fa-download me-2"), "Download"],
                     id="receipt-btn-pdf", n_clicks=0,
                     className="btn btn-outline-danger",
                     style={"borderRadius": "10px", "fontWeight": "600"},

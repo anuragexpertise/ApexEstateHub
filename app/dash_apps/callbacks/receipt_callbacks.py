@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/receipt_callbacks.py
 """
-Receipt Print / Save-as-PDF / Email — clientside callbacks.
+Receipt Print / Download / Email — clientside callbacks.
 
 Same pattern as noc_callbacks.py, with one difference: NOC content is
 free-text (a textarea the admin can edit before issuing), but a receipt is
