@@ -41,6 +41,11 @@ COLORS = {
 _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # ── ADMIN: full CRUD on everything ───────────────────────────────────────
     ("admin", "*"):            {"view", "edit", "delete", "new"},
+    # Societies are platform-level records: an admin may VIEW their own society
+    # (scoped server-side to society_id) and EDIT its properties, but must NOT
+    # create a new society or delete/expire the row they belong to. Master
+    # retains full control via ("master","societies") below.
+    ("admin", "societies"):    {"view", "edit"},
     ("admin", "receivables"):  {"view"},
     ("admin", "payables"):     {"view"},
     ("admin","gate_logs"):     {"view"},
@@ -2132,6 +2137,12 @@ def render_form_card(card_id: str, title: str, icon: str,
     )
     if _owner_locked_apartment_field:
         fields = [f for f in fields if f.get("id") != "apartment_id"]
+
+    # The society 'plan' is owned by the platform (master): a society admin can
+    # see it on the list/profile (rendered read-only there) but must NOT change
+    # it from the Edit form — plan changes are a master-only billing action.
+    if entity == "society" and prefill.get("id") and (role or "admin") != "master":
+        fields = [f for f in fields if f.get("id") != "plan"]
 
     form_rows = [
           dcc.Input(id={"type":"form-entity-pk","entity":entity},

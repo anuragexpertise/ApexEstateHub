@@ -2021,13 +2021,14 @@ def _render_card(
     card_id: str, filters: dict, prefill: dict, store: dict, auth: dict
 ) -> html.Div:
 
-    # ── SOCIETIES LIST: master admin only ────────────────────────────────
-    # Master has no society_id and should be the ONLY role that can view
-    # the societies list. All other roles (admin, apartment, vendor,
-    # security) must be blocked — a non-master navigating to societies
-    # would otherwise see every society in the database.
+    # ── SOCIETIES LIST ───────────────────────────────────────────────────────
+    # Master sees every society (no society_id). Admin is scoped to their OWN
+    # society (filters["society_id"], set by initial_state/_apply_portal_filters),
+    # so the loader's WHERE id=%s returns the single row they're allowed to see.
+    # Every other role (apartment/vendor/security) must be blocked — they have no
+    # business viewing the societies list at all.
     if card_id.startswith("list_societies"):
-        if get_current_user_role() != "master":
+        if get_current_user_role() not in ("master", "admin"):
             return html.Div(
                 "Access denied — only master admin can view societies",
                 style={"color": "#de5c52", "padding": "20px"},
@@ -3833,7 +3834,7 @@ def _save_society(db, d, sid, is_edit, pk):
             )
         else:
             db._execute(
-                "UPDATE societies SET email=%s,phone=%s,address=%s,plan=%s,"
+                "UPDATE societies SET email=%s,phone=%s,address=%s,"
                 "logo=COALESCE(NULLIF(%s, ''), logo),"
                 "login_background=COALESCE(NULLIF(%s, ''), login_background),"
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
@@ -3844,7 +3845,6 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("email"),
                     d.get("phone"),
                     d.get("address"),
-                    d.get("plan", "Free"),
                     d.get("logo"),
                     d.get("login_background"),
                     d.get("secretary_sign"),

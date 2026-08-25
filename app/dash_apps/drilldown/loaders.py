@@ -911,6 +911,10 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
 
     # ── SOCIETIES ───────────────────────────────────────────────────────
     if entity == "societies":
+        sid = _sid(filters)
+        if sid:
+            return ("SELECT * FROM fn_societies_list(%s) WHERE id=%s LIMIT %s OFFSET %s",
+                    (s, sid, page_size, offset))
         return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
                 (s, page_size, offset))
 
@@ -1551,6 +1555,17 @@ def load_list(
 
         # ── SOCIETIES ───────────────────────────────────────────────────────
         if entity == "societies":
+            sid = _sid(filters)
+            if sid:
+                # Non-master (admin): scoped to the caller's own society only.
+                rows = db._execute(
+                    "SELECT * FROM fn_societies_list(%s) WHERE id=%s LIMIT %s OFFSET %s",
+                    (s, sid, page_size, offset), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM societies WHERE id=%s", (sid,), fetch_one=True
+                )
+                return rows, int((cnt or {}).get("n", len(rows)))
             rows = db._execute(
                 "SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
                 (s, page_size, offset), fetch_all=True,
