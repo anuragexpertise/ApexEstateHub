@@ -69,7 +69,13 @@ from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_i
 def _noc_to_html_js() -> str:
     return """
     function nocToHtml(txt) {
-        return txt.split('\\n').map(function(l) {
+        var lines = txt.split('\\n');
+        var first = (lines[0] || '').trim().toUpperCase();
+        var isTitle = first === 'NO OBJECTION CERTIFICATE';
+        return lines.map(function(l, i) {
+            if (i === 0 && isTitle) {
+                return '<p style="margin:8px 0;text-align:center;font-size:24px;font-weight:bold">' + (l || '&nbsp;') + '</p>';
+            }
             return '<p style="margin:4px 0">' + (l || '&nbsp;') + '</p>';
         }).join('');
     }
