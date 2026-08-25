@@ -115,6 +115,42 @@ function buildLetterheadDoc(o) {
         '</body></html>'
     );
 }
+
+function buildLetterheadPdfDoc(o) {
+    var doc = buildLetterheadDoc(o);
+    var bodyMatch = doc.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    var bodyContent = bodyMatch ? bodyMatch[1] : doc;
+    var title = o.title || 'Document';
+    var filename = (o.filename || title).replace(/[^a-z0-9_.-]/gi, '_') + '.pdf';
+
+    return (
+        '<!DOCTYPE html><html><head><title>' + title + '</title>' +
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
+        '<style>@page{size:A4;margin:10mm}body{margin:0;font-family:Arial,sans-serif}</style>' +
+        '</head><body onload="generatePdf()">' +
+        bodyContent +
+        '<script>' +
+        'function generatePdf(){' +
+        '  var imgs=document.images,pending=imgs.length,loaded=0;' +
+        '  function doPdf(){' +
+        '    try{' +
+        '      html2pdf().from(document.body).set({' +
+        '        margin:10,filename:"' + filename + '",' +
+        '        image:{type:"jpeg",quality:0.98},' +
+        '        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},' +
+        '        jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}' +
+        '      }).save();' +
+        '    }catch(e){console.error("PDF generation failed:",e);}' +
+        '  }' +
+        '  if(!pending){doPdf();return;}' +
+        '  for(var i=0;i<pending;i++){' +
+        '    if(imgs[i].complete){loaded++;if(loaded===pending)doPdf();}' +
+        '    else{imgs[i].onload=imgs[i].onerror=function(){loaded++;if(loaded===pending)doPdf();};}' +
+        '  }' +
+        '}' +
+        '</script></body></html>'
+    );
+}
 """
 
 

@@ -766,7 +766,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="receipt-action-store",    storage_type="memory"),
             # receipt-action-store-print/-pdf/-email: dummy Output anchors
             # actually targeted by receipt_callbacks.py's clientside Print/
-            # Download/Email callbacks (2026-08 fix — these were targeted
+            # Save as PDF/Email callbacks (2026-08 fix — these were targeted
             # by the callbacks but never registered here, so the receipt
             # print/PDF/email buttons had no working Output and would fail
             # at runtime).
@@ -782,6 +782,15 @@ def shell_layout() -> html.Div:
             dcc.Store(id="event-ticket-action-store-print", storage_type="memory"),
             dcc.Store(id="event-ticket-action-store-pdf",   storage_type="memory"),
             dcc.Store(id="event-ticket-action-store-email", storage_type="memory"),
+            # vendor-pass-action-store*: dummy Output anchors for
+            # vendor_pass_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — vendor passes previously had no
+            # print/download flow at all).
+            dcc.Store(id="vendor-pass-action-store",       storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-print", storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-email", storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
