@@ -5723,9 +5723,10 @@ $$;
 DROP FUNCTION IF EXISTS fn_societies_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_societies_list(
-    p_search TEXT    DEFAULT NULL,
-    p_plan   VARCHAR DEFAULT NULL,
-    p_status VARCHAR DEFAULT NULL
+    p_search     TEXT    DEFAULT NULL,
+    p_plan       VARCHAR DEFAULT NULL,
+    p_status     VARCHAR DEFAULT NULL,
+    p_society_id INT     DEFAULT NULL
 )
 RETURNS TABLE (
     id INT, name VARCHAR(100), email VARCHAR(30), phone VARCHAR(20),
@@ -5753,8 +5754,9 @@ BEGIN
          FROM receivables WHERE society_id=s.id AND status IN ('pending','partial')),
         s.created_at::TIMESTAMP, s.secretary_phone::VARCHAR(20)
     FROM societies s
-    WHERE (p_search IS NULL OR s.name ILIKE '%'||p_search||'%')
-      AND (p_plan   IS NULL OR s.plan = p_plan)
+    WHERE (p_search     IS NULL OR s.name ILIKE '%'||p_search||'%')
+      AND (p_plan       IS NULL OR s.plan = p_plan)
+      AND (p_society_id IS NULL OR s.id = p_society_id)
     ORDER BY s.name;
 END;
 $$;
