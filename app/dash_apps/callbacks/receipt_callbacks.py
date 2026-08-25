@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/receipt_callbacks.py
 """
-Receipt Print / Download / Email — clientside callbacks.
+Receipt Print / Save as PDF / Email — clientside callbacks.
 
 Same pattern as noc_callbacks.py, with one difference: NOC content is
 free-text (a textarea the admin can edit before issuing), but a receipt is
@@ -100,10 +100,11 @@ function printReceipt(n_clicks, d) {
 
 _RECEIPT_PDF_JS = clientside_iife(
     LETTERHEAD_JS + _receipt_html_js() + r"""
-function downloadReceiptHtml(n_clicks, d) {
+function downloadReceiptPdf(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
-    var html = buildLetterheadDoc({
+    var html = buildLetterheadPdfDoc({
         title: 'Receipt #' + d.receipt_no,
+        filename: 'Receipt_' + d.receipt_no,
         societyName: d.society_name, societyAddress: d.society_address,
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
@@ -111,19 +112,14 @@ function downloadReceiptHtml(n_clicks, d) {
         bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' + receiptHtml(d),
         printWidth: '600px',
     });
-    var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    var url  = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href     = url;
-    a.download = 'Receipt_' + d.receipt_no + '.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    var w = window.open('', '_blank');
+    if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
+    w.document.write(html);
+    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
-    "downloadReceiptHtml",
+    "downloadReceiptPdf",
 )
 
 _RECEIPT_EMAIL_JS = clientside_iife(r"""

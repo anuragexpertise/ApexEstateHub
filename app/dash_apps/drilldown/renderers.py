@@ -1200,7 +1200,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # Scans dispatch to validate_event_ticket_qr() (qr_service.py). Mirrors the
     # concern QR section above.
     #
-    # Branding (2026-08): also adds Print/Download/Email buttons — event
+    # Branding (2026-08): also adds Print/Save as PDF/Email buttons — event
     # tickets previously had no print/download flow at all, only this
     # in-app QR view. Buttons reuse the same letterhead as receipts/NOCs
     # (print_letterhead.py); see event_ticket_callbacks.py.
@@ -1275,7 +1275,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                                 style={"borderRadius": "10px", "fontWeight": "600"},
                             ),
                             html.Button(
-                                [html.I(className="fas fa-download me-2"), "Download"],
+                                [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
                                  id="event-ticket-btn-pdf", n_clicks=0,
                                 className="btn btn-outline-danger btn-sm",
                                 style={"borderRadius": "10px", "fontWeight": "600"},
@@ -1297,8 +1297,99 @@ def render_profile_card(card_id: str, title: str, icon: str,
         except Exception as e:
             print(f"⚠️  event ticket QR render failed: {e}")
 
+    # ── Vendor Pass QR — rendered live for the active vendor pass so the
+    # vendor can print/save a pass document with society branding.
+    vendor_pass_section = []
+    if entity == "vendor" and pk_val:
+        try:
+            from app.services.qr_service import generate_qr_code
+            from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+            qr_society_id = record_dict.get("society_id") or society_id
+            qr_img, qr_payload = generate_qr_code(qr_society_id, "VND", pk_val)
+            if qr_img:
+                pass_row = db._execute(
+                    "SELECT pass_type, issued_date, valid_until FROM vendor_passes "
+                    "WHERE user_id=%s AND status='active' AND valid_until>=CURRENT_DATE "
+                    "ORDER BY valid_until DESC LIMIT 1",
+                    (record_dict.get("user_id") or pk_val,),
+                    fetch_one=True,
+                ) or {}
+                society_row = db._execute(
+                    "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
+                    "FROM societies WHERE id = %s",
+                    (qr_society_id,), fetch_one=True,
+                ) or {}
+                letterhead = get_letterhead_assets(society_row, qr_society_id)
+                vendor_pass_print_data = {
+                    "id": pk_val,
+                    "vendor_name": record_dict.get("name", "Vendor"),
+                    "service_type": record_dict.get("service_type", ""),
+                    "pass_type": pass_row.get("pass_type", ""),
+                    "issued_date": str(pass_row.get("issued_date") or ""),
+                    "valid_until": str(pass_row.get("valid_until") or ""),
+                    "qr_url": qr_img, "qr_payload": qr_payload, "qr_caption": QR_CAPTION,
+                    "society_name": letterhead["society_name"], "society_address": letterhead["society_address"],
+                    "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+                    "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+                }
+                vendor_pass_section.append(
+                    html.Div([
+                        dcc.Store(id="vendor-pass-print-data", data=vendor_pass_print_data, storage_type="memory"),
+                        html.Div([
+                            html.I(className="fas fa-id-card",
+                                   style={"color": "#aaa", "fontSize": "10px",
+                                          "marginRight": "5px"}),
+                            html.Span("Vendor Pass",
+                                      style={"color": "#7d8ea3", "fontSize": "10px",
+                                             "fontWeight": "600",
+                                             "textTransform": "uppercase"}),
+                        ], style={"marginBottom": "5px"}),
+                        html.Img(
+                            src=qr_img,
+                            style={
+                                "maxWidth": "160px", "maxHeight": "160px",
+                                "borderRadius": "8px",
+                                "border": "1px solid rgba(0,0,0,0.08)",
+                                "objectFit": "contain", "background": "#fff",
+                                "padding": "4px", "display": "block",
+                            },
+                        ),
+                        html.Div(qr_payload, style={
+                            "fontSize": "10px", "color": "#7d8ea3",
+                            "fontFamily": "monospace", "marginTop": "4px",
+                        }),
+                        html.Div([
+                            html.Button(
+                                [html.I(className="fas fa-print me-2"), "Print"],
+                                id="vendor-pass-btn-print", n_clicks=0,
+                                className="btn btn-outline-primary btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                            html.Button(
+                            [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                            id="vendor-pass-btn-pdf", n_clicks=0,
+                                className="btn btn-outline-danger btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                            html.Button(
+                                [html.I(className="fas fa-envelope me-2"), "Email Pass"],
+                                id="vendor-pass-btn-email", n_clicks=0,
+                                className="btn btn-outline-info btn-sm",
+                                style={"borderRadius": "10px", "fontWeight": "600"},
+                            ),
+                        ], style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginTop": "10px"}),
+                    ], style={
+                        "marginBottom": "12px", "padding": "10px",
+                        "background": "rgba(248,251,255,0.7)",
+                        "borderRadius": "10px",
+                        "border": "1px solid rgba(200,215,235,0.4)",
+                    })
+                )
+        except Exception as e:
+            print(f"⚠️  vendor pass QR render failed: {e}")
+
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
-    image_section = list(concern_qr_section) + list(event_ticket_qr_section)
+    image_section = list(concern_qr_section) + list(event_ticket_qr_section) + list(vendor_pass_section)
     for f in image_fields:
         image_path = record_dict.get(f["field"])
         if not image_path or str(image_path).strip() in ("", "None"):
@@ -3914,7 +4005,7 @@ def render_noc_card(apt: dict, society: dict,
                            **({"opacity": "0.5", "cursor": "not-allowed"} if not eligible else {})},
                 ),
                 html.Button(
-                    [html.I(className="fas fa-download me-2"), "Download"],
+                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
                     id="noc-btn-pdf",
                     n_clicks=0,
                     disabled=not eligible,
@@ -4041,7 +4132,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
                     style={"borderRadius": "10px", "fontWeight": "600"},
                 ),
                 html.Button(
-                    [html.I(className="fas fa-download me-2"), "Download"],
+                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
                     id="receipt-btn-pdf", n_clicks=0,
                     className="btn btn-outline-danger",
                     style={"borderRadius": "10px", "fontWeight": "600"},

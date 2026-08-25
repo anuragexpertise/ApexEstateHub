@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/noc_callbacks.py
 """
-NOC Print / Download / Email — clientside callbacks.
+NOC Print / Save as PDF / Email — clientside callbacks.
 
 Why these callbacks exist separately
 -------------------------------------
@@ -109,10 +109,10 @@ function printNoc(n_clicks, lh) {
     "printNoc",
 )
 
-# ── Save as HTML (printable to PDF from browser) ──────────────────────────
+# ── Save as PDF ──────────────────────────────────────────────────────────
 _NOC_PDF_JS = clientside_iife(
     LETTERHEAD_JS + _noc_to_html_js() + r"""
-function downloadNocHtml(n_clicks, lh, flat) {
+function downloadNocPdf(n_clicks, lh, flat) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
     var ta   = document.getElementById('noc-textarea');
@@ -120,8 +120,9 @@ function downloadNocHtml(n_clicks, lh, flat) {
     if (!text) return window.dash_clientside.no_update;
     lh = lh || {};
 
-    var html = buildLetterheadDoc({
+    var html = buildLetterheadPdfDoc({
         title: 'NOC — ' + (lh.certificate_no || ''),
+        filename: 'NOC_' + (typeof flat === 'string' && flat ? flat : 'download'),
         societyName: lh.society_name, societyAddress: lh.society_address,
         logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
@@ -130,22 +131,14 @@ function downloadNocHtml(n_clicks, lh, flat) {
         printWidth: '700px',
     });
 
-    var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    var url  = URL.createObjectURL(blob);
-    var filename = 'NOC_' + (typeof flat === 'string' && flat ? flat : 'download') + '.html';
-
-    var a = document.createElement('a');
-    a.href     = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
+    var w = window.open('', '_blank');
+    if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
+    w.document.write(html);
+    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
-    "downloadNocHtml",
+    "downloadNocPdf",
 )
 
 # ── Email ─────────────────────────────────────────────────────────────────
@@ -196,7 +189,7 @@ def register_noc_callbacks(app):
         prevent_initial_call=True,
     )
 
-    # ── Save-as-HTML / PDF button ─────────────────────────────────────────
+    # ── Save as PDF button ──────────────────────────────────────────────────
     clientside_callback(
         _NOC_PDF_JS,
         Output('noc-action-store', 'data', allow_duplicate=True),

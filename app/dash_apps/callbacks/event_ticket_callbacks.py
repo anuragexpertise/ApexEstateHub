@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/event_ticket_callbacks.py
 """
-Event Ticket Print / Download / Email — clientside callbacks.
+Event Ticket Print / Save as PDF / Email — clientside callbacks.
 
 Event tickets previously had no print/download flow at all — the profile
 card only showed the in-app QR (see renderers.py's event_ticket_qr_section)
@@ -87,10 +87,11 @@ function printEventTicket(n_clicks, d) {
 
 _TICKET_PDF_JS = clientside_iife(
     LETTERHEAD_JS + _ticket_html_js() + r"""
-function downloadEventTicketHtml(n_clicks, d) {
+function downloadEventTicketPdf(n_clicks, d) {
     if (!n_clicks || !d) return window.dash_clientside.no_update;
-    var html = buildLetterheadDoc({
+    var html = buildLetterheadPdfDoc({
         title: d.event_title + ' — Ticket',
+        filename: 'Ticket_' + d.booking_reference + '_' + d.ticket_type,
         societyName: d.society_name, societyAddress: d.society_address,
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
@@ -98,19 +99,14 @@ function downloadEventTicketHtml(n_clicks, d) {
         bodyHtml: ticketHtml(d),
         printWidth: '600px',
     });
-    var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    var url  = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href     = url;
-    a.download = 'Ticket_' + d.booking_reference + '_' + d.ticket_type + '.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    var w = window.open('', '_blank');
+    if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
+    w.document.write(html);
+    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
-    "downloadEventTicketHtml",
+    "downloadEventTicketPdf",
 )
 
 _TICKET_EMAIL_JS = clientside_iife(r"""
@@ -139,7 +135,7 @@ function emailEventTicket(n_clicks, d) {
 def register_event_ticket_callbacks(app):
     """
     Register three clientside callbacks for the event-ticket QR section's
-    Print/Download/Email buttons, plus server-side last_printed_at/
+    Print/Save as PDF/Email buttons, plus server-side last_printed_at/
     last_emailed_at stamping — same shape as register_receipt_callbacks.
     """
 
