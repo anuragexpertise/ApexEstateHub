@@ -148,7 +148,7 @@ function buildLetterheadPdfDoc(o) {
         '    else{imgs[i].onload=imgs[i].onerror=function(){loaded++;if(loaded===pending)doPdf();};}' +
         '  }' +
         '}' +
-        '</script></body></html>'
+        '<\/script></body></html>'
     );
 }
 """
