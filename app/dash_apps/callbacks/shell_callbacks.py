@@ -590,12 +590,7 @@ def register_shell_callbacks(app):
 
         app_root_style = {}
         if society_bg_url:
-            app_root_style.update({
-                "backgroundImage": f"url({society_bg_url})",
-                "backgroundSize": "cover",
-                "backgroundPosition": "center",
-                "backgroundRepeat": "no-repeat",
-            })
+            app_root_style["--portal-bg"] = f"url({society_bg_url})"
 
         is_master = role == "master"
         key = "master" if is_master else (role or "admin")

@@ -62,9 +62,25 @@ a {
 #app-root,
 .app-shell {
     min-height: 100vh;
+    position: relative;
+}
+
+#app-root::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--portal-bg, none);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    opacity: 0.2;
+    z-index: 0;
+    pointer-events: none;
+}
+
+#app-root > * {
+    position: relative;
+    z-index: 1;
 }
 
 .page-wrapper {
