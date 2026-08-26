@@ -1150,8 +1150,9 @@ DEFAULT_LAYOUTS = {
             "kpi_receipts_total",
             "kpi_ven_charges_count",
         ],
-        "vendor_passes": [
+        "passes": [
             "kpi_my_pass_expiry",
+            "kpi_vendors_passes",
         ],
         "vendor_receipts": ["kpi_receipts_total"],
         "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
