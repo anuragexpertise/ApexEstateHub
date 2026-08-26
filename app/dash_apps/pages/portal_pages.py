@@ -588,11 +588,11 @@ def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    if active_tab == "vendor_passes":
+    if active_tab == "passes":
         return html.Div([
             _page_title("fa-id-card", c, "My Passes", "active and expired passes"),
             _kpi_row_dynamic(
-                "vendor", "vendor_passes", sid,
+                "vendor", "passes", sid,
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),
