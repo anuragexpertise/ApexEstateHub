@@ -138,7 +138,7 @@ def _login_modal() -> html.Div:
                     ],
                     id="login-modal-body",
                     style={
-                        "backgroundImage": "url(/static/assets/EH_bk.jpg)",
+                        "--login-bg": "url(/static/assets/EH_bk.jpg)",
                         **LOGIN_MODAL_BODY_BASE_STYLE,
                     },
                 ),
