@@ -28,7 +28,9 @@ What it seeds (society_id = 1, "Sunrise Residency"):
   * Opening (BF) balances — round numbers for easy inspection, per an
     explicit request: CiH 100,000 Dr, CapAc 1,000,000 Cr, ICICI 50,000 Dr,
     SBI 50,000 Dr, Furniture 10,000 Dr, Investments 10,000 Dr, Sundry
-    Creditors 0, Sundry Debtors 780,000 Dr. NOW netted to zero (2026-08):
+    Creditors 0, Sundry Debtors 780,000 Dr (now on leaf account 81
+    "Sundry Debtors (Digital)", not header 8 — see BF_VALUES comment,
+    2026-08). NOW netted to zero (2026-08):
     Sundry Debtors carries the balancing 780,000 Dr receivable so that
     Assets (CiH+SBI+ICICI+Furniture+Investments+SDr = 1,000,000 Dr) equals
     Liabilities+Equity (CapAc = 1,000,000 Cr) exactly. Confirmed by
@@ -208,6 +210,8 @@ ACCOUNTS = [
     (65,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  "Dr",  15),
     (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True,  "Dr", 100),
     (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", True,  "Dr", 100),
+    (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True,  "Dr", 100),
+    (82,    "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",       8,  "Dr", True,  "Dr", 100),
     (9,     "Sundry Creditors",           "SCr",       "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
     (201,   "Sinking Fund Reserve",        "SinkFund",  "Sinking Fund Reserve",        1,  "Cr",  True,  "Cr", 100),
     (202,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True,  "Cr", 100),
@@ -537,16 +541,27 @@ BF_VALUES = {
     64:         0.00,    # Instruments
     65:         0.00,    # Car
     9:          0.00,    # Sundry Creditors ("SCr")
-    8:    780_000.00,    # Sundry Debtors ("SDr") -- opening receivable
-                         #   balance, naturally Dr-sided (drcr_bf='Dr' on
-                         #   account 8 in ACCOUNTS above, no override
-                         #   needed). This is the deliberate balancing
-                         #   figure that brings the Bal-root total_closing
-                         #   to exactly 0.00 for the seeded BF_FY -- see
-                         #   the note in this module's docstring. If you
-                         #   change any other BF_VALUES entry, recompute
-                         #   this one so the books still tie out (own_bf
-                         #   sums to zero across every has_bf=TRUE account).
+    8:          0.00,    # Sundry Debtors ("SDr") -- HEADER, not a leaf.
+                         #   Kept at 0 now that 81/82 exist below; the
+                         #   header itself is only ever posted to by
+                         #   fn_post_receivable_accrual's accrual leg
+                         #   (2026-08), same convention as 631 "Bank
+                         #   Accounts" staying 0 while 6311/6312 carry
+                         #   real money.
+    81:   780_000.00,    # Sundry Debtors (Digital) -- opening receivable
+                         #   balance, naturally Dr-sided (drcr_bf='Dr').
+                         #   Arbitrarily parked entirely on the Digital
+                         #   leaf for demo purposes (no historical
+                         #   cash-vs-digital split exists for this BF
+                         #   figure); real societies should split this
+                         #   across 81/82 to match actual history. This
+                         #   is the deliberate balancing figure that
+                         #   brings the Bal-root total_closing to exactly
+                         #   0.00 for the seeded BF_FY -- see the note in
+                         #   this module's docstring. If you change any
+                         #   other BF_VALUES entry, recompute this one so
+                         #   the books still tie out (own_bf sums to zero
+                         #   across every has_bf=TRUE account).
 }
 
 

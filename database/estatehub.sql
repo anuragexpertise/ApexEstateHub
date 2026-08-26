@@ -1879,6 +1879,81 @@ $$;
 -- (if applicable). All lines for one apartment/period share one bill_group_id.
 DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 
+-- ════════════════════════════════════════════════════════════════
+-- fn_post_receivable_accrual — accrual-side posting for a single
+-- newly-billed receivable line (or a newly-applied interest
+-- increment on an existing one).
+--
+-- Posts Dr Sundry Debtors (the "Sundry Debtors" header account, id
+-- resolved by name — not a Digital/Cash leaf) / Cr <the line's own
+-- income or GST-payable account> for the amount just billed, with
+-- mode='journal' since no cash has moved yet (pure accrual
+-- recognition — same convention as the existing depreciation
+-- journals: no cash leg, excluded from the cashbook via
+-- mode <> 'journal', included in ledger/trial balance/closing).
+--
+-- Posted to the CONTROL account rather than 81/82 because the
+-- eventual collection mode is unknown at bill time — only
+-- fn_verify_receivable / fn_pay_apartment_dues_fifo know that, at
+-- collection, and post the clearing Cr leg to the correct
+-- Digital/Cash leaf then. fn_fy_closing_report's recursive ancestry
+-- rollup sums header + leaves together for reporting, so the split
+-- still nets to the correct outstanding balance either way.
+--
+-- Silently no-ops (does nothing) if the amount is zero/NULL, the
+-- income account is NULL, or no "Sundry Debtors" account is
+-- configured for the society — callers are not expected to check
+-- first, mirroring how the fund/GST account resolution in
+-- fn_auto_generate_receivables already tolerates "not configured".
+-- ════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_post_receivable_accrual (INT, INT, INT, VARCHAR, INT, NUMERIC, TEXT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_post_receivable_accrual(
+    p_society_id     INT,
+    p_receivable_id  INT,
+    p_entity_id      INT,
+    p_role           VARCHAR,
+    p_income_acc_id  INT,
+    p_amount         NUMERIC,
+    p_particulars    TEXT
+)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+    v_sdr_acc_id INT;
+    v_journal_id INT;
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 OR p_income_acc_id IS NULL OR p_receivable_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT id INTO v_sdr_acc_id FROM accounts
+    WHERE society_id = p_society_id
+      AND name ILIKE 'Sundry Debtors'
+    LIMIT 1;
+    IF v_sdr_acc_id IS NULL THEN RETURN; END IF;
+
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Dr: Sundry Debtors control account (the member now owes this)
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        p_society_id, 'Dr', CURRENT_DATE, v_sdr_acc_id, p_entity_id, p_role,
+        p_particulars, p_amount, 'journal', 'paid', NULL, NOW(), 'receivables', p_receivable_id, v_journal_id
+    );
+
+    -- Cr: the line's own income / GST-payable account (accrual recognition)
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        p_society_id, 'Cr', CURRENT_DATE, p_income_acc_id, p_entity_id, p_role,
+        p_particulars, p_amount, 'journal', 'paid', NULL, NOW(), 'receivables', p_receivable_id, v_journal_id
+    );
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -1910,6 +1985,7 @@ DECLARE
     v_society_turnover    NUMERIC(15,2);
     v_current_fy          INT;
     v_cached_fy           INT := -1;
+    v_new_rec_id          INT;  -- id of the row just inserted (NULL if ON CONFLICT skipped it — idempotent re-runs must not double-accrue)
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
@@ -2050,7 +2126,14 @@ BEGIN
                     'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
                     v_base_maint, v_base_maint, 0, v_due_date, 'pending', NOW()
                 )
-                ON CONFLICT DO NOTHING;
+                ON CONFLICT DO NOTHING
+                RETURNING id INTO v_new_rec_id;
+
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_new_rec_id, apt.id, 'apartment',
+                    v_fallback_maint_acc, v_base_maint,
+                    'Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY')
+                );
             END IF;
 
             -- Sinking fund line
@@ -2067,7 +2150,14 @@ BEGIN
                     'Sinking Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
                     v_base_sinking, v_base_sinking, 0, v_due_date, 'pending', NOW()
                 )
-                ON CONFLICT DO NOTHING;
+                ON CONFLICT DO NOTHING
+                RETURNING id INTO v_new_rec_id;
+
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_new_rec_id, apt.id, 'apartment',
+                    v_sinking_acc_id, v_base_sinking,
+                    'Sinking Fund ' || TO_CHAR(v_month, 'Mon-YYYY')
+                );
             END IF;
 
             -- Repair fund line
@@ -2084,7 +2174,14 @@ BEGIN
                     'Repair Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
                     v_base_repair, v_base_repair, 0, v_due_date, 'pending', NOW()
                 )
-                ON CONFLICT DO NOTHING;
+                ON CONFLICT DO NOTHING
+                RETURNING id INTO v_new_rec_id;
+
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_new_rec_id, apt.id, 'apartment',
+                    v_repair_acc_id, v_base_repair,
+                    'Repair Fund ' || TO_CHAR(v_month, 'Mon-YYYY')
+                );
             END IF;
 
             -- GST lines (CGST + SGST, both required for a valid GST collection)
@@ -2100,7 +2197,14 @@ BEGIN
                     'CGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
                     v_gst_cgst, v_gst_cgst, 0, v_due_date, 'pending', NOW()
                 )
-                ON CONFLICT DO NOTHING;
+                ON CONFLICT DO NOTHING
+                RETURNING id INTO v_new_rec_id;
+
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_new_rec_id, apt.id, 'apartment',
+                    v_cgst_acc_id, v_gst_cgst,
+                    'CGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY')
+                );
             END IF;
 
             IF v_gst_sgst > 0 AND v_sgst_acc_id IS NOT NULL THEN
@@ -2115,7 +2219,14 @@ BEGIN
                     'SGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
                     v_gst_sgst, v_gst_sgst, 0, v_due_date, 'pending', NOW()
                 )
-                ON CONFLICT DO NOTHING;
+                ON CONFLICT DO NOTHING
+                RETURNING id INTO v_new_rec_id;
+
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_new_rec_id, apt.id, 'apartment',
+                    v_sgst_acc_id, v_gst_sgst,
+                    'SGST on Maintenance ' || TO_CHAR(v_month, 'Mon-YYYY')
+                );
             END IF;
 
             v_month := (v_month + INTERVAL '1 month')::DATE;
@@ -2243,6 +2354,12 @@ BEGIN
                     END
          WHERE id = rec.id;
 
+        PERFORM fn_post_receivable_accrual(
+            p_society_id, rec.id, rec.entity_id, 'apartment',
+            COALESCE(rec.interest_acc_id, v_int_acc_id), v_total_increment,
+            'Interest on ' || COALESCE(rec.description, 'Maintenance Due')
+        );
+
     END LOOP;
 END;
 $$;
@@ -2302,6 +2419,42 @@ BEGIN
 
     IF v_acc_id IS NULL THEN
         RAISE EXCEPTION 'No primary_bank_account_id configured for society % — set Settings > Accounts > Primary Bank Account before recording a non-cash (%) transaction', p_society_id, p_mode;
+    END IF;
+
+    RETURN v_acc_id;
+END;
+$$;
+
+-- fn_resolve_sdr_leg
+-- ==================
+-- Resolves which Sundry Debtors leaf a receivable COLLECTION should
+-- clear against: "Sundry Debtors (Cash)" for mode='cash', else
+-- "Sundry Debtors (Digital)" for every other mode (cheque/upi/card/
+-- bank/crypto). Independent of fn_resolve_bank_leg — that function
+-- decides the Dr cash/bank leg (and returns NULL for cash, since CiH
+-- is derived implicitly, never posted to directly); this one decides
+-- the Cr leg that relieves the member's outstanding balance, which
+-- must exist for every mode, cash included. Falls back to the
+-- "Sundry Debtors" control account itself if a society hasn't been
+-- migrated to the 81/82 split yet, so this never blocks a payment.
+DROP FUNCTION IF EXISTS fn_resolve_sdr_leg (INT, VARCHAR) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_resolve_sdr_leg(p_society_id INT, p_mode VARCHAR)
+RETURNS INT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+    v_name   VARCHAR;
+BEGIN
+    v_name := CASE WHEN p_mode = 'cash' THEN 'Sundry Debtors (Cash)' ELSE 'Sundry Debtors (Digital)' END;
+
+    SELECT id INTO v_acc_id FROM accounts
+    WHERE society_id = p_society_id AND name = v_name
+    LIMIT 1;
+
+    IF v_acc_id IS NULL THEN
+        SELECT id INTO v_acc_id FROM accounts
+        WHERE society_id = p_society_id AND name ILIKE 'Sundry Debtors'
+        LIMIT 1;
     END IF;
 
     RETURN v_acc_id;
@@ -2570,37 +2723,21 @@ BEGIN
     v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
-    IF v_int_acc IS NOT NULL AND v_int_post > 0 THEN
-        -- Line 1: base maintenance income (Cr)
-        INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id, v_rec.role,
-            REPLACE(v_rec.description, ' + Interest', ''),
-            v_base_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
-        ) RETURNING id INTO v_trx_id;
-
-        -- Line 2: interest income to separate account (Cr)
-        INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_int_acc, v_rec.entity_id, v_rec.role,
-            'Interest on ' || REPLACE(v_rec.description, ' + Interest', ''),
-            v_int_post, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
-        );
-    ELSE
-        -- Single line: amount received goes to maintenance income account (Cr)
-        INSERT INTO transactions(
-            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            v_rec.society_id, 'Cr', CURRENT_DATE, v_rec.acc_id, v_rec.entity_id, v_rec.role,
-            v_rec.description,
-            v_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
-        ) RETURNING id INTO v_trx_id;
-    END IF;
+    -- Cr: Sundry Debtors (Digital/Cash leaf, by p_mode) — relieves the
+    -- member's outstanding balance. Income/GST-payable was already
+    -- recognized at BILL time by fn_post_receivable_accrual (accrual
+    -- basis, 2026-08); collection no longer re-credits v_rec.acc_id /
+    -- v_int_acc, which would double-count the income. One combined
+    -- leg for base+interest since both clear the same debtor balance
+    -- against the same leaf account.
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_rec.society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_rec.society_id, p_mode), v_rec.entity_id, v_rec.role,
+        v_rec.description,
+        v_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_rec.id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
 
     -- Dr: cash / bank paired side (actual amount received, not the full residual)
     IF v_bank_acc IS NOT NULL THEN
@@ -2736,9 +2873,7 @@ DECLARE
     v_pay_int      NUMERIC(15,2);
     v_pay_prin     NUMERIC(15,2);
     v_fallback_int_acc INT;
-    v_acc_ids      INT[] := ARRAY[]::INT[];
-    v_acc_totals   NUMERIC(15,2)[] := ARRAY[]::NUMERIC(15,2)[];
-    v_acc_idx      INT;
+    v_total_take   NUMERIC(15,2) := 0;  -- running total actually applied to open dues this call — one Cr leg to the SDr leaf covers all of it (accrual basis, 2026-08)
     v_first_trx_id INT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
@@ -2801,79 +2936,29 @@ BEGIN
                  confirmed_at   = NOW()
              WHERE id = rec.id;
 
-        -- Post interest leg immediately if this row has a separate interest
-        -- account (mirrors fn_verify_receivable's two-leg behavior).
-        IF v_pay_int > 0 AND rec.interest_acc_id IS NOT NULL THEN
-            INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-            ) VALUES (
-                v_society_id, 'Cr', CURRENT_DATE, rec.interest_acc_id, p_apartment_id, 'apartment',
-                'Interest on ' || COALESCE(p_particulars, 'Maintenance Payment'),
-                v_pay_int, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', rec.id, v_journal_id
-            ) RETURNING id INTO v_trx_id;
-            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
-        END IF;
-
-        -- Accumulate principal portion for the row's acc_id (batch-posted after
-        -- the loop so each distinct account gets exactly one Cr leg).
-        IF v_pay_prin > 0 THEN
-            v_acc_idx := NULL;
-            IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
-                FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
-                    IF v_acc_ids[i] = rec.acc_id THEN
-                        v_acc_idx := i;
-                        EXIT;
-                    END IF;
-                END LOOP;
-            END IF;
-            IF v_acc_idx IS NULL THEN
-                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
-                v_acc_totals := array_append(v_acc_totals, v_pay_prin);
-            ELSE
-                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_prin;
-            END IF;
-        END IF;
-
-        -- When there is no separate interest account, the interest portion also
-        -- rolls into the row's own acc_id (fn_verify_receivable ELSE branch).
-        IF v_pay_int > 0 AND rec.interest_acc_id IS NULL THEN
-            v_acc_idx := NULL;
-            IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
-                FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
-                    IF v_acc_ids[i] = rec.acc_id THEN
-                        v_acc_idx := i;
-                        EXIT;
-                    END IF;
-                END LOOP;
-            END IF;
-            IF v_acc_idx IS NULL THEN
-                v_acc_ids := array_append(v_acc_ids, rec.acc_id);
-                v_acc_totals := array_append(v_acc_totals, v_pay_int);
-            ELSE
-                v_acc_totals[v_acc_idx] := v_acc_totals[v_acc_idx] + v_pay_int;
-            END IF;
-        END IF;
-
-        v_remaining := v_remaining - v_take;
+        v_total_take := v_total_take + v_take;
+        v_remaining  := v_remaining - v_take;
     END LOOP;
 
-    -- Emit ONE Cr leg per distinct acc_id actually settled, all sharing the
-    -- same journal_id. This is the core fix: previously the entire lump
-    -- payment was credited to whichever single acc_id belonged to the oldest
-    -- receivable, silently misattributing every other line.
-    IF array_upper(v_acc_ids, 1) IS NOT NULL THEN
-        FOR i IN 1..array_upper(v_acc_ids, 1) LOOP
-            INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-                amount, mode, status, created_by, created_at, source_table, journal_id
-            ) VALUES (
-                v_society_id, 'Cr', CURRENT_DATE, v_acc_ids[i], p_apartment_id, 'apartment',
-                COALESCE(p_particulars, 'Maintenance Payment'),
-                v_acc_totals[i], p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
-            ) RETURNING id INTO v_trx_id;
-            IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
-        END LOOP;
+    -- Cr: Sundry Debtors (Digital/Cash leaf, by p_mode) — ONE combined
+    -- leg for every row actually settled this call, sharing one
+    -- journal_id. Income/GST-payable was already recognized at BILL
+    -- time by fn_post_receivable_accrual (accrual basis, 2026-08);
+    -- collection just relieves the debtor now, so there's no longer a
+    -- need to route per-row by acc_id — every row clears against the
+    -- same leaf account regardless of which income category it billed
+    -- under (base_maint / sinking / repair / GST / interest all land
+    -- on the same "amount this member owed" balance).
+    IF v_total_take > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_society_id, p_mode), p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Maintenance Payment'),
+            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
 
     -- Overpayment (or a payment with no open dues at all) is banked as a

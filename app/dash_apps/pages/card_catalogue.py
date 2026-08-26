@@ -692,6 +692,19 @@ KPI_CARDS = {
         "title": "Maintenance Rules", "group": "monthly",
     },
 
+    # Nav tile for the "My Transactions" passbook (loaders.get_member_ledger).
+    # Custom card, not schema-driven — same "View" + bypass-DRILLDOWN_MAP
+    # pattern as kpi_fy_closing_report / kpi_time_qr (see the special-case
+    # dispatch in drilldown_callbacks.py). Owner-only for now; the loader
+    # and renderer are role-agnostic (entity_id + role), so a vendor/
+    # security "My Transactions" card can reuse both directly later.
+    "kpi_my_ledger": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-receipt", "color": "#18794e",
+        "title": "My Transactions", "group": "passbook",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # SECURITY PORTAL
     # ══════════════════════════════════════════════════════════════════════
@@ -1107,6 +1120,7 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
             "kpi_maintenance_charges",
+            "kpi_my_ledger",
             "kpi_fy_closing_report",
         ],
         "receivables": [

@@ -501,6 +501,53 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
         return [], str(e)
 
 
+def get_member_ledger(society_id: int, entity_id: int, role: str) -> tuple[list[dict], str | None]:
+    """
+    "My Transactions" passbook — every entry posted against this member's
+    Sundry Debtors balance, in chronological order, with a running
+    balance. Works for role in ('apartment','vendor','security') since
+    fn_post_receivable_accrual / fn_verify_receivable / fn_pay_apartment_
+    dues_fifo all tag both legs with entity_id + role.
+
+    This is the practical answer to "give each owner a subaccount under
+    Sundry Debtors": rather than a chart-of-accounts row per apartment/
+    vendor/guard, transactions.entity_id + .role (added specifically to
+    disambiguate the three entity tables — see estatehub.sql) already let
+    us filter down to one member's own entries. Restricting to acc_id
+    under "Sundry Debtors" (the control account 8 and its Digital/Cash
+    leaves 81/82) is what turns that filter into a real personal ledger:
+    Dr rows are amounts billed to this member (posted at receivable
+    creation, accrual basis, 2026-08), Cr rows are amounts collected from
+    them, and the running balance is what they currently owe — the same
+    shape as a "Flat 101 Debtors Account" ledger, without a per-member
+    accounts.id row.
+
+    Returns (rows, error). Each row: trx_date, acc_particulars,
+    entry_side ('Dr'/'Cr'), amount, mode, running_balance.
+    """
+    try:
+        rows = db._execute(
+            """
+            SELECT t.trx_date, t.acc_particulars, t.entry_side, t.amount,
+                   t.mode,
+                   SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount ELSE -t.amount END)
+                       OVER (ORDER BY t.trx_date, t.id
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
+            FROM transactions t
+            JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
+            WHERE t.society_id = %s
+              AND t.entity_id = %s
+              AND t.role = %s
+              AND a.name ILIKE '%%Sundry Debtors%%'
+            ORDER BY t.trx_date, t.id
+            """,
+            (society_id, entity_id, role), fetch_all=True,
+        ) or []
+        return rows, None
+    except Exception as e:
+        return [], str(e)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # LOAD LIST
 # ════════════════════════════════════════════════════════════════════════════
