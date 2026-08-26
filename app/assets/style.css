@@ -839,6 +839,9 @@ a {
     position: relative;
 }
 
+/* Stage-2 background image — rendered on a pseudo-element at 0.5 opacity
+   so the form content (z-index 2) stays fully opaque. The image URL is
+   supplied via the --login-bg custom property set by the Python code. */
 #login-modal-body::before {
     content: '';
     position: absolute;
@@ -846,9 +849,23 @@ a {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(255, 255, 255, 0.92);
-    -webkit-backdrop-filter: blur(2px);
-    backdrop-filter: blur(2px);
+    background-image: var(--login-bg);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.5;
+    z-index: 1;
+}
+
+/* White veil keeps the login form readable over the image */
+#login-modal-body::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.75);
     z-index: 1;
 }
 

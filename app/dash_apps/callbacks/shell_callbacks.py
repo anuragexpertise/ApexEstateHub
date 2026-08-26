@@ -364,7 +364,7 @@ def register_shell_callbacks(app):
         if not n:
             raise PreventUpdate
         default_style = dict(LOGIN_MODAL_BODY_BASE_STYLE)
-        default_style["backgroundImage"] = "url(/static/assets/EH_bk.jpg)"
+        default_style["--login-bg"] = "url(/static/assets/EH_bk.jpg)"
         return ({"display": "block"}, {"display": "none"},
                 "/static/assets/EH_logo.png", default_style)
 
@@ -417,7 +417,7 @@ def register_shell_callbacks(app):
 
         logo_src = "/static/assets/EH_logo.png"
         body_style = dict(LOGIN_MODAL_BODY_BASE_STYLE)
-        body_style["backgroundImage"] = "url(/static/assets/EH_bk.jpg)"
+        body_style["--login-bg"] = "url(/static/assets/EH_bk.jpg)"
         try:
             from app.dash_apps.drilldown.renderers import get_image_url
             society_row = _db()._execute(
@@ -429,7 +429,7 @@ def register_shell_callbacks(app):
             if society_logo_url:
                 logo_src = society_logo_url
             if society_bg_url:
-                body_style["backgroundImage"] = f"url({society_bg_url})"
+                body_style["--login-bg"] = f"url({society_bg_url})"
         except Exception as e:
             print(f"⚠️  stage-2 branding lookup failed: {e}")
 
