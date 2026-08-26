@@ -485,6 +485,7 @@ def register_shell_callbacks(app):
         Output("hdr-avatar",       "children"),
         Output("hdr-society-name", "children"),
         Output("hdr-society-logo", "src"),
+        Output("app-root", "style"),
         Input("url",        "pathname"),
         State("auth-store", "data"),
         prevent_initial_call=False,
@@ -508,6 +509,7 @@ def register_shell_callbacks(app):
             {"rendered": False, "ts": time.time()},
             [], [], "", {}, "—", "—", "?", "User", "?",
             "EstateHub", "/static/assets/EH_logo.png",
+            {},
         )
         if not auth or not auth.get("authenticated"):
             return _BLANK
@@ -570,14 +572,30 @@ def register_shell_callbacks(app):
         if society_id:
             try:
                 s_row = db._execute(
-                    "SELECT name, logo FROM societies WHERE id = %s",
+                    "SELECT name, logo, login_background FROM societies WHERE id = %s",
                     (society_id,), fetch_one=True)
                 if s_row:
                     society_name = s_row.get("name", society_name)
                     if s_row.get("logo"):
                         society_logo = f"/assets/{society_id}/{s_row['logo']}"
+                society_bg_url = None
+                if s_row and s_row.get("login_background"):
+                    try:
+                        from app.dash_apps.drilldown.renderers import get_image_url
+                        society_bg_url = get_image_url(s_row["login_background"], None, "society", society_id)
+                    except Exception:
+                        pass
             except Exception:
                 pass
+
+        app_root_style = {}
+        if society_bg_url:
+            app_root_style.update({
+                "backgroundImage": f"url({society_bg_url})",
+                "backgroundSize": "cover",
+                "backgroundPosition": "center",
+                "backgroundRepeat": "no-repeat",
+            })
 
         is_master = role == "master"
         key = "master" if is_master else (role or "admin")
@@ -597,6 +615,7 @@ def register_shell_callbacks(app):
             user_name, role.title(), avatar,
             user_name, avatar,
             society_name, society_logo,
+            app_root_style,
         )
 
     # ── 9. PUSH NOTIFICATION INIT ON LOGIN ──────────────────────────────────
