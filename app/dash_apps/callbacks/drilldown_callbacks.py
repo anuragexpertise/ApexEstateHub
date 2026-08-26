@@ -485,6 +485,19 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, no_update
 
+            # ── My Transactions — custom card, not a schema-driven list.
+            # Same bypass-DRILLDOWN_MAP pattern as kpi_fy_closing_report;
+            # the logged-in member's own id is resolved server-side inside
+            # the "form_my_ledger" render branch (get_current_linked_id()),
+            # not passed through prefill, so it can't be tampered with.
+            if card_id == "kpi_my_ledger":
+                store = nav_state.initial_state(role, sid)
+                store = nav_state.navigate_to(store, "form_my_ledger", "My Transactions")
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target = nav_info.get("target")
             if not target:
@@ -2311,6 +2324,25 @@ def _render_card(
             return renderers.render_fy_closing_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
+            )
+
+        # ── My Transactions — member's own Sundry Debtors passbook ───────────
+        # entity_id is resolved server-side from the verified session, never
+        # trusted from prefill/client state — same pattern as the event-
+        # ticket "Buyer is the logged-in apartment" branch above.
+        if card_id == "form_my_ledger":
+            sid_val = filters.get("society_id")
+            caller_role = get_current_user_role()
+            member_role = "apartment" if caller_role == "apartment" else caller_role
+            entity_id = get_current_linked_id()
+            member_label = ""
+            if entity_id and sid_val and member_role == "apartment":
+                apt = loaders.load_profile("apartment", entity_id, sid_val) or {}
+                member_label = f"Flat {apt.get('flat_number', '')} — {apt.get('owner_name', '')}".strip(" —")
+            rows, err = (loaders.get_member_ledger(sid_val, entity_id, member_role)
+                         if sid_val and entity_id else ([], "Could not resolve your account"))
+            return renderers.render_member_ledger_card(
+                rows=rows, error=err, member_label=member_label,
             )
 
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────

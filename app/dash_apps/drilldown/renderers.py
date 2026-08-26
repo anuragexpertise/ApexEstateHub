@@ -3154,6 +3154,83 @@ def render_fy_closing_card(rows: list, error: str | None,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# MY TRANSACTIONS CARD — member-facing Sundry Debtors passbook
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_member_ledger_card(rows: list, error: str | None,
+                               member_label: str, color: str = "#18794e") -> html.Div:
+    """
+    Read-only "My Transactions" passbook (loaders.get_member_ledger) —
+    every entry posted against this member's Sundry Debtors balance:
+    Dr = billed, Cr = paid, with a running "amount currently owed"
+    balance. member_label is the display name for the header, e.g. a
+    flat number ("Flat A-101") — generic across apartment/vendor/
+    security since the loader itself is role-agnostic.
+    """
+    header = html.Div([
+        html.Div(html.I(className="fas fa-receipt",
+                        style={"color": "#fff", "fontSize": "16px"}),
+                 style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                        "background": f"linear-gradient(135deg,{color},{color}aa)",
+                        "display": "flex", "alignItems": "center",
+                        "justifyContent": "center", "marginRight": "12px"}),
+        html.Div([
+            html.Strong("My Transactions", style={"fontSize": "14px"}),
+            html.Div(member_label or "", style={"fontSize": "11px", "color": "#999"}),
+        ]),
+    ], style={"padding": "12px 16px", "display": "flex", "alignItems": "center",
+              "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
+
+    if error:
+        return html.Div([
+            header,
+            html.Div(
+                dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error],
+                          color="warning", style={"borderRadius": "10px"}),
+                style={"padding": "16px"},
+            ),
+        ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+                  "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+    if not rows:
+        body = dbc.Alert("No transactions yet.", color="secondary",
+                          style={"borderRadius": "10px"})
+    else:
+        head = html.Thead(html.Tr([
+            html.Th("Date"), html.Th("Particulars"),
+            html.Th("Billed (Dr)", className="text-end"),
+            html.Th("Paid (Cr)", className="text-end"),
+            html.Th("Balance Owed", className="text-end"),
+        ], style={"fontSize": "11px"}))
+
+        def _row(r):
+            is_dr = r.get("entry_side") == "Dr"
+            amt = float(r.get("amount") or 0)
+            bal = float(r.get("running_balance") or 0)
+            return html.Tr([
+                html.Td(str(r.get("trx_date") or ""), style={"whiteSpace": "nowrap"}),
+                html.Td(r.get("acc_particulars", "")),
+                html.Td(f"{amt:,.2f}" if is_dr else "",
+                        className="text-end", style={"color": "#c0392b"}),
+                html.Td(f"{amt:,.2f}" if not is_dr else "",
+                        className="text-end", style={"color": "#17976e"}),
+                html.Td(f"{bal:,.2f}", className="text-end", style={"fontWeight": "700"}),
+            ], style={"fontSize": "12px"})
+
+        body = dbc.Table(
+            [head, html.Tbody([_row(r) for r in rows])],
+            bordered=False, hover=True, responsive=True, size="sm",
+            style={"marginTop": "4px"},
+        )
+
+    return html.Div([
+        header,
+        html.Div(body, style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # VERIFY RECEIVABLE CARD — amount-entry form (single-row confirm)
 # ════════════════════════════════════════════════════════════════════════════
 
