@@ -78,7 +78,8 @@ a {
     pointer-events: none;
 }
 
-#app-root > * {
+/* AFTER — the fix */
+#app-root > .page-wrapper {
     position: relative;
     z-index: 1;
 }
