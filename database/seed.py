@@ -221,7 +221,7 @@ ACCOUNTS = [
 ]
 
 # Compliance tagging for existing accounts (Phase 1)
-INCOME_NATURE_MAP = {
+MUTUALITY_NATURE_MAP = {
     2311: 'mutual', 2317: 'mutual', 2318: 'mutual', 2319: 'mutual',
     23191: 'mutual', 23192: 'mutual', 21113: 'mutual',
     2111: 'non_mutual', 21111: 'non_mutual', 21112: 'non_mutual',
@@ -234,7 +234,7 @@ TDS_SECTION_MAP = {
 }
 
 # Compliance tagging for existing accounts (Phase 1)
-INCOME_NATURE_MAP = {
+MUTUALITY_NATURE_MAP = {
     2311: 'mutual', 2317: 'mutual', 2318: 'mutual', 2319: 'mutual',
     23191: 'mutual', 23192: 'mutual', 21113: 'mutual',
     2111: 'non_mutual', 21111: 'non_mutual', 21112: 'non_mutual',
@@ -840,6 +840,16 @@ STATE_COMPLIANCE_THRESHOLDS = [
 ]
 
 
+def seed_gst_rates(cur, conn):
+    cur.execute("SELECT 1 FROM gst_rates")
+    if not cur.fetchone():
+        cur.execute(
+            """INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
+               VALUES (%s, %s, %s, %s)""",
+            (SOCIETY_ID, 9.00, 9.00, '2017-07-01')
+        )
+        conn.commit()
+
 def seed_state_compliance_thresholds(cur, conn):
     """Idempotent seed of state-specific compliance thresholds."""
     inserted = 0
@@ -877,11 +887,11 @@ def seed_accounts(cur, conn, society_id: int) -> int:
                 """INSERT INTO accounts
                    (id, society_id, name, tab_name, header, parent_account_id,
                     drcr_account, has_bf, drcr_bf, depreciation_percent,
-                    is_depreciable, income_nature, tds_section)
+                    is_depreciable, mutuality_nature, tds_section)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (aid, society_id, name, tab, header, parent,
                  drcr, has_bf, drcr_bf, dep, dep < 100,
-                 INCOME_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
+                 MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
             )
             conn.commit()
             created += 1
@@ -1682,6 +1692,7 @@ def run_seed(conn):
     seed_tds_section_rates(cur, conn, society_id)
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
+    seed_gst_rates(cur, conn)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 

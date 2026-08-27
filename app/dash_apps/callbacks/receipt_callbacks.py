@@ -85,7 +85,9 @@ function printReceipt(n_clicks, d) {
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
         qrUrl: d.qr_url, qrCaption: d.qr_caption,
-        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' + receiptHtml(d),
+        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' +
+                  (d.is_provisional ? '<div style="text-align:center;color:#dc3545;font-weight:bold;margin-bottom:15px;">Provisional - Subject to realization of funds</div>' : '') +
+                  receiptHtml(d),
         printWidth: '600px',
     });
     w.document.write(doc);
@@ -109,7 +111,9 @@ function downloadReceiptPdf(n_clicks, d) {
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
         qrUrl: d.qr_url, qrCaption: d.qr_caption,
-        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' + receiptHtml(d),
+        bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Receipt #' + d.receipt_no + '</h3>' +
+                  (d.is_provisional ? '<div style="text-align:center;color:#dc3545;font-weight:bold;margin-bottom:15px;">Provisional - Subject to realization of funds</div>' : '') +
+                  receiptHtml(d),
         printWidth: '600px',
     });
     var w = window.open('', '_blank');
@@ -134,7 +138,7 @@ function emailReceipt(n_clicks, d) {
         'Account: ' + d.account + '\n' +
         'Amount: Rs. ' + d.amount + '\n' +
         'Mode: ' + d.mode + (d.ref ? (' - Ref: ' + d.ref) : '') + '\n' +
-        'Status: ' + d.status
+        'Status: ' + d.status + (d.is_provisional ? ' (Provisional - Subject to realization of funds)' : '')
     );
     window.location.href = (
         'mailto:?subject=' + encodeURIComponent('Receipt #' + d.receipt_no) +

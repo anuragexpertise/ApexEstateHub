@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 ,
-    income_nature VARCHAR(10) CHECK (income_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
+    mutuality_nature VARCHAR(10) CHECK (mutuality_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
     tds_section VARCHAR(10)
 );
 
@@ -394,7 +394,8 @@ CREATE TABLE IF NOT EXISTS receivables (
             'unverified',
             'paid',
             'cancelled',
-            'credit'
+            'credit',
+            'rejected'
         )
     ),
     confirmed_by INT REFERENCES users (id),
@@ -402,7 +403,12 @@ CREATE TABLE IF NOT EXISTS receivables (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id)
 ,
-    bill_group_id UUID DEFAULT gen_random_uuid()
+    bill_group_id UUID DEFAULT gen_random_uuid(),
+    reported_amount NUMERIC(10, 2),
+    reported_mode VARCHAR(20),
+    reported_reference VARCHAR(255),
+    reported_at TIMESTAMP,
+    reported_by INT REFERENCES users (id)
 );
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
@@ -439,7 +445,8 @@ CREATE TABLE IF NOT EXISTS receipts (
         status IN (
             'pending',
             'confirmed',
-            'cancelled'
+            'cancelled',
+            'rejected'
         )
     ),
     confirmed_by INT REFERENCES users (id),
@@ -802,6 +809,19 @@ CREATE TABLE IF NOT EXISTS society_compliance_settings (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_society_compliance_settings UNIQUE (society_id)
+);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GST RATES — Society-specific GST rates with effective dates
+-- ════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS gst_rates (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    cgst_rate_pct NUMERIC(5, 2) NOT NULL,
+    sgst_rate_pct NUMERIC(5, 2) NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1986,6 +2006,11 @@ DECLARE
     v_current_fy          INT;
     v_cached_fy           INT := -1;
     v_new_rec_id          INT;  -- id of the row just inserted (NULL if ON CONFLICT skipped it — idempotent re-runs must not double-accrue)
+    v_gst_threshold       NUMERIC(10,2);
+    v_turnover_threshold  NUMERIC(15,2);
+    v_cgst_rate           NUMERIC(5,2);
+    v_sgst_rate           NUMERIC(5,2);
+    v_total_taxable       NUMERIC(10,2);
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
@@ -2094,16 +2119,36 @@ BEGIN
             v_base_sinking := ROUND(apt.apartment_size * COALESCE(charge.apt_sinking_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
             v_base_repair  := ROUND(apt.apartment_size * COALESCE(charge.apt_repair_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
 
-            -- GST threshold check (per-apartment maintenance > 7500 AND society turnover > 20L)
+            -- Fetch dynamic GST rates for this month
+            SELECT cgst_rate_pct, sgst_rate_pct INTO v_cgst_rate, v_sgst_rate
+              FROM gst_rates
+             WHERE society_id = p_society_id
+               AND effective_from <= v_month
+               AND (effective_to IS NULL OR effective_to >= v_month)
+             ORDER BY effective_from DESC LIMIT 1;
+             
+            v_cgst_rate := COALESCE(v_cgst_rate, 0);
+            v_sgst_rate := COALESCE(v_sgst_rate, 0);
+
+            -- Fetch dynamic thresholds
+            SELECT value INTO v_gst_threshold FROM state_compliance_thresholds WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1;
+            SELECT value INTO v_turnover_threshold FROM state_compliance_thresholds WHERE threshold_key = 'gst_turnover_lakh' AND is_active = TRUE LIMIT 1;
+            v_gst_threshold := COALESCE(v_gst_threshold, 7500);
+            v_turnover_threshold := COALESCE(v_turnover_threshold, 20) * 100000; -- Convert lakhs to absolute
+
+            -- GST threshold check (per-apartment maintenance > threshold AND society turnover > turnover_threshold)
             v_current_fy := CASE WHEN EXTRACT(MONTH FROM v_month) >= 4 THEN EXTRACT(YEAR FROM v_month)::INT ELSE (EXTRACT(YEAR FROM v_month)::INT - 1) END;
             IF v_current_fy != v_cached_fy THEN
                 SELECT fn_society_turnover_fy(p_society_id, v_current_fy) INTO v_society_turnover;
                 v_cached_fy := v_current_fy;
             END IF;
 
-            IF v_base_maint > 7500 AND COALESCE(v_society_turnover, 0) > 2000000 THEN
-                v_gst_cgst := ROUND(v_base_maint * 0.09, 2);
-                v_gst_sgst := ROUND(v_base_maint * 0.09, 2);
+            -- Evaluate taxability on the common area maintenance components
+            v_total_taxable := v_base_maint + v_base_sinking + v_base_repair;
+
+            IF v_total_taxable > v_gst_threshold AND COALESCE(v_society_turnover, 0) > v_turnover_threshold THEN
+                v_gst_cgst := ROUND(v_total_taxable * (v_cgst_rate / 100.0), 2);
+                v_gst_sgst := ROUND(v_total_taxable * (v_sgst_rate / 100.0), 2);
             ELSE
                 v_gst_cgst := 0;
                 v_gst_sgst := 0;
@@ -2812,7 +2857,7 @@ BEGIN
                paid_principal, interest_acc_id, acc_id, description
           FROM receivables
          WHERE bill_group_id = p_bill_group_id
-           AND status IN ('pending','partial')
+           AND status IN ('pending','partial','unverified')
          ORDER BY due_date ASC NULLS LAST, id ASC
          FOR UPDATE
     LOOP
@@ -7920,3 +7965,161 @@ CREATE TRIGGER trg_concerns_assigns_sync_status
     AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_sync_concern_status();
+
+-- ════════════════════════════════════════════════════════════════
+-- SELF-PAYMENT REPORTING & CONFIRMATION
+-- ════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION fn_self_report_receivable_by_bill_group(
+    p_bill_group_id UUID,
+    p_reported_by INT,
+    p_mode VARCHAR,
+    p_amount NUMERIC,
+    p_reference VARCHAR
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_has_unverified BOOLEAN;
+    v_total_pending NUMERIC;
+BEGIN
+    IF p_amount <= 0 THEN RETURN 'Error: amount must be > 0'; END IF;
+
+    -- Check for race conditions / existing claims
+    SELECT EXISTS (
+        SELECT 1 FROM receivables 
+        WHERE bill_group_id = p_bill_group_id 
+          AND status = 'unverified'
+    ) INTO v_has_unverified;
+
+    IF v_has_unverified THEN
+        RETURN 'Error: A claim is already pending verification for this bill group.';
+    END IF;
+
+    SELECT COALESCE(SUM(amount - paid_amount), 0)
+      INTO v_total_pending
+      FROM receivables
+     WHERE bill_group_id = p_bill_group_id
+       AND status IN ('pending', 'partial');
+       
+    IF v_total_pending <= 0 THEN
+        RETURN 'Error: Nothing outstanding on this bill group.';
+    END IF;
+
+    UPDATE receivables
+       SET status = 'unverified',
+           reported_amount = p_amount,
+           reported_mode = p_mode,
+           reported_reference = p_reference,
+           reported_at = NOW(),
+           reported_by = p_reported_by
+     WHERE bill_group_id = p_bill_group_id
+       AND status IN ('pending', 'partial');
+
+    RETURN 'Success: Payment reported. Awaiting verification.';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_reject_apartment_self_payment(
+    p_type VARCHAR, -- 'receipt' or 'bill_group'
+    p_id TEXT,      -- receipt_id or bill_group_id
+    p_confirmed_by INT,
+    p_penalty_amount NUMERIC DEFAULT 0
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_entity_id INT;
+    v_society_id INT;
+    v_penalty_acc INT;
+BEGIN
+    IF p_type = 'receipt' THEN
+        UPDATE receipts
+           SET status = 'rejected',
+               confirmed_by = p_confirmed_by,
+               confirmed_at = NOW()
+         WHERE id = p_id::INT AND status = 'pending'
+         RETURNING entity_id, society_id INTO v_entity_id, v_society_id;
+         
+        IF NOT FOUND THEN RETURN 'Error: Receipt not found or not pending.'; END IF;
+        
+    ELSIF p_type = 'bill_group' THEN
+        UPDATE receivables
+           SET status = 'pending', -- revert to pending
+               reported_amount = NULL,
+               reported_mode = NULL,
+               reported_reference = NULL,
+               reported_at = NULL,
+               reported_by = NULL
+         WHERE bill_group_id = p_id::UUID AND status = 'unverified'
+         RETURNING entity_id, society_id LIMIT 1 INTO v_entity_id, v_society_id;
+         
+        IF NOT FOUND THEN RETURN 'Error: Bill group not found or not unverified.'; END IF;
+    ELSE
+        RETURN 'Error: Invalid type';
+    END IF;
+
+    IF p_penalty_amount > 0 THEN
+        -- Find Bank Charges account or fallback to Maintenance
+        SELECT id INTO v_penalty_acc FROM accounts 
+         WHERE society_id = v_society_id AND name ILIKE '%Bank Charges%' LIMIT 1;
+         
+        IF v_penalty_acc IS NULL THEN
+            SELECT id INTO v_penalty_acc FROM accounts 
+             WHERE society_id = v_society_id AND name ILIKE '%Maintenance%' LIMIT 1;
+        END IF;
+
+        INSERT INTO receivables (
+            society_id, entity_id, role,
+            acc_id, description, period_month,
+            base_amount, amount, paid_principal, due_date, status
+        ) VALUES (
+            v_society_id, v_entity_id, 'apartment',
+            v_penalty_acc, 'Bank Bounce Penalty', DATE_TRUNC('month', CURRENT_DATE)::DATE,
+            p_penalty_amount, p_penalty_amount, 0, CURRENT_DATE, 'pending'
+        );
+    END IF;
+
+    RETURN 'Success: Payment rejected.';
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- INCOME TAX MUTUALITY REPORTING
+-- ════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION fn_income_tax_summary_fy(
+    p_society_id INT,
+    p_start_date DATE,
+    p_end_date DATE
+) RETURNS TABLE (
+    category VARCHAR, -- 'Income' or 'Expense'
+    nature VARCHAR,   -- 'mutual' or 'non_mutual'
+    total_amount NUMERIC
+) LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        'Income'::VARCHAR as category,
+        a.mutuality_nature as nature,
+        SUM(t.amount) as total_amount
+    FROM transactions t
+    JOIN accounts a ON t.acc_id = a.id
+    WHERE t.society_id = p_society_id
+      AND t.trx_date BETWEEN p_start_date AND p_end_date
+      AND a.drcr_account = 'Cr'
+      AND t.entry_side = 'Cr'
+      AND t.status = 'paid'
+    GROUP BY a.mutuality_nature
+    
+    UNION ALL
+    
+    SELECT 
+        'Expense'::VARCHAR as category,
+        a.mutuality_nature as nature,
+        SUM(t.amount) as total_amount
+    FROM transactions t
+    JOIN accounts a ON t.acc_id = a.id
+    WHERE t.society_id = p_society_id
+      AND t.trx_date BETWEEN p_start_date AND p_end_date
+      AND a.drcr_account = 'Dr'
+      AND t.entry_side = 'Dr'
+      AND t.status = 'paid'
+    GROUP BY a.mutuality_nature;
+END;
+$$;
