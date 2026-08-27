@@ -1406,7 +1406,8 @@ def register_drilldown_callbacks(app):
         # _PORTAL_PERMS (which would otherwise deny them for everyone but
         # admin, breaking e.g. a vendor buying their own pass).
         _SPECIAL_ENTITY_ROLES = {
-            "pay_due": {"admin"}, "pay_dues": {"admin"},
+            "pay_due": {"admin", "apartment"}, "pay_dues": {"admin", "apartment"},
+            "pay_due_bg": {"admin", "apartment"},
             "verify_receivable_amt": {"admin"},
             "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
@@ -2352,6 +2353,25 @@ def _render_card(
             apt = loaders.load_profile("apartment", apt_id, sid_val) or {} if apt_id and sid_val else {}
             pending = float(apt.get("pending_dues") or 0)
             overdue = float(apt.get("overdue_dues") or 0)
+            # Fetch bill groups
+            bill_groups = []
+            if apt_id and sid_val:
+                try:
+                    from database.db_manager import db
+                    bill_groups, _ = db.execute("""
+                        SELECT bill_group_id, 
+                               SUM(amount - paid_amount)::FLOAT as amount,
+                               MIN(period_month)::TEXT as period_month,
+                               STRING_AGG(description, ', ') as desc
+                          FROM receivables
+                         WHERE society_id = %s AND entity_id = %s AND role = 'apartment'
+                           AND status IN ('pending', 'partial')
+                         GROUP BY bill_group_id
+                         ORDER BY MIN(period_month) ASC
+                    """, (sid_val, apt_id))
+                except Exception as e:
+                    print(f"Error fetching bill groups: {e}")
+                    
             return renderers.render_pay_dues_card(
                 entity_id=apt_id,
                 flat_number=apt.get("flat_number", ""),
@@ -2362,6 +2382,7 @@ def _render_card(
                 prefill_mode=prefill.get("mode", "cash"),
                 prefill_particulars=prefill.get("particulars", f"Maintenance Payment — {apt.get('flat_number','')}"),
                 society_id=sid_val,
+                bill_groups=bill_groups,
             )
 
         # ── Vendor Pass form — dedicated renderer (bypasses to_singular mangling) ──
@@ -2743,8 +2764,12 @@ def _save_entity(entity, card_id, data):
         # ── PATCH: previously missing branches ──────────────────────────
         if entity in ("pay_due", "pay_dues"):
             return _save_pay_dues(db, data, sid)
+        if entity == "pay_due_bg":
+            return _save_pay_due_bg(db, data, sid)
         if entity == "verify_receivable_amt":
             return _save_verify_receivable_amt(db, data, sid)
+        if entity == "reject_receivable_amt":
+            return _save_reject_receivable_amt(db, data, sid)
         if entity in ("asset_dispose", "asset_dispose_new"):
             return _save_asset_dispose(db, data, sid)
         if entity in ("vendor_pass", "vendor_pass_new"):
@@ -3018,13 +3043,32 @@ def _save_pay_dues(db, d, sid):
     except (ValueError, TypeError):
         return False, "Invalid amount", None
 
-    # confirmed_by comes from merged["user_id"] which is stamped from auth-store
-    # in handle_form_submit before _save_entity is called.
     confirmed_by = d.get("user_id")
     try:
         confirmed_by = int(confirmed_by) if confirmed_by else None
     except (ValueError, TypeError):
         confirmed_by = None
+
+    actor_role = None
+    if confirmed_by:
+        actor_user = db._execute("SELECT role FROM users WHERE id = %s", (confirmed_by,), fetch_one=True)
+        actor_role = actor_user["role"] if actor_user else None
+        
+    if actor_role == "apartment":
+        # Create a pending receipt instead of settling
+        maint_acc = db._execute(
+            "SELECT id FROM accounts WHERE society_id = %s AND name ILIKE '%%Maintenance%%' AND drcr_account = 'Cr' LIMIT 1",
+            (sid,), fetch_one=True
+        )
+        if not maint_acc: return False, "Maintenance account not found", None
+        try:
+            db._execute("""
+                INSERT INTO receipts (society_id, user_id, entity_id, role, receipt_date, acc_id, particulars, amount, mode, transaction_id, status, created_by)
+                VALUES (%s, %s, %s, 'apartment', CURRENT_DATE, %s, %s, %s, %s, %s, 'pending', %s)
+            """, (sid, confirmed_by, apt_id, maint_acc["id"], d.get("particulars"), amt, d.get("mode", "cash"), d.get("reference", ""), confirmed_by))
+            return True, "Success: Payment reported (FIFO). Awaiting verification.", None
+        except Exception as e:
+            return False, str(e), None
 
     ok, msg, result = loaders.pay_apartment_dues_fifo(
         apartment_id=apt_id, amount=amt, mode=d.get("mode", "cash"),
@@ -3044,6 +3088,32 @@ def _save_pay_dues(db, d, sid):
             print(f"⚠️  notify_payment_received (pay_dues) failed: {e}")
     return ok, msg, trx_id
 
+
+def _save_pay_due_bg(db, d, sid):
+    bg_id = d.get("bill_group_id")
+    if not bg_id: return False, "Bill group ID is required", None
+    amt = d.get("amount")
+    if not amt: return False, "Amount is required", None
+    try: amt = float(amt)
+    except: return False, "Invalid amount", None
+    
+    mode = d.get("mode", "cash")
+    ref = d.get("reference", "")
+    user_id = d.get("user_id")
+    try: user_id = int(user_id) if user_id else None
+    except: user_id = None
+    
+    try:
+        res = db._execute(
+            "SELECT fn_self_report_receivable_by_bill_group(%s, %s, %s, %s, %s) as msg",
+            (bg_id, user_id, mode, amt, ref), fetch_one=True
+        )
+        msg = res["msg"] if res else "Unknown error"
+        if msg.startswith("Success"):
+            return True, msg, None
+        return False, msg, None
+    except Exception as e:
+        return False, f"Database error: {e}", None
 
 def _save_verify_receivable_amt(db, d, sid):
     """
@@ -3084,6 +3154,33 @@ def _save_verify_receivable_amt(db, d, sid):
         mode=d.get("mode", "cash"), amount=amt,
     )
     return ok, msg, rec_id
+
+def _save_reject_receivable_amt(db, d, sid):
+    # Determine if it's a bill group or a receipt by checking the type of entity_id.
+    p_id = d.get("entity_id")
+    if not p_id: return False, "ID is required", None
+    
+    penalty = d.get("penalty_amount")
+    try: penalty = float(penalty) if penalty else 0
+    except: penalty = 0
+    
+    confirmed_by = d.get("user_id")
+    try: confirmed_by = int(confirmed_by) if confirmed_by else None
+    except: confirmed_by = None
+    
+    is_uuid = "-" in str(p_id)
+    p_type = 'bill_group' if is_uuid else 'receipt'
+    
+    try:
+        res = db._execute(
+            "SELECT fn_reject_apartment_self_payment(%s, %s, %s, %s) as msg",
+            (p_type, str(p_id), confirmed_by, penalty), fetch_one=True
+        )
+        msg = res["msg"] if res else "Unknown error"
+        if msg.startswith("Success"): return True, msg, None
+        return False, msg, None
+    except Exception as e:
+        return False, f"Database error: {e}", None
 
 
 # ════════════════════════════════════════════════════════════════════════════

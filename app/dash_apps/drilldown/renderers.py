@@ -3169,8 +3169,16 @@ def render_fy_closing_card(rows: list, error: str | None,
                 html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
                          style={"fontSize": "11px", "color": "#999"}),
             ]),
-        ], style={"display": "flex", "alignItems": "center"}),
-        pills,
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+        html.Div([
+            pills,
+            html.A(
+                [html.I(className="fas fa-file-csv me-2"), "Mutuality CSV"],
+                href=f"/export/mutuality_report?fy={selected_fy}" if selected_fy else "#",
+                className="btn btn-outline-success btn-sm",
+                style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px", "marginBottom": "12px"}
+            ) if selected_fy else None,
+        ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
     ], style={"padding": "12px 16px",
               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
 
@@ -3379,12 +3387,31 @@ def render_verify_receivable_card(
                     style={"fontSize": "13px"},
                 ), width=7),
             ], className="mb-2"),
-            dbc.Button(
-                [html.I(className="fas fa-check me-2"), "Confirm Receipt"],
-                id={"type": "form-submit", "entity": "verify_receivable_amt", "card_id": "form_verify_receivable"},
-                n_clicks=0, color="success", className="mt-3 w-100",
-                style={"borderRadius": "12px", "fontWeight": "700"},
-            ),
+            dbc.Row([
+                dbc.Col(dbc.Label("Bounce Penalty (if rejecting) ₹",
+                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                        width=5, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "verify_receivable_amt", "field": "penalty_amount"},
+                    type="number", value="", min=0, step=0.01,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                    placeholder="Penalty amount",
+                ), width=7),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Button(
+                    [html.I(className="fas fa-times me-2"), "Reject Payment"],
+                    id={"type": "form-submit", "entity": "reject_receivable_amt", "card_id": "form_verify_receivable"},
+                    n_clicks=0, color="danger", className="mt-3 w-100",
+                    style={"borderRadius": "12px", "fontWeight": "700"},
+                ), width=6),
+                dbc.Col(dbc.Button(
+                    [html.I(className="fas fa-check me-2"), "Confirm Receipt"],
+                    id={"type": "form-submit", "entity": "verify_receivable_amt", "card_id": "form_verify_receivable"},
+                    n_clicks=0, color="success", className="mt-3 w-100",
+                    style={"borderRadius": "12px", "fontWeight": "700"},
+                ), width=6),
+            ]),
         ], style={"padding": "16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
@@ -3404,7 +3431,9 @@ def render_pay_dues_card(
     prefill_mode: str = "cash",
     prefill_particulars: str = "",
     society_id=None,
+    bill_groups=None,
 ) -> html.Div:
+    if bill_groups is None: bill_groups = []
     color = "#17976e"
     overdue_color = "#de5c52" if overdue_dues > 0 else "#17976e"
 
@@ -3425,11 +3454,121 @@ def render_pay_dues_card(
                               "textAlign": "center", "padding": "10px"}), width=6),
     ], className="mb-3")
 
+    fifo_tab = dbc.Tab(label="FIFO Pay", tab_id="fifo", children=[
+        html.Div([
+            dues_summary,
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                f"Payment applied FIFO — oldest dues first. "
+                f"Excess beyond ₹{pending_dues:,.2f} credited as advance.",
+            ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
+                                    "borderRadius": "10px", "marginBottom": "12px"}),
+            # Hidden fields
+            dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "entity_id"},
+                      type="hidden", value=str(entity_id or "")),
+            dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "role"},
+                      type="hidden", value="apartment"),
+            dcc.Input(id={"type": "form-entity-pk", "entity": "pay_due"},
+                      type="hidden", value=str(entity_id or "")),
+            # Amount
+            dbc.Row([
+                dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due", "field": "amount"},
+                    type="number", value=str(prefill_amount) if prefill_amount else "",
+                    min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            # Mode
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "pay_due", "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ],
+                    value=prefill_mode, clearable=False, style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            # Particulars
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": "pay_due", "field": "particulars"},
+                    value=prefill_particulars, rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Apply Payment (FIFO)"],
+                id={"type": "form-submit", "entity": "pay_due", "card_id": "form_pay_dues_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"paddingTop": "15px"})
+    ])
+
+    bg_options = []
+    for bg in bill_groups:
+        lbl = f"{bg['period_month']} — {bg['desc']} (₹{bg['amount']:,.2f})"
+        bg_options.append({"label": lbl, "value": bg['bill_group_id']})
+
+    bill_group_tab = dbc.Tab(label="Bill Group Pay", tab_id="bill_group", children=[
+        html.Div([
+            dbc.Row([
+                dbc.Col(dbc.Label("Select Bill", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "pay_due_bg", "field": "bill_group_id"},
+                    options=bg_options, placeholder="Select a bill...", style={"fontSize": "13px"}
+                ), width=8)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due_bg", "field": "amount"},
+                    type="number", min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "pay_due_bg", "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ], value=prefill_mode, clearable=False, style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Reference", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due_bg", "field": "reference"},
+                    type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8)
+            ], className="mb-2"),
+            
+            dcc.Input(id={"type": "form-field", "entity": "pay_due_bg", "field": "role"}, type="hidden", value="apartment"),
+            dcc.Input(id={"type": "form-field", "entity": "pay_due_bg", "field": "entity_id"}, type="hidden", value=str(entity_id or "")),
+            
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Report Payment (Bill Group)"],
+                id={"type": "form-submit", "entity": "pay_due_bg", "card_id": "form_pay_dues_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"paddingTop": "15px"})
+    ])
+
     return html.Div([
         html.Div(
             html.Div([
-                html.Div(html.I(className="fas fa-rupee-sign",
-                                style={"color": "#fff", "fontSize": "16px"}),
+                html.Div(html.I(className="fas fa-rupee-sign", style={"color": "#fff", "fontSize": "16px"}),
                          style={"width": "38px", "height": "38px", "borderRadius": "10px",
                                 "background": f"linear-gradient(135deg,{color},{color}aa)",
                                 "display": "flex", "alignItems": "center",
@@ -3440,77 +3579,16 @@ def render_pay_dues_card(
                              style={"fontSize": "11px", "color": "#999"}),
                 ]),
             ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "12px 16px",
-                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+            style={"padding": "12px 16px", "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
         ),
         html.Div([
             html.Div([
-                dues_summary,
-                dbc.Alert([
-                    html.I(className="fas fa-info-circle me-2"),
-                    f"Payment applied FIFO — oldest dues first. "
-                    f"Excess beyond ₹{pending_dues:,.2f} credited as advance.",
-                ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
-                                        "borderRadius": "10px", "marginBottom": "12px"}),
-                # Hidden fields
-                dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "entity_id"},
-                          type="hidden", value=str(entity_id or "")),
-                dcc.Input(id={"type": "form-field", "entity": "pay_due", "field": "role"},
-                          type="hidden", value="apartment"),
-                dcc.Input(id={"type": "form-entity-pk", "entity": "pay_due"},
-                          type="hidden", value=str(entity_id or "")),
-                # Amount
-                dbc.Row([
-                    dbc.Col(dbc.Label("Amount (₹) *",
-                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                            width=4, style={"paddingTop": "6px"}),
-                    dbc.Col(dbc.Input(
-                        id={"type": "form-field", "entity": "pay_due", "field": "amount"},
-                        type="number", value=str(prefill_amount) if prefill_amount else "",
-                        min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
-                    ), width=8),
-                ], className="mb-2"),
-                # Mode
-                dbc.Row([
-                    dbc.Col(dbc.Label("Payment Mode *",
-                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                            width=4, style={"paddingTop": "6px"}),
-                    dbc.Col(dcc.Dropdown(
-                        id={"type": "form-field", "entity": "pay_due", "field": "mode"},
-                        options=[
-                            {"label": "Cash",          "value": "cash"},
-                            {"label": "Bank Transfer", "value": "bank_transfer"},
-                            {"label": "UPI",           "value": "upi"},
-                            {"label": "Cheque",        "value": "cheque"},
-                            {"label": "Other",         "value": "other"},
-                        ],
-                        value=prefill_mode, clearable=False,
-                        style={"fontSize": "13px"},
-                    ), width=8),
-                ], className="mb-2"),
-                # Particulars
-                dbc.Row([
-                    dbc.Col(dbc.Label("Particulars *",
-                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                            width=4, style={"paddingTop": "6px"}),
-                    dbc.Col(dbc.Textarea(
-                        id={"type": "form-field", "entity": "pay_due", "field": "particulars"},
-                        value=prefill_particulars, rows=2,
-                        style={"fontSize": "13px", "borderRadius": "10px"},
-                    ), width=8),
-                ], className="mb-2"),
-                dbc.Button(
-                    [html.I(className="fas fa-check me-2"), "Apply Payment (FIFO)"],
-                    id={"type": "form-submit", "entity": "pay_due", "card_id": "form_pay_dues_new"},
-                    n_clicks=0, color="success", className="mt-3 w-100",
-                    style={"borderRadius": "12px", "fontWeight": "700"},
-                ),
+                dbc.Tabs([fifo_tab, bill_group_tab], active_tab="fifo", style={"borderBottom": f"2px solid {color}33"}),
             ], style={"flex": "1", "minWidth": "260px"}),
             render_payment_qr_widget(society_id),
-        ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap",
-                  "gap": "16px", "alignItems": "flex-start"}),
-    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
-              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+        ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22", "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4248,6 +4326,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
         "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
         "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
         "qr_url": qr_url, "qr_caption": QR_CAPTION,
+        "is_provisional": (receipt.get("status") in ("pending", "unverified")),
     }
 
     def _row(label, value):
@@ -4287,7 +4366,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
             _row("Account", account),
             _row("Amount", f"₹{amount:,.2f}"),
             _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
-            _row("Status", status),
+            _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})] if receipt.get("status") in ("pending", "unverified") else status)),
             html.Div([
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
