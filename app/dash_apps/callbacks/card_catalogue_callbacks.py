@@ -5,7 +5,7 @@ import time
 from datetime import date, datetime
 
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, html, no_update
+from dash import ALL, Input, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.loaders import _is_db_error
@@ -222,9 +222,55 @@ def register_card_catalogue_callbacks(app):
         print("⚠️  Cannot import KPI_CARDS — KPI refresh skipped")
         KPI_CARDS = {}
 
+    # Spin the header's refresh icon the instant the button is clicked
+    # (client-side, so it's instantaneous rather than waiting on the
+    # server round trip below). The server-side callback clears the
+    # spin class once refresh_kpi_values() actually finishes.
+    app.clientside_callback(
+        "function(n){ return (n && n > 0) ? 'fas fa-rotate kpi-refresh-spin' : 'fas fa-rotate'; }",
+        Output("hdr-refresh-kpi-icon", "className", allow_duplicate=True),
+        Input("hdr-refresh-kpi-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── Debounce: stop rapid repeat clicks on the refresh button ──────────
+    # Pure client-side, time-based (1s, set by kpi-refresh-debounce's
+    # `interval` in app_shell.py) — deliberately NOT tied to how long the
+    # server-side KPI fetch takes, so it debounces the *click*, not the
+    # network round trip. Two halves:
+    #   1) on click: disable the button immediately and (re)arm the
+    #      one-shot Interval (reset n_intervals to 0, un-disable it so it
+    #      starts counting down again from this click).
+    #   2) when the Interval fires once: re-enable the button and disable
+    #      the Interval again so it sits idle until the next click.
+    app.clientside_callback(
+        "function(n){ return n ? [true, 0, false] : [window.dash_clientside.no_update, "
+        "window.dash_clientside.no_update, window.dash_clientside.no_update]; }",
+        Output("hdr-refresh-kpi-btn", "disabled", allow_duplicate=True),
+        Output("kpi-refresh-debounce", "n_intervals", allow_duplicate=True),
+        Output("kpi-refresh-debounce", "disabled", allow_duplicate=True),
+        Input("hdr-refresh-kpi-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        "function(n){ return n ? [false, true] : [window.dash_clientside.no_update, "
+        "window.dash_clientside.no_update]; }",
+        Output("hdr-refresh-kpi-btn", "disabled", allow_duplicate=True),
+        Output("kpi-refresh-debounce", "disabled", allow_duplicate=True),
+        Input("kpi-refresh-debounce", "n_intervals"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
         Output("toast-store", "data", allow_duplicate=True),
+        Output("hdr-refresh-kpi-icon", "className", allow_duplicate=True),
+        # Manual refresh: the "Refresh KPI" button in the header
+        # (app_shell.py's _header()). Only refetches the KPI row already
+        # on screen — same cards, same portal/tab — it doesn't navigate or
+        # rebuild anything, it just forces the values below to be
+        # refetched from the DB instead of served from the KPI cache.
+        Input("hdr-refresh-kpi-btn", "n_clicks"),
         # BUG FIX: this used to listen on Input("url", "pathname") — the same
         # raw Input that shell_callbacks.py's route_page() ALSO listens on,
         # and route_page() is what actually rebuilds portal-content (and
@@ -257,7 +303,10 @@ def register_card_catalogue_callbacks(app):
         prevent_initial_call="initial_duplicate",
     )
     @require_session
-    def refresh_kpi_values(_content_store, auth_data, kpi_ids, kpi_row_style, pathname):
+    def refresh_kpi_values(_refresh_clicks, _content_store, auth_data, kpi_ids, kpi_row_style, pathname):
+        manual_refresh = ctx.triggered_id == "hdr-refresh-kpi-btn"
+        icon_class = "fas fa-rotate"  # always reset the spin once we're done
+
         if not kpi_ids:
             raise PreventUpdate
 
@@ -267,7 +316,7 @@ def register_card_catalogue_callbacks(app):
             raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):
-            return ["—"] * len(kpi_ids), no_update
+            return ["—"] * len(kpi_ids), no_update, icon_class
 
         sid       = auth_data.get("society_id")
         role      = auth_data.get("role", "admin")
@@ -529,7 +578,12 @@ def register_card_catalogue_callbacks(app):
             entity_for_key = scope_entity_id if override else None
             ckey = _cache_key(sid, role, card_id, entity_for_key)
 
-            cached = _get_cached(ckey)
+            # Manual "Refresh KPI" click: force a live DB fetch for every
+            # card on the current tab instead of serving whatever's still
+            # sitting in the cache (which is exactly what a tab-switch/
+            # portal-content re-render — the other Input on this callback —
+            # would otherwise happily do within the TTL window).
+            cached = None if manual_refresh else _get_cached(ckey)
             if cached is not None:
                 results[idx] = cached
                 cache_hits += 1
@@ -643,5 +697,11 @@ def register_card_catalogue_callbacks(app):
                 f"(groups: {', '.join(sorted(active_groups)) or '-'}) portal={pathname}"
             )
 
-        toast = _err_toast(first_err) if first_err else no_update
-        return results, toast
+        if first_err:
+            toast = _err_toast(first_err)
+        elif manual_refresh:
+            toast = {"type": "success", "message": "KPIs refreshed."}
+        else:
+            toast = no_update
+
+        return results, toast, icon_class

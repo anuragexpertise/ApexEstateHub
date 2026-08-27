@@ -247,6 +247,26 @@ a {
     color: var(--primary);
 }
 
+.kpi-refresh-btn:hover,
+.kpi-refresh-btn:focus {
+    background: rgba(var(--theme-dark-rgb), 0.08) !important;
+    color: var(--primary) !important;
+}
+
+.kpi-refresh-btn:disabled {
+    cursor: not-allowed !important;
+    opacity: 0.55;
+}
+
+@keyframes kpi-refresh-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+.kpi-refresh-spin {
+    animation: kpi-refresh-spin 0.7s linear infinite;
+}
+
 .glass-breadcrumb {
     display: flex;
     align-items: center;
