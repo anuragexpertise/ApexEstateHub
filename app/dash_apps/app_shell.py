@@ -579,6 +579,47 @@ def _concern_invite_modal() -> dbc.Modal:
     )
 
 
+# ── Drill-In entity picker modal ──────────────────────────────────────────
+# Generic tap-through card picker for entity_id-style fields on schema-
+# driven forms (New Receipt, New Expense, New Concern, and any other field
+# opted into app/dash_apps/drilldown/drillin.py's DRILLIN_CONFIG). Same UX
+# pattern as the Concerns "Invite to Bid" modal above, but fully generic —
+# see drillin_callbacks.py for the navigation logic.
+
+def _drillin_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Select Entity", id="drillin-modal-title"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="drillin-breadcrumb"),
+                    dbc.InputGroup([
+                        dbc.InputGroupText([html.I(className="fas fa-search")]),
+                        dbc.Input(id="drillin-search", placeholder="Search…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    dcc.Loading(
+                        html.Div(id="drillin-nav-container",
+                                 style={"maxHeight": "420px", "overflowY": "auto"}),
+                        type="circle", color="#1d74d8",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button([html.I(className="fas fa-arrow-left me-1"), "Back"],
+                           id="drillin-back-btn-modal", color="secondary", size="sm",
+                           outline=True, style={"display": "none"}),
+                dbc.Button("Clear Selection", id="drillin-clear-btn",
+                           color="secondary", size="sm", outline=True),
+                dbc.Button("Cancel", id="close-drillin-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="drillin-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20070"},
+    )
+
+
 # ── Concern Bid modal ────────────────────────────────────────────────────────
 # Vendor's "Save Bid" action on a concern profile. Small single-field modal —
 # doesn't need the full schema-driven form engine, mirrors _assign_to_modal's
@@ -801,6 +842,10 @@ def shell_layout() -> html.Div:
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
             dcc.Store(id="invite-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
+            dcc.Store(id="drillin-store",             storage_type="memory",
+                       data={"entity": None, "field": None, "config": None,
+                             "role": None, "target_table": None,
+                             "group_label": None, "group": None, "search": ""}),
             # NOTE (2026-08): poll-action-store / poll-detail-store removed —
             # they were only ever written/read by poll_callbacks.py's now-
             # removed orphaned callbacks (dead since the Polls tab moved to
@@ -924,6 +969,9 @@ def shell_layout() -> html.Div:
 
             # ── Concern Bid modal (vendor: Save Bid action) ───────────────────────
             _concern_bid_modal(),
+
+            # ── Drill-In entity picker modal (New Receipt/Expense/Concern/…) ─────
+            _drillin_modal(),
 
             # ── Channel Subscribers modal ──────────────────────────────────────────
             dbc.Modal([

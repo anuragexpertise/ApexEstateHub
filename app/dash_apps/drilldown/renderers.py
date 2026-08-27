@@ -2144,6 +2144,18 @@ def render_form_card(card_id: str, title: str, icon: str,
     if entity == "society" and prefill.get("id") and (role or "admin") != "master":
         fields = [f for f in fields if f.get("id") != "plan"]
 
+    # A "role"-mode drill-in field (e.g. receipts.entity_id + receipts.role)
+    # sets BOTH columns from one tap in the picker modal — the sibling role
+    # column would otherwise still render as its own plain CHECK-options
+    # select, letting it drift out of sync with the picker's choice. Hide
+    # it here; its value travels as a form-field-hidden input alongside the
+    # drill-in field itself (see the "drillin" branch below).
+    for f in fields:
+        if f.get("type") == "drillin" and (f.get("drillin") or {}).get("mode") == "role":
+            _role_fid = f["drillin"]["role_field"]
+            fields = [x for x in fields if x.get("id") != _role_fid]
+            break
+
     form_rows = [
           dcc.Input(id={"type":"form-entity-pk","entity":entity},
                     type="hidden", value=str(prefill.get("id",""))),
@@ -2255,6 +2267,70 @@ def render_form_card(card_id: str, title: str, icon: str,
                 value=str(pre_val) if pre_val else "",
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
+
+        elif ftype == "drillin":
+            # Tap-through card picker (New Receipt/Expense/Concern/… entity
+            # selection) — replaces a raw numeric entity_id input or a long
+            # flat FK dropdown. See app/dash_apps/drilldown/drillin.py and
+            # drillin_callbacks.py for the modal + its wiring.
+            from app.dash_apps.drilldown.drillin import (
+                role_target_table, drillin_label_for, TABLE_ICON_COLOR,
+            )
+            drillin_cfg = f.get("drillin") or {}
+            d_mode = drillin_cfg.get("mode")
+            role_fid = drillin_cfg.get("role_field") if d_mode == "role" else None
+            role_val = prefill.get(role_fid) if role_fid else None
+
+            target_table = None
+            if d_mode == "role" and role_val:
+                _tt = role_target_table(drillin_cfg, role_val)
+                target_table = _tt["table"] if _tt else None
+            elif d_mode == "single":
+                target_table = drillin_cfg.get("table")
+
+            picked_label = None
+            if pre_val and target_table:
+                picked_label = drillin_label_for(target_table, pre_val, society_id)
+
+            icon, color = (TABLE_ICON_COLOR.get(target_table, ("fas fa-hand-pointer", "#7d8ea3"))
+                           if target_table else ("fas fa-hand-pointer", "#7d8ea3"))
+            role_label = (drillin_cfg.get("roles", {}).get(role_val) or {}).get("label") if role_val else None
+            if picked_label:
+                display_text = f"{role_label + ': ' if role_label and d_mode == 'role' else ''}{picked_label}"
+            else:
+                display_text = "Tap to select…"
+
+            hidden_inputs = [
+                dcc.Input(
+                    id={"type": "form-field-hidden", "entity": entity, "field": fid},
+                    type="hidden", value=str(pre_val) if pre_val else "",
+                ),
+            ]
+            if role_fid:
+                hidden_inputs.append(dcc.Input(
+                    id={"type": "form-field-hidden", "entity": entity, "field": role_fid},
+                    type="hidden", value=str(role_val) if role_val else "",
+                ))
+
+            ctrl = html.Div([
+                *hidden_inputs,
+                html.Div([
+                    html.I(className=f"{icon} me-2", style={"color": color}),
+                    html.Span(display_text, style={
+                        "flex": "1",
+                        "color": "#2a3b52" if picked_label else "#9aa7b8",
+                        "fontWeight": "600" if picked_label else "400",
+                    }),
+                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                ], id={"type": "drillin-trigger", "entity": entity, "field": fid},
+                   n_clicks=0,
+                   style={
+                       "display": "flex", "alignItems": "center",
+                       "padding": "10px 12px", "borderRadius": "10px",
+                       "border": "1px solid #dbe3ee", "background": "#fff",
+                       "cursor": "pointer", "fontSize": "13px",
+                   }),
+            ])
 
         elif ftype == "readonly":
             ctrl = dbc.Input(

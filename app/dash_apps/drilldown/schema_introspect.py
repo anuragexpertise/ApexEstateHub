@@ -466,8 +466,19 @@ def _build_field(col: dict) -> dict:
     ftype   = _map_type(col["pg_type"], name, table)
     field   = {"id": name, "label": _FK_LABEL_OVERRIDES.get(name, _labelize(name)), "type": ftype}
 
+    # Drill-in picker (New Receipt/Expense/Concern/… entity pickers) takes
+    # priority over everything below — a polymorphic entity_id has no FK
+    # constraint to introspect (see DRILLIN_CONFIG's docstring), and a
+    # single-table FK we've opted into drill-in (e.g. concerns.apartment_id)
+    # should render as the tap-through picker, not a flat dropdown.
+    from app.dash_apps.drilldown.drillin import get_drillin_config
+    _drillin = get_drillin_config(table, name)
+    if _drillin is not None:
+        field["type"] = "drillin"
+        field["drillin"] = _drillin
+
     # Account-dropdown overrides take priority over generic FK/check handling
-    if ftype.startswith("account_dropdown"):
+    elif ftype.startswith("account_dropdown"):
         pass   # type already set correctly; no options needed here
 
     elif (table, name) in _EXPLICIT_SELECT_OPTIONS:

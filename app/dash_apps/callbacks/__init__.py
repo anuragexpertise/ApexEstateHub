@@ -194,6 +194,15 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ invite_to_callbacks failed: {e}")
 
+    # 14e. Drill-In entity picker modal (New Receipt/Expense/Concern/… entity_id
+    #     and FK fields opted into drillin.py's DRILLIN_CONFIG).
+    #     Requires "drillin-modal" + "drillin-store" in app_shell.py.
+    try:
+        from .drillin_callbacks import register_drillin_callbacks
+        register_drillin_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ drillin_callbacks failed: {e}")
+
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks
