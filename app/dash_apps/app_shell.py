@@ -303,6 +303,33 @@ def _header() -> html.Header:
             ),
             html.Div(
                 [
+                    html.Button(
+                        html.I(className="fas fa-rotate", id="hdr-refresh-kpi-icon"),
+                        id="hdr-refresh-kpi-btn",
+                        n_clicks=0,
+                        title="Refresh KPIs on this tab",
+                        className="kpi-refresh-btn",
+                        style={
+                            "background": "none", "border": "none", "color": "#000",
+                            "fontSize": "16px", "cursor": "pointer", "marginRight": "10px",
+                            "width": "34px", "height": "34px", "borderRadius": "50%",
+                            "display": "flex", "alignItems": "center", "justifyContent": "center",
+                        },
+                    ),
+                    # Debounce timer for the refresh button above (see the
+                    # two clientside callbacks in card_catalogue_callbacks.py
+                    # that arm/disarm it): starts disabled, gets a fresh
+                    # single-shot fire armed on every click, and its
+                    # n_intervals tick is what re-enables the button —
+                    # purely time-based, independent of how long the
+                    # server-side KPI fetch itself takes.
+                    dcc.Interval(
+                        id="kpi-refresh-debounce",
+                        interval=1000,
+                        n_intervals=0,
+                        max_intervals=-1,
+                        disabled=True,
+                    ),
                     html.Div(id="hdr-entity-name", children="User",
                              style={"fontWeight": "600", "fontSize": "13px", "marginRight": "8px"}),
                     html.Div([
