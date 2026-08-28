@@ -54,6 +54,7 @@ import os
 from pathlib import Path
 from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export
@@ -2583,8 +2584,7 @@ def _render_card(
             bill_groups = []
             if apt_id and sid_val:
                 try:
-                    from database.db_manager import db
-                    bill_groups, _ = db.execute("""
+                    bill_groups = db._execute("""
                         SELECT bill_group_id, 
                                SUM(amount - paid_amount)::FLOAT as amount,
                                MIN(period_month)::TEXT as period_month,
@@ -2594,7 +2594,7 @@ def _render_card(
                            AND status IN ('pending', 'partial')
                          GROUP BY bill_group_id
                          ORDER BY MIN(period_month) ASC
-                    """, (sid_val, apt_id))
+                    """, (sid_val, apt_id), fetch_all=True) or []
                 except Exception as e:
                     print(f"Error fetching bill groups: {e}")
                     
