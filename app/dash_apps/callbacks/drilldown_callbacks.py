@@ -289,9 +289,9 @@ def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
             {"_toast": {"type": "error", "message": "Invalid bill group ID"}}
     try:
         user_id = get_current_user_id() or (auth or {}).get("user_id")
-        ok, msg = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
+        ok, msg, receipt_id = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
     except Exception as e:
-        ok, msg = False, f"Confirm error: {e}"
+        ok, msg, receipt_id = False, f"Confirm error: {e}", None
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
@@ -308,12 +308,15 @@ def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
     else:
         toast_type, toast_msg = "error", msg
     print(f"[CONFIRM_BG] entity={entity} bg_id={bg_id} sid={sid} ok={ok} msg={msg}")
+    toast_payload = {"type": toast_type, "message": toast_msg}
+    if ok and receipt_id:
+        toast_payload["action"] = {"kind": "view_receipts", "receipt_ids": [receipt_id]}
     return (
         store,
         content,
         bc,
         {"display": "none"} if hide_kpis else {"display": "grid"},
-        {"_toast": {"type": toast_type, "message": toast_msg}},
+        {"_toast": toast_payload},
     )
 
 
@@ -1457,6 +1460,59 @@ def register_drilldown_callbacks(app):
             toast_data = no_update
         return store, content, bc, kpi_style, toast_data
 
+    # ── 1b. TOAST → OPEN RECEIPT(S) ─────────────────────────────────────────
+    # "View Receipt"/"View N Receipts" button rendered inside the toast by
+    # shell_callbacks.show_toast when a pay-dues save's toast carries a
+    # view_receipts action (see _save_pay_dues / _save_pay_due_bg / the
+    # bill-group confirm queue). Separate callback (allow_duplicate on the
+    # shared drilldown Outputs) rather than folding into route_drilldown —
+    # keeps that already-large router's Input list/signature untouched.
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Output("kpi-row", "style", allow_duplicate=True),
+        Input({"type": "toast-view-receipts", "ids": ALL}, "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_receipts_from_toast(n_clicks_list, store, auth):
+        if not any(n_clicks_list or []):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not triggered or triggered.get("type") != "toast-view-receipts":
+            raise PreventUpdate
+
+        ids = [int(i) for i in (triggered.get("ids") or "").split(",") if i.strip().isdigit()]
+        if not ids:
+            raise PreventUpdate
+
+        role = (auth or {}).get("role")
+        sid = (auth or {}).get("society_id")
+        store = store or nav_state.initial_state(role, sid)
+
+        if len(ids) == 1:
+            store = nav_state.navigate_to(
+                store, "form_receipt_print", "Print Receipt",
+                prefill={"receipt_id": ids[0]}, entity_pk=ids[0],
+            )
+        else:
+            # Scope the list to whichever apartment these receipts belong
+            # to (they're always from the same payment event / apartment).
+            rec = db._execute(
+                "SELECT entity_id, role FROM receipts WHERE id = %s",
+                (ids[0],), fetch_one=True,
+            )
+            filters = {"entity_id": rec["entity_id"], "role": rec["role"]} if rec else {}
+            store = nav_state.navigate_to(store, "list_receipts", "Receipts", filters=filters)
+
+        hide_kpis = len(store.get("stack", [])) > 1
+        content, bc, db_err = _render_current(store, auth)
+        kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+        return store, content, bc, kpi_style
+
     # ── 2. FORM SUBMIT ────────────────────────────────────────────────────────
     
     @app.callback(
@@ -1727,6 +1783,20 @@ def register_drilldown_callbacks(app):
         # ── 7. Call the appropriate save handler ──────────────────────────────
         ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
 
+        # A few save handlers (pay_due, pay_due_bg) embed a parseable
+        # "[[receipt:<id>]]" marker in their success message when the
+        # payment created/confirmed a receipt — extracted here (rather than
+        # widening new_id, which _move_temp_images/entity_pk below both
+        # already depend on meaning "this row's own primary key") so the
+        # toast can offer a "View Receipt" action without touching any
+        # other save path's return shape.
+        receipt_ids = []
+        if ok and msg:
+            found = re.findall(r"\[\[receipt:(\d+)\]\]", msg)
+            if found:
+                receipt_ids = [int(x) for x in found]
+                msg = re.sub(r"\s*\[\[receipt:\d+\]\]", "", msg).strip()
+
         if ok:
             # KPI cards read counts/sums derived from whatever this save just
             # touched (receivables, transactions, concerns, assets, …) — the
@@ -1769,11 +1839,16 @@ def register_drilldown_callbacks(app):
 
         # Prefer the save message; fall back to any DB render error
         toast_msg = msg or db_err
+        toast_data = no_update
+        if toast_msg:
+            toast_data = {"type": "success", "message": toast_msg}
+            if receipt_ids:
+                toast_data["action"] = {"kind": "view_receipts", "receipt_ids": receipt_ids}
         return (
             store,
             content,
             bc,
-            {"type": "success", "message": toast_msg} if toast_msg else no_update,
+            toast_data,
             {"display": "none"} if hide_kpis else {"display": "grid"},
         )
 
@@ -3180,7 +3255,11 @@ def _save_pay_dues(db, d, sid):
                 fetch_one=True,
             )
             msg = (r or {}).get("status", "Unknown error")
-            return not str(msg).lower().startswith("error"), msg, None
+            receipt_id = (r or {}).get("receipt_id")
+            ok = not str(msg).lower().startswith("error")
+            if ok and receipt_id:
+                msg = f"{msg} [[receipt:{receipt_id}]]"
+            return ok, msg, None
         except Exception as e:
             return False, str(e), None
 
@@ -3189,6 +3268,9 @@ def _save_pay_dues(db, d, sid):
         confirmed_by=confirmed_by, particulars=d.get("particulars"),
     )
     trx_id = result.get("transaction_id") if ok and result else None
+    receipt_id = result.get("receipt_id") if ok and result else None
+    if ok and receipt_id:
+        msg = f"{msg} [[receipt:{receipt_id}]]"
     # NEW: confirm to the resident that payment was applied
     if ok:
         try:
@@ -3229,16 +3311,11 @@ def _save_pay_due_bg(db, d, sid):
         # ownership check inside fn_self_report_receivable_by_bill_group is
         # for owner self-pay only — an admin isn't the apartment's linked
         # user and must never be routed through it.
-        ok, msg = False, ""
-        try:
-            r = db._execute(
-                "SELECT fn_verify_receivable_by_bill_group(%s,%s,%s,%s) AS msg",
-                (bg_id, user_id, mode, amt), fetch_one=True,
-            )
-            msg = (r or {}).get("msg", "Done")
-            ok = not str(msg).lower().startswith("error")
-        except Exception as e:
-            ok, msg = False, str(e)
+        ok, msg, receipt_id = loaders.verify_receivable_bill_group(
+            bg_id, confirmed_by=user_id, mode=mode, amount=amt
+        )
+        if ok and receipt_id:
+            msg = f"{msg} [[receipt:{receipt_id}]]"
         return ok, msg, None
 
     try:
