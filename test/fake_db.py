@@ -1006,7 +1006,7 @@ class FakeDB:
         mode = p.get("p2") or p.get("mode", "cash")
         amount = p.get("p3") or p.get("amount")
         recs = [r for r in self.tables.get("receivables", [])
-                if r.get("bill_group_id") == bill_group_id and r.get("status") in ("pending", "partial")]
+                if r.get("bill_group_id") == bill_group_id and r.get("status") in ("pending", "partial", "unverified")]
         recs.sort(key=lambda r: (r.get("due_date") or "", r.get("id", 0)))
         remaining = float(amount) if amount is not None else sum(
             float(r.get("amount", 0)) - float(r.get("paid_amount", 0)) for r in recs)
@@ -1285,6 +1285,173 @@ class FakeDB:
                 "payment_date": trx_date,
                 "no_pan": not pan,
             })
+        if fetch_one:
+            return rows[0] if rows else None
+        return rows
+
+    def _fn_confirm_apartment_self_payment(self, p, fetch_one, fetch_all):
+        receipt_id = p.get("p0") or p.get("receipt_id")
+        confirmed_by = p.get("p1") or p.get("confirmed_by")
+        mode = p.get("p2") or p.get("mode", "cash")
+        recs = [r for r in self.tables.get("receipts", [])
+                if r.get("id") == receipt_id and r.get("status") == "pending"]
+        if not recs:
+            return {"msg": "Error: Receipt not found or not pending"}
+        receipt = recs[0]
+        receipt["status"] = "confirmed"
+        receipt["confirmed_by"] = confirmed_by
+        receipt["confirmed_at"] = datetime.utcnow().isoformat()
+
+        apt_id = receipt.get("entity_id")
+        amount = float(receipt.get("amount", 0) or 0)
+        open_recs = [r for r in self.tables.get("receivables", [])
+                     if r.get("entity_id") == apt_id and r.get("role") == "apartment"
+                     and r.get("status") in ("pending", "partial")]
+        open_recs.sort(key=lambda r: (r.get("due_date") or "", r.get("id", 0)))
+        remaining = amount
+        for rec in open_recs:
+            if remaining <= 0:
+                break
+            residual = float(rec.get("amount", 0)) - float(rec.get("paid_amount", 0))
+            take = min(remaining, residual)
+            rec["paid_amount"] = float(rec.get("paid_amount", 0)) + take
+            rec["status"] = "paid" if rec["paid_amount"] >= float(rec.get("amount", 0)) else "partial"
+            rec["confirmed_by"] = confirmed_by
+            rec["confirmed_at"] = datetime.utcnow().isoformat()
+            remaining -= take
+
+        return {"msg": f"Success: Payment confirmed — transaction #9999"}
+
+    def _fn_report_apartment_payment_fifo(self, p, fetch_one, fetch_all):
+        apartment_id = p.get("p0") or p.get("apartment_id")
+        amount = float(p.get("p1") or p.get("amount", 0))
+        mode = p.get("p2") or p.get("mode", "cash")
+        reported_by = p.get("p3") or p.get("reported_by")
+        particulars = p.get("p4") or p.get("particulars", "Maintenance Payment (Self-reported, FIFO)")
+        reference = p.get("p5") or p.get("reference")
+        receipt_id = self._next_id("receipts")
+        self.tables["receipts"].append({
+            "id": receipt_id,
+            "society_id": 1,
+            "user_id": reported_by,
+            "entity_id": apartment_id,
+            "role": "apartment",
+            "receipt_date": date.today().isoformat(),
+            "acc_id": None,
+            "particulars": particulars,
+            "amount": amount,
+            "mode": mode,
+            "transaction_id": reference,
+            "status": "pending",
+            "confirmed_by": None,
+            "confirmed_at": None,
+            "created_at": datetime.utcnow().isoformat(),
+            "created_by": reported_by,
+        })
+        return {"receipt_id": receipt_id, "status": "Success: Payment reported (FIFO). Awaiting verification."}
+
+    def _fn_self_report_receivable_by_bill_group(self, p, fetch_one, fetch_all):
+        bill_group_id = p.get("p0") or p.get("bill_group_id")
+        reported_by = p.get("p1") or p.get("reported_by")
+        mode = p.get("p2") or p.get("mode", "cash")
+        amount = float(p.get("p3") or p.get("amount", 0))
+        reference = p.get("p4") or p.get("reference")
+        if amount <= 0:
+            return {"msg": "Error: amount must be > 0"}
+        recs = [r for r in self.tables.get("receivables", [])
+                if r.get("bill_group_id") == bill_group_id and r.get("status") in ("pending", "partial", "unverified")]
+        if not recs:
+            return {"msg": "Error: Bill group not found or nothing outstanding"}
+        for rec in recs:
+            rec["status"] = "unverified"
+            rec["reported_amount"] = amount
+            rec["reported_mode"] = mode
+            rec["reported_reference"] = reference
+            rec["reported_at"] = datetime.utcnow().isoformat()
+            rec["reported_by"] = reported_by
+        return {"msg": "Success: Payment reported. Awaiting verification."}
+
+    def _fn_reject_apartment_self_payment(self, p, fetch_one, fetch_all):
+        p_type = p.get("p0") or p.get("type")
+        p_id = p.get("p1") or p.get("id")
+        confirmed_by = p.get("p2") or p.get("confirmed_by")
+        penalty = float(p.get("p3") or p.get("penalty_amount", 0))
+        if p_type == "receipt":
+            recs = [r for r in self.tables.get("receipts", [])
+                    if r.get("id") == int(p_id) and r.get("status") == "pending"]
+            if not recs:
+                return {"msg": "Error: Receipt not found or not pending."}
+            recs[0]["status"] = "rejected"
+            recs[0]["confirmed_by"] = confirmed_by
+            recs[0]["confirmed_at"] = datetime.utcnow().isoformat()
+        elif p_type == "bill_group":
+            recs = [r for r in self.tables.get("receivables", [])
+                    if r.get("bill_group_id") == p_id and r.get("status") == "unverified"]
+            if not recs:
+                return {"msg": "Error: Bill group not found or not unverified."}
+            for rec in recs:
+                rec["status"] = "pending"
+                rec["reported_amount"] = None
+                rec["reported_mode"] = None
+                rec["reported_reference"] = None
+                rec["reported_at"] = None
+                rec["reported_by"] = None
+        else:
+            return {"msg": "Error: Invalid type"}
+        if penalty > 0:
+            penalty_id = self._next_id("receivables")
+            self.tables["receivables"].append({
+                "id": penalty_id,
+                "society_id": 1,
+                "entity_id": recs[0].get("entity_id") if recs else 0,
+                "role": "apartment",
+                "acc_id": 2311,
+                "description": "Bank Bounce Penalty",
+                "period_month": date.today().isoformat(),
+                "base_amount": penalty,
+                "amount": penalty,
+                "paid_amount": 0,
+                "paid_principal": 0,
+                "due_date": date.today().isoformat(),
+                "status": "pending",
+            })
+        return {"msg": "Success: Payment rejected."}
+
+    def _fn_income_tax_summary_fy(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        fy = int(p.get("p1") or p.get("fy"))
+        fy_start = f"{fy}-04-01"
+        fy_end = f"{fy+1}-03-31"
+        totals = {}
+        for t in self.tables.get("transactions", []):
+            if t.get("society_id") != sid:
+                continue
+            trx_date = t.get("trx_date") or ""
+            if not (fy_start <= trx_date <= fy_end):
+                continue
+            if t.get("status") != "paid":
+                continue
+            acc_id = t.get("acc_id")
+            account = next((a for a in self.tables.get("accounts", []) if a.get("id") == acc_id), None)
+            if not account:
+                continue
+            nature = account.get("mutuality_nature") or "non_mutual"
+            side = t.get("entry_side")
+            if side not in ("Cr", "Dr"):
+                continue
+            category = "Income" if side == "Cr" else "Expense"
+            key = (category, nature)
+            totals[key] = totals.get(key, 0.0) + float(t.get("amount", 0) or 0)
+        rows = []
+        for nature in ("mutual", "non_mutual"):
+            for category in ("Income", "Expense"):
+                amt = totals.get((category, nature), 0.0)
+                if amt != 0:
+                    rows.append({
+                        "category": category,
+                        "nature": nature,
+                        "total_amount": amt,
+                    })
         if fetch_one:
             return rows[0] if rows else None
         return rows

@@ -273,6 +273,93 @@ def _handle_list_confirm(entity, pk, sid, store, auth):
         {"_toast": {"type": toast_type, "message": toast_msg}},
     )
 
+
+def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
+    if not _require_admin(auth):
+        store["refresh"] = False
+        return (
+            store,
+            html.Div("", style={"display": "none"}),
+            [],
+            {"display": "none"},
+            {"_toast": {"type": "error", "message": "Only society admin can confirm"}},
+        )
+    if not bg_id:
+        return _empty_state("Missing bill group ID"), [], [], {"display": "none"}, \
+            {"_toast": {"type": "error", "message": "Invalid bill group ID"}}
+    try:
+        user_id = get_current_user_id() or (auth or {}).get("user_id")
+        ok, msg = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
+    except Exception as e:
+        ok, msg = False, f"Confirm error: {e}"
+    if ok:
+        invalidate_kpi_cache()
+    store["refresh"] = True
+    try:
+        content, bc, db_err = _render_current(store, auth)
+    except Exception as e:
+        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+    store["refresh"] = False
+    hide_kpis = len(store.get("stack", [])) > 1
+    if db_err:
+        toast_type, toast_msg = "error", db_err
+    elif ok:
+        toast_type, toast_msg = "success", msg
+    else:
+        toast_type, toast_msg = "error", msg
+    print(f"[CONFIRM_BG] entity={entity} bg_id={bg_id} sid={sid} ok={ok} msg={msg}")
+    return (
+        store,
+        content,
+        bc,
+        {"display": "none"} if hide_kpis else {"display": "grid"},
+        {"_toast": {"type": toast_type, "message": toast_msg}},
+    )
+
+
+def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
+    if not _require_admin(auth):
+        store["refresh"] = False
+        return (
+            store,
+            html.Div("", style={"display": "none"}),
+            [],
+            {"display": "none"},
+            {"_toast": {"type": "error", "message": "Only society admin can reject"}},
+        )
+    if not bg_id:
+        return _empty_state("Missing bill group ID"), [], [], {"display": "none"}, \
+            {"_toast": {"type": "error", "message": "Invalid bill group ID"}}
+    try:
+        user_id = get_current_user_id() or (auth or {}).get("user_id")
+        ok, msg = loaders.reject_receivable_bill_group(str(bg_id), confirmed_by=user_id)
+    except Exception as e:
+        ok, msg = False, f"Reject error: {e}"
+    if ok:
+        invalidate_kpi_cache()
+    store["refresh"] = True
+    try:
+        content, bc, db_err = _render_current(store, auth)
+    except Exception as e:
+        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+    store["refresh"] = False
+    hide_kpis = len(store.get("stack", [])) > 1
+    if db_err:
+        toast_type, toast_msg = "error", db_err
+    elif ok:
+        toast_type, toast_msg = "success", msg
+    else:
+        toast_type, toast_msg = "error", msg
+    print(f"[REJECT_BG] entity={entity} bg_id={bg_id} sid={sid} ok={ok} msg={msg}")
+    return (
+        store,
+        content,
+        bc,
+        {"display": "none"} if hide_kpis else {"display": "grid"},
+        {"_toast": {"type": toast_type, "message": toast_msg}},
+    )
+
+
 def register_drilldown_callbacks(app):
 
     # ── 0. Image upload ──────────────────────────────────────────────────────
@@ -351,6 +438,8 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-edit", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-confirm", "entity": ALL, "pk": ALL}, "n_clicks"),
+        Input({"type": "list-confirm-bill-group", "entity": ALL, "pk": ALL}, "n_clicks"),
+        Input({"type": "list-reject-bill-group", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input(
             {
                 "type": "profile-action",
@@ -563,6 +652,17 @@ def register_drilldown_callbacks(app):
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
             return _handle_list_confirm(entity, pk, sid, store, auth)
+
+        # ── Confirm/Reject bill group (unverified self-report) ──────────
+        elif trig_type == "list-confirm-bill-group":
+            entity = id_dict.get("entity")
+            pk = id_dict.get("pk")
+            return _handle_list_confirm_bill_group(entity, pk, sid, store, auth)
+
+        elif trig_type == "list-reject-bill-group":
+            entity = id_dict.get("entity")
+            pk = id_dict.get("pk")
+            return _handle_list_reject_bill_group(entity, pk, sid, store, auth)
 
         # ── Profile action ────────────────────────────────────────────────
         elif trig_type == "profile-action":
