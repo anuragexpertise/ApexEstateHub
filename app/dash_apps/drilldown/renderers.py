@@ -749,6 +749,26 @@ def render_list_card(card_id: str, title: str, icon: str,
                            "borderRadius": "7px"},
                 ))
 
+            if entity == "receivables" and role == "admin" and row_dict.get("status") == "unverified":
+                bg_id = row_dict.get("bill_group_id")
+                if bg_id:
+                    action_btns.append(dbc.Button(
+                        html.I(className="fas fa-check"),
+                        id={"type": "list-confirm-bill-group", "entity": entity, "pk": str(bg_id)},
+                        size="sm", color="success", outline=True,
+                        title="Confirm bill group",
+                        style={"fontSize": "11px", "padding": "3px 7px",
+                               "borderRadius": "7px"},
+                    ))
+                    action_btns.append(dbc.Button(
+                        html.I(className="fas fa-times"),
+                        id={"type": "list-reject-bill-group", "entity": entity, "pk": str(bg_id)},
+                        size="sm", color="danger", outline=True,
+                        title="Reject bill group",
+                        style={"fontSize": "11px", "padding": "3px 7px",
+                               "borderRadius": "7px"},
+                    ))
+
             # ── Quick-action buttons derived from PROFILE_ACTIONS ──
             # These let users perform logical actions directly from the
             # list card without opening the profile first.
