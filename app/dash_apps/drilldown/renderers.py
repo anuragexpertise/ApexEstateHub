@@ -195,7 +195,7 @@ _SNAKE_CASE_RE = _re.compile(r"^[a-z0-9]+(_[a-z0-9]+)+$")
 
 def _humanize_string(val: str) -> str:
     """
-    Turn raw snake_case enum/status text ('in_progress', 'bank_transfer')
+    Turn raw snake_case enum/status text ('in_progress', 'bank')
     into readable Title Case ('In Progress', 'Bank Transfer').
     Only touches strings that look like a code/enum value (all-lowercase,
     underscore-separated) so real data — emails, names, flat numbers,
@@ -3475,7 +3475,7 @@ def render_verify_receivable_card(
                     id={"type": "form-field", "entity": "verify_receivable_amt", "field": "mode"},
                     options=[
                         {"label": "Cash",          "value": "cash"},
-                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Bank Transfer", "value": "bank"},
                         {"label": "UPI",           "value": "upi"},
                         {"label": "Cheque",        "value": "cheque"},
                         {"label": "Other",         "value": "other"},
@@ -3583,7 +3583,7 @@ def render_pay_dues_card(
                     id={"type": "form-field", "entity": "pay_due", "field": "mode"},
                     options=[
                         {"label": "Cash",          "value": "cash"},
-                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Bank Transfer", "value": "bank"},
                         {"label": "UPI",           "value": "upi"},
                         {"label": "Cheque",        "value": "cheque"},
                         {"label": "Other",         "value": "other"},
@@ -3643,7 +3643,7 @@ def render_pay_dues_card(
                     id={"type": "form-field", "entity": "pay_due_bg", "field": "mode"},
                     options=[
                         {"label": "Cash",          "value": "cash"},
-                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Bank Transfer", "value": "bank"},
                         {"label": "UPI",           "value": "upi"},
                         {"label": "Cheque",        "value": "cheque"},
                         {"label": "Other",         "value": "other"},
@@ -3868,7 +3868,7 @@ def render_vendor_pass_card(
                     options=[
                         {"label": "Cash",          "value": "cash"},
                         {"label": "UPI",           "value": "upi"},
-                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Bank Transfer", "value": "bank"},
                         {"label": "Cheque",        "value": "cheque"},
                     ],
                     value=prefill_mode,
@@ -4122,7 +4122,7 @@ def render_event_ticket_card(
                     options=[
                         {"label": "Cash",          "value": "cash"},
                         {"label": "UPI",           "value": "upi"},
-                        {"label": "Bank Transfer", "value": "bank_transfer"},
+                        {"label": "Bank Transfer", "value": "bank"},
                         {"label": "Cheque",        "value": "cheque"},
                     ],
                     value=prefill_mode,
