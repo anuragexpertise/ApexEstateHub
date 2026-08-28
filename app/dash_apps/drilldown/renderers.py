@@ -4438,7 +4438,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
             _row("Account", account),
             _row("Amount", f"₹{amount:,.2f}"),
             _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
-            _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})] if receipt.get("status") in ("pending", "unverified") else status)),
+            _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})]) if receipt.get("status") in ("pending", "unverified") else status),
             html.Div([
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
