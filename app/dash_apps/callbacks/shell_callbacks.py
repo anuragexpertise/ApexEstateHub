@@ -693,18 +693,37 @@ def register_shell_callbacks(app):
             return []
         t   = data.get("type", "info")
         msg = data.get("message", "")
+        action = data.get("action") or {}
         icons  = {"success": "fa-check-circle", "error": "fa-exclamation-circle",
                   "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}
         colors = {"success": "#10b981", "error": "#ef4444",
                   "warning": "#f59e0b", "info": "#3b82f6"}
+
+        body = [msg]
+        duration = 4000
+        if action.get("kind") == "view_receipts" and action.get("receipt_ids"):
+            ids = [str(i) for i in action["receipt_ids"] if i]
+            if ids:
+                label = "View Receipt" if len(ids) == 1 else f"View {len(ids)} Receipts"
+                body = [
+                    html.Div(msg, style={"marginBottom": "8px"}),
+                    dbc.Button(
+                        [html.I(className="fas fa-receipt me-2"), label],
+                        id={"type": "toast-view-receipts", "ids": ",".join(ids)},
+                        size="sm", color="light",
+                        style={"fontWeight": "600", "fontSize": "12px"},
+                    ),
+                ]
+                duration = 10000  # give the admin time to actually click it
+
         return dbc.Toast(
-            msg,
+            body,
             id="toast",
             header=html.Div([
                 html.I(className=f"fas {icons.get(t,'fa-info-circle')} me-2"),
                 t.title(),
             ]),
-            icon=t, duration=4000, is_open=True,
+            icon=t, duration=duration, is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
         )
  

@@ -181,10 +181,11 @@ class TestBillGroupSelfPay:
                          bill_group_id=bg_id, status="unverified")
 
         r = db._execute(
-            "SELECT fn_verify_receivable_by_bill_group(%s,%s,%s,%s) as msg",
+            "SELECT * FROM fn_verify_receivable_by_bill_group(%s,%s,%s,%s)",
             (bg_id, 99, "cash", None), fetch_one=True,
         )
         assert r["msg"].startswith("Bill group verified") or r["msg"].startswith("Success")
+        assert r["receipt_id"], "confirming a bill group should create a receipt to print/save/email"
 
         recs = [r for r in db.tables.get("receivables", []) if r["bill_group_id"] == bg_id]
         assert all(r["status"] == "paid" for r in recs)

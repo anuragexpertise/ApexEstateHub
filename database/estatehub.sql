@@ -2825,17 +2825,22 @@ CREATE OR REPLACE FUNCTION fn_verify_receivable_by_bill_group(
     p_mode          VARCHAR DEFAULT 'cash',
     p_amount        NUMERIC DEFAULT NULL
 )
-RETURNS TEXT LANGUAGE plpgsql AS $$
+RETURNS TABLE(msg TEXT, receipt_id INT) LANGUAGE plpgsql AS $$
 DECLARE
-    v_rec       RECORD;
-    v_remaining NUMERIC(15,2);
-    v_take      NUMERIC(15,2);
-    v_residual  NUMERIC(15,2);
-    v_msg       TEXT;
-    v_first     BOOLEAN := TRUE;
+    v_rec        RECORD;
+    v_remaining  NUMERIC(15,2);
+    v_take       NUMERIC(15,2);
+    v_residual   NUMERIC(15,2);
+    v_msg        TEXT;
+    v_total_take NUMERIC(15,2) := 0;
+    v_society_id INT;
+    v_entity_id  INT;
+    v_period     DATE;
+    v_desc       TEXT;
+    v_receipt_id INT;
 BEGIN
     IF p_amount IS NOT NULL AND p_amount <= 0 THEN
-        RETURN 'Error: amount must be > 0';
+        RETURN QUERY SELECT 'Error: amount must be > 0'::TEXT, NULL::INT; RETURN;
     END IF;
 
     SELECT COALESCE(SUM(amount - paid_amount), 0)::NUMERIC(15,2)
@@ -2845,13 +2850,27 @@ BEGIN
        AND status IN ('pending','partial','unverified');
 
     IF v_remaining <= 0 THEN
-        RETURN 'Nothing outstanding on this bill group';
+        RETURN QUERY SELECT 'Nothing outstanding on this bill group'::TEXT, NULL::INT; RETURN;
     END IF;
 
     IF p_amount IS NOT NULL AND p_amount < v_remaining THEN
         v_remaining := p_amount;
     END IF;
 
+    SELECT society_id, entity_id, MIN(period_month), STRING_AGG(DISTINCT description, ', ')
+      INTO v_society_id, v_entity_id, v_period, v_desc
+      FROM receivables
+     WHERE bill_group_id = p_bill_group_id
+     GROUP BY society_id, entity_id;
+
+    -- Bug fix (2026-08): this loop previously RETURNed on its first
+    -- iteration (inside the IF v_first block), which exited the whole
+    -- function immediately — so only the first receivable line of a
+    -- multi-line bill (e.g. just Maintenance) was ever actually verified;
+    -- GST/sinking/repair lines in the same bill group silently stayed
+    -- 'pending'/'partial' even though the toast reported success. Now the
+    -- loop runs to completion (or until v_remaining is exhausted) before
+    -- returning anything.
     FOR v_rec IN
         SELECT id, amount, paid_amount, base_amount, interest_amount,
                paid_principal, interest_acc_id, acc_id, description
@@ -2871,14 +2890,27 @@ BEGIN
         SELECT fn_verify_receivable(v_rec.id, p_confirmed_by, p_mode, v_take)
           INTO v_msg;
 
+        v_total_take := v_total_take + v_take;
         v_remaining := v_remaining - v_take;
-        IF v_first THEN
-            RETURN v_msg;
-            v_first := FALSE;
-        END IF;
     END LOOP;
 
-    RETURN COALESCE(v_msg, 'Bill group verified');
+    IF v_total_take <= 0 THEN
+        RETURN QUERY SELECT COALESCE(v_msg, 'Nothing outstanding on this bill group')::TEXT, NULL::INT; RETURN;
+    END IF;
+
+    -- One receipt per bill-group payment, for print/save/email — this
+    -- function previously created no receipts record at all for admin
+    -- direct/confirmed bill-group payments, so there was nothing to open.
+    INSERT INTO receipts (
+        society_id, user_id, entity_id, role, receipt_date, acc_id,
+        particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
+    ) VALUES (
+        v_society_id, p_confirmed_by, v_entity_id, 'apartment', CURRENT_DATE, NULL,
+        COALESCE(v_desc, 'Maintenance Payment') || COALESCE(' — ' || TO_CHAR(v_period, 'Mon YYYY'), ''),
+        v_total_take, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
+    ) RETURNING id INTO v_receipt_id;
+
+    RETURN QUERY SELECT COALESCE(v_msg, 'Bill group verified')::TEXT, v_receipt_id;
 END;
 $$;
 
@@ -2910,7 +2942,7 @@ CREATE OR REPLACE FUNCTION fn_apply_apartment_dues_fifo_core(
     p_source_table VARCHAR DEFAULT 'receivables',
     p_source_id    INT     DEFAULT NULL
 )
-RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT, receipt_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id INT;
@@ -2929,6 +2961,9 @@ DECLARE
     v_fallback_int_acc INT;
     v_total_take   NUMERIC(15,2) := 0;  -- running total actually applied to open dues this call — one Cr leg to the SDr leaf covers all of it (accrual basis, 2026-08)
     v_first_trx_id INT;
+    v_receipt_id   INT;  -- new (2026-08): the receipt this payment is recorded against — either newly
+                          -- created here (admin-direct path) or the pre-existing self-reported receipt
+                          -- being confirmed (p_source_id, when p_source_table='receipts')
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         RAISE EXCEPTION 'Amount must be > 0';
@@ -3062,10 +3097,32 @@ BEGIN
         );
     END IF;
 
+    -- Receipt of record for this payment, for print/save/email. When
+    -- confirming a pre-existing self-reported receipt (p_source_table=
+    -- 'receipts', p_source_id set), that receipt already exists and the
+    -- caller (fn_confirm_apartment_self_payment) marks it confirmed itself
+    -- — don't create a duplicate. Otherwise (the admin-direct path, no
+    -- pre-existing receipt) create one now; this function previously never
+    -- created any receipts record for admin-direct FIFO payments, so there
+    -- was nothing to open/print/email afterward.
+    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
+        v_receipt_id := p_source_id;
+    ELSE
+        INSERT INTO receipts (
+            society_id, user_id, entity_id, role, receipt_date, acc_id,
+            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
+        ) VALUES (
+            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
+            COALESCE(p_particulars, 'Maintenance Payment'),
+            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
+        ) RETURNING id INTO v_receipt_id;
+    END IF;
+
     RETURN QUERY SELECT v_first_trx_id,
         (p_amount - v_remaining)::NUMERIC(15,2),
         v_remaining::NUMERIC(15,2),
-        v_journal_id;
+        v_journal_id,
+        v_receipt_id;
 END;
 $$;
 
@@ -3082,7 +3139,7 @@ CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
     p_confirmed_by INT     DEFAULT NULL,
     p_particulars  TEXT    DEFAULT NULL
 )
-RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT, receipt_id INT)
 LANGUAGE plpgsql AS $$
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN

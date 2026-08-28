@@ -1037,7 +1037,15 @@ class FakeDB:
                 "journal_id": 9999,
             })
             remaining -= take
-        return {"msg": "Bill group verified"}
+        rid = self._next_id("receipts")
+        self.tables.setdefault("receipts", []).append({
+            "id": rid, "society_id": recs[0].get("society_id") if recs else None,
+            "entity_id": recs[0].get("entity_id") if recs else None,
+            "role": "apartment", "amount": (float(amount) if amount is not None else sum(
+                float(r.get("amount", 0)) - float(r.get("paid_amount", 0)) for r in recs)) - remaining,
+            "mode": mode, "status": "confirmed", "confirmed_by": confirmed_by,
+        })
+        return {"msg": "Bill group verified", "receipt_id": rid}
 
     def _fn_pay_apartment_dues_fifo(self, p, fetch_one, fetch_all):
         apt_id = p.get("p0") or p.get("apartment_id")

@@ -2416,16 +2416,17 @@ def verify_receivable(receivable_id: int, confirmed_by: int, mode: str = "cash",
         return False, str(e)
 
 
-def verify_receivable_bill_group(bill_group_id: str, confirmed_by: int, mode: str = "cash") -> tuple[bool, str]:
+def verify_receivable_bill_group(bill_group_id: str, confirmed_by: int, mode: str = "cash", amount: float = None) -> tuple[bool, str, int | None]:
     try:
         r = db._execute(
-            "SELECT fn_verify_receivable_by_bill_group(%s, %s, %s, NULL) AS msg",
-            (bill_group_id, confirmed_by, mode), fetch_one=True,
+            "SELECT * FROM fn_verify_receivable_by_bill_group(%s, %s, %s, %s)",
+            (bill_group_id, confirmed_by, mode, amount), fetch_one=True,
         )
         msg = (r or {}).get("msg", "Done")
-        return not str(msg).lower().startswith("error"), msg
+        receipt_id = (r or {}).get("receipt_id")
+        return not str(msg).lower().startswith("error"), msg, receipt_id
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 def reject_receivable_bill_group(bill_group_id: str, confirmed_by: int, penalty_amount: float = 0) -> tuple[bool, str]:
@@ -2590,7 +2591,10 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
                 (receipt_id, confirmed_by, mode), fetch_one=True,
             )
             msg = (r or {}).get("msg", "Done")
-            return not str(msg).lower().startswith("error"), msg
+            ok = not str(msg).lower().startswith("error")
+            if ok:
+                msg = f"{msg} [[receipt:{receipt_id}]]"
+            return ok, msg
 
         r = db._execute(
             "SELECT * FROM fn_verify_receipt(%s,%s,%s)",
