@@ -56,7 +56,7 @@ from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export, gst_export
+from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export
 from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -1840,6 +1840,14 @@ def register_drilldown_callbacks(app):
         elif entity == "gst_summary":
             data = gst_export.generate_gst_summary_excel(None, sid, fy)
             filename = f"GSTSummary_FY{fy}-{fy+1}.xlsx"
+        elif entity == "mutuality_summary":
+            # Income Tax — Principle of Mutuality breakup (mutual vs
+            # non_mutual income/expense). Same in-Dash dcc.Download pattern
+            # as every other export here — replaces the earlier standalone
+            # Flask route, which used a mismatched JWT auth mechanism the
+            # browser download link could never actually satisfy.
+            data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
+            filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
         else:
             return no_update
 
@@ -2322,9 +2330,14 @@ def _render_card(
             selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
             rows, err = (loaders.get_fy_closing_report(sid_val, selected_fy)
                          if sid_val and selected_fy else ([], "Society not resolved"))
+            mutuality_summary = (
+                loaders.get_income_tax_mutuality_summary(sid_val, selected_fy)
+                if sid_val and selected_fy else None
+            )
             return renderers.render_fy_closing_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
+                mutuality_summary=mutuality_summary,
             )
 
         # ── My Transactions — member's own Sundry Debtors passbook ───────────
@@ -3055,18 +3068,19 @@ def _save_pay_dues(db, d, sid):
         actor_role = actor_user["role"] if actor_user else None
         
     if actor_role == "apartment":
-        # Create a pending receipt instead of settling
-        maint_acc = db._execute(
-            "SELECT id FROM accounts WHERE society_id = %s AND name ILIKE '%%Maintenance%%' AND drcr_account = 'Cr' LIMIT 1",
-            (sid,), fetch_one=True
-        )
-        if not maint_acc: return False, "Maintenance account not found", None
+        # Self-pay: report only, no allocation/posting yet. Ownership
+        # (confirmed_by must be the apartment user linked to apt_id) is
+        # enforced inside fn_report_apartment_payment_fifo itself — the SQL
+        # function is the trust boundary, not this client-supplied apt_id.
         try:
-            db._execute("""
-                INSERT INTO receipts (society_id, user_id, entity_id, role, receipt_date, acc_id, particulars, amount, mode, transaction_id, status, created_by)
-                VALUES (%s, %s, %s, 'apartment', CURRENT_DATE, %s, %s, %s, %s, %s, 'pending', %s)
-            """, (sid, confirmed_by, apt_id, maint_acc["id"], d.get("particulars"), amt, d.get("mode", "cash"), d.get("reference", ""), confirmed_by))
-            return True, "Success: Payment reported (FIFO). Awaiting verification.", None
+            r = db._execute(
+                "SELECT * FROM fn_report_apartment_payment_fifo(%s,%s,%s,%s,%s,%s)",
+                (apt_id, amt, d.get("mode", "cash"), confirmed_by,
+                 d.get("particulars"), d.get("reference", "")),
+                fetch_one=True,
+            )
+            msg = (r or {}).get("status", "Unknown error")
+            return not str(msg).lower().startswith("error"), msg, None
         except Exception as e:
             return False, str(e), None
 

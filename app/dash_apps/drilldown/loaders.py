@@ -482,6 +482,38 @@ def get_account_options(society_id: int) -> list[dict]:
     return [{"id": r["id"], "label": r["label"], "depth": r["depth"]} for r in rows]
 
 
+def get_income_tax_mutuality_summary(society_id: int, fy: int) -> dict | None:
+    """
+    Wraps fn_income_tax_summary_fy(society_id, fy) — mutual vs non_mutual
+    income/expense breakup for the FY, reshaped into a flat dict for the
+    on-screen KPI card in render_fy_closing_card. Returns None on any
+    failure so the caller can hide the card rather than error the page.
+    """
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_income_tax_summary_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception:
+        return None
+
+    totals = {
+        ("Income", "mutual"): 0.0, ("Income", "non_mutual"): 0.0,
+        ("Expense", "mutual"): 0.0, ("Expense", "non_mutual"): 0.0,
+    }
+    for row in rows:
+        key = (row.get("category"), row.get("nature"))
+        if key in totals:
+            totals[key] += float(row.get("total_amount") or 0)
+
+    return {
+        "mutual_income": totals[("Income", "mutual")],
+        "non_mutual_income": totals[("Income", "non_mutual")],
+        "non_mutual_expense": totals[("Expense", "non_mutual")],
+        "taxable_estimate": totals[("Income", "non_mutual")] - totals[("Expense", "non_mutual")],
+    }
+
+
 def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | None]:
     """
     Wraps fn_fy_closing_report(society_id, fy). The function resolves the
@@ -2512,8 +2544,30 @@ def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
-    """Admin verifies a pending receipt (created by security) → posts to transactions."""
+    """Admin verifies a pending receipt (created by security) → posts to transactions.
+
+    Self-reported apartment FIFO due payments (from fn_report_apartment_payment_fifo)
+    are also stored as pending `receipts` rows, but they must be confirmed via
+    fn_confirm_apartment_self_payment instead of the generic fn_verify_receipt:
+    that's the function that actually runs the FIFO allocation against
+    receivables and posts transactions — fn_verify_receipt only posts a lump
+    sum against acc_id and never touches receivables. Such rows are
+    recognizable by role='apartment' with acc_id left NULL at report time
+    (see fn_report_apartment_payment_fifo).
+    """
     try:
+        marker = db._execute(
+            "SELECT role, acc_id FROM receipts WHERE id = %s AND status = 'pending'",
+            (receipt_id,), fetch_one=True,
+        )
+        if marker and marker.get("role") == "apartment" and marker.get("acc_id") is None:
+            r = db._execute(
+                "SELECT fn_confirm_apartment_self_payment(%s,%s,%s) as msg",
+                (receipt_id, confirmed_by, mode), fetch_one=True,
+            )
+            msg = (r or {}).get("msg", "Done")
+            return not str(msg).lower().startswith("error"), msg
+
         r = db._execute(
             "SELECT * FROM fn_verify_receipt(%s,%s,%s)",
             (receipt_id, confirmed_by, mode),

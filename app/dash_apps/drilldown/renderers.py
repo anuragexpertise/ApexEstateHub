@@ -3126,13 +3126,20 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_fy_closing_card(rows: list, error: str | None,
-                            fy_options: list, selected_fy) -> html.Div:
+                            fy_options: list, selected_fy,
+                            mutuality_summary: dict | None = None) -> html.Div:
     """
     Read-only FY Closing Report — same account-by-account detail for every
     role that can reach it (Admin/Owner/Vendor/Security all confirmed the
     full-detail option). FY pills reuse the existing kpi-card-div click
     pipeline (id pattern "kpi_fy_closing_report__<fy>") rather than a new
     callback — see the special case in drilldown_callbacks.py.
+
+    mutuality_summary (from loaders.get_income_tax_mutuality_summary) drives
+    a small on-screen Income Tax — Mutuality KPI block plus an "Export
+    Mutuality Summary" button, which streams the full Excel workbook via the
+    same btn-fy-export/dcc.Download pattern as every other export on this
+    card (cashbook/ledger/ledger_index) — not a standalone route.
     """
     color = "#17976e"
 
@@ -3172,19 +3179,59 @@ def render_fy_closing_card(rows: list, error: str | None,
         ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
         html.Div([
             pills,
-            html.A(
-                [html.I(className="fas fa-file-csv me-2"), "Mutuality CSV"],
-                href=f"/export/mutuality_report?fy={selected_fy}" if selected_fy else "#",
-                className="btn btn-outline-success btn-sm",
-                style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px", "marginBottom": "12px"}
-            ) if selected_fy else None,
+            html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Mutuality Summary"],
+                    id={"type": "btn-fy-export", "entity": "mutuality_summary"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "mutuality_summary"}),
+            ]) if selected_fy else None,
         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
     ], style={"padding": "12px 16px",
               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
 
+    mutuality_kpi = None
+    if mutuality_summary:
+        def _kpi_tile(label, value, tile_color):
+            return html.Div([
+                html.Div(label, style={"fontSize": "10px", "color": "#888",
+                                        "fontWeight": "600", "textTransform": "uppercase"}),
+                html.Div(f"₹{value:,.2f}", style={"fontSize": "15px", "fontWeight": "700",
+                                                    "color": tile_color}),
+            ], style={"flex": "1", "minWidth": "140px", "padding": "10px 12px",
+                      "background": "#fff", "borderRadius": "10px",
+                      "border": "1px solid #eee"})
+
+        mutuality_kpi = html.Div([
+            html.Div("Income Tax — Mutuality Summary", style={
+                "fontSize": "12px", "fontWeight": "700", "color": "#444",
+                "marginBottom": "8px",
+            }),
+            html.Div([
+                _kpi_tile("Mutual Income (exempt)",
+                          mutuality_summary.get("mutual_income", 0), "#17976e"),
+                _kpi_tile("Non-Mutual Income (taxable)",
+                          mutuality_summary.get("non_mutual_income", 0), "#c0392b"),
+                _kpi_tile("Non-Mutual Expense",
+                          mutuality_summary.get("non_mutual_expense", 0), "#555"),
+                _kpi_tile("Est. Taxable Income",
+                          mutuality_summary.get("taxable_estimate", 0), "#b8860b"),
+            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap"}),
+            html.Div(
+                "Estimate only — verify against your CA before filing.",
+                style={"fontSize": "10px", "color": "#999", "marginTop": "6px",
+                       "fontStyle": "italic"},
+            ),
+        ], style={"padding": "12px 16px", "background": "#f8f9fb",
+                  "borderTop": "1px solid #eee", "borderBottom": "1px solid #eee"})
+
     if error:
         return html.Div([
             header,
+            mutuality_kpi,
             html.Div(
                 dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error],
                           color="warning", style={"borderRadius": "10px"}),
@@ -3232,6 +3279,7 @@ def render_fy_closing_card(rows: list, error: str | None,
 
     return html.Div([
         header,
+        mutuality_kpi,
         html.Div(body, style={"padding": "16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
