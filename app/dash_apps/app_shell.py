@@ -647,6 +647,40 @@ def _drillin_modal() -> dbc.Modal:
     )
 
 
+# ── Pay Dues Bill Group picker modal ──────────────────────────────────────────
+# Modal for selecting an unpaid bill group in the Pay Dues card's
+# "Bill Group Pay" tab. Shows all unpaid bill groups for the current apartment
+# as tappable cards; selecting one writes its bill_group_id into the form's
+# hidden field and closes the modal.
+
+def _pay_dues_bill_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Select Unpaid Bill"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    dbc.InputGroup([
+                        dbc.InputGroupText([html.I(className="fas fa-search")]),
+                        dbc.Input(id="pay-dues-bill-search", placeholder="Search bills…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    dcc.Loading(
+                        html.Div(id="pay-dues-bill-list",
+                                 style={"maxHeight": "420px", "overflowY": "auto"}),
+                        type="circle", color="#17976e",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-pay-dues-bill-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="pay-dues-bill-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20075"},
+    )
+
+
 # ── Concern Bid modal ────────────────────────────────────────────────────────
 # Vendor's "Save Bid" action on a concern profile. Small single-field modal —
 # doesn't need the full schema-driven form engine, mirrors _assign_to_modal's
@@ -873,6 +907,8 @@ def shell_layout() -> html.Div:
                        data={"entity": None, "field": None, "config": None,
                              "role": None, "target_table": None,
                              "group_label": None, "group": None, "search": ""}),
+            dcc.Store(id="pay-dues-bill-store",       storage_type="memory",
+                       data={"apartment_id": None, "society_id": None, "selected_bill": None}),
             # NOTE (2026-08): poll-action-store / poll-detail-store removed —
             # they were only ever written/read by poll_callbacks.py's now-
             # removed orphaned callbacks (dead since the Polls tab moved to
@@ -999,6 +1035,9 @@ def shell_layout() -> html.Div:
 
             # ── Drill-In entity picker modal (New Receipt/Expense/Concern/…) ─────
             _drillin_modal(),
+
+            # ── Pay Dues Bill Group picker modal (Bill Group Pay tab) ───────────
+            _pay_dues_bill_modal(),
 
             # ── Channel Subscribers modal ──────────────────────────────────────────
             dbc.Modal([

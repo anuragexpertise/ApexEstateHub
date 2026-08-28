@@ -420,3 +420,159 @@ def register_drillin_callbacks(app):
         return False
 
     print("  ✓ Drill-in picker callbacks registered")
+
+
+def register_pay_dues_bill_callbacks(app):
+    """Register callbacks for the Pay Dues Bill Group picker modal."""
+
+    # ── 1. Open modal from trigger button ─────────────────────────────────
+    @app.callback(
+        Output("pay-dues-bill-modal", "is_open", allow_duplicate=True),
+        Output("pay-dues-bill-store", "data", allow_duplicate=True),
+        Input({"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"}, "n_clicks"),
+        State({"type": "form-field-hidden", "entity": "pay_due_bg", "field": "entity_id"}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_pay_dues_bill_modal(n_clicks, apartment_id):
+        if not n_clicks:
+            raise PreventUpdate
+        society_id = get_current_society_id()
+        store = {
+            "apartment_id": int(apartment_id) if apartment_id else None,
+            "society_id": society_id,
+            "selected_bill": None,
+        }
+        return True, store
+
+    # ── 2. Close modal ────────────────────────────────────────────────────
+    @app.callback(
+        Output("pay-dues-bill-modal", "is_open", allow_duplicate=True),
+        Input("close-pay-dues-bill-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def close_pay_dues_bill_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 3. Populate bill list (on open + search) ──────────────────────────
+    @app.callback(
+        Output("pay-dues-bill-list", "children", allow_duplicate=True),
+        Input("pay-dues-bill-modal", "is_open"),
+        Input("pay-dues-bill-search", "value"),
+        State("pay-dues-bill-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def populate_pay_dues_bill_list(is_open, search, store):
+        if not is_open:
+            raise PreventUpdate
+        store = store or {}
+        apartment_id = store.get("apartment_id")
+        society_id = store.get("society_id")
+        if not apartment_id or not society_id:
+            return html.P("No apartment selected.", className="text-muted text-center",
+                          style={"padding": "30px"})
+
+        try:
+            from database.db_manager import db
+            rows, _ = db.execute("""
+                SELECT bill_group_id,
+                       SUM(amount - paid_amount)::FLOAT as amount,
+                       MIN(period_month)::TEXT as period_month,
+                       STRING_AGG(description, ', ') as desc
+                  FROM receivables
+                 WHERE society_id = %s AND entity_id = %s AND role = 'apartment'
+                   AND status IN ('pending', 'partial')
+                 GROUP BY bill_group_id
+                 ORDER BY MIN(period_month) ASC
+            """, (society_id, apartment_id))
+        except Exception as e:
+            return html.P(f"Error loading bills: {e}", className="text-danger text-center",
+                          style={"padding": "30px"})
+
+        if not rows:
+            return html.P("No unpaid bills found.", className="text-muted text-center",
+                          style={"padding": "30px"})
+
+        s = (search or "").strip().lower()
+        if s:
+            rows = [r for r in rows
+                    if s in str(r.get("period_month") or "").lower()
+                    or s in str(r.get("desc") or "").lower()]
+
+        items = []
+        for r in rows:
+            items.append(dbc.ListGroupItem([
+                html.Div([
+                    html.Div([
+                        html.Strong(f"{r['period_month']}",
+                                    style={"fontSize": "13px", "fontWeight": "600"}),
+                        html.Small(f"  ₹{r['amount']:,.2f}",
+                                   style={"fontSize": "12px", "color": "#17976e", "marginLeft": "8px"}),
+                    ]),
+                    html.Div(r.get("desc", ""),
+                             style={"fontSize": "11px", "color": "#7d8ea3", "marginTop": "2px"}),
+                ], className="d-flex flex-column"),
+            ], action=True, id={"type": "pay-dues-bill-item", "bill_group_id": r["bill_group_id"]},
+               style={"cursor": "pointer"}))
+
+        return dbc.ListGroup(rows=items, flush=True)
+
+    # ── 4. Select bill -> write hidden field + update trigger text ────────
+    @app.callback(
+        Output({"type": "form-field-hidden", "entity": "pay_due_bg", "field": "bill_group_id"}, "value",
+               allow_duplicate=True),
+        Output({"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"}, "children",
+               allow_duplicate=True),
+        Output("pay-dues-bill-modal", "is_open", allow_duplicate=True),
+        Input({"type": "pay-dues-bill-item", "bill_group_id": ALL}, "n_clicks"),
+        State("pay-dues-bill-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def select_pay_dues_bill(item_ncs, store):
+        triggered = ctx.triggered_id
+        if not triggered or not isinstance(triggered, dict):
+            raise PreventUpdate
+        if not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+
+        bill_group_id = triggered.get("bill_group_id")
+        store = store or {}
+        society_id = store.get("society_id")
+
+        label = None
+        if bill_group_id and society_id:
+            try:
+                from database.db_manager import db
+                row = db._execute("""
+                    SELECT MIN(period_month)::TEXT as period_month,
+                           STRING_AGG(description, ', ') as desc,
+                           SUM(amount - paid_amount)::FLOAT as amount
+                      FROM receivables
+                     WHERE society_id = %s AND bill_group_id = %s
+                     GROUP BY bill_group_id
+                """, (society_id, bill_group_id), fetch_one=True)
+                if row:
+                    label = f"{row['period_month']} — {row['desc']} (₹{row['amount']:,.2f})"
+            except Exception:
+                pass
+
+        display_text = label if label else "Tap to select bill…"
+        button_children = html.Div([
+            html.I(className=("fas fa-hand-pointer me-2" if not label else "fas fa-file-invoice me-2"),
+                   style={"color": "#17976e" if label else "#7d8ea3"}),
+            html.Span(display_text, style={
+                "flex": "1",
+                "color": "#2a3b52" if label else "#9aa7b8",
+                "fontWeight": "600" if label else "400",
+            }),
+            html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+        ], style={"display": "flex", "alignItems": "center"})
+
+        return str(bill_group_id) if bill_group_id else "", button_children, False
+
+    print("  ✓ Pay Dues bill picker callbacks registered")
