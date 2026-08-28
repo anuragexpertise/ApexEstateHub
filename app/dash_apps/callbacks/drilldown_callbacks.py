@@ -1479,13 +1479,19 @@ def register_drilldown_callbacks(app):
     )
     @require_session
     def open_receipts_from_toast(n_clicks_list, store, auth):
-        if not any(n_clicks_list or []):
+        # Only act on an actual click. The pattern-matching ALL input also
+        # fires when the toast is first rendered (n_clicks is None) and when
+        # the toast is later removed from the layout (empty list); both must
+        # be ignored so we don't (a) open the receipt before the user clicks
+        # or (b) raise a PreventUpdate when the toast is dismissed.
+        triggered = ctx.triggered
+        if not triggered or not triggered[0].get("value"):
             raise PreventUpdate
-        triggered = ctx.triggered_id
-        if not triggered or triggered.get("type") != "toast-view-receipts":
+        comp = ctx.triggered_id
+        if not comp or comp.get("type") != "toast-view-receipts":
             raise PreventUpdate
 
-        ids = [int(i) for i in (triggered.get("ids") or "").split(",") if i.strip().isdigit()]
+        ids = [int(i) for i in (comp.get("ids") or "").split(",") if i.strip().isdigit()]
         if not ids:
             raise PreventUpdate
 
@@ -1784,18 +1790,26 @@ def register_drilldown_callbacks(app):
         ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
 
         # A few save handlers (pay_due, pay_due_bg) embed a parseable
-        # "[[receipt:<id>]]" marker in their success message when the
-        # payment created/confirmed a receipt — extracted here (rather than
-        # widening new_id, which _move_temp_images/entity_pk below both
-        # already depend on meaning "this row's own primary key") so the
-        # toast can offer a "View Receipt" action without touching any
-        # other save path's return shape.
-        receipt_ids = []
+        # Save handlers embed navigation markers in their success message so
+        # the post-save router knows which profile to auto-open:
+        #   [[receipt:<id>]]  Pay Dues → receipt print (and toast "View Receipt")
+        #   [[pass:<id>]]      Sell/Buy Pass → Vendor Pass profile (print/save/email)
+        #   [[ticket:<id>]]    Sell/Buy Event → Event Ticket profile (print/save/email)
+        #   [[vendor:<id>]]    vendor profile PK backing a pass (kept for completeness)
+        # These are stripped from the user-facing toast text below.
+        receipt_ids, pass_ids, ticket_ids, vendor_ids = [], [], [], []
         if ok and msg:
-            found = re.findall(r"\[\[receipt:(\d+)\]\]", msg)
-            if found:
-                receipt_ids = [int(x) for x in found]
-                msg = re.sub(r"\s*\[\[receipt:\d+\]\]", "", msg).strip()
+            def _pull(pattern, bucket):
+                found = re.findall(pattern, msg)
+                if found:
+                    bucket.extend(int(x) for x in found)
+                    return True
+                return False
+            _pull(r"\[\[receipt:(\d+)\]\]", receipt_ids)
+            _pull(r"\[\[pass:(\d+)\]\]", pass_ids)
+            _pull(r"\[\[ticket:(\d+)\]\]", ticket_ids)
+            _pull(r"\[\[vendor:(\d+)\]\]", vendor_ids)
+            msg = re.sub(r"\s*\[\[(receipt|pass|ticket|vendor):\d+\]\]", "", msg).strip()
 
         if ok:
             # KPI cards read counts/sums derived from whatever this save just
@@ -1825,9 +1839,33 @@ def register_drilldown_callbacks(app):
             if entity_id:
                 _move_temp_images(entity_singular, entity_id, sid, merged)
 
-        # ── 9. Navigate back one level and trigger list refresh ───────────────
+        # ── 9. Auto-open the relevant profile after a money-saving action:
+        #       Pay Dues → receipt print; Sell/Buy Pass → Vendor Pass profile
+        #       (print/save/email); Sell/Buy Event → Event Ticket profile
+        #       (print/save/email). Otherwise navigate back one level.
         hide_kpis = False
-        if store.get("stack") and len(store["stack"]) > 1:
+        if receipt_ids:
+            rid = receipt_ids[0]
+            store = nav_state.navigate_to(
+                store, "form_receipt_print", "Print Receipt",
+                prefill={"receipt_id": rid}, entity_pk=rid,
+            )
+            hide_kpis = len(store.get("stack", [])) > 1
+        elif pass_ids:
+            pid = pass_ids[0]
+            store = nav_state.navigate_to(
+                store, "profile_vendor_pass", "Vendor Pass",
+                prefill={"id": pid}, entity_pk=pid,
+            )
+            hide_kpis = len(store.get("stack", [])) > 1
+        elif ticket_ids:
+            tid = ticket_ids[0]
+            store = nav_state.navigate_to(
+                store, "profile_event_ticket", "Event Ticket",
+                prefill={"id": tid}, entity_pk=tid,
+            )
+            hide_kpis = len(store.get("stack", [])) > 1
+        elif store.get("stack") and len(store["stack"]) > 1:
             store = nav_state.navigate_back(store, len(store["stack"]) - 2)
             if new_id and store.get("stack"):
                 store["stack"][-1]["entity_pk"] = new_id
@@ -3525,7 +3563,21 @@ def _save_vendor_pass(db, d, sid):
         )
         valid_until = (r or {}).get("valid_until")
         receipt_id  = (r or {}).get("receipt_id")
-        return True, f"Pass sold — valid until {valid_until}", receipt_id
+        pass_id     = (r or {}).get("pass_id")
+        # Resolve the vendor's profile PK so the post-save router can open the
+        # Vendor Pass profile (where the pass Print/Save/Email controls live).
+        vrow = db._execute(
+            "SELECT linked_id FROM users WHERE id=%s", (int(vendor_user_id),), fetch_one=True
+        ) or {}
+        vendor_pk = (vrow or {}).get("linked_id")
+        msg = f"Pass sold — valid until {valid_until}"
+        if pass_id:
+            msg += f" [[pass:{pass_id}]]"
+        if vendor_pk:
+            msg += f" [[vendor:{vendor_pk}]]"
+        if receipt_id:
+            msg += f" [[receipt:{receipt_id}]]"
+        return True, msg, pass_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -3577,8 +3629,9 @@ def _save_event_ticket(db, d, sid):
         if not result:
             return False, msg, None
 
+        ticket_id  = result.get("event_ticket_id")
+        receipt_id = result.get("receipt_id")
         amount = result.get("total_amount")
-        receipt_id = result.get("event_ticket_id")
         parts = []
         if quantity_adult > 0:
             parts.append(f"{quantity_adult} adult")
@@ -3586,7 +3639,12 @@ def _save_event_ticket(db, d, sid):
             parts.append(f"{quantity_child} child")
         qty_label  = " | ".join(parts) + " ticket" + ("s" if (quantity_adult + quantity_child) != 1 else "")
         amt_label  = f" — ₹{float(amount):,.2f}" if amount else " — free"
-        return True, f"{qty_label} issued{amt_label}", receipt_id
+        msg = f"{qty_label} issued{amt_label}"
+        if ticket_id:
+            msg += f" [[ticket:{ticket_id}]]"
+        if receipt_id:
+            msg += f" [[receipt:{receipt_id}]]"
+        return True, msg, ticket_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 

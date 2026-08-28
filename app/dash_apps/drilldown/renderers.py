@@ -1324,32 +1324,61 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
     # ── Vendor Pass QR — rendered live for the active vendor pass so the
     # vendor can print/save a pass document with society branding.
+    # Shown on the vendor profile (entity=="vendor", looks up the active
+    # pass for that vendor) AND on the dedicated Vendor Pass profile
+    # (entity=="vendor_pass", opened straight after a Sell/Buy Pass save).
     vendor_pass_section = []
-    if entity == "vendor" and pk_val:
+    if entity in ("vendor", "vendor_pass") and pk_val:
         try:
             from app.services.qr_service import generate_qr_code
             from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
-            qr_society_id = record_dict.get("society_id") or society_id
-            qr_img, qr_payload = generate_qr_code(qr_society_id, "VND", pk_val)
-            if qr_img:
+
+            if entity == "vendor":
+                vendor_pk = pk_val
+                vendor_user_id = record_dict.get("user_id") or pk_val
+                vendor_name = record_dict.get("name", "Vendor")
+                service_type = record_dict.get("service_type", "")
+                qr_society_id = record_dict.get("society_id") or society_id
                 pass_row = db._execute(
                     "SELECT pass_type, issued_date, valid_until FROM vendor_passes "
                     "WHERE user_id=%s AND status='active' AND valid_until>=CURRENT_DATE "
                     "ORDER BY valid_until DESC LIMIT 1",
-                    (record_dict.get("user_id") or pk_val,),
+                    (vendor_user_id,),
                     fetch_one=True,
                 ) or {}
+            else:  # vendor_pass profile — pk_val is the vendor_passes row id
+                vp_row = db._execute(
+                    "SELECT vp.pass_type, vp.issued_date, vp.valid_until, vp.society_id, "
+                    "u.id AS vendor_user_id, u.linked_id AS vendor_pk, "
+                    "v.name AS vendor_name, v.service_type "
+                    "FROM vendor_passes vp "
+                    "JOIN users u ON u.id = vp.user_id "
+                    "LEFT JOIN vendors v ON v.id = u.linked_id "
+                    "WHERE vp.id = %s",
+                    (pk_val,),
+                    fetch_one=True,
+                ) or {}
+                vendor_pk = vp_row.get("vendor_pk") or pk_val
+                vendor_user_id = vp_row.get("vendor_user_id") or vendor_pk
+                vendor_name = vp_row.get("vendor_name", "Vendor")
+                service_type = vp_row.get("service_type", "")
+                qr_society_id = vp_row.get("society_id") or society_id
+                pass_row = vp_row
+
+            qr_img, qr_payload = generate_qr_code(qr_society_id, "VND", vendor_pk)
+            if qr_img:
                 society_row = db._execute(
                     "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
                     "FROM societies WHERE id = %s",
-                    (qr_society_id,), fetch_one=True,
+                    (qr_society_id,),
+                    fetch_one=True,
                 ) or {}
                 letterhead = get_letterhead_assets(society_row, qr_society_id)
                 vendor_pass_print_data = {
-                    "id": pk_val,
-                    "vendor_name": record_dict.get("name", "Vendor"),
-                    "service_type": record_dict.get("service_type", ""),
-                    "pass_type": pass_row.get("pass_type", ""),
+                    "id": vendor_pk,
+                    "vendor_name": vendor_name,
+                    "service_type": service_type,
+                    "pass_type": pass_row.get("pass_type",""),
                     "issued_date": str(pass_row.get("issued_date") or ""),
                     "valid_until": str(pass_row.get("valid_until") or ""),
                     "qr_url": qr_img, "qr_payload": qr_payload, "qr_caption": QR_CAPTION,

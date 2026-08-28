@@ -121,6 +121,7 @@ def book_event_tickets(
         booking_ref = f"EVT-REF-{society_id}-{user_id}-{event_id}"
         return {
             "event_ticket_id": event_ticket_id,
+            "receipt_id": (r or {}).get("receipt_id"),
             "booking_reference": booking_ref,
             "total_amount": float((r or {}).get("amount") or 0),
             "items": created_items,

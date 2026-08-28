@@ -2078,6 +2078,28 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 )
             return dict(r) if r else None
 
+        # ── VENDOR PASS (profile opened after Sell/Buy Pass) ────────────────
+        if entity_singular == "vendor_pass":
+            r = db._execute(
+                "SELECT vp.*, u.linked_id AS vendor_id "
+                "FROM vendor_passes vp "
+                "JOIN users u ON u.id = vp.user_id "
+                "WHERE vp.id=%s AND vp.society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
+        # ── EVENT TICKET (profile opened after Sell/Buy Event) ───────────────
+        if entity_singular == "event_ticket":
+            r = db._execute(
+                "SELECT et.*, e.title AS event_title, e.event_date, e.event_time, e.venue "
+                "FROM event_tickets et "
+                "JOIN events e ON e.id = et.event_id "
+                "WHERE et.id=%s AND et.society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
         # ── ASSET (admin CRUD + view) ─────────────────────────────────────────
         if entity_singular == "asset":
             r = db._execute(
