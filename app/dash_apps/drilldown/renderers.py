@@ -3579,19 +3579,27 @@ def render_pay_dues_card(
         ], style={"paddingTop": "15px"})
     ])
 
-    bg_options = []
-    for bg in bill_groups:
-        lbl = f"{bg['period_month']} — {bg['desc']} (₹{bg['amount']:,.2f})"
-        bg_options.append({"label": lbl, "value": bg['bill_group_id']})
-
     bill_group_tab = dbc.Tab(label="Bill Group Pay", tab_id="bill_group", children=[
         html.Div([
             dbc.Row([
                 dbc.Col(dbc.Label("Select Bill", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
-                dbc.Col(dcc.Dropdown(
-                    id={"type": "form-field", "entity": "pay_due_bg", "field": "bill_group_id"},
-                    options=bg_options, placeholder="Select a bill...", style={"fontSize": "13px"}
-                ), width=8)
+                dbc.Col([
+                    dcc.Input(id={"type": "form-field-hidden", "entity": "pay_due_bg", "field": "bill_group_id"},
+                              type="hidden", value=""),
+                    html.Div([
+                        html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                        html.Span("Tap to select bill…",
+                                  style={"flex": "1", "color": "#9aa7b8", "fontWeight": "400"}),
+                        html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                    ], id={"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"},
+                       n_clicks=0,
+                       style={
+                           "display": "flex", "alignItems": "center",
+                           "padding": "10px 12px", "borderRadius": "10px",
+                           "border": "1px solid #dbe3ee", "background": "#fff",
+                           "cursor": "pointer", "fontSize": "13px",
+                       }),
+                ], width=8)
             ], className="mb-2"),
             dbc.Row([
                 dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),

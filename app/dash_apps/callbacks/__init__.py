@@ -203,6 +203,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ drillin_callbacks failed: {e}")
 
+    # 14f. Pay Dues Bill Group picker modal (Bill Group Pay tab in Pay Dues card).
+    #     Requires "pay-dues-bill-modal" + "pay-dues-bill-store" in app_shell.py.
+    try:
+        from .drillin_callbacks import register_pay_dues_bill_callbacks
+        register_pay_dues_bill_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ pay_dues_bill_callbacks failed: {e}")
+
     # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
     try:
         from .channel_callbacks import register_channel_callbacks
