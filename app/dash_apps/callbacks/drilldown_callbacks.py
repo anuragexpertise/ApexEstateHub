@@ -3918,7 +3918,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     return True, f"{role.title()} '{email}' created", domain_id
 
 def _save_event(db, d, sid, is_edit, pk):
-    _acc_id = d.get("parent_account_id")
+    _acc_id = d.get("account_id")
     _acc_id = int(_acc_id) if _acc_id not in (None, "", "None") else None
 
     try:
@@ -3957,7 +3957,7 @@ def _save_event(db, d, sid, is_edit, pk):
         _img_param += _upd_by_param + (pk, sid)
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
-            f"event_time=%s, venue=%s, open_to=%s, parent_account_id=%s, "
+            f"event_time=%s, venue=%s, open_to=%s, account_id=%s, "
             f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s"
             f"{_img_clause}{_upd_by_clause} "
             "WHERE id=%s AND society_id=%s",
@@ -3983,7 +3983,7 @@ def _save_event(db, d, sid, is_edit, pk):
         ticket_price2=_ticket_price2,
         ticket_name=_ticket_name,
         ticket_name2=_ticket_name2,
-        parent_account_id=_acc_id,
+        account_id=_acc_id,
         open_to=d.get("open_to", "all"),
         image=d.get("image"),
         created_by=d.get("user_id"),
