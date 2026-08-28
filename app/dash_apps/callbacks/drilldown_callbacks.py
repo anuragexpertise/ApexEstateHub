@@ -3210,13 +3210,37 @@ def _save_pay_due_bg(db, d, sid):
     if not amt: return False, "Amount is required", None
     try: amt = float(amt)
     except: return False, "Invalid amount", None
-    
+
     mode = d.get("mode", "cash")
     ref = d.get("reference", "")
     user_id = d.get("user_id")
     try: user_id = int(user_id) if user_id else None
     except: user_id = None
-    
+
+    actor_role = None
+    if user_id:
+        actor_user = db._execute("SELECT role FROM users WHERE id = %s", (user_id,), fetch_one=True)
+        actor_role = actor_user["role"] if actor_user else None
+
+    if actor_role in ("admin", "master"):
+        # Admin recording a payment on the owner's behalf — post
+        # immediately via the existing (already-correct) confirm primitive,
+        # same as the FIFO tab's admin branch in _save_pay_dues. The
+        # ownership check inside fn_self_report_receivable_by_bill_group is
+        # for owner self-pay only — an admin isn't the apartment's linked
+        # user and must never be routed through it.
+        ok, msg = False, ""
+        try:
+            r = db._execute(
+                "SELECT fn_verify_receivable_by_bill_group(%s,%s,%s,%s) AS msg",
+                (bg_id, user_id, mode, amt), fetch_one=True,
+            )
+            msg = (r or {}).get("msg", "Done")
+            ok = not str(msg).lower().startswith("error")
+        except Exception as e:
+            ok, msg = False, str(e)
+        return ok, msg, None
+
     try:
         res = db._execute(
             "SELECT fn_self_report_receivable_by_bill_group(%s, %s, %s, %s, %s) as msg",
