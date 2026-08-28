@@ -19,7 +19,7 @@ def create_event(
     ticket_price2: float = 0.0,
     ticket_name: str = "Adult",
     ticket_name2: str = "Child",
-    parent_account_id: int = None,
+    account_id: int = None,
     open_to: str = "all",
     image: str = None,
     created_by: int = None,
@@ -29,14 +29,14 @@ def create_event(
         row = db._execute("""
             INSERT INTO events (
                 society_id, title, description, venue, event_date, event_time,
-                open_to, parent_account_id, ticket_name, ticket_price,
+                open_to, account_id, ticket_name, ticket_price,
                 ticket_name2, ticket_price2, image, created_at, created_by
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
             RETURNING id
         """, (
             society_id, title, description, venue, event_date, event_time,
-            open_to, parent_account_id, ticket_name, ticket_price,
+            open_to, account_id, ticket_name, ticket_price,
             ticket_name2, ticket_price2, image, created_by,
         ), fetch_one=True)
         return row["id"], "Event created successfully"

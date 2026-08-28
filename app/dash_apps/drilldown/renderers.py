@@ -2670,7 +2670,7 @@ def render_form_card(card_id: str, title: str, icon: str,
 # Generic (schema-driven) entities whose "New" form collects money that is
 # credited to the society, and should therefore show the payment QR so the
 # payer can scan-and-pay right there. "events" is included because an event's
-# parent_account_id can point at an income/Cr account (e.g. an "Event
+# account_id can point at an income/Cr account (e.g. an "Event
 # Ticket" account collecting entry fees) — see _account_is_credit() below
 # for the narrower per-record check.
 _QR_BANNER_ENTITIES = {"receipts", "events"}
@@ -2938,14 +2938,14 @@ def _payment_qr_banner(entity_plural: str, society_id, prefill: dict) -> html.Di
     has an "id").
 
     - receipts: always shown on New (every receipt records money in).
-    - events: shown on New only when parent_account_id already resolves to
+    - events: shown on New only when account_id already resolves to
       a Cr (income) account, e.g. an "Event Ticket" account — an event
       wired to an expense account doesn't collect money, so no QR.
     """
     if prefill.get("id") or not society_id or entity_plural not in _QR_BANNER_ENTITIES:
         return None
     if entity_plural == "events":
-        acc_id = prefill.get("parent_account_id")
+        acc_id = prefill.get("account_id")
         if not _account_is_credit(acc_id, society_id):
             return None
     return render_payment_qr_widget(society_id)
@@ -3966,7 +3966,7 @@ def render_event_ticket_card(
 
     Ticket flow recorded in DB:
       event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity_adult, quantity_child, amount)
-      receipts       -> status='confirmed' (immediate) -- acc_id = events.parent_account_id
+      receipts       -> status='confirmed' (immediate) -- acc_id = events.account_id
       transactions   -> source_table='receipts', source_id=receipt.id
     """
     from dash import html, dcc

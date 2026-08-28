@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_time TIME,
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
-    parent_account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
+    account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
     ticket_name VARCHAR(20) DEFAULT 'Adult',
     ticket_price NUMERIC(10, 2) DEFAULT 0,
     ticket_name2 VARCHAR(20) DEFAULT 'Child',
@@ -676,7 +676,7 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 -- ── Event tickets ──────────────────────────────────────────────
 -- Tracks who bought tickets for which event; the money itself is
 -- recorded via the usual receipts/transactions pair (acc_id = the
--- event's parent_account_id, e.g. "Holi" = 23191 under "Event
+-- event's account_id, e.g. "Holi" = 23191 under "Event
 -- Ticket" = 2319), same pattern as vendor_passes -> receipts.
 CREATE TABLE IF NOT EXISTS event_tickets (
     id SERIAL PRIMARY KEY,
@@ -3546,7 +3546,7 @@ $$;
 -- SECTION 6b: EVENT TICKET SALE
 --
 -- fn_sell_event_ticket: Cr the event's own ticket sub-account
--- (events.parent_account_id, e.g. "Holi" = 23191 under the
+-- (events.account_id, e.g. "Holi" = 23191 under the
 -- "Event Ticket" = 2319 header) + Dr cash/bank paired side —
 -- same double-entry shape as fn_sell_vendor_pass, but the
 -- income account and per-unit price both come from the event
@@ -3598,7 +3598,7 @@ BEGIN
     WHERE e.id = p_event_id AND e.society_id = v_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
 
-    v_acc_id := v_event.parent_account_id;
+    v_acc_id := v_event.account_id;
     IF v_acc_id IS NULL THEN
         RAISE EXCEPTION 'This event has no ticket account set — tickets cannot be sold for it';
     END IF;
@@ -6120,7 +6120,7 @@ CREATE OR REPLACE FUNCTION fn_events_list(
 )
 RETURNS TABLE (
     id INT, title VARCHAR(200), description TEXT, event_date DATE, event_time VARCHAR(20),
-    venue VARCHAR(200), open_to VARCHAR(20), parent_account_id INT,
+    venue VARCHAR(200), open_to VARCHAR(20), account_id INT,
     ticket_name VARCHAR(20), ticket_price NUMERIC(10,2),
     ticket_name2 VARCHAR(20), ticket_price2 NUMERIC(10,2),
     created_at TIMESTAMP
@@ -6131,7 +6131,7 @@ BEGIN
     SELECT
         e.id::INT, e.title::VARCHAR(200), e.description::TEXT, e.event_date::DATE,
         e.event_time::VARCHAR(20), e.venue::VARCHAR(200), e.open_to::VARCHAR(20),
-        e.parent_account_id::INT,
+        e.account_id::INT,
         e.ticket_name::VARCHAR(20), e.ticket_price::NUMERIC(10,2),
         e.ticket_name2::VARCHAR(20), e.ticket_price2::NUMERIC(10,2),
         e.created_at::TIMESTAMP
@@ -6149,7 +6149,7 @@ CREATE OR REPLACE FUNCTION fn_event_profile(p_event_id INT)
 RETURNS TABLE (
     id INT, society_id INT, title VARCHAR(200), description TEXT, event_date DATE,
     event_time VARCHAR(20), venue VARCHAR(200), open_to VARCHAR(20),
-    parent_account_id INT,
+    account_id INT,
     ticket_name VARCHAR(20), ticket_price NUMERIC(10,2),
     ticket_name2 VARCHAR(20), ticket_price2 NUMERIC(10,2),
     created_at TIMESTAMP, image TEXT, subtitle TEXT
@@ -6157,7 +6157,7 @@ RETURNS TABLE (
 LANGUAGE SQL STABLE AS $$
     SELECT id::INT, society_id::INT, title::VARCHAR(200), description::TEXT,
            event_date::DATE, event_time::VARCHAR(20), venue::VARCHAR(200),
-           open_to::VARCHAR(20), parent_account_id::INT,
+           open_to::VARCHAR(20), account_id::INT,
            ticket_name::VARCHAR(20), ticket_price::NUMERIC(10,2),
            ticket_name2::VARCHAR(20), ticket_price2::NUMERIC(10,2),
            created_at::TIMESTAMP, image::TEXT,
