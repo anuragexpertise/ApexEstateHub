@@ -3722,12 +3722,10 @@ def render_vendor_pass_card(
       receipts       → status='confirmed' (immediate) — acc_id = ven_pass_acc_id
       transactions   → source_table='receipts', source_id=receipt.id
     """
-    from datetime import date as _date
     from dash import html, dcc
     import dash_bootstrap_components as dbc
- 
+  
     color        = "#17976e"
-    today        = _date.today().strftime("%Y-%m-%d")
     action_label = "Sell Pass" if caller_role in ("admin", "master") else "Buy Pass"
     entity_name  = "vendor_pass"   # MUST match _resolve_entity_singular guard
  
@@ -3907,21 +3905,6 @@ def render_vendor_pass_card(
                     ], className="mb-2"),
                 ],
             ),
-            # ── Issue date ────────────────────────────────────────────────
-            dbc.Row([
-                dbc.Col(dbc.Label("Issue Date",
-                                  style={"fontSize": "12px", "fontWeight": "500",
-                                         "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dbc.Input(
-                    id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
-                    type="text",
-                    value=_format_date_entry(today),
-                    placeholder="DD/MM/YYYY",
-                    style={"fontSize": "13px", "borderRadius": "10px"},
-                ), width=8),
-            ], className="mb-2"),
- 
             # ── Submit ────────────────────────────────────────────────────
             dbc.Button(
                 [html.I(className="fas fa-id-card me-2"), action_label],
@@ -3986,12 +3969,10 @@ def render_event_ticket_card(
       receipts       -> status='confirmed' (immediate) -- acc_id = events.parent_account_id
       transactions   -> source_table='receipts', source_id=receipt.id
     """
-    from datetime import date as _date
     from dash import html, dcc
     import dash_bootstrap_components as dbc
 
     color        = "#c8781f"
-    today        = _date.today().strftime("%Y-%m-%d")
     is_admin     = caller_role in ("admin", "master")
     action_label = "Sell Tickets" if is_admin else "Buy Tickets"
     entity_name  = "event_ticket"   # MUST match _resolve_entity_singular guard
@@ -4156,20 +4137,6 @@ def render_event_ticket_card(
                     ], className="mb-2"),
                 ],
             ),
-            # -- Issue date -----------------------------------------------------
-            dbc.Row([
-                dbc.Col(dbc.Label("Issue Date",
-                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dbc.Input(
-                    id={"type": "form-field", "entity": entity_name, "field": "issued_date"},
-                    type="text",
-                    value=_format_date_entry(today),
-                    placeholder="DD/MM/YYYY",
-                    style={"fontSize": "13px", "borderRadius": "10px"},
-                ), width=8),
-            ], className="mb-2"),
-
             # -- Submit -----------------------------------------------------------
             dbc.Button(
                 [html.I(className="fas fa-ticket-alt me-2"), action_label],
