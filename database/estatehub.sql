@@ -2842,7 +2842,7 @@ BEGIN
       INTO v_remaining
       FROM receivables
      WHERE bill_group_id = p_bill_group_id
-       AND status IN ('pending','partial');
+       AND status IN ('pending','partial','unverified');
 
     IF v_remaining <= 0 THEN
         RETURN 'Nothing outstanding on this bill group';
@@ -2894,12 +2894,21 @@ $$;
 -- the journal balanced (overpayment is recognized as a maintenance Cr leg).
 DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
 
-CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
+-- fn_apply_apartment_dues_fifo_core: shared FIFO allocation + posting engine.
+-- Extracted (2026-08) so both the admin-immediate path
+-- (fn_pay_apartment_dues_fifo) and the self-pay confirm path
+-- (fn_confirm_apartment_self_payment) share one implementation instead of
+-- duplicating the FIFO/journal logic. p_source_table/p_source_id let the
+-- caller trace every posted leg back to whatever record authorized it
+-- (a receivable-direct admin payment, or a confirmed self-reported receipt).
+CREATE OR REPLACE FUNCTION fn_apply_apartment_dues_fifo_core(
     p_apartment_id INT,
     p_amount       NUMERIC,
     p_mode         VARCHAR DEFAULT 'cash',
     p_confirmed_by INT     DEFAULT NULL,
-    p_particulars  TEXT    DEFAULT NULL
+    p_particulars  TEXT    DEFAULT NULL,
+    p_source_table VARCHAR DEFAULT 'receivables',
+    p_source_id    INT     DEFAULT NULL
 )
 RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
 LANGUAGE plpgsql AS $$
@@ -2997,11 +3006,11 @@ BEGIN
     IF v_total_take > 0 THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, journal_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_society_id, p_mode), p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Maintenance Payment'),
-            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
@@ -3013,17 +3022,19 @@ BEGIN
     IF v_remaining > 0 THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, journal_id
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Maintenance Payment') || ' (Advance)',
-            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_journal_id
+            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
 
     -- Dr: cash / bank paired side (actual amount received). References the
-    -- first Cr leg posted so the journal is traceable as one event.
+    -- originating record (p_source_id, e.g. a confirmed self-pay receipt) when
+    -- given, else the first Cr leg posted this call, so the journal is
+    -- traceable as one event either way.
     IF v_bank_acc IS NOT NULL THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
@@ -3031,7 +3042,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
             'Cash received - Maintenance Payment',
-            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), 'receivables', v_first_trx_id, v_journal_id
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
         );
     END IF;
 
@@ -3055,6 +3066,125 @@ BEGIN
         (p_amount - v_remaining)::NUMERIC(15,2),
         v_remaining::NUMERIC(15,2),
         v_journal_id;
+END;
+$$;
+
+-- fn_pay_apartment_dues_fifo: admin-immediate path (Pay Dues button).
+-- Thin wrapper over fn_apply_apartment_dues_fifo_core — behavior/signature
+-- unchanged from before the core was extracted (2026-08); source_table stays
+-- 'receivables' with no source_id override, matching the original.
+DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo(INT, NUMERIC, VARCHAR, INT, TEXT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_confirmed_by INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL
+)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT)
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN
+        RAISE EXCEPTION 'Amount must be > 0';
+    END IF;
+    RETURN QUERY
+    SELECT * FROM fn_apply_apartment_dues_fifo_core(
+        p_apartment_id, p_amount, p_mode, p_confirmed_by, p_particulars,
+        'receivables', NULL
+    );
+END;
+$$;
+
+-- fn_report_apartment_payment_fifo: owner self-pay (FIFO toggle).
+-- Creates ONE pending receipts row for the lump sum — no allocation, no
+-- posting. acc_id is deliberately left NULL here rather than guessed via an
+-- ILIKE account-name lookup: the actual income accounts are resolved
+-- correctly inside fn_apply_apartment_dues_fifo_core at confirm time (via
+-- fn_resolve_sdr_leg / the society's own Maintenance account), so nothing
+-- needs to be guessed at report time.
+-- Ownership check: the reporting user must be the 'apartment' user linked
+-- to the target apartment — mirrors the IDOR-hardening convention already
+-- used elsewhere in this codebase (SQL functions are the trust boundary,
+-- not the client-supplied entity_id in the form payload).
+CREATE OR REPLACE FUNCTION fn_report_apartment_payment_fifo(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_reported_by  INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL,
+    p_reference    VARCHAR DEFAULT NULL
+)
+RETURNS TABLE(receipt_id INT, status TEXT) LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id INT;
+    v_owns       BOOLEAN;
+    v_receipt_id INT;
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN
+        RETURN QUERY SELECT NULL::INT, 'Error: Amount must be > 0'::TEXT; RETURN;
+    END IF;
+
+    SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT NULL::INT, 'Error: Apartment not found'::TEXT; RETURN;
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1 FROM users
+         WHERE id = p_reported_by AND role = 'apartment' AND linked_id = p_apartment_id
+    ) INTO v_owns;
+    IF NOT v_owns THEN
+        RETURN QUERY SELECT NULL::INT, 'Error: You are not authorized to report a payment for this apartment'::TEXT; RETURN;
+    END IF;
+
+    INSERT INTO receipts (
+        society_id, user_id, entity_id, role, receipt_date, acc_id,
+        particulars, amount, mode, transaction_id, status, created_by
+    ) VALUES (
+        v_society_id, p_reported_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
+        COALESCE(p_particulars, 'Maintenance Payment (Self-reported, FIFO)'),
+        p_amount, p_mode, p_reference, 'pending', p_reported_by
+    ) RETURNING id INTO v_receipt_id;
+
+    RETURN QUERY SELECT v_receipt_id, 'Success: Payment reported (FIFO). Awaiting verification.'::TEXT;
+END;
+$$;
+
+-- fn_confirm_apartment_self_payment: admin confirms a FIFO-reported receipt.
+-- Runs the same allocation core used by the admin-direct path, so a
+-- confirmed self-pay clears receivables and posts transactions identically
+-- to an admin-entered payment — the only difference is when the posting
+-- happens (on confirm, not on report) and that every leg carries
+-- source_table='receipts'/source_id=<this receipt> for traceability back to
+-- the owner's original claim (UTR/reference included).
+CREATE OR REPLACE FUNCTION fn_confirm_apartment_self_payment(
+    p_receipt_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT NULL
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_receipt   receipts%ROWTYPE;
+    v_result    RECORD;
+BEGIN
+    SELECT * INTO v_receipt FROM receipts
+     WHERE id = p_receipt_id AND role = 'apartment' AND status = 'pending'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'Error: Receipt not found or not pending';
+    END IF;
+
+    SELECT * INTO v_result FROM fn_apply_apartment_dues_fifo_core(
+        v_receipt.entity_id, v_receipt.amount, COALESCE(p_mode, v_receipt.mode),
+        p_confirmed_by, v_receipt.particulars, 'receipts', v_receipt.id
+    );
+
+    UPDATE receipts
+       SET status = 'confirmed', confirmed_by = p_confirmed_by, confirmed_at = NOW()
+     WHERE id = p_receipt_id;
+
+    RETURN 'Success: Payment confirmed and posted — transaction #' || v_result.transaction_id::TEXT;
 END;
 $$;
 
@@ -7980,8 +8110,32 @@ CREATE OR REPLACE FUNCTION fn_self_report_receivable_by_bill_group(
 DECLARE
     v_has_unverified BOOLEAN;
     v_total_pending NUMERIC;
+    v_entity_id INT;
+    v_role VARCHAR(10);
+    v_owns BOOLEAN;
 BEGIN
     IF p_amount <= 0 THEN RETURN 'Error: amount must be > 0'; END IF;
+
+    SELECT entity_id, role INTO v_entity_id, v_role
+      FROM receivables WHERE bill_group_id = p_bill_group_id LIMIT 1;
+    IF NOT FOUND THEN
+        RETURN 'Error: Bill group not found';
+    END IF;
+    IF v_role <> 'apartment' THEN
+        RETURN 'Error: Only apartment dues can be self-reported';
+    END IF;
+
+    -- Ownership check: the reporting user must be the 'apartment' user
+    -- linked to this bill group's apartment — the SQL function is the trust
+    -- boundary, not the client-supplied bill_group_id in the form payload
+    -- (mirrors this codebase's existing IDOR-hardening convention).
+    SELECT EXISTS (
+        SELECT 1 FROM users
+         WHERE id = p_reported_by AND role = 'apartment' AND linked_id = v_entity_id
+    ) INTO v_owns;
+    IF NOT v_owns THEN
+        RETURN 'Error: You are not authorized to report a payment for this bill';
+    END IF;
 
     -- Check for race conditions / existing claims
     SELECT EXISTS (
@@ -8040,6 +8194,17 @@ BEGIN
         IF NOT FOUND THEN RETURN 'Error: Receipt not found or not pending.'; END IF;
         
     ELSIF p_type = 'bill_group' THEN
+        -- UPDATE doesn't support LIMIT in Postgres; capture entity_id/
+        -- society_id first (identical across every row in one bill group),
+        -- then update all matching rows without relying on RETURNING...INTO
+        -- to silently pick a row.
+        SELECT entity_id, society_id INTO v_entity_id, v_society_id
+          FROM receivables
+         WHERE bill_group_id = p_id::UUID AND status = 'unverified'
+         LIMIT 1;
+
+        IF NOT FOUND THEN RETURN 'Error: Bill group not found or not unverified.'; END IF;
+
         UPDATE receivables
            SET status = 'pending', -- revert to pending
                reported_amount = NULL,
@@ -8047,10 +8212,7 @@ BEGIN
                reported_reference = NULL,
                reported_at = NULL,
                reported_by = NULL
-         WHERE bill_group_id = p_id::UUID AND status = 'unverified'
-         RETURNING entity_id, society_id LIMIT 1 INTO v_entity_id, v_society_id;
-         
-        IF NOT FOUND THEN RETURN 'Error: Bill group not found or not unverified.'; END IF;
+         WHERE bill_group_id = p_id::UUID AND status = 'unverified';
     ELSE
         RETURN 'Error: Invalid type';
     END IF;
@@ -8085,13 +8247,15 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION fn_income_tax_summary_fy(
     p_society_id INT,
-    p_start_date DATE,
-    p_end_date DATE
+    p_fy         INT
 ) RETURNS TABLE (
     category VARCHAR, -- 'Income' or 'Expense'
     nature VARCHAR,   -- 'mutual' or 'non_mutual'
     total_amount NUMERIC
 ) LANGUAGE plpgsql AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
 BEGIN
     RETURN QUERY
     SELECT 
@@ -8101,8 +8265,7 @@ BEGIN
     FROM transactions t
     JOIN accounts a ON t.acc_id = a.id
     WHERE t.society_id = p_society_id
-      AND t.trx_date BETWEEN p_start_date AND p_end_date
-      AND a.drcr_account = 'Cr'
+      AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Cr'
       AND t.status = 'paid'
     GROUP BY a.mutuality_nature
@@ -8116,8 +8279,7 @@ BEGIN
     FROM transactions t
     JOIN accounts a ON t.acc_id = a.id
     WHERE t.society_id = p_society_id
-      AND t.trx_date BETWEEN p_start_date AND p_end_date
-      AND a.drcr_account = 'Dr'
+      AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Dr'
       AND t.status = 'paid'
     GROUP BY a.mutuality_nature;
