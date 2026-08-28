@@ -68,6 +68,9 @@ _SYSTEM_COLUMNS = {
     "bill_group_id",
 }
 
+# System columns that should still appear in profile cards (audit trail).
+_PROFILE_VISIBLE_SYSTEM = {"created_at", "updated_at", "created_by", "updated_by"}
+
 # Entities with no Edit action (immutable ledger / read-only tabs).
 # NOTE (2026-08): "polls" removed — Poll now supports Edit, but only
 # while active with zero votes cast (guarded at the row level in
@@ -663,7 +666,8 @@ def build_entity_meta() -> dict:
                 })
 
             # Profile fields: skip system PKs but include most others
-            if not is_system:
+            # (audit/system columns in _PROFILE_VISIBLE_SYSTEM are still shown)
+            if not is_system or name in _PROFILE_VISIBLE_SYSTEM:
                 profile_fields.append({
                     "label": label,
                     "field": name,
