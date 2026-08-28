@@ -430,7 +430,7 @@ def register_pay_dues_bill_callbacks(app):
         Output("pay-dues-bill-modal", "is_open", allow_duplicate=True),
         Output("pay-dues-bill-store", "data", allow_duplicate=True),
         Input({"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"}, "n_clicks"),
-        State({"type": "form-field-hidden", "entity": "pay_due_bg", "field": "entity_id"}, "value"),
+        State({"type": "form-field", "entity": "pay_due_bg", "field": "entity_id"}, "value"),
         prevent_initial_call=True,
     )
     @require_session
@@ -478,7 +478,7 @@ def register_pay_dues_bill_callbacks(app):
 
         try:
             from database.db_manager import db
-            rows, _ = db.execute("""
+            rows = db.execute("""
                 SELECT bill_group_id,
                        SUM(amount - paid_amount)::FLOAT as amount,
                        MIN(period_month)::TEXT as period_month,
@@ -488,7 +488,7 @@ def register_pay_dues_bill_callbacks(app):
                    AND status IN ('pending', 'partial')
                  GROUP BY bill_group_id
                  ORDER BY MIN(period_month) ASC
-            """, (society_id, apartment_id))
+            """, (society_id, apartment_id), fetch_all=True) or []
         except Exception as e:
             return html.P(f"Error loading bills: {e}", className="text-danger text-center",
                           style={"padding": "30px"})
@@ -519,7 +519,7 @@ def register_pay_dues_bill_callbacks(app):
             ], action=True, id={"type": "pay-dues-bill-item", "bill_group_id": r["bill_group_id"]},
                style={"cursor": "pointer"}))
 
-        return dbc.ListGroup(rows=items, flush=True)
+        return dbc.ListGroup(children=items, flush=True)
 
     # ── 4. Select bill -> write hidden field + update trigger text ────────
     @app.callback(
