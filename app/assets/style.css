@@ -104,7 +104,8 @@ a {
     box-shadow: 24px 0 48px rgba(15, 23, 42, 0.22);
     transition: width 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
     z-index: 1040;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .app-sidebar .sb-nav-list,
@@ -808,12 +809,18 @@ a {
         grid-template-columns: 1fr;
     }
 
-    .portal-page .card-header,
-    .portal-page .card-body,
     .dnd-card .card-header,
     .dnd-card .card-body {
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: 2px;
+        padding-right: 2px;
+    }
+
+    .portal-page {
+        padding: 0 2px 2px;
+    }
+
+    .dnd-card {
+        margin: 2px;
     }
 
     .portal-page .btn,
