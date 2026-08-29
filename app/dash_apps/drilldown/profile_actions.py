@@ -293,10 +293,20 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         {
             "label": "Verify & Post",
             "action_id": "verify_expense",
-            "target_card": None,        # server-side only
+            "target_card": "form_expense_print",
             "icon": "fa-check-double",
             "color": "success",
             "roles": ["admin"],
+        },
+        {
+            "label": "Print Expense",
+            "action_id": "print_expense",
+            "target_card": "form_expense_print",
+            "icon": "fa-print",
+            "color": "secondary",
+            # no "roles" restriction — anyone who can view an expense at all
+            # (admin always; apartment/vendor/security for their own rows,
+            # per the view-only _PORTAL_PERMS entries) can print/save/email it.
         },
     ],
     # ── ASSETS ───────────────────────────────────────────────────────────────

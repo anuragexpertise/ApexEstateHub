@@ -893,6 +893,15 @@ def shell_layout() -> html.Div:
             dcc.Store(id="vendor-pass-action-store-print", storage_type="memory"),
             dcc.Store(id="vendor-pass-action-store-pdf",   storage_type="memory"),
             dcc.Store(id="vendor-pass-action-store-email", storage_type="memory"),
+            # expense-action-store*: dummy Output anchors for
+            # expense_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — expenses previously had no
+            # print/download flow at all).
+            dcc.Store(id="expense-action-store",       storage_type="memory"),
+            dcc.Store(id="expense-action-store-print", storage_type="memory"),
+            dcc.Store(id="expense-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="expense-action-store-email", storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),

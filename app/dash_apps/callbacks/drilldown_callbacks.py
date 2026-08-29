@@ -1084,6 +1084,13 @@ def register_drilldown_callbacks(app):
                 content, bc, db_err = _render_current(store, auth)
                 store["refresh"] = False
                 kpi_style = {"display": "none"}
+                if ok:
+                    store = nav_state.navigate_to(
+                        store, "form_receipt_print", "Print Receipt",
+                        prefill={"receipt_id": int(pk)}, entity_pk=int(pk),
+                    )
+                    kpi_style = {"display": "none"}
+                    content, bc, db_err = _render_current(store, auth)
                 return store, content, bc, kpi_style, toast   
 
             # ── Verify payment (admin only, from payables list) ───────────────────
@@ -1109,7 +1116,15 @@ def register_drilldown_callbacks(app):
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
+                store["refresh"] = False
                 kpi_style = {"display": "none"}
+                if ok:
+                    store = nav_state.navigate_to(
+                        store, "form_expense_print", "Print Expense",
+                        prefill={"expense_id": int(pk)}, entity_pk=int(pk),
+                    )
+                    kpi_style = {"display": "none"}
+                    content, bc, db_err = _render_current(store, auth)
                 return store, content, bc, kpi_style, toast
 
             # ── Toggle Duty (security profile — admin-only manual clock in/out) ────
@@ -1794,11 +1809,12 @@ def register_drilldown_callbacks(app):
         # Save handlers embed navigation markers in their success message so
         # the post-save router knows which profile to auto-open:
         #   [[receipt:<id>]]  Pay Dues → receipt print (and toast "View Receipt")
+        #   [[expense:<id>]]   New Expense → expense print (and toast "View Expense")
         #   [[pass:<id>]]      Sell/Buy Pass → Vendor Pass profile (print/save/email)
         #   [[ticket:<id>]]    Sell/Buy Event → Event Ticket profile (print/save/email)
         #   [[vendor:<id>]]    vendor profile PK backing a pass (kept for completeness)
         # These are stripped from the user-facing toast text below.
-        receipt_ids, pass_ids, ticket_ids, vendor_ids = [], [], [], []
+        receipt_ids, expense_ids, pass_ids, ticket_ids, vendor_ids = [], [], [], [], []
         if ok and msg:
             def _pull(pattern, bucket):
                 found = re.findall(pattern, msg)
@@ -1807,10 +1823,11 @@ def register_drilldown_callbacks(app):
                     return True
                 return False
             _pull(r"\[\[receipt:(\d+)\]\]", receipt_ids)
+            _pull(r"\[\[expense:(\d+)\]\]", expense_ids)
             _pull(r"\[\[pass:(\d+)\]\]", pass_ids)
             _pull(r"\[\[ticket:(\d+)\]\]", ticket_ids)
             _pull(r"\[\[vendor:(\d+)\]\]", vendor_ids)
-            msg = re.sub(r"\s*\[\[(receipt|pass|ticket|vendor):\d+\]\]", "", msg).strip()
+            msg = re.sub(r"\s*\[\[(receipt|expense|pass|ticket|vendor):\d+\]\]", "", msg).strip()
 
         if ok:
             # KPI cards read counts/sums derived from whatever this save just
@@ -1852,6 +1869,13 @@ def register_drilldown_callbacks(app):
                 prefill={"receipt_id": rid}, entity_pk=rid,
             )
             hide_kpis = len(store.get("stack", [])) > 1
+        elif expense_ids:
+            eid = expense_ids[0]
+            store = nav_state.navigate_to(
+                store, "form_expense_print", "Print Expense",
+                prefill={"expense_id": eid}, entity_pk=eid,
+            )
+            hide_kpis = len(store.get("stack", [])) > 1
         elif pass_ids:
             pid = pass_ids[0]
             store = nav_state.navigate_to(
@@ -1883,6 +1907,8 @@ def register_drilldown_callbacks(app):
             toast_data = {"type": "success", "message": toast_msg}
             if receipt_ids:
                 toast_data["action"] = {"kind": "view_receipts", "receipt_ids": receipt_ids}
+            elif expense_ids:
+                toast_data["action"] = {"kind": "view_expenses", "expense_ids": expense_ids}
         return (
             store,
             content,
@@ -2738,6 +2764,19 @@ def _render_card(
             society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
             return renderers.render_receipt_card(receipt=receipt, society=society)
 
+        # ── Expense Print — formatted expense + Print/Save/Email (bypasses schema-driven form) ──
+        if card_id == "form_expense_print":
+            expense_id = prefill.get("expense_id") or prefill.get("id")
+            sid_val    = filters.get("society_id")
+            expense = {}
+            if expense_id and sid_val:
+                expense = db._execute(
+                    "SELECT * FROM fn_expenses_list(%s,NULL,NULL,NULL) f WHERE f.id = %s",
+                    (sid_val, expense_id), fetch_one=True,
+                ) or {}
+            society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
+            return renderers.render_expense_card(expense=expense, society=society)
+
         # ── NOC Print — rich-text editor with eligibility banner ──────────────
         if card_id == "form_noc_print":
             apt_id  = prefill.get("apartment_id") or prefill.get("entity_id")
@@ -3093,9 +3132,11 @@ def _save_receipt_v3(db, d, sid):
         receipt_status = (r or {}).get("status", "unknown")
         _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=(receipt_status == 'pending'))
         if receipt_status == 'confirmed':
-            return True, f"Receipt of ₹{amt:,.2f} saved and confirmed", receipt_id
+            msg = f"Receipt of ₹{amt:,.2f} saved and confirmed [[receipt:{receipt_id}]]"
+            return True, msg, receipt_id
         else:
-            return True, f"Receipt of ₹{amt:,.2f} saved — pending admin verification", receipt_id
+            msg = f"Receipt of ₹{amt:,.2f} saved — pending admin verification [[receipt:{receipt_id}]]"
+            return True, msg, receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -3212,9 +3253,9 @@ def _save_expense_v3(db, d, sid):
         expense_id = (r or {}).get("expense_id")
         expense_status = (r or {}).get("status", "unknown")
         if expense_status == 'confirmed':
-            return True, f"Expense of ₹{amt:,.2f} recorded and confirmed", expense_id
+            return True, f"Expense of ₹{amt:,.2f} recorded and confirmed [[expense:{expense_id}]]", expense_id
         else:
-            return True, f"Expense of ₹{amt:,.2f} recorded — pending admin verification", expense_id
+            return True, f"Expense of ₹{amt:,.2f} recorded — pending admin verification [[expense:{expense_id}]]", expense_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -3474,7 +3515,8 @@ def _save_asset_dispose(db, d, sid):
             fetch_one=True,
         )
         receipt_id = (r or {}).get("receipt_id")
-        return True, f"Asset disposed — receipt #{receipt_id}", receipt_id
+        msg = f"Asset disposed — receipt #{receipt_id} [[receipt:{receipt_id}]]"
+        return True, msg, receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
