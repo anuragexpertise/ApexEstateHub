@@ -422,6 +422,7 @@ CREATE TABLE IF NOT EXISTS receipts (
             'apartment',
             'vendor',
             'security',
+            'assets',
             'other'
         )
     ),
