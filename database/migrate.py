@@ -353,6 +353,22 @@ def run_migrations(conn):
         "ALTER TABLE transactions ADD CONSTRAINT transactions_role_check "
         "CHECK (role IN ('apartment', 'vendor', 'security', 'other', 'assets'))",
 
+        # accounts: mutuality_nature + tds_section (compliance tagging, Phase 1)
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS mutuality_nature VARCHAR(10) CHECK (mutuality_nature IN ('mutual','non_mutual')) DEFAULT 'mutual'",
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10)",
+
+        # expenses: tds_section (compliance tagging, Phase 1)
+        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10)",
+
+        # societies: secretary_sign (letterhead signing)
+        "ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_sign VARCHAR(100)",
+
+        # brought_forward: remarks column for audit notes
+        "ALTER TABLE brought_forward ADD COLUMN IF NOT EXISTS remarks VARCHAR(200)",
+
+        # concerns_assigns: bid_amount for bid-based assignment
+        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2)",
+
         # ══ Indian CHS/RWA compliance: TDS (Phase 4/4d) + capital (Phase 5) ══
     ]
 
