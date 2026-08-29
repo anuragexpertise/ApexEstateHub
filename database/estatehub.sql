@@ -542,13 +542,10 @@ CREATE TABLE IF NOT EXISTS expenses (
     source_reference VARCHAR(255),
     qr_payload VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id)
-,
-    tds_section VARCHAR(10)
+    created_by INT REFERENCES users (id),
+    tds_section VARCHAR(10),
+    receipt_number VARCHAR(64)
 );
-
-ALTER TABLE expenses
-ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(64);
 
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
