@@ -36,12 +36,11 @@ def generate_particulars(acc_id: int, entity_id: int | None, role: str,
         return f"Maintenance {MONTHS[today.month - 1]}-{today.year}"
 
     if tab == "SellAs":
-        # "<asset_name> <asset_sno>"
+        # "Sell <asset_name>"
         if entity_id:
             asset = _get_asset(entity_id, society_id)
             if asset:
-                parts = [asset.get("asset_name", ""), asset.get("asset_SNo", "")]
-                return " ".join(p for p in parts if p)
+                return f"Sell {asset.get('asset_name', '')}".strip()
         return f"Sale - {acc_name}"
 
     if tab == "EventT" or tab in ("Holi", "Diwali"):
