@@ -2627,6 +2627,7 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
         receipt_number = (r or {}).get("receipt_number")
         if receipt_number:
             msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
+        msg = f"{msg} [[receipt:{receipt_id}]]"
         return not str(msg).lower().startswith("error"), msg
     except Exception as e:
         return False, str(e)
@@ -2647,6 +2648,7 @@ def verify_expense(expense_id: int, confirmed_by: int, mode: str = None) -> tupl
         receipt_number = (r or {}).get("receipt_number")
         if receipt_number:
             msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
+        msg = f"{msg} [[expense:{expense_id}]]"
         return not str(msg).lower().startswith("error"), msg
     except Exception as e:
         return False, str(e)

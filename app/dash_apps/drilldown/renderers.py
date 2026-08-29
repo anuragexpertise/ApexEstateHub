@@ -4466,6 +4466,121 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
 
+def render_expense_card(expense: dict, society: dict) -> html.Div:
+    """
+    Read-only formatted expense + Print/Save-as-HTML/Email buttons, same
+    clientside-callback pattern as render_receipt_card (see expense_callbacks.py)
+    built from structured fields via a hidden JSON dcc.Store
+    (id="expense-print-data") rather than an editable textarea.
+    """
+    from datetime import date as _date
+
+    color      = "#de5c52"
+    expense_no = expense.get("id", "—")
+    e_date     = expense.get("expense_date") or _date.today().isoformat()
+    payee      = expense.get("entity_name") or "—"
+    role_lbl   = (expense.get("role") or "").title() or "—"
+    particulars = expense.get("particulars", "—")
+    account    = expense.get("account_name", "—")
+    amount     = float(expense.get("amount") or 0)
+    mode       = (expense.get("mode") or "cash").title()
+    ref        = expense.get("transaction_id") or expense.get("cheque_no") or ""
+    status     = (expense.get("status") or "confirmed").title()
+    society_nm = society.get("name", "—")
+    society_addr = society.get("address", "")
+    society_id = expense.get("society_id") or society.get("id")
+    tds_pct    = expense.get("tds_pct")
+
+    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    letterhead = get_letterhead_assets(society, society_id)
+
+    qr_url = ""
+    if expense_no and expense_no != "—" and society_id:
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_img, _payload = generate_qr_code(society_id, "EXP", int(expense_no))
+            qr_url = qr_img or ""
+        except Exception as e:
+            print(f"⚠️  expense QR render failed: {e}")
+
+    print_data = {
+        "expense_no": expense_no, "date": e_date, "payee": payee,
+        "role": role_lbl, "particulars": particulars, "account": account,
+        "amount": f"{amount:,.2f}", "mode": mode, "ref": ref, "status": status,
+        "society_name": society_nm, "society_address": society_addr,
+        "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+        "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+        "qr_url": qr_url, "qr_caption": QR_CAPTION,
+        "is_provisional": (expense.get("status") in ("pending", "unverified")),
+        "tds_pct": tds_pct,
+    }
+
+    def _row(label, value):
+        return dbc.Row([
+            dbc.Col(html.Small(label, style={"color": "#7d8ea3", "fontWeight": "600"}), width=4),
+            dbc.Col(html.Span(str(value), style={"fontWeight": "500"}), width=8),
+        ], className="mb-2", style={"fontSize": "12px"})
+
+    return dbc.Card([
+        dcc.Store(id="expense-print-data", data=print_data, storage_type="memory"),
+        dbc.CardHeader(
+            html.Div([
+                html.Div(html.I(className="fas fa-file-invoice-dollar",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong(f"Expense #{expense_no}", style={"fontSize": "14px"}),
+                    html.Div(f"{payee} — {role_lbl}",
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            html.Div([
+                html.Div(society_nm, style={"fontWeight": "800", "fontSize": "15px"}),
+                html.Div(society_addr, style={"fontSize": "11px", "color": "#999"}),
+            ], style={"textAlign": "center", "marginBottom": "14px",
+                      "paddingBottom": "10px", "borderBottom": "1px dashed #d0dae8"}),
+            _row("Date", e_date),
+            _row("Paid To", f"{payee} ({role_lbl})"),
+            _row("Particulars", particulars),
+            _row("Account", account),
+            _row("Amount", f"₹{amount:,.2f}"),
+            _row("TDS %", f"{tds_pct}%" if tds_pct else "—"),
+            _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
+            _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})]) if expense.get("status") in ("pending", "unverified") else status),
+            html.Div([
+                html.Button(
+                    [html.I(className="fas fa-print me-2"), "Print"],
+                    id="expense-btn-print", n_clicks=0,
+                    className="btn btn-outline-primary",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                    id="expense-btn-pdf", n_clicks=0,
+                    className="btn btn-outline-danger",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+                html.Button(
+                    [html.I(className="fas fa-envelope me-2"), "Email Expense"],
+                    id="expense-btn-email", n_clicks=0,
+                    className="btn btn-outline-info",
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                      "marginTop": "16px", "paddingTop": "14px",
+                      "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+        ], style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # EVENT MOBILE TICKET PASS VIEW & SUBSCRIBABLE ALERTS RENDERERS
 # ════════════════════════════════════════════════════════════════════════════

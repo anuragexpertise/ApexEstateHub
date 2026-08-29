@@ -160,6 +160,15 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ vendor_pass_callbacks failed: {e}")
 
+    # 13d. Expense Print / Save / Email buttons (expense-action-store dummy
+    #      Output — requires those stores added to app_shell.py). New
+    #      2026-08 — expenses previously had no print/download flow.
+    try:
+        from .expense_callbacks import register_expense_callbacks
+        register_expense_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ expense_callbacks failed: {e}")
+
     # 14. Bulk Enroll (CSV upload for apartments/vendors/security on the
     #     Admin/Enroll tab). Requires "bulk-enroll-modal" +
     #     "bulk-enroll-entity-store" in app_shell.py, and a "Bulk Enroll"
