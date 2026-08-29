@@ -106,6 +106,12 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
             "other":     None,
         },
     },
+    ("receipts", "asset_id"): {
+        "mode": "single",
+        "table": "assets",
+        "label": "Asset (Not Disposed)",
+        "filter": "disposed=FALSE",
+    },
     ("expenses", "entity_id"): {
         "mode": "role",
         "role_field": "role",
@@ -198,17 +204,19 @@ def list_drillin_items(
     society_id: int,
     group_key: str | None = None,
     search: str | None = None,
+    extra_filter: str | None = None,
 ) -> list[dict]:
     """Level-3 tappable item cards for a target table, optionally scoped
     to a Level-2 group. Returns [{id, label, sub, icon, color}]."""
     if target_table not in _ALLOWED_TABLES:
         return []
     rules = _TABLE_RULES.get(target_table, {})
+    query = f"SELECT * FROM {target_table} WHERE society_id=%s AND active=TRUE"
+    params: list = [society_id]
+    if extra_filter:
+        query += f" AND {extra_filter}"
     try:
-        rows = db._execute(
-            f"SELECT * FROM {target_table} WHERE society_id=%s AND active=TRUE",
-            (society_id,), fetch_all=True,
-        ) or []
+        rows = db._execute(query, tuple(params), fetch_all=True) or []
     except Exception as e:
         print(f"⚠️  list_drillin_items({target_table}): {e}")
         return []
