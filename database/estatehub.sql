@@ -547,6 +547,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     tds_section VARCHAR(10)
 );
 
+ALTER TABLE expenses
+ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(64);
+
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
 --
@@ -2692,11 +2695,9 @@ BEGIN
         confirmed_at = NOW()
     WHERE id = p_expense_id;
 
-    v_number := fn_issue_receipt_hash_for_receipt(p_expense_id);
-
     expense_id := p_expense_id;
-    receipt_number := v_number;
-    msg := 'Verified: transaction #' || v_trx_id::TEXT || ' receipt_number=' || COALESCE(v_number, 'N/A');
+    receipt_number := NULL;
+    msg := 'Verified: transaction #' || v_trx_id::TEXT;
     RETURN NEXT;
 END;
 $$;
@@ -3317,7 +3318,7 @@ CREATE OR REPLACE FUNCTION fn_verify_payment(
     p_mode         VARCHAR DEFAULT 'cash',
     p_tds_pct      NUMERIC DEFAULT 10
 )
-RETURNS TEXT LANGUAGE plpgsql AS $$
+RETURNS TABLE(expense_id INT, msg TEXT) LANGUAGE plpgsql AS $$
 DECLARE
     v_pay        payables%ROWTYPE;
     v_trx_id     INT;
@@ -3326,13 +3327,14 @@ DECLARE
     v_tds_acc    INT;
     v_tds_amt    NUMERIC(15,2) := 0;
     v_net_amt    NUMERIC(15,2);
+    v_expense_id INT;
 BEGIN
     SELECT * INTO v_pay FROM payables WHERE id = p_payment_id FOR UPDATE;
-    IF NOT FOUND THEN RETURN 'Error: Payment not found'; END IF;
-    IF v_pay.status = 'verified' THEN RETURN 'Already verified'; END IF;
-    IF v_pay.acc_id IS NULL THEN RETURN 'Error: No expense account set on this payment row'; END IF;
+    IF NOT FOUND THEN msg := 'Error: Payment not found'; expense_id := NULL; RETURN NEXT; RETURN; END IF;
+    IF v_pay.status = 'verified' THEN msg := 'Already verified'; expense_id := NULL; RETURN NEXT; RETURN; END IF;
+    IF v_pay.acc_id IS NULL THEN msg := 'Error: No expense account set on this payment row'; expense_id := NULL; RETURN NEXT; RETURN; END IF;
     IF p_tds_pct IS NOT NULL AND (p_tds_pct < 0 OR p_tds_pct > 100) THEN
-        RETURN 'Error: TDS % must be between 0 and 100';
+        msg := 'Error: TDS % must be between 0 and 100'; expense_id := NULL; RETURN NEXT; RETURN;
     END IF;
 
     v_bank_acc := fn_resolve_bank_leg(v_pay.society_id, p_mode);
@@ -3388,6 +3390,16 @@ BEGIN
         );
     END IF;
 
+    INSERT INTO expenses(
+        society_id, user_id, entity_id, role,
+        expense_date, acc_id, particulars, amount, mode,
+        status, confirmed_by, confirmed_at, source_reference, created_at, created_by
+    ) VALUES (
+        v_pay.society_id, p_confirmed_by, v_pay.entity_id, v_pay.role,
+        CURRENT_DATE, v_pay.acc_id, v_pay.description, v_pay.amount, p_mode,
+        'confirmed', p_confirmed_by, NOW(), NULL, NOW(), p_confirmed_by
+    ) RETURNING id INTO v_expense_id;
+
     UPDATE payables
     SET status       = 'verified',
         confirmed_by = p_confirmed_by,
@@ -3395,7 +3407,9 @@ BEGIN
         paid_at      = NOW()
     WHERE id = p_payment_id;
 
-    RETURN 'Verified: transaction #' || v_trx_id::TEXT;
+    msg := 'Verified: transaction #' || v_trx_id::TEXT || ' expense_id=' || v_expense_id::TEXT;
+    expense_id := v_expense_id;
+    RETURN NEXT;
 END;
 $$;
 
@@ -3703,10 +3717,11 @@ CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_created_by        INT     DEFAULT NULL,
     p_particulars       TEXT    DEFAULT NULL
 )
-RETURNS TABLE(asset_id INT, transaction_id INT, journal_id INT)
+RETURNS TABLE(asset_id INT, expense_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_asset_id   INT;
+    v_expense_id INT;
     v_trx_id     INT;
     v_journal_id INT;
     v_bank_acc   INT;
@@ -3755,7 +3770,17 @@ BEGIN
         );
     END IF;
 
-    RETURN QUERY SELECT v_asset_id, v_trx_id, v_journal_id;
+    INSERT INTO expenses(
+        society_id, user_id, entity_id, role,
+        expense_date, acc_id, particulars, amount, mode,
+        status, confirmed_by, confirmed_at, source_reference, created_at, created_by
+    ) VALUES (
+        p_society_id, p_created_by, v_asset_id, 'assets',
+        p_purchase_date, p_acc_id, v_desc, p_purchase_value, p_mode,
+        'confirmed', p_created_by, NOW(), NULL, NOW(), p_created_by
+    ) RETURNING id INTO v_expense_id;
+
+    RETURN QUERY SELECT v_asset_id, v_expense_id, v_trx_id, v_journal_id;
 END;
 $$;
 
@@ -3865,6 +3890,17 @@ BEGIN
             );
         END IF;
     END IF;
+
+    -- Create receipt for the asset sale proceeds
+    INSERT INTO receipts(
+        society_id, user_id, entity_id, role,
+        receipt_date, acc_id, particulars, amount, mode,
+        status, confirmed_by, confirmed_at, source_reference, created_at, created_by
+    ) VALUES (
+        v_asset.society_id, p_created_by, p_asset_id, 'assets',
+        p_sale_date, v_acc_id, v_desc, p_sale_value, p_mode,
+        'confirmed', p_created_by, NOW(), NULL, NOW(), p_created_by
+    ) RETURNING id INTO v_receipt_id;
 
     UPDATE assets
     SET disposed    = TRUE,

@@ -3938,6 +3938,117 @@ def render_vendor_pass_card(
  
 
 # ════════════════════════════════════════════════════════════════════════════
+# ASSET DISPOSE CARD — Sell / Dispose Asset
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
+    """
+    Dedicated form card for Sell / Dispose Asset (admin only).
+
+    entity name on all IDs = "asset_dispose" — matches _resolve_entity_singular
+    guard and _save_entity("asset_dispose") → _save_asset_dispose() routing.
+
+    Asset disposal flow recorded in DB:
+      assets      → marked disposed=TRUE
+      receipts    → sale proceeds receipt (confirmed)
+      transactions → double-entry (Dr cash/bank, Cr asset class, gain/loss)
+    """
+    from datetime import date as _date
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+
+    color        = "#de5c52"
+    asset_id     = asset.get("id", "")
+    asset_name   = asset.get("asset_name", "—")
+    asset_sno    = asset.get("asset_SNo", "—")
+    purchase_val = float(asset.get("purchase_value") or 0)
+    sale_value   = asset.get("sale_value") or ""
+    sale_date    = asset.get("disposed_at") or _date.today().isoformat()
+    mode         = asset.get("mode", "cash") or "cash"
+    particulars  = asset.get("particulars") or ""
+
+    today_str = _date.today().isoformat()
+
+    return dbc.Card([
+        dbc.CardHeader(
+            html.Div([
+                html.Div(html.I(className="fas fa-sign-out-alt",
+                                style={"color": "#fff", "fontSize": "16px"}),
+                         style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                                "background": f"linear-gradient(135deg,{color},{color}aa)",
+                                "display": "flex", "alignItems": "center",
+                                "justifyContent": "center", "marginRight": "12px"}),
+                html.Div([
+                    html.Strong("Sell / Dispose Asset", style={"fontSize": "14px"}),
+                    html.Div(f"{asset_name} (S/N: {asset_sno})",
+                             style={"fontSize": "11px", "color": "#999"}),
+                ]),
+            ], style={"display": "flex", "alignItems": "center"}),
+            style={"padding": "12px 16px",
+                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+        ),
+        dbc.CardBody([
+            html.Div([
+                html.Small("Asset", style={"color": "#7d8ea3", "fontWeight": "600"}),
+                html.Span(f"{asset_name} (S/N: {asset_sno})", style={"fontWeight": "500"}),
+            ], className="mb-2", style={"fontSize": "12px"}),
+            html.Div([
+                html.Small("Purchase Value", style={"color": "#7d8ea3", "fontWeight": "600"}),
+                html.Span(f"₹{purchase_val:,.2f}", style={"fontWeight": "500"}),
+            ], className="mb-3", style={"fontSize": "12px"}),
+            dcc.Input(id={"type": "form-field-hidden", "entity": "asset_dispose", "field": "asset_id"},
+                      type="hidden", value=str(asset_id)),
+            dcc.Input(id={"type": "form-field-hidden", "entity": "asset_dispose", "field": "role"},
+                      type="hidden", value="assets"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Sale Value (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Input(
+                    id={"type": "form-field", "entity": "asset_dispose", "field": "sale_value"},
+                    type="number", value=sale_value, min=0.01, step=0.01,
+                    required=True, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Sale Date *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Input(
+                    id={"type": "form-field", "entity": "asset_dispose", "field": "sale_date"},
+                    type="text", value=sale_date, placeholder="YYYY-MM-DD",
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "asset_dispose", "field": "mode"},
+                    options=[
+                        {"label": "Cash", "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank"},
+                        {"label": "UPI", "value": "upi"},
+                        {"label": "Cheque", "value": "cheque"},
+                        {"label": "Card", "value": "card"},
+                    ],
+                    value=mode, clearable=False, style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": "asset_dispose", "field": "particulars"},
+                    value=particulars, rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Confirm Sale & Generate Receipt"],
+                id={"type": "form-submit", "entity": "asset_dispose", "card_id": "form_asset_dispose_new"},
+                n_clicks=0, color="danger", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"padding": "16px"}),
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # EVENT TICKET CARD  — Sell Tickets (admin) / Buy Tickets (apartment)
 # ════════════════════════════════════════════════════════════════════════════
 

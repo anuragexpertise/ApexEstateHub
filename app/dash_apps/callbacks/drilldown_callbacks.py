@@ -1099,11 +1099,19 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() 
-                ok, msg = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
+                ok, msg, expense_id = loaders.verify_payment(int(pk), confirmed_by=user_id, mode="cash")
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
+                store["refresh"] = False
                 kpi_style = {"display": "none"}
+                if ok and expense_id:
+                    store = nav_state.navigate_to(
+                        store, "form_expense_print", "Print Expense",
+                        prefill={"expense_id": expense_id}, entity_pk=expense_id,
+                    )
+                    kpi_style = {"display": "none"}
+                    content, bc, db_err = _render_current(store, auth)
                 return store, content, bc, kpi_style, toast
 
             # ── Verify expense (admin only, from expenses list) ────────────────────
@@ -2777,6 +2785,15 @@ def _render_card(
             society = loaders.load_profile("society", sid_val, None) or {} if sid_val else {}
             return renderers.render_expense_card(expense=expense, society=society)
 
+        # ── Asset Dispose — sell/dispose form (bypasses schema-driven form) ──
+        if card_id == "form_asset_dispose_new":
+            asset_id = prefill.get("asset_id") or prefill.get("id")
+            sid_val  = filters.get("society_id")
+            asset    = {}
+            if asset_id and sid_val:
+                asset = loaders.load_profile("asset", asset_id, sid_val) or {}
+            return renderers.render_asset_dispose_card(asset=asset, society_id=sid_val)
+
         # ── NOC Print — rich-text editor with eligibility banner ──────────────
         if card_id == "form_noc_print":
             apt_id  = prefill.get("apartment_id") or prefill.get("entity_id")
@@ -3741,7 +3758,11 @@ def _save_asset(db, d, sid, is_edit, pk):
             fetch_one=True,
         )
         asset_id = (r or {}).get("asset_id")
-        return True, f"Asset '{asset_name}' purchased (₹{purchase_value:,.2f})", asset_id
+        expense_id = (r or {}).get("expense_id")
+        msg = f"Asset '{asset_name}' purchased (₹{purchase_value:,.2f})"
+        if expense_id:
+            msg += f" [[expense:{expense_id}]]"
+        return True, msg, asset_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
