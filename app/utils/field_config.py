@@ -285,8 +285,8 @@ FIELD_CONFIG = {
             "edit": "Update security staff details.",
         },
         "name": {
-            "visible": ALL_ROLES,
-            "editable": ADMIN_MASTER,
+            "visible": ("admin", "apartment", "security"),
+            "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
                 "required": "Guard name is required.",
@@ -295,7 +295,7 @@ FIELD_CONFIG = {
             "tooltip": "Full name of the security guard",
         },
         "email": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
@@ -305,7 +305,7 @@ FIELD_CONFIG = {
             "tooltip": "Login email — must be unique",
         },
         "password": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
@@ -315,8 +315,8 @@ FIELD_CONFIG = {
             "tooltip": "Minimum 8 characters",
         },
         "mobile": {
-            "visible": ALL_ROLES,
-            "editable": ADMIN_MASTER,
+            "visible": ("admin", "apartment", "security"),
+            "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
                 "required": "Mobile number is required.",
@@ -325,8 +325,8 @@ FIELD_CONFIG = {
             "tooltip": "10-digit mobile number",
         },
         "shift": {
-            "visible": ALL_ROLES,
-            "editable": ADMIN_MASTER,
+            "visible": ("admin", "apartment", "security"),
+            "editable": ADMIN_ONLY,
             "default": "morning",
             "validation": {
                 "required": "Shift is required.",
@@ -334,7 +334,7 @@ FIELD_CONFIG = {
             "tooltip": "Duty shift: morning (6AM-2PM), evening (2PM-10PM), night (10PM-6AM)",
         },
         "salary_per_shift": {
-            "visible": ADMIN_MASTER + ("apartment",),
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": 0,
             "validation": {
@@ -344,7 +344,7 @@ FIELD_CONFIG = {
             "tooltip": "Amount paid per shift (in Rupees)",
         },
         "joining_date": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": TODAY,
             "validation": {
@@ -353,21 +353,21 @@ FIELD_CONFIG = {
             "tooltip": "Date when the guard joined the society",
         },
         "photo": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Upload guard photo (JPG/PNG)",
         },
         "id_proof": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Upload ID proof document",
         },
         "active": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "security"),
             "editable": ADMIN_ONLY,
             "default": True,
             "validation": {},
@@ -384,7 +384,7 @@ FIELD_CONFIG = {
             "edit": "Update event details.",
         },
         "title": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
@@ -394,14 +394,14 @@ FIELD_CONFIG = {
             "tooltip": "Name of the event (e.g., Diwali Celebration)",
         },
         "description": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Brief description of the event",
         },
         "event_date": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": TODAY,
             "validation": {
@@ -410,42 +410,42 @@ FIELD_CONFIG = {
             "tooltip": "Date when the event will take place",
         },
         "event_time": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "18:00",
             "validation": {},
             "tooltip": "Start time of the event (24-hour format, e.g., 18:00)",
         },
         "venue": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Location where the event will be held",
         },
         "open_to": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "all",
             "validation": {},
             "tooltip": "Who can attend: all, members_only, or residents_only",
         },
         "account_id": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": None,
             "validation": {},
             "tooltip": "Income account for ticket sales (accounting field)",
         },
         "ticket_name": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "Adult",
             "validation": {},
             "tooltip": "Label for the primary ticket type (e.g., Adult, General)",
         },
         "ticket_price": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": 0,
             "validation": {
@@ -454,14 +454,14 @@ FIELD_CONFIG = {
             "tooltip": "Price for the primary ticket type (0 = free)",
         },
         "ticket_name2": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "Child",
             "validation": {},
             "tooltip": "Label for the secondary ticket type (e.g., Child, Senior)",
         },
         "ticket_price2": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": 0,
             "validation": {
@@ -470,7 +470,7 @@ FIELD_CONFIG = {
             "tooltip": "Price for the secondary ticket type",
         },
         "image": {
-            "visible": ADMIN_MASTER,
+            "visible": ("admin", "apartment", "security"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
@@ -747,7 +747,7 @@ FIELD_CONFIG = {
             "edit": "Update asset details.",
         },
         "asset_name": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {
@@ -757,21 +757,21 @@ FIELD_CONFIG = {
             "tooltip": "Name of the asset (e.g., Society Generator, CCTV Camera)",
         },
         "asset_SNo": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Serial number or identification mark",
         },
         "company_name": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment"),
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Manufacturer or brand name",
         },
         "purchase_value": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment"),
             "editable": ADMIN_ONLY,
             "default": 0,
             "validation": {
@@ -781,7 +781,7 @@ FIELD_CONFIG = {
             "tooltip": "Purchase price in Rupees",
         },
         "purchase_date": {
-            "visible": ALL_ROLES,
+            "visible": ("admin", "apartment"),
             "editable": ADMIN_ONLY,
             "default": TODAY,
             "validation": {
@@ -790,28 +790,28 @@ FIELD_CONFIG = {
             "tooltip": "Date when the asset was purchased",
         },
         "mode": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": "cash",
             "validation": {},
             "tooltip": "Payment mode used for purchase",
         },
         "particulars": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
             "tooltip": "Additional notes about the purchase",
         },
         "acc_id": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": None,
             "validation": {},
             "tooltip": "Asset account (e.g., Furniture, Equipment)",
         },
         "image": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
