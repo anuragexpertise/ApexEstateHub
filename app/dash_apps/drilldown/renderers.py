@@ -2172,6 +2172,13 @@ def render_form_card(card_id: str, title: str, icon: str,
     entity_plural = to_plural(entity)
     fields = [f for f in fields if _field_visible(entity_plural, f.get("id"), role or "admin")]
 
+    # Apply field_config visibility rules
+    try:
+        from app.utils.field_config import is_visible as fc_visible, get_tooltip, get_default
+        fields = [f for f in fields if fc_visible(entity_plural, f.get("id"), role or "admin")]
+    except ImportError:
+        pass
+
     # Owner's self-service "Raise Concern" form shares its schema-driven
     # apartment_id field with Admin's "pick any flat" picker (see
     # _concern_wait_banner's docstring above) — that field is an ordinary
@@ -2256,6 +2263,29 @@ def render_form_card(card_id: str, title: str, icon: str,
         ftype    = f.get("type", "text")
         required = f.get("required", False)
         label_txt = f["label"] + (" *" if required else "")
+
+        # Apply pre-fill from field_config if no explicit prefill
+        if pre_val is None:
+            try:
+                from app.utils.field_config import get_default as fc_default
+                pre_val = fc_default(entity_plural, fid)
+            except ImportError:
+                pass
+
+        # Build label with tooltip
+        label_children = [label_txt]
+        try:
+            from app.utils.field_config import get_tooltip as fc_tooltip, is_editable as fc_editable
+            tooltip_text = fc_tooltip(entity_plural, fid)
+            if tooltip_text:
+                label_children.append(
+                    html.Span("?", className="field-tooltip-icon", **{"data-tooltip": tooltip_text})
+                )
+            # Apply read-only if not editable
+            if not fc_editable(entity_plural, fid, role or "admin"):
+                ftype = "readonly"
+        except ImportError:
+            pass
 
         if ftype == "select" and f.get("dynamic_options"):
             from app.dash_apps.drilldown.schema_introspect import load_dynamic_select_options
@@ -2611,7 +2641,7 @@ def render_form_card(card_id: str, title: str, icon: str,
 
         form_rows.append(dbc.Row([
             dbc.Col(
-                dbc.Label(label_txt,
+                dbc.Label(label_children,
                           style={"fontSize": "12px", "fontWeight": "500",
                                  "color": "#555"}),
                 width=4, style={"paddingTop": "6px"},
@@ -2622,26 +2652,44 @@ def render_form_card(card_id: str, title: str, icon: str,
     # Filter out None (the PK input was only added once)
     form_rows = [r for r in form_rows if r is not None]
 
+    # Build form header
+    form_header = html.Div(
+        html.Div([
+            html.Div(
+                html.I(className=f"fas {icon}",
+                       style={"color": "#fff", "fontSize": "15px"}),
+                style={
+                    "width": "34px", "height": "34px",
+                    "borderRadius": "9px",
+                    "background": f"linear-gradient(135deg,{color},{color}aa)",
+                    "display": "flex", "alignItems": "center",
+                    "justifyContent": "center",
+                    "marginRight": "10px", "flexShrink": "0",
+                },
+            ),
+            html.Strong(title, style={"fontSize": "13px"}),
+        ], style={"display": "flex", "alignItems": "center"}),
+        style={"padding": "10px 16px",
+               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
+    )
+
+    # Build form banner (user-friendly help text)
+    form_banner = None
+    try:
+        from app.utils.field_config import get_banner
+        mode = "edit" if prefill.get("id") else "new"
+        banner_text = get_banner(entity_plural, mode)
+        if banner_text:
+            form_banner = html.Div(
+                banner_text,
+                className="form-banner",
+            )
+    except ImportError:
+        pass
+
     return html.Div([
-        html.Div(
-            html.Div([
-                html.Div(
-                    html.I(className=f"fas {icon}",
-                           style={"color": "#fff", "fontSize": "15px"}),
-                    style={
-                        "width": "34px", "height": "34px",
-                        "borderRadius": "9px",
-                        "background": f"linear-gradient(135deg,{color},{color}aa)",
-                        "display": "flex", "alignItems": "center",
-                        "justifyContent": "center",
-                        "marginRight": "10px", "flexShrink": "0",
-                    },
-                ),
-                html.Strong(title, style={"fontSize": "13px"}),
-            ], style={"display": "flex", "alignItems": "center"}),
-            style={"padding": "10px 16px",
-                   "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"},
-        ),
+        form_header,
+        form_banner,
         html.Div([
             html.Div([
                 html.Div(form_rows),
