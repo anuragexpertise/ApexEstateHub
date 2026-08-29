@@ -1079,6 +1079,11 @@ def register_drilldown_callbacks(app):
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id()
                 ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
+                # BUGFIX: loaders.verify_receipt embeds a [[receipt:<id>]]
+                # marker in msg (used below to navigate), but it was never
+                # stripped before going into the toast — the success toast
+                # was literally showing "...  [[receipt:16]]" to the user.
+                msg = re.sub(r"\s*\[\[receipt:\d+\]\]", "", msg).strip()
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
@@ -1121,6 +1126,9 @@ def register_drilldown_callbacks(app):
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id() 
                 ok, msg = loaders.verify_expense(int(pk), confirmed_by=user_id)
+                # BUGFIX: same marker-leak as verify_receipt above — strip
+                # the [[expense:<id>]] marker before it reaches the toast.
+                msg = re.sub(r"\s*\[\[expense:\d+\]\]", "", msg).strip()
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
                 content, bc, db_err = _render_current(store, auth)
