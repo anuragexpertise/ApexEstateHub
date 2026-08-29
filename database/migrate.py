@@ -143,6 +143,11 @@ def run_migrations(conn):
     """
     Apply all incremental schema changes needed by existing databases.
     Each ALTER is wrapped in its own savepoint so one failure doesn't block others.
+
+    Note: Column additions are now defined inline in estatehub.sql CREATE TABLE
+    statements. This function only handles:
+    - Function replacements (fn_fy_closing_report)
+    - Dead column cleanup (accounts.bf_amount)
     """
     alterations = [
         # fn_fy_closing_report: add depth + sort_path for Ledger Index tree
@@ -259,117 +264,9 @@ def run_migrations(conn):
         END;
         $$;""",
 
-        # alert_channels: add 'visitor' to channel_type CHECK
-        "ALTER TABLE alert_channels DROP CONSTRAINT IF EXISTS alert_channels_channel_type_check",
-        "ALTER TABLE alert_channels ADD CONSTRAINT alert_channels_channel_type_check "
-        "CHECK (channel_type IN ('school_bus', 'taxi', 'visitor'))",
-
-        # alert_events: add 'pending' to state CHECK
-        "ALTER TABLE alert_events DROP CONSTRAINT IF EXISTS alert_events_state_check",
-        "ALTER TABLE alert_events ADD CONSTRAINT alert_events_state_check "
-        "CHECK (state IN ('idle', 'pending', 'arrived', 'calling', 'resolved', 'denied'))",
-
-        # visitors: ensure host_apartment_id column exists (older schema used apartment_id)
-        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_apartment_id INT REFERENCES apartments(id)",
-
-        # concerns: qr_payload column for audit/tracking
-        "ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
-        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
-        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255)",
-        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
-        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE",
-        "ALTER TABLE patrol_locations ADD COLUMN IF NOT EXISTS qr_payload VARCHAR(255) UNIQUE NOT NULL",
-
-        # print branding (2026-08): letterhead (logo/watermark/signature/QR)
-        # rollout for receipts, NOCs, and event tickets — see
-        # app/dash_apps/callbacks/print_letterhead.py.
-        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP",
-        "ALTER TABLE event_ticket_items ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP",
-
-        # qr_version: per-entity counter for signed static-pass QR codes.
-        # Scoped to apartment/vendor/security only — these are generated
-        # live on every view via generate_static_qr_code (no stored
-        # payload), so bumping the counter takes effect immediately.
-        # patrol_locations is deliberately excluded: it's read-only /
-        # _NO_AUTO_ACTIONS with no create-or-regenerate flow anywhere in
-        # the app (seeded outside the app), and its qr_payload is a
-        # stored, static column — bumping a version with no way to
-        # re-sign and update that stored value would just permanently
-        # break the location's own code. Revisit once a patrol_location
-        # create/reissue flow exists. See app/services/qr_service.py.
-        "ALTER TABLE apartments ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
-
-        # Fallback for admin logins with no apartments row (linked_id IS
-        # NULL — seeded first-admin). A promoted apartment owner
-        # (linked_id = apartments.id) uses apartments.qr_version instead.
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
-        "ALTER TABLE vendors ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
-        "ALTER TABLE security_staff ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT 1",
-
-        # visitors: source column to distinguish owner-preapproved vs security walk-in
-        "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'security' CHECK (source IN ('owner', 'security'))",
-        "ALTER TABLE visitors ALTER COLUMN source SET DEFAULT 'security'",
-
-        # accounts.bf_amount: dead column. Opening balances live in the
-        # FY-scoped brought_forward table (acc_id + society_id +
-        # financial_year); nothing has read accounts.bf_amount since that
-        # migration and seed.py / default_accounts_estateacc.py never
-        # insert into it. Drop it from existing installations.
+        # accounts.bf_amount: dead column cleanup for existing installations.
+        # Opening balances live in the FY-scoped brought_forward table.
         "ALTER TABLE accounts DROP COLUMN IF EXISTS bf_amount",
-
-        # transactions.mode: add 'journal' — a book entry with NO cash or
-        # bank movement at all (e.g. Dr Depreciation/Cr Asset, and its
-        # transfer to Income & Expenditure). Until now such entries had no
-        # honest mode to use: 'cash' was being reused to mean "don't
-        # auto-generate a completing bank leg" (see fn_resolve_bank_leg,
-        # which treats mode='cash' as "no bank leg needed"), but
-        # fn_cih_balance_asof and fn_cashbook_paired_v3 both also read
-        # mode='cash' to mean "this is physical rupees, show it in the
-        # Cashbook's Cash column" — so a depreciation journal marked
-        # 'cash' displayed as a phantom cash transaction in the Cashbook
-        # (see database/seed.py's seed_instruments_depreciation, now
-        # fixed to use 'journal'). It doesn't corrupt fn_cih_balance_asof's
-        # actual balance figure (a balanced Dr/Cr pair on the same mode
-        # always nets to zero regardless of which mode), only what the
-        # Cashbook visually shows — but 'journal' gives it a mode that
-        # means what it says, and fn_cashbook_paired_v3 (below) now
-        # excludes it from the Cashbook outright rather than relying on
-        # that zero-net coincidence.
-        "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_mode_check",
-        "ALTER TABLE transactions ADD CONSTRAINT transactions_mode_check "
-        "CHECK (mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto', 'journal'))",
-
-        # transactions.role: discriminator for entity_id, mirroring
-        # receipts/expenses/payables.role. Without it, resolving an entity's
-        # display name (apartments/vendors/security_staff) has to join on
-        # entity_id alone, which can false-match if IDs collide across
-        # those tables (e.g. apartment id=5 and vendor id=5 both "matching"
-        # the same transactions row). 'assets' covers asset purchase/sale/
-        # writeoff legs, where entity_id references assets.id — a distinct
-        # ID space, not apartment/vendor/security — so it deliberately
-        # doesn't match any of those joins.
-        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS role VARCHAR(10)",
-        "ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_role_check",
-        "ALTER TABLE transactions ADD CONSTRAINT transactions_role_check "
-        "CHECK (role IN ('apartment', 'vendor', 'security', 'other', 'assets'))",
-
-        # accounts: mutuality_nature + tds_section (compliance tagging, Phase 1)
-        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS mutuality_nature VARCHAR(10) CHECK (mutuality_nature IN ('mutual','non_mutual')) DEFAULT 'mutual'",
-        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10)",
-
-        # expenses: tds_section (compliance tagging, Phase 1)
-        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS tds_section VARCHAR(10)",
-
-        # societies: secretary_sign (letterhead signing)
-        "ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_sign VARCHAR(100)",
-
-        # brought_forward: remarks column for audit notes
-        "ALTER TABLE brought_forward ADD COLUMN IF NOT EXISTS remarks VARCHAR(200)",
-
-        # concerns_assigns: bid_amount for bid-based assignment
-        "ALTER TABLE concerns_assigns ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2)",
-
-        # ══ Indian CHS/RWA compliance: TDS (Phase 4/4d) + capital (Phase 5) ══
     ]
 
     ok = 0
