@@ -95,6 +95,7 @@ a {
     position: fixed;
     inset: 0 auto 0 0;
     width: var(--sidebar-width);
+    height: 100vh;
     min-height: 100vh;
     background: var(--sidebar-bg);
     color: #f8fbff;
@@ -104,8 +105,23 @@ a {
     box-shadow: 24px 0 48px rgba(15, 23, 42, 0.22);
     transition: width 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
     z-index: 1040;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.app-sidebar .sb-nav,
+.glass-sidebar .sb-nav {
+    flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    min-height: 0;
+}
+
+.app-sidebar .sb-user-panel,
+.glass-sidebar .sb-user-panel {
+    flex-shrink: 0;
+    margin-top: auto;
 }
 
 .app-sidebar .sb-nav-list,
@@ -704,11 +720,26 @@ a {
         width: min(84vw, 312px);
         transform: translateX(-105%);
         box-shadow: 24px 0 48px rgba(15, 23, 42, 0.24);
-        top: var(--header-height);
-        height: calc(100vh - var(--header-height));
-        min-height: calc(100vh - var(--header-height));
+        top: 0;
+        height: 100vh;
+        min-height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .app-sidebar .sb-nav,
+    .glass-sidebar .sb-nav {
+        flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
+        min-height: 0;
+    }
+
+    .app-sidebar .sb-user-panel,
+    .glass-sidebar .sb-user-panel {
+        flex-shrink: 0;
+        margin-top: auto;
     }
 
     .app-sidebar.sidebar-open,
