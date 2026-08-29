@@ -3404,7 +3404,7 @@ BEGIN
         paid_at      = NOW()
     WHERE id = p_payment_id;
 
-    msg := 'Verified: transaction #' || v_trx_id::TEXT || ' expense_id=' || v_expense_id::TEXT;
+    msg := 'Payment verified — expense #' || v_expense_id::TEXT || ' posted (transaction #' || v_trx_id::TEXT || ')';
     expense_id := v_expense_id;
     RETURN NEXT;
 END;
