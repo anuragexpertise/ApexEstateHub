@@ -704,6 +704,11 @@ a {
         width: min(84vw, 312px);
         transform: translateX(-105%);
         box-shadow: 24px 0 48px rgba(15, 23, 42, 0.24);
+        top: var(--header-height);
+        height: calc(100vh - var(--header-height));
+        min-height: calc(100vh - var(--header-height));
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .app-sidebar.sidebar-open,
