@@ -257,6 +257,7 @@ SOCIETY = {
     "phone":            "9876543210",
     "secretary_name":   "Ramesh Kumar",
     "secretary_phone":  "9876543211",
+    "secretary_sign":   "signatures/ramesh_kumar.png",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
     "calc_start_date":  "2026-04-01",
@@ -265,7 +266,7 @@ SOCIETY = {
     "login_background": "sunrise_bg.png",
 }
 
-MASTER = {"email": "master@estatehub.com", "password": "Master@2024"}
+MASTER = {"email": "master@estatehub.com", "password": "Master@2024", "name": "Master Admin"}
 
 USERS = [
     {"role": "admin",     "email": "admin@sunriseresidency.com",    "password": "Admin@2024",
@@ -406,70 +407,118 @@ USERS = [
 EVENTS = [
     {"title": "Annual General Meeting", "date": "2026-07-15",
      "time": "11:00:00", "venue": "Community Hall", "open_to": "all",
+     "account_id": 2318,
+     "ticket_name": "Adult", "ticket_price": 0,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Yearly AGM for all residents to review society accounts and elect committee."},
     {"title": "Ganesh Chaturthi Celebration", "date": "2026-08-27",
      "time": "18:00:00", "venue": "Garden Area", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 100,
+     "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Society-wide celebration with puja, prasad and cultural programme."},
     {"title": "Independence Day Flag Hoisting", "date": "2026-08-15",
      "time": "08:00:00", "venue": "Main Gate", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 0,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Flag hoisting ceremony followed by sweets distribution for all residents."},
     {"title": "Fire Safety Awareness Workshop", "date": "2026-08-05",
      "time": "15:00:00", "venue": "Community Hall", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 0,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Fire drill demonstration and extinguisher-usage training by local fire department."},
     {"title": "Yoga & Wellness Camp", "date": "2026-09-20",
      "time": "06:30:00", "venue": "Garden Area", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 50,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Morning yoga and meditation session led by a certified wellness instructor."},
     {"title": "Blood Donation Drive", "date": "2026-10-02",
      "time": "10:00:00", "venue": "Community Hall", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 0,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Voluntary blood donation camp organised with a local hospital, open to all residents."},
     {"title": "Children's Day Fun Fair", "date": "2026-11-14",
      "time": "16:00:00", "venue": "Garden Area", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 200,
+     "ticket_name2": "Child", "ticket_price2": 100,
      "description": "Games, face painting and prizes for the society's children."},
     {"title": "Diwali Mela", "date": "2026-11-08",
      "time": "17:00:00", "venue": "Garden Area", "open_to": "all",
+     "account_id": 23192,
+     "ticket_name": "Adult", "ticket_price": 150,
+     "ticket_name2": "Child", "ticket_price2": 75,
      "description": "Diwali-themed stalls, rangoli competition and fireworks display."},
     {"title": "Society Cricket Tournament", "date": "2026-12-05",
      "time": "07:00:00", "venue": "Society Ground", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 100,
+     "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Inter-block cricket tournament with trophies for the winning team."},
     {"title": "New Year's Eve Party", "date": "2026-12-31",
      "time": "20:00:00", "venue": "Community Hall", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 500,
+     "ticket_name2": "Child", "ticket_price2": 250,
      "description": "Live music, dinner and countdown celebration to welcome the new year."},
     {"title": "Republic Day Celebration", "date": "2027-01-26",
      "time": "09:00:00", "venue": "Main Gate", "open_to": "all",
+     "account_id": 2319,
+     "ticket_name": "Adult", "ticket_price": 0,
+     "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Flag hoisting followed by a cultural programme by resident children."},
     {"title": "Holi Celebration", "date": "2027-03-10",
      "time": "10:00:00", "venue": "Garden Area", "open_to": "all",
+     "account_id": 23191,
+     "ticket_name": "Adult", "ticket_price": 100,
+     "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Colour-play, music and traditional snacks for all residents."},
 ]
 
 CONCERNS = [
     {"flat_number": "A-101", "type": "plumbing",   "status": "open",
+     "preferred_time": "morning",
      "desc": "Water leakage from bathroom ceiling — needs urgent attention."},
     {"flat_number": "B-202", "type": "electrical", "status": "in_progress",
+     "preferred_time": "afternoon",
      "desc": "Main corridor light flickering near staircase. Sparks observed twice.",
      "assign_role": "SEC", "assign_name": "Ramu Singh"},
     {"flat_number": "A-102", "type": "carpentry", "status": "open",
+     "preferred_time": "anytime",
      "desc": "Main door hinge broken and door doesn't close properly."},
     {"flat_number": "A-103", "type": "painting", "status": "in_progress",
+     "preferred_time": "morning",
      "desc": "Living room wall paint peeling due to water seepage from above.",
      "assign_role": "VND", "assign_name": "ColorMax Painters"},
     {"flat_number": "A-202", "type": "pest_control", "status": "open",
+     "preferred_time": "evening",
      "desc": "Cockroach infestation reported in the kitchen area."},
     {"flat_number": "A-203", "type": "housekeeping", "status": "resolved",
+     "preferred_time": "morning",
      "desc": "Common corridor on 2nd floor was left uncleaned for three days."},
     {"flat_number": "B-101", "type": "security", "status": "open",
+     "preferred_time": "night",
      "desc": "Night-shift security guard found absent from the main gate post.",
      "assign_role": "SEC", "assign_name": "Mahesh Chand"},
     {"flat_number": "B-102", "type": "parking", "status": "in_progress",
+     "preferred_time": "anytime",
      "desc": "Unauthorized vehicle repeatedly parked in the owner's allotted slot."},
     {"flat_number": "B-203", "type": "elevator", "status": "open",
+     "preferred_time": "morning",
      "desc": "Lift makes a loud grinding noise between the 3rd and 4th floors.",
      "assign_role": "VND", "assign_name": "LiftCare Elevators"},
     {"flat_number": "B-204", "type": "water_supply", "status": "resolved",
+     "preferred_time": "morning",
      "desc": "No water supply for about two hours during the morning peak."},
     {"flat_number": "C-101", "type": "noise", "status": "closed",
+     "preferred_time": "evening",
      "desc": "Loud construction noise from a renovation continued past permitted hours."},
     {"flat_number": "C-102", "type": "garbage", "status": "open",
+     "preferred_time": "morning",
      "desc": "Garbage bin near the C-block entrance has not been cleared for two days."},
 ]
 
@@ -578,13 +627,14 @@ def seed_society(cur, conn) -> int:
     cur.execute(
         """INSERT INTO societies
            (id, name, PAN_number, gstin, address, email, phone, secretary_name,
-            secretary_phone, plan, plan_validity, calc_start_date,
+            secretary_phone, secretary_sign, plan, plan_validity, calc_start_date,
             payment_qr, logo, login_background)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
-         SOCIETY["secretary_phone"], SOCIETY["plan"], SOCIETY["plan_validity"],
+         SOCIETY["secretary_phone"], SOCIETY.get("secretary_sign"),
+         SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
          SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background")),
     )
@@ -724,8 +774,8 @@ def seed_kpi_rule_links(cur, conn):
             continue
         cur.execute(
             """INSERT INTO kpi_rule_links
-               (category, state, label, url, description, sort_order, is_active)
-               VALUES (%s,%s,%s,%s,%s,%s,TRUE)
+               (category, state, label, url, description, sort_order, is_active, effective_from)
+               VALUES (%s,%s,%s,%s,%s,%s,TRUE,CURRENT_DATE)
                ON CONFLICT DO NOTHING""",
             (category, state, label, url, description, sort_order),
         )
@@ -906,6 +956,33 @@ def seed_accounts(cur, conn, society_id: int) -> int:
     return created
 
 
+def seed_accounts_created_by(cur, conn, society_id: int, admin_uid: int):
+    """Backfill created_by on accounts seeded before admin user existed."""
+    cur.execute(
+        "UPDATE accounts SET created_by = %s WHERE society_id = %s AND created_by IS NULL",
+        (admin_uid, society_id),
+    )
+    conn.commit()
+
+
+def seed_society_created_by(cur, conn, society_id: int, admin_uid: int):
+    """Backfill created_by on society seeded before admin user existed."""
+    cur.execute(
+        "UPDATE societies SET created_by = %s WHERE id = %s AND created_by IS NULL",
+        (admin_uid, society_id),
+    )
+    conn.commit()
+
+
+def seed_admin_created_by(cur, conn, admin_uid: int):
+    """Backfill created_by on the admin user (who created themselves)."""
+    cur.execute(
+        "UPDATE users SET created_by = %s WHERE id = %s AND created_by IS NULL",
+        (admin_uid, admin_uid),
+    )
+    conn.commit()
+
+
 # ══ Indian CHS/RWA compliance: CBDT TDS section → rate + thresholds ══
 # Best-guess seed (FLAG — PROFESSIONAL REVIEW): confirm against the
 # applicable Finance Act before relying on these for a filing. Each
@@ -1016,11 +1093,11 @@ def seed_master_admin(cur, conn) -> int:
         return row["id"]
     row = _one(
         cur,
-        """INSERT INTO users (email, password_hash, role, login_method, is_master_admin)
-           VALUES (%s, %s, 'admin', 'password', TRUE)
+        """INSERT INTO users (email, password_hash, name, role, login_method, is_master_admin)
+           VALUES (%s, %s, %s, 'admin', 'password', TRUE)
            ON CONFLICT (email) DO UPDATE SET is_master_admin = TRUE
            RETURNING id""",
-        (MASTER["email"], generate_password_hash(MASTER["password"])),
+        (MASTER["email"], generate_password_hash(MASTER["password"]), MASTER["name"]),
     )
     conn.commit()
     print(f"  ✓ Master admin  {MASTER['email']}  /  {MASTER['password']}")
@@ -1048,13 +1125,17 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO apartments
-                   (society_id,flat_number,owner_name,mobile,alt_mobile,alt_address,
+                   (society_id,flat_number,owner_name,owner_photo,id_proof,
+                    mobile,alt_mobile,alt_address,
                     apartment_size,apt_calc_start_date,active,created_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
                    ON CONFLICT (society_id,flat_number) DO UPDATE
                      SET owner_name = EXCLUDED.owner_name
                    RETURNING id""",
-                (society_id, u["flat_number"], u["name"], u.get("mobile", ""),
+                (society_id, u["flat_number"], u["name"],
+                 f"photos/owner_{u['flat_number']}.jpg",
+                 f"id_proofs/owner_{u['flat_number']}.jpg",
+                 u.get("mobile", ""),
                  u.get("alt_mobile", ""), u.get("alt_address", ""),
                  u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
                  admin_uid),
@@ -1077,10 +1158,14 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO vendors
-                   (society_id,business_name,name,service_type,mobile,service_description,active,created_by,
+                   (society_id,business_name,name,logo,license,photo,
+                    service_type,mobile,service_description,active,created_by,
                     pan_number,gstin)
-                   VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id""",
                 (society_id, u.get("business_name", u["name"]), u["name"],
+                 f"logos/{u.get('business_name', u['name']).replace(' ', '_').lower()}.png",
+                 f"licenses/{u.get('business_name', u['name']).replace(' ', '_').lower()}.pdf",
+                 f"photos/{u['name'].replace(' ', '_').lower()}.jpg",
                  u.get("service_type", "General"), u.get("mobile", ""),
                  u.get("service_description", "Best in town"),
                  admin_uid, u.get("pan_number"), u.get("gstin")),
@@ -1103,9 +1188,13 @@ def seed_users(cur, conn, society_id: int):
             row = _one(
                 cur,
                 """INSERT INTO security_staff
-                   (society_id,name,mobile,shift,salary_per_shift,joining_date,active,created_by)
-                   VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,TRUE,%s) RETURNING id""",
-                (society_id, u["name"], u.get("mobile", ""),
+                   (society_id,name,photo,id_proof,mobile,shift,salary_per_shift,
+                    joining_date,active,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE,%s) RETURNING id""",
+                (society_id, u["name"],
+                 f"photos/{u['name'].replace(' ', '_').lower()}.jpg",
+                 f"id_proofs/{u['name'].replace(' ', '_').lower()}.jpg",
+                 u.get("mobile", ""),
                  u.get("shift", "morning"), u.get("salary", 10000),
                  admin_uid),
             )
@@ -1154,9 +1243,12 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
         if _one(cur, "SELECT id FROM events WHERE society_id=%s AND title=%s", (society_id, ev["title"])):
             continue
         cur.execute(
-            """INSERT INTO events (society_id,title,description,event_date,event_time,venue,open_to,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (society_id, ev["title"], ev["description"], ev["date"], ev["time"], ev["venue"], ev["open_to"],
+            """INSERT INTO events (society_id,title,description,event_date,event_time,venue,open_to,
+                account_id,ticket_name,ticket_price,ticket_name2,ticket_price2,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (society_id, ev["title"], ev["description"], ev["date"], ev["time"], ev["venue"],
+             ev["open_to"], ev.get("account_id"), ev.get("ticket_name", "Adult"),
+             ev.get("ticket_price", 0), ev.get("ticket_name2", "Child"), ev.get("ticket_price2", 0),
              created_by),
         )
         conn.commit()
@@ -1170,11 +1262,15 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
                         (society_id, apt_id, con["type"]))
         if existing:
             continue
+        preferred_time = con.get("preferred_time", "anytime")
+        qr_payload = f"con:{society_id}:{con['flat_number']}:{con['type']}"
         row = _one(
             cur,
-            """INSERT INTO concerns (society_id,apartment_id,concern_type,description,status,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-            (society_id, apt_id, con["type"], con["desc"], con["status"], created_by),
+            """INSERT INTO concerns (society_id,apartment_id,concern_type,description,
+                preferred_time,status,qr_payload,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (society_id, apt_id, con["type"], con["desc"], preferred_time,
+             con["status"], qr_payload, created_by),
         )
         conn.commit()
         concern_id = row["id"] if row else None
@@ -1199,10 +1295,11 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
 
             if entity_id:
                 cur.execute(
-                    """INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by)
-                       VALUES (%s,%s,%s,%s,%s)
+                    """INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id,
+                        invited_by, assigned_by, status)
+                       VALUES (%s,%s,%s,%s,%s,%s,'assigned')
                        ON CONFLICT (concern_id, role, entity_id) DO NOTHING""",
-                    (concern_id, society_id, assign_role, entity_id, created_by),
+                    (concern_id, society_id, assign_role, entity_id, created_by, created_by),
                 )
                 conn.commit()
                 print(f"    ↳ Assigned to {assign_role} '{assign_name}'")
@@ -1212,7 +1309,8 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
 # APARTMENT / VENDOR CHARGE HISTORIES
 # ═════════════════════════════════════════════════════════════════════════════
 
-def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: dict):
+def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: dict,
+                                 admin_uid: int = None):
     # Society default: rate-based (apartment_size * apt_maintenance_rate)
     if not _one(cur, """SELECT 1 FROM apt_charges_fines_basis
                          WHERE society_id=%s AND apt_id IS NULL AND end_date IS NULL""",
@@ -1221,9 +1319,9 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
             """INSERT INTO apt_charges_fines_basis
                (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
                 apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
-                apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
-               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s)""",
-             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True),
+                apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)
+               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s,%s)""",
+             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True, admin_uid),
         )
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
@@ -1241,9 +1339,9 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                 """INSERT INTO apt_charges_fines_basis
                    (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
                     apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
-                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
-                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
-                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True),
+                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)
+                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s,%s)""",
+                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True, admin_uid),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
@@ -1254,9 +1352,10 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                 (society_id,)):
         cur.execute(
             """INSERT INTO ven_charges_fines_basis
-               (society_id, ven_id, start_date, end_date, vendor_1day, vendor_7day, vendor_1mth, ven_status)
-               VALUES (%s,NULL,%s,NULL,%s,%s,%s,TRUE)""",
-            (society_id, SOCIETY["calc_start_date"], 100.0, 500.0, 2000.0),
+               (society_id, ven_id, start_date, end_date, vendor_1day, vendor_7day, vendor_1mth,
+                ven_status, created_by)
+               VALUES (%s,NULL,%s,NULL,%s,%s,%s,TRUE,%s)""",
+            (society_id, SOCIETY["calc_start_date"], 100.0, 500.0, 2000.0, admin_uid),
         )
         conn.commit()
         print("  ✓ Vendor charge basis added")
@@ -1266,18 +1365,20 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
 # SECURITY ROSTER + ATTENDANCE
 # ═════════════════════════════════════════════════════════════════════════════
 
-def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list):
-    """guards: list of dicts {user_id, linked_id (security_staff.id)}"""
+def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list,
+                                          admin_uid: int = None):
+    """guards: list of dicts {user_id, linked_id (security_staff.id), shift}"""
     roster_dates = [date(2026, 7, d) for d in (14, 15, 16, 17)]
 
     for g in guards:
         sec_id = g["linked_id"]
         for i, d in enumerate(roster_dates):
             cur.execute(
-                """INSERT INTO security_roster (society_id, security_id, roster_date, shift_type, assigned_by)
-                   VALUES (%s,%s,%s,%s,%s)
+                """INSERT INTO security_roster (society_id, security_id, roster_date, shift_type,
+                    assigned_by, created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (society_id, security_id, roster_date) DO NOTHING""",
-                (society_id, sec_id, d, g.get("shift", "morning"), None),
+                (society_id, sec_id, d, g.get("shift", "morning"), admin_uid, admin_uid),
             )
             conn.commit()
 
@@ -1293,15 +1394,16 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
                         (society_id, sec_id, d)):
                 if is_latest:
                     cur.execute(
-                        """INSERT INTO gate_access (society_id, entity_id, role, time_in)
-                           VALUES (%s,%s,'SEC', %s)""",
-                        (society_id, sec_id, f"{d} 08:00:00"),
+                        """INSERT INTO gate_access (society_id, entity_id, role, time_in, created_by)
+                           VALUES (%s,%s,'SEC', %s,%s)""",
+                        (society_id, sec_id, f"{d} 08:00:00", admin_uid),
                     )
                 else:
                     cur.execute(
-                        """INSERT INTO gate_access (society_id, entity_id, role, time_in, time_out)
-                           VALUES (%s,%s,'SEC', %s, %s)""",
-                        (society_id, sec_id, f"{d} 08:00:00", f"{d} 20:00:00"),
+                        """INSERT INTO gate_access (society_id, entity_id, role, time_in, time_out,
+                            created_by)
+                           VALUES (%s,%s,'SEC', %s, %s,%s)""",
+                        (society_id, sec_id, f"{d} 08:00:00", f"{d} 20:00:00", admin_uid),
                     )
                 conn.commit()
         status = "ON duty (open shift)" if roster_dates else "—"
@@ -1337,14 +1439,17 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     if not _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
                 (society_id, FULLY_DEPRECIATED_ASSET["asset_name"])):
         a = FULLY_DEPRECIATED_ASSET
+        qr_payload = f"ast:{society_id}:{a['asset_SNo']}"
         cur.execute(
             """INSERT INTO assets
-               (society_id,asset_name,asset_SNo,purchase_date,purchase_value,
-                acc_id,depreciation_rate,last_depreciation_date,disposed)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,FALSE)""",
-            (society_id, a["asset_name"], a["asset_SNo"],
+               (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,
+                acc_id,depreciation_rate,last_depreciation_date,disposed,
+                qr_payload,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE,%s,%s)""",
+            (society_id, a["company_name"], a["asset_name"], a["asset_SNo"],
              a["purchase_date"], a["purchase_value"], a["acc_id"],
-             a["depreciation_rate"], a["last_depreciation_date"]),
+             a["depreciation_rate"], a["last_depreciation_date"],
+             qr_payload, admin_uid),
         )
         conn.commit()
         print(f"  ✓ Asset    '{a['asset_name']}' — book_value=0, disposed=FALSE (still in use)")
@@ -1553,10 +1658,11 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
         cur.execute(
             """INSERT INTO expenses
                (society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
-                amount, mode, status, created_at)
-               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',NOW())""",
+                amount, mode, status, tds_pct, tds_section, created_by, created_at)
+               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
             (society_id, security_user_id, None, "2026-07-16",
-             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00),
+             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00,
+             admin_uid),
         )
         conn.commit()
         print("  ✓ Expense (salary paid, status=pending, needs admin confirmation): ₹12000")
@@ -1628,13 +1734,19 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
         for i in range(len(choices), 5):
             choice_cols[f"choice_{i+1}"] = None
 
+        # Active polls end 30 days from creation; closed/results_declared polls ended in the past
+        if p["status"] == "active":
+            ends_at = "NOW() + INTERVAL '30 days'"
+        else:
+            ends_at = "NOW() - INTERVAL '1 day'"
+
         row = _one(
             cur,
-            """INSERT INTO polls
-               (society_id, created_by, title, description, status, choice_count,
-                choice_1, choice_2, choice_3, choice_4, choice_5)
-               VALUES (%s,%s,%s,%s,'active',%s,%s,%s,%s,%s,%s)
-               RETURNING id""",
+            f"""INSERT INTO polls
+                (society_id, created_by, title, description, status, choice_count,
+                 choice_1, choice_2, choice_3, choice_4, choice_5, ends_at)
+                VALUES (%s,%s,%s,%s,'active',%s,%s,%s,%s,%s,%s,{ends_at})
+                RETURNING id""",
             (society_id, admin_uid, p["title"], p["description"], len(choices),
              choice_cols["choice_1"], choice_cols["choice_2"], choice_cols["choice_3"],
              choice_cols["choice_4"], choice_cols["choice_5"]),
@@ -1693,15 +1805,19 @@ def run_seed(conn):
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
     seed_gst_rates(cur, conn)
+    seed_accounts_created_by(cur, conn, society_id, admin_uid)
+    seed_society_created_by(cur, conn, society_id, admin_uid)
+    seed_admin_created_by(cur, conn, admin_uid)
 
     seed_events_and_concerns(cur, conn, society_id, admin_uid)
 
-    seed_apt_charge_histories(cur, conn, society_id, {"A-101": apt1_id, "B-202": apt2_id})
+    seed_apt_charge_histories(cur, conn, society_id, {"A-101": apt1_id, "B-202": apt2_id},
+                              admin_uid)
 
     seed_security_roster_and_attendance(cur, conn, society_id, [
         {"user_id": security_uid_1, "linked_id": security_lid_1, "shift": "morning"},
         {"user_id": security_uid_2, "linked_id": security_lid_2, "shift": "night"},
-    ])
+    ], admin_uid)
 
     seed_simple_assets(cur, conn, society_id, admin_uid)
     seed_instruments_depreciation(cur, conn, society_id, admin_uid)
