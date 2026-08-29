@@ -2463,16 +2463,17 @@ def reject_receivable_bill_group(bill_group_id: str, confirmed_by: int, penalty_
         return False, str(e)
 
 
-def verify_payment(payment_id: int, confirmed_by: int, mode: str = "cash") -> tuple[bool, str]:
+def verify_payment(payment_id: int, confirmed_by: int, mode: str = "cash") -> tuple[bool, str, int | None]:
     try:
         r = db._execute(
-            "SELECT fn_verify_payment(%s,%s,%s) AS msg",
+            "SELECT * FROM fn_verify_payment(%s,%s,%s)",
             (payment_id, confirmed_by, mode), fetch_one=True,
         )
         msg = (r or {}).get("msg", "Done")
-        return not str(msg).lower().startswith("error"), msg
+        expense_id = (r or {}).get("expense_id")
+        return not str(msg).lower().startswith("error"), msg, expense_id
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 # ════════════════════════════════════════════════════════════════════════════
