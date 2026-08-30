@@ -3567,6 +3567,13 @@ $$;
 
 DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
 
+-- 2026-08: generalized from apartment-only to apartment/vendor/security so
+-- "Buy Tickets" can be opened to every portal. Eligibility is now gated by
+-- the event's own open_to column instead of a hardcoded role restriction:
+--   'all'            -> apartment, vendor, security
+--   'members_only'   -> apartment (society members/owners) only
+--   'residents_only' -> apartment + security (on-site residents; vendors
+--                        are not residents of the society)
 CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
     p_user_id      INT,
     p_event_id     INT,
@@ -3581,8 +3588,9 @@ RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT, sta
 LANGUAGE plpgsql AS $$
 DECLARE
     v_society_id   INT;
-    v_apt_id       INT;
-    v_flat_number  VARCHAR;
+    v_role         VARCHAR(20);
+    v_entity_id    INT;
+    v_buyer_label  VARCHAR;
     v_event        RECORD;
     v_acc_id       INT;
     v_is_ticket_ac BOOLEAN;
@@ -3600,15 +3608,27 @@ BEGIN
         RAISE EXCEPTION 'Total ticket quantity must be at least 1';
     END IF;
 
-    SELECT society_id, linked_id INTO v_society_id, v_apt_id
-    FROM users WHERE id = p_user_id AND role = 'apartment';
-    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment user not found'; END IF;
-
-    SELECT flat_number INTO v_flat_number FROM apartments WHERE id = v_apt_id;
+    SELECT society_id, role, linked_id INTO v_society_id, v_role, v_entity_id
+    FROM users WHERE id = p_user_id AND role IN ('apartment', 'vendor', 'security');
+    IF NOT FOUND THEN RAISE EXCEPTION 'Buyer not found or not eligible to buy tickets'; END IF;
 
     SELECT e.* INTO v_event FROM events e
     WHERE e.id = p_event_id AND e.society_id = v_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+
+    IF v_event.open_to = 'members_only' AND v_role <> 'apartment' THEN
+        RAISE EXCEPTION 'This event is open to members only';
+    ELSIF v_event.open_to = 'residents_only' AND v_role NOT IN ('apartment', 'security') THEN
+        RAISE EXCEPTION 'This event is open to residents only';
+    END IF;
+
+    IF v_role = 'apartment' THEN
+        SELECT flat_number INTO v_buyer_label FROM apartments WHERE id = v_entity_id;
+    ELSIF v_role = 'vendor' THEN
+        SELECT business_name INTO v_buyer_label FROM vendors WHERE id = v_entity_id;
+    ELSE
+        SELECT name INTO v_buyer_label FROM security_staff WHERE id = v_entity_id;
+    END IF;
 
     v_acc_id := v_event.account_id;
     IF v_acc_id IS NULL THEN
@@ -3626,7 +3646,7 @@ BEGIN
     v_total_qty := COALESCE(p_quantity_adult, 0) + COALESCE(p_quantity_child, 0);
     v_desc := COALESCE(p_particulars,
         'Event Ticket x' || v_total_qty || ' - ' || COALESCE(v_event.title,'') ||
-        ' - ' || COALESCE(v_flat_number,''));
+        ' - ' || COALESCE(v_buyer_label,''));
 
     v_bank_acc   := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
@@ -3646,7 +3666,7 @@ BEGIN
             receipt_date, acc_id, particulars, amount, mode,
             status, confirmed_by, confirmed_at, source_reference, created_at
         ) VALUES (
-            v_society_id, p_user_id, v_apt_id, 'apartment',
+            v_society_id, p_user_id, v_entity_id, v_role,
             p_issued_date, v_acc_id, v_desc, v_amount, p_mode,
             v_status,
             CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
@@ -3659,7 +3679,7 @@ BEGIN
                 society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                 amount, mode, status, created_by, created_at, source_table, source_id, journal_id
             ) VALUES (
-                v_society_id, 'Cr', p_issued_date, v_acc_id, v_apt_id, 'apartment', v_desc,
+                v_society_id, 'Cr', p_issued_date, v_acc_id, v_entity_id, v_role, v_desc,
                 v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
             );
 
@@ -3668,7 +3688,7 @@ BEGIN
                     society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                     amount, mode, status, created_by, created_at, source_table, source_id, journal_id
                 ) VALUES (
-                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_apt_id, 'apartment',
+                    v_society_id, 'Dr', p_issued_date, v_bank_acc, v_entity_id, v_role,
                     'Cash received - ' || v_desc,
                     v_amount, p_mode, 'paid', p_created_by, NOW(), 'receipts', v_receipt_id, v_journal_id
                 );

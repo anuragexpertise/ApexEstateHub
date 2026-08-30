@@ -2331,11 +2331,21 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
         elif ftype == "date":
+            # Native calendar picker (was a manually-typed DD/MM/YYYY text
+            # field). Safe swap: handle_form_submit's dd/mm/yyyy→iso
+            # normalisation (drilldown_callbacks.py) already runs every
+            # string field through _parse_date_entry, which has always
+            # accepted "%Y-%m-%d" — exactly what a native date input
+            # submits — so no backend change was needed.
+            _iso_pre = _parse_date_entry(pre_val) if isinstance(pre_val, str) else None
+            if not _iso_pre and pre_val not in (None, ""):
+                # pre_val may already be a date/datetime object (edit-form
+                # prefill from the DB row) rather than a typed string.
+                _iso_pre = _parse_date_entry(_format_date_entry(pre_val))
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
-                type="text",
-                value=_format_date_entry(pre_val) or date.today().strftime("%d/%m/%Y"),
-                placeholder="DD/MM/YYYY",
+                type="date",
+                value=_iso_pre or date.today().isoformat(),
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
@@ -2639,7 +2649,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
-        form_rows.append(dbc.Row([
+        _row = dbc.Row([
             dbc.Col(
                 dbc.Label(label_children,
                           style={"fontSize": "12px", "fontWeight": "500",
@@ -2647,7 +2657,37 @@ def render_form_card(card_id: str, title: str, icon: str,
                 width=4, style={"paddingTop": "6px"},
             ),
             dbc.Col(ctrl, width=8),
-        ], className="mb-2"))
+        ], className="mb-2")
+
+        # Payment-mode-conditional visibility: cheque_no only matters for
+        # mode='cheque', transaction_id only for the reference-number modes
+        # (upi/card/bank/crypto) — cash needs neither. Wrapped (rather than
+        # left always-visible) so Receipts/Expenses don't ask for a cheque
+        # number when the payer chose UPI, or vice versa. Initial display
+        # is computed server-side from the current/prefilled mode (avoids
+        # a flash of the wrong fields on load); mode_conditional_
+        # callbacks.py's clientside callback keeps it in sync as the user
+        # changes the Mode dropdown, entity-scoped via MATCH so it only
+        # ever touches receipts/expenses rows.
+        if fid in ("cheque_no", "transaction_id") and entity_plural in ("receipts", "expenses"):
+            _cur_mode = prefill.get("mode")
+            if _cur_mode is None:
+                try:
+                    from app.utils.field_config import get_default as _fc_default
+                    _cur_mode = _fc_default(entity_plural, "mode")
+                except ImportError:
+                    _cur_mode = "cash"
+            _visible = (
+                (fid == "cheque_no" and _cur_mode == "cheque") or
+                (fid == "transaction_id" and _cur_mode in ("upi", "card", "bank", "crypto"))
+            )
+            form_rows.append(html.Div(
+                _row,
+                id={"type": "mode-conditional-row", "entity": entity, "field": fid},
+                style={} if _visible else {"display": "none"},
+            ))
+        else:
+            form_rows.append(_row)
 
     # Filter out None (the PK input was only added once)
     form_rows = [r for r in form_rows if r is not None]
@@ -4112,13 +4152,15 @@ def render_event_ticket_card(
     apt_user_id=None,
     flat_number: str = "",
     owner_name: str = "",
+    buyer_label: str = "",
     apartment_options: list | None = None,
     prefill_mode: str = "cash",
-    caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment" -> Buy Tickets
+    caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment"/"vendor"/"security" -> Buy Tickets
 ) -> "html.Div":
     """
     Dedicated form card for Sell Event Ticket (admin) / Buy Event Ticket
-    (apartment) -- mirrors render_vendor_pass_card's Sell/Buy Pass shape.
+    (apartment/vendor/security) -- mirrors render_vendor_pass_card's
+    Sell/Buy Pass shape.
 
     entity name on all IDs = "event_ticket" -- matches _resolve_entity_singular
     guard and _save_entity("event_ticket") -> _save_event_ticket() routing.
@@ -4127,6 +4169,12 @@ def render_event_ticket_card(
       event_tickets  -> one row per purchase (society_id, event_id, user_id, quantity_adult, quantity_child, amount)
       receipts       -> status='confirmed' (immediate) -- acc_id = events.account_id
       transactions   -> source_table='receipts', source_id=receipt.id
+
+    2026-08: buyer side generalized from apartment-only to
+    apartment/vendor/security (gated per-event by events.open_to --
+    enforced in fn_sell_event_ticket, not here). `flat_number`/`owner_name`
+    stay as the apartment-specific display fields; `buyer_label` is the
+    generic one-line identity string used for vendor/security instead.
     """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
@@ -4160,7 +4208,8 @@ def render_event_ticket_card(
     ], color="info", style={"fontSize": "12px", "borderRadius": "10px",
                              "padding": "8px 14px", "marginBottom": "12px"})
 
-    # -- Buyer field: admin picks an apartment, apartment sees their own flat --
+    # -- Buyer field: admin picks an apartment, apartment/vendor/security see
+    #    their own identity --
     if is_admin:
         buyer_field = dbc.Row([
             dbc.Col(dbc.Label("Apartment *",
@@ -4178,8 +4227,9 @@ def render_event_ticket_card(
         ], className="mb-2")
         pk_for_wrap = str(event_id)
     else:
+        own_label = f"Flat {flat_number} — {owner_name}" if caller_role == "apartment" else buyer_label
         buyer_field = html.Div(
-            f"Flat {flat_number} — {owner_name}",
+            own_label,
             style={"fontSize": "13px", "fontWeight": "600", "color": "#15304f",
                    "marginBottom": "10px"},
         )
@@ -4215,14 +4265,20 @@ def render_event_ticket_card(
                 type="hidden", value=str(event_id or ""),
             ),
             dcc.Input(
+                # NOTE (2026-08): kept as a form field for continuity, but
+                # _save_event_ticket() never reads "role" — fn_sell_event_
+                # ticket resolves the buyer's actual role server-side from
+                # p_user_id via the users table. This is display-only; set
+                # to the real caller_role now rather than a hardcoded
+                # "apartment" so it's not actively misleading.
                 id={"type": "form-field", "entity": entity_name, "field": "role"},
-                type="hidden", value="apartment",
+                type="hidden", value=(caller_role if not is_admin else "apartment"),
             ),
             dcc.Input(
                 id={"type": "form-entity-pk", "entity": entity_name},
                 type="hidden", value=pk_for_wrap,
             ),
-            # apartment's own user id -- hidden when buying for themselves
+            # buyer's own user id -- hidden when buying for themselves
             (dcc.Input(
                 id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
                 type="hidden", value=str(apt_user_id or ""),

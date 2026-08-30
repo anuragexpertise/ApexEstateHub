@@ -243,4 +243,13 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ account_callbacks failed: {e}")
 
+    # 18. Mode-conditional field visibility (Receipts/Expenses cheque_no /
+    #     transaction_id rows, shown only for the relevant payment Mode).
+    #     Clientside — no server state, no new Store needed.
+    try:
+        from .mode_conditional_callbacks import register_mode_conditional_callbacks
+        register_mode_conditional_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ mode_conditional_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

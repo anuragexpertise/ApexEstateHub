@@ -1747,14 +1747,17 @@ def register_drilldown_callbacks(app):
         # Owner-initiated event ticket purchases must always be billed to
         # the buyer's own account — never trust apt_user_id coming back from
         # the form for this. It travels as an ordinary hidden form field
-        # (see the form_event_ticket_new prefill above), so without this an
-        # owner could edit that field and have a ticket purchase attributed
-        # to a different apartment/user entirely — _save_event_ticket passes
-        # it straight through to event_service.book_event_tickets(user_id=...),
-        # which is a real financial write (receivable/charge), not just
-        # display. Admin keeps it fully editable, since picking which
-        # apartment is buying is the whole point of that path for them.
-        if merged['caller_role'] == "apartment" and entity_singular in ("event_ticket", "event_ticket_new"):
+        # (see the form_event_ticket_new prefill above), so without this a
+        # buyer could edit that field and have a ticket purchase attributed
+        # to a different apartment/vendor/security user entirely —
+        # _save_event_ticket passes it straight through to
+        # event_service.book_event_tickets(user_id=...), which is a real
+        # financial write (receivable/charge), not just display. Admin
+        # keeps it fully editable, since picking which apartment is buying
+        # is the whole point of that path for them.
+        # 2026-08: widened from apartment-only to apartment/vendor/security
+        # alongside opening "Buy Tickets" to all three portals.
+        if merged['caller_role'] in ("apartment", "vendor", "security") and entity_singular in ("event_ticket", "event_ticket_new"):
             merged["apt_user_id"] = get_current_user_id()
 
         # Owner-initiated concerns must always be raised against the owner's
@@ -2713,6 +2716,7 @@ def _render_card(
             apt_user_id = None
             flat_number = ""
             owner_name  = ""
+            buyer_label = ""
             apartment_options = []
             if caller_role == "apartment":
                 # Buyer is the logged-in apartment — pull their own identity
@@ -2729,6 +2733,24 @@ def _render_card(
                       if apt_id and sid_val else {}
                 flat_number = apt.get("flat_number", "")
                 owner_name  = apt.get("owner_name", "")
+            elif caller_role in ("vendor", "security"):
+                # 2026-08: Event Tickets opened to vendor/security too —
+                # same self-buy shape as apartment above (own identity only,
+                # same merged[...] override at save time), just resolving a
+                # different profile table. Actual eligibility for THIS event
+                # (open_to='all'/'members_only'/'residents_only') is enforced
+                # server-side in fn_sell_event_ticket, not here — this is
+                # display only.
+                apt_user_id = get_current_user_id()
+                linked_id = get_current_linked_id()
+                if caller_role == "vendor":
+                    rec = loaders.load_profile("vendor", linked_id, sid_val) or {} \
+                          if linked_id and sid_val else {}
+                    buyer_label = rec.get("business_name") or rec.get("name") or "Vendor"
+                else:
+                    rec = loaders.load_profile("security", linked_id, sid_val) or {} \
+                          if linked_id and sid_val else {}
+                    buyer_label = rec.get("name") or "Security"
             elif sid_val:
                 # Admin needs to pick which apartment is buying — options are
                 # {users.id (role='apartment') : "Flat — Owner"}, since
@@ -2760,6 +2782,7 @@ def _render_card(
                 apt_user_id=apt_user_id,
                 flat_number=flat_number,
                 owner_name=owner_name,
+                buyer_label=buyer_label,
                 apartment_options=apartment_options,
                 caller_role=caller_role,
             )
