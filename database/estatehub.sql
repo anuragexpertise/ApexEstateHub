@@ -3574,6 +3574,10 @@ DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
 --   'members_only'   -> apartment (society members/owners) only
 --   'residents_only' -> apartment + security (on-site residents; vendors
 --                        are not residents of the society)
+-- Also (Tweak 3): p_cheque_no/p_transaction_id added and written straight
+-- into receipts.cheque_no/receipts.transaction_id (columns that already
+-- existed) instead of the caller string-concatenating them into
+-- particulars as a display-only workaround.
 CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
     p_user_id      INT,
     p_event_id     INT,
@@ -3582,7 +3586,9 @@ CREATE OR REPLACE FUNCTION fn_sell_event_ticket(
     p_mode         VARCHAR DEFAULT 'cash',
     p_created_by   INT DEFAULT NULL,
     p_issued_date  DATE DEFAULT CURRENT_DATE,
-    p_particulars  TEXT DEFAULT NULL
+    p_particulars  TEXT DEFAULT NULL,
+    p_cheque_no       VARCHAR DEFAULT NULL,
+    p_transaction_id  VARCHAR DEFAULT NULL
 )
 RETURNS TABLE(receipt_id INT, ticket_id INT, amount NUMERIC, journal_id INT, status VARCHAR(20))
 LANGUAGE plpgsql AS $$
@@ -3664,10 +3670,12 @@ BEGIN
         INSERT INTO receipts(
             society_id, user_id, entity_id, role,
             receipt_date, acc_id, particulars, amount, mode,
+            cheque_no, transaction_id,
             status, confirmed_by, confirmed_at, source_reference, created_at
         ) VALUES (
             v_society_id, p_user_id, v_entity_id, v_role,
             p_issued_date, v_acc_id, v_desc, v_amount, p_mode,
+            p_cheque_no, p_transaction_id,
             v_status,
             CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
             CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,

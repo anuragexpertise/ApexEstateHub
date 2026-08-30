@@ -252,4 +252,12 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ mode_conditional_callbacks failed: {e}")
 
+    # 19. Quantity stepper (+/- buttons) for numeric qty fields — first
+    #     used by the Event Ticket form's Adult/Child Qty. Clientside.
+    try:
+        from .qty_stepper_callbacks import register_qty_stepper_callbacks
+        register_qty_stepper_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ qty_stepper_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

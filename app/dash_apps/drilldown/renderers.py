@@ -4140,6 +4140,45 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
 # EVENT TICKET CARD  — Sell Tickets (admin) / Buy Tickets (apartment)
 # ════════════════════════════════════════════════════════════════════════════
 
+def _qty_stepper_row(entity_name: str, field_id: str, label: str, initial: int, min_val: int = 0):
+    """
+    Touch-friendly '−  [qty]  +' quantity control (Tweak 2, 2026-08) —
+    replaces a bare dbc.Input(type='number') for Adult/Child Qty. Buttons
+    use the {"type":"qty-step","entity","field","dir"} id shape driven by
+    qty_stepper_callbacks.py's generic clientside callback, so this same
+    row shape is reusable for any other numeric field, not just event
+    tickets.
+    """
+    import dash_bootstrap_components as dbc
+    btn_style = {
+        "width": "34px", "height": "34px", "padding": "0",
+        "borderRadius": "8px", "fontWeight": "700", "fontSize": "16px",
+        "lineHeight": "1",
+    }
+    return dbc.Row([
+        dbc.Col(dbc.Label(label, style={"fontSize": "12px", "fontWeight": "500",
+                                         "color": "#555"}),
+                width=4, style={"paddingTop": "6px"}),
+        dbc.Col(html.Div([
+            dbc.Button("−", id={"type": "qty-step", "entity": entity_name,
+                                 "field": field_id, "dir": "down"},
+                       n_clicks=0, size="sm", color="light", outline=True,
+                       style=btn_style),
+            dbc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": field_id},
+                type="number", value=str(initial), min=min_val, step=1,
+                style={"fontSize": "13px", "borderRadius": "10px",
+                       "textAlign": "center", "width": "56px",
+                       "margin": "0 6px"},
+            ),
+            dbc.Button("+", id={"type": "qty-step", "entity": entity_name,
+                                 "field": field_id, "dir": "up"},
+                       n_clicks=0, size="sm", color="light", outline=True,
+                       style=btn_style),
+        ], style={"display": "flex", "alignItems": "center"}), width=8),
+    ], className="mb-2")
+
+
 def render_event_ticket_card(
     event_id,
     event_title: str,
@@ -4153,7 +4192,7 @@ def render_event_ticket_card(
     flat_number: str = "",
     owner_name: str = "",
     buyer_label: str = "",
-    apartment_options: list | None = None,
+    open_to: str = "all",
     prefill_mode: str = "cash",
     caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment"/"vendor"/"security" -> Buy Tickets
 ) -> "html.Div":
@@ -4175,6 +4214,14 @@ def render_event_ticket_card(
     enforced in fn_sell_event_ticket, not here). `flat_number`/`owner_name`
     stay as the apartment-specific display fields; `buyer_label` is the
     generic one-line identity string used for vendor/security instead.
+
+    2026-08 Tweak 1: admin's buyer field is now the entity_id/role
+    drill-in (DRILLIN_CONFIG[("event_tickets","entity_id")]) instead of a
+    flat apartment-only dropdown — which roles it offers is narrowed to
+    this event's own open_to at the moment the picker is opened (see
+    drillin_callbacks.py's drillin_navigate special-case), not computed
+    here; `open_to` is only used below for the small caption under the
+    picker button.
     """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
@@ -4208,31 +4255,59 @@ def render_event_ticket_card(
     ], color="info", style={"fontSize": "12px", "borderRadius": "10px",
                              "padding": "8px 14px", "marginBottom": "12px"})
 
-    # -- Buyer field: admin picks an apartment, apartment/vendor/security see
-    #    their own identity --
+    _OPEN_TO_CAPTIONS = {
+        "all": "Open to everyone",
+        "members_only": "Open to members (apartments) only",
+        "residents_only": "Open to residents (apartments + security) only",
+    }
+
+    # -- Buyer field: admin drills in to any eligible apartment/vendor/
+    #    security (Tweak 1); apartment/vendor/security see their own
+    #    identity --
     if is_admin:
-        buyer_field = dbc.Row([
-            dbc.Col(dbc.Label("Apartment *",
-                              style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                    width=4, style={"paddingTop": "6px"}),
-            dbc.Col(dcc.Dropdown(
-                id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
-                options=apartment_options or [],
-                value=None,
-                placeholder="Select apartment…",
-                clearable=False,
-                style={"fontSize": "13px"},
-                optionHeight=40,
-            ), width=8),
-        ], className="mb-2")
+        buyer_field = html.Div([
+            dcc.Input(
+                id={"type": "form-field-hidden", "entity": entity_name, "field": "entity_id"},
+                type="hidden", value="",
+            ),
+            dcc.Input(
+                id={"type": "form-field-hidden", "entity": entity_name, "field": "role"},
+                type="hidden", value="",
+            ),
+            dbc.Label("Buyer *", style={"fontSize": "12px", "fontWeight": "500",
+                                         "color": "#555", "marginBottom": "4px",
+                                         "display": "block"}),
+            html.Div([
+                html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                html.Span("Tap to select…", style={"flex": "1", "color": "#9aa7b8"}),
+                html.I(className="fas fa-chevron-right",
+                       style={"color": "#c2cdda", "fontSize": "11px"}),
+            ], id={"type": "drillin-trigger", "entity": entity_name, "field": "entity_id"},
+               n_clicks=0,
+               style={
+                   "display": "flex", "alignItems": "center",
+                   "padding": "10px 12px", "borderRadius": "10px",
+                   "border": "1px solid #dbe3ee", "background": "#fff",
+                   "cursor": "pointer", "fontSize": "13px",
+               }),
+            html.Small(_OPEN_TO_CAPTIONS.get(open_to, _OPEN_TO_CAPTIONS["all"]),
+                       style={"color": "#9aa7b8", "fontSize": "10px",
+                              "marginTop": "4px", "display": "block"}),
+        ], style={"marginBottom": "10px"})
         pk_for_wrap = str(event_id)
     else:
         own_label = f"Flat {flat_number} — {owner_name}" if caller_role == "apartment" else buyer_label
-        buyer_field = html.Div(
-            own_label,
-            style={"fontSize": "13px", "fontWeight": "600", "color": "#15304f",
-                   "marginBottom": "10px"},
-        )
+        buyer_field = html.Div([
+            dcc.Input(
+                # NOTE: _save_event_ticket() never reads "role" — fn_sell_
+                # event_ticket resolves the buyer's actual role server-side
+                # from p_user_id via the users table. This is display-only.
+                id={"type": "form-field", "entity": entity_name, "field": "role"},
+                type="hidden", value=caller_role,
+            ),
+            html.Div(own_label, style={"fontSize": "13px", "fontWeight": "600",
+                                        "color": "#15304f", "marginBottom": "10px"}),
+        ])
         pk_for_wrap = str(apt_user_id or event_id)
 
     return html.Div([
@@ -4265,20 +4340,12 @@ def render_event_ticket_card(
                 type="hidden", value=str(event_id or ""),
             ),
             dcc.Input(
-                # NOTE (2026-08): kept as a form field for continuity, but
-                # _save_event_ticket() never reads "role" — fn_sell_event_
-                # ticket resolves the buyer's actual role server-side from
-                # p_user_id via the users table. This is display-only; set
-                # to the real caller_role now rather than a hardcoded
-                # "apartment" so it's not actively misleading.
-                id={"type": "form-field", "entity": entity_name, "field": "role"},
-                type="hidden", value=(caller_role if not is_admin else "apartment"),
-            ),
-            dcc.Input(
                 id={"type": "form-entity-pk", "entity": entity_name},
                 type="hidden", value=pk_for_wrap,
             ),
-            # buyer's own user id -- hidden when buying for themselves
+            # buyer's own user id -- hidden when buying for themselves.
+            # Admin's equivalent (entity_id/role) comes from the drill-in's
+            # own hidden fields, rendered inside buyer_field above.
             (dcc.Input(
                 id={"type": "form-field", "entity": entity_name, "field": "apt_user_id"},
                 type="hidden", value=str(apt_user_id or ""),
@@ -4287,26 +4354,9 @@ def render_event_ticket_card(
             buyer_field,
 
             # -- Quantity (Adult / Child split) --
-            dbc.Row([
-                dbc.Col(dbc.Label("Adult Qty *",
-                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dbc.Input(
-                    id={"type": "form-field", "entity": entity_name, "field": "quantity_adult"},
-                    type="number", value="1", min=0, step=1,
-                    style={"fontSize": "13px", "borderRadius": "10px"},
-                ), width=8),
-            ], className="mb-2"),
-            (dbc.Row([
-                dbc.Col(dbc.Label("Child Qty",
-                                  style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dbc.Input(
-                    id={"type": "form-field", "entity": entity_name, "field": "quantity_child"},
-                    type="number", value="0", min=0, step=1,
-                    style={"fontSize": "13px", "borderRadius": "10px"},
-                ), width=8),
-            ], className="mb-2") if ticket_price2 and float(ticket_price2 or 0) > 0 else None),
+            _qty_stepper_row(entity_name, "quantity_adult", "Adult Qty *", 1, min_val=0),
+            (_qty_stepper_row(entity_name, "quantity_child", "Child Qty", 0, min_val=0)
+             if ticket_price2 and float(ticket_price2 or 0) > 0 else None),
 
             # -- Payment mode ---------------------------------------------------
             dbc.Row([
@@ -4326,32 +4376,40 @@ def render_event_ticket_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
-            # -- Dummy anchor for the non-cash-field clientside toggle -------
-            dcc.Store(id="et-noncash-dummy", data=None),
-            html.Div(
-                id={"type": "et-noncash-wrap", "pk": pk_for_wrap},
-                style={"display": "none"},
-                children=[
-                    dbc.Row([
-                        dbc.Col(dbc.Label("Cheque No.",
-                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                                width=4, style={"paddingTop": "6px"}),
-                        dbc.Col(dbc.Input(
-                            id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
-                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
-                        ), width=8),
-                    ], className="mb-2"),
-                    dbc.Row([
-                        dbc.Col(dbc.Label("Payment Gateway ID",
-                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                                width=4, style={"paddingTop": "6px"}),
-                        dbc.Col(dbc.Input(
-                            id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
-                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
-                        ), width=8),
-                    ], className="mb-2"),
-                ],
-            ),
+            # -- Tweak 3 (2026-08): Cash -> neither field. Cheque -> Cheque
+            #    No. only. Anything else (UPI/Bank/Card) -> Payment Gateway
+            #    ID only. Reuses the SAME generic mode-conditional-row /
+            #    MATCH clientside callback (mode_conditional_callbacks.py)
+            #    that already drives Receipts/Expenses — this card just
+            #    needed to wrap these two rows with the same id shape
+            #    (entity="event_ticket") to plug in automatically; the
+            #    bespoke "et-noncash-wrap" toggle this replaced showed both
+            #    fields together for every non-cash mode instead of
+            #    splitting them, and is now removed (see qr_callbacks.py).
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": entity_name, "field": "cheque_no"},
+               style={} if prefill_mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": entity_name, "field": "transaction_id"},
+               style={} if prefill_mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
             # -- Submit -----------------------------------------------------------
             dbc.Button(
                 [html.I(className="fas fa-ticket-alt me-2"), action_label],

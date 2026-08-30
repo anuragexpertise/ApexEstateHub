@@ -55,6 +55,8 @@ def book_event_tickets(
     created_by: int = None,
     issued_date: str = None,
     particulars: str = None,
+    cheque_no: str = None,
+    transaction_id: str = None,
 ):
     """
     Book event tickets via fn_sell_event_ticket and generate N individual
@@ -62,7 +64,7 @@ def book_event_tickets(
     """
     try:
         r = db._execute(
-            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_sell_event_ticket(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 int(user_id),
                 int(event_id),
@@ -72,6 +74,8 @@ def book_event_tickets(
                 created_by,
                 issued_date or date.today().isoformat(),
                 particulars,
+                cheque_no,
+                transaction_id,
             ),
             fetch_one=True,
         )
