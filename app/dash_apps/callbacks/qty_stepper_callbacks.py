@@ -38,7 +38,7 @@ def register_qty_stepper_callbacks(app):
             return val;
         }
         """,
-        Output({"type": "form-field", "entity": MATCH, "field": MATCH}, "value"),
+        Output({"type": "form-field", "entity": MATCH, "field": MATCH}, "value", allow_duplicate=True),
         Input({"type": "qty-step", "entity": MATCH, "field": MATCH, "dir": "down"}, "n_clicks"),
         Input({"type": "qty-step", "entity": MATCH, "field": MATCH, "dir": "up"}, "n_clicks"),
         State({"type": "form-field", "entity": MATCH, "field": MATCH}, "value"),
