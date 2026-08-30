@@ -176,7 +176,7 @@ def list_drillin_groups(target_table: str, society_id: int, search: str | None =
         return []
     try:
         rows = db._execute(
-            f"SELECT * FROM {target_table} WHERE society_id=%s AND active=TRUE",
+            f"SELECT * FROM {target_table} WHERE society_id=%s AND disposed=TRUE",
             (society_id,), fetch_all=True,
         ) or []
     except Exception as e:
@@ -211,7 +211,7 @@ def list_drillin_items(
     if target_table not in _ALLOWED_TABLES:
         return []
     rules = _TABLE_RULES.get(target_table, {})
-    query = f"SELECT * FROM {target_table} WHERE society_id=%s AND active=TRUE"
+    query = f"SELECT * FROM {target_table} WHERE society_id=%s AND disposed=TRUE"
     params: list = [society_id]
     if extra_filter:
         query += f" AND {extra_filter}"
