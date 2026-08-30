@@ -3681,12 +3681,36 @@ def render_pay_dues_card(
             ], className="mb-2"),
             # Particulars
             dbc.Row([
-                dbc.Col(dbc.Label("Particulars *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dbc.Textarea(
                     id={"type": "form-field", "entity": "pay_due", "field": "particulars"},
                     value=prefill_particulars, rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due", "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due", "field": "cheque_no"},
+               style={} if prefill_mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due", "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due", "field": "transaction_id"},
+               style={} if prefill_mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
             dbc.Button(
                 [html.I(className="fas fa-check me-2"), "Apply Payment (FIFO)"],
                 id={"type": "form-submit", "entity": "pay_due", "card_id": "form_pay_dues_new"},
@@ -3739,12 +3763,36 @@ def render_pay_dues_card(
                 ), width=8),
             ], className="mb-2"),
             dbc.Row([
-                dbc.Col(dbc.Label("Reference", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dbc.Label("Reference", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dbc.Input(
                     id={"type": "form-field", "entity": "pay_due_bg", "field": "reference"},
                     type="text", style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8)
             ], className="mb-2"),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due_bg", "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due_bg", "field": "cheque_no"},
+               style={} if prefill_mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due_bg", "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due_bg", "field": "transaction_id"},
+               style={} if prefill_mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
             
             dcc.Input(id={"type": "form-field", "entity": "pay_due_bg", "field": "role"}, type="hidden", value="apartment"),
             dcc.Input(id={"type": "form-field", "entity": "pay_due_bg", "field": "entity_id"}, type="hidden", value=str(entity_id or "")),
@@ -3962,6 +4010,26 @@ def render_vendor_pass_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
+            dcc.Input(
+                id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
+                type="hidden", value="",
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(html.Div([
+                    html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                    html.Span("Society Charge", style={"flex": "1", "color": "#2a3b52", "fontWeight": "600"}),
+                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                ], id={"type": "drillin-trigger", "entity": entity_name, "field": "acc_id"}, n_clicks=0,
+                style={"display": "flex", "alignItems": "center", "padding": "10px 12px", "borderRadius": "10px", "border": "1px solid #dbe3ee", "background": "#fff", "cursor": "pointer", "fontSize": "13px"}), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": entity_name, "field": "particulars"},
+                    value="", rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
             # ── Dummy anchor for the non-cash-field clientside toggle ───────
             # (a real Store prop, rather than borrowing an unrelated prop
             # like dcc.Dropdown's nonexistent "title" — see qr_callbacks.py).
@@ -4054,6 +4122,9 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
     sale_date    = asset.get("disposed_at") or _date.today().isoformat()
     mode         = asset.get("mode", "cash") or "cash"
     particulars  = asset.get("particulars") or ""
+    acc_id       = asset.get("acc_id") or ""
+    acc_name     = asset.get("acc_name") or "Tap to select…"
+    acc_color    = "#2a3b52" if acc_id else "#9aa7b8"
 
     today_str = _date.today().isoformat()
 
@@ -4088,6 +4159,17 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
                       type="hidden", value=str(asset_id)),
             dcc.Input(id={"type": "form-field-hidden", "entity": "asset_dispose", "field": "role"},
                       type="hidden", value="assets"),
+            dcc.Input(id={"type": "form-field-hidden", "entity": "asset_dispose", "field": "acc_id"},
+                      type="hidden", value=str(acc_id)),
+            dbc.Row([
+                dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(html.Div([
+                    html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                    html.Span(acc_name, style={"flex": "1", "color": acc_color, "fontWeight": "400" if not acc_id else "600"}),
+                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                ], id={"type": "drillin-trigger", "entity": "asset_dispose", "field": "acc_id"}, n_clicks=0,
+                style={"display": "flex", "alignItems": "center", "padding": "10px 12px", "borderRadius": "10px", "border": "1px solid #dbe3ee", "background": "#fff", "cursor": "pointer", "fontSize": "13px"}), width=8),
+            ], className="mb-2"),
             dbc.Row([
                 dbc.Col(dbc.Label("Sale Value (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dcc.Input(
@@ -4125,15 +4207,40 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
                     value=particulars, rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "asset_dispose", "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "asset_dispose", "field": "cheque_no"},
+               style={} if mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "asset_dispose", "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "asset_dispose", "field": "transaction_id"},
+               style={} if mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
             dbc.Button(
                 [html.I(className="fas fa-check me-2"), "Confirm Sale & Generate Receipt"],
                 id={"type": "form-submit", "entity": "asset_dispose", "card_id": "form_asset_dispose_new"},
                 n_clicks=0, color="danger", className="mt-3 w-100",
                 style={"borderRadius": "12px", "fontWeight": "700"},
             ),
-        ], style={"padding": "16px"}),
+        ], style={"padding": "16px", "flex": "1", "minWidth": "260px"}),
+        render_payment_qr_widget(society_id),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
-              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden", "display": "flex", "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"})
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4216,7 +4323,7 @@ def render_event_ticket_card(
     generic one-line identity string used for vendor/security instead.
 
     2026-08 Tweak 1: admin's buyer field is now the entity_id/role
-    drill-in (DRILLIN_CONFIG[("event_tickets","entity_id")]) instead of a
+    drill-in (DRILLIN_CONFIG[("event_ticket_items","entity_id")]) instead of a
     flat apartment-only dropdown — which roles it offers is narrowed to
     this event's own open_to at the moment the picker is opened (see
     drillin_callbacks.py's drillin_navigate special-case), not computed

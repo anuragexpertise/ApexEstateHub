@@ -179,7 +179,31 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "label": "Ticket Income Account",
         "filter": "drcr_account='Cr'",
     },
-    # event_tickets.entity_id (2026-08, Tweak 1) — admin's "Sell Tickets"
+    ("event_tickets", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Ticket Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    ("vendor_passes", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    ("asset_disposes", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    ("verify_receivable_amts", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    # event_ticket_items.entity_id (2026-08, Tweak 1) — admin's "Sell Tickets"
     # buyer picker. All three roles are listed here; which ones actually
     # show as cards is narrowed per-event at open time in
     # drillin_callbacks.py's drillin_navigate() (special-cased there,
@@ -187,7 +211,7 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
     # event's open_to ('all' / 'members_only' / 'residents_only') — not
     # something a static config entry can express on its own since the
     # same entry is shared by every event regardless of its open_to.
-    ("event_tickets", "entity_id"): {
+    ("event_ticket_items", "entity_id"): {
         "mode": "role",
         "role_field": "role",
         "roles": {

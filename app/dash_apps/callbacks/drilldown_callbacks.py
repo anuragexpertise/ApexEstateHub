@@ -3357,6 +3357,15 @@ def _save_pay_dues(db, d, sid):
         actor_user = db._execute("SELECT role FROM users WHERE id = %s", (confirmed_by,), fetch_one=True)
         actor_role = actor_user["role"] if actor_user else None
         
+    mode = d.get("mode", "cash")
+    particulars = d.get("particulars") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
+
     if actor_role == "apartment":
         # Self-pay: report only, no allocation/posting yet. Ownership
         # (confirmed_by must be the apartment user linked to apt_id) is
@@ -3365,8 +3374,8 @@ def _save_pay_dues(db, d, sid):
         try:
             r = db._execute(
                 "SELECT * FROM fn_report_apartment_payment_fifo(%s,%s,%s,%s,%s,%s)",
-                (apt_id, amt, d.get("mode", "cash"), confirmed_by,
-                 d.get("particulars"), d.get("reference", "")),
+                (apt_id, amt, mode, confirmed_by,
+                 particulars, d.get("reference", "")),
                 fetch_one=True,
             )
             msg = (r or {}).get("status", "Unknown error")
@@ -3379,8 +3388,8 @@ def _save_pay_dues(db, d, sid):
             return False, str(e), None
 
     ok, msg, result = loaders.pay_apartment_dues_fifo(
-        apartment_id=apt_id, amount=amt, mode=d.get("mode", "cash"),
-        confirmed_by=confirmed_by, particulars=d.get("particulars"),
+        apartment_id=apt_id, amount=amt, mode=mode,
+        confirmed_by=confirmed_by, particulars=particulars,
     )
     trx_id = result.get("transaction_id") if ok and result else None
     receipt_id = result.get("receipt_id") if ok and result else None
@@ -3409,7 +3418,13 @@ def _save_pay_due_bg(db, d, sid):
     except: return False, "Invalid amount", None
 
     mode = d.get("mode", "cash")
-    ref = d.get("reference", "")
+    ref = d.get("reference") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            ref = (ref + " — " if ref else "") + " / ".join(ref_bits)
     user_id = d.get("user_id")
     try: user_id = int(user_id) if user_id else None
     except: user_id = None
@@ -3537,16 +3552,25 @@ def _save_asset_dispose(db, d, sid):
     except (ValueError, TypeError):
         return False, "Invalid sale value", None
 
+    mode = d.get("mode", "cash")
+    particulars = d.get("particulars") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
+
     try:
         r = db._execute(
             "SELECT * FROM fn_dispose_asset(%s,%s,%s,%s,%s,%s)",
             (
                 asset_id,
                 sale_value,
-                d.get("mode", "cash"),
+                mode,
                 d.get("user_id"),
                 d.get("sale_date") or dt_date.today().isoformat(),
-                d.get("particulars"),
+                particulars,
             ),
             fetch_one=True,
         )

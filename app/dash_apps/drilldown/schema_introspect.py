@@ -136,6 +136,7 @@ _FK_HUMAN_ALIASES = {
     "apt_maintenance_acc_id": "maintenance_account_name",
     "apt_interest_acc_id": "interest_account_name",
     "ven_pass_acc_id": "pass_account_name",
+    "transaction_id": "Payment Gateway ID",
 }
 
 # Friendly label overrides for FK columns.
@@ -248,8 +249,6 @@ _AUTH_FIELDS: dict[str, list[dict]] = {
 # must be filtered by drcr_account.
 _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     # (table, col_name) → form field type
-    ("receipts",              "acc_id"):                 "account_dropdown_receipt",
-    ("expenses",              "acc_id"):                 "account_dropdown_expense",
     ("receivables",           "acc_id"):                 "account_dropdown_cr",
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
     ("payables",              "acc_id"):                 "account_dropdown_dr",
