@@ -45,6 +45,7 @@ from app.dash_apps.drilldown.schema_introspect import ENTITY_TABLE_MAP
 from app.dash_apps.drilldown.registry import to_plural
 from app.security.guards import require_session
 from app.security.audit_context import get_current_society_id
+from database.db_manager import db
 
 
 def _physical_table(entity: str) -> str:
@@ -181,10 +182,15 @@ def register_drillin_callbacks(app):
         Input("drillin-back-btn-modal", "n_clicks"),
         Input("drillin-search", "value"),
         State("drillin-store", "data"),
+        # Fixed (non-wildcard) state, read only for the event_ticket/
+        # entity_id case below (Tweak 1, 2026-08) — every other
+        # drillin-trigger ignores it. Safe to keep unconditional here since
+        # a missing/absent component just resolves to None.
+        State({"type": "form-field", "entity": "event_ticket", "field": "event_id"}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def drillin_navigate(_trig_nc, _role_nc, _group_nc, _back_nc, search, store):
+    def drillin_navigate(_trig_nc, _role_nc, _group_nc, _back_nc, search, store, event_ticket_event_id):
         triggered = ctx.triggered_id
         if triggered is None:
             raise PreventUpdate
@@ -206,6 +212,37 @@ def register_drillin_callbacks(app):
             cfg = get_drillin_config(table, field)
             if not cfg:
                 raise PreventUpdate
+
+            # Tweak 1 (2026-08): admin's "Sell Tickets" buyer picker —
+            # narrow the role cards to whoever this specific event's
+            # open_to actually allows, looked up fresh every time the
+            # picker opens (never cached/baked into DRILLIN_CONFIG, since
+            # one config entry is shared by every event regardless of its
+            # own open_to). Mirrors the same open_to semantics enforced
+            # server-side in fn_sell_event_ticket:
+            #   'all'            -> apartment, vendor, security
+            #   'members_only'   -> apartment only
+            #   'residents_only' -> apartment, security (vendors aren't
+            #                        residents of the society)
+            if entity == "event_ticket" and field == "entity_id" and event_ticket_event_id:
+                try:
+                    erow = db._execute(
+                        "SELECT open_to FROM events WHERE id=%s AND society_id=%s",
+                        (event_ticket_event_id, society_id), fetch_one=True,
+                    )
+                    open_to = (erow or {}).get("open_to") or "all"
+                except Exception as e:
+                    print(f"⚠️  event_ticket entity_id open_to lookup: {e}")
+                    open_to = "all"
+                if open_to == "members_only":
+                    allowed = {"apartment"}
+                elif open_to == "residents_only":
+                    allowed = {"apartment", "security"}
+                else:
+                    allowed = {"apartment", "vendor", "security"}
+                cfg = dict(cfg)
+                cfg["roles"] = {k: v for k, v in cfg["roles"].items() if k in allowed}
+
             store = {
                 "entity": entity, "field": field, "config": cfg,
                 "role": None, "target_table": cfg.get("table"),

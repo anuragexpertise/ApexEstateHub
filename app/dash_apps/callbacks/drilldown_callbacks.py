@@ -2717,7 +2717,6 @@ def _render_card(
             flat_number = ""
             owner_name  = ""
             buyer_label = ""
-            apartment_options = []
             if caller_role == "apartment":
                 # Buyer is the logged-in apartment — pull their own identity
                 # from the server session (get_current_user_id()), not
@@ -2751,24 +2750,13 @@ def _render_card(
                     rec = loaders.load_profile("security", linked_id, sid_val) or {} \
                           if linked_id and sid_val else {}
                     buyer_label = rec.get("name") or "Security"
-            elif sid_val:
-                # Admin needs to pick which apartment is buying — options are
-                # {users.id (role='apartment') : "Flat — Owner"}, since
-                # fn_sell_event_ticket takes p_user_id, not apartments.id.
-                try:
-                    rows = db._execute(
-                        "SELECT u.id, a.flat_number, a.owner_name "
-                        "FROM users u JOIN apartments a ON a.id = u.linked_id "
-                        "WHERE u.role='apartment' AND u.society_id=%s "
-                        "ORDER BY a.flat_number",
-                        (sid_val,), fetch_all=True,
-                    ) or []
-                    apartment_options = [
-                        {"label": f"{r['flat_number']} — {r['owner_name']}", "value": r["id"]}
-                        for r in rows
-                    ]
-                except Exception as _e:
-                    print(f"⚠️  event ticket apartment options: {_e}")
+            # else: admin — buyer is now picked via the entity_id/role
+            # drill-in (Tweak 1, 2026-08) instead of a flat apartment-only
+            # dropdown; drillin_navigate() in drillin_callbacks.py scopes
+            # the role cards it offers to this specific event's open_to at
+            # the moment the picker is opened (looked up fresh each time,
+            # not baked into this render), so no apartment_options query
+            # is needed here any more.
 
             return renderers.render_event_ticket_card(
                 event_id=event_id,
@@ -2783,7 +2771,7 @@ def _render_card(
                 flat_number=flat_number,
                 owner_name=owner_name,
                 buyer_label=buyer_label,
-                apartment_options=apartment_options,
+                open_to=event.get("open_to") or "all",
                 caller_role=caller_role,
             )
 
@@ -3677,8 +3665,28 @@ def _save_event_ticket(db, d, sid):
     event_id    = d.get("event_id")
     created_by  = d.get("user_id")
 
+    # Tweak 1 (2026-08): admin's "Sell Tickets" now supplies entity_id +
+    # role from the drill-in picker instead of apt_user_id directly (that
+    # field only exists at all for the self-buy apartment/vendor/security
+    # path — see render_event_ticket_card). Resolve it to the same
+    # users.id fn_sell_event_ticket has always taken as p_user_id.
     if not apt_user_id:
-        return False, "Apartment is required", None
+        role = d.get("role")
+        entity_id = d.get("entity_id")
+        if role and entity_id:
+            try:
+                urow = db._execute(
+                    "SELECT id FROM users WHERE role=%s AND linked_id=%s AND society_id=%s",
+                    (role, entity_id, sid), fetch_one=True,
+                )
+            except Exception as e:
+                return False, _clean_pg_error(e), None
+            if not urow:
+                return False, f"No {role} user account found for the selected {role}", None
+            apt_user_id = urow["id"]
+
+    if not apt_user_id:
+        return False, "Buyer is required", None
     if not event_id:
         return False, "Event is required", None
 
@@ -3693,18 +3701,20 @@ def _save_event_ticket(db, d, sid):
         return False, "Ticket quantities must be whole numbers ≥ 0, with at least 1 total", None
 
     mode = d.get("mode", "cash")
-    if mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
+    cheque_no = d.get("cheque_no") or None
+    transaction_id = d.get("transaction_id") or None
+    if mode != "cash" and not (cheque_no or transaction_id):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
 
     particulars = d.get("particulars") or ""
-    if mode != "cash":
-        ref_bits = []
-        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
-        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
-        if ref_bits:
-            particulars = (particulars + " — " if particulars else "") + " / ".join(ref_bits)
 
     try:
+        # Tweak 3 (2026-08): cheque_no/transaction_id now travel as their
+        # own params straight into receipts.cheque_no/receipts.
+        # transaction_id (columns that already existed and are used by
+        # every other receipt-writing flow) instead of being string-
+        # concatenated into particulars, which was a display-only
+        # workaround, not a real fix.
         result, msg = event_service.book_event_tickets(
             society_id=sid,
             event_id=event_id,
@@ -3715,6 +3725,8 @@ def _save_event_ticket(db, d, sid):
             created_by=created_by,
             issued_date=d.get("issued_date") or dt_date.today().isoformat(),
             particulars=particulars,
+            cheque_no=cheque_no,
+            transaction_id=transaction_id,
         )
         if not result:
             return False, msg, None
