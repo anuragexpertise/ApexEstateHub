@@ -24,6 +24,23 @@ Two drill modes, selected per (table, field) in DRILLIN_CONFIG:
 Adding a new field to the picker is one DRILLIN_CONFIG entry — no new
 callback wiring required, the modal + callbacks in drillin_callbacks.py
 are fully generic over this config.
+
+"accounts" (2026-08) is special-cased rather than going through the
+generic single-query-plus-group_fn path every other table uses: its
+Level-2 grouping is the account's own PARENT account (accounts.
+parent_account_id — the real chart-of-accounts hierarchy; tab_name is
+just "Excel ledger tab grouping", per its own column comment in
+estatehub.sql, and isn't reliable for this), and only genuine leaf
+accounts (never themselves someone else's parent) are selectable —
+exactly what app/utils/account_picker.py's now-removed
+list_account_hierarchy() did, minus the header sub-level (kept to a
+2-tap flow like every other drill-in field instead of a 3-tap one, by
+using the parent's name as the single group label). Resolving a leaf's
+parent name can require a cross-side lookup (e.g. a Dr expense leaf's
+parent is a Cr rollup account, "Income Expenditure A/c"), so it needs
+the whole society's accounts fetched once up front — that's what
+_fetch_account_leaves() does — rather than fitting the single filtered
+SELECT + pure-per-row-group_fn shape the other tables use.
 """
 
 from __future__ import annotations
@@ -34,7 +51,9 @@ from database.db_manager import db
 # Physical tables this module is allowed to query. Mirrors the allowlist
 # guard in schema_introspect.load_fk_options() — never interpolate a
 # caller-controlled table name that isn't in this set.
-_ALLOWED_TABLES = {"apartments", "vendors", "security_staff", "assets"}
+# "accounts" added (2026-08) for receipts.acc_id / expenses.acc_id /
+# events.account_id — see DRILLIN_CONFIG below.
+_ALLOWED_TABLES = {"apartments", "vendors", "security_staff", "assets", "accounts"}
 
 
 def _apartment_block(flat_number: str | None) -> str:
@@ -49,7 +68,9 @@ def _apartment_block(flat_number: str | None) -> str:
     return "General"
 
 
-# Per-target-table rendering + grouping rules.
+# Per-target-table rendering + grouping rules. "accounts" only needs
+# icon/color/label here — its actual group/item queries are special-cased
+# in list_drillin_groups/list_drillin_items (see _fetch_account_leaves).
 _TABLE_RULES = {
     "apartments": {
         "label_col": "flat_number",
@@ -88,6 +109,15 @@ _TABLE_RULES = {
         "group_fn": None,   # flat list — no natural grouping
         "group_label": None,
     },
+    "accounts": {
+        "label_col": "name",
+        "sub_col": None,
+        "icon": "fas fa-book",
+        "color": "#c9822e",
+        "search_cols": ["name"],
+        "group_fn": "special",   # handled directly in list_drillin_groups/items
+        "group_label": "Category",
+    },
 }
 
 
@@ -112,6 +142,18 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "label": "Asset (Not Disposed)",
         "filter": "disposed=FALSE",
     },
+    # acc_id (2026-08): reuses the same "single" drill-in flow as asset_id
+    # above, grouped by the account's parent (see module docstring),
+    # scoped to the correct normal-balance side per form so a receipt can
+    # only pick a Cr (income) account and an expense can only pick a Dr
+    # (expense) one — identical scoping to the plain dropdown it replaces
+    # (renderers.py's old account_dropdown_receipt/expense branch).
+    ("receipts", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Income Account",
+        "filter": "drcr_account='Cr'",
+    },
     ("expenses", "entity_id"): {
         "mode": "role",
         "role_field": "role",
@@ -121,6 +163,21 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
             "assets":    {"table": "assets",     "label": "Asset"},
             "other":     None,
         },
+    },
+    ("expenses", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Expense Account",
+        "filter": "drcr_account='Dr'",
+    },
+    # events.account_id (2026-08) — the income account event ticket sales
+    # post to (fn_sell_event_ticket). Same accounts/Cr picker as
+    # receipts.acc_id, just on a different table/field pair.
+    ("events", "account_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Ticket Income Account",
+        "filter": "drcr_account='Cr'",
     },
     ("receivables", "entity_id"): {
         "mode": "role",
@@ -161,24 +218,102 @@ def role_target_table(config: dict, role_key: str) -> dict | None:
 def _label_and_sub(rules: dict, row: dict) -> tuple[str, str]:
     label = row.get(rules["label_col"]) or row.get(rules.get("label_fallback_col") or "", "")
     label = label or f"#{row.get('id')}"
-    sub = row.get(rules.get("sub_col") or "", "") or ""
-    return str(label), str(sub)
+    sub_col = rules.get("sub_col")
+    sub = row.get(sub_col, "") if sub_col else ""
+    return str(label), str(sub or "")
 
 
-def list_drillin_groups(target_table: str, society_id: int, search: str | None = None) -> list[dict]:
+def _parse_drcr_filter(extra_filter: str | None) -> str | None:
+    """Pull 'Cr'/'Dr' out of a "drcr_account='Cr'"-shaped extra_filter
+    string. Returns None (no side restriction) for anything else."""
+    if not extra_filter:
+        return None
+    m = re.search(r"drcr_account\s*=\s*'(Cr|Dr)'", extra_filter)
+    return m.group(1) if m else None
+
+
+def _fetch_account_leaves(society_id: int, drcr: str | None) -> list[dict]:
+    """All selectable ("leaf") accounts for the picker, each tagged with
+    its group (its own direct parent account's name — falls back to the
+    account's own tab_name, then "Other", if it has no parent or the
+    parent lookup misses). A leaf is any account on the requested
+    drcr_account side that is not itself the parent of another account
+    (excludes rollup/header accounts like "Income Expenditure A/c").
+
+    Fetches the whole society's chart of accounts unfiltered first
+    (rather than pre-filtering by drcr_account in SQL) because a leaf's
+    immediate parent can legitimately sit on the OTHER side — e.g. the
+    Dr expense leaf "Depreciation" (231) is a child of the Cr rollup
+    "Income Expenditure A/c" (23) — so the parent-name lookup needs
+    both sides in memory regardless of which side the caller asked for.
+    """
+    try:
+        all_rows = db._execute(
+            "SELECT id, name, tab_name, parent_account_id, drcr_account "
+            "FROM accounts WHERE society_id=%s",
+            (society_id,), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"⚠️  _fetch_account_leaves: {e}")
+        return []
+
+    by_id = {r["id"]: r for r in all_rows}
+    parent_ids = {r["parent_account_id"] for r in all_rows if r.get("parent_account_id") is not None}
+
+    leaves = []
+    for r in all_rows:
+        if drcr and r.get("drcr_account") != drcr:
+            continue
+        if r["id"] in parent_ids:
+            continue  # this account is itself a parent — not a postable leaf
+        parent = by_id.get(r.get("parent_account_id"))
+        group_label = (parent["name"] if parent else None) or r.get("tab_name") or "Other"
+        leaves.append({**r, "_group": group_label})
+    return leaves
+
+
+def list_drillin_groups(
+    target_table: str,
+    society_id: int,
+    search: str | None = None,
+    extra_filter: str | None = None,
+) -> list[dict]:
     """Level-2 group cards for a target table (e.g. apartment blocks,
-    vendor service types). Returns [] if the table has no grouping rule
-    (caller should skip straight to the item list) or on any DB error."""
+    vendor service types, account parent categories). Returns [] if the
+    table has no grouping rule (caller should skip straight to the item
+    list) or on any DB error."""
     if target_table not in _ALLOWED_TABLES:
         return []
     rules = _TABLE_RULES.get(target_table, {})
+
+    if target_table == "accounts":
+        leaves = _fetch_account_leaves(society_id, _parse_drcr_filter(extra_filter))
+        if search:
+            s = search.strip().lower()
+            leaves = [r for r in leaves
+                      if s in str(r.get("name", "")).lower() or s in str(r.get("_group", "")).lower()]
+        counts: dict[str, int] = {}
+        for r in leaves:
+            counts[r["_group"]] = counts.get(r["_group"], 0) + 1
+        return [{"key": k, "label": k, "count": c} for k, c in sorted(counts.items())]
+
     if not rules.get("group_fn"):
         return []
+    # NOTE (2026-08 fix): this used to hardcode "AND disposed=TRUE"
+    # unconditionally for every target table. apartments/vendors/
+    # security_staff have no disposed column at all, so that raised an
+    # exception on every call (caught below, silently returning []) —
+    # the Apartment/Vendor/Security drill-in groups/items were empty in
+    # production regardless of data. For assets, it also collided with
+    # the DRILLIN_CONFIG "disposed=FALSE" filter (AND disposed=TRUE AND
+    # disposed=FALSE = always zero rows). Only apply a filter when the
+    # field's own config supplies one via extra_filter.
+    query = f"SELECT * FROM {target_table} WHERE society_id=%s"
+    params: list = [society_id]
+    if extra_filter:
+        query += f" AND {extra_filter}"
     try:
-        rows = db._execute(
-            f"SELECT * FROM {target_table} WHERE society_id=%s AND disposed=TRUE",
-            (society_id,), fetch_all=True,
-        ) or []
+        rows = db._execute(query, tuple(params), fetch_all=True) or []
     except Exception as e:
         print(f"⚠️  list_drillin_groups({target_table}): {e}")
         return []
@@ -211,7 +346,29 @@ def list_drillin_items(
     if target_table not in _ALLOWED_TABLES:
         return []
     rules = _TABLE_RULES.get(target_table, {})
-    query = f"SELECT * FROM {target_table} WHERE society_id=%s AND disposed=TRUE"
+
+    if target_table == "accounts":
+        leaves = _fetch_account_leaves(society_id, _parse_drcr_filter(extra_filter))
+        if group_key:
+            leaves = [r for r in leaves if r["_group"] == group_key]
+        if search:
+            s = search.strip().lower()
+            leaves = [r for r in leaves
+                      if s in str(r.get("name", "")).lower() or s in str(r.get("_group", "")).lower()]
+        items = [{
+            "id": r["id"],
+            "label": r.get("name") or f"#{r['id']}",
+            "sub": r["_group"],
+            "icon": rules.get("icon", "fas fa-book"),
+            "color": rules.get("color", "#c9822e"),
+        } for r in leaves]
+        items.sort(key=lambda x: x["label"].lower())
+        return items
+
+    # Same 2026-08 fix as list_drillin_groups() above — no more hardcoded
+    # "AND disposed=TRUE"; only extra_filter (from the field's own
+    # DRILLIN_CONFIG entry) scopes the query now.
+    query = f"SELECT * FROM {target_table} WHERE society_id=%s"
     params: list = [society_id]
     if extra_filter:
         query += f" AND {extra_filter}"

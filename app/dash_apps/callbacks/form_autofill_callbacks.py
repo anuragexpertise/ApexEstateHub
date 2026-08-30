@@ -18,23 +18,34 @@ Behavior (per spec):
     "or (if profile-scoped auto-fill)" half of the spec: profile-scoped
     prefills always win; this is only a fallback suggestion for the
     unscoped "New Receipt" / "New Expense" case.
-  - Only fires for entity in {"receipts", "receipts", "expenses",
-    "expenses"} — other entities that happen to have an acc_id field
-    (receivables, payables, assets) are explicitly left alone; they don't
-    have a comparable free-text particulars field to suggest into, or (for
-    assets) already have their own dedicated save/prefill flow.
+  - Only fires for entity in {"receipt", "expense"} — other entities that
+    happen to have an acc_id field (receivables, payables, assets, events)
+    are explicitly left alone; they don't have a comparable free-text
+    particulars field to suggest into, or already have their own
+    dedicated save/prefill flow.
+
+NOTE (2026-08, two bugs fixed):
+  1. _APPLIES_TO held the PLURAL entity keys ("receipts"/"expenses"), but
+     renderers.py's form-field ids always carry the SINGULAR form key
+     (entity="receipt"/"expense" — see render_form_card's `entity_raw`).
+     `entity not in _APPLIES_TO` was therefore always True and this
+     callback silently no-opped on every acc_id change since it was
+     written — never actually suggesting anything.
+  2. acc_id is now a drill-in field (see drillin.py's DRILLIN_CONFIG),
+     so its value lives in a {"type":"form-field-hidden",...} component,
+     not {"type":"form-field",...} — the Input below is updated to match.
 """
 from dash import Input, Output, State, MATCH, no_update, callback_context
 
 
-_APPLIES_TO = {"receipts", "receipts", "expenses", "expenses"}
+_APPLIES_TO = {"receipt", "expense"}
 
 
 def register_form_autofill_callbacks(app):
 
     @app.callback(
         Output({"type": "form-field", "entity": MATCH, "field": "particulars"}, "value"),
-        Input({"type": "form-field", "entity": MATCH, "field": "acc_id"}, "value"),
+        Input({"type": "form-field-hidden", "entity": MATCH, "field": "acc_id"}, "value"),
         State({"type": "form-field", "entity": MATCH, "field": "particulars"}, "value"),
         prevent_initial_call=False,
     )
@@ -42,7 +53,7 @@ def register_form_autofill_callbacks(app):
         if not acc_id:
             return no_update
 
-        # Only act for receipts/expenses — MATCH fires for any entity that
+        # Only act for receipt/expense — MATCH fires for any entity that
         # happens to render both an acc_id and a particulars form-field.
         triggered = callback_context.triggered_id
         entity = (triggered or {}).get("entity") if isinstance(triggered, dict) else None

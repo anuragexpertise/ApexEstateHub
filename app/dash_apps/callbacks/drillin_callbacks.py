@@ -147,13 +147,21 @@ def _current_view(store: dict, society_id: int):
         return "item", html.P("Nothing to select for this option.",
                                className="text-muted text-center", style={"padding": "30px"})
 
+    # NOTE (2026-08 fix): cfg["filter"] (e.g. receipts.asset_id's
+    # "disposed=FALSE", or acc_id's "drcr_account='Cr'"/"'Dr'") was
+    # defined in DRILLIN_CONFIG but never actually read here, so it never
+    # reached list_drillin_groups/list_drillin_items — every "single"
+    # mode field with a filter was silently querying unfiltered. Now
+    # threaded through both calls.
+    extra_filter = cfg.get("filter")
+
     if not store.get("group"):
-        groups = list_drillin_groups(target_table, society_id, search)
+        groups = list_drillin_groups(target_table, society_id, search, extra_filter)
         if groups:
             _, color = TABLE_ICON_COLOR.get(target_table, ("fas fa-hand-pointer", "#7d8ea3"))
             return "group", _render_group_cards(groups, store.get("group_label"), color)
 
-    items = list_drillin_items(target_table, society_id, store.get("group"), search)
+    items = list_drillin_items(target_table, society_id, store.get("group"), search, extra_filter)
     return "item", _render_item_list(items)
 
 

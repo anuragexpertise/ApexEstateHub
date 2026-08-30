@@ -374,12 +374,17 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "roles": ["admin"],
         },
         {
-            "label": "Buy Tickets",        # apartment buys their own
+            "label": "Buy Tickets",        # buyer purchases their own
             "action_id": "buy_event_ticket",
             "target_card": "form_event_ticket_new",
             "icon": "fa-ticket-alt",
             "color": "primary",
-            "roles": ["apartment"],
+            # 2026-08: opened from apartment-only to all portals — actual
+            # eligibility for a given event is gated by that event's own
+            # open_to column (all/members_only/residents_only), enforced
+            # server-side in fn_sell_event_ticket. This role list only
+            # controls whether the action button/card appears at all.
+            "roles": ["apartment", "vendor", "security"],
         },
     ],
 
