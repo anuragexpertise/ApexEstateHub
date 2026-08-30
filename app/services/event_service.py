@@ -57,6 +57,7 @@ def book_event_tickets(
     particulars: str = None,
     cheque_no: str = None,
     transaction_id: str = None,
+    acc_id: int = None,
 ):
     """
     Book event tickets via fn_sell_event_ticket and generate N individual
@@ -80,8 +81,12 @@ def book_event_tickets(
             fetch_one=True,
         )
         ticket_id = (r or {}).get("ticket_id")
+        receipt_id = (r or {}).get("receipt_id")
         if not ticket_id:
             return None, "Failed to book tickets"
+
+        if acc_id and receipt_id:
+            db._execute("UPDATE receipts SET acc_id = %s WHERE id = %s", (acc_id, receipt_id))
 
         event_ticket_id = ticket_id
         created_items = []

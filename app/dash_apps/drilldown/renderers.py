@@ -3509,6 +3509,7 @@ def render_verify_receivable_card(
     residual: float,
     prefill_amount: float,
     prefill_mode: str = "cash",
+    society_id=None,
 ) -> html.Div:
     color = "#17976e"
     return html.Div([
@@ -3572,6 +3573,26 @@ def render_verify_receivable_card(
                     style={"fontSize": "13px"},
                 ), width=7),
             ], className="mb-2"),
+            dcc.Input(
+                id={"type": "form-field-hidden", "entity": "verify_receivable_amt", "field": "acc_id"},
+                type="hidden", value="",
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=5, style={"paddingTop": "6px"}),
+                dbc.Col(html.Div([
+                    html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                    html.Span("Receivable Account", style={"flex": "1", "color": "#2a3b52", "fontWeight": "600"}),
+                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                ], id={"type": "drillin-trigger", "entity": "verify_receivable_amt", "field": "acc_id"}, n_clicks=0,
+                style={"display": "flex", "alignItems": "center", "padding": "10px 12px", "borderRadius": "10px", "border": "1px solid #dbe3ee", "background": "#fff", "cursor": "pointer", "fontSize": "13px"}), width=7),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=5, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": "verify_receivable_amt", "field": "particulars"},
+                    value="", rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=7),
+            ], className="mb-2"),
             dbc.Row([
                 dbc.Col(dbc.Label("Bounce Penalty (if rejecting) ₹",
                                   style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
@@ -3597,9 +3618,10 @@ def render_verify_receivable_card(
                     style={"borderRadius": "12px", "fontWeight": "700"},
                 ), width=6),
             ]),
-        ], style={"padding": "16px"}),
+        ], style={"padding": "16px", "flex": "1", "minWidth": "260px"}),
+        render_payment_qr_widget(society_id),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
-              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden", "display": "flex", "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"})
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4481,6 +4503,26 @@ def render_event_ticket_card(
                     value=prefill_mode,
                     clearable=False,
                     style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            dcc.Input(
+                id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
+                type="hidden", value="",
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(html.Div([
+                    html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
+                    html.Span("Event Account", style={"flex": "1", "color": "#2a3b52", "fontWeight": "600"}),
+                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
+                ], id={"type": "drillin-trigger", "entity": entity_name, "field": "acc_id"}, n_clicks=0,
+                style={"display": "flex", "alignItems": "center", "padding": "10px 12px", "borderRadius": "10px", "border": "1px solid #dbe3ee", "background": "#fff", "cursor": "pointer", "fontSize": "13px"}), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Textarea(
+                    id={"type": "form-field", "entity": entity_name, "field": "particulars"},
+                    value="", rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
             # -- Tweak 3 (2026-08): Cash -> neither field. Cheque -> Cheque

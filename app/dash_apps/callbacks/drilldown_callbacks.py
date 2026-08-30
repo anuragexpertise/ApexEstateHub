@@ -3554,6 +3554,12 @@ def _save_asset_dispose(db, d, sid):
 
     mode = d.get("mode", "cash")
     particulars = d.get("particulars") or ""
+    acc_id = d.get("acc_id")
+    if acc_id:
+        try:
+            acc_id = int(acc_id)
+        except (ValueError, TypeError):
+            acc_id = None
     if mode != "cash":
         ref_bits = []
         if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
@@ -3575,6 +3581,8 @@ def _save_asset_dispose(db, d, sid):
             fetch_one=True,
         )
         receipt_id = (r or {}).get("receipt_id")
+        if receipt_id and acc_id:
+            db._execute("UPDATE receipts SET acc_id = %s WHERE id = %s", (acc_id, receipt_id))
         msg = f"Asset disposed — receipt #{receipt_id} [[receipt:{receipt_id}]]"
         return True, msg, receipt_id
     except Exception as e:
@@ -3731,6 +3739,12 @@ def _save_event_ticket(db, d, sid):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payments", None
 
     particulars = d.get("particulars") or ""
+    acc_id = d.get("acc_id")
+    if acc_id:
+        try:
+            acc_id = int(acc_id)
+        except (ValueError, TypeError):
+            acc_id = None
 
     try:
         # Tweak 3 (2026-08): cheque_no/transaction_id now travel as their
@@ -3751,6 +3765,7 @@ def _save_event_ticket(db, d, sid):
             particulars=particulars,
             cheque_no=cheque_no,
             transaction_id=transaction_id,
+            acc_id=acc_id,
         )
         if not result:
             return False, msg, None
