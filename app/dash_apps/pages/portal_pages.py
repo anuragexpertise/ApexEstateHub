@@ -85,7 +85,7 @@ def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
             style={
                 "position": "relative",
                 "background": (
-                    f"linear-gradient(135deg, {color}80 0%, {color}00 55%), "
+                    f"linear-gradient(135deg, {color}80 0%, {color}00 20%), "
                     "linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,251,255,0.9))"
                 ),
                 "border": "1px solid rgba(255,255,255,0.68)", "borderRadius": "16px",
