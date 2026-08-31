@@ -1250,12 +1250,18 @@ def make_kpi_card(card_id: str, value) -> html.Div:
         **{"data-card-id": card_id, "data-card-type": "kpi"},
         className="dnd-card",
         style={
-            "position": "relative", "background": "white", "borderRadius": "12px",
-            "padding": "16px 12px 12px", "borderLeft": f"4px solid {color}",
+            "position": "relative",
+            "background": (
+                f"linear-gradient(135deg, {color}80 0%, {color}00 55%), "
+                "linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,251,255,0.9))"
+            ),
+            "borderRadius": "12px",
+            "padding": "16px 12px 12px", "borderLeft": f"7px solid {color}",
             "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
             "cursor": "pointer", "userSelect": "none",
             "transition": "transform 0.1s, box-shadow 0.1s",
             "height": "120px", "display": "flex",
             "flexDirection": "column", "justifyContent": "center",
+            "backdropFilter": "blur(10px)", "overflow": "hidden",
         },
     )

@@ -56,7 +56,7 @@ def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
             [
                 html.Div(style={
                     "position": "absolute", "left": 0, "top": 0, "bottom": 0,
-                    "width": "4px", "background": color, "borderRadius": "4px 0 0 4px",
+                    "width": "7px", "background": color, "borderRadius": "7px 0 0 7px",
                 }),
                 html.Div("⠿", className="dnd-handle", style={
                     "position": "absolute", "top": "6px", "right": "8px",
@@ -84,7 +84,10 @@ def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
             title=f"Click to drill into {label}",
             style={
                 "position": "relative",
-                "background": "linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,251,255,0.9))",
+                "background": (
+                    f"linear-gradient(135deg, {color}80 0%, {color}00 55%), "
+                    "linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,251,255,0.9))"
+                ),
                 "border": "1px solid rgba(255,255,255,0.68)", "borderRadius": "16px",
                 "padding": "18px 14px 14px 18px", "cursor": "pointer",
                 "boxShadow": "0 8px 24px rgba(15,23,42,0.07)",
