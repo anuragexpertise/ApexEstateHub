@@ -96,6 +96,79 @@ def _current_qr_version(role_code: str, entity_id: int):
     return (row or {}).get("qr_version")
 
 
+def _stamp_and_reissue(society_id: int, role_code: str, entity_id: int, action: str):
+    """
+    Record a print/save/email touch of a static gate-pass QR (APT/VND/SEC/
+    ADM) and bump the entity's qr_version if this is a REPEAT touch.
+
+    "Repeat" = last_printed_at or last_emailed_at was already set before
+    this call, i.e. a copy of the code has already been handed out once
+    before. First-ever issuance (both columns still NULL) just stamps the
+    timestamp and leaves qr_version alone — there's nothing to invalidate
+    yet. action='save' and 'print' both stamp last_printed_at (either one
+    hands the current holder a usable copy of the code, on paper or as a
+    file); action='email' stamps last_emailed_at.
+
+    Done as a single self-referencing UPDATE (old column values read in
+    the CASE, new values written in the same statement) rather than a
+    separate SELECT-then-UPDATE, so a double-click can't race past the
+    check — Postgres row-level locking serializes concurrent UPDATEs to
+    the same row.
+
+    Always re-derives the QR from generate_qr_code AFTER the stamp/bump
+    commits, rather than reusing any image the caller already had —
+    an image generated before this call is signed against the OLD
+    qr_version and would already be wrong the instant a bump happens here.
+
+    Returns (img_src, payload) — either may be None if role_code isn't a
+    versioned role or the entity can't be resolved (caller should treat
+    that the same as a generate_qr_code failure).
+    """
+    ts_col = "last_emailed_at" if action == "email" else "last_printed_at"
+
+    if role_code == "ADM":
+        # Same dual-counter resolution as _current_qr_version's ADM branch:
+        # a promoted apartment owner's admin badge rides on their
+        # apartments.qr_version; a seeded first-admin (no apartments row)
+        # falls back to their own users.qr_version.
+        admin_row = db._execute(
+            "SELECT a.id AS apt_id FROM users u "
+            "LEFT JOIN apartments a ON a.id = u.linked_id "
+            "WHERE u.id = %s AND u.role = 'admin'",
+            (entity_id,), fetch_one=True,
+        )
+        if not admin_row:
+            return None, None
+        if admin_row.get("apt_id") is not None:
+            table, pk = "apartments", admin_row["apt_id"]
+        else:
+            table, pk = "users", entity_id
+    else:
+        table = _QR_VERSIONED_ROLES.get(role_code)
+        if not table:
+            return None, None
+        pk = entity_id
+
+    row = db._execute(
+        f"""UPDATE {table}
+               SET qr_version = CASE WHEN last_printed_at IS NOT NULL
+                                        OR last_emailed_at IS NOT NULL
+                                      THEN qr_version + 1
+                                      ELSE qr_version END,
+                   {ts_col} = NOW()
+             WHERE id = %s
+         RETURNING id""",
+        (pk,), fetch_one=True,
+    )
+    if not row:
+        return None, None
+
+    # entity_id here stays the ADM caller's users.id even when the counter
+    # itself lives on `table` — generate_qr_code -> _current_qr_version
+    # re-resolves the same ADM branch and reads whatever we just wrote.
+    return generate_qr_code(society_id, role_code, entity_id)
+
+
 ROLE_CODE_MAP = {
     "ADM": "admin",
     "APT": "apartment",  # Apartment / Owner

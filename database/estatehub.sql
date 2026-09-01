@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS users (
     created_by INT REFERENCES users (id)
 );
 
+-- qr_version reissue tracking (2026-09): last_printed_at/last_emailed_at
+-- let the app tell a first-ever "show my QR" apart from a repeat one — see
+-- app/services/qr_service.py _stamp_and_reissue. ADD COLUMN IF NOT EXISTS
+-- (not baked into the CREATE TABLE above) because CREATE TABLE IF NOT
+-- EXISTS is a no-op against an already-provisioned database; same
+-- convention as societies.primary_bank_account_id below.
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -187,6 +197,20 @@ CREATE TABLE IF NOT EXISTS security_staff (
     created_by INT REFERENCES users (id),
     updated_by INT REFERENCES users (id)
 );
+
+-- Same reissue-tracking columns for the three static-pass entity tables —
+-- see the users.last_printed_at comment above for why ALTER, not CREATE.
+ALTER TABLE apartments
+ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+
+ALTER TABLE vendors
+ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+
+ALTER TABLE security_staff
+ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
 
 CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
