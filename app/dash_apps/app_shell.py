@@ -805,6 +805,10 @@ def _qr_modal() -> dbc.Modal:
                                    id="print-qr-png-btn", n_clicks=0, color="info", size="sm"),
                         dbc.Button("Close", id="close-qr-modal", n_clicks=0, color="secondary"),
                         dcc.Download(id="qr-download"),
+                        # Server stamp/reissue -> clientside print handoff; see
+                        # qr_callbacks.py stamp_and_prepare_print / the print
+                        # clientside_callback below it.
+                        dcc.Store(id="qr-print-payload", storage_type="memory"),
                     ],
                     style={"display": "flex", "alignItems": "center",
                            "justifyContent": "space-between", "width": "100%", "gap": "8px"},

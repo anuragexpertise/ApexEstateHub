@@ -11,6 +11,9 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
+from app.services.qr_service import (
+    ROLE_CODE_MAP_REV, _QR_SIGNABLE_ROLES, _stamp_and_reissue,
+)
 
 
 def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
@@ -1184,47 +1187,101 @@ def register_qr_callbacks(app):
         return items
 
     # ── 5b. Save QR as PNG ────────────────────────────────────────
+    # Reissue tracking (2026-09): a "Save PNG" is a copy handed to the
+    # holder just as much as a physical print is, so it stamps
+    # last_printed_at the same way and bumps qr_version if this is a
+    # repeat touch — see qr_service._stamp_and_reissue. Rebuilt to
+    # regenerate the image server-side from THIS stamp rather than trust
+    # qr-modal-img's src (State), which was rendered when the modal
+    # opened and would already be signed against a now-stale qr_version
+    # the moment a bump happens here.
     @app.callback(
         Output('qr-download', 'data'),
+        Output('qr-modal-img', 'src', allow_duplicate=True),
+        Output('qr-modal-text', 'value', allow_duplicate=True),
         Input('save-qr-png-btn', 'n_clicks'),
-        State('qr-modal-img', 'src'),
         State('qr-entity-store', 'data'),
         prevent_initial_call=True,
     )
     @require_session
-    def save_qr_png(n_clicks, img_src, entity_data):
-        if not n_clicks or not img_src or not entity_data:
+    def save_qr_png(n_clicks, entity_data):
+        if not n_clicks or not entity_data:
             raise PreventUpdate
-        
-        if not img_src.startswith('data:image/png;base64,'):
+
+        role = entity_data.get('role')
+        entity_id = entity_data.get('entity_id')
+        society_id = entity_data.get('society_id')
+        role_code = ROLE_CODE_MAP_REV.get(role)
+
+        if not entity_id or role_code not in _QR_SIGNABLE_ROLES:
+            # Non-versioned/unsigned role (e.g. attendance_entry) reaching
+            # this button shouldn't happen from the UI, but fail closed
+            # rather than silently download an unstamped image.
             raise PreventUpdate
-        
+
+        src, payload = _stamp_and_reissue(society_id, role_code, entity_id, action='save')
+        if not src or not src.startswith('data:image/png;base64,'):
+            print(f"QR PNG save error: {payload}")
+            raise PreventUpdate
+
         try:
-            entity_id = entity_data.get('entity_id', 'qr')
-            role = entity_data.get('role', 'entity')
             filename = f"Gate_Pass_{entity_id}_{role}.png"
-
-            b64_data = img_src.split(',', 1)[1]
+            b64_data = src.split(',', 1)[1]
             img_bytes = base64.b64decode(b64_data)
-
-            return dcc.send_bytes(img_bytes, filename)
+            return dcc.send_bytes(img_bytes, filename), src, payload
         except Exception as e:
             print(f"QR PNG save error: {e}")
             raise PreventUpdate
 
     # ── 5c. Print QR as PNG ───────────────────────────────────────
+    # Split into a server-side stamp/reissue step followed by the actual
+    # clientside print, chained through qr-print-payload — NOT triggered
+    # directly off the button anymore. Printing straight off n_clicks (the
+    # old shape) would open the print window using whatever image was
+    # already sitting in qr-modal-img from when the modal was opened,
+    # which is exactly the image a version bump (triggered by this same
+    # click, for a repeat print) invalidates — the pass would be stale
+    # before the user even walks away with it. Gating the clientside step
+    # on the server's output guarantees the print always uses the
+    # just-stamped, current-version image.
+    @app.callback(
+        Output('qr-print-payload', 'data'),
+        Output('qr-modal-img', 'src', allow_duplicate=True),
+        Output('qr-modal-text', 'value', allow_duplicate=True),
+        Input('print-qr-png-btn', 'n_clicks'),
+        State('qr-entity-store', 'data'),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def stamp_and_prepare_print(n_clicks, entity_data):
+        if not n_clicks or not entity_data:
+            raise PreventUpdate
+
+        role = entity_data.get('role')
+        entity_id = entity_data.get('entity_id')
+        society_id = entity_data.get('society_id')
+        role_code = ROLE_CODE_MAP_REV.get(role)
+
+        if not entity_id or role_code not in _QR_SIGNABLE_ROLES:
+            raise PreventUpdate
+
+        src, payload = _stamp_and_reissue(society_id, role_code, entity_id, action='print')
+        if not src or not src.startswith('data:image/png;base64,'):
+            print(f"QR PNG print error: {payload}")
+            raise PreventUpdate
+
+        return {'src': src}, src, payload
+
     clientside_callback(
         """
-        function(n_clicks, img_src, entity_data) {
-            if (!n_clicks || !img_src || !entity_data) 
+        function(print_data) {
+            if (!print_data || !print_data.src)
                 return window.dash_clientside.no_update;
-            
-            if (!img_src.startsWith('data:image/png;base64,')) 
-                return window.dash_clientside.no_update;
-            
+
+            var img_src = print_data.src;
             var win = window.open('', '_blank');
             if (!win) return window.dash_clientside.no_update;
-            
+
             win.document.write(
                 '<!DOCTYPE html>' +
                 '<html><head><title>Print Gate Pass QR</title>' +
@@ -1237,14 +1294,12 @@ def register_qr_callbacks(app):
                 '</body></html>'
             );
             win.document.close();
-            
+
             return window.dash_clientside.no_update;
         }
         """,
-        Output('print-qr-png-btn', 'n_clicks'),
-        Input('print-qr-png-btn', 'n_clicks'),
-        State('qr-modal-img', 'src'),
-        State('qr-entity-store', 'data'),
+        Output('print-qr-png-btn', 'n_clicks', allow_duplicate=True),
+        Input('qr-print-payload', 'data'),
         prevent_initial_call=True,
     )
 

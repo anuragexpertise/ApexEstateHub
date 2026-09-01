@@ -1263,14 +1263,22 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
         if existing:
             continue
         preferred_time = con.get("preferred_time", "anytime")
-        qr_payload = f"con:{society_id}:{con['flat_number']}:{con['type']}"
+        # qr_payload deliberately NOT set here — fn_trg_concerns_qr (BEFORE
+        # INSERT trigger) fills it in as the canonical "<society_id>-CON-<id>"
+        # format automatically once NEW.id is known. Explicitly passing a
+        # value (the old "con:{society_id}:{flat_number}:{type}" string)
+        # skipped the trigger's IS NULL guard and left a payload seed data
+        # couldn't match what qr_service.generate_qr_code/parse_qr_payload
+        # actually produce/expect (wrong delimiter, wrong role token, keyed
+        # on flat_number instead of the concern's own id) — same pattern
+        # receipts/expenses/events already followed correctly below.
         row = _one(
             cur,
             """INSERT INTO concerns (society_id,apartment_id,concern_type,description,
-                preferred_time,status,qr_payload,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                preferred_time,status,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (society_id, apt_id, con["type"], con["desc"], preferred_time,
-             con["status"], qr_payload, created_by),
+             con["status"], created_by),
         )
         conn.commit()
         concern_id = row["id"] if row else None
@@ -1439,17 +1447,22 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     if not _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
                 (society_id, FULLY_DEPRECIATED_ASSET["asset_name"])):
         a = FULLY_DEPRECIATED_ASSET
-        qr_payload = f"ast:{society_id}:{a['asset_SNo']}"
+        # qr_payload deliberately NOT set — same bug/fix as the concerns
+        # insert above: fn_trg_assets_qr auto-fills the canonical
+        # "<society_id>-AST-<id>" format on insert, but only when the
+        # column arrives NULL. The old "ast:{society_id}:{asset_SNo}"
+        # value here was non-null so it skipped the trigger and stuck,
+        # never matching what qr_service actually generates/expects.
         cur.execute(
             """INSERT INTO assets
                (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,
                 acc_id,depreciation_rate,last_depreciation_date,disposed,
-                qr_payload,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE,%s,%s)""",
+                created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE,%s)""",
             (society_id, a["company_name"], a["asset_name"], a["asset_SNo"],
              a["purchase_date"], a["purchase_value"], a["acc_id"],
              a["depreciation_rate"], a["last_depreciation_date"],
-             qr_payload, admin_uid),
+             admin_uid),
         )
         conn.commit()
         print(f"  ✓ Asset    '{a['asset_name']}' — book_value=0, disposed=FALSE (still in use)")
