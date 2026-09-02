@@ -34,6 +34,48 @@ COLORS = {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# ENTITY BANNERS
+# Universal descriptions shown on all forms and profiles for contextual clarity.
+# ════════════════════════════════════════════════════════════════════════════
+
+_ENTITY_BANNERS = {
+    "society": "Manage top-level society details, plan validity, and default settings.",
+    "societies": "Manage top-level society details, plan validity, and default settings.",
+    "apartment": "Manage apartment details including owner information, flat size, and occupancy status.",
+    "apartments": "Manage apartment details including owner information, flat size, and occupancy status.",
+    "vendor": "Manage vendor profiles, daily pass validity, and account balances.",
+    "vendors": "Manage vendor profiles, daily pass validity, and account balances.",
+    "security": "Manage security staff profiles, shift assignments, and gate access.",
+    "security_staff": "Manage security staff profiles, shift assignments, and gate access.",
+    "event": "Manage society events, event dates, and ticketing capacities.",
+    "events": "Manage society events, event dates, and ticketing capacities.",
+    "concern": "Track and manage resident issues, maintenance requests, and their resolution status.",
+    "concerns": "Track and manage resident issues, maintenance requests, and their resolution status.",
+    "account": "Manage financial chart of accounts, opening balances, and categorization.",
+    "accounts": "Manage financial chart of accounts, opening balances, and categorization.",
+    "asset": "Track physical assets of the society, their purchase value, and lifecycle status.",
+    "assets": "Track physical assets of the society, their purchase value, and lifecycle status.",
+    "receipt": "Record and track incoming payments against receivables or direct income.",
+    "receipts": "Record and track incoming payments against receivables or direct income.",
+    "expense": "Record and track outgoing payments against vendor payables or direct expenses.",
+    "expenses": "Record and track outgoing payments against vendor payables or direct expenses.",
+    "poll": "Create and manage society-wide polls and track voting results.",
+    "polls": "Create and manage society-wide polls and track voting results.",
+    "channel": "Manage communication channels, subscriptions, and automated alert rules.",
+    "channels": "Manage communication channels, subscriptions, and automated alert rules.",
+    "compliance_setting": "Manage tax, regulatory, and fund compliance parameters for the society.",
+    "compliance_settings": "Manage tax, regulatory, and fund compliance parameters for the society.",
+    "apt_charge": "This profile defines the recurring maintenance and fine structures applicable to apartments. Fields display the billing frequency, rate per square foot, flat amounts, and late fee percentages.",
+    "apt_charges": "This profile defines the recurring maintenance and fine structures applicable to apartments. Fields display the billing frequency, rate per square foot, flat amounts, and late fee percentages.",
+    "ven_charge": "This profile defines the recurring charges and fee structures applicable to vendors. Fields display the billing frequency, standard rates, flat amounts, and any relevant deductions.",
+    "ven_charges": "This profile defines the recurring charges and fee structures applicable to vendors. Fields display the billing frequency, standard rates, flat amounts, and any relevant deductions.",
+    "patrol_location": "Manage NFC/QR checkpoints for security guard patrol tracking.",
+    "patrol_locations": "Manage NFC/QR checkpoints for security guard patrol tracking.",
+    "event_ticket": "View details of this purchased event ticket.",
+    "event_ticket_items": "View details of this purchased event ticket.",
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # PORTAL PERMISSION MATRIX
 # key = (role, entity)  →  set of allowed actions
 # ════════════════════════════════════════════════════════════════════════════
@@ -1791,27 +1833,14 @@ def render_profile_card(card_id: str, title: str, icon: str,
                 ], className="text-success mt-2")
             )
 
-    # ── Apt Charge Profile Explanation Banner ──────────────────────────────────
-    _apt_charge_banners = []
-    if entity in ("apt_charge", "apt_charges"):
-        _apt_charge_banners.append(dbc.Alert(
+    # ── Universal Entity Banner ──────────────────────────────────────────────────
+    _entity_banner = []
+    banner_text = _ENTITY_BANNERS.get(entity)
+    if banner_text:
+        _entity_banner.append(dbc.Alert(
             [
                 html.I(className="fas fa-info-circle me-2"),
-                html.Strong("Apt Charge Profile Info: "),
-                "This profile defines the recurring maintenance and fine structures applicable to this apartment. Fields display the billing frequency, rate per square foot, flat amounts, and late fee percentages."
-            ],
-            color="info",
-            style={"fontSize": "12px", "padding": "8px 12px", "borderRadius": "8px", "marginBottom": "8px"}
-        ))
-
-    # ── Ven Charge Profile Explanation Banner ──────────────────────────────────
-    _ven_charge_banners = []
-    if entity in ("ven_charge", "ven_charges"):
-        _ven_charge_banners.append(dbc.Alert(
-            [
-                html.I(className="fas fa-info-circle me-2"),
-                html.Strong("Vendor Charge Profile Info: "),
-                "This profile defines the recurring charges and fee structures applicable to this vendor. Fields display the billing frequency, standard rates, flat amounts, and any relevant deductions."
+                banner_text
             ],
             color="info",
             style={"fontSize": "12px", "padding": "8px 12px", "borderRadius": "8px", "marginBottom": "8px"}
@@ -1852,9 +1881,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
             # ── Channel lifecycle banners (active/inactive + pending alerts) ─
             *(_channel_banners if _channel_banners else []),
 
-            # ── Apt/Ven Charge banners ─
-            *(_apt_charge_banners if _apt_charge_banners else []),
-            *(_ven_charge_banners if _ven_charge_banners else []),
+            # ── Universal Entity banner ─
+            *(_entity_banner if _entity_banner else []),
 
             # ── Compliance settings rule reference (RWA/CHS GST/TDS/fund banner) ─
             _compliance_rules_banner(entity_plural, _resolve_society_state(record_dict, society_id)),
@@ -2246,6 +2274,18 @@ def render_form_card(card_id: str, title: str, icon: str,
           dcc.Input(id={"type":"form-entity-pk","entity":entity},
                     type="hidden", value=str(prefill.get("id",""))),
       ]
+
+    # ── Universal Entity Banner ──────────────────────────────────────────────────
+    banner_text = _ENTITY_BANNERS.get(entity)
+    if banner_text:
+        form_rows.append(dbc.Alert(
+            [
+                html.I(className="fas fa-info-circle me-2"),
+                banner_text
+            ],
+            color="info",
+            style={"fontSize": "12px", "padding": "8px 12px", "borderRadius": "8px", "marginBottom": "14px"}
+        ))
 
     if _owner_locked_apartment_field and not prefill.get("id"):
         form_rows.append(dbc.Alert(
