@@ -1791,6 +1791,32 @@ def render_profile_card(card_id: str, title: str, icon: str,
                 ], className="text-success mt-2")
             )
 
+    # ── Apt Charge Profile Explanation Banner ──────────────────────────────────
+    _apt_charge_banners = []
+    if entity in ("apt_charge", "apt_charges"):
+        _apt_charge_banners.append(dbc.Alert(
+            [
+                html.I(className="fas fa-info-circle me-2"),
+                html.Strong("Apt Charge Profile Info: "),
+                "This profile defines the recurring maintenance and fine structures applicable to this apartment. Fields display the billing frequency, rate per square foot, flat amounts, and late fee percentages."
+            ],
+            color="info",
+            style={"fontSize": "12px", "padding": "8px 12px", "borderRadius": "8px", "marginBottom": "8px"}
+        ))
+
+    # ── Ven Charge Profile Explanation Banner ──────────────────────────────────
+    _ven_charge_banners = []
+    if entity in ("ven_charge", "ven_charges"):
+        _ven_charge_banners.append(dbc.Alert(
+            [
+                html.I(className="fas fa-info-circle me-2"),
+                html.Strong("Vendor Charge Profile Info: "),
+                "This profile defines the recurring charges and fee structures applicable to this vendor. Fields display the billing frequency, standard rates, flat amounts, and any relevant deductions."
+            ],
+            color="info",
+            style={"fontSize": "12px", "padding": "8px 12px", "borderRadius": "8px", "marginBottom": "8px"}
+        ))
+
     return html.Div([
         html.Div(
             html.Div([
@@ -1825,6 +1851,10 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
             # ── Channel lifecycle banners (active/inactive + pending alerts) ─
             *(_channel_banners if _channel_banners else []),
+
+            # ── Apt/Ven Charge banners ─
+            *(_apt_charge_banners if _apt_charge_banners else []),
+            *(_ven_charge_banners if _ven_charge_banners else []),
 
             # ── Compliance settings rule reference (RWA/CHS GST/TDS/fund banner) ─
             _compliance_rules_banner(entity_plural, _resolve_society_state(record_dict, society_id)),
