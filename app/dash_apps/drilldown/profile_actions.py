@@ -343,24 +343,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
 
     # ── APT CHARGES ──────────────────────────────────────────────────────────
     "apt_charges": [
-        {
-            "label": "My Transactions",
-            "action_id": "show_my_ledger",
-            "target_card": "form_my_ledger",
-            "icon": "fa-file-invoice-dollar",
-            "color": "info",
-        },
     ],
 
     # ── VEN CHARGES ──────────────────────────────────────────────────────────
     "ven_charges": [
-        {
-            "label": "My Transactions",
-            "action_id": "show_my_ledger",
-            "target_card": "form_my_ledger",
-            "icon": "fa-file-invoice-dollar",
-            "color": "info",
-        },
     ],
 
     # ── EVENTS ──────────────────────────────────────────────────────────────
