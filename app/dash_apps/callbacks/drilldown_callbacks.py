@@ -2157,6 +2157,35 @@ def register_drilldown_callbacks(app):
             # browser download link could never actually satisfy.
             data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
             filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
+        elif entity == "member_ledger":
+            
+            prefill = nav_state.get_prefill(store)
+            caller_role = get_current_user_role()
+            if caller_role in ("admin", "master"):
+                entity_id = prefill.get("entity_id") or prefill.get("apartment_id") or prefill.get("vendor_id") or prefill.get("security_id")
+                member_role = "apartment"
+                if prefill.get("vendor_id"): member_role = "vendor"
+                elif prefill.get("security_id"): member_role = "security"
+            else:
+                member_role = "apartment" if caller_role == "apartment" else caller_role
+                entity_id = get_current_linked_id()
+                
+            if not entity_id:
+                return no_update
+                
+            rows, _, _ = loaders.get_member_ledger(sid, entity_id, member_role, page=1, page_size=10000, financial_year=fy)
+            
+            df = pd.DataFrame(rows)
+            export_df = pd.DataFrame()
+            if not df.empty:
+                export_df["Date"] = df["trx_date"]
+                export_df["Particulars"] = df["acc_particulars"]
+                export_df["Breakdown"] = df["breakdown"]
+                export_df["Billed (Dr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Dr" else "", axis=1)
+                export_df["Paid (Cr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Cr" else "", axis=1)
+                export_df["Balance Owed"] = df["running_balance"]
+            
+            return dcc.send_data_frame(export_df.to_excel, f"My_Transactions_FY{fy}-{fy+1}.xlsx", index=False)
         else:
             return no_update
 
@@ -4952,59 +4981,6 @@ def register_member_ledger_callbacks(app):
         # Bumping the trigger forces the main drilldown callback to re-render
         store_data["trigger"] = store_data.get("trigger", 0) + 1 
         return store_data
-
-    @app.callback(
-        Output("download-member-ledger-excel", "data"),
-        Input("btn-export-member-ledger", "n_clicks"),
-        State("drilldown-store", "data"),
-        prevent_initial_call=True
-    )
-    def export_member_ledger(n_clicks, store_data):
-        if not n_clicks or not store_data:
-            return no_update
-            
-        from app.dash_apps.drilldown import loaders
-        from app.security.audit_context import get_current_user_role, get_current_linked_id
-        
-        filters = store_data.get("filters", {})
-        prefill = store_data.get("prefill", {})
-        sid_val = filters.get("society_id")
-        
-        caller_role = get_current_user_role()
-        if caller_role in ("admin", "master"):
-            entity_id = prefill.get("entity_id") or prefill.get("apartment_id") or prefill.get("vendor_id") or prefill.get("security_id")
-            member_role = "apartment"
-            if prefill.get("vendor_id"): member_role = "vendor"
-            elif prefill.get("security_id"): member_role = "security"
-        else:
-            member_role = "apartment" if caller_role == "apartment" else caller_role
-            entity_id = get_current_linked_id()
-
-        selected_fy = filters.get("financial_year", loaders._current_fy())
-        
-        if not (sid_val and entity_id):
-            return no_update
-            
-        # For export, fetch ALL records for the selected FY (or all time), ignoring pagination
-        # Page size 10000 ensures we get everything
-        rows, _, err = loaders.get_member_ledger(
-            sid_val, entity_id, member_role, page=1, page_size=10000, financial_year=selected_fy
-        )
-        if err or not rows:
-            return no_update
-            
-        # Format for Excel
-        df = pd.DataFrame(rows)
-        # Rename and select columns
-        export_df = pd.DataFrame()
-        export_df["Date"] = df["trx_date"]
-        export_df["Particulars"] = df["acc_particulars"]
-        export_df["Breakdown"] = df["breakdown"]
-        export_df["Billed (Dr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Dr" else "", axis=1)
-        export_df["Paid (Cr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Cr" else "", axis=1)
-        export_df["Balance Owed"] = df["running_balance"]
-        
-        return dcc.send_data_frame(export_df.to_excel, "My_Transactions.xlsx", index=False)
 
     @app.callback(
         Output("qr-reissue-feedback", "children"),
