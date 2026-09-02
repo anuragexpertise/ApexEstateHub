@@ -611,6 +611,20 @@ KPI_CARDS = {
         "title": "Compliance Settings", "group": "settings",
     },
 
+    "kpi_patrol_locations": {
+        "query": "SELECT COUNT(*) AS v FROM patrol_locations WHERE society_id=%s AND active=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-map-location-dot", "color": "#17976e",
+        "title": "Patrol Locations", "group": "settings",
+    },
+
+    "kpi_QR_version": {
+        "query": "SELECT 'Manage' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-qrcode", "color": "#e74c3c",
+        "title": "QR Version Manager", "group": "settings",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
@@ -1094,6 +1108,7 @@ DEFAULT_LAYOUTS = {
             "kpi_ven_charges_count",
             "kpi_compliance_settings",
             "kpi_time_qr",
+            "kpi_patrol_locations",
         ],
         "channels": [
             "kpi_channels_total",

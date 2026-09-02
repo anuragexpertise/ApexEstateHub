@@ -185,6 +185,19 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "label": "Ticket Income Account",
         "filter": "drcr_account='Cr'",
     },
+    ("qr_manager", "entity_id"): {
+        "mode": "role",
+        "role_field": "role_code",
+        "roles": {
+            "APT": {"table": "apartments", "label": "Apartment"},
+            "VEN": {"table": "vendors",    "label": "Vendor"},
+            "SEC": {"table": "security_staff", "label": "Security"},
+            "CON": {"table": "concerns",   "label": "Concern"},
+            "EVT": {"table": "event_ticket_items", "label": "Event Ticket"},
+            "PTL": {"table": "patrol_locations", "label": "Patrol Location"},
+            "ADM": {"table": "users",      "label": "Admin User"},
+        },
+    },
     ("vendor_passes", "acc_id"): {
         "mode": "single",
         "table": "accounts",
