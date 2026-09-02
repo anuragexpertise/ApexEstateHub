@@ -3590,7 +3590,7 @@ def render_member_ledger_card(
             ) if fy_opts else None,
             dbc.Button(
                 [html.I(className="fas fa-file-excel me-1"), "Export"],
-                id="btn-export-member-ledger",
+                id={"type": "btn-fy-export", "entity": "member_ledger"},
                 size="sm", color="light", outline=True,
                 style={"fontSize": "12px", "borderRadius": "8px", "marginLeft": "8px",
                        "border": "1px solid #dce4ec", "color": "#15304f"}
@@ -3603,7 +3603,7 @@ def render_member_ledger_card(
                 size="sm", color="success",
                 style={"fontSize": "12px", "borderRadius": "8px", "marginRight": "16px",
                        "fontWeight": "600"}
-            ) if final_balance > 0 else None,
+            ),
             
             dbc.ButtonGroup([
                 dbc.Button(
@@ -3631,7 +3631,7 @@ def render_member_ledger_card(
         header,
         toolbar,
         html.Div(body, style={"padding": "16px"}),
-        dcc.Download(id="download-member-ledger-excel"),
+        dcc.Download(id={"type": "fy-export-trigger", "entity": "member_ledger"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
