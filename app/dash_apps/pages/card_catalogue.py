@@ -1044,7 +1044,6 @@ DEFAULT_LAYOUTS = {
             "kpi_societies_unlimited",
             "kpi_societies_expired",
             "kpi_master_apartments_total",
-            
         ],
         "master-settings": [
             "kpi_societies_expiring_soon",
@@ -1057,6 +1056,7 @@ DEFAULT_LAYOUTS = {
             "kpi_security_on_duty",
             "kpi_events_total",
             "kpi_concerns_not_closed",
+            "kpi_concerns_assigned",
             "kpi_gate_logs",
             "kpi_assets_count",
             "kpi_receipts_pending",
@@ -1138,15 +1138,15 @@ DEFAULT_LAYOUTS = {
             "kpi_my_pending_dues",
             "kpi_my_overdue_dues",
         ],
-        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
-        "owner_receipts": ["kpi_receipts_total"],
-        "charges": ["kpi_maintenance_charges", "kpi_apt_charges_count"],
-        # Per the Concerns workflow spec: Owner/Concerns tab shows "not
-        # closed" (own concerns), "total" (society-wide), and "open" (own
-        # concerns).
-        "concerns": ["kpi_concerns_not_closed", "kpi_concerns_total"],
-        "events": ["kpi_events_total", "kpi_events_tickets"],
-        "polls": ["kpi_polls_total", "kpi_polls_active"],
+        "concerns": [
+            "kpi_concerns_not_closed",
+            "kpi_concerns_total"],
+        "events": [
+            "kpi_events_total",
+            "kpi_events_tickets"],
+        "polls": [
+            "kpi_polls_total",
+            "kpi_polls_active"],
         "settings": ["kpi_owner_member_since"],
     },
     "vendor": {
@@ -1166,12 +1166,16 @@ DEFAULT_LAYOUTS = {
             "kpi_vendors_passes",
         ],
         "vendor_receipts": ["kpi_receipts_total"],
-        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
-        # Per the Concerns workflow spec: Vendor/Concerns tab shows
-        # "invited", "assigned", and "resolved".
-        "concerns": ["kpi_concerns_invited", "kpi_concerns_assigned", "kpi_concerns_resolved"],
-        "charges": ["kpi_ven_charges_count", "kpi_vendors_other_charges"],
-        "events": ["kpi_events_total"],
+       
+        "concerns": [
+            "kpi_concerns_invited",
+            "kpi_concerns_assigned",
+            "kpi_concerns_resolved"],
+        "charges": [
+            "kpi_ven_charges_count",
+            "kpi_vendors_other_charges"],
+        "events": [
+            "kpi_events_total"],
         "settings": ["kpi_vendors_date"],
     },
     "security": {
@@ -1193,13 +1197,11 @@ DEFAULT_LAYOUTS = {
         # With no cards left, the tab itself was removed too — see
         # app_shell.py, shell_callbacks.py, portal_pages.py, and
         # renderers.py's _PORTAL_PERMS for the matching removals.
-        "cashbook": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_this_month", "kpi_payables_this_month"],
-        "security_receipt": ["kpi_receipts_month"],
         "security_receipts": ["kpi_security_receipts"],
         "security_events": ["kpi_events_total"],
-        # Per the Concerns workflow spec: Security/Concerns tab shows
-        # "assigned" and "resolved".
-        "security_concerns": ["kpi_concerns_assigned", "kpi_concerns_resolved"],
+        "security_concerns": [
+            "kpi_concerns_assigned",
+            "kpi_concerns_resolved"],
         "security_channels": [
             "kpi_channels_total",
             "kpi_channels_pending",
