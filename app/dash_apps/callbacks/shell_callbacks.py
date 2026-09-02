@@ -68,36 +68,94 @@ def _make_nav_items(role, society_id, pathname):
     items = []
     for tab in cfg["tabs"]:
         href      = tab["href"]
+        label     = tab["label"]
         is_active = bool(pathname and href.rstrip("/") in pathname)
-        items.append(
-            html.Li(
-                dcc.Link(
-                    [
-                        html.I(
-                            className=f"fas {tab['icon']} me-2",
-                            style={
-                                "width": "18px",
-                                "color": color if is_active else "rgba(255,255,255,0.55)",
-                            },
-                        ),
-                        html.Span(
-                            tab["label"],
-                            style={"color": "#fff" if is_active else "rgba(255,255,255,0.8)"},
-                        ),
-                    ],
-                    href=href,
-                    refresh=False,
-                    className="snav-link" + (" snav-link--active" if is_active else ""),
+        
+        # ── 1. Create the main link element ──────────────────────────
+        link_el = dcc.Link(
+            [
+                html.I(
+                    className=f"fas {tab['icon']} me-2",
                     style={
-                        "display": "flex", "alignItems": "center",
-                        "padding": "10px 14px", "borderRadius": "10px",
-                        "textDecoration": "none",
-                        "background": "rgba(255,255,255,0.12)" if is_active else "transparent",
-                        "transition": "background 0.15s ease",
+                        "width": "18px",
+                        "color": color if is_active else "rgba(255,255,255,0.55)",
                     },
                 ),
+                html.Span(
+                    label,
+                    style={"color": "#fff" if is_active else "rgba(255,255,255,0.8)"},
+                ),
+            ],
+            href=href,
+            refresh=False,
+            className="snav-link" + (" snav-link--active" if is_active else ""),
+            style={
+                "display": "flex", "alignItems": "center",
+                "padding": "10px 14px", "borderRadius": "10px",
+                "textDecoration": "none",
+                "background": "rgba(255,255,255,0.12)" if is_active else "transparent",
+                "transition": "background 0.15s ease",
+                "flexGrow": "1"
+            },
+        )
+        
+        # ── 2. Create the quick-link action buttons ───────────────────
+        from app.dash_apps.drilldown.renderers import _perms_for
+        action_buttons = []
+        
+        def _make_btn(entity, icon, btn_color, tooltip="New"):
+            return html.Button(
+                html.I(className=f"fas {icon}"),
+                id={"type": "btn-new-sidebar", "entity": entity},
+                title=tooltip,
+                style={
+                    "background": "transparent",
+                    "border": "none",
+                    "color": btn_color,
+                    "padding": "4px 8px",
+                    "marginLeft": "4px",
+                    "cursor": "pointer",
+                    "borderRadius": "4px",
+                }
+            )
+
+        if label == "Financials":
+            if "new" in _perms_for(role, "receipts"):
+                action_buttons.append(_make_btn("receipt", "fa-plus", "#28a745", "New Receipt"))
+            if "new" in _perms_for(role, "expenses"):
+                action_buttons.append(_make_btn("expense", "fa-minus", "#dc3545", "New Expense"))
+        elif label not in ["Dashboard", "Settings", "Customize", "Enroll", "Pass Eval", "Cashbook"]:
+            _TAB_ENTITY_MAP = {
+                "Channels": "channels",
+                "Assets": "assets",
+                "Events": "events",
+                "Concerns": "concerns",
+                "Polls": "polls",
+                "Attendance": "attendance",
+                "Users": "security",
+                "Receipts": "receipts",
+                "Expenses": "expenses",
+                "Bills Paid": "receipts",
+                "Bills Due": "receivables",
+                "Payables": "payables",
+                "Charges": "apt_charges",
+            }
+            mapped_plural = _TAB_ENTITY_MAP.get(label)
+            if mapped_plural and "new" in _perms_for(role, mapped_plural):
+                singular = "security" if mapped_plural == "security" else mapped_plural.rstrip('s')
+                action_buttons.append(_make_btn(singular, "fa-plus", "#1d74d8", f"New {label.rstrip('s')}"))
+
+        items.append(
+            html.Li(
+                [link_el] + action_buttons,
                 className="snav-item",
-                style={"listStyle": "none", "marginBottom": "2px"},
+                style={
+                    "listStyle": "none", 
+                    "marginBottom": "2px",
+                    "display": "flex",
+                    "alignItems": "center",
+                    "justifyContent": "space-between"
+                },
             )
         )
     return items
