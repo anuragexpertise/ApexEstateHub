@@ -9,38 +9,49 @@ from io import BytesIO
 import qrcode
 from database.db_manager import db
 
-# ── SECURITY (2026-08): signed QR codes for the "print once, stick to a
-# vehicle/patrol point" static passes (apartment/vendor/security).
-# Previously the payload was just plain data (society_id-ROLE-entity_id) —
-# small sequential integers with no proof of having been legitimately
-# issued, so a code could be forged by guessing rather than needing to
-# copy a real one. Signing keeps the "static, printed once" property
-# intact (a signed code never expires or rotates on its own) while making
-# forgery infeasible, and qr_version gives per-entity revocation: bump one
-# vendor's qr_version and every previously printed code for THAT vendor
-# stops validating, without touching anyone else's.
+# ── SECURITY (2026-08, revised 2026-09): signed QR codes for the "print
+# once, stick to a vehicle/patrol point" static passes (apartment/vendor/
+# security/admin/patrol_location). Previously the payload was just plain
+# data (society_id-ROLE-entity_id) — small sequential integers with no
+# proof of having been legitimately issued, so a code could be forged by
+# guessing rather than needing to copy a real one. Signing keeps the
+# "static, printed once" property intact (a signed code never expires or
+# rotates on its own) while making forgery infeasible, and qr_version
+# gives per-entity revocation: reissue one vendor's qr_version and every
+# previously printed code for THAT vendor stops validating, without
+# touching anyone else's.
+#
+# qr_version is a random 4-digit nonce (1000-9999), not a sequential
+# counter. It changes ONLY through an explicit admin action —
+# revoke_and_reissue below, logged to qr_reissue_log — never as a side
+# effect of viewing/printing/saving/emailing a code (an earlier version of
+# this comment/design had print/save auto-bump on a repeat touch; that was
+# reverted — the entity that reports a pass lost/stolen/mutilated is the
+# single source of truth for "this needs revoking," not a heuristic guess
+# based on repeat button clicks).
 #
 # Deliberately NOT applied to attendance_entry (ATD) — that's already
 # time-boxed/single-use via generate_time_qr, a different mechanism for a
-# different problem (replay, not forgery). Deliberately NOT yet applied to
-# patrol_location — no create/regenerate flow exists for it in the app
-# (read-only / _NO_AUTO_ACTIONS, seeded outside the app), and its
-# qr_payload is a stored static column rather than generated live, so
-# there's currently no safe way to re-sign it if a version were bumped.
+# different problem (replay, not forgery).
 #
 # QR_SIGNING_SECRET is unset by default so this stays fully backward
 # compatible until deliberately provisioned (mirrors VAPID_PRIVATE_KEY /
 # VAPID_PUBLIC_KEY in push_service.py) — once set, newly generated codes
-# for apartment/vendor/security are signed, while previously-printed
-# unsigned codes for those same roles keep validating during the reprint
-# transition window. Once every existing pass has been reprinted, remove
-# the "legacy unsigned still accepted" branch in validate_qr_code below.
+# for versioned roles are signed, while previously-printed unsigned codes
+# for those same roles keep validating during the reprint transition
+# window. Once every existing pass has been reprinted, remove the "legacy
+# unsigned still accepted" branch in validate_qr_code below.
+# revoke_and_reissue additionally REQUIRES QR_SIGNING_SECRET to be set —
+# see its docstring — since the replacement nonce is itself derived from
+# it; there is no unsigned fallback for the revoke action the way there is
+# for ordinary code generation.
 QR_SIGNING_SECRET = os.getenv('QR_SIGNING_SECRET')
 
 _QR_VERSIONED_ROLES = {
     "APT": "apartments",
     "VND": "vendors",
     "SEC": "security_staff",
+    "PTL": "patrol_locations",
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
@@ -96,41 +107,70 @@ def _current_qr_version(role_code: str, entity_id: int):
     return (row or {}).get("qr_version")
 
 
-def _stamp_and_reissue(society_id: int, role_code: str, entity_id: int, action: str):
+def _derive_nonce(seed_extra: str) -> int:
+    """4-digit (1000-9999) nonce derived from HMAC(QR_SIGNING_SECRET, ...),
+    per instruction that QR_SIGNING_SECRET is what produces the
+    replacement value on a revoke, not a plain random() call. seed_extra
+    must include fresh per-call entropy (revoke_and_reissue passes a
+    random hex token) so two reissues of the same entity don't derive the
+    same value just because the entity/role/table are the same.
+
+    Caller must check QR_SIGNING_SECRET is set first — this raises
+    RuntimeError otherwise rather than silently falling back to something
+    unsigned, since an unsigned "revocation" would be a no-op security
+    theater (nothing would actually stop validating).
     """
-    Record a print/save/email touch of a static gate-pass QR (APT/VND/SEC/
-    ADM) and bump the entity's qr_version if this is a REPEAT touch.
+    if not QR_SIGNING_SECRET:
+        raise RuntimeError(
+            "QR_SIGNING_SECRET must be configured to revoke/reissue a QR code."
+        )
+    digest = hmac.new(QR_SIGNING_SECRET.encode(), seed_extra.encode(), hashlib.sha256).hexdigest()
+    return 1000 + (int(digest, 16) % 9000)
 
-    "Repeat" = last_printed_at or last_emailed_at was already set before
-    this call, i.e. a copy of the code has already been handed out once
-    before. First-ever issuance (both columns still NULL) just stamps the
-    timestamp and leaves qr_version alone — there's nothing to invalidate
-    yet. action='save' and 'print' both stamp last_printed_at (either one
-    hands the current holder a usable copy of the code, on paper or as a
-    file); action='email' stamps last_emailed_at.
 
-    Done as a single self-referencing UPDATE (old column values read in
-    the CASE, new values written in the same statement) rather than a
-    separate SELECT-then-UPDATE, so a double-click can't race past the
-    check — Postgres row-level locking serializes concurrent UPDATEs to
-    the same row.
-
-    Always re-derives the QR from generate_qr_code AFTER the stamp/bump
-    commits, rather than reusing any image the caller already had —
-    an image generated before this call is signed against the OLD
-    qr_version and would already be wrong the instant a bump happens here.
-
-    Returns (img_src, payload) — either may be None if role_code isn't a
-    versioned role or the entity can't be resolved (caller should treat
-    that the same as a generate_qr_code failure).
+def revoke_and_reissue(
+    society_id: int,
+    role_code: str,
+    entity_id: int,
+    reason: str,
+    actor_user_id: int,
+    entity_label: str = None,
+):
     """
-    ts_col = "last_emailed_at" if action == "email" else "last_printed_at"
+    The ONLY function that changes qr_version after initial issuance.
+    Admin-initiated, single source of truth for "this QR needs revoking" —
+    deliberately NOT triggered by print/save/email/view, which stay pure
+    reads (see qr_callbacks.py). Every call writes one qr_reissue_log row,
+    so a mass reissue is an explicit loop over entities by the caller, not
+    a hidden bulk mechanism here — each entity's reissue is its own
+    logged, individually-reasoned action even when triggered in bulk.
+
+    Requires QR_SIGNING_SECRET (via _derive_nonce) — if it isn't
+    configured, this raises rather than silently no-op'ing; there's no
+    unsigned revoke.
+
+    reason must be one of the qr_reissue_log CHECK values: 'lost',
+    'theft', 'mutilated', 'request', 'other'. Caller (the server callback)
+    is responsible for checking the acting user is actually an admin
+    before calling this — this function itself doesn't re-check role,
+    same as the rest of qr_service.py's role-agnostic helpers.
+
+    Returns (img_src, payload, old_nonce, new_nonce). Raises ValueError if
+    role_code isn't versioned or the entity can't be resolved, ValueError
+    if reason isn't a recognized value, RuntimeError if QR_SIGNING_SECRET
+    is unset (from _derive_nonce).
+    """
+    valid_reasons = ("lost", "theft", "mutilated", "request", "other")
+    if reason not in valid_reasons:
+        raise ValueError(f"reason must be one of {valid_reasons}, got {reason!r}")
 
     if role_code == "ADM":
-        # Same dual-counter resolution as _current_qr_version's ADM branch:
-        # a promoted apartment owner's admin badge rides on their
+        # Same dual-counter resolution as _current_qr_version's ADM
+        # branch: a promoted apartment owner's admin badge rides on their
         # apartments.qr_version; a seeded first-admin (no apartments row)
-        # falls back to their own users.qr_version.
+        # falls back to their own users.qr_version. entity_id passed in
+        # and returned is always users.id either way — only which table
+        # actually gets UPDATEd differs.
         admin_row = db._execute(
             "SELECT a.id AS apt_id FROM users u "
             "LEFT JOIN apartments a ON a.id = u.linked_id "
@@ -138,35 +178,46 @@ def _stamp_and_reissue(society_id: int, role_code: str, entity_id: int, action: 
             (entity_id,), fetch_one=True,
         )
         if not admin_row:
-            return None, None
-        if admin_row.get("apt_id") is not None:
-            table, pk = "apartments", admin_row["apt_id"]
-        else:
-            table, pk = "users", entity_id
+            raise ValueError(f"No admin user found for entity_id={entity_id}")
+        table, pk = (
+            ("apartments", admin_row["apt_id"])
+            if admin_row.get("apt_id") is not None
+            else ("users", entity_id)
+        )
     else:
         table = _QR_VERSIONED_ROLES.get(role_code)
         if not table:
-            return None, None
+            raise ValueError(f"{role_code!r} is not a versioned/reissuable role")
         pk = entity_id
 
-    row = db._execute(
-        f"""UPDATE {table}
-               SET qr_version = CASE WHEN last_printed_at IS NOT NULL
-                                        OR last_emailed_at IS NOT NULL
-                                      THEN qr_version + 1
-                                      ELSE qr_version END,
-                   {ts_col} = NOW()
-             WHERE id = %s
-         RETURNING id""",
-        (pk,), fetch_one=True,
-    )
-    if not row:
-        return None, None
+    old_row = db._execute(f"SELECT qr_version FROM {table} WHERE id=%s", (pk,), fetch_one=True)
+    if old_row is None:
+        raise ValueError(f"No {table} row with id={pk}")
+    old_nonce = old_row["qr_version"]
 
-    # entity_id here stays the ADM caller's users.id even when the counter
-    # itself lives on `table` — generate_qr_code -> _current_qr_version
-    # re-resolves the same ADM branch and reads whatever we just wrote.
-    return generate_qr_code(society_id, role_code, entity_id)
+    new_nonce = _derive_nonce(f"{table}:{pk}:{reason}:{os.urandom(8).hex()}")
+    # ~1-in-9000 chance new_nonce == old_nonce is accepted rather than
+    # retried — this is a rare, deliberate, human-invoked action (not a
+    # hot path where a collision is a systemic risk), and a no-op reissue
+    # is trivially retriable by the admin if they notice.
+    db._execute(f"UPDATE {table} SET qr_version=%s WHERE id=%s", (new_nonce, pk))
+
+    db._execute(
+        """INSERT INTO qr_reissue_log
+               (society_id, role_code, entity_id, entity_label,
+                old_nonce, new_nonce, reason, actor_user_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (society_id, role_code, entity_id, entity_label,
+         str(old_nonce) if old_nonce is not None else None, str(new_nonce),
+         reason, actor_user_id),
+    )
+
+    # entity_id here stays the caller's role-facing id (ADM's users.id)
+    # even when the counter lives on `table` — generate_qr_code ->
+    # _current_qr_version re-resolves the same branch and reads what we
+    # just wrote.
+    img_src, payload = generate_qr_code(society_id, role_code, entity_id)
+    return img_src, payload, old_nonce, new_nonce
 
 
 ROLE_CODE_MAP = {
@@ -211,7 +262,8 @@ def parse_qr_payload(qr_data: str) -> dict:
     """
     Parses QR string.
     Legacy (unsigned) format: <society_id>-<ROLE_CODE>-<entity_id>
-    Signed format (2026-08+, APT/VND/SEC only): adds -<qr_version>-<sig>.
+    Signed format (2026-08+, versioned/signable roles only): adds
+    -<qr_version>-<sig>.
     Signature verification itself happens in validate_qr_code, not here —
     this function only parses the string into its parts.
     """
@@ -250,7 +302,8 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
     """
     Generate QR code image (Base64) and payload.
     Legacy payload: <society_id>-<ROLE_CODE>-<entity_id>
-    Signed payload (APT/VND/SEC only, once QR_SIGNING_SECRET is set): adds
+    Signed payload (versioned/signable roles, once QR_SIGNING_SECRET is
+    set): adds
     -<qr_version>-<sig>, so the same printed/displayed code stays valid
     indefinitely unless the entity's qr_version is bumped server-side.
     """

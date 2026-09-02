@@ -68,7 +68,11 @@ CREATE TABLE IF NOT EXISTS users (
     -- apartment owner (linked_id = apartments.id) uses apartments.qr_version
     -- instead; this column is only ever consulted when linked_id is NULL.
     -- See app/services/qr_service.py _current_qr_version's ADM branch.
-    qr_version INT NOT NULL DEFAULT 1,
+    -- Random 4-digit nonce, not a sequential counter — the ALTER COLUMN
+    -- ... SET DEFAULT right after push_subscriptions below covers already-
+    -- provisioned databases; see qr_service.revoke_and_reissue for how it
+    -- actually gets bumped (always admin-initiated, never automatic).
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     login_method VARCHAR(20) DEFAULT 'password',
     -- push_subscription is DEPRECATED; use push_subscriptions table instead.
     -- Kept here for migration compatibility only.
@@ -85,15 +89,27 @@ CREATE TABLE IF NOT EXISTS users (
     created_by INT REFERENCES users (id)
 );
 
--- qr_version reissue tracking (2026-09): last_printed_at/last_emailed_at
--- let the app tell a first-ever "show my QR" apart from a repeat one — see
--- app/services/qr_service.py _stamp_and_reissue. ADD COLUMN IF NOT EXISTS
--- (not baked into the CREATE TABLE above) because CREATE TABLE IF NOT
--- EXISTS is a no-op against an already-provisioned database; same
--- convention as societies.primary_bank_account_id below.
+-- qr_version is now a random 4-digit nonce, not a sequential counter, and
+-- only ever changes via an explicit admin revoke/reissue action — see
+-- app/services/qr_service.py revoke_and_reissue. ALTER COLUMN ... SET
+-- DEFAULT (not relying on the CREATE TABLE's DEFAULT alone) because
+-- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
+-- database — same convention as societies.primary_bank_account_id below.
+-- Existing rows keep whatever qr_version they already had (no bulk
+-- backfill/mass-reissue here by design — see the qr_reissue_log comment
+-- further down); only NEW rows and future explicit revokes get a random
+-- value.
+--
+-- last_printed_at/last_emailed_at (2026-09, DROPPED again same release):
+-- briefly added here to back an auto-reissue-on-repeat-print/save design
+-- that was reverted before shipping — Print/Save/Email are pure reads
+-- again, so there's nothing left that reads or writes these two columns.
+-- Dropped rather than left dangling on an already-provisioned database
+-- that may have run the earlier version of this migration.
 ALTER TABLE users
-ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
-ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+DROP COLUMN IF EXISTS last_printed_at,
+DROP COLUMN IF EXISTS last_emailed_at,
+ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id SERIAL PRIMARY KEY,
@@ -151,7 +167,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     apartment_size INT NOT NULL DEFAULT 0,
     apt_calc_start_date DATE DEFAULT CURRENT_DATE,
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    qr_version INT NOT NULL DEFAULT 1,
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
@@ -171,7 +187,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     mobile VARCHAR(15),
     service_description TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    qr_version INT NOT NULL DEFAULT 1,
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
@@ -191,26 +207,30 @@ CREATE TABLE IF NOT EXISTS security_staff (
     shift VARCHAR(20),
     salary_per_shift NUMERIC(10, 2),
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    qr_version INT NOT NULL DEFAULT 1,
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     created_by INT REFERENCES users (id),
     updated_by INT REFERENCES users (id)
 );
 
--- Same reissue-tracking columns for the three static-pass entity tables —
--- see the users.last_printed_at comment above for why ALTER, not CREATE.
+-- Same DROP-then-reset-DEFAULT treatment as users above — see that
+-- comment block for why last_printed_at/last_emailed_at are being
+-- removed again in the same release they were added.
 ALTER TABLE apartments
-ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
-ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+DROP COLUMN IF EXISTS last_printed_at,
+DROP COLUMN IF EXISTS last_emailed_at,
+ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 ALTER TABLE vendors
-ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
-ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+DROP COLUMN IF EXISTS last_printed_at,
+DROP COLUMN IF EXISTS last_emailed_at,
+ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 ALTER TABLE security_staff
-ADD COLUMN IF NOT EXISTS last_printed_at TIMESTAMP,
-ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMP;
+DROP COLUMN IF EXISTS last_printed_at,
+DROP COLUMN IF EXISTS last_emailed_at,
+ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
@@ -1039,10 +1059,16 @@ CREATE TABLE IF NOT EXISTS patrol_locations (
     location_name VARCHAR(100) NOT NULL,
     description TEXT,
     qr_payload VARCHAR(255) UNIQUE NOT NULL,
+    -- Reissue nonce (2026-09): patrol_location is now a versioned/signable
+    -- role like apartments/vendors/security_staff — see
+    -- app/services/qr_service.py _QR_VERSIONED_ROLES and revoke_and_reissue.
+    -- Random 4-digit range, same convention as those three tables.
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     schedule_start TIME,
     schedule_end TIME,
     scan_interval INT DEFAULT 120,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -1695,6 +1721,32 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+-- ════════════════════════════════════════════════════════════════
+-- QR REISSUE AUDIT LOG (2026-09)
+-- One row per admin-initiated revoke/reissue of a versioned QR
+-- (apartment/vendor/security/admin/patrol_location). This is the ONLY
+-- way qr_version ever changes post-issuance — see
+-- app/services/qr_service.py revoke_and_reissue. Exported as an xlsx
+-- via database/qr_reissue_export.py.
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS qr_reissue_log (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    role_code VARCHAR(5) NOT NULL,       -- APT / VND / SEC / ADM / PTL
+    entity_id INT NOT NULL,              -- role_code's own table.id (ADM = users.id, per the same convention _current_qr_version already uses)
+    entity_label VARCHAR(150),           -- human label captured at reissue time (flat number, vendor name, etc.) so the log stays readable if the entity is later renamed/removed
+    old_nonce VARCHAR(4),
+    new_nonce VARCHAR(4) NOT NULL,
+    reason VARCHAR(20) NOT NULL CHECK (
+        reason IN ('lost', 'theft', 'mutilated', 'request', 'other')
+    ),
+    actor_user_id INT NOT NULL REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_qr_reissue_log_society
+    ON qr_reissue_log (society_id, created_at DESC);
 
 -- ════════════════════════════════════════════════════════════════
 -- QR PAYLOAD AUTO-GENERATION TRIGGERS

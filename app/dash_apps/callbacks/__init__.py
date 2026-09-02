@@ -260,4 +260,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ qty_stepper_callbacks failed: {e}")
 
+    # 20. Patrol Locations — minimal admin create/list/reissue flow
+    #     (2026-09). See patrol_location_callbacks.py module docstring for
+    #     why this is standalone rather than folded into the generic
+    #     drilldown/DRILLDOWN_MAP engine.
+    try:
+        from .patrol_location_callbacks import register_patrol_location_callbacks
+        register_patrol_location_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ patrol_location_callbacks failed: {e}")
+
     print("✅ All callbacks registered")
