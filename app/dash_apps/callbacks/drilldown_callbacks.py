@@ -4849,11 +4849,11 @@ def register_member_ledger_callbacks(app):
     from dash import Input, Output, State, callback_context, no_update, dcc
 
     @app.callback(
-        Output("nav-state-store", "data", allow_duplicate=True),
+        Output("drilldown-store", "data", allow_duplicate=True),
         Input({"type": "drill-filter", "field": "financial_year"}, "value"),
         Input({"type": "ledger-page-btn", "dir": "prev"}, "n_clicks"),
         Input({"type": "ledger-page-btn", "dir": "next"}, "n_clicks"),
-        State("nav-state-store", "data"),
+        State("drilldown-store", "data"),
         prevent_initial_call=True
     )
     def update_member_ledger_state(fy_val, prev_clicks, next_clicks, store_data):
@@ -4882,7 +4882,7 @@ def register_member_ledger_callbacks(app):
     @app.callback(
         Output("download-member-ledger-excel", "data"),
         Input("btn-export-member-ledger", "n_clicks"),
-        State("nav-state-store", "data"),
+        State("drilldown-store", "data"),
         prevent_initial_call=True
     )
     def export_member_ledger(n_clicks, store_data):
