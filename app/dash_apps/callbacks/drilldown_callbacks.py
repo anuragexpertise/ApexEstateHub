@@ -2639,6 +2639,30 @@ def _render_card(
                 entity_id=entity_id
             )
 
+        # ── QR Version Manager ──────────────────────────────────────────────────
+        if card_id == "form_qr_manager":
+            from app.dash_apps.drilldown.drillin import DRILLIN_CONFIG
+            from app.dash_apps.drilldown.renderers import build_drillin_field
+            
+            drillin_spec = DRILLIN_CONFIG.get(("qr_manager", "entity_id"))
+            picker_div = build_drillin_field(drillin_spec, "entity_id", None, None, "new", None)
+            
+            reasons = ["lost", "theft", "mutilated", "request", "other"]
+            reason_opts = [{"label": r.title(), "value": r} for r in reasons]
+            
+            form_body = html.Div([
+                html.H5("Revoke and Reissue QR Code"),
+                html.P("Select the entity and provide a reason to immediately revoke their current QR code and issue a new one. The old code will become invalid for scanning.", className="text-muted small"),
+                html.Label("Target Entity", className="form-label"),
+                picker_div,
+                html.Label("Reason for Reissue", className="form-label mt-3"),
+                dbc.Select(id={"type": "form-field", "field": "reason"}, options=reason_opts, value="request"),
+                dbc.Button("Revoke and Reissue QR", id="btn-qr-reissue", color="danger", className="mt-4 w-100"),
+                html.Div(id="qr-reissue-feedback", className="mt-3")
+            ], className="p-3")
+            
+            return html.Div(form_body, className="card shadow-sm")
+
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
         if card_id == "form_pay_dues_new":
             apt_id  = prefill.get("entity_id") or prefill.get("apartment_id")
@@ -4931,3 +4955,38 @@ def register_member_ledger_callbacks(app):
         export_df["Balance Owed"] = df["running_balance"]
         
         return dcc.send_data_frame(export_df.to_excel, "My_Transactions.xlsx", index=False)
+
+    @app.callback(
+        Output("qr-reissue-feedback", "children"),
+        Input("btn-qr-reissue", "n_clicks"),
+        State({"type": "drillin-role", "field": "entity_id"}, "value"),
+        State({"type": "drillin-id", "field": "entity_id"}, "value"),
+        State({"type": "form-field", "field": "reason"}, "value"),
+        State("kpi-filters-store", "data"),
+        prevent_initial_call=True
+    )
+    @require_session(["admin"])
+    def handle_qr_reissue(n_clicks, role_code, entity_id, reason, filters):
+        if not n_clicks:
+            return no_update
+        if not role_code or not entity_id:
+            return dbc.Alert("Please select an entity.", color="danger")
+            
+        sid = filters.get("society_id")
+        user_id = get_current_user_id()
+        
+        if not sid or not user_id:
+            return dbc.Alert("Session invalid. Could not process request.", color="danger")
+            
+        try:
+            from app.services.qr_service import revoke_and_reissue
+            _, _, old_nonce, new_nonce = revoke_and_reissue(
+                society_id=sid,
+                role_code=role_code,
+                entity_id=int(entity_id),
+                reason=reason,
+                actor_user_id=user_id
+            )
+            return dbc.Alert(f"Successfully reissued QR. Old nonce: {old_nonce}, New nonce: {new_nonce}", color="success")
+        except Exception as e:
+            return dbc.Alert(f"Failed to reissue QR: {str(e)}", color="danger")
