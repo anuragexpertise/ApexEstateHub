@@ -1121,7 +1121,6 @@ DEFAULT_LAYOUTS = {
             "kpi_my_overdue_dues",
             "kpi_maintenance_charges",
             "kpi_my_ledger",
-            "kpi_fy_closing_report",
         ],
         "receivables": [
             "kpi_my_pending_dues",
