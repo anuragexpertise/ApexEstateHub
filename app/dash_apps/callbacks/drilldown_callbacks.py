@@ -465,6 +465,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
         Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
+        Input({"type": "btn-new-sidebar", "entity": ALL}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
@@ -1238,6 +1239,23 @@ def register_drilldown_callbacks(app):
                 )
                 hide_kpis = True
 
+            # ── Show My Ledger (My Transactions) ──────────────────────────────────
+            elif action == "show_my_ledger":
+                mapped_role = "apartment"
+                if entity in ("vendor", "vendors"): mapped_role = "vendor"
+                elif entity in ("security", "security_staff"): mapped_role = "security"
+                
+                store = nav_state.navigate_to(
+                    store, "form_my_ledger", "My Transactions",
+                    prefill={
+                        "entity_id": pk,
+                        f"{mapped_role}_id": pk,
+                        "role": mapped_role,
+                    },
+                    entity_pk=pk,
+                )
+                hide_kpis = True
+
             # ── Buy vendor pass (vendor portal — vendor buys own pass) ────────────
             elif action == "buy_vendor_pass":
                 record = loaders.load_profile(entity, pk, sid) or {}
@@ -1431,7 +1449,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── New button ────────────────────────────────────────────────────
-        elif trig_type == "btn-new":
+        elif trig_type in ("btn-new", "btn-new-sidebar"):
             entity = id_dict.get("entity")
             _new_map = {
                 "receipts": "form_receipt_new",
@@ -1439,6 +1457,9 @@ def register_drilldown_callbacks(app):
                 "cashbook": "form_receipt_new",
             }
             target = _new_map.get(entity, f"form_{to_singular(entity)}_new")
+
+            if trig_type == "btn-new-sidebar":
+                store = {"stack": [], "prefill": {}, "filters": {}}
 
             # Build a smart prefill for New forms by propagating current filters
             # and any existing prefill context. This makes creating a new entity
@@ -4994,7 +5015,7 @@ def register_member_ledger_callbacks(app):
         State("kpi-filters-store", "data"),
         prevent_initial_call=True
     )
-    @require_session(["admin"])
+    @require_session
     def handle_qr_reissue(n_clicks, role_code, entity_id, reason, filters):
         if not n_clicks:
             return no_update
