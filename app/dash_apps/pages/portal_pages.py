@@ -29,6 +29,13 @@ def _manual_qr_card(scope: str, **kwargs):
     return render_manual_qr_card(scope, **kwargs)
 
 
+def _patrol_locations_section(sid):
+    """Thin wrapper around patrol_location_callbacks.render_patrol_locations_section
+    — same lazy-import rationale as _manual_qr_card above."""
+    from app.dash_apps.callbacks.patrol_location_callbacks import render_patrol_locations_section
+    return render_patrol_locations_section(sid)
+
+
 _C = {
     "master":    "#c96a19",
     "admin":     "#1859b8",
@@ -416,6 +423,7 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),
+            _patrol_locations_section(sid),
         ], className="portal-page")
 
     if active_tab == "evaluate_pass":
