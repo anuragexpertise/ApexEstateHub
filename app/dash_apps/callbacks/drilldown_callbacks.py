@@ -2606,8 +2606,15 @@ def _render_card(
         if card_id == "form_my_ledger":
             sid_val = filters.get("society_id")
             caller_role = get_current_user_role()
-            member_role = "apartment" if caller_role == "apartment" else caller_role
-            entity_id = get_current_linked_id()
+            
+            if caller_role in ("admin", "master"):
+                entity_id = prefill.get("entity_id") or prefill.get("apartment_id") or prefill.get("vendor_id") or prefill.get("security_id")
+                member_role = "apartment"
+                if prefill.get("vendor_id"): member_role = "vendor"
+                elif prefill.get("security_id"): member_role = "security"
+            else:
+                member_role = "apartment" if caller_role == "apartment" else caller_role
+                entity_id = get_current_linked_id()
             
             page = int(filters.get("member_ledger_page", 1))
             page_size = 50
@@ -4883,13 +4890,22 @@ def register_member_ledger_callbacks(app):
             return no_update
             
         from app.dash_apps.drilldown import loaders
-        from app.dash_apps.callbacks.drilldown_callbacks import get_current_user_role, get_current_linked_id
+        from app.security.audit_context import get_current_user_role, get_current_linked_id
         
         filters = store_data.get("filters", {})
+        prefill = store_data.get("prefill", {})
         sid_val = filters.get("society_id")
+        
         caller_role = get_current_user_role()
-        member_role = "apartment" if caller_role == "apartment" else caller_role
-        entity_id = get_current_linked_id()
+        if caller_role in ("admin", "master"):
+            entity_id = prefill.get("entity_id") or prefill.get("apartment_id") or prefill.get("vendor_id") or prefill.get("security_id")
+            member_role = "apartment"
+            if prefill.get("vendor_id"): member_role = "vendor"
+            elif prefill.get("security_id"): member_role = "security"
+        else:
+            member_role = "apartment" if caller_role == "apartment" else caller_role
+            entity_id = get_current_linked_id()
+
         selected_fy = filters.get("financial_year", loaders._current_fy())
         
         if not (sid_val and entity_id):
