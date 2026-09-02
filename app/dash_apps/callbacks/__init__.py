@@ -28,8 +28,9 @@ def register_callbacks(app):
 
     # 3. Drilldown — needs profile-action-trigger Store in app_shell
     try:
-        from .drilldown_callbacks import register_drilldown_callbacks
+        from .drilldown_callbacks import register_drilldown_callbacks, register_member_ledger_callbacks
         register_drilldown_callbacks(app)
+        register_member_ledger_callbacks(app)
     except Exception as e:
         print(f"⚠️ drilldown_callbacks failed: {e}")
         import traceback; traceback.print_exc()

@@ -533,7 +533,11 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
         return [], str(e)
 
 
-def get_member_ledger(society_id: int, entity_id: int, role: str) -> tuple[list[dict], str | None]:
+def get_member_ledger(
+    society_id: int, entity_id: int, role: str,
+    page: int = 1, page_size: int = 50,
+    financial_year: int = None
+) -> tuple[list[dict], int, str | None]:
     """
     "My Transactions" passbook — every entry posted against this member's
     Sundry Debtors balance, in chronological order, with a running
@@ -554,30 +558,56 @@ def get_member_ledger(society_id: int, entity_id: int, role: str) -> tuple[list[
     shape as a "Flat 101 Debtors Account" ledger, without a per-member
     accounts.id row.
 
-    Returns (rows, error). Each row: trx_date, acc_particulars,
-    entry_side ('Dr'/'Cr'), amount, mode, running_balance.
+    Returns (rows, total_count, error). Each row: trx_date, acc_particulars,
+    entry_side ('Dr'/'Cr'), amount, mode, running_balance, breakdown.
     """
     try:
-        rows = db._execute(
-            """
-            SELECT t.trx_date, t.acc_particulars, t.entry_side, t.amount,
-                   t.mode,
-                   SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount ELSE -t.amount END)
-                       OVER (ORDER BY t.trx_date, t.id
-                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance
-            FROM transactions t
-            JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
-            WHERE t.society_id = %s
-              AND t.entity_id = %s
-              AND t.role = %s
-              AND a.name ILIKE '%%Sundry Debtors%%'
-            ORDER BY t.trx_date, t.id
-            """,
-            (society_id, entity_id, role), fetch_all=True,
-        ) or []
-        return rows, None
+        offset = (page - 1) * page_size
+        params = [society_id, entity_id, role]
+        
+        # We use a CTE to calculate the running balance and component breakdown over the 
+        # *entire* history, so that paginating/filtering doesn't break the balance.
+        query = """
+            WITH ledger AS (
+                SELECT t.id, t.trx_date, t.acc_particulars, t.entry_side, t.amount,
+                       t.mode,
+                       SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount ELSE -t.amount END)
+                           OVER (ORDER BY t.trx_date, t.id
+                                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_balance,
+                       (
+                           SELECT string_agg(a2.name || ': ' || t2.amount, ', ')
+                           FROM transactions t2
+                           JOIN accounts a2 ON a2.id = t2.acc_id
+                           WHERE t2.journal_id = t.journal_id
+                             AND t2.id != t.id
+                       ) AS breakdown
+                FROM transactions t
+                JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
+                WHERE t.society_id = %s
+                  AND t.entity_id = %s
+                  AND t.role = %s
+                  AND a.name ILIKE '%%Sundry Debtors%%'
+            )
+            SELECT *, count(*) OVER() AS total_count
+            FROM ledger
+            WHERE 1=1
+        """
+        
+        if financial_year:
+            query += " AND trx_date >= %s AND trx_date <= %s"
+            params.extend([f"{financial_year}-04-01", f"{financial_year + 1}-03-31"])
+
+        query += """
+            ORDER BY trx_date DESC, id DESC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([page_size, offset])
+        
+        rows = db._execute(query, tuple(params), fetch_all=True) or []
+        total_count = rows[0]["total_count"] if rows else 0
+        return rows, total_count, None
     except Exception as e:
-        return [], str(e)
+        return [], 0, str(e)
 
 
 # ════════════════════════════════════════════════════════════════════════════

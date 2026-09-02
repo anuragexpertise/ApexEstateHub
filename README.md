@@ -450,6 +450,17 @@ SET acc_id = (SELECT id FROM accounts WHERE society_id=r.society_id AND name ILI
 WHERE r.acc_id IS NULL AND r.role='apartment' AND r.status IN ('pending','partial');
 ```
 
+### Interest Calculation & Subtleties
+
+ApexEstateHub calculates simple interest on overdue maintenance receivables dynamically. Key subtleties to note regarding financial calculations:
+
+1. **Daily Pro-Rata Formula**: Interest is calculated using a standard banking 30-day month pro-rata basis:
+   `Interest = Unpaid Principal × Monthly Rate × (Total Days Elapsed / 30.0)`.
+   This ensures that partial months (including the current incomplete month) are fairly calculated down to the exact day.
+2. **Compound Interest Prevention**: To comply with standard housing society by-laws, interest is calculated strictly on the *unpaid principal* (the base amount), never on accumulated past interest.
+3. **Database Precision**: The `interest_months_applied` column in the `receivables` table is defined as `NUMERIC(10,4)` to handle the exact decimal fraction of months elapsed (e.g., 28 days = `0.9333` months).
+4. **FIFO Allocation**: When an apartment pays dues, the `fn_pay_apartment_dues_fifo` function applies the payment to the oldest outstanding receivable first. Within a specific receivable, payments are applied to clear interest first, then the principal base amount.
+5. **Component Breakdown**: When rendering the "My Transactions" ledger, the system runs a Common Table Expression (CTE) to fetch a grouped string (e.g. `Society Maint: 1500, Sinking Fund: 200`) representing the different journal entry legs that made up the receivable.
 ---
 
 ## 10. Pay Dues — Five Paths

@@ -3426,8 +3426,13 @@ def render_fy_closing_card(rows: list, error: str | None,
 # MY TRANSACTIONS CARD — member-facing Sundry Debtors passbook
 # ════════════════════════════════════════════════════════════════════════════
 
-def render_member_ledger_card(rows: list, error: str | None,
-                               member_label: str, color: str = "#18794e") -> html.Div:
+def render_member_ledger_card(
+    rows: list, total_count: int, error: str | None,
+    member_label: str, color: str = "#18794e",
+    page: int = 1, page_size: int = 50,
+    fy_options: list[int] = None, selected_fy: int = None,
+    entity_id: int = None
+) -> html.Div:
     """
     Read-only "My Transactions" passbook (loaders.get_member_ledger) —
     every entry posted against this member's Sundry Debtors balance:
@@ -3466,7 +3471,7 @@ def render_member_ledger_card(rows: list, error: str | None,
                           style={"borderRadius": "10px"})
     else:
         head = html.Thead(html.Tr([
-            html.Th("Date"), html.Th("Particulars"),
+            html.Th("Date"), html.Th("Particulars"), html.Th("Breakdown"),
             html.Th("Billed (Dr)", className="text-end"),
             html.Th("Paid (Cr)", className="text-end"),
             html.Th("Balance Owed", className="text-end"),
@@ -3476,9 +3481,12 @@ def render_member_ledger_card(rows: list, error: str | None,
             is_dr = r.get("entry_side") == "Dr"
             amt = float(r.get("amount") or 0)
             bal = float(r.get("running_balance") or 0)
+            breakdown_str = r.get("breakdown") or ""
+            
             return html.Tr([
                 html.Td(str(r.get("trx_date") or ""), style={"whiteSpace": "nowrap"}),
                 html.Td(r.get("acc_particulars", "")),
+                html.Td(breakdown_str, style={"fontSize": "11px", "color": "#7d8ea3"}),
                 html.Td(f"{amt:,.2f}" if is_dr else "",
                         className="text-end", style={"color": "#c0392b"}),
                 html.Td(f"{amt:,.2f}" if not is_dr else "",
@@ -3492,9 +3500,68 @@ def render_member_ledger_card(rows: list, error: str | None,
             style={"marginTop": "4px"},
         )
 
+    # ── Toolbar: FY Filter, Export, Pagination ──
+    fy_opts = fy_options or []
+    
+    # Calculate final balance using the first row if available (since DESC order)
+    # Wait, the SQL is ordered DESC, so rows[0] is the newest entry on the current page.
+    final_balance = 0
+    if rows and page == 1:
+        final_balance = float(rows[0].get("running_balance") or 0)
+
+    toolbar = html.Div([
+        html.Div([
+            dbc.Select(
+                id={"type": "drill-filter", "field": "financial_year"},
+                options=[{"label": f"FY {y}-{y+1}", "value": str(y)} for y in fy_opts]
+                        + [{"label": "All Time", "value": ""}],
+                value=str(selected_fy) if selected_fy else "",
+                size="sm", style={"width": "140px", "fontSize": "12px", "borderRadius": "8px"}
+            ) if fy_opts else None,
+            dbc.Button(
+                [html.I(className="fas fa-file-excel me-1"), "Export"],
+                id="btn-export-member-ledger",
+                size="sm", color="light", outline=True,
+                style={"fontSize": "12px", "borderRadius": "8px", "marginLeft": "8px",
+                       "border": "1px solid #dce4ec", "color": "#15304f"}
+            )
+        ], style={"display": "flex", "alignItems": "center"}),
+        
+        html.Div([
+            dbc.Button(
+                "Pay Now", id={"type": "kpi-card-div", "card_id": "form_pay_dues_new"},
+                size="sm", color="success",
+                style={"fontSize": "12px", "borderRadius": "8px", "marginRight": "16px",
+                       "fontWeight": "600"}
+            ) if final_balance > 0 else None,
+            
+            dbc.ButtonGroup([
+                dbc.Button(
+                    html.I(className="fas fa-chevron-left"),
+                    id={"type": "ledger-page-btn", "dir": "prev"},
+                    disabled=(page <= 1), size="sm", outline=True, color="secondary"
+                ),
+                dbc.Button(
+                    f"{page} / {max(1, (total_count + page_size - 1) // page_size)}",
+                    disabled=True, size="sm", outline=True, color="secondary",
+                    style={"fontSize": "12px", "color": "#555"}
+                ),
+                dbc.Button(
+                    html.I(className="fas fa-chevron-right"),
+                    id={"type": "ledger-page-btn", "dir": "next"},
+                    disabled=(page * page_size >= total_count), size="sm", outline=True, color="secondary"
+                ),
+            ], size="sm")
+        ], style={"display": "flex", "alignItems": "center"})
+    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
+              "padding": "12px 16px", "borderBottom": "1px solid #f0f3f8",
+              "background": "#fbfcfd"})
+
     return html.Div([
         header,
+        toolbar,
         html.Div(body, style={"padding": "16px"}),
+        dcc.Download(id="download-member-ledger-excel"),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
@@ -3667,7 +3734,10 @@ def render_pay_dues_card(
             dbc.Alert([
                 html.I(className="fas fa-info-circle me-2"),
                 f"Payment applied FIFO — oldest dues first. "
-                f"Excess beyond ₹{pending_dues:,.2f} credited as advance.",
+                f"Excess beyond ₹{pending_dues:,.2f} credited as advance. ",
+                html.Br(), html.Br(),
+                html.Strong("Note: "),
+                "Interest on overdue amounts is calculated on a daily pro-rata basis using a standard 30-day banking month."
             ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
                                     "borderRadius": "10px", "marginBottom": "12px"}),
             # Hidden fields

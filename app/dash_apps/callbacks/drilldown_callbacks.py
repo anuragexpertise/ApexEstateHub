@@ -2608,14 +2608,28 @@ def _render_card(
             caller_role = get_current_user_role()
             member_role = "apartment" if caller_role == "apartment" else caller_role
             entity_id = get_current_linked_id()
+            
+            page = int(filters.get("member_ledger_page", 1))
+            page_size = 50
+            fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
+            selected_fy = filters.get("financial_year", loaders._current_fy())
+            
             member_label = ""
             if entity_id and sid_val and member_role == "apartment":
                 apt = loaders.load_profile("apartment", entity_id, sid_val) or {}
                 member_label = f"Flat {apt.get('flat_number', '')} — {apt.get('owner_name', '')}".strip(" —")
-            rows, err = (loaders.get_member_ledger(sid_val, entity_id, member_role)
-                         if sid_val and entity_id else ([], "Could not resolve your account"))
+            
+            if sid_val and entity_id:
+                rows, total_count, err = loaders.get_member_ledger(
+                    sid_val, entity_id, member_role, page, page_size, selected_fy
+                )
+            else:
+                rows, total_count, err = [], 0, "Could not resolve your account"
+                
             return renderers.render_member_ledger_card(
-                rows=rows, error=err, member_label=member_label,
+                rows=rows, total_count=total_count, error=err, member_label=member_label,
+                page=page, page_size=page_size, fy_options=fy_options, selected_fy=selected_fy,
+                entity_id=entity_id
             )
 
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
@@ -4818,3 +4832,86 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         if sec_staff_id:
             f["sec_assignee_id"] = sec_staff_id
     return f
+
+# ════════════════════════════════════════════════════════════════════════════
+# MEMBER LEDGER SPECIFIC CONTROLS
+# ════════════════════════════════════════════════════════════════════════════
+
+def register_member_ledger_callbacks(app):
+    import pandas as pd
+    from dash import Input, Output, State, callback_context, no_update, dcc
+
+    @app.callback(
+        Output("nav-state-store", "data", allow_duplicate=True),
+        Input({"type": "drill-filter", "field": "financial_year"}, "value"),
+        Input({"type": "ledger-page-btn", "dir": "prev"}, "n_clicks"),
+        Input({"type": "ledger-page-btn", "dir": "next"}, "n_clicks"),
+        State("nav-state-store", "data"),
+        prevent_initial_call=True
+    )
+    def update_member_ledger_state(fy_val, prev_clicks, next_clicks, store_data):
+        ctx = callback_context
+        if not ctx.triggered or not store_data:
+            return no_update
+        
+        trigger_id = ctx.triggered[0]["prop_id"]
+        filters = store_data.get("filters", {})
+        
+        if "financial_year" in trigger_id:
+            filters["financial_year"] = fy_val if fy_val else ""
+            filters["member_ledger_page"] = 1 # Reset page on FY change
+        elif "ledger-page-btn" in trigger_id:
+            current_page = int(filters.get("member_ledger_page", 1))
+            if "prev" in trigger_id:
+                filters["member_ledger_page"] = max(1, current_page - 1)
+            elif "next" in trigger_id:
+                filters["member_ledger_page"] = current_page + 1
+                
+        store_data["filters"] = filters
+        # Bumping the trigger forces the main drilldown callback to re-render
+        store_data["trigger"] = store_data.get("trigger", 0) + 1 
+        return store_data
+
+    @app.callback(
+        Output("download-member-ledger-excel", "data"),
+        Input("btn-export-member-ledger", "n_clicks"),
+        State("nav-state-store", "data"),
+        prevent_initial_call=True
+    )
+    def export_member_ledger(n_clicks, store_data):
+        if not n_clicks or not store_data:
+            return no_update
+            
+        from app.dash_apps.drilldown import loaders
+        from app.dash_apps.callbacks.drilldown_callbacks import get_current_user_role, get_current_linked_id
+        
+        filters = store_data.get("filters", {})
+        sid_val = filters.get("society_id")
+        caller_role = get_current_user_role()
+        member_role = "apartment" if caller_role == "apartment" else caller_role
+        entity_id = get_current_linked_id()
+        selected_fy = filters.get("financial_year", loaders._current_fy())
+        
+        if not (sid_val and entity_id):
+            return no_update
+            
+        # For export, fetch ALL records for the selected FY (or all time), ignoring pagination
+        # Page size 10000 ensures we get everything
+        rows, _, err = loaders.get_member_ledger(
+            sid_val, entity_id, member_role, page=1, page_size=10000, financial_year=selected_fy
+        )
+        if err or not rows:
+            return no_update
+            
+        # Format for Excel
+        df = pd.DataFrame(rows)
+        # Rename and select columns
+        export_df = pd.DataFrame()
+        export_df["Date"] = df["trx_date"]
+        export_df["Particulars"] = df["acc_particulars"]
+        export_df["Breakdown"] = df["breakdown"]
+        export_df["Billed (Dr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Dr" else "", axis=1)
+        export_df["Paid (Cr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Cr" else "", axis=1)
+        export_df["Balance Owed"] = df["running_balance"]
+        
+        return dcc.send_data_frame(export_df.to_excel, "My_Transactions.xlsx", index=False)

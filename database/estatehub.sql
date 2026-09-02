@@ -421,7 +421,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     period_month DATE, -- first-of-month; NULL for non-periodic rows
     base_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     interest_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
-    interest_months_applied INT NOT NULL DEFAULT 0,
+    interest_months_applied NUMERIC(10, 4) NOT NULL DEFAULT 0,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0), -- base + interest, kept in sync
     paid_amount NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
     -- paid_principal = portion of paid_amount applied to the BASE (principal)
@@ -2369,8 +2369,8 @@ AS $$
 DECLARE
     rec               RECORD;
     v_rate            NUMERIC(5,2);
-    v_months_elapsed  INT;
-    v_months_new      INT;
+    v_months_elapsed  NUMERIC(10,4);
+    v_months_new      NUMERIC(10,4);
     v_residual        NUMERIC(15,2);
     v_total_increment NUMERIC(15,2);
     v_int_acc_id      INT;
@@ -2417,17 +2417,9 @@ BEGIN
             CONTINUE;
         END IF;
 
-        v_months_elapsed :=
-            GREATEST(
-                (
-                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, rec.due_date))*12
-                  + EXTRACT(MONTH FROM AGE(CURRENT_DATE, rec.due_date))
-                )::INT,
-                0
-            );
+        v_months_elapsed := ROUND((CURRENT_DATE - rec.due_date) / 30.0, 4);
 
-        v_months_new :=
-            v_months_elapsed - rec.interest_months_applied;
+        v_months_new := ROUND(v_months_elapsed - rec.interest_months_applied, 4);
 
         IF v_months_new <= 0 THEN
             CONTINUE;
