@@ -1821,6 +1821,35 @@ def register_drilldown_callbacks(app):
                           f"forced to own pk={_own_pk}")
                 merged["id"] = _own_pk
 
+        # ── 6c. Apartment limit check ─────────────────────────────────────────
+        # Ensure that the number of apartments does not exceed the society's plan limit.
+        if entity_singular == "apartment" and "edit" not in card_id and sid:
+            try:
+                soc_plan_row = db._execute(
+                    "SELECT plan FROM societies WHERE id=%s",
+                    (sid,), fetch_one=True
+                )
+                if soc_plan_row:
+                    soc_plan = soc_plan_row.get("plan", "Free")
+                    apt_count_row = db._execute(
+                        "SELECT COUNT(*) as c FROM apartments WHERE society_id=%s",
+                        (sid,), fetch_one=True
+                    )
+                    apt_count = apt_count_row.get("c", 0) if apt_count_row else 0
+                    
+                    plan_limits = {"Free": 9, "9Apts": 9, "99Apts": 99, "999Apts": 999, "unlimited": 9999}
+                    limit = plan_limits.get(soc_plan, 9)
+                    if apt_count >= limit:
+                        return (
+                            store,
+                            no_update,
+                            no_update,
+                            {"type": "error", "message": f"Society plan '{soc_plan}' limit reached ({limit} apartments). Cannot add more."},
+                            no_update,
+                        )
+            except Exception as e:
+                print(f"⚠️  Error checking apartment limit: {e}")
+
         # ── 7. Call the appropriate save handler ──────────────────────────────
         ok, msg, new_id = _save_entity(entity_singular, card_id, merged)
 

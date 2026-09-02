@@ -338,8 +338,6 @@ DRILLDOWN_MAP: dict = {
         "target": "list_apartments",
         "label": "All Apartments",
     },
-    "kpi_master_vendors_total": {"target": "list_vendors", "label": "All Vendors"},
-    "kpi_master_security_total": {"target": "list_security", "label": "Security Staff"},
     # OWNER PORTAL KPIs
     "kpi_apartments_date": {"target": "list_apartments", "label": "Managed Apartments"},
     # VENDOR PORTAL KPIs

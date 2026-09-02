@@ -647,8 +647,6 @@ KPI_CARDS = {
         "title": "Expiring Soon", "group": "next 30 days",
     },
     "kpi_master_apartments_total": {"query": "SELECT COUNT(*) AS v FROM apartments WHERE active=TRUE", "params": 0, "format": "number", "icon": "fa-home",       "color": "#1859b8", "title": "Apartments",    "group": "across all"},
-    "kpi_master_vendors_total":    {"query": "SELECT COUNT(*) AS v FROM vendors WHERE active=TRUE",    "params": 0, "format": "number", "icon": "fa-truck",      "color": "#b98a07", "title": "Vendors",       "group": "across all"},
-    "kpi_master_security_total":   {"query": "SELECT COUNT(*) AS v FROM security_staff WHERE active=TRUE", "params": 0, "format": "number", "icon": "fa-user-shield", "color": "#b63b3b", "title": "Security", "group": "across all"},
 
     # ══════════════════════════════════════════════════════════════════════
     # OWNER / APARTMENT PORTAL
@@ -1046,8 +1044,7 @@ DEFAULT_LAYOUTS = {
             "kpi_societies_unlimited",
             "kpi_societies_expired",
             "kpi_master_apartments_total",
-            "kpi_master_vendors_total",
-            "kpi_master_security_total",
+            
         ],
         "master-settings": [
             "kpi_societies_expiring_soon",
@@ -1071,11 +1068,11 @@ DEFAULT_LAYOUTS = {
             "kpi_security_total",
         ],
         "financials": [
-            "kpi_security_salaries_due",
             "kpi_receipts_month",
             "kpi_receipts_total",
             "kpi_expenses_month",
             "kpi_expenses_total",
+            "kpi_security_salaries_due",
             "kpi_cash_in_hand",
             "kpi_bank_balance",
             "kpi_cashbook_open",
