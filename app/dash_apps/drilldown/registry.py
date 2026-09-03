@@ -112,6 +112,7 @@ DRILLDOWN_MAP: dict = {
     },
     "kpi_polls_total": {"target": "list_polls", "label": "All Polls"},
     "kpi_polls_active": {"target": "list_polls", "label": "Active Polls", "filter": {"status": "active"}},
+    "kpi_tds_rates": {"target": "list_tds_rates", "label": "TDS Rates"},
     "kpi_apartments_total": {
         "target": "list_apartments",
         "label": "All Apartments"

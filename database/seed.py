@@ -972,16 +972,47 @@ def seed_admin_created_by(cur, conn, admin_uid: int):
 #   194J: 10% professional/technical services, no threshold.
 # rate_no_pan = Section 206AA higher rate when the vendor has no PAN.
 TDS_SECTION_RATE_SEED = [
-    # (section, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
-    ('194C', 1.00, 2.00, 30000, 100000),
-    ('194C', 2.00, 4.00, 30000, 100000),
-    ('194J', 10.00, 20.00, 0, 0),
+    # (section, nature, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
+    ('192', 'Salary income', 0.00, 20.00, 0, 0),
+    ('192A', 'Premature EPF withdrawal', 10.00, 30.00, 50000, 50000),
+    ('193', 'Interest on securities', 10.00, 20.00, 10000, 10000),
+    ('194', 'Dividend on shares/mutual funds', 10.00, 20.00, 5000, 5000),
+    ('194A', 'Interest other than securities', 10.00, 20.00, 40000, 40000),
+    ('194B', 'Winnings from lottery, puzzles, crossword', 30.00, 30.00, 10000, 10000),
+    ('194BA', 'Net winnings from online games', 30.00, 30.00, 0, 0),
+    ('194BB', 'Winnings from horse races', 30.00, 30.00, 10000, 10000),
+    ('194C', 'Payments to contractors / subcontractors (Ind/HUF)', 1.00, 20.00, 30000, 100000),
+    ('194C', 'Payments to contractors / subcontractors (Others)', 2.00, 20.00, 30000, 100000),
+    ('194D', 'Insurance commission (Ind)', 5.00, 20.00, 15000, 15000),
+    ('194D', 'Insurance commission (Company)', 10.00, 20.00, 15000, 15000),
+    ('194DA', 'Maturity proceeds from life insurance policies', 5.00, 20.00, 100000, 100000),
+    ('194EE', 'Payments from National Savings Scheme (NSS)', 10.00, 20.00, 2500, 2500),
+    ('194F', 'Repurchase of units by Mutual Fund/UTI', 20.00, 20.00, 0, 0),
+    ('194G', 'Commission on sale of lottery tickets', 5.00, 20.00, 15000, 15000),
+    ('194H', 'Brokerage or commission', 2.00, 20.00, 15000, 15000),
+    ('194-I', 'Rent on land, building, or furniture', 10.00, 20.00, 240000, 240000),
+    ('194-I', 'Rent on plant, machinery, or equipment', 2.00, 20.00, 240000, 240000),
+    ('194-IB', 'Rent paid by Individual / HUF', 2.00, 20.00, 600000, 600000),
+    ('194-IA', 'Payment on transfer of immovable property', 1.00, 20.00, 5000000, 5000000),
+    ('194-IC', 'Monetary payment under Joint Development Agreement', 10.00, 20.00, 0, 0),
+    ('194J', 'Technical fees, royalty, call centre operator', 2.00, 20.00, 30000, 30000),
+    ('194J', 'Professional fees, director fees, non-compete', 10.00, 20.00, 30000, 30000),
+    ('194K', 'Income in respect of mutual fund units', 10.00, 20.00, 5000, 5000),
+    ('194M', 'Contract/professional fees paid by Individual/HUF', 2.00, 20.00, 5000000, 5000000),
+    ('194N', 'Cash withdrawals from banking company/co-op bank', 2.00, 20.00, 10000000, 10000000),
+    ('194-O', 'E-commerce operator on sale of goods/services', 0.10, 20.00, 500000, 500000),
+    ('194Q', 'Purchase of goods exceeding specified limit', 0.10, 20.00, 5000000, 5000000),
+    ('194R', 'Benefit or perquisite arising from business/profession', 10.00, 20.00, 20000, 20000),
+    ('194S', 'Transfer of Virtual Digital Assets (Crypto, NFT)', 1.00, 20.00, 10000, 10000),
+    ('195', 'Payments to Non-Resident / Foreign Company', 20.00, 20.00, 0, 0),
+    ('206AA', 'Higher rate for failure to furnish PAN', 20.00, 20.00, 0, 0),
+    ('206AB', 'Higher rate for non-filers of specified tax returns', 5.00, 20.00, 0, 0),
 ]
 
 
 def seed_tds_section_rates(cur, conn, society_id: int):
     inserted = 0
-    for i, (section, rate, rate_no_pan, single_thr, annual_thr) in enumerate(TDS_SECTION_RATE_SEED):
+    for i, (section, nature, rate, rate_no_pan, single_thr, annual_thr) in enumerate(TDS_SECTION_RATE_SEED):
         # Stagger effective_from per variant so the UNIQUE(society_id,section,
         # effective_from) constraint keeps one "current" row per (section,rate).
         eff_from = f"{2024 + i}-04-01"
@@ -995,11 +1026,11 @@ def seed_tds_section_rates(cur, conn, society_id: int):
             continue
         cur.execute(
             """INSERT INTO tds_section_rates
-               (society_id, section, rate, rate_no_pan,
+               (society_id, section, nature_of_income, rate, rate_no_pan,
                 single_bill_threshold, annual_aggregate_threshold, effective_from)
-               VALUES (%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT DO NOTHING""",
-            (society_id, section, rate, rate_no_pan, single_thr, annual_thr, eff_from),
+            (society_id, section, nature, rate, rate_no_pan, single_thr, annual_thr, eff_from),
         )
         conn.commit()
         inserted += 1

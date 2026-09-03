@@ -618,6 +618,13 @@ KPI_CARDS = {
         "title": "Patrol Locations", "group": "settings",
     },
 
+    "kpi_tds_rates": {
+        "query": "SELECT COUNT(*) AS v FROM tds_section_rates WHERE society_id=%s",
+        "params": 1, "format": "number",
+        "icon": "fa-percent", "color": "#8e44ad",
+        "title": "TDS Rates", "group": "settings",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
@@ -1099,6 +1106,7 @@ DEFAULT_LAYOUTS = {
             "kpi_compliance_settings",
             "kpi_time_qr",
             "kpi_patrol_locations",
+            "kpi_tds_rates",
         ],
         "channels": [
             "kpi_channels_total",

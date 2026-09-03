@@ -43,6 +43,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "visitors":           "visitors",
     "event_ticket_items": "event_ticket_items",
     "patrol_locations":   "patrol_locations",
+    "tds_rates":          "tds_section_rates",
     # "channels" was declared in the drilldown registry (PK_MAP,
     # ENTITY_MAP, 5 KPI -> list_channels -> profile_channel mappings) but
     # never registered here, so get_entity_meta()["channels"] never
@@ -437,9 +438,22 @@ def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dic
                 opts = [{"label": r["service_type"], "value": r["service_type"]} for r in rows]
             except Exception as e:
                 print(f"⚠️  load_dynamic_select_options(vendor_service_types): {e}")
-        # Always offer "Other" — covers new societies with no vendors yet,
+        # always offer "Other" — covers new societies with no vendors yet,
         # and concerns that genuinely don't match any onboarded vendor type.
         opts.append({"label": "Other", "value": "other"})
+        return opts
+    elif marker == "tds_sections":
+        opts: list[dict] = []
+        if society_id:
+            try:
+                rows = db._execute(
+                    "SELECT DISTINCT section FROM tds_section_rates "
+                    "WHERE society_id=%s ORDER BY section",
+                    (society_id,), fetch_all=True,
+                ) or []
+                opts = [{"label": r["section"], "value": r["section"]} for r in rows]
+            except Exception as e:
+                print(f"⚠️  load_dynamic_select_options(tds_sections): {e}")
         return opts
     return []
 
@@ -493,9 +507,13 @@ def _build_field(col: dict) -> dict:
         # concern lines up with who can actually be invited to fix it), plus
         # a constant "Other" fallback. That's per-society and DB-driven, so
         # it can't be resolved at import time here; renderers.py resolves
-        # this marker live when the form is actually built.
+        # marker live when the form is actually built.
         field["type"] = "select"
         field["dynamic_options"] = "vendor_service_types"
+
+    elif (table, name) == ("expenses", "tds_section"):
+        field["type"] = "select"
+        field["dynamic_options"] = "tds_sections"
 
     elif col["check_options"]:
         field["type"] = "select"
