@@ -2021,13 +2021,14 @@ def register_drilldown_callbacks(app):
         Input({"type": "form-field", "entity": "expenses", "field": "entity_id"}, "value"),
         Input({"type": "form-field", "entity": "expenses", "field": "amount"}, "value"),
         Input({"type": "form-field", "entity": "expenses", "field": "expense_date"}, "value"),
+        Input({"type": "form-field", "entity": "expenses", "field": "tds_section"}, "value"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, store):
+    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, tds_section, store):
         sid = get_current_society_id()
-        if not sid or not acc_id:
+        if not sid:
             return no_update, no_update, no_update
         try:
             amt = float(amount) if amount not in (None, "") else 0.0
@@ -2038,16 +2039,32 @@ def register_drilldown_callbacks(app):
         except (TypeError, ValueError):
             vendor_id = None
         try:
-            acc = int(acc_id)
+            acc = int(acc_id) if acc_id not in (None, "") else None
         except (TypeError, ValueError):
-            return no_update, no_update, no_update
+            acc = None
+
+        import dash
+        ctx = dash.callback_context
+        triggered = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+        
+        # If the account changed, we want to fetch its default section.
+        # Otherwise (amount, entity, or section itself changed), we preserve the current section selection.
+        if "acc_id" in triggered or not triggered:
+            override_section = None
+        else:
+            override_section = tds_section
 
         sug = tds_compliance.suggest_expense_tax_fields(
-            db, sid, acc, vendor_id, amt, expense_date=expense_date,
+            db, sid, acc, vendor_id, amt, expense_date=expense_date, override_section=override_section,
         )
+        
+        # If the user just manually picked a section, don't overwrite the dropdown with the exact same value 
+        # to avoid cursor jumps / redraws.
+        out_section = no_update if "tds_section" in triggered else (sug["tds_section"] or "")
+
         return (
             sug["tds_pct"] if sug["tds_applies"] else 0,
-            sug["tds_section"] or "",
+            out_section,
             {
                 "tds_pct": sug["tds_pct"],
                 "tds_section": sug["tds_section"],
