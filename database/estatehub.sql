@@ -8473,3 +8473,121 @@ BEGIN
     GROUP BY a.mutuality_nature;
 END;
 $$;
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 18: FIXED ASSET REGISTER
+-- ════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_fixed_asset_register_fy(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_fixed_asset_register_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    account_id            INT,
+    account_name          VARCHAR,
+    depreciation_percent  NUMERIC(5,2),
+    opening_wdv           NUMERIC(15,2),
+    additions_first_half  NUMERIC(15,2),
+    additions_second_half NUMERIC(15,2),
+    deductions            NUMERIC(15,2),
+    depreciation_charge   NUMERIC(15,2),
+    closing_wdv           NUMERIC(15,2)
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_half_cutoff DATE := MAKE_DATE(p_fy, 9, 1);
+BEGIN
+    RETURN QUERY
+    WITH blocks AS (
+        SELECT id AS acc_id, name AS acc_name, a.depreciation_percent AS dep_pct
+        FROM accounts a
+        WHERE a.society_id = p_society_id AND COALESCE(a.is_depreciable, FALSE) = TRUE
+    ),
+    wdv AS (
+        SELECT b.acc_id, fn_resolve_bf_amount_fy(p_society_id, b.acc_id, p_fy) AS op_wdv
+        FROM blocks b
+    ),
+    adds AS (
+        SELECT acc_id,
+               SUM(CASE WHEN purchase_date < v_half_cutoff THEN purchase_value ELSE 0 END) AS add_fh,
+               SUM(CASE WHEN purchase_date >= v_half_cutoff THEN purchase_value ELSE 0 END) AS add_sh
+        FROM assets
+        WHERE society_id = p_society_id AND purchase_date BETWEEN v_fy_start AND v_fy_end AND disposed = FALSE
+        GROUP BY acc_id
+    ),
+    deds AS (
+        SELECT t.acc_id, SUM(t.amount) AS deds_val
+        FROM transactions t
+        JOIN blocks b ON t.acc_id = b.acc_id
+        WHERE t.society_id = p_society_id
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+          AND t.entry_side = 'Cr'
+          AND t.status = 'paid'
+          AND t.source_table = 'assets'
+        GROUP BY t.acc_id
+    )
+    SELECT
+        b.acc_id,
+        b.acc_name,
+        b.dep_pct,
+        COALESCE(w.op_wdv, 0) AS opening_wdv,
+        COALESCE(a.add_fh, 0) AS additions_first_half,
+        COALESCE(a.add_sh, 0) AS additions_second_half,
+        COALESCE(d.deds_val, 0) AS deductions,
+        fn_account_depreciation(p_society_id, b.acc_id, p_fy) AS depreciation_charge,
+        COALESCE(w.op_wdv, 0) + COALESCE(a.add_fh, 0) + COALESCE(a.add_sh, 0) - COALESCE(d.deds_val, 0) - fn_account_depreciation(p_society_id, b.acc_id, p_fy) AS closing_wdv
+    FROM blocks b
+    LEFT JOIN wdv w ON b.acc_id = w.acc_id
+    LEFT JOIN adds a ON b.acc_id = a.acc_id
+    LEFT JOIN deds d ON b.acc_id = d.acc_id
+    ORDER BY b.acc_name;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS fn_fixed_assets_list_fy(INT, INT) CASCADE;
+CREATE OR REPLACE FUNCTION fn_fixed_assets_list_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    asset_id      INT,
+    asset_name    VARCHAR,
+    asset_sno     VARCHAR,
+    account_name  VARCHAR,
+    purchase_date DATE,
+    purchase_value NUMERIC(15,2),
+    disposed      BOOLEAN,
+    disposal_date DATE,
+    sale_value    NUMERIC(15,2)
+) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+BEGIN
+    RETURN QUERY
+    SELECT
+        ast.id AS asset_id,
+        ast.asset_name,
+        ast.asset_sno,
+        acc.name AS account_name,
+        ast.purchase_date,
+        ast.purchase_value,
+        ast.disposed,
+        ast.disposal_date,
+        (
+            SELECT SUM(amount)
+            FROM transactions t
+            WHERE t.society_id = p_society_id
+              AND t.source_table = 'assets'
+              AND t.source_id = ast.id
+              AND t.entry_side = 'Cr'
+              AND t.status = 'paid'
+        ) AS sale_value
+    FROM assets ast
+    JOIN accounts acc ON ast.acc_id = acc.id
+    WHERE ast.society_id = p_society_id
+      AND ast.purchase_date <= v_fy_end
+    ORDER BY acc.name, ast.purchase_date;
+END;
+$$;
