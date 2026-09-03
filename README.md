@@ -27,8 +27,9 @@
 17. [Codebase Map](#17-codebase-map)
 18. [Critical Dash Rules](#18-critical-dash-rules)
 19. [Known Bugs & Fixes Applied](#19-known-bugs--fixes-applied)
-20. [🗑️ Legacy Code Removal Guide](#20-️-legacy-code-removal-guide)
-21. [Deployment Notes](#21-deployment-notes)
+20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
+21. [🗑️ Legacy Code Removal Guide](#21-️-legacy-code-removal-guide)
+22. [Deployment Notes](#22-deployment-notes)
 
 ---
 
@@ -831,7 +832,109 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 
 ---
 
-## 20. 🧹 Legacy Code Cleanup Status
+## 20. 🚩 Open Design Subtleties & Flagged Caveats
+
+Behaviors the code deliberately implements a specific (non-obvious) way, or
+explicitly defers — not bugs, but easy to break by accident if a future
+change doesn't know the reasoning below. Distinct from [§19](#19-known-bugs--fixes-applied),
+which is already-fixed bugs, and [§18](#18-critical-dash-rules), which is
+Dash-framework footguns.
+
+### QR / Gate-Pass Signing
+
+- **Legacy unsigned codes still validate.** `QR_SIGNING_SECRET` is unset by
+  default (mirrors `VAPID_PRIVATE_KEY`/`VAPID_PUBLIC_KEY` in
+  `push_service.py` — both silently no-op until deliberately provisioned).
+  Once set, newly generated codes for versioned roles (`APT`/`VND`/`SEC`/`PTL`/`ADM`)
+  are HMAC-signed, but a previously-printed *unsigned* code for those same
+  roles still passes `validate_qr_code` during the reprint transition
+  window (`qr_service.py`). **Open item:** the "legacy unsigned still
+  accepted" branch is meant to be removed once every existing pass has
+  actually been reprinted — nothing in the code enforces that this has
+  happened.
+- **`revoke_and_reissue` doesn't check the caller's role itself.** It's the
+  single source of truth for bumping `qr_version`, but authorization
+  (admin-only) is the *calling* callback's job (`confirm_revoke_and_reissue`
+  in `qr_callbacks.py`). Any new code path that calls `revoke_and_reissue`
+  directly must re-implement that admin check — it will not fail safe on
+  its own.
+- **ADM's `qr_version` lives on two different counters depending on
+  history.** `entity_id` for an admin's QR is always `users.id`, but
+  `_current_qr_version`'s ADM branch resolves the actual version from
+  `apartments.qr_version` if the admin was promoted from an apartment owner
+  (linked_id still points at their old apartment row), or from
+  `users.qr_version` if they were seeded as the society's first admin
+  (no apartment to attach to). `revoke_and_reissue` mirrors this exact
+  dual-counter logic — any future QR/admin code must replicate *both*
+  branches identically or revocation will silently no-op for one of the
+  two admin types.
+- **`_QR_VERSIONED_ROLES` is intentionally narrow:** only
+  `APT`/`VND`/`SEC`/`PTL`. Concerns (`CON`) and event tickets (`EVT`) are
+  QR-*signable* lookups but are **not** versioned/reissuable — calling
+  `revoke_and_reissue` with either raises `ValueError` by design. (A
+  now-removed admin card briefly offered both in its picker — see the
+  `remove_broken_qr_manager.patch` history.)
+- **Viewing/printing/saving/emailing a QR must never bump `qr_version`** —
+  only an explicit admin revoke does. An earlier design auto-bumped on
+  repeat "Save," and was deliberately reverted (see the comment block at
+  the top of `qr_service.py`): the entity reporting a pass lost/stolen is
+  the only trustworthy signal, not a heuristic based on button clicks.
+- **`event_ticket`/`patrol_location` scans don't write to `gate_access`.**
+  `GATE_PERSON_ROLES` in `qr_callbacks.py` is deliberately just
+  `("apartment", "vendor", "security", "admin")` — those two roles log
+  themselves inside their own validators (`validate_event_ticket_qr`,
+  `validate_patrol_qr`) instead. Anything that reports gate traffic by
+  querying `gate_access` alone will silently undercount patrol rounds and
+  event admissions.
+- **`patrol_locations` is deliberately outside the generic drilldown
+  engine.** `registry.py`'s `_NO_AUTO_ACTIONS` opts it out of
+  `DRILLDOWN_MAP`-driven CRUD on purpose (read-only QR-scan profile);
+  `patrol_location_callbacks.py` is a self-contained add/list/scan module
+  instead. Generic drilldown changes elsewhere will not automatically
+  reach patrol locations.
+
+### Concurrency / "First Writer Wins" Patterns
+
+- **The DB driver layer exposes no `cur.rowcount`.** Every place that needs
+  to detect "did my write actually win a race" (visitor admission in
+  `qr_service.validate_visitor_qr`, alert state transitions in
+  `alert_service.py`) uses a conditional `UPDATE ... WHERE <still-pending>
+  RETURNING id` and checks whether a row came back — not a rowcount check.
+  Any new concurrent-write code must follow the same `RETURNING`-based
+  pattern; a naive `UPDATE` + assume-success will not be race-safe here.
+- **`entity_id` alone collides across `apartments`/`vendors`/`security_staff`.**
+  Already caused one shipped bug (`fn_account_ledger_fy`, see §19) — every
+  join against those three tables on `entity_id` must also filter on
+  `role`, since the ids are independent per-table sequences, not a shared
+  namespace.
+
+### Trust Boundary
+
+- **Client-supplied `profile_action` / `auth_data` fields are never trusted
+  directly for identity-bearing actions.** `toggle_qr_modal` re-derives
+  `role`/`society_id`/`user_id` from the server session for the caller's
+  *own* QR, and separately re-validates admin/master + same-society scope
+  before minting a gate pass *for another entity* from `profile_action`
+  (`qr_callbacks.py`). The comments there call out that this was previously
+  a real vulnerability (QR identity sourced from client-editable
+  `auth-store`) — any new profile action that mints a credential or writes
+  `confirmed_by`/`user_id` needs the same re-derivation, not a pass-through
+  of whatever the client sent.
+
+### Deferred / Not-Yet-Built
+
+- **Cashbook `Cr LF` / `Dr LF` (ledger folio) columns are deliberately
+  omitted** from `_CASHBOOK_LIST_COLUMNS` in `schema_introspect.py` —
+  waiting on the Ledger Index/pagination feature that would actually
+  assign folio numbers.
+- **`MST` (master admin) has no QR entry at all, by design** — a
+  platform-level onboarding role with no `society_id` or gate/entity
+  identity to represent (`qr_service.py`). Don't add one without first
+  deciding what a master-level QR would even mean.
+
+---
+
+## 21. 🧹 Legacy Code Cleanup Status
 
 All dead, superseded, or bug-inducing code identified in previous phases has been **successfully cleaned up and removed** from the repository to ensure optimal performance, prevent startup crashes, and keep the codebase tidy:
 
@@ -850,7 +953,7 @@ All dead, superseded, or bug-inducing code identified in previous phases has bee
 
 ---
 
-## 21. Deployment & Utility Notes
+## 22. Deployment & Utility Notes
 
 ### Environment Variables
 
