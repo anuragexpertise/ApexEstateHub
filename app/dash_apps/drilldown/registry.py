@@ -181,9 +181,6 @@ DRILLDOWN_MAP: dict = {
     "kpi_patrol_locations": {
         "target": "list_patrol_locations", "label": "Patrol Locations",
     },
-    "kpi_QR_version": {
-        "target": "form_qr_manager", "label": "Manage QR Versions",
-    },
     "kpi_gate_logs": {"target": "list_gate_logs", "label": "Gate Logs Today"},
     "kpi_presumed_visitor": {
         "target": "list_visitors",

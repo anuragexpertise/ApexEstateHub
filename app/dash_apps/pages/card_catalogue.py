@@ -618,13 +618,6 @@ KPI_CARDS = {
         "title": "Patrol Locations", "group": "settings",
     },
 
-    "kpi_QR_version": {
-        "query": "SELECT 'Manage' AS v",
-        "params": 0, "format": "text",
-        "icon": "fa-qrcode", "color": "#e74c3c",
-        "title": "QR Version Manager", "group": "settings",
-    },
-
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
