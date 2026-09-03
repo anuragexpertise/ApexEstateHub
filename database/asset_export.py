@@ -38,10 +38,10 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
 
     headers = [
         "Block / Account Name", "Dep Rate %", "Opening WDV",
-        "Additions (<1 Sep)", "Additions (>=1 Sep)", "Deductions / Sales",
-        "Depreciation Charge", "Closing WDV",
+        "Additions (>=180 days use)", "Additions (<180 days use)", "Deductions / Sales",
+        "Depreciation Charge", "Closing WDV", "STCG u/s 50", "STCL u/s 50",
     ]
-    widths = {"A": 25, "B": 12, "C": 15, "D": 18, "E": 18, "F": 18, "G": 18, "H": 18}
+    widths = {"A": 25, "B": 12, "C": 15, "D": 20, "E": 20, "F": 18, "G": 18, "H": 18, "I": 14, "J": 14}
     _apply_header(ws, 2, widths)
 
     for col, hdr in enumerate(headers, start=1):
@@ -52,7 +52,7 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         cell.border = _BORDER_ALL
 
     r = 3
-    t_op, t_a1, t_a2, t_ded, t_dep, t_cl = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    t_op, t_a1, t_a2, t_ded, t_dep, t_cl, t_stcg, t_stcl = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     for row in rows:
         acc_name = row.get("account_name", "")
         pct = float(row.get("depreciation_percent") or 0)
@@ -62,8 +62,10 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         ded = float(row.get("deductions") or 0)
         dep = float(row.get("depreciation_charge") or 0)
         cl_wdv = float(row.get("closing_wdv") or 0)
+        stcg = float(row.get("stcg_u_s_50") or 0)
+        stcl = float(row.get("stcl_u_s_50") or 0)
 
-        vals = [acc_name, pct, op_wdv, a1, a2, ded, dep, cl_wdv]
+        vals = [acc_name, pct, op_wdv, a1, a2, ded, dep, cl_wdv, stcg, stcl]
         for col, val in enumerate(vals, start=1):
             cell = ws.cell(row=r, column=col, value=val)
             cell.font = _FONT_BODY
@@ -83,9 +85,11 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         t_ded += ded
         t_dep += dep
         t_cl += cl_wdv
+        t_stcg += stcg
+        t_stcl += stcl
 
     if rows:
-        totals = ["TOTAL", "", t_op, t_a1, t_a2, t_ded, t_dep, t_cl]
+        totals = ["TOTAL", "", t_op, t_a1, t_a2, t_ded, t_dep, t_cl, t_stcg, t_stcl]
         for col, val in enumerate(totals, start=1):
             cell = ws.cell(row=r, column=col, value=val)
             cell.font = _FONT_TOTAL
@@ -95,6 +99,12 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
             elif col > 2:
                 cell.alignment = _ALIGN_R
                 cell.number_format = _FMT_AMT
+        if t_stcg or t_stcl:
+            r += 2
+            note = ws.cell(row=r, column=1,
+                value="STCG/STCL u/s 50 are separate short-term capital gains/losses — report them in the capital gains "
+                      "schedule of the FY return, not as ordinary business income/expense.")
+            note.font = Font(name="Arial", size=8, italic=True, color="C0392B")
 
 def _write_asset_list_sheet(ws, rows: list[dict], fy: int) -> None:
     ws.cell(row=1, column=1, value=f"Fixed Asset Details FY {fy}-{fy+1}")

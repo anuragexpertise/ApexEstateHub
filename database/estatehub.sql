@@ -3899,8 +3899,6 @@ DECLARE
     v_receipt_id INT;
     v_trx_id     INT;
     v_journal_id INT;
-    v_book_value NUMERIC(15,2);
-    v_gain_loss  NUMERIC(15,2);
     v_desc       TEXT;
 BEGIN
     SELECT * INTO v_asset FROM assets WHERE id = p_asset_id FOR UPDATE;
@@ -3917,13 +3915,17 @@ BEGIN
         LIMIT 1;
     END IF;
 
-    -- Book value = purchase_value less straight-line depreciation
-    v_book_value := GREATEST(
-        v_asset.purchase_value * (1 - COALESCE(v_asset.depreciation_rate,
-                                              COALESCE((SELECT depreciation_percent FROM accounts WHERE id = v_asset.acc_id), 100)) / 100),
-        0);
-    v_gain_loss := p_sale_value - v_book_value;
-
+    -- Fixed (2026-09, CA compliance pass): this used to compute a
+    -- straight-line "book value" per asset and post the gain/loss over
+    -- book value to a separate income account. That's individual-asset
+    -- accounting, not the Block-of-Assets method the rest of the ledger
+    -- (fn_account_depreciation, fn_fixed_asset_register_fy) uses. Under
+    -- sec. 43(6)(c) of the Income-tax Act, a disposal simply reduces the
+    -- BLOCK by the actual moneys payable (sale value) — there is no
+    -- per-asset gain/loss to recognise at the time of sale; any excess of
+    -- deductions over the block's WDV becomes sec. 50 short-term capital
+    -- gain, computed at the block/FY level (see fn_account_depreciation
+    -- and fn_fixed_asset_register_fy), not per-transaction here.
     v_desc := COALESCE(p_particulars, 'Asset Sale - ' || v_asset.asset_name);
     v_bank_acc := fn_resolve_bank_leg(v_asset.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
@@ -3951,40 +3953,18 @@ BEGIN
         );
     END IF;
 
-    -- Cr: asset class account (book value removal)
+    -- Cr: asset class (block) account, for the FULL sale value — this is
+    -- the "deductions" leg fn_account_depreciation / fn_fixed_asset_register_fy
+    -- read back as moneys payable reducing the block, per sec. 43(6)(c).
+    -- No separate gain/loss leg: the block method has none at this stage.
     INSERT INTO transactions(
         society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
         amount, mode, status, created_by, created_at, source_table, source_id, journal_id
     ) VALUES (
         v_asset.society_id, 'Cr', p_sale_date, v_asset.acc_id, p_asset_id, 'assets',
-        'Asset written off - ' || v_asset.asset_name,
-        v_book_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+        'Asset disposed (moneys payable) - ' || v_asset.asset_name,
+        p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
-
-    -- Cr (balancing): gain, or Dr (balancing): loss via the sale income account
-    IF v_gain_loss <> 0 THEN
-        IF v_gain_loss > 0 THEN
-            -- Gain: Cr income account
-            INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-            ) VALUES (
-                v_asset.society_id, 'Cr', p_sale_date, v_acc_id, p_asset_id, 'assets',
-                'Gain on sale - ' || v_asset.asset_name,
-                v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
-            );
-        ELSE
-            -- Loss: Dr loss account (the same income account, debited)
-            INSERT INTO transactions(
-                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-            ) VALUES (
-                v_asset.society_id, 'Dr', p_sale_date, v_acc_id, p_asset_id, 'assets',
-                'Loss on sale - ' || v_asset.asset_name,
-                -v_gain_loss, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
-            );
-        END IF;
-    END IF;
 
     -- Create receipt for the asset sale proceeds
     INSERT INTO receipts(
@@ -4731,15 +4711,66 @@ END;
 $$;
 
 -- SECTION 4: DEPRECIATION CALCULATION
--- Full-year depreciation on brought-forward WDV; half-year depreciation
--- on assets purchased on/after 1-Sep of the financial year (per spec:
--- "Half depreciation if asset date > 1 Sep of the year").
--- ════════════════════════════════════════════════════════════════
-
--- Fixed (2026-08): same SMALLINT->INT fix as fn_resolve_bf_amount_fy
--- above, same reason — plain integer literals/Python ints don't
--- implicitly cast to smallint for function-call resolution.
+-- Block-of-Assets WDV method per Section 32 / 43(6)(c) of the Income-tax
+-- Act, 1961.
+--
+-- Fixed (2026-09, CA compliance pass — see fixed_asset_register_compliance
+-- patch notes):
+--   1. Half-year test was a fixed "1-Sep" calendar cutoff. The actual
+--      statutory test (Explanation 5 to sec. 32 / Rule 5) is 180 days of
+--      use before FY-end (31 Mar), which falls around 3 Oct, not 1 Sep —
+--      the old cutoff wrongly denied full depreciation to any asset put
+--      to use between ~1 Sep and ~3 Oct. Replaced with a per-asset day
+--      count (fn_asset_gets_full_year_dep helper) so it's exact for every
+--      year including leap years, instead of a second hardcoded date.
+--   2. Deductions (assets disposed during the FY) were previously ignored
+--      by this function entirely — depreciation was charged on the full
+--      opening WDV + additions even when part of the block was sold
+--      mid-year. Sec. 43(6)(c) requires moneys payable for assets sold
+--      during the year to reduce the block BEFORE depreciation is
+--      computed on it. Deductions are now netted off (full-rate portion
+--      first, spilling into the half-rate portion) before applying the
+--      rate.
+--   3. If deductions exceed the block's WDV + additions, the block value
+--      goes negative — that excess is a short-term capital gain under
+--      sec. 50(1), not depreciation, and no depreciation is allowed on
+--      the block for that year. This function returns 0 in that case;
+--      the STCG figure itself is surfaced by fn_fixed_asset_register_fy
+--      (this function's contract is just the P&L depreciation figure).
 DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, SMALLINT) CASCADE;
+DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, INT) CASCADE;
+
+-- fn_asset_gets_full_year_dep: TRUE if an asset put to use on p_purchase_date
+-- has been used for 180 days or more by p_fy_end (statutory test for full
+-- vs. half depreciation), FALSE otherwise.
+DROP FUNCTION IF EXISTS fn_asset_gets_full_year_dep (DATE, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION fn_asset_gets_full_year_dep(
+    p_purchase_date DATE,
+    p_fy_end        DATE
+) RETURNS BOOLEAN LANGUAGE sql IMMUTABLE AS $$
+    SELECT (p_fy_end - p_purchase_date + 1) >= 180;
+$$;
+
+-- fn_block_dep_base: shared netting logic — given a block's opening WDV,
+-- full-rate additions, half-rate additions, and in-year deductions
+-- (moneys payable for disposals), returns (full_rate_base, half_rate_base,
+-- stcg). Deductions are absorbed against the full-rate base first (opening
+-- WDV + pre-cutoff additions), any excess against the half-rate base
+-- (post-cutoff additions), and any further excess is sec. 50(1) STCG with
+-- both bases floored at 0.
+DROP FUNCTION IF EXISTS fn_block_dep_base (NUMERIC, NUMERIC, NUMERIC, NUMERIC) CASCADE;
+CREATE OR REPLACE FUNCTION fn_block_dep_base(
+    p_opening_wdv NUMERIC,
+    p_add_full    NUMERIC,
+    p_add_half    NUMERIC,
+    p_deductions  NUMERIC
+) RETURNS TABLE (full_rate_base NUMERIC, half_rate_base NUMERIC, stcg NUMERIC)
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT
+        GREATEST(COALESCE(p_opening_wdv, 0) + COALESCE(p_add_full, 0) - COALESCE(p_deductions, 0), 0) AS full_rate_base,
+        GREATEST(COALESCE(p_add_half, 0) - GREATEST(COALESCE(p_deductions, 0) - (COALESCE(p_opening_wdv, 0) + COALESCE(p_add_full, 0)), 0), 0) AS half_rate_base,
+        GREATEST(COALESCE(p_deductions, 0) - (COALESCE(p_opening_wdv, 0) + COALESCE(p_add_full, 0) + COALESCE(p_add_half, 0)), 0) AS stcg;
+$$;
 
 CREATE OR REPLACE FUNCTION fn_account_depreciation(
     p_society_id     INT,
@@ -4751,37 +4782,52 @@ DECLARE
     v_dep_pct      NUMERIC(5,2);
     v_is_dep       BOOLEAN;
     v_opening_wdv  NUMERIC(15,2);
-    v_dep_opening  NUMERIC(15,2) := 0;
-    v_dep_additions NUMERIC(15,2) := 0;
-    v_half_cutoff  DATE := MAKE_DATE(p_financial_year, 9, 1);
+    v_add_full     NUMERIC(15,2) := 0;
+    v_add_half     NUMERIC(15,2) := 0;
+    v_deductions   NUMERIC(15,2) := 0;
+    v_base         RECORD;
     v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
     v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
 BEGIN
     SELECT depreciation_percent, is_depreciable
       INTO v_dep_pct, v_is_dep
       FROM accounts WHERE id = p_account_id AND society_id = p_society_id;
- 
+
     IF NOT FOUND OR NOT COALESCE(v_is_dep, FALSE) OR COALESCE(v_dep_pct, 100) >= 100 THEN
         RETURN 0;
     END IF;
- 
-    -- Depreciation on the opening WDV (assets already owned before this FY)
+
     v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
-    v_dep_opening := GREATEST(v_opening_wdv, 0) * v_dep_pct / 100.0;
- 
-    -- Depreciation on assets purchased DURING this FY (half-year rule)
-    SELECT COALESCE(SUM(
-        purchase_value * v_dep_pct / 100.0 *
-        CASE WHEN purchase_date >= v_half_cutoff THEN 0.5 ELSE 1.0 END
-    ), 0)
-    INTO v_dep_additions
-    FROM assets
-    WHERE society_id = p_society_id
-      AND acc_id = p_account_id
-      AND purchase_date BETWEEN v_fy_start AND v_fy_end
-      AND disposed = FALSE;
- 
-    RETURN ROUND(v_dep_opening + v_dep_additions, 2);
+
+    SELECT
+        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0),
+        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0)
+      INTO v_add_full, v_add_half
+      FROM assets
+     WHERE society_id = p_society_id
+       AND acc_id = p_account_id
+       AND purchase_date BETWEEN v_fy_start AND v_fy_end;
+       -- Fixed (2026-09): no "disposed = FALSE" filter here — an asset
+       -- bought AND sold within the same FY still adds its cost to the
+       -- block per sec. 43(6)(c); its sale proceeds reduce the block
+       -- separately via the deductions query below. Excluding it here
+       -- silently dropped its acquisition cost from the block entirely.
+
+    -- Deductions: moneys payable for assets of this block disposed during
+    -- the FY (fn_dispose_asset posts this as a single Cr leg on the block
+    -- account for the actual sale value — see that function's notes).
+    SELECT COALESCE(SUM(t.amount), 0) INTO v_deductions
+      FROM transactions t
+     WHERE t.society_id = p_society_id
+       AND t.acc_id = p_account_id
+       AND t.entry_side = 'Cr'
+       AND t.status = 'paid'
+       AND t.source_table = 'assets'
+       AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
+
+    SELECT * INTO v_base FROM fn_block_dep_base(v_opening_wdv, v_add_full, v_add_half, v_deductions);
+
+    RETURN ROUND(v_base.full_rate_base * v_dep_pct / 100.0 + v_base.half_rate_base * v_dep_pct / 100.0 * 0.5, 2);
 END;
 $$;
 
@@ -4804,6 +4850,11 @@ $$;
 -- something that would benefit from the split.
 DROP FUNCTION IF EXISTS fn_account_depreciation_split (INT, INT, INT) CASCADE;
 
+-- Same block-netted base as fn_account_depreciation (see that function's
+-- header notes for the 2026-09 compliance fixes) — just returned as the
+-- (full-rate, half-rate) pair instead of a single total, for the ledger's
+-- two-row display. full_amount + half_amount always equals
+-- fn_account_depreciation's own total for the same arguments.
 CREATE OR REPLACE FUNCTION fn_account_depreciation_split(
     p_society_id     INT,
     p_account_id     INT,
@@ -4815,10 +4866,10 @@ DECLARE
     v_dep_pct      NUMERIC(5,2);
     v_is_dep       BOOLEAN;
     v_opening_wdv  NUMERIC(15,2);
-    v_dep_opening  NUMERIC(15,2) := 0;
-    v_dep_full_additions NUMERIC(15,2) := 0;
-    v_dep_half_additions NUMERIC(15,2) := 0;
-    v_half_cutoff  DATE := MAKE_DATE(p_financial_year, 9, 1);
+    v_add_full     NUMERIC(15,2) := 0;
+    v_add_half     NUMERIC(15,2) := 0;
+    v_deductions   NUMERIC(15,2) := 0;
+    v_base         RECORD;
     v_fy_start     DATE := MAKE_DATE(p_financial_year, 4, 1);
     v_fy_end       DATE := MAKE_DATE(p_financial_year + 1, 3, 31);
 BEGIN
@@ -4832,27 +4883,32 @@ BEGIN
     END IF;
 
     v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
-    v_dep_opening := GREATEST(v_opening_wdv, 0) * v_dep_pct / 100.0;
 
-    SELECT COALESCE(SUM(purchase_value * v_dep_pct / 100.0), 0)
-    INTO v_dep_full_additions
-    FROM assets
-    WHERE society_id = p_society_id AND acc_id = p_account_id
-      AND purchase_date BETWEEN v_fy_start AND v_fy_end
-      AND purchase_date < v_half_cutoff
-      AND disposed = FALSE;
+    SELECT
+        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0),
+        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0)
+      INTO v_add_full, v_add_half
+      FROM assets
+     WHERE society_id = p_society_id AND acc_id = p_account_id
+       AND purchase_date BETWEEN v_fy_start AND v_fy_end;
+       -- Fixed (2026-09): same fix as fn_account_depreciation — no
+       -- disposed=FALSE filter; a same-FY buy-then-sell still adds cost
+       -- here and is netted via deductions below.
 
-    SELECT COALESCE(SUM(purchase_value * v_dep_pct / 100.0 * 0.5), 0)
-    INTO v_dep_half_additions
-    FROM assets
-    WHERE society_id = p_society_id AND acc_id = p_account_id
-      AND purchase_date BETWEEN v_fy_start AND v_fy_end
-      AND purchase_date >= v_half_cutoff
-      AND disposed = FALSE;
+    SELECT COALESCE(SUM(t.amount), 0) INTO v_deductions
+      FROM transactions t
+     WHERE t.society_id = p_society_id
+       AND t.acc_id = p_account_id
+       AND t.entry_side = 'Cr'
+       AND t.status = 'paid'
+       AND t.source_table = 'assets'
+       AND t.trx_date BETWEEN v_fy_start AND v_fy_end;
+
+    SELECT * INTO v_base FROM fn_block_dep_base(v_opening_wdv, v_add_full, v_add_half, v_deductions);
 
     RETURN QUERY SELECT
-        ROUND(v_dep_opening + v_dep_full_additions, 2)::NUMERIC(15,2),
-        ROUND(v_dep_half_additions, 2)::NUMERIC(15,2);
+        ROUND(v_base.full_rate_base * v_dep_pct / 100.0, 2)::NUMERIC(15,2),
+        ROUND(v_base.half_rate_base * v_dep_pct / 100.0 * 0.5, 2)::NUMERIC(15,2);
 END;
 $$;
 
@@ -8477,6 +8533,21 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 18: FIXED ASSET REGISTER
 -- ════════════════════════════════════════════════════════════════
+-- Fixed (2026-09, CA compliance pass):
+--   - additions_first_half/additions_second_half now split on the
+--     statutory 180-day test (fn_asset_gets_full_year_dep) instead of a
+--     fixed 1-Sep cutoff.
+--   - deductions/depreciation_charge/closing_wdv now go through the same
+--     block-netting helper (fn_block_dep_base) as fn_account_depreciation,
+--     so this register can never disagree with the P&L depreciation
+--     figure — closing_wdv is floored at 0 rather than allowed negative.
+--   - stcg_u_s_50 / stcl_u_s_50 columns added: sec. 50(1) short-term
+--     capital gain when deductions exceed the block's WDV+additions;
+--     sec. 50(2) short-term capital loss when the block is fully
+--     disposed (no active assets remain) while WDV is still positive.
+--     Both are separate from ordinary P&L depreciation/income and need
+--     their own line in the tax computation — this register surfaces
+--     them, it does not post them anywhere.
 DROP FUNCTION IF EXISTS fn_fixed_asset_register_fy(INT, INT) CASCADE;
 CREATE OR REPLACE FUNCTION fn_fixed_asset_register_fy(
     p_society_id INT,
@@ -8491,12 +8562,13 @@ RETURNS TABLE (
     additions_second_half NUMERIC(15,2),
     deductions            NUMERIC(15,2),
     depreciation_charge   NUMERIC(15,2),
-    closing_wdv           NUMERIC(15,2)
+    closing_wdv           NUMERIC(15,2),
+    stcg_u_s_50           NUMERIC(15,2),
+    stcl_u_s_50           NUMERIC(15,2)
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
     v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
-    v_half_cutoff DATE := MAKE_DATE(p_fy, 9, 1);
 BEGIN
     RETURN QUERY
     WITH blocks AS (
@@ -8510,10 +8582,11 @@ BEGIN
     ),
     adds AS (
         SELECT acc_id,
-               SUM(CASE WHEN purchase_date < v_half_cutoff THEN purchase_value ELSE 0 END) AS add_fh,
-               SUM(CASE WHEN purchase_date >= v_half_cutoff THEN purchase_value ELSE 0 END) AS add_sh
+               SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)) AS add_fh,
+               SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)) AS add_sh
         FROM assets
-        WHERE society_id = p_society_id AND purchase_date BETWEEN v_fy_start AND v_fy_end AND disposed = FALSE
+        WHERE society_id = p_society_id AND purchase_date BETWEEN v_fy_start AND v_fy_end
+        -- Fixed (2026-09): no disposed=FALSE filter — see fn_account_depreciation's notes.
         GROUP BY acc_id
     ),
     deds AS (
@@ -8526,22 +8599,64 @@ BEGIN
           AND t.status = 'paid'
           AND t.source_table = 'assets'
         GROUP BY t.acc_id
+    ),
+    -- Asset headcount as of FY end — used to detect sec. 50(2) "block
+    -- ceases to exist" (every itemised asset in the block disposed, WDV
+    -- still positive => residual is a short-term capital loss). Gated on
+    -- total_count > 0: many blocks (e.g. a lump-sum opening WDV brought
+    -- forward from before this system existed) have NO rows in `assets`
+    -- at all — active_count=0 there means "never itemised", not "all
+    -- sold", and must NOT trigger sec. 50(2). Only a block with at least
+    -- one itemised asset, all of them now disposed, is genuine evidence
+    -- the block ceased to exist.
+    active AS (
+        SELECT acc_id,
+               COUNT(*) AS total_count,
+               COUNT(*) FILTER (WHERE NOT disposed) AS active_count
+        FROM assets
+        WHERE society_id = p_society_id
+          AND purchase_date <= v_fy_end
+        GROUP BY acc_id
+    ),
+    base AS (
+        SELECT
+            b.acc_id, b.acc_name, b.dep_pct,
+            COALESCE(w.op_wdv, 0) AS op_wdv,
+            COALESCE(a.add_fh, 0) AS add_fh,
+            COALESCE(a.add_sh, 0) AS add_sh,
+            COALESCE(d.deds_val, 0) AS deds_val,
+            COALESCE(act.total_count, 0) AS total_count,
+            COALESCE(act.active_count, 0) AS active_count,
+            (COALESCE(w.op_wdv, 0) + COALESCE(a.add_fh, 0) + COALESCE(a.add_sh, 0) - COALESCE(d.deds_val, 0)) AS pre_dep_value
+        FROM blocks b
+        LEFT JOIN wdv w ON b.acc_id = w.acc_id
+        LEFT JOIN adds a ON b.acc_id = a.acc_id
+        LEFT JOIN deds d ON b.acc_id = d.acc_id
+        LEFT JOIN active act ON b.acc_id = act.acc_id
     )
     SELECT
-        b.acc_id,
-        b.acc_name,
-        b.dep_pct,
-        COALESCE(w.op_wdv, 0) AS opening_wdv,
-        COALESCE(a.add_fh, 0) AS additions_first_half,
-        COALESCE(a.add_sh, 0) AS additions_second_half,
-        COALESCE(d.deds_val, 0) AS deductions,
-        fn_account_depreciation(p_society_id, b.acc_id, p_fy) AS depreciation_charge,
-        COALESCE(w.op_wdv, 0) + COALESCE(a.add_fh, 0) + COALESCE(a.add_sh, 0) - COALESCE(d.deds_val, 0) - fn_account_depreciation(p_society_id, b.acc_id, p_fy) AS closing_wdv
-    FROM blocks b
-    LEFT JOIN wdv w ON b.acc_id = w.acc_id
-    LEFT JOIN adds a ON b.acc_id = a.acc_id
-    LEFT JOIN deds d ON b.acc_id = d.acc_id
-    ORDER BY b.acc_name;
+        base.acc_id,
+        base.acc_name,
+        base.dep_pct,
+        base.op_wdv,
+        base.add_fh,
+        base.add_sh,
+        base.deds_val,
+        CASE
+            WHEN base.pre_dep_value <= 0 THEN 0::NUMERIC(15,2)
+            WHEN base.total_count > 0 AND base.active_count = 0 THEN 0::NUMERIC(15,2)  -- block ceases to exist: sec. 50(2), no further depreciation
+            ELSE fn_account_depreciation(p_society_id, base.acc_id, p_fy)
+        END AS depreciation_charge,
+        CASE
+            WHEN base.pre_dep_value <= 0 THEN 0::NUMERIC(15,2)
+            WHEN base.total_count > 0 AND base.active_count = 0 THEN 0::NUMERIC(15,2)
+            ELSE GREATEST(base.pre_dep_value - fn_account_depreciation(p_society_id, base.acc_id, p_fy), 0)
+        END AS closing_wdv,
+        GREATEST(-base.pre_dep_value, 0) AS stcg_u_s_50,
+        CASE WHEN base.total_count > 0 AND base.active_count = 0
+             THEN GREATEST(base.pre_dep_value, 0) ELSE 0::NUMERIC(15,2) END AS stcl_u_s_50
+    FROM base
+    ORDER BY base.acc_name;
 END;
 $$;
 
@@ -8574,7 +8689,7 @@ BEGIN
         ast.purchase_date,
         ast.purchase_value,
         ast.disposed,
-        ast.disposal_date,
+        ast.disposed_at AS disposal_date,
         (
             SELECT SUM(amount)
             FROM transactions t
