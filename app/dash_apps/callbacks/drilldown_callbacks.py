@@ -3160,6 +3160,7 @@ def _save_entity(entity, card_id, data):
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
+        if entity == "tds_rate":        return _save_tds_rate(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
             return False, "Security charge rules have been removed. Use manual expenses for security payables.", None
         # ── PATCH: previously missing branches ──────────────────────────
@@ -4569,6 +4570,42 @@ def _save_compliance_settings(db, d, sid, is_edit, pk):
         params,
     )
     return True, "Compliance settings updated", pk
+
+
+def _save_tds_rate(db, d, sid, is_edit, pk):
+    section = (d.get("section") or "").strip()
+    nature_of_income = (d.get("nature_of_income") or "").strip()
+    rate = d.get("rate")
+    rate_no_pan = d.get("rate_no_pan")
+    single_thr = d.get("single_bill_threshold")
+    if single_thr is None:
+        single_thr = 30000
+    annual_thr = d.get("annual_aggregate_threshold")
+    if annual_thr is None:
+        annual_thr = 0
+    eff_from = d.get("effective_from")
+    if not section or rate is None or not eff_from:
+        return False, "Section, Rate and Effective From are required.", None
+
+    try:
+        if is_edit:
+            db._execute(
+                "UPDATE tds_section_rates SET section=%s, nature_of_income=%s, rate=%s, rate_no_pan=%s, "
+                "single_bill_threshold=%s, annual_aggregate_threshold=%s, effective_from=%s "
+                "WHERE id=%s AND society_id=%s",
+                (section, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from, pk, sid)
+            )
+            return True, "TDS rate updated.", None
+        else:
+            db._execute(
+                "INSERT INTO tds_section_rates "
+                "(society_id, section, nature_of_income, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold, effective_from) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (sid, section, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from)
+            )
+            return True, "TDS rate added.", None
+    except Exception as e:
+        return False, _clean_pg_error(e), None
 
 
 def _save_account(db, d, sid, is_edit, pk):

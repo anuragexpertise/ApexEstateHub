@@ -1866,6 +1866,18 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── TDS RATES ──────────────────────────────────────────────────────────
+        if entity == "tds_rates":
+            rows = db._execute(
+                "SELECT * FROM tds_section_rates WHERE society_id=%s ORDER BY section LIMIT %s OFFSET %s",
+                (sid, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute(
+                "SELECT COUNT(*) AS n FROM tds_section_rates WHERE society_id=%s",
+                (sid,), fetch_one=True,
+            )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
@@ -2288,7 +2300,16 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     (pk, society_id), fetch_all=True,
                 ) or []
                 profile["_alert_events"] = alert_events
+                profile["_alert_events"] = alert_events
             return profile
+
+        # ── TDS RATE ───────────────────────────────────────────────────────────
+        if entity_singular == "tds_rate":
+            r = db._execute(
+                "SELECT * FROM tds_section_rates WHERE id=%s AND society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
 
         return None
 

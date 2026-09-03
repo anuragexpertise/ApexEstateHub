@@ -1136,6 +1136,7 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     section VARCHAR(10) NOT NULL,
+    nature_of_income VARCHAR(255),
     rate NUMERIC(5, 2) NOT NULL,
     rate_no_pan NUMERIC(5, 2),
     single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
