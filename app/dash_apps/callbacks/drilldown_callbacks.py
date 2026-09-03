@@ -57,7 +57,7 @@ from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export
+from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export, asset_export
 from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -2247,6 +2247,9 @@ def register_drilldown_callbacks(app):
         elif entity == "gst_summary":
             data = gst_export.generate_gst_summary_excel(None, sid, fy)
             filename = f"GSTSummary_FY{fy}-{fy+1}.xlsx"
+        elif entity == "fixed_asset_register":
+            data = asset_export.generate_fixed_asset_register_excel(None, sid, fy)
+            filename = f"FixedAssetRegister_FY{fy}-{fy+1}.xlsx"
         elif entity == "mutuality_summary":
             # Income Tax — Principle of Mutuality breakup (mutual vs
             # non_mutual income/expense). Same in-Dash dcc.Download pattern
