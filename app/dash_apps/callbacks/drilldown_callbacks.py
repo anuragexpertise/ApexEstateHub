@@ -2006,27 +2006,51 @@ def register_drilldown_callbacks(app):
         return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
 
     # ── 3a. EXPENSE-FORM TDS AUTOFILL (Phase 4.3) ─────────────────────────────
-    # When the account dropdown (acc_id) or the linked vendor (entity_id)
-    # changes on the New/Edit Expense form, recompute the suggested TDS % /
-    # section / capital flags server-side and push them back into the form's
-    # tds_pct field + a warning banner. The field stays editable — this only
-    # pre-fills the correct default so the person entering the expense doesn't
-    # need to know current tax law. Block (vs warn) for a missing PAN is
-    # enforced again at save time in _save_expense_v3.
+    # When the account (acc_id) or the linked entity (entity_id) drill-in
+    # picker changes on the New/Edit Expense form, recompute the suggested
+    # TDS % / section / capital flags server-side and push them back into
+    # the form's tds_pct/tds_section fields + a PAN-status banner. The
+    # fields stay editable — this only pre-fills the correct default so the
+    # person entering the expense doesn't need to know current tax law.
+    # Block (vs warn) for a missing PAN is enforced again at save time in
+    # _save_expense_v3.
+    #
+    # NOTE (2026-09 fix, 4 bugs):
+    #   1. entity key was the PLURAL "expenses" on every Input/Output.
+    #      render_form_card renders the Expense form with entity="expense"
+    #      (SINGULAR — see registry.py's "expenses"->"expense" map), so
+    #      none of these pattern-matching ids ever matched anything and
+    #      this callback never fired. Fixed to "expense" throughout, same
+    #      fix already applied once to form_autofill_callbacks.py.
+    #   2. acc_id/entity_id are drill-in fields (DRILLIN_CONFIG) — their
+    #      live value is a {"type":"form-field-hidden",...} component
+    #      (renderers.py's drillin branch), not "form-field". Inputs fixed
+    #      to "form-field-hidden".
+    #   3. entity_id is a POLYMORPHIC drill-in (role: vendor/security/
+    #      assets/other) — blindly treating it as vendor_id could look up
+    #      an unrelated vendor row (or nothing) when a Security/Asset was
+    #      actually picked. Now also reads the sibling hidden "role" field
+    #      and only resolves vendor_id when role=="vendor".
+    #   4. The tds-autofill Store output targeted a component that was
+    #      never rendered anywhere, so the computed pan_warning/pan_captured
+    #      payload had nowhere to land. renderers.py now renders that Store
+    #      plus a banner Div on the Expense form; expense_tds_pan_banner()
+    #      below renders pan_warning into it.
     @app.callback(
-        Output({"type": "form-field", "entity": "expenses", "field": "tds_pct"}, "value"),
-        Output({"type": "form-field", "entity": "expenses", "field": "tds_section"}, "value"),
-        Output({"type": "tds-autofill", "entity": "expenses"}, "data"),
-        Input({"type": "form-field", "entity": "expenses", "field": "acc_id"}, "value"),
-        Input({"type": "form-field", "entity": "expenses", "field": "entity_id"}, "value"),
-        Input({"type": "form-field", "entity": "expenses", "field": "amount"}, "value"),
-        Input({"type": "form-field", "entity": "expenses", "field": "expense_date"}, "value"),
-        Input({"type": "form-field", "entity": "expenses", "field": "tds_section"}, "value"),
+        Output({"type": "form-field", "entity": "expense", "field": "tds_pct"}, "value"),
+        Output({"type": "form-field", "entity": "expense", "field": "tds_section"}, "value"),
+        Output({"type": "tds-autofill", "entity": "expense"}, "data"),
+        Input({"type": "form-field-hidden", "entity": "expense", "field": "acc_id"}, "value"),
+        Input({"type": "form-field-hidden", "entity": "expense", "field": "entity_id"}, "value"),
+        Input({"type": "form-field", "entity": "expense", "field": "amount"}, "value"),
+        Input({"type": "form-field", "entity": "expense", "field": "expense_date"}, "value"),
+        Input({"type": "form-field", "entity": "expense", "field": "tds_section"}, "value"),
+        State({"type": "form-field-hidden", "entity": "expense", "field": "role"}, "value"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, tds_section, store):
+    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, tds_section, entity_role, store):
         sid = get_current_society_id()
         if not sid:
             return no_update, no_update, no_update
@@ -2034,8 +2058,15 @@ def register_drilldown_callbacks(app):
             amt = float(amount) if amount not in (None, "") else 0.0
         except (TypeError, ValueError):
             amt = 0.0
+        # entity_id is polymorphic (vendor/security/assets/other) — only
+        # treat it as a vendor_id (and therefore only PAN-check it) when
+        # the sibling drill-in role is actually "vendor". Fixes bug #3.
         try:
-            vendor_id = int(entity_id) if entity_id not in (None, "") else None
+            vendor_id = (
+                int(entity_id)
+                if entity_role == "vendor" and entity_id not in (None, "")
+                else None
+            )
         except (TypeError, ValueError):
             vendor_id = None
         try:
@@ -2046,7 +2077,7 @@ def register_drilldown_callbacks(app):
         import dash
         ctx = dash.callback_context
         triggered = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
-        
+
         # If the account changed, we want to fetch its default section.
         # Otherwise (amount, entity, or section itself changed), we preserve the current section selection.
         if "acc_id" in triggered or not triggered:
@@ -2057,7 +2088,7 @@ def register_drilldown_callbacks(app):
         sug = tds_compliance.suggest_expense_tax_fields(
             db, sid, acc, vendor_id, amt, expense_date=expense_date, override_section=override_section,
         )
-        
+
         # If the user just manually picked a section, don't overwrite the dropdown with the exact same value 
         # to avoid cursor jumps / redraws.
         out_section = no_update if "tds_section" in triggered else (sug["tds_section"] or "")
@@ -2077,6 +2108,30 @@ def register_drilldown_callbacks(app):
                 "is_depreciable": sug["is_depreciable"],
                 "depreciation_percent": sug["depreciation_percent"],
             },
+        )
+
+    # ── 3a-bis. EXPENSE-FORM PAN-STATUS BANNER ────────────────────────────────
+    # Renders the tds-autofill Store's pan_warning (bug #4 above) into the
+    # banner placeholder rendered right under the entity_id drill-in control
+    # on the Expense form (see renderers.py render_form_card, entity=="expense"
+    # branch). Amber when TDS applies but no PAN is on file (or a hard block,
+    # per society policy), hidden otherwise.
+    @app.callback(
+        Output({"type": "tds-pan-banner", "entity": "expense"}, "children"),
+        Input({"type": "tds-autofill", "entity": "expense"}, "data"),
+        prevent_initial_call=True,
+    )
+    def expense_tds_pan_banner(data):
+        data = data or {}
+        warning = data.get("pan_warning")
+        if not warning:
+            return None
+        blocked = data.get("pan_action") == "block"
+        return dbc.Alert(
+            [html.I(className="fas fa-exclamation-triangle me-2"), warning],
+            color="danger" if blocked else "warning",
+            style={"fontSize": "12px", "borderRadius": "10px",
+                   "padding": "8px 14px", "marginTop": "-4px", "marginBottom": "10px"},
         )
 
     # ── 3b. CASHBOOK / LEDGER FY EXPORT ─────────────────────────────────────────

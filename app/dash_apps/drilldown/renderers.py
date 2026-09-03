@@ -2761,6 +2761,18 @@ def render_form_card(card_id: str, title: str, icon: str,
         else:
             form_rows.append(_row)
 
+    # ── Expense-form TDS autofill plumbing (2026-09) ────────────────────────
+    # A dcc.Store to carry the server-computed TDS suggestion (tds_pct,
+    # tds_section, pan_captured, pan_warning, …) — see expense_tds_autofill()
+    # in drilldown_callbacks.py — plus a banner placeholder right under the
+    # entity_id drill-in field that expense_tds_pan_banner() fills in with a
+    # PAN warning when TDS applies and no PAN is on file for the picked
+    # vendor. Both previously had nowhere to render, so the computed
+    # pan_warning payload never reached the UI.
+    if entity_plural == "expenses":
+        form_rows.append(dcc.Store(id={"type": "tds-autofill", "entity": "expense"}, data={}))
+        form_rows.append(html.Div(id={"type": "tds-pan-banner", "entity": "expense"}))
+
     # Filter out None (the PK input was only added once)
     form_rows = [r for r in form_rows if r is not None]
 
