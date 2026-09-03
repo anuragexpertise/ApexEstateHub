@@ -1459,7 +1459,33 @@ def register_drilldown_callbacks(app):
             target = _new_map.get(entity, f"form_{to_singular(entity)}_new")
 
             if trig_type == "btn-new-sidebar":
-                store = {"stack": [], "prefill": {}, "filters": {}}
+                _list_map = {
+                    "receipt": "list_receipts",
+                    "expense": "list_expenses",
+                    "security": "list_security",
+                    "attendance": "list_attendance",
+                    "apt_charge": "list_apt_charges",
+                }
+                base_card = _list_map.get(entity, f"list_{entity}s")
+                base_label = entity.replace('_', ' ').title() + "s"
+                if entity == "security":
+                    base_label = "Users"
+                elif entity == "attendance":
+                    base_label = "Attendance"
+
+                store = {
+                    "stack": [{
+                        "card_id": base_card,
+                        "label": base_label,
+                        "filters": {},
+                        "prefill": {},
+                        "entity_pk": None,
+                        "entity_label": None
+                    }],
+                    "active_card": base_card,
+                    "prefill": {},
+                    "filters": {}
+                }
 
             # Build a smart prefill for New forms by propagating current filters
             # and any existing prefill context. This makes creating a new entity
