@@ -1012,10 +1012,13 @@ TDS_SECTION_RATE_SEED = [
 
 def seed_tds_section_rates(cur, conn, society_id: int):
     inserted = 0
-    for i, (section, nature, rate, rate_no_pan, single_thr, annual_thr) in enumerate(TDS_SECTION_RATE_SEED):
-        # Stagger effective_from per variant so the UNIQUE(society_id,section,
-        # effective_from) constraint keeps one "current" row per (section,rate).
-        eff_from = f"{2024 + i}-04-01"
+    section_counts = {}
+    for section, nature, rate, rate_no_pan, single_thr, annual_thr in TDS_SECTION_RATE_SEED:
+        # Stagger effective_from only if there are multiple rates for the SAME section.
+        count = section_counts.get(section, 0)
+        eff_from = f"{2024 + count}-04-01"
+        section_counts[section] = count + 1
+        
         row = _one(
             cur,
             "SELECT 1 FROM tds_section_rates "

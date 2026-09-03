@@ -136,6 +136,7 @@ def account_is_depreciable(db, society_id: int, acc_id: int) -> dict:
 def suggest_expense_tax_fields(
     db, society_id: int, acc_id: int | None, vendor_id: int | None,
     amount: float, expense_date=None, exclude_expense_id: int | None = None,
+    override_section: str | None = None,
 ) -> dict:
     """All-in-one helper for the expense form: given the chosen account,
     vendor, and amount, return the auto-suggested TDS %/section plus the
@@ -157,12 +158,15 @@ def suggest_expense_tax_fields(
     """
     fy = _fy_from_date(expense_date) if expense_date else str(_fy_from_date(__import__("datetime").date.today()))
 
-    # Inherit TDS section from the chosen account (Phase 1.3).
-    section_row = db._execute(
-        "SELECT tds_section FROM accounts WHERE id=%s AND society_id=%s",
-        (acc_id, society_id), fetch_one=True,
-    ) if acc_id else None
-    section = (section_row or {}).get("tds_section") or None
+    if override_section is not None:
+        section = override_section if override_section != "" else None
+    else:
+        # Inherit TDS section from the chosen account (Phase 1.3).
+        section_row = db._execute(
+            "SELECT tds_section FROM accounts WHERE id=%s AND society_id=%s",
+            (acc_id, society_id), fetch_one=True,
+        ) if acc_id else None
+        section = (section_row or {}).get("tds_section") or None
 
     pan_captured = vendor_has_pan(db, vendor_id) if vendor_id else False
     comp = compute_tds_pct(db, society_id, vendor_id, section, fy, amount, pan_captured)
