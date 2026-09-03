@@ -182,15 +182,19 @@ def register_drillin_callbacks(app):
         Input("drillin-back-btn-modal", "n_clicks"),
         Input("drillin-search", "value"),
         State("drillin-store", "data"),
-        # Fixed (non-wildcard) state, read only for the event_ticket/
-        # entity_id case below (Tweak 1, 2026-08) — every other
-        # drillin-trigger ignores it. Safe to keep unconditional here since
-        # a missing/absent component just resolves to None.
-        State({"type": "form-field", "entity": "event_ticket", "field": "event_id"}, "value"),
+        # Use wildcard matching instead of exact ID because exact IDs missing from the DOM cause Dash exceptions.
+        State({"type": "form-field", "entity": ALL, "field": ALL}, "value"),
+        State({"type": "form-field", "entity": ALL, "field": ALL}, "id"),
         prevent_initial_call=True,
     )
     @require_session
-    def drillin_navigate(_trig_nc, _role_nc, _group_nc, _back_nc, search, store, event_ticket_event_id):
+    def drillin_navigate(_trig_nc, _role_nc, _group_nc, _back_nc, search, store, form_values, form_ids):
+        event_ticket_event_id = None
+        if form_values and form_ids:
+            for val, fid in zip(form_values, form_ids):
+                if fid.get("entity") == "event_ticket" and fid.get("field") == "event_id":
+                    event_ticket_event_id = val
+                    break
         triggered = ctx.triggered_id
         if triggered is None:
             raise PreventUpdate

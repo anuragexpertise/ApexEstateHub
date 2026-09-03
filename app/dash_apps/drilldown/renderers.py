@@ -2711,12 +2711,14 @@ def render_form_card(card_id: str, title: str, icon: str,
                 optionHeight=40,
             )
         else:
+            extra_props = {"step": "any"} if ftype == "number" else {}
             ctrl = dbc.Input(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 type=ftype,
                 value=str(pre_val) if pre_val is not None else "",
                 placeholder=f["label"],
                 style={"fontSize": "13px", "borderRadius": "10px"},
+                **extra_props
             )
 
         _row = dbc.Row([

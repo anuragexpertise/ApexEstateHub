@@ -536,6 +536,14 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     "concerns": {
         "status", "qr_payload",
     },
+    "receipts": {
+        "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",
+        "receipt_number", "previous_hash", "source_reference", "qr_payload",
+    },
+    "expenses": {
+        "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",
+        "receipt_number", "previous_hash", "source_reference", "qr_payload",
+    },
 }
 
 
