@@ -41,9 +41,9 @@ def create_society(data: dict) -> int | None:
         result = db._execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
-                plan,plan_validity,calc_start_date)
+                plan,plan_validity,calc_start_date, PAN_number, registration_number)
                VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
-                       :plan,:validity,:Calc)
+                       :plan,:validity,:Calc, :pan, :reg_num)
                RETURNING id""",
             {
                 "name":     data["name"],
@@ -55,6 +55,8 @@ def create_society(data: dict) -> int | None:
                 "plan":     data.get("plan", "Free"),
                 "validity": data.get("validity"),
                 "Calc":   data.get("Calc"),
+                "pan":    data.get("pan"),
+                "reg_num": data.get("reg_num"),
             },
             fetch_one=True,
         )

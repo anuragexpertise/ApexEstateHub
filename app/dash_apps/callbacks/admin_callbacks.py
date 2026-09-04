@@ -40,13 +40,16 @@ def register_admin_callbacks(app):
         Output("master-create-result", "children"),
         Input("master-create-society-btn", "n_clicks"),
         State("new-society-name", "value"),
+        State("new-society-address", "value"),
+        State("new-society-pan", "value"),
+        State("new-society-reg-num", "value"),
         State("new-society-email", "value"),
         State("new-society-password", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def handle_create_society(n_clicks, name, email, password):
-        if not n_clicks or not name or not email or not password:
+    def handle_create_society(n_clicks, name, address, pan, reg_num, email, password):
+        if not n_clicks or not name or not address or not pan or not reg_num or not email or not password:
             raise PreventUpdate
         if len(password) < 8:
             return html.Div([
@@ -56,6 +59,9 @@ def register_admin_callbacks(app):
         try:
             sid = create_society({
                 "name": name.strip(),
+                "address": address.strip(),
+                "pan": pan.strip(),
+                "reg_num": reg_num.strip(),
                 "admin_email": email.strip(),
                 "admin_password": password,
             })
@@ -79,7 +85,7 @@ def register_admin_callbacks(app):
         """
         function(n) {
             if (!n) return window.dash_clientside.no_update;
-            var fields = ['new-society-name','new-society-email','new-society-password'];
+            var fields = ['new-society-name','new-society-address','new-society-pan','new-society-reg-num','new-society-email','new-society-password'];
             fields.forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el) { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); }

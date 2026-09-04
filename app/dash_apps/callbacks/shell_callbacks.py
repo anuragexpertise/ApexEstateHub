@@ -627,6 +627,7 @@ def register_shell_callbacks(app):
 
         society_name = "EstateHub"
         society_logo = "/static/assets/EH_logo.png"
+        society_bg_url = None
         if society_id:
             try:
                 s_row = db._execute(
@@ -636,7 +637,6 @@ def register_shell_callbacks(app):
                     society_name = s_row.get("name", society_name)
                     if s_row.get("logo"):
                         society_logo = f"/assets/{society_id}/{s_row['logo']}"
-                society_bg_url = None
                 if s_row and s_row.get("login_background"):
                     try:
                         from app.dash_apps.drilldown.renderers import get_image_url
