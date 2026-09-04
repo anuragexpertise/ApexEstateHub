@@ -817,6 +817,20 @@ FIELD_CONFIG = {
             "validation": {},
             "tooltip": "Upload asset photo",
         },
+        "itc_claimed": {
+            "visible": ADMIN_ONLY,
+            "editable": ADMIN_ONLY,
+            "default": 0,
+            "validation": {},
+            "tooltip": "Input Tax Credit claimed at purchase (if any)",
+        },
+        "gst_disposal_liability": {
+            "visible": ADMIN_ONLY,
+            "editable": ADMIN_ONLY,
+            "default": 0,
+            "validation": {},
+            "tooltip": "GST liability calculated on disposal of this asset",
+        },
     },
 
     # ═════════════════════════════════════════════════════════════════════════

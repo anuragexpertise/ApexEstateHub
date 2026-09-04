@@ -203,6 +203,30 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "label": "Income Account",
         "filter": "drcr_account='Cr'",
     },
+    ("assets", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Asset Account",
+        "filter": "drcr_account='Dr'",
+    },
+    ("receivables", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    ("receivables", "interest_acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Interest Income Account",
+        "filter": "drcr_account='Cr'",
+    },
+    ("payables", "acc_id"): {
+        "mode": "single",
+        "table": "accounts",
+        "label": "Expense Account",
+        "filter": "drcr_account='Dr'",
+    },
     # event_ticket_items.entity_id (2026-08, Tweak 1) — admin's "Sell Tickets"
     # buyer picker. All three roles are listed here; which ones actually
     # show as cards is narrowed per-event at open time in
