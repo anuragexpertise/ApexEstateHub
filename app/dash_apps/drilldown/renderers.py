@@ -3418,11 +3418,32 @@ def render_fy_closing_card(rows: list, error: str | None,
                     id={"type": "btn-fy-export", "entity": "fixed_asset_register"},
                     size="sm", color="success", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
-                           "marginBottom": "12px"},
+                           "marginBottom": "12px", "marginRight": "8px"},
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "fixed_asset_register"}),
+                # Fixed (2026-09): gst_export.py / tds_export.py have been
+                # backend-ready since before the fixed-asset-register patch —
+                # same pre-existing "dispatcher exists, no button" gap as
+                # fixed_asset_register had. Same MATCH-pattern wiring, no
+                # backend changes needed for either.
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export GST Summary"],
+                    id={"type": "btn-fy-export", "entity": "gst_summary"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "gst_summary"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export TDS Summary"],
+                    id={"type": "btn-fy-export", "entity": "tds_summary"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "tds_summary"}),
             ]) if selected_fy else None,
-        ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
+        ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start", "flexWrap": "wrap"}),
     ], style={"padding": "12px 16px",
               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
 
