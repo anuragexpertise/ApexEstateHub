@@ -33,10 +33,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     # ADMIN - Dashboard tab — Concerns (per Concern workflow spec)
     ("kpi_concerns_not_closed", "admin", "dashboard", "Concerns"),
     # ADMIN - Enroll tab
-    ("kpi_apartments_total", "admin", "enroll", "Entities"),
-    ("kpi_vendors_total", "admin", "enroll", "Entities"),
-    ("kpi_security_total", "admin", "enroll", "Entities"),
-    ("kpi_security_roster_count", "admin", "enroll", "Security"),
+    ("kpi_apartments_total", "admin", "enrolled", "Entities"),
+    ("kpi_vendors_total", "admin", "enrolled", "Entities"),
+    ("kpi_security_total", "admin", "enrolled", "Entities"),
+    ("kpi_security_roster_count", "admin", "enrolled", "Security"),
     # ADMIN - Cashbook tab
     ("kpi_receivables_total", "admin", "cashbook", "Cashbook"),
     ("kpi_payables_total", "admin", "cashbook", "Cashbook"),

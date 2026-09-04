@@ -336,12 +336,12 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
-    # ── Enroll ───────────────────────────────────────────────────────────────
-    if active_tab == "enroll":
+    # ── Enrolled ───────────────────────────────────────────────────────────────
+    if active_tab == "enrolled":
         return html.Div([
-            _page_title("fa-user-plus", c, "Enroll Members", "apartments · vendors · security"),
+            _page_title("fa-user-plus", c, "Enrolled Members", "apartments · vendors · security"),
             _kpi_row_dynamic(
-                "admin", "enroll", sid,
+                "admin", "enrolled", sid,
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),
