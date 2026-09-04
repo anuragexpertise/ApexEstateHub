@@ -298,37 +298,37 @@ DRILLDOWN_MAP: dict = {
     # MASTER PORTAL KPIs
     "kpi_societies_total": {"target": "list_societies", "label": "All Societies"},
     "kpi_societies_9apts": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "9Apts"},
     },
     "kpi_societies_99apts": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "99Apts"},
     },
     "kpi_societies_999apts": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "999Apts"},
     },
     "kpi_societies_unlimited": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Unlimited Plans",
         "filter": {"plan": "unlimited"},
     },
     "kpi_societies_free": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Free Plan Societies",
         "filter": {"plan": "Free"},
     },
     "kpi_societies_expired": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Expired Plans",
         "filter": {"status": "expired"},
     },
     "kpi_societies_expiring_soon": {
-        "target": "list_societies",
+        "target": "master_list_societies",
         "label": "Expiring Soon",
         "filter": {"status": "expiring_soon"},
     },

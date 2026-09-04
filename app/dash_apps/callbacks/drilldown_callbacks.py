@@ -1654,6 +1654,7 @@ def register_drilldown_callbacks(app):
             "asset_dispose": {"admin"}, "asset_dispose_new": {"admin"},
             "vendor_pass": {"admin", "vendor"}, "vendor_pass_new": {"admin", "vendor"},
             "event_ticket": {"admin", "apartment"}, "event_ticket_new": {"admin", "apartment"},
+            "master_society": {"master"},
         }
         _actor_role = get_current_user_role()
         if entity_singular in _SPECIAL_ENTITY_ROLES:
@@ -1818,6 +1819,61 @@ def register_drilldown_callbacks(app):
         # picker for them. See Concerns_Workflow_Review.md round 2.
         if merged['caller_role'] == "apartment" and entity_singular == "concern":
             merged["apartment_id"] = get_current_linked_id()
+        # ── 6. Master Society Creation Intercept ─────────────────────────────
+        if entity_singular == "master_society" and card_id == "form_master_society_new":
+            name = merged.get("name", "").strip()
+            address = merged.get("address", "").strip()
+            pan = merged.get("pan", "").strip()
+            reg_num = merged.get("registration", "").strip()
+            plan = merged.get("plan", "Free")
+            validity_date = merged.get("validity_date")
+            admin_email = merged.get("admin_username", "").strip()
+            admin_password = merged.get("admin_password", "")
+            
+            if not name or not admin_email or not admin_password:
+                return (store, no_update, no_update, 
+                        {"type": "error", "message": "Name, Admin Email and Admin Password are required."}, 
+                        no_update)
+            
+            if len(admin_password) < 8:
+                return (store, no_update, no_update, 
+                        {"type": "error", "message": "Password must be at least 8 characters."}, 
+                        no_update)
+            
+            from app.services.society_service import create_society
+            try:
+                nsid = create_society({
+                    "name": name,
+                    "address": address,
+                    "pan": pan,
+                    "reg_num": reg_num,
+                    "plan": plan,
+                    "validity": validity_date if validity_date else None,
+                    "admin_email": admin_email,
+                    "admin_password": admin_password,
+                })
+                if not nsid:
+                    return (store, no_update, no_update, 
+                            {"type": "error", "message": "Failed to create society."}, 
+                            no_update)
+                
+                # Success: pop back to list and re-render
+                store = nav_state.pop(store)
+                hide_kpis = len(store.get("stack", [])) > 1
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+                return (
+                    store,
+                    content,
+                    bc,
+                    {"type": "success", "message": f"Society '{name}' created successfully!"},
+                    kpi_style,
+                )
+            except Exception as e:
+                return (store, no_update, no_update, 
+                        {"type": "error", "message": f"Error: {str(e)[:120]}"}, 
+                        no_update)
+
         # ── 6. Smart receipt defaults (date + account) ────────────────────────
         #       Applied only when submitting a new receipt/expense form and the
         #       user left the date or account blank.
@@ -3053,6 +3109,10 @@ def _render_card(
             edit_prefill = prefill if card_id == "form_poll_edit" else None
             return poll_form(sid_val, get_current_user_id(), role, prefill=edit_prefill)
 
+        # ── Create Master Society — dedicated form ─────────────
+        if card_id == "form_master_society_new":
+            return renderers.render_form_master_society_new()
+
         # ── Create Channel — dedicated form (bypasses schema-driven form,
         # needs apartment_id validation for Taxi/Visitor channels) ─────────────
         if card_id == "form_channel_new":
@@ -3098,6 +3158,61 @@ def _render_card(
             "new": f"New {entity_raw.replace('_', ' ').title()}",
             "edit": f"Edit {entity_raw.replace('_', ' ').title()}",
         }
+        
+        # ── Master Society Creation ──────────────────────────────────────────
+        if entity_raw == "master_society" and card_id == "form_master_society_new":
+            name = prefill.get("name", "").strip()
+            address = prefill.get("address", "").strip()
+            pan = prefill.get("pan", "").strip()
+            reg_num = prefill.get("registration", "").strip()
+            plan = prefill.get("plan", "Free")
+            validity_date = prefill.get("validity_date")
+            admin_email = prefill.get("admin_username", "").strip()
+            admin_password = prefill.get("admin_password", "")
+            
+            if not name or not admin_email or not admin_password:
+                return [html.Div([
+                    html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                    "Name, Admin Email and Admin Password are required."
+                ], className="alert alert-warning mt-2")], "drill-down-pane", None
+            
+            if len(admin_password) < 8:
+                return [html.Div([
+                    html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                    "Password must be at least 8 characters."
+                ], className="alert alert-warning mt-2")], "drill-down-pane", None
+            
+            from app.services.society_service import create_society
+            try:
+                sid = create_society({
+                    "name": name,
+                    "address": address,
+                    "pan": pan,
+                    "reg_num": reg_num,
+                    "plan": plan,
+                    "validity": validity_date if validity_date else None,
+                    "admin_email": admin_email,
+                    "admin_password": admin_password,
+                })
+                if sid:
+                    return [html.Div([
+                        html.I(className="fas fa-check-circle me-2", style={"color": "#17976e"}),
+                        f"Society '{name}' created successfully! (ID: {sid})",
+                    ], className="alert alert-success mt-2")], "drill-down-pane", None
+                return [html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
+                    "Failed to create society."
+                ], className="alert alert-danger mt-2")], "drill-down-pane", None
+            except Exception as e:
+                return [html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
+                    f"Error: {str(e)[:120]}"
+                ], className="alert alert-danger mt-2")], "drill-down-pane", None
+
+        # ── INTERCEPT: Verify Receivable / Accept Payment ────────────────────────
+        if entity_raw in ("verify_receivable_amt", "reject_receivable_amt"):
+            return None # Logic handled elsewhere
+
         return renderers.render_form_card(
             card_id=card_id,
             title=titles.get(action, card_id),

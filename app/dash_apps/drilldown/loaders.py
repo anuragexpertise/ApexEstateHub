@@ -1027,6 +1027,23 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
                 (s, page_size, offset))
 
+    # ── MASTER SOCIETIES ────────────────────────────────────────────────
+    if entity == "master_societies":
+        sid = _sid(filters)
+        base_query = """
+            SELECT 
+                s.id, s.name, s.address, s.PAN_number, s.registration_number, 
+                s.plan, s.plan_validity, 
+                COUNT(a.id) AS apartment_count
+            FROM societies s
+            LEFT JOIN apartments a ON a.society_id = s.id
+        """
+        if sid:
+            return (base_query + " WHERE s.id=%s GROUP BY s.id LIMIT %s OFFSET %s",
+                    (sid, page_size, offset))
+        return (base_query + " GROUP BY s.id ORDER BY s.id DESC LIMIT %s OFFSET %s",
+                (page_size, offset))
+
     # ── APT_CHARGES ─────────────────────────────────────────────────────
     if entity == "apt_charges":
         return ("SELECT * FROM fn_apt_charges_list(%s,%s) LIMIT %s OFFSET %s",
@@ -1678,6 +1695,32 @@ def load_list(
             rows = db._execute(
                 "SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
                 (s, page_size, offset), fetch_all=True,
+            ) or []
+            cnt = db._execute("SELECT COUNT(*) AS n FROM societies", (), fetch_one=True)
+            return rows, int((cnt or {}).get("n", len(rows)))
+
+        # ── MASTER SOCIETIES ────────────────────────────────────────────────
+        if entity == "master_societies":
+            sid = _sid(filters)
+            base_query = """
+                SELECT 
+                    s.id, s.name, s.address, s.PAN_number, s.registration_number, 
+                    s.plan, s.plan_validity, 
+                    COUNT(a.id) AS apartment_count
+                FROM societies s
+                LEFT JOIN apartments a ON a.society_id = s.id
+            """
+            if sid:
+                rows = db._execute(
+                    base_query + " WHERE s.id=%s GROUP BY s.id LIMIT %s OFFSET %s",
+                    (sid, page_size, offset), fetch_all=True,
+                ) or []
+                cnt = db._execute("SELECT COUNT(*) AS n FROM societies WHERE id=%s", (sid,), fetch_one=True)
+                return rows, int((cnt or {}).get("n", len(rows)))
+            
+            rows = db._execute(
+                base_query + " GROUP BY s.id ORDER BY s.id DESC LIMIT %s OFFSET %s",
+                (page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute("SELECT COUNT(*) AS n FROM societies", (), fetch_one=True)
             return rows, int((cnt or {}).get("n", len(rows)))

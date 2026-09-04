@@ -356,6 +356,88 @@ def register_list_inspector_callbacks(app):
                  % (selected_list or "unknown", sql_text.strip()))
         return dcc.send_string(block, filename="list_%s.sql" % (selected_list or "query"))
 
+    # ── List Audit ────────────────────────────────────────────────────────
+    @app.callback(
+        Output("list-audit-table", "children"),
+        Output("list-audit-summary", "children"),
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("run-list-audit-btn", "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def run_list_audit(n_clicks, auth_data):
+        from dash.exceptions import PreventUpdate
+        if not n_clicks:
+            raise PreventUpdate
+
+        from database.db_manager import db
+        from app.dash_apps.drilldown import loaders
+        sid = get_current_society_id()
+
+        rows_out = []
+        n_ok = n_err = 0
+
+        for list_id in sorted(LIST_INDEX.keys()):
+            entry = LIST_INDEX[list_id]
+            plural = to_plural(entry["entity"])
+
+            active_filter = {}
+            if entry["kpis"]:
+                active_filter = entry["kpis"][0]["filter"]
+
+            filters = dict(active_filter)
+            if sid:
+                filters["society_id"] = sid
+
+            t0 = time.perf_counter()
+            err_msg = ""
+            row_count = 0
+            
+            try:
+                sql, params = loaders._build_list_sql(plural, filters, page=1, page_size=1)
+                rows = db._execute(sql, params, fetch_all=True)
+                row_count = len(rows) if rows else 0
+            except Exception as e:
+                err_msg = str(e)
+
+            ms = int((time.perf_counter() - t0) * 1000)
+
+            if err_msg:
+                n_err += 1
+                status = dbc.Badge("ERROR", color="danger")
+                val_disp = html.Span(err_msg[:60], style={"fontSize": "10px", "color": "#dc3545"})
+            else:
+                n_ok += 1
+                status = dbc.Badge("OK", color="success")
+                val_disp = html.Span(str(row_count), style={"fontWeight": "600"})
+
+            rows_out.append(html.Tr(
+                [
+                    html.Td(""),
+                    html.Td(html.Code(list_id, style={"fontSize": "11px"})),
+                    html.Td(status),
+                    html.Td(val_disp),
+                    html.Td(f"{ms} ms", style={"fontSize": "11px", "color": "#888"}),
+                ],
+                style={"background": "#f8d7da" if err_msg else "transparent"},
+            ))
+
+        summary = html.Div([
+            dbc.Badge(f"✓ {n_ok} OK", color="success", className="me-2"),
+            dbc.Badge(f"✗ {n_err} ERROR", color="danger", className="me-2"),
+            html.Small(f" — {len(LIST_INDEX)} total lists audited",
+                       style={"color": "#666", "fontSize": "11px"}),
+        ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap", "gap": "4px"})
+
+        toast = no_update
+        if n_err > 0:
+            toast = {"type": "error", "message": f"List Audit: {n_err} errors found"}
+        elif n_ok > 0:
+            toast = {"type": "success", "message": "List Audit: All lists OK"}
+
+        return rows_out, summary, toast
+
     print("  ✓ List inspector callbacks registered")
 
 
