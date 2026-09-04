@@ -58,7 +58,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
 _SYSTEM_COLUMNS = {
     "id", "society_id", "user_id", "created_at", "updated_at",
     "password_hash", "pin_hash", "pattern_hash", "linked_id",
-    "created_by", "updated_by",
+    "created_by", "updated_by", "qr_payload",
     # receivable-internal fields not shown in forms
     "interest_months_applied", "source_table", "source_id",
     # payment-internal
@@ -70,7 +70,7 @@ _SYSTEM_COLUMNS = {
 }
 
 # System columns that should still appear in profile cards (audit trail).
-_PROFILE_VISIBLE_SYSTEM = {"created_at", "updated_at", "created_by", "updated_by"}
+_PROFILE_VISIBLE_SYSTEM = {"created_at", "updated_at", "created_by", "updated_by", "qr_payload"}
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
 # NOTE (2026-08): "polls" removed — Poll now supports Edit, but only
