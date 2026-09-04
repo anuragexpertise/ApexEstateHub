@@ -2401,21 +2401,13 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
         elif ftype == "date":
-            # Native calendar picker (was a manually-typed DD/MM/YYYY text
-            # field). Safe swap: handle_form_submit's dd/mm/yyyy→iso
-            # normalisation (drilldown_callbacks.py) already runs every
-            # string field through _parse_date_entry, which has always
-            # accepted "%Y-%m-%d" — exactly what a native date input
-            # submits — so no backend change was needed.
             _iso_pre = _parse_date_entry(pre_val) if isinstance(pre_val, str) else None
             if not _iso_pre and pre_val not in (None, ""):
-                # pre_val may already be a date/datetime object (edit-form
-                # prefill from the DB row) rather than a typed string.
                 _iso_pre = _parse_date_entry(_format_date_entry(pre_val))
-            ctrl = dbc.Input(
-                id={"type": "form-field", "entity": entity, "field": fid},
-                type="date",
-                value=_iso_pre or date.today().isoformat(),
+            ctrl = dcc.DatePickerSingle(
+                id={"type": "form-field-date", "entity": entity, "field": fid},
+                date=_iso_pre or date.today().isoformat(),
+                display_format="DD/MM/YYYY",
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
 
