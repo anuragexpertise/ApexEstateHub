@@ -4028,9 +4028,10 @@ def _save_asset(db, d, sid, is_edit, pk):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
+                d.get("company_name"),
                 asset_name,
                 d.get("asset_SNo"),
                 purchase_value,

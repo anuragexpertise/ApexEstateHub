@@ -142,6 +142,8 @@ _FK_HUMAN_ALIASES = {
 
 # Friendly label overrides for FK columns.
 _FK_LABEL_OVERRIDES = {
+    "PAN_number": "PAN Number",
+    "TAN_number": "TAN Number",
     "apt_id": "Apartment",
     "ven_id": "Vendor",
     "sec_id": "Security",

@@ -264,9 +264,7 @@ def run_migrations(conn):
         END;
         $$;""",
 
-        # accounts.bf_amount: dead column cleanup for existing installations.
-        # Opening balances live in the FY-scoped brought_forward table.
-        "ALTER TABLE accounts DROP COLUMN IF EXISTS bf_amount",
+        $$;""",
     ]
 
     ok = 0

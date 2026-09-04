@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS societies (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE,
     PAN_number VARCHAR(10),
+    TAN_number VARCHAR(10),
     logo VARCHAR(100),
     address TEXT,
     email VARCHAR(30),
@@ -257,17 +258,6 @@ CREATE TABLE IF NOT EXISTS assets (
     qr_payload VARCHAR(255)
 );
 
--- assets.itc_claimed / gst_disposal_liability (2026-09)
--- ==============================================
--- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
--- society's DB, so these need an explicit ALTER TABLE too (same reason as
--- societies.primary_bank_account_id above). itc_claimed defaults to 0 —
--- most RWA capital purchases never have ITC claimed on them, since that
--- needs a GST-registered supplier's tax invoice and the asset used for a
--- taxable (non-exempt) business purpose; 0 correctly turns off the sec.
--- 18(6)/Rule 44(6) computation in fn_asset_gst_disposal_liability below.
-ALTER TABLE assets ADD COLUMN IF NOT EXISTS itc_claimed NUMERIC(12, 2) DEFAULT 0;
-ALTER TABLE assets ADD COLUMN IF NOT EXISTS gst_disposal_liability NUMERIC(12, 2);
 
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
@@ -3817,6 +3807,7 @@ DROP FUNCTION IF EXISTS fn_buy_asset CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_society_id        INT,
+    p_company_name      VARCHAR,
     p_asset_name        VARCHAR,
     p_asset_sno         VARCHAR,
     p_purchase_value    NUMERIC,
@@ -3848,10 +3839,10 @@ BEGIN
     SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id;
 
     INSERT INTO assets(
-        society_id, asset_name, asset_SNo, purchase_date, purchase_value,
+        society_id, company_name, asset_name, asset_SNo, purchase_date, purchase_value,
         acc_id, depreciation_rate, created_at, created_by, itc_claimed
     ) VALUES (
-        p_society_id, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
+        p_society_id, p_company_name, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
         p_acc_id, v_dep_rate, NOW(), p_created_by, COALESCE(p_itc_claimed, 0)
     ) RETURNING id INTO v_asset_id;
 
