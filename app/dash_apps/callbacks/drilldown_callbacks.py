@@ -1609,12 +1609,13 @@ def register_drilldown_callbacks(app):
         Input({"type": "form-submit", "entity": ALL, "card_id": ALL}, "n_clicks"),
         State({"type": "form-field", "entity": ALL, "field": ALL}, "value"),
         State({"type": "form-field-hidden", "entity": ALL, "field": ALL}, "value"),
+        State({"type": "form-field-date", "entity": ALL, "field": ALL}, "date"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def handle_form_submit(n_clicks_list, _fv, _hv, store, auth):
+    def handle_form_submit(n_clicks_list, _fv, _hv, _dv, store, auth):
         # ── Guard: nothing triggered or all zero-clicks ──────────────────────
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
@@ -1678,7 +1679,7 @@ def register_drilldown_callbacks(app):
                 k_dict = json.loads(key.split(".")[0])
             except Exception:
                 continue
-            if k_dict.get("type") != "form-field":
+            if k_dict.get("type") not in ("form-field", "form-field-date"):
                 continue
             # NOTE: must use the guarded resolver here, not bare to_singular().
             # to_singular("vendor_pass") falls through to .rstrip('s'), which
