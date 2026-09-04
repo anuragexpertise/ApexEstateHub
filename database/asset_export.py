@@ -153,8 +153,8 @@ def _write_asset_list_sheet(ws, rows: list[dict], fy: int) -> None:
 
 def generate_fixed_asset_register_excel(db, society_id: int, fy: int) -> bytes:
     if not db:
-        from database.db_query import get_connection
-        db = get_connection()
+        from database.db_manager import db as _db
+        db = _db
     
     blocks = db._execute("SELECT * FROM fn_fixed_asset_register_fy(%s, %s)", (society_id, fy), fetch_all=True)
     assets = db._execute("SELECT * FROM fn_fixed_assets_list_fy(%s, %s)", (society_id, fy), fetch_all=True)
