@@ -1438,9 +1438,9 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
             print(f"  · Asset '{item['asset_name']}' already exists — skipped.")
             continue
         cur.execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, item["company_name"], item["asset_name"], item["asset_SNo"], item["purchase_value"],
-             64, item["purchase_date"], "cash", admin_uid,
+             64, item["purchase_date"], item.get("installation_date"), "cash", admin_uid,
              f"Instrument purchase - {item['asset_name']}"),
         )
         conn.commit()
@@ -1555,9 +1555,9 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
                 (society_id, asset["asset_name"])):
             continue
         cur.execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_value"],
-             asset["acc_id"], asset["purchase_date"], "cash", admin_uid,
+             asset["acc_id"], asset["purchase_date"], asset.get("installation_date"), "cash", admin_uid,
              f"Asset purchase - {asset['asset_name']}"),
         )
         conn.commit()

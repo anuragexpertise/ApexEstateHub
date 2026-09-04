@@ -240,6 +240,7 @@ CREATE TABLE IF NOT EXISTS assets (
     asset_name VARCHAR(100) NOT NULL,
     asset_SNo VARCHAR(50),
     purchase_date DATE,
+    installation_date DATE,
     purchase_value NUMERIC(12, 2),
     acc_id INT REFERENCES accounts (id), -- asset class account (e.g. Furniture 61)
     depreciation_rate NUMERIC(5, 2),
@@ -3813,6 +3814,7 @@ CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_purchase_value    NUMERIC,
     p_acc_id            INT,
     p_purchase_date     DATE    DEFAULT CURRENT_DATE,
+    p_installation_date DATE    DEFAULT NULL,
     p_mode              VARCHAR DEFAULT 'cash',
     p_created_by        INT     DEFAULT NULL,
     p_particulars       TEXT    DEFAULT NULL,
@@ -3839,10 +3841,10 @@ BEGIN
     SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id;
 
     INSERT INTO assets(
-        society_id, company_name, asset_name, asset_SNo, purchase_date, purchase_value,
+        society_id, company_name, asset_name, asset_SNo, purchase_date, installation_date, purchase_value,
         acc_id, depreciation_rate, created_at, created_by, itc_claimed
     ) VALUES (
-        p_society_id, p_company_name, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
+        p_society_id, p_company_name, p_asset_name, p_asset_sno, p_purchase_date, p_installation_date, p_purchase_value,
         p_acc_id, v_dep_rate, NOW(), p_created_by, COALESCE(p_itc_claimed, 0)
     ) RETURNING id INTO v_asset_id;
 
@@ -4942,8 +4944,8 @@ BEGIN
     v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
 
     SELECT
-        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0),
-        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0)
+        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)), 0),
+        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)), 0)
       INTO v_add_full, v_add_half
       FROM assets
      WHERE society_id = p_society_id
@@ -5027,8 +5029,8 @@ BEGIN
     v_opening_wdv := fn_resolve_bf_amount_fy(p_society_id, p_account_id, p_financial_year);
 
     SELECT
-        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0),
-        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)), 0)
+        COALESCE(SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)), 0),
+        COALESCE(SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)), 0)
       INTO v_add_full, v_add_half
       FROM assets
      WHERE society_id = p_society_id AND acc_id = p_account_id
@@ -8733,8 +8735,8 @@ BEGIN
     ),
     adds AS (
         SELECT acc_id,
-               SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(purchase_date, v_fy_end)) AS add_fh,
-               SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(purchase_date, v_fy_end)) AS add_sh
+               SUM(purchase_value) FILTER (WHERE fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)) AS add_fh,
+               SUM(purchase_value) FILTER (WHERE NOT fn_asset_gets_full_year_dep(COALESCE(installation_date, purchase_date), v_fy_end)) AS add_sh
         FROM assets
         WHERE society_id = p_society_id AND purchase_date BETWEEN v_fy_start AND v_fy_end
         -- Fixed (2026-09): no disposed=FALSE filter — see fn_account_depreciation's notes.

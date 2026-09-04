@@ -789,6 +789,13 @@ FIELD_CONFIG = {
             },
             "tooltip": "Date when the asset was purchased",
         },
+        "installation_date": {
+            "visible": ("admin", "apartment"),
+            "editable": ADMIN_ONLY,
+            "default": "",
+            "validation": {},
+            "tooltip": "Date put to use (determines <180 days half-rate depreciation). Optional; defaults to purchase date.",
+        },
         "mode": {
             "visible": ADMIN_ONLY,
             "editable": ADMIN_ONLY,

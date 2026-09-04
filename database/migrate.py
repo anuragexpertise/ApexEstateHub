@@ -263,8 +263,6 @@ def run_migrations(conn):
             ORDER BY lf.sort_path;
         END;
         $$;""",
-
-        $$;""",
     ]
 
     ok = 0
