@@ -597,6 +597,66 @@ CREATE TABLE IF NOT EXISTS expenses (
     receipt_number VARCHAR(64)
 );
 
+-- ── BANK RECONCILIATION ────────────────────────────────────────────
+-- bank_statement_lines: raw rows from an admin-uploaded CSV/Excel bank
+-- statement, kept even after matching (unlike a "consume and discard"
+-- import) so every reconciliation is traceable back to the actual bank
+-- line — mirrors the audit-trail convention already used by receipts/
+-- expenses (confirmed_by/confirmed_at). batch_id groups all rows from
+-- one upload so a bad upload can be identified together, though rows
+-- are not deleted as a batch (a matched row shouldn't vanish once a
+-- receipt/expense depends on it).
+CREATE TABLE IF NOT EXISTS bank_statement_lines (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    txn_date DATE NOT NULL,
+    description TEXT,
+    debit NUMERIC(10, 2),
+    credit NUMERIC(10, 2),
+    reference_no VARCHAR(100),
+    balance NUMERIC(12, 2),
+    batch_id UUID NOT NULL,
+    matched_entity VARCHAR(10) CHECK (matched_entity IN ('receipt', 'expense')),
+    matched_id INT,
+    match_confidence VARCHAR(10) CHECK (
+        match_confidence IN ('exact', 'fuzzy', 'manual')
+    ),
+    uploaded_by INT REFERENCES users (id),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (num_nonnulls(debit, credit) = 1)
+);
+
+COMMENT ON TABLE bank_statement_lines IS
+    'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates.';
+
+CREATE INDEX IF NOT EXISTS idx_bank_lines_society_unmatched
+    ON bank_statement_lines (society_id, matched_id)
+    WHERE matched_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_bank_lines_batch
+    ON bank_statement_lines (batch_id);
+
+-- Reconciliation state lives on the transaction side (receipts/expenses),
+-- mirroring how status/confirmed_by/confirmed_at already work there.
+-- bank_statement_line_id is nullable: a manual reconcile (no matching
+-- bank line found/uploaded yet) stamps reconciled_at/reconciled_by with
+-- no line reference.
+ALTER TABLE receipts
+    ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS reconciled_by INT REFERENCES users (id),
+    ADD COLUMN IF NOT EXISTS bank_statement_line_id INT REFERENCES bank_statement_lines (id);
+
+ALTER TABLE expenses
+    ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS reconciled_by INT REFERENCES users (id),
+    ADD COLUMN IF NOT EXISTS bank_statement_line_id INT REFERENCES bank_statement_lines (id);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_reconciled
+    ON receipts (society_id, reconciled_at);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_reconciled
+    ON expenses (society_id, reconciled_at);
+
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
 --
@@ -4699,7 +4759,8 @@ RETURNS TABLE (
     particulars TEXT, amount NUMERIC(10,2), mode VARCHAR(20),
     cheque_no VARCHAR(50), transaction_id VARCHAR(255), status VARCHAR(20),
     confirmed_by INT, confirmed_at TIMESTAMP,
-    last_printed_at TIMESTAMP, last_emailed_at TIMESTAMP, created_at TIMESTAMP
+    last_printed_at TIMESTAMP, last_emailed_at TIMESTAMP, created_at TIMESTAMP,
+    reconciled_at TIMESTAMP, reconciled_by INT, bank_statement_line_id INT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -4722,7 +4783,8 @@ BEGIN
         r.status::VARCHAR(20),
         r.confirmed_by::INT, r.confirmed_at::TIMESTAMP,
         r.last_printed_at::TIMESTAMP, r.last_emailed_at::TIMESTAMP,
-        r.created_at::TIMESTAMP
+        r.created_at::TIMESTAMP,
+        r.reconciled_at::TIMESTAMP, r.reconciled_by::INT, r.bank_statement_line_id::INT
     FROM receipts r
     LEFT JOIN accounts      a  ON a.id  = r.acc_id
     LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.role = 'apartment'
@@ -4752,7 +4814,8 @@ RETURNS TABLE (
     particulars TEXT, amount NUMERIC(10,2), mode VARCHAR(20),
     cheque_no VARCHAR(50), transaction_id VARCHAR(255), status VARCHAR(20),
     confirmed_by INT, confirmed_at TIMESTAMP,
-    last_printed_at TIMESTAMP, last_emailed_at TIMESTAMP, created_at TIMESTAMP
+    last_printed_at TIMESTAMP, last_emailed_at TIMESTAMP, created_at TIMESTAMP,
+    reconciled_at TIMESTAMP, reconciled_by INT, bank_statement_line_id INT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -4777,7 +4840,8 @@ BEGIN
         e.status::VARCHAR(20),
         e.confirmed_by::INT, e.confirmed_at::TIMESTAMP,
         e.last_printed_at::TIMESTAMP, e.last_emailed_at::TIMESTAMP,
-        e.created_at::TIMESTAMP
+        e.created_at::TIMESTAMP,
+        e.reconciled_at::TIMESTAMP, e.reconciled_by::INT, e.bank_statement_line_id::INT
     FROM expenses e
     LEFT JOIN accounts       a ON a.id = e.acc_id
     LEFT JOIN vendors        v ON v.id = e.entity_id AND e.role = 'vendor'

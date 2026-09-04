@@ -180,6 +180,17 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ bulk_enroll_callbacks failed: {e}")
 
+    # 14a2. Bank Reconcile (CSV/Excel bank statement upload + per-row
+    #     Reconcile picker for list_receipts/list_expenses). Requires
+    #     "bank-reconcile-modal" + "bank-reconcile-picker-modal" +
+    #     their stores in app_shell.py, and a "Bulk Reconcile" button /
+    #     per-row "Reconcile" button rendered in renderers.py.
+    try:
+        from .bank_reconcile_callbacks import register_bank_reconcile_callbacks
+        register_bank_reconcile_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ bank_reconcile_callbacks failed: {e}")
+
     # 14b. Assign-To modal (concern assignment to admins/vendors/security)
     #     Requires "assign-to-modal" + "assign-to-store" in app_shell.py.
     try:

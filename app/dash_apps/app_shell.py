@@ -431,6 +431,83 @@ def _bulk_enroll_modal() -> dbc.Modal:
     )
 
 
+# ── Bank Reconcile modals ────────────────────────────────────────────────────────
+# Two modals: a bulk upload modal (mirrors _bulk_enroll_modal — CSV/Excel
+# upload + template download, opened by the "Bulk Reconcile" button next to
+# "New" on list_receipts/list_expenses), and a per-row picker modal (mirrors
+# _pay_dues_bill_modal — a tappable candidate list, opened by the row-level
+# "Reconcile" button). Both driven by bank_reconcile_callbacks.py.
+
+def _bank_reconcile_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle(id="bank-reconcile-modal-title", children="Bank Reconcile"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="bank-reconcile-instructions", className="mb-2"),
+                    dbc.Button(
+                        [html.I(className="fas fa-file-download me-2"), "Download Template"],
+                        id="bank-reconcile-template-btn", n_clicks=0,
+                        color="secondary", outline=True, size="sm",
+                        className="mb-3",
+                    ),
+                    dcc.Download(id="bank-reconcile-template-download"),
+                    dcc.Upload(
+                        id="bank-reconcile-upload",
+                        children=html.Div([
+                            html.I(className="fas fa-cloud-upload-alt me-2"),
+                            "Drag & drop or click to select a CSV or Excel file",
+                        ]),
+                        style={
+                            "width": "100%", "height": "70px", "lineHeight": "70px",
+                            "borderWidth": "2px", "borderStyle": "dashed",
+                            "borderRadius": "10px", "textAlign": "center",
+                            "borderColor": "#667eea",
+                            "background": "rgba(102,126,234,0.04)",
+                            "color": "#667eea", "cursor": "pointer",
+                        },
+                        multiple=False, accept=".csv,.xlsx,.xls",
+                    ),
+                    dcc.Loading(
+                        html.Div(id="bank-reconcile-result", className="mt-3"),
+                        type="dot",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-bank-reconcile-modal", n_clicks=0, color="secondary"),
+            ),
+        ],
+        id="bank-reconcile-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20055"},
+    )
+
+
+def _bank_reconcile_picker_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Reconcile Against Bank Statement"), close_button=True),
+            dbc.ModalBody(
+                dcc.Loading(
+                    html.Div(id="bank-reconcile-picker-list",
+                             style={"maxHeight": "420px", "overflowY": "auto"}),
+                    type="circle", color="#17976e",
+                )
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-bank-reconcile-picker-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="bank-reconcile-picker-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20056"},
+    )
+
+
 # ── Assign-To modal ─────────────────────────────────────────────────────────────
 # File-Explorer style modal for assigning concerns to admins/vendors/security.
 # Three entity-type cards at the top; clicking loads the respective list below.
@@ -954,6 +1031,8 @@ def shell_layout() -> html.Div:
             dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
             dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
             dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
+            dcc.Store(id="bank-reconcile-entity-store", storage_type="memory", data=None),
+            dcc.Store(id="bank-reconcile-picker-store", storage_type="memory", data=None),
             dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
             dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
             dcc.Store(id="invite-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
@@ -1077,6 +1156,10 @@ def shell_layout() -> html.Div:
 
             # ── Bulk Enroll modal ────────────────────────────────────────────────
             _bulk_enroll_modal(),
+
+            # ── Bank Reconcile modals (bulk upload + per-row picker) ─────────────
+            _bank_reconcile_modal(),
+            _bank_reconcile_picker_modal(),
 
             # ── Assign-To modal ──────────────────────────────────────────────────
             _assign_to_modal(),
