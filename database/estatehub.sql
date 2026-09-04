@@ -8029,6 +8029,15 @@ RETURNS TABLE (
     total_bills_gst_applicable BIGINT,
     total_bills_exempt BIGINT
 ) LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
+-- Fixed (2026-09): RETURNS TABLE(period_month DATE, ...) declares an
+-- implicit `period_month` variable in scope for the whole function body,
+-- which collided with `receivables.period_month`/CTE column references
+-- inside the RETURN QUERY below ("column reference period_month is
+-- ambiguous") — this function has been failing on every call. The
+-- #variable_conflict pragma tells plpgsql to prefer the table column over
+-- the OUT-parameter variable wherever they clash, which is what every
+-- query in this function actually intends.
 DECLARE
     v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
     v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
