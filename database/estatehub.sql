@@ -248,12 +248,26 @@ CREATE TABLE IF NOT EXISTS assets (
     sale_value NUMERIC(12, 2),
     sale_acc_id INT REFERENCES accounts (id), -- Selling Asset income account (e.g. 212)
     disposed_by INT REFERENCES users (id),
+    itc_claimed NUMERIC(12, 2) DEFAULT 0, -- ITC claimed at purchase, if any (sec. 16 CGST Act); 0 = no ITC ever claimed on this asset
+    gst_disposal_liability NUMERIC(12, 2), -- sec. 18(6)/Rule 44(6) liability computed at disposal, for audit trail
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id),
     qr_payload VARCHAR(255)
 );
+
+-- assets.itc_claimed / gst_disposal_liability (2026-09)
+-- ==============================================
+-- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
+-- society's DB, so these need an explicit ALTER TABLE too (same reason as
+-- societies.primary_bank_account_id above). itc_claimed defaults to 0 —
+-- most RWA capital purchases never have ITC claimed on them, since that
+-- needs a GST-registered supplier's tax invoice and the asset used for a
+-- taxable (non-exempt) business purpose; 0 correctly turns off the sec.
+-- 18(6)/Rule 44(6) computation in fn_asset_gst_disposal_liability below.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS itc_claimed NUMERIC(12, 2) DEFAULT 0;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS gst_disposal_liability NUMERIC(12, 2);
 
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
@@ -3810,7 +3824,8 @@ CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_purchase_date     DATE    DEFAULT CURRENT_DATE,
     p_mode              VARCHAR DEFAULT 'cash',
     p_created_by        INT     DEFAULT NULL,
-    p_particulars       TEXT    DEFAULT NULL
+    p_particulars       TEXT    DEFAULT NULL,
+    p_itc_claimed       NUMERIC DEFAULT 0 -- ITC claimed on this purchase, if any (sec. 16 CGST Act) — leave 0 unless a GST tax invoice's ITC was actually claimed
 )
 RETURNS TABLE(asset_id INT, expense_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
@@ -3834,10 +3849,10 @@ BEGIN
 
     INSERT INTO assets(
         society_id, asset_name, asset_SNo, purchase_date, purchase_value,
-        acc_id, depreciation_rate, created_at, created_by
+        acc_id, depreciation_rate, created_at, created_by, itc_claimed
     ) VALUES (
         p_society_id, p_asset_name, p_asset_sno, p_purchase_date, p_purchase_value,
-        p_acc_id, v_dep_rate, NOW(), p_created_by
+        p_acc_id, v_dep_rate, NOW(), p_created_by, COALESCE(p_itc_claimed, 0)
     ) RETURNING id INTO v_asset_id;
 
     v_desc := COALESCE(p_particulars, 'Asset Purchase - ' || p_asset_name);
@@ -3881,6 +3896,79 @@ $$;
 
 DROP FUNCTION IF EXISTS fn_dispose_asset CASCADE;
 
+-- fn_asset_gst_disposal_liability (2026-09, CA compliance pass)
+-- ==============================================
+-- Sec. 18(6) CGST Act / Rule 44(6): when capital goods on which ITC was
+-- claimed are supplied (sold/disposed), the registered person must pay an
+-- amount equal to the HIGHER of:
+--   (a) ITC taken on the goods, reduced by 5% per quarter (or part
+--       thereof) of use since the date of the invoice, or
+--   (b) tax on the transaction value of the supply (sec. 15).
+-- This is a separate GST output-tax liability — it does NOT reduce the
+-- Income-tax block WDV (that's still just the sale value, per
+-- fn_dispose_asset / fn_account_depreciation), and it only applies at
+-- all if ITC was actually claimed on the asset (assets.itc_claimed > 0);
+-- the vast majority of RWA capital purchases never claim ITC, so this is
+-- 0 for them and the disposal is unaffected.
+--
+-- Quarter count: (days elapsed + 1) / 91, rounded up — any part-quarter
+-- counts as a full quarter per the statute's "or part thereof" wording.
+DROP FUNCTION IF EXISTS fn_asset_gst_disposal_liability (INT, NUMERIC, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION fn_asset_gst_disposal_liability(
+    p_asset_id   INT,
+    p_sale_value NUMERIC,
+    p_sale_date  DATE
+) RETURNS TABLE (liability NUMERIC(15,2), cgst_amount NUMERIC(15,2), sgst_amount NUMERIC(15,2))
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_asset         assets%ROWTYPE;
+    v_itc_reversal  NUMERIC(15,2);
+    v_tax_on_value  NUMERIC(15,2);
+    v_quarters      INT;
+    v_cgst_rate     NUMERIC(5,2);
+    v_sgst_rate     NUMERIC(5,2);
+    v_liability     NUMERIC(15,2);
+BEGIN
+    SELECT * INTO v_asset FROM assets WHERE id = p_asset_id;
+    IF NOT FOUND OR COALESCE(v_asset.itc_claimed, 0) <= 0 THEN
+        RETURN QUERY SELECT 0::NUMERIC(15,2), 0::NUMERIC(15,2), 0::NUMERIC(15,2);
+        RETURN;
+    END IF;
+
+    v_quarters := CEIL((p_sale_date - v_asset.purchase_date + 1) / 91.0);
+    v_itc_reversal := GREATEST(v_asset.itc_claimed * (1 - 0.05 * v_quarters), 0);
+
+    SELECT cgst_rate_pct, sgst_rate_pct INTO v_cgst_rate, v_sgst_rate
+      FROM gst_rates
+     WHERE society_id = v_asset.society_id
+       AND effective_from <= p_sale_date
+       AND (effective_to IS NULL OR effective_to >= p_sale_date)
+     ORDER BY effective_from DESC LIMIT 1;
+    v_cgst_rate := COALESCE(v_cgst_rate, 0);
+    v_sgst_rate := COALESCE(v_sgst_rate, 0);
+    v_tax_on_value := ROUND(p_sale_value * (v_cgst_rate + v_sgst_rate) / 100.0, 2);
+
+    v_liability := GREATEST(v_itc_reversal, v_tax_on_value);
+
+    -- Split the liability CGST:SGST in the same ratio as the current
+    -- rates (normally 1:1); if no rate is configured for this society,
+    -- the whole liability (from the ITC-reversal branch) still needs
+    -- somewhere to go — fall back to a straight 50:50 split rather than
+    -- silently dropping half of it.
+    IF v_cgst_rate + v_sgst_rate > 0 THEN
+        RETURN QUERY SELECT
+            v_liability,
+            ROUND(v_liability * v_cgst_rate / (v_cgst_rate + v_sgst_rate), 2)::NUMERIC(15,2),
+            ROUND(v_liability * v_sgst_rate / (v_cgst_rate + v_sgst_rate), 2)::NUMERIC(15,2);
+    ELSE
+        RETURN QUERY SELECT
+            v_liability,
+            ROUND(v_liability / 2, 2)::NUMERIC(15,2),
+            ROUND(v_liability / 2, 2)::NUMERIC(15,2);
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_dispose_asset(
     p_asset_id    INT,
     p_sale_value  NUMERIC,
@@ -3900,6 +3988,10 @@ DECLARE
     v_trx_id     INT;
     v_journal_id INT;
     v_desc       TEXT;
+    v_gst         RECORD;
+    v_gst_exp_acc INT;
+    v_cgst_acc    INT;
+    v_sgst_acc    INT;
 BEGIN
     SELECT * INTO v_asset FROM assets WHERE id = p_asset_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Asset not found'; END IF;
@@ -3966,6 +4058,64 @@ BEGIN
         p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
     ) RETURNING id INTO v_trx_id;
 
+    -- sec. 18(6) CGST Act / Rule 44(6): if ITC was ever claimed on this
+    -- asset, disposal triggers a separate GST output-tax liability (the
+    -- higher of ITC-reversal or tax on transaction value — see
+    -- fn_asset_gst_disposal_liability). This is independent of the
+    -- Income-tax block reduction above; it's booked as Dr the disposal's
+    -- GST cost, Cr CGST/SGST Payable. Skipped (with a WARNING) if the
+    -- society hasn't set up a "GST on Asset Disposal" expense account —
+    -- same defensive, name-resolved-account convention used everywhere
+    -- else in this file (fn_resolve_depreciation_account etc.) — the
+    -- liability is still recorded on the assets row either way so it's
+    -- never silently lost from the audit trail/FAR export.
+    SELECT * INTO v_gst FROM fn_asset_gst_disposal_liability(p_asset_id, p_sale_value, p_sale_date);
+    IF v_gst.liability > 0 THEN
+        SELECT id INTO v_gst_exp_acc FROM accounts
+        WHERE society_id = v_asset.society_id AND name ILIKE '%GST on Asset Disposal%' AND drcr_account = 'Dr'
+        LIMIT 1;
+        SELECT id INTO v_cgst_acc FROM accounts
+        WHERE society_id = v_asset.society_id AND name ILIKE '%CGST Payable%' AND drcr_account = 'Cr'
+        LIMIT 1;
+        SELECT id INTO v_sgst_acc FROM accounts
+        WHERE society_id = v_asset.society_id AND name ILIKE '%SGST Payable%' AND drcr_account = 'Cr'
+        LIMIT 1;
+
+        IF v_gst_exp_acc IS NOT NULL THEN
+            INSERT INTO transactions(
+                society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+            ) VALUES (
+                v_asset.society_id, 'Dr', p_sale_date, v_gst_exp_acc, p_asset_id, 'assets',
+                'GST on disposal (sec 18(6)/Rule 44(6)) - ' || v_asset.asset_name,
+                v_gst.liability, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+            );
+            IF v_cgst_acc IS NOT NULL AND v_gst.cgst_amount > 0 THEN
+                INSERT INTO transactions(
+                    society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                    amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+                ) VALUES (
+                    v_asset.society_id, 'Cr', p_sale_date, v_cgst_acc, p_asset_id, 'assets',
+                    'CGST on disposal - ' || v_asset.asset_name,
+                    v_gst.cgst_amount, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+                );
+            END IF;
+            IF v_sgst_acc IS NOT NULL AND v_gst.sgst_amount > 0 THEN
+                INSERT INTO transactions(
+                    society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                    amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+                ) VALUES (
+                    v_asset.society_id, 'Cr', p_sale_date, v_sgst_acc, p_asset_id, 'assets',
+                    'SGST on disposal - ' || v_asset.asset_name,
+                    v_gst.sgst_amount, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+                );
+            END IF;
+        ELSE
+            RAISE WARNING 'Asset % disposal has a GST liability of % (sec 18(6)/Rule 44(6)) but no "GST on Asset Disposal" account exists for society % — liability recorded on the asset row but NOT posted to the ledger. Add that account and post it manually.',
+                p_asset_id, v_gst.liability, v_asset.society_id;
+        END IF;
+    END IF;
+
     -- Create receipt for the asset sale proceeds
     INSERT INTO receipts(
         society_id, user_id, entity_id, role,
@@ -3982,7 +4132,8 @@ BEGIN
         disposed_at = p_sale_date,
         sale_value  = p_sale_value,
         sale_acc_id = v_acc_id,
-        disposed_by = p_created_by
+        disposed_by = p_created_by,
+        gst_disposal_liability = v_gst.liability
     WHERE id = p_asset_id;
 
     RETURN QUERY SELECT v_receipt_id, v_trx_id, v_journal_id;
@@ -8674,7 +8825,8 @@ RETURNS TABLE (
     purchase_value NUMERIC(15,2),
     disposed      BOOLEAN,
     disposal_date DATE,
-    sale_value    NUMERIC(15,2)
+    sale_value    NUMERIC(15,2),
+    gst_disposal_liability NUMERIC(15,2)
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
@@ -8696,9 +8848,14 @@ BEGIN
             WHERE t.society_id = p_society_id
               AND t.source_table = 'assets'
               AND t.source_id = ast.id
+              AND t.acc_id = ast.acc_id -- Fixed (2026-09): scope to the block account's own leg only —
+                                         -- the GST-on-disposal CGST/SGST Cr legs share source_table='assets'/
+                                         -- source_id=ast.id too but post to different accounts, and would
+                                         -- otherwise be double-counted into "sale_value" here.
               AND t.entry_side = 'Cr'
               AND t.status = 'paid'
-        ) AS sale_value
+        ) AS sale_value,
+        ast.gst_disposal_liability
     FROM assets ast
     JOIN accounts acc ON ast.acc_id = acc.id
     WHERE ast.society_id = p_society_id

@@ -3406,9 +3406,21 @@ def render_fy_closing_card(rows: list, error: str | None,
                     id={"type": "btn-fy-export", "entity": "mutuality_summary"},
                     size="sm", color="success", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
-                           "marginBottom": "12px"},
+                           "marginBottom": "12px", "marginRight": "8px"},
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "mutuality_summary"}),
+                # Fixed (2026-09): fn_fixed_asset_register_fy / asset_export.py have
+                # been ready since the "fixed asset register compliance" patch — this
+                # was the last missing piece, per that patch's own follow-up note.
+                # Same btn-fy-export/dcc.Download pattern as every other export here.
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Fixed Asset Register"],
+                    id={"type": "btn-fy-export", "entity": "fixed_asset_register"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "fixed_asset_register"}),
             ]) if selected_fy else None,
         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}),
     ], style={"padding": "12px 16px",

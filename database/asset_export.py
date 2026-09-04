@@ -112,9 +112,9 @@ def _write_asset_list_sheet(ws, rows: list[dict], fy: int) -> None:
 
     headers = [
         "Block / Account Name", "Asset Name", "Serial Number",
-        "Purchase Date", "Purchase Value", "Status", "Sale Value",
+        "Purchase Date", "Purchase Value", "Status", "Sale Value", "GST on Disposal (Rule 44(6))",
     ]
-    widths = {"A": 25, "B": 25, "C": 20, "D": 15, "E": 18, "F": 12, "G": 18}
+    widths = {"A": 25, "B": 25, "C": 20, "D": 15, "E": 18, "F": 12, "G": 18, "H": 22}
     _apply_header(ws, 2, widths)
 
     for col, hdr in enumerate(headers, start=1):
@@ -133,9 +133,10 @@ def _write_asset_list_sheet(ws, rows: list[dict], fy: int) -> None:
         pval = float(row.get("purchase_value") or 0)
         disp = bool(row.get("disposed"))
         sval = float(row.get("sale_value") or 0)
+        gst_liab = float(row.get("gst_disposal_liability") or 0)
 
         status = "Disposed" if disp else "Active"
-        vals = [acc, name, sno, pdate, pval, status, sval if disp else None]
+        vals = [acc, name, sno, pdate, pval, status, sval if disp else None, gst_liab if disp and gst_liab else None]
         for col, val in enumerate(vals, start=1):
             cell = ws.cell(row=r, column=col, value=val)
             cell.font = _FONT_BODY

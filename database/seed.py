@@ -218,6 +218,7 @@ ACCOUNTS = [
     (203,   "Corpus Fund",                 "CorpusFund","Corpus Fund",                 1,  "Cr",  True,  "Cr", 100),
     (401,   "CGST Payable",                "CGST",      "CGST Payable",                4,  "Cr",  True,  "Cr", 100),
     (402,   "SGST Payable",                "SGST",      "SGST Payable",                4,  "Cr",  True,  "Cr", 100),
+    (2323,  "GST on Asset Disposal",       "GSTDisp",   "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 23, "Dr", True, "Dr", 100),
 ]
 
 # Compliance tagging for existing accounts (Phase 1)
