@@ -67,10 +67,17 @@ _SYSTEM_COLUMNS = {
     "last_depreciation_date",
     # auto-generated grouping key
     "bill_group_id",
+    # bank reconciliation — raw FK to bank_statement_lines; the matched
+    # bank line's date/description/reference are shown via the Reconcile
+    # picker modal instead of a bare id in the list/form
+    "bank_statement_line_id",
 }
 
 # System columns that should still appear in profile cards (audit trail).
-_PROFILE_VISIBLE_SYSTEM = {"created_at", "updated_at", "created_by", "updated_by", "qr_payload"}
+_PROFILE_VISIBLE_SYSTEM = {
+    "created_at", "updated_at", "created_by", "updated_by", "qr_payload",
+    "bank_statement_line_id",
+}
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
 # NOTE (2026-08): "polls" removed — Poll now supports Edit, but only
@@ -156,6 +163,8 @@ _FK_LABEL_OVERRIDES = {
     "assigned_to": "Assigned To",
     "confirmed_by": "Confirmed By",
     "disposed_by": "Disposed By",
+    "reconciled_by": "Reconciled By",
+    "bank_statement_line_id": "Matched Bank Line",
     "apt_maintenance_acc_id": "Maintenance Income Account",
     "apt_interest_acc_id": "Interest Income Account",
     "ven_pass_acc_id": "Pass Sale Account",
@@ -559,10 +568,15 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     "receipts": {
         "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",
         "receipt_number", "previous_hash", "source_reference", "qr_payload",
+        # bank reconciliation — set only by _handle_list_reconcile /
+        # bank_reconcile_callbacks.py's picker/bulk-match flows, never by
+        # the generic New/Edit form (same reasoning as confirmed_by above)
+        "reconciled_at", "reconciled_by",
     },
     "expenses": {
         "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",
         "receipt_number", "previous_hash", "source_reference", "qr_payload",
+        "reconciled_at", "reconciled_by",
     },
 }
 

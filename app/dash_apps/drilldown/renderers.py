@@ -811,6 +811,23 @@ def render_list_card(card_id: str, title: str, icon: str,
                                "borderRadius": "7px"},
                     ))
 
+            # "Reconcile" — bank statement matching (bank_reconcile_callbacks.py).
+            # Shown for any unreconciled receipt/expense row, regardless of
+            # payment mode (2026-09 decision: reconciliation isn't limited to
+            # mode='bank'). Opens the picker modal listing candidate
+            # bank_statement_lines for this row's amount/date rather than
+            # navigating — same non-navigating pattern as the QR modal
+            # trigger, so it doesn't go through the main drilldown router.
+            if entity in ("receipts", "expenses") and role == "admin" and not row_dict.get("reconciled_at"):
+                action_btns.append(dbc.Button(
+                    html.I(className="fas fa-link"),
+                    id={"type": "list-reconcile", "entity": entity, "pk": pk_val},
+                    size="sm", color="warning", outline=True,
+                    title="Reconcile against bank statement",
+                    style={"fontSize": "11px", "padding": "3px 7px",
+                           "borderRadius": "7px"},
+                ))
+
             # ── Quick-action buttons derived from PROFILE_ACTIONS ──
             # These let users perform logical actions directly from the
             # list card without opening the profile first.
@@ -944,6 +961,18 @@ def render_list_card(card_id: str, title: str, icon: str,
                 [html.I(className="fas fa-file-csv me-1"), "Bulk Enroll"],
                 id={"type": "btn-bulk-enroll", "entity": entity},
                 size="sm", color="success", outline=True,
+                style={"fontSize": "11px", "borderRadius": "8px",
+                       "fontWeight": "600"},
+            ))
+
+        # "Bulk Reconcile" — CSV/Excel bank statement upload against
+        # receipts/expenses. Same single-global-modal pattern as Bulk
+        # Enroll above (see bank_reconcile_callbacks.py).
+        if entity in ("receipts", "expenses"):
+            header_right.append(dbc.Button(
+                [html.I(className="fas fa-file-invoice-dollar me-1"), "Bulk Reconcile"],
+                id={"type": "btn-bulk-reconcile", "entity": entity},
+                size="sm", color="warning", outline=True,
                 style={"fontSize": "11px", "borderRadius": "8px",
                        "fontWeight": "600"},
             ))
