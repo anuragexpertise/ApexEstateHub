@@ -175,6 +175,7 @@ ACCOUNTS = [
     (239,   "House Tax",                  "HTax",       "House Tax",                  23,  "Dr", True,  "Dr", 100),
     (2310,  "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",     23,  "Dr", True,  "Dr", 100),
     (2311,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 23,  "Cr",  True,  "Cr", 100),
+    (2312,  "Repair and Maintenance",     "RM",         "Repair and Maintenance",     23,  "Dr", True,  "Dr", 100),
     (2313,  "Stationery",                 "Stationery", "Stationery",                 23,  "Dr", True,  "Dr", 100),
     (2314,  "Generator Charges",          "GenChrg",    "Generator Charges",          23,  "Dr", True,  "Dr",  15),
     (2315,  "Accountant Fee",             "AccountantF","Accountant Fee",             23,  "Dr", True,  "Dr", 100),
