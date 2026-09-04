@@ -180,7 +180,7 @@ _PATH_LABELS = {
     "vendor-receipts":   "Bills Paid",
     "vendor-passes":     "Passes",
     "expenses":          "Expenses",
-    "enroll":            "Enroll",
+    "enrolled":          "Enrolled",
     "events":            "Events",
     "owner-events":      "Events",
     "vendor-events":     "Events",
@@ -253,7 +253,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "cashbook"      if "/cashbook"      in p else
             "receipts"      if "/receipts"      in p else
             "expenses"      if "/expenses"      in p else
-            "enroll"        if "/enroll"        in p else
+            "enrolled"      if "/enrolled"      in p else
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
             "polls"         if "/polls"         in p else

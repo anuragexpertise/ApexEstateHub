@@ -1044,6 +1044,49 @@ If VS Code shows missing import warnings on Flask/Dash components, it is usually
 
 Or press `Ctrl+Shift+P` → **Python: Select Interpreter** and select your active virtual environment.
 
+### Portal WorkFlows Review Table (Detailed System Names)
+
+The following table maps the user workflows for each tab across the different application portals, using the exact system identifiers (KPIs, Lists, Profiles, Forms) defined in the application's configuration (`DEFAULT_LAYOUTS` and `DRILLDOWN_MAP`).
+
+| Portal | WorkFlow Name | Ux interactions |
+| :--- | :--- | :--- |
+| **Admin Portal** | View Admin Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_apartments_dues`> ->list<`list_apartments`> ->profile<`profile_apartment`> ->card<View>]<br>*(Also: `kpi_vendors_passes` -> `list_vendors`, `kpi_gate_logs` -> `list_gate_logs`, etc.)* |
+| | Manage Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_receipts_month`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->actionButton<Verify> ->form<`form_receipt_edit`>]<br>*(Also: `kpi_expenses_month` -> `list_expenses`, `kpi_cashbook_open` -> `list_cashbook`)* |
+| | Manage Channels | Tap/Click 'Tab'<`channels`> [->Kpi<`kpi_channels_total`> ->list<`list_channels`> ->profile<`profile_channel`> ->actionButton<Edit> ->form<`form_channel_edit`>] |
+| | Enroll Members | Tap/Click 'Tab'<`enrolled`> [->Kpi<`kpi_apartments_total`> ->list<`list_apartments`> ->actionButton<Add> ->form<`form_apartment_new`>]<br>*(Also: `list_vendors`, `list_security`)* |
+| | Manage Assets | Tap/Click 'Tab'<`assets`> [->Kpi<`kpi_assets_count`> ->list<`list_assets`> ->profile<`profile_asset`> ->actionButton<Buy/Sell> ->form<`form_asset_new`>] |
+| | Manage Events | Tap/Click 'Tab'<`events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->actionButton<Edit> ->form<`form_event_edit`>] |
+| | Manage Concerns | Tap/Click 'Tab'<`concerns`> [->Kpi<`kpi_concerns_not_closed`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Update> ->form<`form_concern_edit`>] |
+| | Manage Polls | Tap/Click 'Tab'<`polls`> [->Kpi<`kpi_polls_total`> ->list<`list_polls`> ->profile<`profile_poll`> ->actionButton<Edit> ->form<`form_poll_edit`>] |
+| | Evaluate Pass | Tap/Click 'Tab'<`evaluate_pass`> [->quick-link<Scan/ManualQR> -card<`manual_qr_card`>] |
+| | Customize Layout | Tap/Click 'Tab'<`customize`> [->quick-link<SelectKPIs> -card<`customize_layout`>] |
+| | Manage Settings | Tap/Click 'Tab'<`settings`> [->quick-link<UpdateSettings> -form<`form_settings_edit`>] |
+| **Owner Portal** | View Owner Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_my_pending_dues`> ->list<`list_receivables`> ->profile<`profile_receivable`> ->card<View>] |
+| | View Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_my_receipts`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
+| | Manage Channel Alerts | Tap/Click 'Tab'<`owner_channels`> [->Kpi<`kpi_channels_active`> ->list<`list_channels`> ->actionButton<Subscribe> ->form<`form_channel_subscribe`>] |
+| | View Bills Due | Tap/Click 'Tab'<`owner_dues`> [->Kpi<`kpi_my_overdue_dues`> ->list<`list_receivables`> ->profile<`profile_receivable`> ->card<View>] |
+| | View Bills Paid | Tap/Click 'Tab'<`owner_receipts`> [->Kpi<`kpi_my_receipts`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
+| | View Events | Tap/Click 'Tab'<`owner_events`> [->Kpi<`kpi_events_tickets`> ->list<`list_event_ticket_items`> ->profile<`profile_event_ticket`> ->card<View>] |
+| | Report Concerns | Tap/Click 'Tab'<`concerns`> [->Kpi<`kpi_concerns_open`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Add> ->form<`form_concern_new`>] |
+| | Vote in Polls | Tap/Click 'Tab'<`owner_polls`> [->Kpi<`kpi_polls_active`> ->list<`list_polls`> ->profile<`profile_poll`> ->actionButton<Vote> ->form<`form_poll_vote`>] |
+| | Update Profile | Tap/Click 'Tab'<`owner_settings`> [->quick-link<UpdateProfile> -form<`form_apartment_edit`>] |
+| **Vendor Portal** | View Vendor Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_vendors_payables_due`> ->list<`list_payables`> ->profile<`profile_payment`> ->card<View>] |
+| | View Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_receipts_total`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
+| | Manage Passes | Tap/Click 'Tab'<`passes`> [->Kpi<`kpi_my_pass_expiry`> ->list<`list_vendors`> ->profile<`profile_vendor`> ->card<View>] |
+| | View Events | Tap/Click 'Tab'<`vendor_events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->card<View>] |
+| | Report Concerns | Tap/Click 'Tab'<`concerns`> [->quick-link<`vendor_concern_lookup`> -card<`manual_qr_card`>] |
+| | Update Profile | Tap/Click 'Tab'<`vendor_settings`> [->quick-link<UpdateProfile> -form<`form_vendor_edit`>] |
+| **Security Portal**| Evaluate Pass | Tap/Click 'Tab'<`pass_evaluation`> [->quick-link<Scan/ManualQR> -card<`manual_qr_card`>] |
+| | Mark Attendance | Tap/Click 'Tab'<`attendance`> [->quick-link<ClockIn/Out> -card<`attendance_status`>] |
+| | View Users | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_security_on_duty`> ->list<`list_security`> ->profile<`profile_security`> ->card<View>] |
+| | Add Receipts | Tap/Click 'Tab'<`security_receipt`> [->Kpi<`kpi_receipts_in_hand_total`> ->list<`list_receipts`> ->actionButton<Add> ->form<`form_receipt_new`>] |
+| | View Events | Tap/Click 'Tab'<`security_events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->card<View>] |
+| | Report Concerns | Tap/Click 'Tab'<`security_concerns`> [->Kpi<`kpi_concerns_open`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Add> ->form<`form_concern_new`>] |
+| | Update Profile | Tap/Click 'Tab'<`security_settings`> [->quick-link<UpdateProfile> -form<`form_security_edit`>] |
+| **Master Portal** | View Master Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_societies_total`> ->list<`list_societies`> ->profile<`profile_society`> ->actionButton<Edit> ->form<`form_society_edit`>] |
+| | Create Society | Tap/Click 'Tab'<`master-create`> [->quick-link<FillDetails> -form<`master-create-society-btn`>] |
+| | Platform Settings | Tap/Click 'Tab'<`master-settings`> [->Kpi<`kpi_societies_expiring_soon`> ->list<`list_societies`> ->profile<`profile_society`> ->card<View>] |
+
 ---
 
 *ApexEstateHub — Built for societies that mean business.*

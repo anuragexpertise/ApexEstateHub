@@ -32,12 +32,12 @@ ROLE_CONFIG = {
             {"label": "Dashboard",     "href": "/dashboard/admin-portal",  "icon": "fa-th-large"},
             {"label": "Financials",    "href": "/dashboard/financials",     "icon": "fa-book"},
             {"label": "Channels",      "href": "/dashboard/channels",       "icon": "fa-bullhorn"},
-            {"label": "Enroll",        "href": "/dashboard/enroll",         "icon": "fa-user-plus"},
             {"label": "Assets",        "href": "/dashboard/assets",         "icon": "fa-building"},
             {"label": "Events",        "href": "/dashboard/events",         "icon": "fa-calendar-alt"},
             {"label": "Concerns",      "href": "/dashboard/concerns",        "icon": "fa-hand-point-up"},
             {"label": "Polls",         "href": "/dashboard/polls",         "icon": "fa-poll"},
             {"label": "Evaluate Pass", "href": "/dashboard/evaluate-pass",  "icon": "fa-qrcode"},
+            {"label": "Enrolled",      "href": "/dashboard/enrolled",         "icon": "fa-user-plus"},
             {"label": "Customize",     "href": "/dashboard/customize",      "icon": "fa-edit"},
             {"label": "Settings",      "href": "/dashboard/settings",       "icon": "fa-cog"},
         ],
@@ -379,7 +379,7 @@ def _header() -> html.Header:
 # ── Bulk Enroll modal ───────────────────────────────────────────────────────────
 # Single global modal (like the QR modal below) reused for all three
 # enrollable entities — apartments, vendors, security. Which entity it's
-# currently open for is tracked in "bulk-enroll-entity-store"; content/labels
+# currently open for is tracked in "bulk-enrolled-entity-store"; content/labels
 # are filled in dynamically by bulk_enroll_callbacks.py.
 
 def _bulk_enroll_modal() -> dbc.Modal:
