@@ -91,7 +91,7 @@ ROLE_CONFIG = {
         "icon": "fa-crown",
         "tabs": [
             {"label": "Dashboard",      "href": "/dashboard/master",          "icon": "fa-th-large"},
-            {"label": "Create Society", "href": "/dashboard/master-create",   "icon": "fa-building"},
+            {"label": "Societies",      "href": "/dashboard/master-societies",   "icon": "fa-building"},
             {"label": "Settings",       "href": "/dashboard/master-settings", "icon": "fa-cog"},
         ],
     },

@@ -93,6 +93,12 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ list_inspector_callbacks failed: {e}")
 
+    try:
+        from .form_inspector_callbacks import register_form_inspector_callbacks
+        register_form_inspector_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ form_inspector_callbacks failed: {e}")
+
     # 9. Setup Wizard callbacks
     try:
         from .setup_wizard_callbacks import register_setup_wizard_callbacks

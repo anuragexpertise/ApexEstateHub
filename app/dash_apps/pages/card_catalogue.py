@@ -1042,11 +1042,9 @@ DEFAULT_LAYOUTS = {
             "kpi_societies_99apts",
             "kpi_societies_999apts",
             "kpi_societies_unlimited",
-            "kpi_societies_expired",
-            "kpi_master_apartments_total",
+            "kpi_societies_expiring_soon",
         ],
         "master-settings": [
-            "kpi_societies_expiring_soon",
         ],
     },
     "admin": {
