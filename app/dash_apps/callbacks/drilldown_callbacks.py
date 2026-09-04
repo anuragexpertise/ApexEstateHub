@@ -4028,7 +4028,7 @@ def _save_asset(db, d, sid, is_edit, pk):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 d.get("company_name"),
@@ -4037,6 +4037,7 @@ def _save_asset(db, d, sid, is_edit, pk):
                 purchase_value,
                 acc_id,
                 d.get("purchase_date") or dt_date.today().isoformat(),
+                d.get("installation_date"),
                 d.get("mode", "cash"),
                 d.get("user_id"),
                 d.get("particulars") or f"Asset Purchase — {asset_name}",
