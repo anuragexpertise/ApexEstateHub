@@ -279,7 +279,19 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
                         dbc.Input(id="new-society-name", type="text", placeholder="Enter society name"),
                     ], width=12, className="mb-3"),
                     dbc.Col([
-                        dbc.Label("Admin Email", html_for="new-society-email"),
+                        dbc.Label("Society Address", html_for="new-society-address"),
+                        dbc.Input(id="new-society-address", type="text", placeholder="Enter society address"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Label("PAN Number", html_for="new-society-pan"),
+                        dbc.Input(id="new-society-pan", type="text", placeholder="Enter PAN number"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Label("Registration Number", html_for="new-society-reg-num"),
+                        dbc.Input(id="new-society-reg-num", type="text", placeholder="Enter registration number"),
+                    ], width=12, className="mb-3"),
+                    dbc.Col([
+                        dbc.Label("Admin Email (Username)", html_for="new-society-email"),
                         dbc.Input(id="new-society-email", type="email", placeholder="admin@society.com"),
                     ], width=12, className="mb-3"),
                     dbc.Col([

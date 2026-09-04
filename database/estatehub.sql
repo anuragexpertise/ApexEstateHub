@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS societies (
     login_background VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by INT,
-    gstin VARCHAR(15)
+    gstin VARCHAR(15),
+    registration_number VARCHAR(100),
+    qr_signing_secret_hash VARCHAR(64)
 );
 
 CREATE TABLE IF NOT EXISTS users (

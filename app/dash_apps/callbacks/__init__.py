@@ -93,7 +93,14 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ list_inspector_callbacks failed: {e}")
 
-    # 9. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
+    # 9. Setup Wizard callbacks
+    try:
+        from .setup_wizard_callbacks import register_setup_wizard_callbacks
+        register_setup_wizard_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ setup_wizard_callbacks failed: {e}")
+
+    # 10. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
     try:
         from .debug_callbacks import register_debug_callbacks
         register_debug_callbacks(app)

@@ -944,6 +944,7 @@ def _qr_modal() -> dbc.Modal:
 def shell_layout() -> html.Div:
     return html.Div(
         [
+            html.Div(id="setup-wizard-container"),
             # ── Routing ────────────────────────────────────────────────────────
             # refresh=False is mandatory for SPA behaviour — tab clicks via dcc.Link
             # update this pathname without triggering an HTTP request
