@@ -212,6 +212,7 @@ ACCOUNTS = [
     (64,    "Instruments",                "Inst",       "Instruments & Tools",         6,  "Dr", True,  "Dr",  15),
     (65,    "Machinery",                  "Mch",        "Machinery",                   6,  "Dr", True,  "Dr",  15),
     (66,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  "Dr",  15),
+    (67,    "Computers",                  "Comp",       "Computers",                   6,  "Dr", True,  "Dr",  40),
     (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True,  "Dr", 100),
     (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", True,  "Dr", 100),
     (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True,  "Dr", 100),
@@ -501,6 +502,14 @@ SIMPLE_ASSETS = [
      "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314},
     {"company_name": "Samsung","asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
      "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 64},
+    {"company_name": "Godrej","asset_name": "Office Desk & Chairs",       "asset_SNo": "GODREJ-F1",
+     "purchase_date": "2026-07-10", "purchase_value": 15000, "acc_id": 61},
+    {"company_name": "Kirloskar","asset_name": "Water Pump Motor",        "asset_SNo": "KIR-M12",
+     "purchase_date": "2026-08-05", "purchase_value": 25000, "acc_id": 65},
+    {"company_name": "Tata","asset_name": "Society Patrol Vehicle",       "asset_SNo": "MH12AB1234",
+     "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 66},
+    {"company_name": "Dell","asset_name": "Security Desktop PC",          "asset_SNo": "DELL-PC1",
+     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 67},
 ]
 
 # Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').
