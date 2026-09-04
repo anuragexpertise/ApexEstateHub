@@ -1062,7 +1062,7 @@ DEFAULT_LAYOUTS = {
             "kpi_receipts_pending",
             "kpi_channels_total",
         ],
-        "enroll": [
+        "enrolled": [
             "kpi_apartments_total",
             "kpi_vendors_total",
             "kpi_security_total",
