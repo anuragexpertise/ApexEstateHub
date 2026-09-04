@@ -240,6 +240,7 @@ SOCIETY_ID = 1  # fixed identity, independent of migrate.py's demo path
 SOCIETY = {
     "name":             "Sunrise Residency",
     "PAN_number":       "ABCDE1234X",
+    "TAN_number":       "BLRS12345E",
     "gstin":            "27AAAAA0000A1Z5",
     "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
     "email":            "admin@sunriseresidency.com",
@@ -322,22 +323,22 @@ USERS = [
     # ── +10 vendors, each a distinct service type ──────────────────────
     {"role": "vendor",    "email": "vendor3@sunriseresidency.com",  "password": "Vendor3@2024",
      "business_name": "Electrical Experts", "name": "Manoj Tiwari", "service_type": "Electrical",
-     "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out"},
+     "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out", "pan_number": "ELECP1234A"},
     {"role": "vendor",    "email": "vendor4@sunriseresidency.com",  "password": "Vendor4@2024",
      "business_name": "WoodCraft Carpentry", "name": "Suresh Thakur", "service_type": "Carpentry",
-     "mobile": "9877100002", "service_description": "Custom furniture repair and fittings"},
+     "mobile": "9877100002", "service_description": "Custom furniture repair and fittings", "pan_number": "WOODC5678B"},
     {"role": "vendor",    "email": "vendor5@sunriseresidency.com",  "password": "Vendor5@2024",
      "business_name": "ColorMax Painters", "name": "Anil Rawat", "service_type": "Painting",
-     "mobile": "9877100003", "service_description": "Interior and exterior painting specialists"},
+     "mobile": "9877100003", "service_description": "Interior and exterior painting specialists", "pan_number": "COLOR9012C"},
     {"role": "vendor",    "email": "vendor6@sunriseresidency.com",  "password": "Vendor6@2024",
      "business_name": "PestFree Solutions", "name": "Ravi Kumar", "service_type": "Pest Control",
-     "mobile": "9877100004", "service_description": "Odourless, eco-friendly pest control"},
+     "mobile": "9877100004", "service_description": "Odourless, eco-friendly pest control", "pan_number": "PESTF3456D"},
     {"role": "vendor",    "email": "vendor7@sunriseresidency.com",  "password": "Vendor7@2024",
      "business_name": "SparkleClean Services", "name": "Geeta Devi", "service_type": "Housekeeping",
-     "mobile": "9877100005", "service_description": "Deep cleaning and daily housekeeping staff"},
+     "mobile": "9877100005", "service_description": "Deep cleaning and daily housekeeping staff", "pan_number": "SPARK7890E"},
     {"role": "vendor",    "email": "vendor8@sunriseresidency.com",  "password": "Vendor8@2024",
      "business_name": "SecureTech Systems", "name": "Vikas Sharma", "service_type": "CCTV & Security",
-     "mobile": "9877100006", "service_description": "CCTV installation and access-control systems"},
+     "mobile": "9877100006", "service_description": "CCTV installation and access-control systems", "pan_number": "SECUR1234F"},
     {"role": "vendor",    "email": "vendor9@sunriseresidency.com",  "password": "Vendor9@2024",
      "business_name": "CoolAir HVAC", "name": "Rakesh Yadav", "service_type": "AC Repair",
      "mobile": "9877100007", "service_description": "AC servicing, repair and installation"},
@@ -596,12 +597,12 @@ def seed_society(cur, conn) -> int:
 
     cur.execute(
         """INSERT INTO societies
-           (id, name, PAN_number, gstin, address, email, phone, secretary_name,
+           (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
             secretary_phone, secretary_sign, plan, plan_validity, calc_start_date,
             payment_qr, logo, login_background)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
-        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["gstin"], SOCIETY["address"],
+        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
          SOCIETY["secretary_phone"], SOCIETY.get("secretary_sign"),
          SOCIETY["plan"], SOCIETY["plan_validity"],
@@ -1437,8 +1438,8 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
             print(f"  · Asset '{item['asset_name']}' already exists — skipped.")
             continue
         cur.execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (society_id, item["asset_name"], item["asset_SNo"], item["purchase_value"],
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (society_id, item["company_name"], item["asset_name"], item["asset_SNo"], item["purchase_value"],
              64, item["purchase_date"], "cash", admin_uid,
              f"Instrument purchase - {item['asset_name']}"),
         )
@@ -1554,8 +1555,8 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
                 (society_id, asset["asset_name"])):
             continue
         cur.execute(
-            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (society_id, asset["asset_name"], asset["asset_SNo"], asset["purchase_value"],
+            "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_value"],
              asset["acc_id"], asset["purchase_date"], "cash", admin_uid,
              f"Asset purchase - {asset['asset_name']}"),
         )
