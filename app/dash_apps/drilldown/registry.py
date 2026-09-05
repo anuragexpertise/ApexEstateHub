@@ -28,6 +28,7 @@ PK_MAP: dict = {
     "expenses": "id",
     "cashbook": "id",
     "societies": "id",
+    "master_societies": "id",
     "accounts": "id",
     "apt_charges": "id",
     "ven_charges": "id",
@@ -60,6 +61,7 @@ ENTITY_MAP: dict = {
     "expenses": "expense",
     "cashbook": "transaction",
     "societies": "society",
+    "master_societies": "master_society",
     "accounts": "account",
     "apt_charges": "apt_charge",
     "ven_charges": "ven_charge",
@@ -295,40 +297,51 @@ DRILLDOWN_MAP: dict = {
         "target": "list_receipts",
         "label": "My Receipts",
     },
-    # MASTER PORTAL KPIs
-    "kpi_societies_total": {"target": "list_societies", "label": "All Societies"},
+    # MASTER PORTAL KPIs — all 7 master-dashboard society KPIs (including
+    # Total) target "list_master_societies", a separate list entity from
+    # "list_societies" that adds an apartment_count column via a joined
+    # query (see loaders.py + _MASTER_SOCIETIES_LIST_COLUMNS in
+    # schema_introspect.py). "list_societies" itself is reserved for
+    # non-master portals/contexts (e.g. the Settings-tab KPIs further down
+    # that operate on a single society's own record).
+    "kpi_societies_total": {"target": "list_master_societies", "label": "All Societies"},
+    # The plan/status filter dict below is carried for documentation/
+    # Inspector purposes only; the master_societies loader does not apply
+    # it (see loaders.py), so these currently all show the same unfiltered
+    # list, just with the extra column. Filtering by plan/status is a
+    # separate follow-up.
     "kpi_societies_9apts": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "9Apts"},
     },
     "kpi_societies_99apts": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "99Apts"},
     },
     "kpi_societies_999apts": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Paid Plan Societies",
         "filter": {"plan": "999Apts"},
     },
     "kpi_societies_unlimited": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Unlimited Plans",
         "filter": {"plan": "unlimited"},
     },
     "kpi_societies_free": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Free Plan Societies",
         "filter": {"plan": "Free"},
     },
     "kpi_societies_expired": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Expired Plans",
         "filter": {"status": "expired"},
     },
     "kpi_societies_expiring_soon": {
-        "target": "master_list_societies",
+        "target": "list_master_societies",
         "label": "Expiring Soon",
         "filter": {"status": "expiring_soon"},
     },
@@ -414,6 +427,9 @@ DRILLDOWN_MAP: dict = {
     },
     "list_cashbook": {"target": "profile_transaction", "label": "Transaction Details"},
     "list_societies": {"target": "profile_society", "label": "Society Profile"},
+    # master_societies is a separate list entity (societies + apartment_count),
+    # but rows still open the same real society profile/edit form.
+    "list_master_societies": {"target": "profile_society", "label": "Society Profile"},
     "list_accounts": {"target": "profile_account", "label": "Account Details"},
     "list_ledger": {"target": "profile_account", "label": "Account Ledger"},
     "list_ledger_index": {"target": "profile_account", "label": "Account Profile"},

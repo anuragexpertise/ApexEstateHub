@@ -33,6 +33,15 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "payables":     "payables",
     "assets":       "assets",
     "societies":    "societies",
+    # master_societies is a distinct list entity (Master dashboard's plan-
+    # breakdown KPIs), backed by a joined query with an extra
+    # apartment_count column (see loaders.py + _MASTER_SOCIETIES_LIST_COLUMNS
+    # below, which overrides list_columns rather than using the full
+    # introspected societies column list). It has no dedicated
+    # form_master_society_edit — see NO_EDIT_ACTION — rows drill into the
+    # real profile_society/form_society_edit instead (registry.py's
+    # list_master_societies -> profile_society mapping).
+    "master_societies": "societies",
     "accounts":     "accounts",
     "apt_charges":  "apt_charges_fines_basis",
     "ven_charges":  "ven_charges_fines_basis",
@@ -100,6 +109,11 @@ NO_EDIT_ACTION = {
     # society_id/apartment_id be changed without that validation, so
     # channels are view-only from the drilldown profile.
     "channels",
+    # master_societies has no form_master_society_edit — it's the same
+    # underlying societies table as "societies", just with an extra
+    # computed column for the Master dashboard's plan-breakdown lists.
+    # Edit goes through the real "societies" entity's profile/edit form.
+    "master_societies",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -226,6 +240,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Active",       "field": "active", "icon": "fa-toggle-on", "format": "bool"},
         {"label": "Scan Interval", "field": "scan_interval", "icon": "fa-clock"},
     ],
+
     # NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
     # already resolved generically via _FK_HUMAN_ALIASES / _FK_LABEL_OVERRIDES
     # below, same as every other apartment_id FK column — no separate entry
@@ -644,6 +659,22 @@ _CASHBOOK_LIST_COLUMNS = [
     {"name": "CIH Running",  "field": "cih_running",      "sortable": True, "format": "currency"},
 ]
 
+# master_societies is backed by loaders.py's hand-written join query
+# (societies LEFT JOIN apartments, GROUP BY), which only selects a subset
+# of societies columns plus the computed apartment_count — override rather
+# than use the full introspected societies column list, or most cells
+# would render blank for columns the query never selects (logo,
+# secretary_sign, payment_qr, email, phone, qr_signing_secret_hash, …).
+_MASTER_SOCIETIES_LIST_COLUMNS = [
+    {"name": "Society Name",         "field": "name",                 "sortable": True},
+    {"name": "Address",              "field": "address",              "sortable": True},
+    {"name": "PAN Number",           "field": "pan_number",           "sortable": True},
+    {"name": "Registration Number",  "field": "registration_number",  "sortable": True},
+    {"name": "Plan",                 "field": "plan",                 "sortable": True},
+    {"name": "Plan Validity",        "field": "plan_validity",        "sortable": True, "format": "date"},
+    {"name": "Apartments",           "field": "apartment_count",      "sortable": False},
+]
+
 # Ledger is backed by fn_account_ledger_fy(), which returns a virtual
 # double-sided ledger with BF, transaction rows, depreciation row (where
 # applicable), and closing balance — row_type distinguishes them ('bf' |
@@ -788,6 +819,11 @@ def build_entity_meta() -> dict:
             meta[ekey]["list_columns"] = _LEDGER_LIST_COLUMNS
             meta[ekey]["list_title"] = "Account Ledger"
             meta[ekey]["list_icon"] = "fa-book"
+
+        if ekey == "master_societies":
+            meta[ekey]["list_columns"] = _MASTER_SOCIETIES_LIST_COLUMNS
+            meta[ekey]["list_title"] = "Societies"
+            meta[ekey]["list_icon"] = "fa-crown"
 
         if ekey == "event_ticket_items":
             meta[ekey]["list_columns"] = [

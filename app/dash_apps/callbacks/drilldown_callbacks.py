@@ -3158,56 +3158,15 @@ def _render_card(
             "new": f"New {entity_raw.replace('_', ' ').title()}",
             "edit": f"Edit {entity_raw.replace('_', ' ').title()}",
         }
-        
-        # ── Master Society Creation ──────────────────────────────────────────
-        if entity_raw == "master_society" and card_id == "form_master_society_new":
-            name = prefill.get("name", "").strip()
-            address = prefill.get("address", "").strip()
-            pan = prefill.get("pan", "").strip()
-            reg_num = prefill.get("registration", "").strip()
-            plan = prefill.get("plan", "Free")
-            validity_date = prefill.get("validity_date")
-            admin_email = prefill.get("admin_username", "").strip()
-            admin_password = prefill.get("admin_password", "")
-            
-            if not name or not admin_email or not admin_password:
-                return [html.Div([
-                    html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
-                    "Name, Admin Email and Admin Password are required."
-                ], className="alert alert-warning mt-2")], "drill-down-pane", None
-            
-            if len(admin_password) < 8:
-                return [html.Div([
-                    html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
-                    "Password must be at least 8 characters."
-                ], className="alert alert-warning mt-2")], "drill-down-pane", None
-            
-            from app.services.society_service import create_society
-            try:
-                sid = create_society({
-                    "name": name,
-                    "address": address,
-                    "pan": pan,
-                    "reg_num": reg_num,
-                    "plan": plan,
-                    "validity": validity_date if validity_date else None,
-                    "admin_email": admin_email,
-                    "admin_password": admin_password,
-                })
-                if sid:
-                    return [html.Div([
-                        html.I(className="fas fa-check-circle me-2", style={"color": "#17976e"}),
-                        f"Society '{name}' created successfully! (ID: {sid})",
-                    ], className="alert alert-success mt-2")], "drill-down-pane", None
-                return [html.Div([
-                    html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
-                    "Failed to create society."
-                ], className="alert alert-danger mt-2")], "drill-down-pane", None
-            except Exception as e:
-                return [html.Div([
-                    html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
-                    f"Error: {str(e)[:120]}"
-                ], className="alert alert-danger mt-2")], "drill-down-pane", None
+
+        # NOTE: a "Master Society Creation" intercept used to live here,
+        # duplicating create_society's validation + call. It was dead code —
+        # card_id == "form_master_society_new" already returns earlier in
+        # this function (see "Create Master Society — dedicated form" above,
+        # which calls renderers.render_form_master_society_new()), so this
+        # branch could never execute. The one live create-society path is
+        # the "Master Society Creation Intercept" in handle_form_submit
+        # above, which runs on actual form submission. Removed 2026-09.
 
         # ── INTERCEPT: Verify Receivable / Accept Payment ────────────────────────
         if entity_raw in ("verify_receivable_amt", "reject_receivable_amt"):
