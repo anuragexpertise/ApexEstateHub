@@ -112,6 +112,10 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin", "channels"):     {"view", "new"},
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
     ("master", "societies"):   {"view", "edit", "new"},
+    # master_societies (Master dashboard's plan-breakdown lists) rows open
+    # the same profile_society/form_society_edit as "societies" above —
+    # keep the same permission set so both lists behave identically.
+    ("master", "master_societies"): {"view", "edit", "new"},
     ("master", "receivables"): {"view"},
     ("master", "payables"):    {"view"},
     ("master", "security_roster"): {"view"},

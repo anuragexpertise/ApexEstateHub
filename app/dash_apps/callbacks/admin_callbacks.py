@@ -25,77 +25,26 @@ manual-qr-input / validate-qr-btn / qr-validation-result — those are now
 "scope": <page>}, scoped per page (e.g. "pass_evaluation",
 "vendor_concern_lookup") so multiple instances can coexist without
 colliding.
+
+handle_create_society and its "CLEAR CREATE-SOCIETY FORM" clientside
+callback were REMOVED (2026-09) — dead code left over from an earlier,
+static-id create-society form (master-create-society-btn, new-society-name,
+etc.) that no longer exists anywhere in portal_pages.py/renderers.py. The
+live "New Society" form is form_master_society_new (renderers.py's
+render_form_master_society_new), submitted through the generic
+form-field/form-submit pattern and handled by the "Master Society Creation
+Intercept" in drilldown_callbacks.py's handle_form_submit. Besides being
+unreachable, handle_create_society also called `raise PreventUpdate`
+without importing PreventUpdate — a NameError had it ever fired.
 """
 
 from dash import Input, Output, State, html, no_update
 from datetime import datetime
 
 from app.security.guards import require_session
-from app.services.society_service import create_society
 
 
 def register_admin_callbacks(app):
-    # ── 0. CREATE SOCIETY (Master portal) ─────────────────────────────────────
-    @app.callback(
-        Output("master-create-result", "children"),
-        Input("master-create-society-btn", "n_clicks"),
-        State("new-society-name", "value"),
-        State("new-society-address", "value"),
-        State("new-society-pan", "value"),
-        State("new-society-reg-num", "value"),
-        State("new-society-email", "value"),
-        State("new-society-password", "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def handle_create_society(n_clicks, name, address, pan, reg_num, email, password):
-        if not n_clicks or not name or not address or not pan or not reg_num or not email or not password:
-            raise PreventUpdate
-        if len(password) < 8:
-            return html.Div([
-                html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
-                "Password must be at least 8 characters.",
-            ], className="alert alert-warning mt-2")
-        try:
-            sid = create_society({
-                "name": name.strip(),
-                "address": address.strip(),
-                "pan": pan.strip(),
-                "reg_num": reg_num.strip(),
-                "admin_email": email.strip(),
-                "admin_password": password,
-            })
-            if sid:
-                return html.Div([
-                    html.I(className="fas fa-check-circle me-2", style={"color": "#17976e"}),
-                    f"Society '{name}' created successfully! (ID: {sid})",
-                ], className="alert alert-success mt-2")
-            return html.Div([
-                html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
-                "Failed to create society. Please try again.",
-            ], className="alert alert-danger mt-2")
-        except Exception as e:
-            return html.Div([
-                html.I(className="fas fa-exclamation-circle me-2", style={"color": "#de5c52"}),
-                f"Error: {str(e)[:120]}",
-            ], className="alert alert-danger mt-2")
-
-    # ── 1. CLEAR CREATE-SOCIETY FORM ──────────────────────────────────────────
-    app.clientside_callback(
-        """
-        function(n) {
-            if (!n) return window.dash_clientside.no_update;
-            var fields = ['new-society-name','new-society-address','new-society-pan','new-society-reg-num','new-society-email','new-society-password'];
-            fields.forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); }
-            });
-            return '';
-        }
-        """,
-        Output("new-society-name", "value", allow_duplicate=True),
-        Input("master-clear-btn", "n_clicks"),
-        prevent_initial_call=True,
-    )
-
-    print("  ✓ Admin callbacks registered (manual QR validate moved to qr_callbacks.py)")
+    # Fully pruned — see module docstring. Kept as a no-op registration
+    # slot for future admin-specific callbacks.
+    print("  ✓ Admin callbacks registered (no-op — see admin_callbacks.py module docstring)")

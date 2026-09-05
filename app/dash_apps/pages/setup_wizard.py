@@ -144,7 +144,7 @@ def get_setup_wizard_layout():
                         [
                             html.Div(
                                 [
-                                    html.H5(html.I(className="fas fa-info-circle me-2") + " Rules & Regulations", style={"fontWeight": "bold", "color": "#2c3e50"}),
+                                    html.H5([html.I(className="fas fa-info-circle me-2"), "Rules & Regulations"], style={"fontWeight": "bold", "color": "#2c3e50"}),
                                     html.Hr(),
                                     html.P(id="sw-banner-text", style={"fontSize": "14px", "color": "#4a5568", "lineHeight": "1.6"}),
                                     html.A("Learn More", id="sw-banner-link", href="#", target="_blank", className="btn btn-outline-info btn-sm mt-3")
