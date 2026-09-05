@@ -5561,23 +5561,23 @@ def render_form_master_society_new() -> "html.Div":
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Society Name", html_for="new-society-name", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "name", "card_id": "form_master_society_new"}, type="text", placeholder="Enter society name", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "name"}, type="text", placeholder="Enter society name", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Society Address", html_for="new-society-address", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "address", "card_id": "form_master_society_new"}, type="text", placeholder="Enter society address", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "address"}, type="text", placeholder="Enter society address", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("PAN Number", html_for="new-society-pan", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "pan", "card_id": "form_master_society_new"}, type="text", placeholder="Enter PAN number", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "pan"}, type="text", placeholder="Enter PAN number", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Registration Number", html_for="new-society-reg-num", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "registration", "card_id": "form_master_society_new"}, type="text", placeholder="Enter registration number", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "registration"}, type="text", placeholder="Enter registration number", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Plan", html_for="new-society-plan", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Select(id={"type": "form-field", "entity": "master_society", "field": "plan", "card_id": "form_master_society_new"},
+                    dbc.Select(id={"type": "form-field", "entity": "master_society", "field": "plan"},
                                options=[
                                    {"label": "Free", "value": "Free"},
                                    {"label": "9Apts", "value": "9Apts"},
@@ -5588,15 +5588,15 @@ def render_form_master_society_new() -> "html.Div":
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Validity Date", html_for="new-society-validity", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "validity_date", "card_id": "form_master_society_new"}, type="date", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "validity_date"}, type="date", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Admin Email (Username)", html_for="new-society-email", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "admin_username", "card_id": "form_master_society_new"}, type="email", placeholder="admin@society.com", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "admin_username"}, type="email", placeholder="admin@society.com", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Admin Password", html_for="new-society-password", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "admin_password", "card_id": "form_master_society_new"}, type="password", placeholder="Min 8 characters", style={"fontSize":"12px"}),
+                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "admin_password"}, type="password", placeholder="Min 8 characters", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Button([html.I(className="fas fa-plus me-2"), "Create Society"], 
