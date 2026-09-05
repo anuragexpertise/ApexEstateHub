@@ -13,7 +13,7 @@ def register_setup_wizard_callbacks(app):
         Input("auth-store", "data")
     )
     def trigger_setup_wizard(auth):
-        if not auth or not auth.get("authenticated"):
+        if not auth or not isinstance(auth, dict) or not auth.get("authenticated"):
             return no_update
         if auth.get("role") != "admin":
             return no_update
