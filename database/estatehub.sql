@@ -8990,10 +8990,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_ven_7day     NUMERIC,
     p_ven_1mth     NUMERIC,
     p_bf_fy        INT,
-    p_bf_acc_id    INT,
-    p_bf_drcr      VARCHAR(2),
-    p_bf_amount    NUMERIC,
-    p_bf_remarks   VARCHAR(200),
+    p_bf_json      JSONB,
     p_created_by   INT
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
@@ -9006,19 +9003,8 @@ BEGIN
         RETURN 'Error: society not identified';
     END IF;
 
-    -- Validate brought-forward account belongs to THIS society before
-    -- touching anything (accounts.id is a global serial across all
-    -- societies, so an unchanged/mistyped Account ID could otherwise
-    -- silently reference another tenant's account).
-    IF p_bf_amount IS NOT NULL AND p_bf_amount > 0 THEN
-        IF p_bf_acc_id IS NULL OR NOT EXISTS (
-            SELECT 1 FROM accounts WHERE id = p_bf_acc_id AND society_id = p_society_id
-        ) THEN
-            RETURN 'Error: Brought Forward Account ID does not belong to this society.';
-        END IF;
-        IF p_bf_drcr IS NULL OR p_bf_drcr NOT IN ('Dr', 'Cr') THEN
-            RETURN 'Error: Brought Forward Type must be Dr or Cr.';
-        END IF;
+    -- Validate brought-forward (if present, fy is required)
+    IF p_bf_json IS NOT NULL AND jsonb_array_length(p_bf_json) > 0 THEN
         IF p_bf_fy IS NULL THEN
             RETURN 'Error: Brought Forward Financial Year is required.';
         END IF;
@@ -9091,14 +9077,20 @@ BEGIN
             (p_society_id, NULL, CURRENT_DATE, p_ven_1day, p_ven_7day, p_ven_1mth, p_created_by);
     END IF;
 
-    -- 6) Brought forward (optional single opening-balance row; validated above)
-    IF p_bf_amount IS NOT NULL AND p_bf_amount > 0 THEN
-        INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, created_by, is_auto_calculated)
-        VALUES (p_society_id, p_bf_fy, p_bf_acc_id, p_bf_drcr, p_bf_amount, p_bf_remarks, p_created_by, FALSE)
-        ON CONFLICT (society_id, financial_year, acc_id)
-        DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount,
-                      remarks = EXCLUDED.remarks, updated_at = NOW(), updated_by = p_created_by,
-                      is_auto_calculated = FALSE;
+    -- 6) Brought forward (multiple opening-balance rows passed as JSON)
+    IF p_bf_json IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(p_bf_json)
+        LOOP
+            IF (v_item->>'bf_amount')::NUMERIC > 0 THEN
+                INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, created_by, is_auto_calculated)
+                SELECT p_society_id, p_bf_fy, (v_item->>'acc_id')::INT, a.drcr_bf, (v_item->>'bf_amount')::NUMERIC, v_item->>'remarks', p_created_by, FALSE
+                FROM accounts a WHERE a.id = (v_item->>'acc_id')::INT AND a.society_id = p_society_id
+                ON CONFLICT (society_id, financial_year, acc_id)
+                DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount,
+                              remarks = EXCLUDED.remarks, updated_at = NOW(), updated_by = p_created_by,
+                              is_auto_calculated = FALSE;
+            END IF;
+        END LOOP;
     END IF;
 
     RETURN 'OK';

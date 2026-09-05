@@ -111,3 +111,14 @@ def get() -> any:
     Returns None - state is in the store dict passed to callbacks.
     """
     return None
+
+def pop(state: dict) -> dict:
+    """Pop the top card off the navigation stack."""
+    state = deepcopy(state)
+    if state and "stack" in state and len(state["stack"]) > 1:
+        state["stack"].pop()
+        entry = state["stack"][-1]
+        state["active_card"] = entry["card_id"]
+        state["filters"]     = entry.get("filters", state.get("filters", {}))
+        state["prefill"]     = entry.get("prefill", {})
+    return state

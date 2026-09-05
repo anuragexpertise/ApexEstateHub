@@ -63,7 +63,7 @@ def render_category_content(category, society_id=None):
             row = dbc.Row([
                 dbc.Col(html.B(section), width=2, className="d-flex align-items-center text-primary"),
                 dbc.Col(html.Span(nature, className="small text-muted"), width=7, className="d-flex align-items-center"),
-                dbc.Col(dbc.Input(id={"type": "sw-tds-rate", "index": idx}, type="number", value=rate, step=0.1, bs_size="sm"), width=3),
+                dbc.Col(dbc.Input(id={"type": "sw-tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm"), width=3),
             ], className="mb-2")
             inputs.append(row)
             
@@ -117,10 +117,10 @@ def render_category_content(category, society_id=None):
         inputs.append(html.H6("State Compliance Thresholds", className="mt-4 mb-2 text-primary"))
         inputs.append(dbc.Row([
             dbc.Col(html.B("State", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Compliance Key", className="small text-uppercase"), width=5),
+            dbc.Col(html.B("Compliance Key", className="small text-uppercase"), width=3),
             dbc.Col(html.B("Value", className="small text-uppercase"), width=2),
             dbc.Col(html.B("Unit", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Notes", className="small text-uppercase"), width=3),
+            dbc.Col(html.B("Notes", className="small text-uppercase"), width=5),
         ], className="mb-2 border-bottom pb-1"))
         
         for idx, item in enumerate(STATE_COMPLIANCE_THRESHOLDS):
@@ -128,10 +128,10 @@ def render_category_content(category, society_id=None):
             display_val = val if val is not None else (val_text if val_text != "NULL_NO_FLOOR" else "")
             row = dbc.Row([
                 dbc.Col(html.B(state), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(key, className="small text-muted"), width=5, className="d-flex align-items-center text-break"),
+                dbc.Col(html.Span(key, className="small text-muted"), width=3, className="d-flex align-items-center text-break"),
                 dbc.Col(html.Span(display_val, className="small fw-bold"), width=2, className="d-flex align-items-center"),
                 dbc.Col(html.Span(unit, className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(notes[:30] + ("..." if len(notes) > 30 else ""), className="small text-muted", title=notes), width=3, className="d-flex align-items-center text-truncate"),
+                dbc.Col(html.Span(notes, className="small text-muted"), width=5, className="d-flex align-items-center"),
             ], className="mb-2")
             inputs.append(row)
 
@@ -154,7 +154,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2")
             inputs.append(row)
             
-        return [html.Div(inputs, style={"maxHeight": "400px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
+        return [html.Div(inputs, style={"maxHeight": "400px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Apartment Charges":
         return [
             html.P("Configure default Apartment Charges & Fines Basis.", className="text-muted mb-3"),
@@ -182,22 +182,42 @@ def render_category_content(category, society_id=None):
             dbc.Input(id="sw-ven-1mth", type="number", value=500.0, step=1, className="mb-3"),
         ]
     elif category == "Brought Forward":
-        return [
+        accounts = []
+        if society_id:
+            accounts = db._execute(
+                "SELECT id, tab_name, name, drcr_bf FROM accounts WHERE society_id = :sid AND has_bf = TRUE ORDER BY id",
+                {"sid": society_id}, fetch_all=True
+            ) or []
+            
+        inputs = [
             html.P("Configure Opening Balances (Brought Forward).", className="text-muted mb-3"),
             dbc.Label("Financial Year (Start Year)"),
             dbc.Input(id="sw-bf-fy", type="number", value=2026, step=1, className="mb-3"),
-            dbc.Label("Account ID"),
-            dbc.Input(id="sw-bf-acc-id", type="number", value=1, step=1, className="mb-3"),
-            dbc.Label("Type (Dr/Cr)"),
-            dbc.Select(id="sw-bf-drcr", options=[
-                {"label": "Debit (Dr)", "value": "Dr"},
-                {"label": "Credit (Cr)", "value": "Cr"}
-            ], value="Dr", className="mb-3"),
-            dbc.Label("Amount (₹)"),
-            dbc.Input(id="sw-bf-amount", type="number", value=0.0, step=0.01, min=0, className="mb-3"),
-            dbc.Label("Remarks"),
-            dbc.Input(id="sw-bf-remarks", type="text", placeholder="Opening balance...", className="mb-3"),
+            html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
         ]
+        
+        header = dbc.Row([
+            dbc.Col(html.B("ID", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Tab", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Name", className="small text-uppercase"), width=4),
+            dbc.Col(html.B("Dr/Cr", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Amount (₹)", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Remarks", className="small text-uppercase"), width=2),
+        ], className="mb-2 border-bottom pb-1")
+        inputs.append(header)
+        
+        for acc in accounts:
+            row = dbc.Row([
+                dbc.Col(html.Span(str(acc["id"]), className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc["tab_name"] or "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc["name"] or "", className="small fw-bold"), width=4, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc["drcr_bf"] or "", className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc["id"]}, type="number", value=0.0, step=0.01, min=0, size="sm"), width=2),
+                dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc["id"]}, type="text", placeholder="Remarks...", size="sm"), width=2),
+            ], className="mb-2")
+            inputs.append(row)
+            
+        return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "QR Code":
         return [
             html.P("Set a Setup Confirmation Password to finish onboarding this society.", className="text-danger fw-bold mb-3"),
@@ -253,11 +273,23 @@ def get_setup_wizard_layout(society_id=None):
                         width=3,
                         style={"borderRight": "1px solid #e0e0e0"}
                     ),
-                    # Middle: Form
+                    # Right: Rules (Above) and Content (Below)
                     dbc.Col(
                         [
+                            # Rules (Above)
+                            html.Div(
+                                [
+                                    html.H5([html.I(className="fas fa-info-circle me-2"), "Rules & Regulations"], style={"fontWeight": "bold", "color": "#2c3e50"}),
+                                    html.Hr(style={"margin": "10px 0"}),
+                                    html.P(id="sw-banner-text", style={"fontSize": "14px", "color": "#4a5568", "lineHeight": "1.6", "marginBottom": "10px"}),
+                                    html.A("Learn More", id="sw-banner-link", href="#", target="_blank", className="btn btn-outline-info btn-sm")
+                                ],
+                                style={"background": "rgba(255,255,255,0.85)", "padding": "15px", "borderRadius": "10px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)", "marginBottom": "20px"}
+                            ),
+                            
+                            # Content (Below)
                             html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold", "marginBottom": "20px"}),
-                            html.Div(id="sw-category-content", children=[
+                            html.Div(id="sw-category-content", style={"overflow": "auto", "maxHeight": "500px", "paddingRight": "10px"}, children=[
                                 html.Div(
                                     render_category_content(cat, society_id),
                                     id={"type": "sw-step-container", "index": i},
@@ -276,23 +308,8 @@ def get_setup_wizard_layout(society_id=None):
                                 style={"marginTop": "30px", "textAlign": "right"}
                             )
                         ],
-                        width=5,
+                        width=9,
                         style={"padding": "0 20px"}
-                    ),
-                    # Right: Banner Text
-                    dbc.Col(
-                        [
-                            html.Div(
-                                [
-                                    html.H5([html.I(className="fas fa-info-circle me-2"), "Rules & Regulations"], style={"fontWeight": "bold", "color": "#2c3e50"}),
-                                    html.Hr(),
-                                    html.P(id="sw-banner-text", style={"fontSize": "14px", "color": "#4a5568", "lineHeight": "1.6"}),
-                                    html.A("Learn More", id="sw-banner-link", href="#", target="_blank", className="btn btn-outline-info btn-sm mt-3")
-                                ],
-                                style={"background": "rgba(255,255,255,0.85)", "padding": "20px", "borderRadius": "10px", "boxShadow": "0 4px 6px rgba(0,0,0,0.1)", "height": "100%"}
-                            )
-                        ],
-                        width=4
                     )
                 ]),
                 id="setup-wizard-modal-body",
@@ -300,7 +317,7 @@ def get_setup_wizard_layout(society_id=None):
                     "--login-bg": "url(/static/assets/EH_bk.jpg)",
                     "backgroundSize": "cover",
                     "backgroundPosition": "center",
-                    "minHeight": "500px",
+                    "minHeight": "650px",
                     "padding": "30px"
                 }
             ),
@@ -310,6 +327,8 @@ def get_setup_wizard_layout(society_id=None):
         id="setup-wizard-modal",
         is_open=True,
         size="xl",
+        fullscreen=True,
+        centered=True,
         backdrop="static",
         keyboard=False
     )
