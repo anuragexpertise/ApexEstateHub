@@ -255,6 +255,7 @@ SOCIETY = {
     "payment_qr":       "sunrise_qr.png",
     "logo":             "sunrise_logo.png",
     "login_background": "sunrise_bg.png",
+    "qr_signing_secret_hash": generate_password_hash("Setup@2024"),
 }
 
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024", "name": "Master Admin"}
@@ -608,15 +609,16 @@ def seed_society(cur, conn) -> int:
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
             secretary_phone, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            payment_qr, logo, login_background, qr_signing_secret_hash)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
          SOCIETY["secretary_phone"], SOCIETY.get("secretary_sign"),
          SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
-         SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background")),
+         SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background"),
+         SOCIETY.get("qr_signing_secret_hash")),
     )
     conn.commit()
     cur.execute(
