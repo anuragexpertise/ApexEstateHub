@@ -537,6 +537,12 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='resolved'",
                         (sid, sec_id),
                     ) if sec_id else None,
+                    "kpi_presumed_visitor": (
+                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE AND role='VIS' "
+                        "AND (time_out IS NULL OR time_out::DATE > CURRENT_DATE)",
+                        (sid,),
+                    ),
                 }
                 return overrides.get(card_id)
 
@@ -596,8 +602,11 @@ def register_card_catalogue_callbacks(app):
 
             # Default: use the KPI's own SQL with society_id params
             n_params = cfg.get("params", 0)
-            if n_params == 0 or is_master:
+            if n_params == 0:
                 params = ()
+            elif is_master:
+                results[idx] = "—"
+                continue
             else:
                 if not sid:
                     results[idx] = "—"

@@ -5588,7 +5588,11 @@ def render_form_master_society_new() -> "html.Div":
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Validity Date", html_for="new-society-validity", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "validity_date"}, type="date", style={"fontSize":"12px"}),
+                    dcc.DatePickerSingle(
+                        id={"type": "form-field-date", "entity": "master_society", "field": "validity_date"},
+                        display_format="DD/MM/YYYY",
+                        style={"fontSize":"12px", "borderRadius": "10px"},
+                    ),
                 ], width=12, className="mb-3"),
                 dbc.Col([
                     dbc.Label("Admin Email (Username)", html_for="new-society-email", style={"fontSize":"11px", "fontWeight":"700"}),

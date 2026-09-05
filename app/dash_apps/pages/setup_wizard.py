@@ -4,8 +4,7 @@ import hmac
 import hashlib
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 import dash_bootstrap_components as dbc
-from utils.database import get_db_connection
-
+from database.db_manager import db
 def load_conversation_data():
     data = []
     file_path = os.path.join(os.path.dirname(__file__), "../../../conversation.csv")
@@ -22,17 +21,25 @@ CATEGORIES = [
     "Apartment Charges", "Vendor Charges", "Brought Forward", "QR Code"
 ]
 
-def render_category_content(category):
+def render_category_content(category, society_id=None):
     if category == "Society Details":
+        s_name, s_addr, s_pan, s_reg = "", "", "", ""
+        if society_id:
+            row = db._execute("SELECT name, address, PAN_number, registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_name = row.get("name", "") or ""
+                s_addr = row.get("address", "") or ""
+                s_pan = row.get("PAN_number", "") or ""
+                s_reg = row.get("registration_number", "") or ""
         return [
             dbc.Label("Society Name (Must)"),
-            dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3"),
+            dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True),
             dbc.Label("Address (Must)"),
-            dbc.Textarea(id="sw-society-address", required=True, className="mb-3"),
+            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr, readonly=True),
             dbc.Label("PAN Number (Must)"),
-            dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3"),
+            dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True),
             dbc.Label("Registration Number (Must)"),
-            dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3"),
+            dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg, readonly=True),
         ]
     elif category == "TDS Rates":
         return [
@@ -88,12 +95,20 @@ def render_category_content(category):
         ]
     return []
 
-def get_setup_wizard_layout():
+def get_setup_wizard_layout(society_id=None):
     return dbc.Modal(
         [
             dbc.ModalHeader(
-                dbc.ModalTitle("EstateHub First-Time Setup Wizard", style={"fontWeight": "bold", "color": "#fff"}),
-                style={"background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)", "borderBottom": "none"}
+                [
+                    dbc.ModalTitle("EstateHub First-Time Setup Wizard", style={"fontWeight": "bold", "color": "#fff"}),
+                    html.Button(
+                        html.I(className="fas fa-times"),
+                        id="sw-close-btn",
+                        style={"background": "none", "border": "none", "color": "#fff", "fontSize": "1.5rem", "cursor": "pointer"}
+                    )
+                ],
+                close_button=False,
+                style={"background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)", "borderBottom": "none", "display": "flex", "justifyContent": "space-between"}
             ),
             dbc.ModalBody(
                 dbc.Row([
@@ -123,7 +138,7 @@ def get_setup_wizard_layout():
                     dbc.Col(
                         [
                             html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold", "marginBottom": "20px"}),
-                            html.Div(id="sw-category-content", children=render_category_content(CATEGORIES[0])),
+                            html.Div(id="sw-category-content", children=render_category_content(CATEGORIES[0], society_id)),
                             
                             html.Div(id="sw-error-msg", style={"color": "red", "marginTop": "15px"}),
 
@@ -155,13 +170,17 @@ def get_setup_wizard_layout():
                         width=4
                     )
                 ]),
+                id="setup-wizard-modal-body",
                 style={
-                    "background": "url(/static/assets/EH_bk.jpg) center/cover no-repeat",
+                    "--login-bg": "url(/static/assets/EH_bk.jpg)",
+                    "backgroundSize": "cover",
+                    "backgroundPosition": "center",
                     "minHeight": "500px",
                     "padding": "30px"
                 }
             ),
-            dcc.Store(id="sw-current-step", data=0)
+            dcc.Store(id="sw-current-step", data=0),
+            dcc.Store(id="sw-society-id", data=society_id)
         ],
         id="setup-wizard-modal",
         is_open=True,

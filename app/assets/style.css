@@ -917,15 +917,17 @@ a {
 .dnd-card[data-card-type="kpi"]:active {
     transform: translateY(0);
 }
-/* Login modal background overlay for readability */
-#login-modal-body {
+/* Login and Setup Wizard modal background overlay for readability */
+#login-modal-body,
+#setup-wizard-modal-body {
     position: relative;
 }
 
 /* Stage-2 background image — rendered on a pseudo-element at 0.5 opacity
    so the form content (z-index 2) stays fully opaque. The image URL is
    supplied via the --login-bg custom property set by the Python code. */
-#login-modal-body::before {
+#login-modal-body::before,
+#setup-wizard-modal-body::before {
     content: '';
     position: absolute;
     top: 0;
@@ -941,7 +943,8 @@ a {
 }
 
 /* White veil keeps the login form readable over the image */
-#login-modal-body::after {
+#login-modal-body::after,
+#setup-wizard-modal-body::after {
     content: '';
     position: absolute;
     top: 0;
@@ -952,7 +955,8 @@ a {
     z-index: 1;
 }
 
-#login-modal-body > * {
+#login-modal-body > *,
+#setup-wizard-modal-body > * {
     position: relative;
     z-index: 2;
 }
