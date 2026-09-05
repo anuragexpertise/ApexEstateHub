@@ -165,8 +165,8 @@ _PATH_LABELS = {
     "admin-portal":      "Dashboard",
     "owner-portal":      "Dashboard",
     "vendor-portal":     "Dashboard",
-    "master":            "Dashboard",
-    "master-create":     "Create Society",
+    "master":            "Societies",
+    "master-societies":  "Societies",
     "master-settings":   "Settings",
     "pass-evaluation":   "Pass Eval",
     "cashbook":          "Cashbook",
@@ -242,9 +242,8 @@ def _portal_content(role, society_id, pathname, auth=None):
 
     if is_master:
         tab = (
-            "master-create"   if "/master-create"   in p else
             "master-settings" if "/master-settings" in p else
-            "master"
+            "master"  # covers both /master and /master-societies — same page
         )
         return master_portal_page(active_tab=tab, sid=society_id)
     if role == "admin":

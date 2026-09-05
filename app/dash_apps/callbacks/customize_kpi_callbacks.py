@@ -95,7 +95,7 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_societies_99apts", "master", "dashboard", "Master"),
     ("kpi_societies_999apts", "master", "dashboard", "Master"),
     ("kpi_societies_unlimited", "master", "dashboard", "Master"),
-    ("kpi_master_apartments_total", "master", "dashboard", "Master"),
+    ("kpi_societies_expiring_soon", "master", "dashboard", "Master"),
     # APARTMENT PORTAL - Dashboard
     ("kpi_apartments_dues", "apartment", "dashboard", "Account"),
     ("kpi_concerns_not_closed", "apartment", "dashboard", "Concerns"),

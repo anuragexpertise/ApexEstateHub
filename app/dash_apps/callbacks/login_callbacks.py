@@ -90,7 +90,7 @@ def _build_auth_store(user: dict) -> dict:
 
 def _redirect(role: str, society_id) -> str:
     if role == "master":
-        return "/dashboard/master"
+        return "/dashboard/master-societies"
     paths = {
         "admin":     "/dashboard/admin-portal",
         "apartment": "/dashboard/owner-portal",

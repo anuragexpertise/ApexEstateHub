@@ -646,7 +646,11 @@ KPI_CARDS = {
         "icon": "fa-hourglass-half", "color": "#e2a03f",
         "title": "Expiring Soon", "group": "next 30 days",
     },
-    "kpi_master_apartments_total": {"query": "SELECT COUNT(*) AS v FROM apartments WHERE active=TRUE", "params": 0, "format": "number", "icon": "fa-home",       "color": "#1859b8", "title": "Apartments",    "group": "across all"},
+    # kpi_master_apartments_total REMOVED (2026-09, per plan) — not part of
+    # the Master "Societies" tab's 7 KPIs, and wasn't referenced by any
+    # DEFAULT_LAYOUTS anywhere else either; it was orphaned dead weight left
+    # over from the "Master module overhaul". See registry.py and
+    # customize_kpi_callbacks.py for the matching removals.
 
     # ══════════════════════════════════════════════════════════════════════
     # OWNER / APARTMENT PORTAL
