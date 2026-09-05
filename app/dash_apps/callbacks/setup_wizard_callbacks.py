@@ -116,17 +116,16 @@ def register_setup_wizard_callbacks(app):
         State("sw-ven-7day", "value"),
         State("sw-ven-1mth", "value"),
         State("sw-bf-fy", "value"),
-        State("sw-bf-acc-id", "value"),
-        State("sw-bf-drcr", "value"),
-        State("sw-bf-amount", "value"),
-        State("sw-bf-remarks", "value"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "id"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
         State("auth-store", "data"),
         prevent_initial_call=True
     )
     def submit_setup_wizard(n_submit, n_close, qr_secret, qr_confirm, tds_rates, cgst, sgst,
                              apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair,
                              ven_1day, ven_7day, ven_1mth,
-                             bf_fy, bf_acc_id, bf_drcr, bf_amount, bf_remarks, auth):
+                             bf_fy, bf_ids, bf_amts, bf_remarks, auth):
         triggered = ctx.triggered_id
         _noop = (no_update, no_update, no_update, no_update, no_update, no_update)
 
@@ -179,6 +178,17 @@ def register_setup_wizard_callbacks(app):
                 for idx, item in enumerate(TDS_SECTION_RATE_SEED)
                 if idx < len(tds_rates) and tds_rates[idx] not in (None, "")
             ]
+            
+            bf_json = []
+            if bf_ids and bf_amts:
+                for idx, acc_dict in enumerate(bf_ids):
+                    amt = bf_amts[idx]
+                    if amt is not None and float(amt) > 0:
+                        bf_json.append({
+                            "acc_id": acc_dict["acc_id"],
+                            "bf_amount": float(amt),
+                            "remarks": bf_remarks[idx] if idx < len(bf_remarks) else ""
+                        })
 
             try:
                 result = db._execute(
@@ -186,7 +196,7 @@ def register_setup_wizard_callbacks(app):
                         :sid, :qr_hash, :tds_json::jsonb, :cgst, :sgst,
                         :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
-                        :bf_fy, :bf_acc, :bf_drcr, :bf_amt, :bf_remarks, :created_by
+                        :bf_fy, :bf_json::jsonb, :created_by
                     ) AS result""",
                     {
                         "sid": society_id,
@@ -196,8 +206,7 @@ def register_setup_wizard_callbacks(app):
                         "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_due": apt_due_day,
                         "apt_sink": apt_sinking, "apt_repair": apt_repair,
                         "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,
-                        "bf_fy": bf_fy, "bf_acc": bf_acc_id, "bf_drcr": bf_drcr,
-                        "bf_amt": bf_amount, "bf_remarks": bf_remarks,
+                        "bf_fy": bf_fy, "bf_json": json.dumps(bf_json),
                         "created_by": auth.get("user_id"),
                     },
                     fetch_one=True,
