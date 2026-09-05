@@ -7,12 +7,17 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 def load_conversation_data():
     data = []
-    file_path = os.path.join(os.path.dirname(__file__), "../../../conversation.csv")
+    here = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.abspath(os.path.join(here, "../../../conversation.xlsx"))
     if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                data.append(row)
+        try:
+            import pandas as pd
+            df = pd.read_excel(file_path)
+            # Replace NaNs with empty strings
+            df = df.fillna('')
+            data = df.to_dict('records')
+        except Exception as e:
+            print(f"Error loading conversation.xlsx: {e}")
     return data
 
 CONVERSATION_DATA = load_conversation_data()
@@ -32,65 +37,149 @@ def render_category_content(category, society_id=None):
                 s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
         return [
-            dbc.Label("Society Name (Must)"),
-            dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True),
-            dbc.Label("Address (Must)"),
-            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr, readonly=True),
-            dbc.Label("PAN Number (Must)"),
-            dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True),
-            dbc.Label("Registration Number (Must)"),
-            dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg, readonly=True),
+            html.P("Contact master administrator to update readonly fields", className="text-muted small mb-3"),
+            dbc.Label("Society Name"),
+            dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Label("Address"),
+            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Label("PAN Number"),
+            dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Label("Registration Number"),
+            dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
         ]
     elif category == "TDS Rates":
-        return [
-            html.P("Defaults will be filled based on seed.py (e.g. 194C, 194J).", className="text-muted"),
-            dbc.Label("Default TDS Section 194C Rate (%)"),
-            dbc.Input(id="sw-tds-194c", type="number", value=1.0, disabled=True, className="mb-3"),
-            dbc.Label("Default TDS Section 194J Rate (%)"),
-            dbc.Input(id="sw-tds-194j", type="number", value=10.0, disabled=True, className="mb-3"),
+        from database.seed import TDS_SECTION_RATE_SEED
+        inputs = [
+            html.P("Configure TDS Section rates. Values are pre-filled with standards.", className="text-muted mb-3")
         ]
+        
+        header = dbc.Row([
+            dbc.Col(html.B("Section", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Nature of Payment", className="small text-uppercase"), width=7),
+            dbc.Col(html.B("Rate (%)", className="small text-uppercase"), width=3),
+        ], className="mb-2 border-bottom pb-2")
+        inputs.append(header)
+        
+        for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+            section, nature, rate = item[0], item[1], item[2]
+            row = dbc.Row([
+                dbc.Col(html.B(section), width=2, className="d-flex align-items-center text-primary"),
+                dbc.Col(html.Span(nature, className="small text-muted"), width=7, className="d-flex align-items-center"),
+                dbc.Col(dbc.Input(id={"type": "sw-tds-rate", "index": idx}, type="number", value=rate, step=0.1, bs_size="sm"), width=3),
+            ], className="mb-2")
+            inputs.append(row)
+            
+        return [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
     elif category == "GST Rates":
         return [
-            html.P("Defaults will be filled based on seed.py.", className="text-muted"),
+            html.P("Configure GST Rates and Thresholds.", className="text-muted mb-3"),
             dbc.Label("CGST Rate (%)"),
-            dbc.Input(id="sw-cgst", type="number", value=9.0, disabled=True, className="mb-3"),
+            dbc.Input(id="sw-cgst", type="number", value=9.0, className="mb-3", step=0.1),
             dbc.Label("SGST Rate (%)"),
-            dbc.Input(id="sw-sgst", type="number", value=9.0, disabled=True, className="mb-3"),
+            dbc.Input(id="sw-sgst", type="number", value=9.0, className="mb-3", step=0.1),
+            dbc.Label("Annual Turnover Limit for GST (Lakhs)"),
+            dbc.Input(id="sw-gst-turnover", type="number", value=20.0, className="mb-3"),
+            dbc.Label("Monthly Exemption Limit (₹ per member)"),
+            dbc.Input(id="sw-gst-exempt", type="number", value=7500.0, className="mb-3"),
         ]
     elif category == "Society Compliance":
-        return [
-            html.P("Defaults will be filled based on seed.py.", className="text-muted"),
-            dbc.Label("Sinking Fund Rate Basis"),
-            dbc.Input(value="per_sq_ft", disabled=True, className="mb-3"),
-            dbc.Label("GST Filing Cadence"),
-            dbc.Input(value="monthly", disabled=True, className="mb-3"),
+        from database.seed import KPI_RULE_LINKS, STATE_COMPLIANCE_THRESHOLDS
+        inputs = [
+            html.P("Configure State Compliance Thresholds and Reference Rule Links.", className="text-muted mb-3")
         ]
+        
+        # State Compliance Thresholds
+        inputs.append(html.H6("State Compliance Thresholds", className="mt-4 mb-2 text-primary"))
+        inputs.append(dbc.Row([
+            dbc.Col(html.B("State", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Compliance Key", className="small text-uppercase"), width=5),
+            dbc.Col(html.B("Value", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Unit", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Notes", className="small text-uppercase"), width=3),
+        ], className="mb-2 border-bottom pb-1"))
+        
+        for idx, item in enumerate(STATE_COMPLIANCE_THRESHOLDS):
+            state, key, val, val_text, unit, eff_from, eff_to, notes = item
+            display_val = val if val is not None else (val_text if val_text != "NULL_NO_FLOOR" else "")
+            row = dbc.Row([
+                dbc.Col(html.B(state), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(key, className="small text-muted"), width=5, className="d-flex align-items-center text-break"),
+                dbc.Col(dbc.Input(id={"type": "sw-compliance-val", "index": idx}, type="number" if val is not None else "text", value=display_val, bs_size="sm"), width=2),
+                dbc.Col(html.Span(unit, className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(notes[:30] + ("..." if len(notes) > 30 else ""), className="small text-muted", title=notes), width=3, className="d-flex align-items-center text-truncate"),
+            ], className="mb-2")
+            inputs.append(row)
+
+        # KPI Rule Links
+        inputs.append(html.H6("Reference KPI Rule Links", className="mt-4 mb-2 text-primary"))
+        inputs.append(dbc.Row([
+            dbc.Col(html.B("State", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Category", className="small text-uppercase"), width=3),
+            dbc.Col(html.B("Label", className="small text-uppercase"), width=4),
+            dbc.Col(html.B("URL", className="small text-uppercase"), width=4),
+        ], className="mb-2 border-bottom pb-1"))
+        
+        for idx, item in enumerate(KPI_RULE_LINKS):
+            cat, state, label, url, desc, order = item
+            row = dbc.Row([
+                dbc.Col(html.B(state), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(cat, className="small text-muted text-break"), width=3, className="d-flex align-items-center"),
+                dbc.Col(dbc.Input(id={"type": "sw-kpi-label", "index": idx}, type="text", value=label, bs_size="sm", title=label), width=4),
+                dbc.Col(dbc.Input(id={"type": "sw-kpi-url", "index": idx}, type="text", value=url, bs_size="sm", title=url), width=4),
+            ], className="mb-2")
+            inputs.append(row)
+            
+        return [html.Div(inputs, style={"maxHeight": "400px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
     elif category == "Apartment Charges":
         return [
-            html.P("Defaults will be filled.", className="text-muted"),
-            dbc.Label("Base Maintenance Rate (per sq ft)"),
-            dbc.Input(value=3.0, type="number", disabled=True, className="mb-3"),
-            dbc.Label("Interest Pct"),
-            dbc.Input(value=1.75, type="number", disabled=True, className="mb-3"),
+            html.P("Configure default Apartment Charges & Fines Basis.", className="text-muted mb-3"),
+            dbc.Label("Maintenance Flat Amount (₹)"),
+            dbc.Input(id="sw-apt-maint-amt", type="number", value=1500.0, className="mb-3"),
+            dbc.Label("Maintenance Rate (per sq.ft)"),
+            dbc.Input(id="sw-apt-maint-rate", type="number", value=3.0, step=0.1, className="mb-3"),
+            dbc.Label("Payment Due Day (1-31)"),
+            dbc.Input(id="sw-apt-due-day", type="number", value=5, min=1, max=31, className="mb-3"),
+            dbc.Label("Late Payment Interest (%) per month"),
+            dbc.Input(id="sw-apt-interest", type="number", value=1.75, step=0.01, className="mb-3"),
+            dbc.Label("Sinking Fund Rate"),
+            dbc.Input(id="sw-apt-sinking", type="number", value=0.0, step=0.1, className="mb-3"),
+            dbc.Label("Repair Fund Rate"),
+            dbc.Input(id="sw-apt-repair", type="number", value=0.0, step=0.1, className="mb-3"),
         ]
     elif category == "Vendor Charges":
         return [
-            html.P("Defaults will be filled.", className="text-muted"),
-            dbc.Label("1-Day Pass Charge"),
-            dbc.Input(value=0, type="number", disabled=True, className="mb-3"),
+            html.P("Configure default Vendor Charges & Fines Basis.", className="text-muted mb-3"),
+            dbc.Label("Vendor Pass (1 Day) ₹"),
+            dbc.Input(id="sw-ven-1day", type="number", value=50.0, step=1, className="mb-3"),
+            dbc.Label("Vendor Pass (7 Days) ₹"),
+            dbc.Input(id="sw-ven-7day", type="number", value=200.0, step=1, className="mb-3"),
+            dbc.Label("Vendor Pass (1 Month) ₹"),
+            dbc.Input(id="sw-ven-1mth", type="number", value=500.0, step=1, className="mb-3"),
         ]
     elif category == "Brought Forward":
         return [
-            html.P("Opening Balances must be 0.", className="text-muted"),
-            dbc.Label("Dr Balance"),
-            dbc.Input(value=0, type="number", disabled=True, className="mb-3"),
-            dbc.Label("Cr Balance"),
-            dbc.Input(value=0, type="number", disabled=True, className="mb-3"),
+            html.P("Configure Opening Balances (Brought Forward).", className="text-muted mb-3"),
+            dbc.Label("Financial Year (Start Year)"),
+            dbc.Input(id="sw-bf-fy", type="number", value=2026, step=1, className="mb-3"),
+            dbc.Label("Account ID"),
+            dbc.Input(id="sw-bf-acc-id", type="number", value=1, step=1, className="mb-3"),
+            dbc.Label("Type (Dr/Cr)"),
+            dbc.Select(id="sw-bf-drcr", options=[
+                {"label": "Debit (Dr)", "value": "Dr"},
+                {"label": "Credit (Cr)", "value": "Cr"}
+            ], value="Dr", className="mb-3"),
+            dbc.Label("Amount (₹)"),
+            dbc.Input(id="sw-bf-amount", type="number", value=0.0, step=0.01, min=0, className="mb-3"),
+            dbc.Label("Remarks"),
+            dbc.Input(id="sw-bf-remarks", type="text", placeholder="Opening balance...", className="mb-3"),
         ]
     elif category == "QR Code":
         return [
-            dbc.Label("QR Signing Secret (Must)"),
+            html.P("Note: Administrator need to keep it secret, as it can revoke entire QR versioning.", className="text-danger fw-bold mb-3"),
+            dbc.Label("QR_SIGNING_SECRET (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
+            dbc.Label("Confirm QR_SIGNING_SECRET"),
+            dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
             html.Small("This secret will be hashed and stored in the database.", className="text-muted"),
         ]
     return []

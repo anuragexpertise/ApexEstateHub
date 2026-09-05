@@ -102,6 +102,7 @@ def register_setup_wizard_callbacks(app):
         Input("sw-btn-submit", "n_clicks"),
         Input("sw-close-btn", "n_clicks"),
         State("sw-qr-secret", "value"),
+        State("sw-qr-secret-confirm", "value"),
         State("sw-society-name", "value"),
         State("sw-society-address", "value"),
         State("sw-society-pan", "value"),
@@ -109,7 +110,7 @@ def register_setup_wizard_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True
     )
-    def submit_setup_wizard(n_submit, n_close, qr_secret, s_name, s_addr, s_pan, s_reg, auth):
+    def submit_setup_wizard(n_submit, n_close, qr_secret, qr_confirm, s_name, s_addr, s_pan, s_reg, auth):
         triggered = ctx.triggered_id
         
         if triggered == "sw-close-btn":
@@ -126,7 +127,14 @@ def register_setup_wizard_callbacks(app):
             if not n_submit:
                 return no_update, no_update, no_update, no_update, no_update
             if not qr_secret:
-                return True, no_update, no_update, no_update, no_update # Keep open if missing mandatory field
+                return True, "QR Secret is required.", no_update, no_update, no_update 
+            
+            if qr_secret != qr_confirm:
+                return True, "Passwords do not match.", no_update, no_update, no_update
+                
+            import re
+            if len(qr_secret) < 8 or not re.search(r'[A-Z]', qr_secret) or not re.search(r'[a-z]', qr_secret) or not re.search(r'[^a-zA-Z0-9]', qr_secret):
+                return True, "Password must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char.", no_update, no_update, no_update
                 
             society_id = auth.get("society_id")
             
