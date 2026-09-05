@@ -1,8 +1,9 @@
+import json
 from dash import Input, Output, State, ALL, callback, no_update, html, ctx
 import dash_bootstrap_components as dbc
-import hashlib
-import hmac
+from werkzeug.security import generate_password_hash
 from database.db_manager import db
+from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content
 
 def register_setup_wizard_callbacks(app):
@@ -45,15 +46,14 @@ def register_setup_wizard_callbacks(app):
         Input("sw-btn-next", "n_clicks"),
         Input({"type": "sw-nav-item", "index": ALL}, "n_clicks"),
         State("sw-current-step", "data"),
-        State("sw-society-name", "value"),
-        State("sw-society-address", "value"),
-        State("sw-society-pan", "value"),
-        State("sw-society-reg", "value"),
-        State("sw-qr-secret", "value"),
         State("sw-society-id", "data"),
         prevent_initial_call=True
     )
-    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, s_name, s_addr, s_pan, s_reg, qr_sec, society_id):
+    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id):
+        # (society_id kept as a State for parity with the layout's dcc.Store,
+        # though this callback doesn't currently need it beyond triggering
+        # re-registration; the four sw-society-* / sw-qr-secret States that
+        # used to sit here were unused dead params — removed 2026-09.)
         triggered_id = ctx.triggered_id
         
         # Validation for Step 0 and 7
@@ -99,62 +99,120 @@ def register_setup_wizard_callbacks(app):
         Output("url", "pathname", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
         Output("login-modal", "is_open", allow_duplicate=True),
+        Output("sw-error-msg", "children", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
         Input("sw-close-btn", "n_clicks"),
         State("sw-qr-secret", "value"),
         State("sw-qr-secret-confirm", "value"),
-        State("sw-society-name", "value"),
-        State("sw-society-address", "value"),
-        State("sw-society-pan", "value"),
-        State("sw-society-reg", "value"),
+        State({"type": "sw-tds-rate", "index": ALL}, "value"),
+        State("sw-cgst", "value"),
+        State("sw-sgst", "value"),
+        State("sw-apt-maint-amt", "value"),
+        State("sw-apt-maint-rate", "value"),
+        State("sw-apt-due-day", "value"),
+        State("sw-apt-sinking", "value"),
+        State("sw-apt-repair", "value"),
+        State("sw-ven-1day", "value"),
+        State("sw-ven-7day", "value"),
+        State("sw-ven-1mth", "value"),
+        State("sw-bf-fy", "value"),
+        State("sw-bf-acc-id", "value"),
+        State("sw-bf-drcr", "value"),
+        State("sw-bf-amount", "value"),
+        State("sw-bf-remarks", "value"),
         State("auth-store", "data"),
         prevent_initial_call=True
     )
-    def submit_setup_wizard(n_submit, n_close, qr_secret, qr_confirm, s_name, s_addr, s_pan, s_reg, auth):
+    def submit_setup_wizard(n_submit, n_close, qr_secret, qr_confirm, tds_rates, cgst, sgst,
+                             apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair,
+                             ven_1day, ven_7day, ven_1mth,
+                             bf_fy, bf_acc_id, bf_drcr, bf_amount, bf_remarks, auth):
         triggered = ctx.triggered_id
-        
+        _noop = (no_update, no_update, no_update, no_update, no_update, no_update)
+
         if triggered == "sw-close-btn":
             if not n_close:
-                return no_update, no_update, no_update, no_update, no_update
+                return _noop
             try:
                 from flask_login import logout_user
                 logout_user()
             except Exception:
                 pass
-            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True
-            
+            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True, ""
+
         if triggered == "sw-btn-submit":
             if not n_submit:
-                return no_update, no_update, no_update, no_update, no_update
+                return _noop
+
+            # auth-store must never be overwritten with anything but a real
+            # auth dict or None (logout) — every other callback in the app
+            # does auth.get(...) on it. Validation failures below only ever
+            # touch is_open / sw-error-msg.
+            if not auth or not auth.get("society_id"):
+                return True, no_update, no_update, no_update, no_update, "Session error — please log in again."
+
             if not qr_secret:
-                return True, "QR Secret is required.", no_update, no_update, no_update 
-            
+                return True, no_update, no_update, no_update, no_update, "Setup Confirmation Password is required."
+
             if qr_secret != qr_confirm:
-                return True, "Passwords do not match.", no_update, no_update, no_update
-                
+                return True, no_update, no_update, no_update, no_update, "Passwords do not match."
+
             import re
             if len(qr_secret) < 8 or not re.search(r'[A-Z]', qr_secret) or not re.search(r'[a-z]', qr_secret) or not re.search(r'[^a-zA-Z0-9]', qr_secret):
-                return True, "Password must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char.", no_update, no_update, no_update
-                
+                return True, no_update, no_update, no_update, no_update, "Password must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char."
+
             society_id = auth.get("society_id")
-            
-            # Hash the QR secret (HMAC based on society id or generic key)
-            secret_hash = hmac.new(qr_secret.encode('utf-8'), b"EstateHub", hashlib.sha256).hexdigest()
-            
-            # Update society
-            db._execute("""
-                UPDATE societies 
-                SET name = :name, address = :addr, PAN_number = :pan, registration_number = :reg, qr_signing_secret_hash = :hash
-                WHERE id = :id
-            """, {
-                "name": s_name, 
-                "addr": s_addr, 
-                "pan": s_pan, 
-                "reg": s_reg, 
-                "hash": secret_hash, 
-                "id": society_id
-            })
-                
-            return False, no_update, no_update, no_update, no_update # Close modal
-            
-        return no_update, no_update, no_update, no_update, no_update
+
+            # werkzeug's salted hash (consistent with every other password/
+            # PIN/pattern in this codebase) — replaces the old hmac-sha256
+            # with a key hardcoded in this open-source file, which offered
+            # no real protection against offline brute force.
+            secret_hash = generate_password_hash(qr_secret)
+
+            # Zip edited rates back onto their seed sections. See the note
+            # on fn_complete_society_setup: TDS_SECTION_RATE_SEED has two
+            # rows sharing section '194C' — the later one in this list wins
+            # once persisted, a pre-existing schema/seed mismatch, not
+            # something this fix resolves.
+            tds_pairs = [
+                {"section": item[0], "rate": float(tds_rates[idx])}
+                for idx, item in enumerate(TDS_SECTION_RATE_SEED)
+                if idx < len(tds_rates) and tds_rates[idx] not in (None, "")
+            ]
+
+            try:
+                result = db._execute(
+                    """SELECT fn_complete_society_setup(
+                        :sid, :qr_hash, :tds_json::jsonb, :cgst, :sgst,
+                        :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
+                        :ven_1, :ven_7, :ven_30,
+                        :bf_fy, :bf_acc, :bf_drcr, :bf_amt, :bf_remarks, :created_by
+                    ) AS result""",
+                    {
+                        "sid": society_id,
+                        "qr_hash": secret_hash,
+                        "tds_json": json.dumps(tds_pairs),
+                        "cgst": cgst, "sgst": sgst,
+                        "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_due": apt_due_day,
+                        "apt_sink": apt_sinking, "apt_repair": apt_repair,
+                        "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,
+                        "bf_fy": bf_fy, "bf_acc": bf_acc_id, "bf_drcr": bf_drcr,
+                        "bf_amt": bf_amount, "bf_remarks": bf_remarks,
+                        "created_by": auth.get("user_id"),
+                    },
+                    fetch_one=True,
+                )
+            except Exception as e:
+                return True, no_update, no_update, no_update, no_update, f"Error saving setup: {str(e)[:150]}"
+
+            outcome = (result or {}).get("result") or ""
+            if outcome != "OK":
+                return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again."
+
+            return (
+                False, no_update, no_update,
+                {"type": "success", "message": "Setup completed successfully!"},
+                no_update, ""
+            )  # Close modal
+
+        return _noop

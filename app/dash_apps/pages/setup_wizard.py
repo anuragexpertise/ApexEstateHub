@@ -1,7 +1,5 @@
 import os
 import csv
-import hmac
-import hashlib
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
@@ -71,21 +69,48 @@ def render_category_content(category, society_id=None):
             
         return [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
     elif category == "GST Rates":
+        # Turnover/exemption limits are statutory constants (state_compliance_
+        # thresholds), not per-society settings — same no-state-filter LIMIT 1
+        # lookup fn_auto_generate_receivables already uses in production, so
+        # this display matches what actually governs GST auto-generation.
+        # Shown read-only: earlier this screen let each society's admin
+        # "edit" these values in the form, but nothing ever wrote them
+        # anywhere, and if it had, writing them here would have overwritten
+        # the same statutory row for every OTHER society too.
+        turnover_row = db._execute(
+            "SELECT value FROM state_compliance_thresholds "
+            "WHERE threshold_key = 'gst_turnover_lakh' AND is_active = TRUE LIMIT 1",
+            fetch_one=True,
+        )
+        exempt_row = db._execute(
+            "SELECT value FROM state_compliance_thresholds "
+            "WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1",
+            fetch_one=True,
+        )
+        turnover_val = (turnover_row or {}).get("value", 20.0)
+        exempt_val = (exempt_row or {}).get("value", 7500.0)
+        readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
         return [
-            html.P("Configure GST Rates and Thresholds.", className="text-muted mb-3"),
+            html.P("Configure this society's GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society.", className="text-muted mb-3"),
             dbc.Label("CGST Rate (%)"),
             dbc.Input(id="sw-cgst", type="number", value=9.0, className="mb-3", step=0.1),
             dbc.Label("SGST Rate (%)"),
             dbc.Input(id="sw-sgst", type="number", value=9.0, className="mb-3", step=0.1),
             dbc.Label("Annual Turnover Limit for GST (Lakhs)"),
-            dbc.Input(id="sw-gst-turnover", type="number", value=20.0, className="mb-3"),
+            dbc.Input(type="number", value=turnover_val, className="mb-3", readonly=True, style=readonly_style),
             dbc.Label("Monthly Exemption Limit (₹ per member)"),
-            dbc.Input(id="sw-gst-exempt", type="number", value=7500.0, className="mb-3"),
+            dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
         ]
     elif category == "Society Compliance":
+        # Read-only reference display. Both tables below are GLOBAL (shared
+        # across every society in that state / nationwide) — they used to
+        # render as editable dbc.Input fields, but nothing ever persisted
+        # the edits, and had it been wired up it would have let one
+        # society's admin silently rewrite statutory thresholds and rule
+        # links for every other tenant in that state. Kept informational.
         from database.seed import KPI_RULE_LINKS, STATE_COMPLIANCE_THRESHOLDS
         inputs = [
-            html.P("Configure State Compliance Thresholds and Reference Rule Links.", className="text-muted mb-3")
+            html.P("State Compliance Thresholds and Reference Rule Links (statutory reference values, maintained by Master — shown here for information only).", className="text-muted mb-3")
         ]
         
         # State Compliance Thresholds
@@ -104,7 +129,7 @@ def render_category_content(category, society_id=None):
             row = dbc.Row([
                 dbc.Col(html.B(state), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span(key, className="small text-muted"), width=5, className="d-flex align-items-center text-break"),
-                dbc.Col(dbc.Input(id={"type": "sw-compliance-val", "index": idx}, type="number" if val is not None else "text", value=display_val, bs_size="sm"), width=2),
+                dbc.Col(html.Span(display_val, className="small fw-bold"), width=2, className="d-flex align-items-center"),
                 dbc.Col(html.Span(unit, className="small text-muted"), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span(notes[:30] + ("..." if len(notes) > 30 else ""), className="small text-muted", title=notes), width=3, className="d-flex align-items-center text-truncate"),
             ], className="mb-2")
@@ -124,8 +149,8 @@ def render_category_content(category, society_id=None):
             row = dbc.Row([
                 dbc.Col(html.B(state), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span(cat, className="small text-muted text-break"), width=3, className="d-flex align-items-center"),
-                dbc.Col(dbc.Input(id={"type": "sw-kpi-label", "index": idx}, type="text", value=label, bs_size="sm", title=label), width=4),
-                dbc.Col(dbc.Input(id={"type": "sw-kpi-url", "index": idx}, type="text", value=url, bs_size="sm", title=url), width=4),
+                dbc.Col(html.Span(label, className="small text-truncate d-block", title=label), width=4),
+                dbc.Col(html.A(url, href=url, target="_blank", className="small text-truncate d-block", title=url), width=4),
             ], className="mb-2")
             inputs.append(row)
             
@@ -175,12 +200,17 @@ def render_category_content(category, society_id=None):
         ]
     elif category == "QR Code":
         return [
-            html.P("Note: Administrator need to keep it secret, as it can revoke entire QR versioning.", className="text-danger fw-bold mb-3"),
-            dbc.Label("QR_SIGNING_SECRET (Strong Password)"),
+            html.P("Set a Setup Confirmation Password to finish onboarding this society.", className="text-danger fw-bold mb-3"),
+            dbc.Label("Setup Confirmation Password (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
-            dbc.Label("Confirm QR_SIGNING_SECRET"),
+            dbc.Label("Confirm Password"),
             dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
-            html.Small("This secret will be hashed and stored in the database.", className="text-muted"),
+            html.Small(
+                "This password is hashed and stored to mark setup as complete — it does not configure the "
+                "actual QR-signing key. QR_SIGNING_SECRET is a deployment-wide setting configured by Master "
+                "in the hosting environment, not per-society.",
+                className="text-muted"
+            ),
         ]
     return []
 
