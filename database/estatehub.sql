@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS societies (
     created_by INT,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
-    qr_signing_secret_hash VARCHAR(64)
+    qr_signing_secret_hash VARCHAR(255) -- werkzeug generate_password_hash output (salted scrypt/pbkdf2), widened 2026-09 from VARCHAR(64) which fit only a raw sha256 hexdigest
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -1240,6 +1240,15 @@ DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 -- mode routes through it uniformly.
 ALTER TABLE societies
 ADD COLUMN IF NOT EXISTS primary_bank_account_id INT REFERENCES accounts (id);
+
+-- societies.qr_signing_secret_hash widen (2026-09) — see Setup Wizard fix.
+-- The Setup Wizard was hashing the admin-entered QR completion secret with
+-- raw hmac-sha256 (64 hex chars) instead of werkzeug's generate_password_hash
+-- (used everywhere else in this codebase for passwords/PINs/patterns), whose
+-- salted scrypt/pbkdf2 output can run 100-160+ chars and would have been
+-- silently truncated by the old VARCHAR(64) column.
+ALTER TABLE societies
+ALTER COLUMN qr_signing_secret_hash TYPE VARCHAR(255);
 
 -- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
 -- Auto-generate human-friendly receipt_number / transaction_number.
@@ -8929,5 +8938,169 @@ BEGIN
     WHERE ast.society_id = p_society_id
       AND ast.purchase_date <= v_fy_end
     ORDER BY acc.name, ast.purchase_date;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SECTION 24: SOCIETY SETUP WIZARD — first-time onboarding finisher (2026-09)
+-- ════════════════════════════════════════════════════════════════════════════
+-- Persists everything collected by the Admin portal's first-time Setup
+-- Wizard (app/dash_apps/pages/setup_wizard.py). Before this function
+-- existed, submit_setup_wizard() only ever wrote qr_signing_secret_hash —
+-- the TDS Rates, GST Rates, Apartment Charges, Vendor Charges and Brought
+-- Forward steps collected input on-screen but never persisted any of it,
+-- so every newly onboarded society ended up with zero tds_section_rates
+-- rows, zero gst_rates rows, and no apartment/vendor charge defaults
+-- until someone filled them in by hand later.
+--
+-- Deliberately NOT accepted here: the wizard's "Society Compliance" step
+-- (State Compliance Thresholds, Reference KPI Rule Links) and the GST
+-- turnover/exemption limits shown under "GST Rates". Those live in the
+-- global state_compliance_thresholds / kpi_rule_links tables, shared
+-- across every society in that state/nationwide — letting one society's
+-- admin edit them from this wizard would silently rewrite statutory
+-- constants for every other tenant. The wizard UI now renders those
+-- read-only; this function has no parameters for them at all.
+--
+-- Validation (brought_forward.acc_id must belong to the calling society —
+-- a plain FK can't express that) runs before any write, so a bad id
+-- fails the whole call with nothing written yet, rather than needing a
+-- rollback partway through.
+--
+-- p_tds_rates is a JSON array of {"section":..., "rate":...} objects.
+-- NOTE: TDS_SECTION_RATE_SEED (database/seed.py) has two rows sharing
+-- section '194C' (Ind/HUF vs Others rates) but tds_section_rates is
+-- unique on (society_id, section, effective_from) — only one rate per
+-- section can be stored per society. The later row in JSON array order
+-- wins (ON CONFLICT DO UPDATE). This is a pre-existing schema/seed
+-- mismatch — flagged here, not fixed; a real fix needs a payee-type
+-- column on tds_section_rates, out of scope for this patch.
+CREATE OR REPLACE FUNCTION fn_complete_society_setup(
+    p_society_id   INT,
+    p_qr_hash      VARCHAR(255),
+    p_tds_rates    JSONB,
+    p_cgst         NUMERIC,
+    p_sgst         NUMERIC,
+    p_apt_amt      NUMERIC,
+    p_apt_rate     NUMERIC,
+    p_apt_due_day  INT,
+    p_apt_sinking  NUMERIC,
+    p_apt_repair   NUMERIC,
+    p_ven_1day     NUMERIC,
+    p_ven_7day     NUMERIC,
+    p_ven_1mth     NUMERIC,
+    p_bf_fy        INT,
+    p_bf_acc_id    INT,
+    p_bf_drcr      VARCHAR(2),
+    p_bf_amount    NUMERIC,
+    p_bf_remarks   VARCHAR(200),
+    p_created_by   INT
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_item   JSONB;
+    v_apt_id INT;
+    v_ven_id INT;
+    v_gst_id INT;
+BEGIN
+    IF p_society_id IS NULL THEN
+        RETURN 'Error: society not identified';
+    END IF;
+
+    -- Validate brought-forward account belongs to THIS society before
+    -- touching anything (accounts.id is a global serial across all
+    -- societies, so an unchanged/mistyped Account ID could otherwise
+    -- silently reference another tenant's account).
+    IF p_bf_amount IS NOT NULL AND p_bf_amount > 0 THEN
+        IF p_bf_acc_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM accounts WHERE id = p_bf_acc_id AND society_id = p_society_id
+        ) THEN
+            RETURN 'Error: Brought Forward Account ID does not belong to this society.';
+        END IF;
+        IF p_bf_drcr IS NULL OR p_bf_drcr NOT IN ('Dr', 'Cr') THEN
+            RETURN 'Error: Brought Forward Type must be Dr or Cr.';
+        END IF;
+        IF p_bf_fy IS NULL THEN
+            RETURN 'Error: Brought Forward Financial Year is required.';
+        END IF;
+    END IF;
+
+    -- 1) Setup-completion flag (also gates `trigger_setup_wizard` from
+    --    reopening the wizard on next login).
+    UPDATE societies SET qr_signing_secret_hash = p_qr_hash WHERE id = p_society_id;
+
+    -- 2) TDS section rates (per-society; last value per section wins — see note above)
+    IF p_tds_rates IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(p_tds_rates)
+        LOOP
+            INSERT INTO tds_section_rates (society_id, section, rate, effective_from)
+            VALUES (p_society_id, v_item->>'section', (v_item->>'rate')::NUMERIC, '2024-04-01')
+            ON CONFLICT (society_id, section, effective_from)
+            DO UPDATE SET rate = EXCLUDED.rate;
+        END LOOP;
+    END IF;
+
+    -- 3) GST rate (per-society default). Updates the currently-open row
+    --    (effective_to IS NULL) in place rather than versioning — this is
+    --    initial setup, not a mid-year rate change event.
+    SELECT id INTO v_gst_id FROM gst_rates
+    WHERE society_id = p_society_id AND effective_to IS NULL
+    ORDER BY effective_from DESC LIMIT 1;
+
+    IF v_gst_id IS NOT NULL THEN
+        UPDATE gst_rates SET cgst_rate_pct = p_cgst, sgst_rate_pct = p_sgst WHERE id = v_gst_id;
+    ELSE
+        INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
+        VALUES (p_society_id, p_cgst, p_sgst, CURRENT_DATE);
+    END IF;
+
+    -- 4) Apartment charges default (apt_id IS NULL row = society-wide fallback,
+    --    per the existing (apt_id = apt.id OR apt_id IS NULL) lookup convention)
+    SELECT id INTO v_apt_id FROM apt_charges_fines_basis
+    WHERE society_id = p_society_id AND apt_id IS NULL AND end_date IS NULL
+    LIMIT 1;
+
+    IF v_apt_id IS NOT NULL THEN
+        UPDATE apt_charges_fines_basis
+        SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
+            apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
+            apt_repair_fund_rate = p_apt_repair, updated_at = NOW(), updated_by = p_created_by
+        WHERE id = v_apt_id;
+    ELSE
+        INSERT INTO apt_charges_fines_basis
+            (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, created_by)
+        VALUES
+            (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
+             p_apt_due_day, p_apt_sinking, p_apt_repair, p_created_by);
+    END IF;
+
+    -- 5) Vendor charges default (ven_id IS NULL row = society-wide fallback)
+    SELECT id INTO v_ven_id FROM ven_charges_fines_basis
+    WHERE society_id = p_society_id AND ven_id IS NULL AND end_date IS NULL
+    LIMIT 1;
+
+    IF v_ven_id IS NOT NULL THEN
+        UPDATE ven_charges_fines_basis
+        SET vendor_1day = p_ven_1day, vendor_7day = p_ven_7day, vendor_1mth = p_ven_1mth,
+            updated_at = NOW(), updated_by = p_created_by
+        WHERE id = v_ven_id;
+    ELSE
+        INSERT INTO ven_charges_fines_basis
+            (society_id, ven_id, start_date, vendor_1day, vendor_7day, vendor_1mth, created_by)
+        VALUES
+            (p_society_id, NULL, CURRENT_DATE, p_ven_1day, p_ven_7day, p_ven_1mth, p_created_by);
+    END IF;
+
+    -- 6) Brought forward (optional single opening-balance row; validated above)
+    IF p_bf_amount IS NOT NULL AND p_bf_amount > 0 THEN
+        INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, created_by, is_auto_calculated)
+        VALUES (p_society_id, p_bf_fy, p_bf_acc_id, p_bf_drcr, p_bf_amount, p_bf_remarks, p_created_by, FALSE)
+        ON CONFLICT (society_id, financial_year, acc_id)
+        DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount,
+                      remarks = EXCLUDED.remarks, updated_at = NOW(), updated_by = p_created_by,
+                      is_auto_calculated = FALSE;
+    END IF;
+
+    RETURN 'OK';
 END;
 $$;
