@@ -32,7 +32,7 @@ def register_setup_wizard_callbacks(app):
     @app.callback(
         Output("sw-current-step", "data"),
         Output("sw-category-title", "children"),
-        Output("sw-category-content", "children"),
+        Output({"type": "sw-step-container", "index": ALL}, "style"),
         Output("sw-banner-text", "children"),
         Output("sw-banner-link", "href"),
         Output("sw-banner-link", "style"),
@@ -60,18 +60,18 @@ def register_setup_wizard_callbacks(app):
         error_msg = ""
         new_step = current_step
         
-        if triggered_id == "sw-btn-next":
+        if triggered_id == "sw-btn-next" and n_next:
             if current_step < len(CATEGORIES) - 1:
                 new_step = current_step + 1
-        elif triggered_id == "sw-btn-prev":
+        elif triggered_id == "sw-btn-prev" and n_prev:
             if current_step > 0:
                 new_step = current_step - 1
-        elif isinstance(triggered_id, dict) and triggered_id["type"] == "sw-nav-item":
+        elif isinstance(triggered_id, dict) and triggered_id["type"] == "sw-nav-item" and any(nav_clicks):
             clicked_step = triggered_id["index"]
             new_step = clicked_step
 
         cat_name = CATEGORIES[new_step]
-        content = render_category_content(cat_name, society_id)
+        step_styles = [{"display": "block"} if i == new_step else {"display": "none"} for i in range(len(CATEGORIES))]
         
         # Banner Data
         banner_text = "No additional regulations found."
@@ -90,7 +90,7 @@ def register_setup_wizard_callbacks(app):
         next_style = {"display": "inline-block"} if new_step < len(CATEGORIES) - 1 else {"display": "none"}
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
-        return new_step, cat_name, content, banner_text, banner_link, link_style, nav_active, prev_disabled, next_style, submit_style, error_msg
+        return new_step, cat_name, step_styles, banner_text, banner_link, link_style, nav_active, prev_disabled, next_style, submit_style, error_msg
 
 
     @app.callback(
@@ -113,6 +113,8 @@ def register_setup_wizard_callbacks(app):
         triggered = ctx.triggered_id
         
         if triggered == "sw-close-btn":
+            if not n_close:
+                return no_update, no_update, no_update, no_update, no_update
             try:
                 from flask_login import logout_user
                 logout_user()
@@ -121,6 +123,8 @@ def register_setup_wizard_callbacks(app):
             return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True
             
         if triggered == "sw-btn-submit":
+            if not n_submit:
+                return no_update, no_update, no_update, no_update, no_update
             if not qr_secret:
                 return True, no_update, no_update, no_update, no_update # Keep open if missing mandatory field
                 
