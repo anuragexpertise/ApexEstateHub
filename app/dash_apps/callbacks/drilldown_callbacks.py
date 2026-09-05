@@ -1830,9 +1830,9 @@ def register_drilldown_callbacks(app):
             admin_email = merged.get("admin_username", "").strip()
             admin_password = merged.get("admin_password", "")
             
-            if not name or not admin_email or not admin_password:
+            if not all([name, address, pan, reg_num, validity_date, admin_email, admin_password]):
                 return (store, no_update, no_update, 
-                        {"type": "error", "message": "Name, Admin Email and Admin Password are required."}, 
+                        {"type": "error", "message": "All essential fields (Name, Address, PAN, Registration, Validity Date, Admin Email, Password) are required."}, 
                         no_update)
             
             if len(admin_password) < 8:
@@ -1872,6 +1872,18 @@ def register_drilldown_callbacks(app):
             except Exception as e:
                 return (store, no_update, no_update, 
                         {"type": "error", "message": f"Error: {str(e)[:120]}"}, 
+                        no_update)
+                        
+        if entity_singular == "societies" and "edit" in card_id:
+            name = (merged.get("name") or "").strip()
+            address = (merged.get("address") or "").strip()
+            pan = (merged.get("PAN_number") or "").strip()
+            reg_num = (merged.get("registration_number") or "").strip()
+            validity_date = merged.get("plan_validity")
+            
+            if not all([name, address, pan, reg_num, validity_date]):
+                return (store, no_update, no_update, 
+                        {"type": "error", "message": "All essential fields (Name, Address, PAN, Registration, Validity Date) are required."}, 
                         no_update)
 
         # ── 6. Smart receipt defaults (date + account) ────────────────────────

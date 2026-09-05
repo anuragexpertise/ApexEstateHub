@@ -2,7 +2,7 @@ from dash import Input, Output, State, ALL, callback, no_update, html, ctx
 import dash_bootstrap_components as dbc
 import hashlib
 import hmac
-from utils.database import get_db_connection
+from database.db_manager import db
 from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content
 
 def register_setup_wizard_callbacks(app):
@@ -22,13 +22,10 @@ def register_setup_wizard_callbacks(app):
             return no_update
             
         # Check if qr_signing_secret_hash is NULL
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT qr_signing_secret_hash FROM societies WHERE id = %s", (society_id,))
-                row = cur.fetchone()
-                if row and row[0] is None:
-                    # Trigger Wizard
-                    return get_setup_wizard_layout()
+        row = db._execute("SELECT qr_signing_secret_hash FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        if row and row.get("qr_signing_secret_hash") is None:
+            # Trigger Wizard
+            return get_setup_wizard_layout(society_id)
         
         return html.Div() # Clear wizard
 
@@ -53,9 +50,10 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-pan", "value"),
         State("sw-society-reg", "value"),
         State("sw-qr-secret", "value"),
+        State("sw-society-id", "data"),
         prevent_initial_call=True
     )
-    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, s_name, s_addr, s_pan, s_reg, qr_sec):
+    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, s_name, s_addr, s_pan, s_reg, qr_sec, society_id):
         triggered_id = ctx.triggered_id
         
         # Validation for Step 0 and 7
@@ -63,10 +61,6 @@ def register_setup_wizard_callbacks(app):
         new_step = current_step
         
         if triggered_id == "sw-btn-next":
-            if current_step == 0:
-                if not all([s_name, s_addr, s_pan, s_reg]):
-                    error_msg = "Please fill all mandatory fields (Name, Address, PAN, Registration)."
-                    return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, error_msg
             if current_step < len(CATEGORIES) - 1:
                 new_step = current_step + 1
         elif triggered_id == "sw-btn-prev":
@@ -74,14 +68,10 @@ def register_setup_wizard_callbacks(app):
                 new_step = current_step - 1
         elif isinstance(triggered_id, dict) and triggered_id["type"] == "sw-nav-item":
             clicked_step = triggered_id["index"]
-            if current_step == 0 and clicked_step != 0:
-                 if not all([s_name, s_addr, s_pan, s_reg]):
-                    error_msg = "Please fill all mandatory fields (Name, Address, PAN, Registration)."
-                    return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, error_msg
             new_step = clicked_step
 
         cat_name = CATEGORIES[new_step]
-        content = render_category_content(cat_name)
+        content = render_category_content(cat_name, society_id)
         
         # Banner Data
         banner_text = "No additional regulations found."
@@ -105,7 +95,12 @@ def register_setup_wizard_callbacks(app):
 
     @app.callback(
         Output("setup-wizard-modal", "is_open"),
+        Output("auth-store", "data", allow_duplicate=True),
+        Output("url", "pathname", allow_duplicate=True),
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("login-modal", "is_open", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
+        Input("sw-close-btn", "n_clicks"),
         State("sw-qr-secret", "value"),
         State("sw-society-name", "value"),
         State("sw-society-address", "value"),
@@ -114,31 +109,40 @@ def register_setup_wizard_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True
     )
-    def submit_setup_wizard(n_submit, qr_secret, s_name, s_addr, s_pan, s_reg, auth):
-        if not n_submit:
-            return no_update
+    def submit_setup_wizard(n_submit, n_close, qr_secret, s_name, s_addr, s_pan, s_reg, auth):
+        triggered = ctx.triggered_id
         
-        if not qr_secret:
-            return True # Keep open if missing mandatory field
+        if triggered == "sw-close-btn":
+            try:
+                from flask_login import logout_user
+                logout_user()
+            except Exception:
+                pass
+            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True
             
-        society_id = auth.get("society_id")
-        
-        # Hash the QR secret (HMAC based on society id or generic key)
-        # Using a generic key or society_id string as the message
-        # But wait, usually HMAC takes a key and a msg. If QR_SIGNING_SECRET *is* the secret, 
-        # we can just hash it with sha256 to store it, or store HMAC of something.
-        # The prompt says: "Put HMAC(QR_SIGNING_SECRET) in table 'societies'".
-        # I'll create a simple hash of it.
-        secret_hash = hmac.new(qr_secret.encode('utf-8'), b"EstateHub", hashlib.sha256).hexdigest()
-        
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # Update society
-                cur.execute("""
-                    UPDATE societies 
-                    SET name = %s, address = %s, PAN_number = %s, registration_number = %s, qr_signing_secret_hash = %s
-                    WHERE id = %s
-                """, (s_name, s_addr, s_pan, s_reg, secret_hash, society_id))
-            conn.commit()
+        if triggered == "sw-btn-submit":
+            if not qr_secret:
+                return True, no_update, no_update, no_update, no_update # Keep open if missing mandatory field
+                
+            society_id = auth.get("society_id")
             
-        return False # Close modal
+            # Hash the QR secret (HMAC based on society id or generic key)
+            secret_hash = hmac.new(qr_secret.encode('utf-8'), b"EstateHub", hashlib.sha256).hexdigest()
+            
+            # Update society
+            db._execute("""
+                UPDATE societies 
+                SET name = :name, address = :addr, PAN_number = :pan, registration_number = :reg, qr_signing_secret_hash = :hash
+                WHERE id = :id
+            """, {
+                "name": s_name, 
+                "addr": s_addr, 
+                "pan": s_pan, 
+                "reg": s_reg, 
+                "hash": secret_hash, 
+                "id": society_id
+            })
+                
+            return False, no_update, no_update, no_update, no_update # Close modal
+            
+        return no_update, no_update, no_update, no_update, no_update
