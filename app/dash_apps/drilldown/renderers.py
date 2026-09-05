@@ -5556,7 +5556,6 @@ def _render_channel_alert_events(record_dict: dict) -> list:
 
 def render_form_master_society_new() -> "html.Div":
     """Dedicated form to create a new society from the master portal."""
-    c = _C["master"]
     return html.Div([
         dbc.Form([
             dbc.Row([
