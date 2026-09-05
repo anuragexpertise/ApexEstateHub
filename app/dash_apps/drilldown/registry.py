@@ -345,10 +345,11 @@ DRILLDOWN_MAP: dict = {
         "label": "Expiring Soon",
         "filter": {"status": "expiring_soon"},
     },
-    "kpi_master_apartments_total": {
-        "target": "list_apartments",
-        "label": "All Apartments",
-    },
+    # kpi_master_apartments_total REMOVED (2026-09, per plan) — not one of
+    # the Master "Societies" tab's 7 KPIs, and it wasn't referenced by any
+    # DEFAULT_LAYOUTS anywhere else either; orphaned dead weight left over
+    # from the "Master module overhaul". See card_catalogue.py and
+    # customize_kpi_callbacks.py for the matching removals.
     # OWNER PORTAL KPIs
     "kpi_apartments_date": {"target": "list_apartments", "label": "Managed Apartments"},
     # VENDOR PORTAL KPIs
