@@ -29,7 +29,7 @@ def render_category_content(category, society_id=None):
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
-                s_pan = row.get("PAN_number", "") or ""
+                s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
         return [
             dbc.Label("Society Name (Must)"),
@@ -138,7 +138,13 @@ def get_setup_wizard_layout(society_id=None):
                     dbc.Col(
                         [
                             html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold", "marginBottom": "20px"}),
-                            html.Div(id="sw-category-content", children=render_category_content(CATEGORIES[0], society_id)),
+                            html.Div(id="sw-category-content", children=[
+                                html.Div(
+                                    render_category_content(cat, society_id),
+                                    id={"type": "sw-step-container", "index": i},
+                                    style={"display": "block" if i == 0 else "none"}
+                                ) for i, cat in enumerate(CATEGORIES)
+                            ]),
                             
                             html.Div(id="sw-error-msg", style={"color": "red", "marginTop": "15px"}),
 
