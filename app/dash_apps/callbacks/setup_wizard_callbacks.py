@@ -250,14 +250,20 @@ def register_setup_wizard_callbacks(app):
             qr_path = save_uploaded_image(pay_qr_data, "qr")
             sign_path = save_uploaded_image(sec_sign_data, "sign")
 
+            tan = str(tan)[:10] if tan else None
+            gstin = str(gstin)[:15] if gstin else None
+            phone = str(phone)[:20] if phone else None
+            sec_phone = str(sec_phone)[:20] if sec_phone else None
+            sec_name = str(sec_name)[:100] if sec_name else None
+            
             try:
                 result = db._execute(
                     """SELECT fn_complete_society_setup(
                         :sid, :qr_hash, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_sign,
-                        :tds_json::jsonb, :cgst, :sgst,
+                        CAST(:tds_json AS jsonb), :cgst, :sgst,
                         :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
-                        :bf_fy, :bf_json::jsonb, :created_by
+                        :bf_fy, CAST(:bf_json AS jsonb), :created_by
                     ) AS result""",
                     {
                         "sid": society_id,

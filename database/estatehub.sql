@@ -9028,7 +9028,7 @@ BEGIN
         address = COALESCE(p_address, address),
         phone = COALESCE(p_phone, phone),
         login_background = COALESCE(p_login_bg, login_background),
-        "TAN_number" = COALESCE(p_tan, "TAN_number"),
+        tan_number = COALESCE(p_tan, tan_number),
         gstin = COALESCE(p_gstin, gstin),
         payment_qr = COALESCE(p_payment_qr, payment_qr),
         calc_start_date = COALESCE(p_calc_start, calc_start_date),
