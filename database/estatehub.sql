@@ -8978,6 +8978,17 @@ $$;
 CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_society_id   INT,
     p_qr_hash      VARCHAR(255),
+    p_logo         VARCHAR(100),
+    p_address      TEXT,
+    p_phone        VARCHAR(20),
+    p_login_bg     VARCHAR(100),
+    p_tan          VARCHAR(10),
+    p_gstin        VARCHAR(15),
+    p_payment_qr   VARCHAR(255),
+    p_calc_start   DATE,
+    p_sec_name     VARCHAR(100),
+    p_sec_phone    VARCHAR(20),
+    p_sec_sign     VARCHAR(100),
     p_tds_rates    JSONB,
     p_cgst         NUMERIC,
     p_sgst         NUMERIC,
@@ -9010,9 +9021,21 @@ BEGIN
         END IF;
     END IF;
 
-    -- 1) Setup-completion flag (also gates `trigger_setup_wizard` from
-    --    reopening the wizard on next login).
-    UPDATE societies SET qr_signing_secret_hash = p_qr_hash WHERE id = p_society_id;
+    -- 1) Setup-completion flag and society details
+    UPDATE societies SET 
+        qr_signing_secret_hash = p_qr_hash,
+        logo = COALESCE(p_logo, logo),
+        address = COALESCE(p_address, address),
+        phone = COALESCE(p_phone, phone),
+        login_background = COALESCE(p_login_bg, login_background),
+        "TAN_number" = COALESCE(p_tan, "TAN_number"),
+        gstin = COALESCE(p_gstin, gstin),
+        payment_qr = COALESCE(p_payment_qr, payment_qr),
+        calc_start_date = COALESCE(p_calc_start, calc_start_date),
+        secretary_name = COALESCE(p_sec_name, secretary_name),
+        secretary_phone = COALESCE(p_sec_phone, secretary_phone),
+        secretary_sign = COALESCE(p_sec_sign, secretary_sign)
+    WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; last value per section wins — see note above)
     IF p_tds_rates IS NOT NULL THEN

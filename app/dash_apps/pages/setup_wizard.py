@@ -20,35 +20,46 @@ def load_conversation_data():
 
 CONVERSATION_DATA = load_conversation_data()
 CATEGORIES = [
-    "Society Details", "TDS Rates", "GST Rates", "Society Compliance",
-    "Apartment Charges", "Vendor Charges", "Brought Forward", "QR Code"
+    "Society Details", "Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate",
+    "Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward", "Administrator", "Agreement"
 ]
 
 def render_category_content(category, society_id=None):
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg = "", "", "", ""
+        s_name, s_addr, s_pan, s_reg, s_phone = "", "", "", "", ""
         if society_id:
-            row = db._execute("SELECT name, address, PAN_number, registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT name, address, phone, PAN_number, registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
+                s_phone = row.get("phone", "") or ""
                 s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
         return [
-            html.P("Contact master administrator to update readonly fields", className="text-muted small mb-3"),
+            html.P("Enter society details. Logo and Background images are optional.", className="text-muted small mb-3"),
             dbc.Label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Label("Society Logo (Image)"),
+            dcc.Upload(id="sw-logo-upload", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
             dbc.Label("Address"),
-            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
+            dbc.Label("Phone Number"),
+            dbc.Input(id="sw-society-phone", type="tel", required=True, className="mb-3", value=s_phone),
             dbc.Label("PAN Number"),
             dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            dbc.Label("Login Background (Image)"),
+            dcc.Upload(id="sw-bg-upload", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
         ]
-    elif category == "TDS Rates":
+    elif category == "TAN & TDS Rates":
         from database.seed import TDS_SECTION_RATE_SEED
         inputs = [
-            html.P("Configure TDS Section rates. Values are pre-filled with standards.", className="text-muted mb-3")
+            html.P("Configure TAN and TDS Section rates. Values are pre-filled with standards.", className="text-muted mb-3"),
+            dbc.Label("TAN Number"),
+            dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN...", className="mb-4"),
+            html.Hr(),
+            html.H6("TDS Rates", className="text-primary mb-3")
         ]
         
         header = dbc.Row([
@@ -68,7 +79,7 @@ def render_category_content(category, society_id=None):
             inputs.append(row)
             
         return [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
-    elif category == "GST Rates":
+    elif category == "GSTIN & GST Rate":
         # Turnover/exemption limits are statutory constants (state_compliance_
         # thresholds), not per-society settings — same no-state-filter LIMIT 1
         # lookup fn_auto_generate_receivables already uses in production, so
@@ -91,7 +102,11 @@ def render_category_content(category, society_id=None):
         exempt_val = (exempt_row or {}).get("value", 7500.0)
         readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
         return [
-            html.P("Configure this society's GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society.", className="text-muted mb-3"),
+            html.P("Configure this society's GSTIN and GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society.", className="text-muted mb-3"),
+            dbc.Label("GSTIN"),
+            dbc.Input(id="sw-society-gstin", type="text", placeholder="Enter GSTIN...", className="mb-4"),
+            html.Hr(),
+            html.H6("GST Rates", className="text-primary mb-3"),
             dbc.Label("CGST Rate (%)"),
             dbc.Input(id="sw-cgst", type="number", value=9.0, className="mb-3", step=0.1),
             dbc.Label("SGST Rate (%)"),
@@ -181,6 +196,38 @@ def render_category_content(category, society_id=None):
             dbc.Label("Vendor Pass (1 Month) ₹"),
             dbc.Input(id="sw-ven-1mth", type="number", value=500.0, step=1, className="mb-3"),
         ]
+    elif category == "Accounts":
+        from database.seed import ACCOUNTS
+        inputs = [
+            html.P("Configure general account parameters and view default accounts.", className="text-muted mb-3"),
+            dbc.Label("Payment QR (Image)"),
+            dcc.Upload(id="sw-payment-qr", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            dbc.Label("Calculation Start Date"),
+            dcc.DatePickerSingle(id="sw-calc-start-date", date="2024-04-01", display_format='YYYY-MM-DD', className="mb-4 d-block"),
+            html.Hr(),
+            html.H6("All Accounts (Seeded)", className="text-primary mb-3"),
+        ]
+        header = dbc.Row([
+            dbc.Col(html.B("ID", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Tab", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Name", className="small text-uppercase"), width=4),
+            dbc.Col(html.B("Dr/Cr BF", className="small text-uppercase"), width=1),
+            dbc.Col(html.B("Dr/Cr Type", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Group", className="small text-uppercase"), width=2),
+        ], className="mb-2 border-bottom pb-1")
+        inputs.append(header)
+
+        for acc in ACCOUNTS:
+            row = dbc.Row([
+                dbc.Col(html.Span(str(acc[0]), className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc[1], className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc[2], className="small fw-bold"), width=4, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[3]), className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[4]), className="small text-muted"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[5]), className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+            ], className="mb-2")
+            inputs.append(row)
+        return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Brought Forward":
         accounts = []
         if society_id:
@@ -218,19 +265,67 @@ def render_category_content(category, society_id=None):
             inputs.append(row)
             
         return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
-    elif category == "QR Code":
+    elif category == "Administrator":
+        sec_name, sec_phone = "", ""
+        if society_id:
+            row = db._execute("SELECT secretary_name, secretary_phone FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                sec_name = row.get("secretary_name", "") or ""
+                sec_phone = row.get("secretary_phone", "") or ""
         return [
-            html.P("Set a Setup Confirmation Password to finish onboarding this society.", className="text-danger fw-bold mb-3"),
+            html.P("Configure Administrator (Secretary) details.", className="text-muted mb-3"),
+            dbc.Label("Secretary Name"),
+            dbc.Input(id="sw-sec-name", type="text", value=sec_name, className="mb-3"),
+            dbc.Label("Secretary Phone"),
+            dbc.Input(id="sw-sec-phone", type="tel", value=sec_phone, className="mb-3"),
+            dbc.Label("Secretary Signature (Image)"),
+            dcc.Upload(id="sw-sec-sign", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            html.Hr(),
+            html.P("Create a Setup Confirmation Password to secure this onboarding.", className="text-danger fw-bold mb-3"),
             dbc.Label("Setup Confirmation Password (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
             dbc.Label("Confirm Password"),
             dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
-            html.Small(
-                "This password is hashed and stored to mark setup as complete — it does not configure the "
-                "actual QR-signing key. QR_SIGNING_SECRET is a deployment-wide setting configured by Master "
-                "in the hosting environment, not per-society.",
-                className="text-muted"
+            html.Small("This password is hashed and stored to mark setup as complete.", className="text-muted")
+        ]
+    elif category == "Agreement":
+        here = os.path.dirname(os.path.abspath(__file__))
+        readme_path = os.path.abspath(os.path.join(here, "../../../README.md"))
+        agreement_path = os.path.abspath(os.path.join(here, "../../../database/AGREEMENT.md"))
+        
+        readme_txt = ""
+        agreement_txt = ""
+        if os.path.exists(readme_path):
+            with open(readme_path, 'r') as f:
+                readme_txt = f.read()
+        if os.path.exists(agreement_path):
+            with open(agreement_path, 'r') as f:
+                agreement_txt = f.read()
+
+        return [
+            html.H5("EstateHub terms and agreements", className="text-primary mb-3"),
+            html.Div(
+                [
+                    dcc.Markdown(readme_txt),
+                    html.Hr(),
+                    dcc.Markdown(agreement_txt)
+                ],
+                style={"height": "300px", "overflowY": "auto", "backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             ),
+            dbc.Label("Type 'I AGREE' below to proceed"),
+            dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),
+            html.Hr(),
+            html.P("Authorization required to submit setup.", className="fw-bold"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Admin Password"),
+                    dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3")
+                ], width=6),
+                dbc.Col([
+                    dbc.Label("Setup Confirmation Password"),
+                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the password created in Administrator tab...", className="mb-3")
+                ], width=6)
+            ])
         ]
     return []
 
