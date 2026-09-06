@@ -35,6 +35,11 @@ def register_callbacks(app):
         print(f"⚠️ drilldown_callbacks failed: {e}")
         import traceback; traceback.print_exc()
 
+    try:
+        import app.dash_apps.callbacks.patrol_map_callbacks
+    except Exception as e:
+        print(f"⚠️ patrol_map_callbacks failed: {e}")
+
     # 4. Card catalogue (KPI refresh + list loaders)
     try:
         from .card_catalogue_callbacks import register_card_catalogue_callbacks

@@ -2792,9 +2792,11 @@ def render_form_card(card_id: str, title: str, icon: str,
             id={"type": "patrol-map-container", "entity": entity},
             style={"height": "300px", "width": "100%", "marginTop": "10px", "borderRadius": "10px", "border": "1px solid #ccc", "zIndex": 1},
         )
+        dummy_out = html.Div(id={"type": "patrol-map-dummy", "entity": entity}, style={"display": "none"})
         form_rows.append(dbc.Row([
             dbc.Col(dbc.Label("Pick Location on Map", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=12),
-            dbc.Col(map_html, width=12)
+            dbc.Col(map_html, width=12),
+            dummy_out
         ], className="mb-2"))
 
     # ── Expense-form TDS autofill plumbing (2026-09) ────────────────────────
