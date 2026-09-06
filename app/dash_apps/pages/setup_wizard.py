@@ -266,27 +266,38 @@ def render_category_content(category, society_id=None):
             
         return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Administrator":
-        sec_name, sec_phone = "", ""
+        sec_name, sec_phone, sec_email = "", "", ""
         if society_id:
-            row = db._execute("SELECT secretary_name, secretary_phone FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT secretary_name, secretary_phone, secretary_email FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 sec_name = row.get("secretary_name", "") or ""
                 sec_phone = row.get("secretary_phone", "") or ""
+                sec_email = row.get("secretary_email", "") or ""
         return [
             html.P("Configure Administrator (Secretary) details.", className="text-muted mb-3"),
             dbc.Label("Secretary Name"),
             dbc.Input(id="sw-sec-name", type="text", value=sec_name, className="mb-3"),
             dbc.Label("Secretary Phone"),
             dbc.Input(id="sw-sec-phone", type="tel", value=sec_phone, className="mb-3"),
+            dbc.Label("Secretary Email"),
+            dbc.Input(id="sw-sec-email", type="email", value=sec_email, className="mb-3"),
             dbc.Label("Secretary Signature (Image)"),
             dcc.Upload(id="sw-sec-sign", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
             html.Hr(),
-            html.P("Create a Setup Confirmation Password to secure this onboarding.", className="text-danger fw-bold mb-3"),
-            dbc.Label("Setup Confirmation Password (Strong Password)"),
+            html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
+            html.P(
+                "This is the real key used to sign every QR gate-pass code "
+                "(apartments, vendors, security, admin) issued for THIS "
+                "society — it is specific to this society and is never "
+                "shared with any other society on the platform. Store it "
+                "safely: changing it later invalidates every previously "
+                "printed QR code for this society, requiring a full reissue.",
+                className="text-muted small mb-3",
+            ),
+            dbc.Label("SIGNING_SECRET (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
-            dbc.Label("Confirm Password"),
+            dbc.Label("Confirm SIGNING_SECRET"),
             dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
-            html.Small("This password is hashed and stored to mark setup as complete.", className="text-muted")
         ]
     elif category == "Agreement":
         here = os.path.dirname(os.path.abspath(__file__))
@@ -322,8 +333,8 @@ def render_category_content(category, society_id=None):
                     dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3")
                 ], width=6),
                 dbc.Col([
-                    dbc.Label("Setup Confirmation Password"),
-                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the password created in Administrator tab...", className="mb-3")
+                    dbc.Label("SIGNING_SECRET"),
+                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the SIGNING_SECRET created in the Administrator tab...", className="mb-3")
                 ], width=6)
             ])
         ]

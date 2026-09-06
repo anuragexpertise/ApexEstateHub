@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS societies (
     phone VARCHAR(20),
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
+    secretary_email VARCHAR(100),
     secretary_sign VARCHAR(100),
     payment_qr VARCHAR(255),
     plan VARCHAR(20) NOT NULL DEFAULT 'Free' CHECK (
@@ -46,7 +47,18 @@ CREATE TABLE IF NOT EXISTS societies (
     created_by INT,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
-    qr_signing_secret_hash VARCHAR(255) -- werkzeug generate_password_hash output (salted scrypt/pbkdf2), widened 2026-09 from VARCHAR(64) which fit only a raw sha256 hexdigest
+    -- signing_secret_enc (renamed 2026-09 from qr_signing_secret_hash):
+    -- this society's own QR SIGNING_SECRET, Fernet-encrypted (reversible)
+    -- under the deployment's SECRET_VAULT_KEY — see
+    -- app/services/secret_vault.py. The old column stored a one-way
+    -- werkzeug hash and could only ever function as a "setup completed"
+    -- flag, never as real HMAC key material (a hash can't be turned back
+    -- into the key). NULL means this society hasn't completed the Setup
+    -- Wizard yet (or hasn't set a signing secret) — QR codes for that
+    -- society stay unsigned until it is set. Also doubles as the
+    -- "has this society finished onboarding" flag the Setup Wizard
+    -- trigger checks, same role the old column played.
+    signing_secret_enc TEXT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -547,6 +559,33 @@ CREATE TABLE IF NOT EXISTS nocs (
 );
 
 COMMENT ON COLUMN nocs.status IS 'valid/expired are derived by validate_noc_qr() comparing valid_until to today; revoked is the only status ever written directly (via an explicit revoke action).';
+
+-- society_agreements (2026-09) — persisted record of the EstateHub
+-- Software License / Terms of Service Agreement's execution page,
+-- auto-generated the moment a society completes the Setup Wizard (see
+-- submit_setup_wizard / _get_or_create_agreement). Mirrors nocs' pattern
+-- of a body_text snapshot: society/secretary details are copied in at
+-- generation time rather than always read live off `societies`, so a
+-- later profile edit (secretary changes, address changes) never rewrites
+-- what was actually agreed to and signed at onboarding. UNIQUE(society_id)
+-- — one agreement per society, get-or-create, not reissued.
+CREATE TABLE IF NOT EXISTS society_agreements (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL UNIQUE REFERENCES societies (id) ON DELETE CASCADE,
+    agreement_no VARCHAR(64) UNIQUE,
+    body_text TEXT NOT NULL DEFAULT '', -- the exact text issued; see body_text comment on nocs for why this isn't regenerated from the live template later
+    society_name VARCHAR(100),
+    society_address TEXT,
+    registration_number VARCHAR(100),
+    secretary_name VARCHAR(100),
+    secretary_email VARCHAR(100),
+    secretary_sign VARCHAR(100), -- path snapshot at generation time, same convention as secretary_sign elsewhere
+    qr_payload VARCHAR(255),
+    last_printed_at TIMESTAMP,
+    last_emailed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id)
+);
 
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
 CREATE TABLE IF NOT EXISTS expenses (
@@ -1244,14 +1283,19 @@ DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 ALTER TABLE societies
 ADD COLUMN IF NOT EXISTS primary_bank_account_id INT REFERENCES accounts (id);
 
--- societies.qr_signing_secret_hash widen (2026-09) — see Setup Wizard fix.
--- The Setup Wizard was hashing the admin-entered QR completion secret with
--- raw hmac-sha256 (64 hex chars) instead of werkzeug's generate_password_hash
--- (used everywhere else in this codebase for passwords/PINs/patterns), whose
--- salted scrypt/pbkdf2 output can run 100-160+ chars and would have been
--- silently truncated by the old VARCHAR(64) column.
-ALTER TABLE societies
-ALTER COLUMN qr_signing_secret_hash TYPE VARCHAR(255);
+-- societies.signing_secret_enc / secretary_email (2026-09) — clean cutover,
+-- no signed QR codes or society rows existed in production yet, so this is
+-- a straight rename+retype rather than a data-preserving migration:
+--   * qr_signing_secret_hash (one-way werkzeug hash, VARCHAR(255) — see the
+--     now-superseded 2026-09 widen note this replaces) -> signing_secret_enc
+--     (Fernet ciphertext, TEXT — reversible, so it can actually be used as
+--     an HMAC key; see app/services/secret_vault.py and qr_service.py).
+--   * secretary_email added — needed for the post-onboarding society
+--     Agreement (see society_agreements below), which had no email field
+--     to print/send to at all before this.
+ALTER TABLE societies DROP COLUMN IF EXISTS qr_signing_secret_hash;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS signing_secret_enc TEXT;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_email VARCHAR(100);
 
 -- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
 -- Auto-generate human-friendly receipt_number / transaction_number.
@@ -8949,8 +8993,9 @@ $$;
 -- ════════════════════════════════════════════════════════════════════════════
 -- Persists everything collected by the Admin portal's first-time Setup
 -- Wizard (app/dash_apps/pages/setup_wizard.py). Before this function
--- existed, submit_setup_wizard() only ever wrote qr_signing_secret_hash —
--- the TDS Rates, GST Rates, Apartment Charges, Vendor Charges and Brought
+-- existed, submit_setup_wizard() only ever wrote the setup-completion
+-- secret column (signing_secret_enc, née qr_signing_secret_hash) — the
+-- TDS Rates, GST Rates, Apartment Charges, Vendor Charges and Brought
 -- Forward steps collected input on-screen but never persisted any of it,
 -- so every newly onboarded society ended up with zero tds_section_rates
 -- rows, zero gst_rates rows, and no apartment/vendor charge defaults
@@ -8978,34 +9023,40 @@ $$;
 -- wins (ON CONFLICT DO UPDATE). This is a pre-existing schema/seed
 -- mismatch — flagged here, not fixed; a real fix needs a payee-type
 -- column on tds_section_rates, out of scope for this patch.
+-- p_signing_secret_enc is the Fernet ciphertext already encrypted in
+-- Python (secret_vault.encrypt_secret) before this call — this function
+-- never sees the plaintext SIGNING_SECRET and does no hashing/encryption
+-- of its own (contrast the old p_qr_hash, which arrived pre-hashed too,
+-- but as a one-way werkzeug hash instead of reversible ciphertext).
 CREATE OR REPLACE FUNCTION fn_complete_society_setup(
-    p_society_id   INT,
-    p_qr_hash      VARCHAR(255),
-    p_logo         VARCHAR(100),
-    p_address      TEXT,
-    p_phone        VARCHAR(20),
-    p_login_bg     VARCHAR(100),
-    p_tan          VARCHAR(10),
-    p_gstin        VARCHAR(15),
-    p_payment_qr   VARCHAR(255),
-    p_calc_start   DATE,
-    p_sec_name     VARCHAR(100),
-    p_sec_phone    VARCHAR(20),
-    p_sec_sign     VARCHAR(100),
-    p_tds_rates    JSONB,
-    p_cgst         NUMERIC,
-    p_sgst         NUMERIC,
-    p_apt_amt      NUMERIC,
-    p_apt_rate     NUMERIC,
-    p_apt_due_day  INT,
-    p_apt_sinking  NUMERIC,
-    p_apt_repair   NUMERIC,
-    p_ven_1day     NUMERIC,
-    p_ven_7day     NUMERIC,
-    p_ven_1mth     NUMERIC,
-    p_bf_fy        INT,
-    p_bf_json      JSONB,
-    p_created_by   INT
+    p_society_id        INT,
+    p_signing_secret_enc TEXT,
+    p_logo              VARCHAR(100),
+    p_address           TEXT,
+    p_phone             VARCHAR(20),
+    p_login_bg          VARCHAR(100),
+    p_tan               VARCHAR(10),
+    p_gstin             VARCHAR(15),
+    p_payment_qr        VARCHAR(255),
+    p_calc_start        DATE,
+    p_sec_name          VARCHAR(100),
+    p_sec_phone         VARCHAR(20),
+    p_sec_email         VARCHAR(100),
+    p_sec_sign          VARCHAR(100),
+    p_tds_rates         JSONB,
+    p_cgst              NUMERIC,
+    p_sgst              NUMERIC,
+    p_apt_amt           NUMERIC,
+    p_apt_rate          NUMERIC,
+    p_apt_due_day       INT,
+    p_apt_sinking       NUMERIC,
+    p_apt_repair        NUMERIC,
+    p_ven_1day          NUMERIC,
+    p_ven_7day          NUMERIC,
+    p_ven_1mth          NUMERIC,
+    p_bf_fy             INT,
+    p_bf_json           JSONB,
+    p_created_by        INT
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -9026,7 +9077,7 @@ BEGIN
 
     -- 1) Setup-completion flag and society details
     UPDATE societies SET 
-        qr_signing_secret_hash = p_qr_hash,
+        signing_secret_enc = p_signing_secret_enc,
         logo = COALESCE(p_logo, logo),
         address = COALESCE(p_address, address),
         phone = COALESCE(p_phone, phone),
@@ -9037,6 +9088,7 @@ BEGIN
         calc_start_date = COALESCE(p_calc_start, calc_start_date),
         secretary_name = COALESCE(p_sec_name, secretary_name),
         secretary_phone = COALESCE(p_sec_phone, secretary_phone),
+        secretary_email = COALESCE(p_sec_email, secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign)
     WHERE id = p_society_id;
 

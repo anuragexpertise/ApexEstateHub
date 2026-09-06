@@ -35,18 +35,63 @@ from database.db_manager import db
 # time-boxed/single-use via generate_time_qr, a different mechanism for a
 # different problem (replay, not forgery).
 #
-# QR_SIGNING_SECRET is unset by default so this stays fully backward
-# compatible until deliberately provisioned (mirrors VAPID_PRIVATE_KEY /
-# VAPID_PUBLIC_KEY in push_service.py) — once set, newly generated codes
-# for versioned roles are signed, while previously-printed unsigned codes
-# for those same roles keep validating during the reprint transition
-# window. Once every existing pass has been reprinted, remove the "legacy
-# unsigned still accepted" branch in validate_qr_code below.
-# revoke_and_reissue additionally REQUIRES QR_SIGNING_SECRET to be set —
-# see its docstring — since the replacement nonce is itself derived from
-# it; there is no unsigned fallback for the revoke action the way there is
-# for ordinary code generation.
-QR_SIGNING_SECRET = os.getenv('QR_SIGNING_SECRET')
+# SIGNING_SECRET (renamed 2026-09 from the old QR_SIGNING_SECRET env var)
+# is now PER-SOCIETY, not a single deployment-wide value — see
+# app/services/secret_vault.py's module docstring for why a global secret
+# was a cross-tenant risk (one leak could forge QR codes for every society
+# on the platform, not just one). Each society's plaintext SIGNING_SECRET
+# is set once by its own admin in the Setup Wizard, encrypted at rest in
+# societies.signing_secret_enc, and resolved per-call by
+# _get_signing_secret(society_id) below — there is no module-level
+# constant anymore.
+#
+# A society with no SIGNING_SECRET configured yet (setup not completed,
+# or the vault can't decrypt it) stays fully backward compatible: newly
+# generated codes for versioned roles are unsigned for that society only,
+# exactly like the old global unset-by-default behavior (mirrors
+# VAPID_PRIVATE_KEY / VAPID_PUBLIC_KEY in push_service.py), just scoped
+# down from platform-wide to that one tenant.
+#
+# revoke_and_reissue additionally REQUIRES the calling society's
+# SIGNING_SECRET to be set — see its docstring — since the replacement
+# nonce is itself derived from it; there is no unsigned fallback for the
+# revoke action the way there is for ordinary code generation.
+#
+# 2026-09 cutover note: switching from one global secret to per-society
+# secrets was done as a clean cutover (no signed QR codes existed in
+# production yet), so there is no migration/transition-window logic here
+# for previously-signed codes.
+
+
+def _get_signing_secret(society_id):
+    """
+    Resolve a society's plaintext SIGNING_SECRET from
+    societies.signing_secret_enc (Fernet-encrypted — see secret_vault.py).
+
+    Returns None if society_id is falsy, the society hasn't completed
+    setup yet (column is NULL), or SECRET_VAULT_KEY itself is misconfigured.
+    The last case is deliberately not distinguished from "not set yet" by
+    the return value (mirrors the old global QR_SIGNING_SECRET-unset
+    behavior — codes for that society silently stay unsigned rather than
+    crashing) but IS logged loudly, since a vault misconfiguration is a
+    deployment bug worth noticing, unlike a fresh society that simply
+    hasn't finished onboarding.
+    """
+    if not society_id:
+        return None
+    row = db._execute(
+        "SELECT signing_secret_enc FROM societies WHERE id=%s",
+        (society_id,), fetch_one=True,
+    )
+    enc = (row or {}).get("signing_secret_enc")
+    if not enc:
+        return None
+    from app.services.secret_vault import decrypt_secret, SecretVaultError
+    try:
+        return decrypt_secret(enc)
+    except SecretVaultError as e:
+        print(f"⚠️  SIGNING_SECRET vault error for society_id={society_id}: {e}")
+        return None
 
 _QR_VERSIONED_ROLES = {
     "APT": "apartments",
@@ -63,12 +108,14 @@ _QR_VERSIONED_ROLES = {
 _QR_SIGNABLE_ROLES = set(_QR_VERSIONED_ROLES) | {"ADM"}
 
 
-def _qr_sign(society_id: int, role_code: str, entity_id: int, qr_version: int) -> str:
+def _qr_sign(secret: str, society_id: int, role_code: str, entity_id: int, qr_version: int) -> str:
     """HMAC-SHA256 tag over the payload, truncated for a compact QR /
-    manual-entry string. Requires QR_SIGNING_SECRET; callers must check
-    that separately."""
+    manual-entry string. `secret` is the calling society's own plaintext
+    SIGNING_SECRET (from _get_signing_secret) — callers resolve it once
+    and pass it in, rather than this function re-fetching/re-decrypting
+    it on every call."""
     msg = f"{society_id}-{role_code}-{entity_id}-{qr_version}".encode()
-    return hmac.new(QR_SIGNING_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:10]
+    return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()[:10]
 
 
 def _current_qr_version(role_code: str, entity_id: int):
@@ -108,24 +155,26 @@ def _current_qr_version(role_code: str, entity_id: int):
     return (row or {}).get("qr_version")
 
 
-def _derive_nonce(seed_extra: str) -> int:
-    """4-digit (1000-9999) nonce derived from HMAC(QR_SIGNING_SECRET, ...),
-    per instruction that QR_SIGNING_SECRET is what produces the
+def _derive_nonce(secret, seed_extra: str) -> int:
+    """4-digit (1000-9999) nonce derived from HMAC(secret, ...), per
+    instruction that the society's own SIGNING_SECRET is what produces the
     replacement value on a revoke, not a plain random() call. seed_extra
     must include fresh per-call entropy (revoke_and_reissue passes a
     random hex token) so two reissues of the same entity don't derive the
     same value just because the entity/role/table are the same.
 
-    Caller must check QR_SIGNING_SECRET is set first — this raises
-    RuntimeError otherwise rather than silently falling back to something
-    unsigned, since an unsigned "revocation" would be a no-op security
-    theater (nothing would actually stop validating).
+    `secret` must already be resolved (via _get_signing_secret) and
+    truthy — this raises RuntimeError otherwise rather than silently
+    falling back to something unsigned, since an unsigned "revocation"
+    would be a no-op security theater (nothing would actually stop
+    validating).
     """
-    if not QR_SIGNING_SECRET:
+    if not secret:
         raise RuntimeError(
-            "QR_SIGNING_SECRET must be configured to revoke/reissue a QR code."
+            "This society's SIGNING_SECRET must be configured (complete "
+            "the Setup Wizard) to revoke/reissue a QR code."
         )
-    digest = hmac.new(QR_SIGNING_SECRET.encode(), seed_extra.encode(), hashlib.sha256).hexdigest()
+    digest = hmac.new(secret.encode(), seed_extra.encode(), hashlib.sha256).hexdigest()
     return 1000 + (int(digest, 16) % 9000)
 
 
@@ -146,9 +195,9 @@ def revoke_and_reissue(
     a hidden bulk mechanism here — each entity's reissue is its own
     logged, individually-reasoned action even when triggered in bulk.
 
-    Requires QR_SIGNING_SECRET (via _derive_nonce) — if it isn't
-    configured, this raises rather than silently no-op'ing; there's no
-    unsigned revoke.
+    Requires this society's SIGNING_SECRET to be configured (via
+    _derive_nonce) — if it isn't, this raises rather than silently
+    no-op'ing; there's no unsigned revoke.
 
     reason must be one of the qr_reissue_log CHECK values: 'lost',
     'theft', 'mutilated', 'request', 'other'. Caller (the server callback)
@@ -158,8 +207,8 @@ def revoke_and_reissue(
 
     Returns (img_src, payload, old_nonce, new_nonce). Raises ValueError if
     role_code isn't versioned or the entity can't be resolved, ValueError
-    if reason isn't a recognized value, RuntimeError if QR_SIGNING_SECRET
-    is unset (from _derive_nonce).
+    if reason isn't a recognized value, RuntimeError if the society's
+    SIGNING_SECRET is unset (from _derive_nonce).
     """
     valid_reasons = ("lost", "theft", "mutilated", "request", "other")
     if reason not in valid_reasons:
@@ -196,7 +245,8 @@ def revoke_and_reissue(
         raise ValueError(f"No {table} row with id={pk}")
     old_nonce = old_row["qr_version"]
 
-    new_nonce = _derive_nonce(f"{table}:{pk}:{reason}:{os.urandom(8).hex()}")
+    secret = _get_signing_secret(society_id)
+    new_nonce = _derive_nonce(secret, f"{table}:{pk}:{reason}:{os.urandom(8).hex()}")
     # ~1-in-9000 chance new_nonce == old_nonce is accepted rather than
     # retried — this is a rare, deliberate, human-invoked action (not a
     # hot path where a collision is a systemic risk), and a no-op reissue
@@ -303,8 +353,8 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
     """
     Generate QR code image (Base64) and payload.
     Legacy payload: <society_id>-<ROLE_CODE>-<entity_id>
-    Signed payload (versioned/signable roles, once QR_SIGNING_SECRET is
-    set): adds
+    Signed payload (versioned/signable roles, once this society's own
+    SIGNING_SECRET has been set via the Setup Wizard): adds
     -<qr_version>-<sig>, so the same printed/displayed code stays valid
     indefinitely unless the entity's qr_version is bumped server-side.
     """
@@ -312,10 +362,11 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
         role_code_clean = role_code.upper().strip()
         qr_payload = f"{society_id or 0}-{role_code_clean}-{entity_id}"
 
-        if QR_SIGNING_SECRET:
+        secret = _get_signing_secret(society_id)
+        if secret:
             qr_version = _current_qr_version(role_code_clean, entity_id)
             if qr_version is not None:
-                sig = _qr_sign(society_id or 0, role_code_clean, entity_id, qr_version)
+                sig = _qr_sign(secret, society_id or 0, role_code_clean, entity_id, qr_version)
                 qr_payload = f"{qr_payload}-{qr_version}-{sig}"
 
         qr = qrcode.QRCode(
@@ -822,7 +873,8 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
 
         role_code = parsed["role_code"]
-        if role_code in _QR_SIGNABLE_ROLES and QR_SIGNING_SECRET:
+        secret = _get_signing_secret(qr_society_id) if role_code in _QR_SIGNABLE_ROLES else None
+        if secret:
             qr_version = parsed.get("qr_version")
             sig = parsed.get("sig")
             if sig is not None:
@@ -833,7 +885,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 # version, even though the signature itself would still be
                 # mathematically correct for that old version.
                 current_version = _current_qr_version(role_code, entity_id)
-                expected_sig = _qr_sign(qr_society_id, role_code, entity_id, qr_version)
+                expected_sig = _qr_sign(secret, qr_society_id, role_code, entity_id, qr_version)
                 if (
                     current_version is None
                     or qr_version != current_version

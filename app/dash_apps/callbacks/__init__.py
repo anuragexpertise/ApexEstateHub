@@ -126,6 +126,15 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ noc_callbacks failed: {e}")
 
+    # 10b. Agreement card buttons (Print / PDF / Email — clientside JS)
+    #     Requires dcc.Store(id='agreement-action-store') + agreement-modal
+    #     in app_shell.py layout.
+    try:
+        from .agreement_callbacks import register_agreement_callbacks
+        register_agreement_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ agreement_callbacks failed: {e}")
+
     # 11. Admin callbacks — fully pruned. update_society_count,
     #     update_recent_societies, enroll_member, and
     #     validate_qr_code_admin were all removed from admin_callbacks.py:

@@ -1,7 +1,6 @@
 import json
 from dash import Input, Output, State, ALL, callback, no_update, html, ctx
 import dash_bootstrap_components as dbc
-from werkzeug.security import generate_password_hash
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content
@@ -47,9 +46,9 @@ def register_setup_wizard_callbacks(app):
         if not society_id:
             return no_update
             
-        # Check if qr_signing_secret_hash is NULL
-        row = db._execute("SELECT qr_signing_secret_hash FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-        if row and row.get("qr_signing_secret_hash") is None:
+        # Check if signing_secret_enc is NULL (setup not completed yet)
+        row = db._execute("SELECT signing_secret_enc FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        if row and row.get("signing_secret_enc") is None:
             # Trigger Wizard
             return get_setup_wizard_layout(society_id)
         
@@ -125,6 +124,8 @@ def register_setup_wizard_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Output("login-modal", "is_open", allow_duplicate=True),
         Output("sw-error-msg", "children", allow_duplicate=True),
+        Output("agreement-modal", "is_open", allow_duplicate=True),
+        Output("agreement-modal-body", "children", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
         Input("sw-close-btn", "n_clicks"),
         State("sw-logo-upload", "contents"),
@@ -137,6 +138,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-calc-start-date", "date"),
         State("sw-sec-name", "value"),
         State("sw-sec-phone", "value"),
+        State("sw-sec-email", "value"),
         State("sw-sec-sign", "contents"),
         State("sw-qr-secret", "value"),
         State("sw-qr-secret-confirm", "value"),
@@ -164,14 +166,14 @@ def register_setup_wizard_callbacks(app):
     def submit_setup_wizard(n_submit, n_close, 
                             logo_data, address, phone, bg_data, 
                             tan, gstin, pay_qr_data, calc_start, 
-                            sec_name, sec_phone, sec_sign_data, 
+                            sec_name, sec_phone, sec_email, sec_sign_data, 
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
                             tds_rates, cgst, sgst,
                             apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair,
                             ven_1day, ven_7day, ven_1mth,
                             bf_fy, bf_ids, bf_amts, bf_remarks, auth):
         triggered = ctx.triggered_id
-        _noop = (no_update, no_update, no_update, no_update, no_update, no_update)
+        _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
 
         if triggered == "sw-close-btn":
             if not n_close:
@@ -181,7 +183,7 @@ def register_setup_wizard_callbacks(app):
                 logout_user()
             except Exception:
                 pass
-            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True, ""
+            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True, "", no_update, no_update
 
         if triggered == "sw-btn-submit":
             if not n_submit:
@@ -192,36 +194,42 @@ def register_setup_wizard_callbacks(app):
             # does auth.get(...) on it. Validation failures below only ever
             # touch is_open / sw-error-msg.
             if not auth or not auth.get("society_id"):
-                return True, no_update, no_update, no_update, no_update, "Session error — please log in again."
+                return True, no_update, no_update, no_update, no_update, "Session error — please log in again.", no_update, no_update
 
             if i_agree != 'I AGREE':
-                return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed."
+                return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", no_update, no_update
 
             if not admin_pass:
-                return True, no_update, no_update, no_update, no_update, "Admin Password is required."
+                return True, no_update, no_update, no_update, no_update, "Admin Password is required.", no_update, no_update
 
             from werkzeug.security import check_password_hash
             user_row = db._execute("SELECT password_hash FROM users WHERE id = :uid", {"uid": auth.get("user_id")}, fetch_one=True)
             if not user_row or not check_password_hash(user_row["password_hash"], admin_pass):
-                return True, no_update, no_update, no_update, no_update, "Invalid Admin Password."
+                return True, no_update, no_update, no_update, no_update, "Invalid Admin Password.", no_update, no_update
 
             if not qr_secret:
-                return True, no_update, no_update, no_update, no_update, "Setup Confirmation Password is required."
+                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET is required.", no_update, no_update
 
             if qr_secret != qr_confirm or qr_secret != qr_confirm_final:
-                return True, no_update, no_update, no_update, no_update, "Passwords do not match."
+                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRETs do not match.", no_update, no_update
 
             import re
             if len(qr_secret) < 8 or not re.search(r'[A-Z]', qr_secret) or not re.search(r'[a-z]', qr_secret) or not re.search(r'[^a-zA-Z0-9]', qr_secret):
-                return True, no_update, no_update, no_update, no_update, "Password must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char."
+                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char.", no_update, no_update
 
             society_id = auth.get("society_id")
 
-            # werkzeug's salted hash (consistent with every other password/
-            # PIN/pattern in this codebase) — replaces the old hmac-sha256
-            # with a key hardcoded in this open-source file, which offered
-            # no real protection against offline brute force.
-            secret_hash = generate_password_hash(qr_secret)
+            # Reversible encryption (NOT a one-way hash like passwords/PINs
+            # elsewhere in this codebase) — this is society_id's own real
+            # QR HMAC key and must be decryptable at sign/verify time. See
+            # app/services/secret_vault.py. Requires SECRET_VAULT_KEY to be
+            # configured on the deployment; if it isn't, fail loudly here
+            # rather than silently storing something unusable.
+            try:
+                from app.services.secret_vault import encrypt_secret
+                secret_enc = encrypt_secret(qr_secret)
+            except Exception as e:
+                return True, no_update, no_update, no_update, no_update, f"Could not secure the SIGNING_SECRET: {str(e)[:150]}", no_update, no_update
 
             # Zip edited rates back onto their seed sections. See the note
             # on fn_complete_society_setup: TDS_SECTION_RATE_SEED has two
@@ -255,11 +263,12 @@ def register_setup_wizard_callbacks(app):
             phone = str(phone)[:20] if phone else None
             sec_phone = str(sec_phone)[:20] if sec_phone else None
             sec_name = str(sec_name)[:100] if sec_name else None
+            sec_email = str(sec_email)[:100] if sec_email else None
             
             try:
                 result = db._execute(
                     """SELECT fn_complete_society_setup(
-                        :sid, :qr_hash, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_sign,
+                        :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_email, :sec_sign,
                         CAST(:tds_json AS jsonb), :cgst, :sgst,
                         :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
@@ -267,7 +276,7 @@ def register_setup_wizard_callbacks(app):
                     ) AS result""",
                     {
                         "sid": society_id,
-                        "qr_hash": secret_hash,
+                        "secret_enc": secret_enc,
                         "logo": logo_path,
                         "addr": address,
                         "phone": phone,
@@ -278,6 +287,7 @@ def register_setup_wizard_callbacks(app):
                         "calc_start": calc_start,
                         "sec_name": sec_name,
                         "sec_phone": sec_phone,
+                        "sec_email": sec_email,
                         "sec_sign": sign_path,
                         "tds_json": json.dumps(tds_pairs),
                         "cgst": cgst, "sgst": sgst,
@@ -290,16 +300,34 @@ def register_setup_wizard_callbacks(app):
                     fetch_one=True,
                 )
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, f"Error saving setup: {str(e)[:150]}"
+                return True, no_update, no_update, no_update, no_update, f"Error saving setup: {str(e)[:150]}", no_update, no_update
 
             outcome = (result or {}).get("result") or ""
             if outcome != "OK":
-                return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again."
+                return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again.", no_update, no_update
+
+            # Auto-show the society's Agreement right after onboarding
+            # completes, and persist it (society_agreements) so it can be
+            # reprinted/audited later. A failure here must never block the
+            # setup itself from completing — the wizard has already
+            # succeeded at this point.
+            agreement_body = no_update
+            agreement_open = no_update
+            try:
+                from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
+                from app.dash_apps.drilldown import renderers
+                agreement_record = _get_or_create_agreement(db, society_id, auth.get("user_id"))
+                society = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
+                agreement_body = renderers.render_agreement_card(society=dict(society), agreement_record=agreement_record)
+                agreement_open = True
+            except Exception as e:
+                print(f"⚠️  Agreement generation failed after setup: {e}")
 
             return (
                 False, no_update, no_update,
                 {"type": "success", "message": "Setup completed successfully!"},
-                no_update, ""
-            )  # Close modal
+                no_update, "",
+                agreement_open, agreement_body,
+            )  # Close wizard modal, open Agreement modal
 
         return _noop

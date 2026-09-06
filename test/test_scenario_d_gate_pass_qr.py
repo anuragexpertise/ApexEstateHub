@@ -56,7 +56,7 @@ class TestScenarioD_GatePassQR:
 
     def test_generate_qr_payload_format(self):
         _, payload = qr_service.generate_qr_code(2, "SEC", 5)
-        if qr_service.QR_SIGNING_SECRET:
+        if qr_service._get_signing_secret(2):
             assert payload.startswith("2-SEC-5-")
         else:
             assert payload == "2-SEC-5"

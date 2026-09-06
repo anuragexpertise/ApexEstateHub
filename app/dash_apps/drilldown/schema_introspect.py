@@ -68,6 +68,13 @@ _SYSTEM_COLUMNS = {
     "id", "society_id", "user_id", "created_at", "updated_at",
     "password_hash", "pin_hash", "pattern_hash", "linked_id",
     "created_by", "updated_by", "qr_payload",
+    # per-society QR signing secret — reversible ciphertext (see
+    # secret_vault.py), not just a hash like the auth fields above, so an
+    # accidental raw-text edit through the generic form could silently
+    # corrupt it (breaking that society's QR signing) with no validation
+    # in front of it. Only ever written via fn_complete_society_setup /
+    # the Setup Wizard's own dedicated, validated flow.
+    "signing_secret_enc",
     # receivable-internal fields not shown in forms
     "interest_months_applied", "source_table", "source_id",
     # payment-internal
@@ -664,7 +671,7 @@ _CASHBOOK_LIST_COLUMNS = [
 # of societies columns plus the computed apartment_count — override rather
 # than use the full introspected societies column list, or most cells
 # would render blank for columns the query never selects (logo,
-# secretary_sign, payment_qr, email, phone, qr_signing_secret_hash, …).
+# secretary_sign, payment_qr, email, phone, signing_secret_enc, …).
 _MASTER_SOCIETIES_LIST_COLUMNS = [
     {"name": "Society Name",         "field": "name",                 "sortable": True},
     {"name": "Address",              "field": "address",              "sortable": True},

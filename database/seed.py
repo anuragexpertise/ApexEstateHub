@@ -101,6 +101,18 @@ import psycopg2
 import psycopg2.extras
 from werkzeug.security import generate_password_hash
 
+
+def _seed_signing_secret(plaintext: str):
+    """Encrypt the demo society's SIGNING_SECRET for seeding, gracefully
+    returning None (unsigned QR fallback) if SECRET_VAULT_KEY isn't
+    configured in this environment — see the SOCIETY dict comment."""
+    try:
+        from app.services.secret_vault import encrypt_secret
+        return encrypt_secret(plaintext)
+    except Exception as e:
+        print(f"  ⚠️  Skipping demo SIGNING_SECRET (SECRET_VAULT_KEY not configured?): {e}")
+        return None
+
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger(__name__)
 
@@ -248,6 +260,7 @@ SOCIETY = {
     "phone":            "9876543210",
     "secretary_name":   "Ramesh Kumar",
     "secretary_phone":  "9876543211",
+    "secretary_email":  "secretary@sunriseresidency.com",
     "secretary_sign":   "signatures/ramesh_kumar.png",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
@@ -255,7 +268,13 @@ SOCIETY = {
     "payment_qr":       "sunrise_qr.png",
     "logo":             "sunrise_logo.png",
     "login_background": "sunrise_bg.png",
-    "qr_signing_secret_hash": generate_password_hash("Setup@2024"),
+    # signing_secret_enc must be reversible ciphertext (this society's real
+    # QR HMAC key), not a hash — see app/services/secret_vault.py. Requires
+    # SECRET_VAULT_KEY to be set even for local/demo seeding; if it isn't,
+    # this stays NULL and the demo society's QR codes are simply unsigned
+    # (same graceful degrade as a society that hasn't run the Setup Wizard
+    # yet), rather than seed.py hard-failing over a demo-only secret.
+    "signing_secret_enc": _seed_signing_secret("Setup@2024"),
 }
 
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024", "name": "Master Admin"}
@@ -608,17 +627,17 @@ def seed_society(cur, conn) -> int:
     cur.execute(
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
-            secretary_phone, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background, qr_signing_secret_hash)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
+            payment_qr, logo, login_background, signing_secret_enc)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
-         SOCIETY["secretary_phone"], SOCIETY.get("secretary_sign"),
+         SOCIETY["secretary_phone"], SOCIETY.get("secretary_email"), SOCIETY.get("secretary_sign"),
          SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
          SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background"),
-         SOCIETY.get("qr_signing_secret_hash")),
+         SOCIETY.get("signing_secret_enc")),
     )
     conn.commit()
     cur.execute(
