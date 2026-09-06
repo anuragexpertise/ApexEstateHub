@@ -211,30 +211,34 @@ def render_category_content(category, society_id=None):
             dbc.Col(html.B("ID", className="small text-uppercase"), width=1),
             dbc.Col(html.B("Tab", className="small text-uppercase"), width=2),
             dbc.Col(html.B("Name", className="small text-uppercase"), width=4),
-            dbc.Col(html.B("Dr/Cr BF", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Dr/Cr Type", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Group", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Dr/Cr", className="small text-uppercase", title="drcr_account"), width=1),
+            dbc.Col(html.B("BF?", className="small text-uppercase", title="has_bf"), width=1),
+            dbc.Col(html.B("Depr?", className="small text-uppercase", title="is_depreciable"), width=1),
+            dbc.Col(html.B("Depr %", className="small text-uppercase", title="depreciation_percent"), width=2),
         ], className="mb-2 border-bottom pb-1")
         inputs.append(header)
 
-        for acc in ACCOUNTS:
+        # Group (sort) by parent_account_id (acc[4])
+        sorted_accounts = sorted(ACCOUNTS, key=lambda x: (x[4] if x[4] is not None else -1, x[0]))
+
+        for acc in sorted_accounts:
+            # acc mapping: 0=id, 1=header, 2=tab, 3=name, 4=parent, 5=drcr, 6=has_bf, 7=drcr_bf, 8=depr_percent
+            is_depreciable = acc[8] < 100 if acc[8] is not None else False
+            
             row = dbc.Row([
                 dbc.Col(html.Span(str(acc[0]), className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc[1], className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc[2], className="small fw-bold"), width=4, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[3]), className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[4]), className="small text-muted"), width=2, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[5]), className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[2] or ""), className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[3] or ""), className="small fw-bold"), width=4, className="d-flex align-items-center"),
+                dbc.Col(html.Span(str(acc[5] or ""), className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span("Yes" if acc[6] else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span("Yes" if is_depreciable else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(f"{acc[8]}%" if acc[8] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
             ], className="mb-2")
             inputs.append(row)
         return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Brought Forward":
-        accounts = []
-        if society_id:
-            accounts = db._execute(
-                "SELECT id, tab_name, name, drcr_bf FROM accounts WHERE society_id = :sid AND has_bf = TRUE ORDER BY id",
-                {"sid": society_id}, fetch_all=True
-            ) or []
+        from database.seed import ACCOUNTS
+        accounts = [{"id": acc[0], "tab_name": acc[2], "name": acc[3], "drcr_bf": acc[7]} for acc in ACCOUNTS if acc[6]]
             
         inputs = [
             html.P("Configure Opening Balances (Brought Forward).", className="text-muted mb-3"),

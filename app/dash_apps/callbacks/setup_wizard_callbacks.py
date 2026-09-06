@@ -266,6 +266,14 @@ def register_setup_wizard_callbacks(app):
             sec_email = str(sec_email)[:100] if sec_email else None
             
             try:
+                from database.seed import seed_accounts
+                with db._conn() as conn:
+                    with conn.cursor() as cur:
+                        seed_accounts(cur, conn, society_id)
+            except Exception as e:
+                return True, no_update, no_update, no_update, no_update, f"Could not seed accounts: {str(e)[:150]}", no_update, no_update
+
+            try:
                 result = db._execute(
                     """SELECT fn_complete_society_setup(
                         :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_email, :sec_sign,
