@@ -437,6 +437,35 @@ def _bulk_enroll_modal() -> dbc.Modal:
 # _pay_dues_bill_modal — a tappable candidate list, opened by the row-level
 # "Reconcile" button). Both driven by bank_reconcile_callbacks.py.
 
+def _agreement_modal() -> dbc.Modal:
+    """
+    Self-contained, permanently-mounted modal (same pattern as
+    _bank_reconcile_modal below) — deliberately NOT routed through the
+    generic drilldown/DRILLDOWN_MAP system that most cards use. That
+    system is a large multi-Input router keyed off card_id; wiring a new
+    entity through it just to show one whole-society document auto-fired
+    right after the Setup Wizard closes would add real risk for no
+    benefit here. submit_setup_wizard sets is_open + agreement-modal-body
+    directly once setup succeeds; render_agreement_card supplies the
+    actual content either way, so a future reprint entry point (e.g. a
+    Settings button that re-fetches via _get_or_create_agreement and sets
+    these same two Outputs) reuses this exact modal with no new plumbing.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Society Onboarding Agreement"),
+                close_button=True,
+            ),
+            dbc.ModalBody(html.Div(id="agreement-modal-body")),
+        ],
+        id="agreement-modal",
+        size="lg", is_open=False, centered=True,
+        backdrop=True, keyboard=True,
+        style={"zIndex": "20060"},
+    )
+
+
 def _bank_reconcile_modal() -> dbc.Modal:
     return dbc.Modal(
         [
@@ -979,6 +1008,13 @@ def shell_layout() -> html.Div:
             # fail at runtime; left the unused ones in place rather than
             # risk removing a store something else depends on).
             dcc.Store(id="noc-action-store",        storage_type="memory"),
+            # agreement-action-store(-print/-email): same dummy-Output-anchor
+            # pattern as noc-action-store above, for agreement_callbacks.py's
+            # clientside Print/PDF/Email callbacks and server-side
+            # last_printed_at/last_emailed_at stamping.
+            dcc.Store(id="agreement-action-store",        storage_type="memory"),
+            dcc.Store(id="agreement-action-store-print",  storage_type="memory"),
+            dcc.Store(id="agreement-action-store-email",  storage_type="memory"),
             # cam-delegation-dummy: dummy Output anchor for camera_callbacks.py's
             # click-delegation clientside callback. Deliberately separate from
             # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
@@ -1162,6 +1198,9 @@ def shell_layout() -> html.Div:
             # ── Bank Reconcile modals (bulk upload + per-row picker) ─────────────
             _bank_reconcile_modal(),
             _bank_reconcile_picker_modal(),
+
+            # ── Society Onboarding Agreement modal ────────────────────────────
+            _agreement_modal(),
 
             # ── Assign-To modal ──────────────────────────────────────────────────
             _assign_to_modal(),
