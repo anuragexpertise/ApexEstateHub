@@ -299,14 +299,16 @@ def register_callbacks(app):
     except Exception as e:
         print(f"⚠️ qty_stepper_callbacks failed: {e}")
 
-    # 20. Patrol Locations — minimal admin create/list/reissue flow
-    #     (2026-09). See patrol_location_callbacks.py module docstring for
-    #     why this is standalone rather than folded into the generic
-    #     drilldown/DRILLDOWN_MAP engine.
-    try:
-        from .patrol_location_callbacks import register_patrol_location_callbacks
-        register_patrol_location_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ patrol_location_callbacks failed: {e}")
+    # 20. Patrol Locations standalone Settings-tab "Add Location" panel
+    #     (patrol_location_callbacks.py, added 2026-09) removed 2026-09:
+    #     render_patrol_locations_section() was never actually mounted
+    #     into portal_pages.py/app_shell.py, so its Add/List/QR-audit-
+    #     export callbacks all targeted component IDs that didn't exist
+    #     anywhere in the layout — dead code, including an INSERT that
+    #     never wrote latitude/longitude even if it had been reachable.
+    #     Patrol location creation now has exactly one path: the generic
+    #     drilldown list card's "New" button (list_patrol_locations ->
+    #     form_patrol_location_new -> render_form_card), which already
+    #     includes the interactive map (see patrol_map_callbacks.py).
 
     print("✅ All callbacks registered")
