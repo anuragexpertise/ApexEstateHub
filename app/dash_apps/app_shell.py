@@ -920,6 +920,8 @@ def _qr_modal() -> dbc.Modal:
                         dbc.Button(html.I(className="fas fa-sign-out-alt"),
                                    id="qr-modal-logout-btn", n_clicks=0,
                                    color="link", style={"color": "#e74c3c", "fontSize": "18px"}),
+                        dbc.Button([html.I(className="fas fa-microchip me-2"), "Program NFC"],
+                                   id="program-nfc-btn", n_clicks=0, color="warning", size="sm", style={"display": "none"}),
                         dbc.Button([html.I(className="fas fa-download me-2"), "Save PNG"],
                                    id="save-qr-png-btn", n_clicks=0, color="success", size="sm"),
                         dbc.Button([html.I(className="fas fa-print me-2"), "Print"],

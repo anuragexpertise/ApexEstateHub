@@ -29,11 +29,7 @@ def _manual_qr_card(scope: str, **kwargs):
     return render_manual_qr_card(scope, **kwargs)
 
 
-def _patrol_locations_section(sid):
-    """Thin wrapper around patrol_location_callbacks.render_patrol_locations_section
-    — same lazy-import rationale as _manual_qr_card above."""
-    from app.dash_apps.callbacks.patrol_location_callbacks import render_patrol_locations_section
-    return render_patrol_locations_section(sid)
+
 
 
 _C = {
@@ -660,7 +656,6 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),
-            _patrol_locations_section(sid),
         ], className="portal-page")
 
     if active_tab == "evaluate_pass":
@@ -1092,6 +1087,11 @@ def _evaluate_pass_page(sid=None) -> html.Div:
                                        style={"flex": "1"}, n_clicks=0),
                             dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Exit OUT"],
                                        id="qr-exit-start-btn", color="danger", size="sm",
+                                       style={"flex": "1"}, n_clicks=0),
+                        ], style={"display": "flex", "gap": "6px", "marginBottom": "6px"}),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-microchip me-1"), "Scan NFC (Patrol)"],
+                                       id="scan-nfc-btn", color="primary", size="sm",
                                        style={"flex": "1"}, n_clicks=0),
                         ], style={"display": "flex", "gap": "6px", "marginBottom": "6px"}),
                         html.Div([

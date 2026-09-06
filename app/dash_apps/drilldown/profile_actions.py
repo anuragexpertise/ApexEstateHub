@@ -90,6 +90,17 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
 
+    # ── PATROL LOCATION ──────────────────────────────────────────────────────
+    "patrol_location": [
+        {
+            "label": "Program NFC / Show QR",
+            "action_id": "show_qr",
+            "target_card": "modal_qr",
+            "icon": "fa-qrcode",
+            "color": "primary",
+        },
+    ],
+
     # ── SECURITY ─────────────────────────────────────────────────────────────
     "security": [
         {

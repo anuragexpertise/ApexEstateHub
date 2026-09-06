@@ -828,6 +828,18 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             tuple(params) + (page_size, offset),
         )
 
+    # ── PATROL LOCATIONS ────────────────────────────────────────────────
+    if entity == "patrol_locations":
+        if s:
+            return (
+                "SELECT * FROM patrol_locations WHERE society_id=%s AND location_name ILIKE %s ORDER BY location_name LIMIT %s OFFSET %s",
+                (sid, f"%{s}%", page_size, offset)
+            )
+        return (
+            "SELECT * FROM patrol_locations WHERE society_id=%s ORDER BY location_name LIMIT %s OFFSET %s",
+            (sid, page_size, offset)
+        )
+
     # ── GATE LOGS ───────────────────────────────────────────────────────
     if entity == "gate_logs":
         return ("SELECT * FROM fn_gate_logs_named(%s,%s,CURRENT_DATE) LIMIT %s OFFSET %s",

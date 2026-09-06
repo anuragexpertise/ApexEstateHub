@@ -168,23 +168,37 @@ function qrCameraController(
         .then(function(d){
             S.scanning = false;
             if (d.status === 'success' && d.qr_data) {
-                // 2. Stop camera (this sets S.mode = null)
                 stopCamera(); 
+                status('QR detected — fetching location...');
                 
-                status('QR detected — validating...');
-                
-                var modeInput = el('qr-scan-mode');
-                var dataInput = el('qr-scan-input');
-                
-                if (modeInput && dataInput) {
-                    // 3. Use the saved currentMode, NOT S.mode
-                    setReact(modeInput, currentMode); 
-                    setReact(dataInput, d.qr_data);
+                var finalize = function(lat, lon) {
+                    status('QR detected — validating...');
+                    var modeInput = el('qr-scan-mode');
+                    var dataInput = el('qr-scan-input');
                     
-                    setTimeout(function(){
-                        var btn = el('qr-validate-btn');
-                        if (btn) btn.click();
-                    }, 300);
+                    if (modeInput && dataInput) {
+                        setReact(modeInput, currentMode); 
+                        var finalData = d.qr_data;
+                        if (lat !== null && lon !== null) {
+                            finalData += "||" + lat + "," + lon;
+                        }
+                        setReact(dataInput, finalData);
+                        
+                        setTimeout(function(){
+                            var btn = el('qr-validate-btn');
+                            if (btn) btn.click();
+                        }, 300);
+                    }
+                };
+
+                if ("geolocation" in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(pos) { finalize(pos.coords.latitude, pos.coords.longitude); },
+                        function(err) { console.warn("GPS error", err); finalize(null, null); },
+                        {timeout: 3000}
+                    );
+                } else {
+                    finalize(null, null);
                 }
             }
         })
@@ -803,10 +817,19 @@ def register_qr_callbacks(app):
 
         from app.services.qr_service import validate_qr_code
         from database.db_manager import db
-        
         society_id = get_current_society_id()
         scanning_user_id = get_current_user_id()
-        result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id)
+        
+        lat, lon = None, None
+        if "||" in qr_payload:
+            parts = qr_payload.split("||", 1)
+            qr_payload = parts[0]
+            try:
+                lat, lon = [float(x) for x in parts[1].split(",")]
+            except ValueError:
+                pass
+
+        result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id, lat=lat, lon=lon)
         now_s = datetime.now().strftime("%H:%M:%S")
         log = list(scan_log or [])
         
@@ -1376,7 +1399,79 @@ def register_qr_callbacks(app):
         from database.db_manager import db
         society_id = get_current_society_id()
         user_id = get_current_user_id()
-
+    # ── 5f. Read NFC (Web NFC API) + Geolocation Fallback ──────────
+    clientside_callback(
+        """
+        async function(n_clicks) {
+            if (!n_clicks) return window.dash_clientside.no_update;
+            
+            if (!("NDEFReader" in window)) {
+                alert("Web NFC is not supported. Please use the QR scanner instead.");
+                return window.dash_clientside.no_update;
+            }
+            
+            try {
+                // Get geolocation first
+                var lat = null;
+                var lon = null;
+                if ("geolocation" in navigator) {
+                    try {
+                        const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {timeout: 5000}));
+                        lat = pos.coords.latitude;
+                        lon = pos.coords.longitude;
+                    } catch (e) {
+                        console.warn("Geolocation failed", e);
+                    }
+                }
+                
+                const ndef = new NDEFReader();
+                await ndef.scan();
+                
+                return new Promise((resolve) => {
+                    ndef.onreading = event => {
+                        const message = event.message;
+                        for (const record of message.records) {
+                            if (record.recordType === "text") {
+                                const textDecoder = new TextDecoder(record.encoding);
+                                const payload = textDecoder.decode(record.data);
+                                // Append GPS coords to the payload to send to backend if needed
+                                // Or we could just set the standard qr-scan-mode to 'NFC' 
+                                // and trigger the python callback.
+                                var modeInput = document.getElementById('qr-scan-mode');
+                                var dataInput = document.getElementById('qr-scan-input');
+                                
+                                if (modeInput && dataInput) {
+                                    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                    setter.call(modeInput, 'NFC');
+                                    modeInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                    
+                                    setter.call(dataInput, payload + "||" + lat + "," + lon);
+                                    dataInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                    
+                                    setTimeout(() => {
+                                        var btn = document.getElementById('qr-validate-btn');
+                                        if (btn) btn.click();
+                                    }, 300);
+                                }
+                                resolve(window.dash_clientside.no_update);
+                            }
+                        }
+                    };
+                    ndef.onreadingerror = () => {
+                        alert("Error reading NFC tag.");
+                        resolve(window.dash_clientside.no_update);
+                    };
+                });
+            } catch (error) {
+                alert("Error starting NFC scan: " + error);
+                return window.dash_clientside.no_update;
+            }
+        }
+        """,
+        Output('scan-nfc-btn', 'n_clicks'),
+        Input('scan-nfc-btn', 'n_clicks'),
+        prevent_initial_call=True,
+    )
         if not society_id:
             return {"type": "error", "message": "No society selected"}
         
