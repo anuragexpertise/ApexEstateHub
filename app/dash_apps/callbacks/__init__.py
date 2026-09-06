@@ -36,7 +36,8 @@ def register_callbacks(app):
         import traceback; traceback.print_exc()
 
     try:
-        import app.dash_apps.callbacks.patrol_map_callbacks
+        import importlib
+        importlib.import_module('app.dash_apps.callbacks.patrol_map_callbacks')
     except Exception as e:
         print(f"⚠️ patrol_map_callbacks failed: {e}")
 
