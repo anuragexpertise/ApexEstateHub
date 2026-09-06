@@ -25,10 +25,12 @@ def create_dash_app(flask_app):
         # version (<2.15.0) predates the official on_error/set_props API,
         # so this fills that gap at the browser level instead.
         "/static/js/error-monitor.js",
+        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
     ]
     external_stylesheets = [
         dbc.themes.BOOTSTRAP,
         "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
     ]
     dash_app = Dash(
         __name__,

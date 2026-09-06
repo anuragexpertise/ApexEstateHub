@@ -3366,10 +3366,42 @@ def _save_entity(entity, card_id, data):
             return _save_vendor_pass(db, data, sid)
         if entity in ("event_ticket", "event_ticket_new"):
             return _save_event_ticket(db, data, sid)
+        if entity == "patrol_location":
+            return _save_patrol_location(db, data, sid, is_edit, pk)
         # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None
     except Exception as e:
         return False, _clean_pg_error(e), None
+
+def _save_patrol_location(db, data, sid, is_edit, pk):
+    loc_name = data.get("location_name")
+    description = data.get("description")
+    active = data.get("active", True)
+    scan_interval = data.get("scan_interval")
+    lat = data.get("latitude")
+    lon = data.get("longitude")
+    nfc = data.get("nfc_enabled", False)
+
+    if not loc_name:
+        return False, "Location name is required", None
+
+    if not is_edit:
+        db._execute(
+            """INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (sid, loc_name, description, active, scan_interval, lat, lon, nfc)
+        )
+        msg = f"Patrol location '{loc_name}' created."
+        return True, msg, None
+    else:
+        db._execute(
+            """UPDATE patrol_locations
+               SET location_name=%s, description=%s, active=%s, scan_interval=%s, latitude=%s, longitude=%s, nfc_enabled=%s
+               WHERE id=%s AND society_id=%s""",
+            (loc_name, description, active, scan_interval, lat, lon, nfc, pk, sid)
+        )
+        msg = f"Patrol location '{loc_name}' updated."
+        return True, msg, pk
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2.  NEW: Receipt save using fn_save_receipt

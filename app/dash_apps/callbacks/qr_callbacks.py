@@ -1399,6 +1399,25 @@ def register_qr_callbacks(app):
         from database.db_manager import db
         society_id = get_current_society_id()
         user_id = get_current_user_id()
+
+        if not society_id:
+            return {"type": "error", "message": "No society selected"}
+        
+        try:
+            # Create emergency event for ALL entities
+            db._execute(
+                """INSERT INTO events 
+                   (society_id, title, description, event_date, open_to, created_by)
+                   VALUES (%s, 'SECURITY EMERGENCY', 
+                           'Emergency alert triggered by security at gate', 
+                           CURRENT_DATE, 'all', %s)""",
+                (society_id, user_id)
+            )
+            return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
+        except Exception as e:
+            return {"type": "error", "message": f"Failed to trigger emergency: {str(e)}"}
+
+
     # ── 5f. Read NFC (Web NFC API) + Geolocation Fallback ──────────
     clientside_callback(
         """
@@ -1434,9 +1453,7 @@ def register_qr_callbacks(app):
                             if (record.recordType === "text") {
                                 const textDecoder = new TextDecoder(record.encoding);
                                 const payload = textDecoder.decode(record.data);
-                                // Append GPS coords to the payload to send to backend if needed
-                                // Or we could just set the standard qr-scan-mode to 'NFC' 
-                                // and trigger the python callback.
+                                
                                 var modeInput = document.getElementById('qr-scan-mode');
                                 var dataInput = document.getElementById('qr-scan-input');
                                 
@@ -1472,22 +1489,6 @@ def register_qr_callbacks(app):
         Input('scan-nfc-btn', 'n_clicks'),
         prevent_initial_call=True,
     )
-        if not society_id:
-            return {"type": "error", "message": "No society selected"}
-        
-        try:
-            # Create emergency event for ALL entities
-            db._execute(
-                """INSERT INTO events 
-                   (society_id, title, description, event_date, open_to, created_by)
-                   VALUES (%s, 'SECURITY EMERGENCY', 
-                           'Emergency alert triggered by security at gate', 
-                           CURRENT_DATE, 'all', %s)""",
-                (society_id, user_id)
-            )
-            return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
-        except Exception as e:
-            return {"type": "error", "message": f"Emergency failed: {str(e)[:40]}"}
 
     # ── 6. Call Admin ───────────────────────────────────────────
     @app.callback(

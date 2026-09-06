@@ -562,6 +562,13 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             INSERT INTO patrol_scans (society_id, location_id, security_user_id, scanned_at)
             VALUES (%s, %s, %s, NOW())
         """, (society_id, location_id, security_user_id))
+        
+        if security_user_id:
+            db._execute("""
+                UPDATE patrol_tasks 
+                SET status = 'COMPLETED' 
+                WHERE security_user_id = %s AND location_id = %s AND status = 'PENDING'
+            """, (security_user_id, location_id))
 
         return {
             "status": "PASS",
