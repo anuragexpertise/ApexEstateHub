@@ -672,7 +672,7 @@ KPI_CARDS = {
         # Live clock display; click intercepted in drilldown_callbacks.py
         # (same early-return pattern as "show_qr") to open the 1-min ATD
         # QR modal instead of routing through DRILLDOWN_MAP.
-        "query": "SELECT NOW()::TIME(0) AS v",
+        "query": "SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::TIME(0) AS v",
         "params": 0, "format": "time",
         "icon": "fa-qrcode", "color": "#1859b8",
         "title": "Attendance QR", "group": "gate punch-clock",

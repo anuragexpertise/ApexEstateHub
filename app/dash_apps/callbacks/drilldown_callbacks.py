@@ -679,16 +679,16 @@ def register_drilldown_callbacks(app):
             if action == "show_qr":
                 entity_singular = to_singular(entity)
                 record = loaders.load_profile(entity_singular, pk, sid) or {}
-                entity_name = record.get("owner_name") or record.get("name", entity)
+                entity_name = record.get("owner_name") or record.get("name") or record.get("location_name") or entity
 
                 qr_entity_id = pk
-                if entity_singular in ("apartment", "vendor", "security"):
+                if entity_singular in ("apartment", "vendor", "security", "patrol_location"):
                     if not qr_entity_id:
                         return no_update, no_update, no_update, no_update, no_update
 
                 trigger_data = {
                     "entity_id": qr_entity_id,
-                    "role": {"apartment": "apartment", "vendor": "vendor", "security": "security"}.get(entity_singular, entity_singular),
+                    "role": {"apartment": "apartment", "vendor": "vendor", "security": "security", "patrol_location": "patrol_location"}.get(entity_singular, entity_singular),
                     "society_id": sid,
                     "name": entity_name,
                 }

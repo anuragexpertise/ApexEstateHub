@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import time
 from datetime import datetime
 from io import BytesIO
 import qrcode
@@ -508,8 +509,22 @@ def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int 
         return {"status": "FAIL", "reason": f"Visitor validation error: {str(e)}", "gate_action": "deny"}
 
 
-def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int = None) -> dict:
-    """Log security patrol point scan."""
+import math
+
+def _haversine(lat1, lon1, lat2, lon2):
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+        return None
+    R = 6371e3
+    phi1 = lat1 * math.pi / 180
+    phi2 = lat2 * math.pi / 180
+    delta_phi = (lat2 - lat1) * math.pi / 180
+    delta_lambda = (lon2 - lon1) * math.pi / 180
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int = None, lat: float = None, lon: float = None) -> dict:
+    """Log security patrol point scan with anti-spoofing checks."""
     try:
         loc = db._execute("""
             SELECT * FROM patrol_locations WHERE id = %s AND society_id = %s AND active = TRUE
@@ -517,6 +532,31 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
 
         if not loc:
             return {"status": "FAIL", "reason": "Patrol location not found or inactive", "gate_action": "deny"}
+
+        # Method A: Geo-Fencing (if GPS is available and location has coords)
+        loc_lat, loc_lon = loc.get("latitude"), loc.get("longitude")
+        distance = _haversine(loc_lat, loc_lon, lat, lon)
+        if distance is not None and distance > 50:  # 50 meters tolerance
+            return {"status": "FAIL", "reason": f"Spoofing detected: {int(distance)}m away from location", "gate_action": "deny"}
+
+        # Method D: Time-Speed Check against last scan
+        if security_user_id:
+            last_scan = db._execute("""
+                SELECT loc.latitude, loc.longitude, p.scanned_at 
+                FROM patrol_scans p 
+                JOIN patrol_locations loc ON p.location_id = loc.id
+                WHERE p.security_user_id = %s 
+                ORDER BY p.scanned_at DESC LIMIT 1
+            """, (security_user_id,), fetch_one=True)
+            
+            if last_scan and last_scan.get("latitude") and loc_lat:
+                travel_dist = _haversine(loc_lat, loc_lon, last_scan["latitude"], last_scan["longitude"])
+                time_diff = (datetime.now() - last_scan["scanned_at"]).total_seconds()
+                
+                if time_diff > 0 and travel_dist is not None:
+                    speed = travel_dist / time_diff  # meters per second
+                    if speed > 7:  # > 25 km/h, impossible for a walking guard
+                        return {"status": "FAIL", "reason": "Spoofing detected: Impossible travel speed", "gate_action": "deny"}
 
         db._execute("""
             INSERT INTO patrol_scans (society_id, location_id, security_user_id, scanned_at)
@@ -700,7 +740,7 @@ def generate_time_qr(society_id: int):
     Returns (img_src_b64, payload, issued_at_epoch, expires_at_epoch) so
     the UI can drive its own 60s auto-refresh countdown.
     """
-    issued_at = int(datetime.utcnow().timestamp())
+    issued_at = int(time.time())
     img_src, payload = generate_qr_code(society_id, "ATD", issued_at)
     return img_src, payload, issued_at, issued_at + ATTENDANCE_QR_EXPIRY_SECONDS
 
@@ -712,7 +752,7 @@ def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: in
     `security_user_id` must be the scanning guard's own users.id, taken
     from their authenticated session — not an audit-only field here.
     """
-    now = int(datetime.utcnow().timestamp())
+    now = int(time.time())
     age = now - issued_at
 
     if age > ATTENDANCE_QR_EXPIRY_SECONDS:
@@ -757,7 +797,7 @@ def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: in
     }
 
 
-def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None) -> dict:
+def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None, lat: float = None, lon: float = None) -> dict:
     """
     Server-side validation with standard hyphenated format (<society_id>-<ROLE_CODE>-<entity_id>).
     Dispatches to role-specific validators.
@@ -804,7 +844,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
         elif role == "visitor":
             return validate_visitor_qr(entity_id, qr_society_id, security_user_id)
         elif role == "patrol_location":
-            return validate_patrol_qr(entity_id, qr_society_id, security_user_id)
+            return validate_patrol_qr(entity_id, qr_society_id, security_user_id, lat=lat, lon=lon)
         elif role == "attendance_entry":
             # entity_id here is the epoch issued_at, not a row id
             return validate_attendance_qr(entity_id, qr_society_id, security_user_id)

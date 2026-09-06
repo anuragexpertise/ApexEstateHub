@@ -1135,6 +1135,9 @@ CREATE TABLE IF NOT EXISTS patrol_locations (
     schedule_end TIME,
     scan_interval INT DEFAULT 120,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
+    nfc_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     created_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW()
 );
