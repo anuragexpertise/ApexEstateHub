@@ -2794,10 +2794,29 @@ def render_form_card(card_id: str, title: str, icon: str,
             style={"height": "300px", "width": "100%", "marginTop": "10px", "borderRadius": "10px", "border": "1px solid #ccc", "zIndex": 1},
         )
         dummy_out = html.Div(id={"type": "patrol-map-dummy", "entity": entity}, style={"display": "none"})
+        # Hidden trigger button — clicking the map fires a real native click
+        # on this button (via JS .click()), which Dash tracks through its
+        # normal n_clicks mechanism. A *separate* clientside callback then
+        # Outputs the picked coordinates directly into the lat/lon form-
+        # field "value" props (see patrol_map_callbacks.py) — the same
+        # proven Output-based pattern used by qty_stepper_callbacks.py,
+        # rather than trying to poke React-controlled inputs from outside
+        # Dash's own callback graph.
+        picked_trigger = html.Button(
+            id={"type": "patrol-map-picked", "entity": entity},
+            style={"display": "none"},
+            **{"data-lat": "", "data-lon": ""},
+        )
+        coord_readout = html.Div(
+            id={"type": "patrol-map-readout", "entity": entity},
+            style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+        )
         form_rows.append(dbc.Row([
             dbc.Col(dbc.Label("Pick Location on Map", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=12),
             dbc.Col(map_html, width=12),
-            dummy_out
+            dbc.Col(coord_readout, width=12),
+            dummy_out,
+            picked_trigger,
         ], className="mb-2"))
 
     # ── Expense-form TDS autofill plumbing (2026-09) ────────────────────────
