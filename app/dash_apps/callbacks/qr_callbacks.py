@@ -1489,6 +1489,35 @@ def register_qr_callbacks(app):
         Input('scan-nfc-btn', 'n_clicks'),
         prevent_initial_call=True,
     )
+    # ── 5g. Write NFC (Web NFC API) ─────────────────────────────────
+    clientside_callback(
+        """
+        async function(n_clicks, payload) {
+            if (!n_clicks || !payload) return window.dash_clientside.no_update;
+            
+            if (!("NDEFReader" in window)) {
+                alert("Web NFC is not supported on this device/browser. Please use Chrome on Android.");
+                return window.dash_clientside.no_update;
+            }
+            
+            try {
+                const ndef = new NDEFReader();
+                await ndef.write({
+                    records: [{ recordType: "text", data: payload }]
+                });
+                alert("✅ Successfully wrote patrol code to NFC tag!");
+            } catch (error) {
+                alert("❌ Error writing NFC tag: " + error);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('qr-modal-write-nfc-btn', 'n_clicks'),
+        Input('qr-modal-write-nfc-btn', 'n_clicks'),
+        State('qr-modal-text', 'value'),
+        prevent_initial_call=True,
+    )
+
 
     # ── 6. Call Admin ───────────────────────────────────────────
     @app.callback(
