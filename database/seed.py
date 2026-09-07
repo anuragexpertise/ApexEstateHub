@@ -230,9 +230,9 @@ ACCOUNTS = [
     (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True,  "Dr", 100),
     (82,    "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",       8,  "Dr", True,  "Dr", 100),
     (9,     "Sundry Creditors",           "SCr",        "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
-    (101,   "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",        1,  "Cr",  True,  "Cr", 100),
-    (102,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True,  "Cr", 100),
-    (103,   "Corpus Fund",                "CorpusFund", "Corpus Fund",                 1,  "Cr",  True,  "Cr", 100),
+    (101,   "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",        1,  "Dr",  True,  "Dr", 100),
+    (102,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Dr",  True,  "Dr", 100),
+    (103,   "Corpus Fund",                "CorpusFund", "Corpus Fund",                 1,  "Dr",  True,  "Dr", 100),
 ]
 
 # Compliance tagging for existing accounts (Phase 1)
