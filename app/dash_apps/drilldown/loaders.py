@@ -2068,8 +2068,8 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 profile["_assignments"] = assigns
             return profile
 
-        # ── SOCIETY ──────────────────────────────────────────────────────────
-        if entity_singular == "society":
+        # ── SOCIETY / MASTER SOCIETY ─────────────────────────────────────────
+        if entity_singular in ("society", "master_society"):
             r = db._execute("SELECT * FROM fn_society_profile(%s)", (pk,), fetch_one=True)
             return dict(r) if r else None
 

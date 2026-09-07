@@ -19,6 +19,7 @@ from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
+from app.dash_apps.drilldown.registry import to_singular
 
 # ════════════════════════════════════════════════════════════════════════════
 # COLORS & STYLES
@@ -939,12 +940,12 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     # "New" button — only when role has 'new' permission
     if "new" in allowed:
-        new_target = f"form_{entity.rstrip('s') if not entity.endswith('_tbl') else entity.replace('_tbl','')}_new"
+        new_target = f"form_{to_singular(entity)}_new"
         # Special cases
         _new_target_map = {
             "receipts": "form_receipt_new",
             "expenses": "form_expense_new",
-            "cashbook":     "form_receipt_new",
+            "cashbook": "form_receipt_new",
         }
         new_target = _new_target_map.get(entity, new_target)
 

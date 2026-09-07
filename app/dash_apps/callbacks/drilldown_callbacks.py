@@ -3342,7 +3342,7 @@ def _save_entity(entity, card_id, data):
         if entity == "expense":         return _save_expense_v3(db, data, sid)
         if entity == "asset":           return _save_asset(db, data, sid, is_edit, pk)
         if entity == "gate_log":        return _save_gate_log(db, data, sid)
-        if entity == "society":         return _save_society(db, data, sid, is_edit, pk)
+        if entity in ("society", "master_society"): return _save_society(db, data, sid, is_edit, pk)
         if entity == "account":         return _save_account(db, data, sid, is_edit, pk)
         if entity == "compliance_setting": return _save_compliance_settings(db, data, sid, is_edit, pk)
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
