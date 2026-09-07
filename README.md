@@ -66,6 +66,11 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 ```
 Browser (Dash SPA)
 │
+├── auth/                     ← JWT handler and authentication logic
+├── models/                   ← SQLAlchemy models (User, Transaction, Apartment, etc.)
+├── routes/                   ← Flask routes and API endpoints
+├── services/                 ← Core business logic (auth, qr)
+│
 ├── app_shell.py              ← Top-level layout: header, sidebar, modals, stores
 │
 ├── callbacks/
@@ -668,7 +673,7 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | Auth | JWT (PyJWT) + Werkzeug password hashing | Multi-method |
 | Database | PostgreSQL via NeonDB / Aiven | Serverless PostgreSQL |
 | DB Driver | psycopg2 + SQLAlchemy text() | Named params via `_to_pyformat()` |
-| ORM | None — raw SQL via `db._execute()` | All logic in `fn_*` stored functions |
+| ORM | SQLAlchemy `db.Model` + raw SQL | SQLAlchemy models in `app/models/` alongside `fn_*` stored functions |
 | Image Processing | Pillow (PIL) | WebP compression to ≤25KB |
 | Excel Export | pandas + openpyxl | |
 | QR | `qrcode[pil]` + `cryptography.Fernet` | Encrypted payloads |
@@ -716,6 +721,9 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 ApexEstateHub/
 │
 ├── app/
+│   ├── auth/                                 ← JWT handler and token logic
+│   ├── models/                               ← SQLAlchemy models (User, Transaction, Apartment, etc.)
+│   ├── routes/                               ← Flask routes and API endpoints
 │   ├── dash_apps/
 │   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
 │   │   ├── layout.py                         ← Shared page layout and UI components
@@ -730,6 +738,14 @@ ApexEstateHub/
 │   │   │   ├── noc_callbacks.py              ← Print / PDF / Email NOC (clientside)
 │   │   │   ├── customize_callbacks.py        ← DnD layout editor
 │   │   │   ├── customize_kpi_callbacks.py    ← KPI Inspector + _KPI_PORTAL_ENTRIES
+│   │   │   ├── list_inspector_callbacks.py   ← List column configuration
+│   │   │   ├── form_inspector_callbacks.py   ← Form field configuration
+│   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
+│   │   │   ├── bulk_enroll_callbacks.py      ← CSV bulk upload for members/staff
+│   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation
+│   │   │   ├── channel_callbacks.py          ← Channel subscriptions
+│   │   │   ├── poll_callbacks.py             ← Owner voting and poll management
+│   │   │   ├── account_callbacks.py          ← Account settings / change password
 │   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
 │   │   │   ├── admin_callbacks.py            ← [Disabled] Admin specific actions (unregistered)
 │   │   │   ├── owner_callbacks.py            ← [Disabled] Owner portal specific actions (unregistered)
@@ -829,6 +845,11 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 | Camera `mode` captured before `stopCamera()` clears `S.mode` | Wrong mode (`null`) sent to validate callback | Saved `currentMode` before `stopCamera()` call |
 | Leftover `render_default_profile` in `shell_callbacks.py` | Pylance undefined-variable errors on `loaders`, `renderers`, `nav_state` | Delete that callback block — functionality moved to `drilldown_callbacks.py` |
 | `fn_account_ledger_fy` referenced `t.role` | `Error: column t.role does not exist` on Ledger Index card → IncExp drilldown | Added `transactions.role` column (mirrors `receipts`/`expenses`/`payables`.role); every `INSERT INTO transactions` now writes it; `fn_account_ledger_fy` / `fn_cashbook_paired_v3` / `fn_cashbook_month_page` join `apartments`/`vendors`/`security_staff` on `entity_id` **and** `role`, since `entity_id` alone can collide across those tables |
+| Patrol Locations map blank | `L.map()` initialization skipped on page load | Fixed `prevent_initial_call=False` in `patrol_map_callbacks.py` so map mounts immediately |
+| Patrol Location not saving | Form submitted `"patrol_location_new"` but handler only checked `"patrol_location"` | Fixed string-matching condition in `_save_patrol_location` inside `drilldown_callbacks.py` |
+| Patrol Locations list empty | List generation SQL was completely missing from `loaders.py` | Added `patrol_locations` branch to `load_list` in `loaders.py` using direct SQL query |
+| Duplicate list columns | `active` and `scan_interval` appeared twice in Patrol Locations list | Removed `patrol_locations` from `_COMPUTED_FIELDS` in `schema_introspect.py` since schema introspector already natively discovers them |
+| No NFC programming UI | "Program NFC" button opened generic QR modal with no way to write NFC | Added "Write to NFC Tag" button to `_qr_modal` (`app_shell.py`) and wired Web NFC API `NDEFReader().write()` callback (`qr_callbacks.py`) |
 
 ---
 
