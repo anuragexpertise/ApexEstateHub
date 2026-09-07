@@ -927,65 +927,35 @@ def seed_state_compliance_thresholds(cur, conn):
         print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
 
 
-def seed_accounts(cur, conn, society_id: int) -> dict:
+def seed_accounts(cur, conn, society_id: int) -> int:
     created = 0
-    id_map = {}
-    
-    # 1. First pass: insert accounts (parent=NULL for now to avoid FK violations if parent isn't inserted yet)
     for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
         try:
-            cur.execute("SELECT id FROM accounts WHERE society_id = %s AND name = %s", (society_id, name))
-            row = cur.fetchone()
-            if row:
-                id_map[aid] = row['id']
+            cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
+            if cur.fetchone():
                 continue
-                
-            if society_id == 1:
-                cur.execute(
-                    """INSERT INTO accounts
-                       (id, society_id, name, tab_name, header, parent_account_id,
-                        drcr_account, has_bf, drcr_bf, depreciation_percent,
-                        is_depreciable, mutuality_nature, tds_section)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (aid, society_id, name, tab, header, None,
-                     drcr, has_bf, drcr_bf, dep, dep < 100,
-                     MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
-                )
-            else:
-                cur.execute(
-                    """INSERT INTO accounts
-                       (society_id, name, tab_name, header, parent_account_id,
-                        drcr_account, has_bf, drcr_bf, depreciation_percent,
-                        is_depreciable, mutuality_nature, tds_section)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (society_id, name, tab, header, None,
-                     drcr, has_bf, drcr_bf, dep, dep < 100,
-                     MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
-                )
-            new_id = cur.fetchone()['id']
-            id_map[aid] = new_id
+            cur.execute(
+                """INSERT INTO accounts
+                   (id, society_id, name, tab_name, header, parent_account_id,
+                    drcr_account, has_bf, drcr_bf, depreciation_percent,
+                    is_depreciable, mutuality_nature, tds_section)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (aid, society_id, name, tab, header, parent,
+                 drcr, has_bf, drcr_bf, dep, dep < 100,
+                 MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
+            )
+            conn.commit()
             created += 1
         except Exception as exc:
+            conn.rollback()
             log.warning("Account %s skip: %s", aid, exc)
-
-    # 2. Second pass: Update parent_account_id
-    for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
-        if parent is not None and aid in id_map and parent in id_map:
-            cur.execute(
-                "UPDATE accounts SET parent_account_id = %s WHERE id = %s",
-                (id_map[parent], id_map[aid])
-            )
-            
-    conn.commit()
-
     if society_id == 1:
         cur.execute(
             "SELECT setval(pg_get_serial_sequence('accounts','id'), "
             "(SELECT COALESCE(MAX(id),1) FROM accounts))"
         )
         conn.commit()
-
-    return id_map
+    return created
 
 
 def seed_accounts_created_by(cur, conn, society_id: int, admin_uid: int):

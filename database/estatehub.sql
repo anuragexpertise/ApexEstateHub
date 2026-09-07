@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 -- Categorisation is entirely determined by acc_id + drcr_account at the point
 -- of use — there is no `category` column on this table.
 CREATE TABLE IF NOT EXISTS accounts (
-    id SERIAL PRIMARY KEY,
+    id SERIAL,
+    PRIMARY KEY (society_id, id),
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     tab_name VARCHAR(20), -- Excel ledger tab grouping only
@@ -163,7 +164,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id),
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT fk_account_parent FOREIGN KEY (parent_account_id) REFERENCES accounts (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
+    CONSTRAINT fk_account_parent FOREIGN KEY (society_id, parent_account_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 ,
     mutuality_nature VARCHAR(10) CHECK (mutuality_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
     tds_section VARCHAR(10)
@@ -256,13 +257,15 @@ CREATE TABLE IF NOT EXISTS assets (
     purchase_date DATE,
     installation_date DATE,
     purchase_value NUMERIC(12, 2),
-    acc_id INT REFERENCES accounts (id), -- asset class account (e.g. Furniture 61)
+    acc_id INT,
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id), -- asset class account (e.g. Furniture 61)
     depreciation_rate NUMERIC(5, 2),
     last_depreciation_date DATE,
     disposed BOOLEAN NOT NULL DEFAULT FALSE,
     disposed_at DATE,
     sale_value NUMERIC(12, 2),
-    sale_acc_id INT REFERENCES accounts (id), -- Selling Asset income account (e.g. 212)
+    sale_acc_id INT,
+    FOREIGN KEY (society_id, sale_acc_id) REFERENCES accounts (society_id, id), -- Selling Asset income account (e.g. 212)
     disposed_by INT REFERENCES users (id),
     itc_claimed NUMERIC(12, 2) DEFAULT 0, -- ITC claimed at purchase, if any (sec. 16 CGST Act); 0 = no ITC ever claimed on this asset
     gst_disposal_liability NUMERIC(12, 2), -- sec. 18(6)/Rule 44(6) liability computed at disposal, for audit trail
@@ -283,7 +286,8 @@ CREATE TABLE IF NOT EXISTS events (
     event_time TIME,
     venue VARCHAR(200),
     open_to VARCHAR(20) DEFAULT 'all',
-    account_id INT REFERENCES accounts (id), -- e.g. event income or event expense account
+    account_id INT,
+    FOREIGN KEY (society_id, account_id) REFERENCES accounts (society_id, id), -- e.g. event income or event expense account
     ticket_name VARCHAR(20) DEFAULT 'Adult',
     ticket_price NUMERIC(10, 2) DEFAULT 0,
     ticket_name2 VARCHAR(20) DEFAULT 'Child',
@@ -434,8 +438,10 @@ CREATE TABLE IF NOT EXISTS receivables (
             'security'
         )
     ),
-    acc_id INT REFERENCES accounts (id), -- income account for base amount
-    interest_acc_id INT REFERENCES accounts (id), -- income account for interest (NULL = same as acc_id)
+    acc_id INT, -- income account for base amount
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
+    interest_acc_id INT, -- income account for interest (NULL = same as acc_id)
+    FOREIGN KEY (society_id, interest_acc_id) REFERENCES accounts (society_id, id),
     description TEXT NOT NULL DEFAULT 'Receivable', -- becomes acc_particulars in transactions
     period_month DATE, -- first-of-month; NULL for non-periodic rows
     base_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
@@ -490,7 +496,8 @@ CREATE TABLE IF NOT EXISTS receipts (
         )
     ),
     receipt_date DATE NOT NULL,
-    acc_id INT REFERENCES accounts (id), -- income account (Cr) — IS the category
+    acc_id INT, -- income account (Cr) — IS the category
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
     particulars TEXT NOT NULL, -- human-readable label; suggested from Python PARTICULARS_TEMPLATES
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
     mode VARCHAR(20) DEFAULT 'cash' CHECK (
@@ -602,7 +609,8 @@ CREATE TABLE IF NOT EXISTS expenses (
         )
     ),
     expense_date DATE NOT NULL,
-    acc_id INT REFERENCES accounts (id), -- expense account (Dr) — IS the category
+    acc_id INT, -- expense account (Dr) — IS the category
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
     particulars TEXT NOT NULL, -- human-readable label; suggested from Python PARTICULARS_TEMPLATES
     amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
     mode VARCHAR(20) DEFAULT 'cash' CHECK (
@@ -722,7 +730,8 @@ CREATE TABLE IF NOT EXISTS payables (
             'other'
         )
     ),
-    acc_id INT REFERENCES accounts (id), -- expense account (Dr) — IS the category
+    acc_id INT, -- expense account (Dr) — IS the category
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
     description TEXT NOT NULL DEFAULT 'Payment', -- becomes acc_particulars in transactions
     roster_id INT REFERENCES security_roster (id),
     shift_date DATE,
@@ -755,7 +764,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entry_side VARCHAR(2),
     trx_date DATE NOT NULL,
-    acc_id INT REFERENCES accounts (id),
+    acc_id INT,
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
     entity_id INTEGER,
     -- Discriminator for entity_id, mirroring receipts/expenses/payables.role.
     -- Without this, joining apartments/vendors/security_staff on entity_id
@@ -898,7 +908,8 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2025 = FY 1-Apr-2025..31-Mar-2026
-    acc_id INT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    acc_id INT NOT NULL,
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE,
     drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
     bf_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (bf_amount >= 0),
     is_auto_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- FALSE once a human hand-edits this row (see drilldown_callbacks.py); no automatic writer exists as of 2026-08 (fn_close_financial_year removed)
@@ -1281,7 +1292,9 @@ DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
 ALTER TABLE societies
-ADD COLUMN IF NOT EXISTS primary_bank_account_id INT REFERENCES accounts (id);
+ADD COLUMN IF NOT EXISTS primary_bank_account_id INT;
+ALTER TABLE societies DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
+ALTER TABLE societies ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
 
 -- societies.signing_secret_enc / secretary_email (2026-09) — clean cutover,
 -- no signed QR codes or society rows existed in production yet, so this is
