@@ -886,6 +886,12 @@ def _qr_modal() -> dbc.Modal:
                                     "borderRadius": "10px", "padding": "8px"}),
                     html.Div(id="qr-modal-validity", className="mt-2 text-center"),
                     html.Hr(),
+                    dbc.Button(
+                        [html.I(className="fas fa-wifi me-2"), "Write to NFC Tag"],
+                        id="qr-modal-write-nfc-btn", n_clicks=0,
+                        color="primary", size="lg",
+                        style={"width": "100%", "marginBottom": "10px"},
+                    ),
                     dbc.Textarea(id="qr-modal-text", readOnly=True,
                                  style={"marginTop": "10px", "minHeight": "54px",
                                         "fontSize": "22px", "fontFamily": "monospace",
