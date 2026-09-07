@@ -7,30 +7,6 @@ from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES
 
 def register_setup_wizard_callbacks(app):
 
-    def save_uploaded_image(contents, prefix):
-        if not contents:
-            return None
-        try:
-            import base64
-            import uuid
-            import os
-            
-            header, encoded = contents.split(',', 1)
-            ext = header.split('/')[1].split(';')[0]
-            if ext == 'jpeg': ext = 'jpg'
-            
-            filename = f"{prefix}_{uuid.uuid4().hex[:8]}.{ext}"
-            upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../static/uploads"))
-            os.makedirs(upload_dir, exist_ok=True)
-            
-            filepath = os.path.join(upload_dir, filename)
-            with open(filepath, "wb") as f:
-                f.write(base64.b64decode(encoded))
-                
-            return f"/static/uploads/{filename}"
-        except Exception as e:
-            print("Error saving image:", e)
-            return None
 
     @app.callback(
         Output("setup-wizard-container", "children"),
@@ -128,18 +104,18 @@ def register_setup_wizard_callbacks(app):
         Output("agreement-modal-body", "children", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
         Input("sw-close-btn", "n_clicks"),
-        State("sw-logo-upload", "contents"),
+        State({"type": "form-field-hidden", "entity": "society", "field": "logo"}, "value"),
         State("sw-society-address", "value"),
         State("sw-society-phone", "value"),
-        State("sw-bg-upload", "contents"),
+        State({"type": "form-field-hidden", "entity": "society", "field": "bg"}, "value"),
         State("sw-society-tan", "value"),
         State("sw-society-gstin", "value"),
-        State("sw-payment-qr", "contents"),
+        State({"type": "form-field-hidden", "entity": "society", "field": "pay_qr"}, "value"),
         State("sw-calc-start-date", "date"),
         State("sw-sec-name", "value"),
         State("sw-sec-phone", "value"),
         State("sw-sec-email", "value"),
-        State("sw-sec-sign", "contents"),
+        State({"type": "form-field-hidden", "entity": "society", "field": "sec_sign"}, "value"),
         State("sw-qr-secret", "value"),
         State("sw-qr-secret-confirm", "value"),
         State("sw-i-agree", "value"),
@@ -253,10 +229,20 @@ def register_setup_wizard_callbacks(app):
                             "remarks": bf_remarks[idx] if idx < len(bf_remarks) else ""
                         })
 
-            logo_path = save_uploaded_image(logo_data, "logo")
-            bg_path = save_uploaded_image(bg_data, "bg")
-            qr_path = save_uploaded_image(pay_qr_data, "qr")
-            sign_path = save_uploaded_image(sec_sign_data, "sign")
+            logo_path = logo_data
+            bg_path = bg_data
+            qr_path = pay_qr_data
+            sign_path = sec_sign_data
+
+            from app.dash_apps.callbacks.drilldown_callbacks import _move_temp_images
+            form_data = {}
+            if logo_path: form_data["logo"] = logo_path
+            if bg_path: form_data["bg"] = bg_path
+            if qr_path: form_data["pay_qr"] = qr_path
+            if sign_path: form_data["sec_sign"] = sign_path
+
+            if form_data:
+                _move_temp_images("society", society_id, society_id, form_data)
 
             tan = str(tan)[:10] if tan else None
             gstin = str(gstin)[:15] if gstin else None

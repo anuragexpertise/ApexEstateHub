@@ -40,7 +40,17 @@ def render_category_content(category, society_id=None):
             dbc.Label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Society Logo (Image)"),
-            dcc.Upload(id="sw-logo-upload", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            html.Div([
+                dcc.Upload(
+                    id={"type": "form-upload", "entity": "society", "field": "logo"},
+                    children=html.Div(["Drag and Drop or ", html.A("Select Files")]),
+                    style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px"},
+                    multiple=False,
+                ),
+                html.Div(id={"type": "image-preview", "entity": "society", "field": "logo"}, style={"marginTop": "10px", "marginBottom": "15px"}),
+                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "logo"}, type="hidden"),
+                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
+            ]),
             dbc.Label("Address"),
             dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
             dbc.Label("Phone Number"),
@@ -50,7 +60,17 @@ def render_category_content(category, society_id=None):
             dbc.Label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Login Background (Image)"),
-            dcc.Upload(id="sw-bg-upload", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            html.Div([
+                dcc.Upload(
+                    id={"type": "form-upload", "entity": "society", "field": "bg"},
+                    children=html.Div(["Drag and Drop or ", html.A("Select Files")]),
+                    style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px"},
+                    multiple=False,
+                ),
+                html.Div(id={"type": "image-preview", "entity": "society", "field": "bg"}, style={"marginTop": "10px", "marginBottom": "15px"}),
+                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "bg"}, type="hidden"),
+                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
+            ]),
         ]
     elif category == "TAN & TDS Rates":
         from database.seed import TDS_SECTION_RATE_SEED
@@ -200,8 +220,18 @@ def render_category_content(category, society_id=None):
         from database.seed import ACCOUNTS
         inputs = [
             html.P("Configure general account parameters and view default accounts.", className="text-muted mb-3"),
-            dbc.Label("Payment QR (Image)"),
-            dcc.Upload(id="sw-payment-qr", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            dbc.Label("Payment QR Code Image"),
+            html.Div([
+                dcc.Upload(
+                    id={"type": "form-upload", "entity": "society", "field": "pay_qr"},
+                    children=html.Div(["Drag and Drop or ", html.A("Select Files")]),
+                    style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px"},
+                    multiple=False,
+                ),
+                html.Div(id={"type": "image-preview", "entity": "society", "field": "pay_qr"}, style={"marginTop": "10px", "marginBottom": "15px"}),
+                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "pay_qr"}, type="hidden"),
+                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
+            ]),
             dbc.Label("Calculation Start Date"),
             dcc.DatePickerSingle(id="sw-calc-start-date", date="2024-04-01", display_format='YYYY-MM-DD', className="mb-4 d-block"),
             html.Hr(),
@@ -285,8 +315,18 @@ def render_category_content(category, society_id=None):
             dbc.Input(id="sw-sec-phone", type="tel", value=sec_phone, className="mb-3"),
             dbc.Label("Secretary Email"),
             dbc.Input(id="sw-sec-email", type="email", value=sec_email, className="mb-3"),
-            dbc.Label("Secretary Signature (Image)"),
-            dcc.Upload(id="sw-sec-sign", children=html.Div(["Drag and Drop or ", html.A("Select Files")]), style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px", "marginBottom": "15px"}, multiple=False),
+            dbc.Label("Secretary Signature Image"),
+            html.Div([
+                dcc.Upload(
+                    id={"type": "form-upload", "entity": "society", "field": "sec_sign"},
+                    children=html.Div(["Drag and Drop or ", html.A("Select Files")]),
+                    style={"border": "1px dashed #ced4da", "borderRadius": "5px", "textAlign": "center", "padding": "10px"},
+                    multiple=False,
+                ),
+                html.Div(id={"type": "image-preview", "entity": "society", "field": "sec_sign"}, style={"marginTop": "10px", "marginBottom": "15px"}),
+                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "sec_sign"}, type="hidden"),
+                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
+            ]),
             html.Hr(),
             html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
             html.P(
