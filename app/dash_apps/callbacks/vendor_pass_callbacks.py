@@ -84,10 +84,9 @@ function downloadVendorPassPdf(n_clicks, d) {
         bodyHtml: '<h3 style="text-align:center;margin:10px 0 20px">Vendor Pass</h3>' + vendorPassHtml(d),
         printWidth: '600px',
     });
-    var w = window.open('', '_blank');
+    var blob = new Blob([html], {type: 'text/html'});
+    var w = window.open(URL.createObjectURL(blob), '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(html);
-    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
@@ -106,10 +105,12 @@ function emailVendorPass(n_clicks, d) {
         'Status: ACTIVE\n' +
         'Verification code: ' + d.qr_payload
     );
-    window.location.href = (
+    var _a = document.createElement('a');
+    _a.href = (
         'mailto:?subject=' + encodeURIComponent('Vendor Pass — ' + (d.vendor_name || '')) +
         '&body=' + encodeURIComponent(body)
     );
+    _a.click();
     return window.dash_clientside.no_update;
 }
 """,

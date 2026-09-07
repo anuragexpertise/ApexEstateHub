@@ -62,8 +62,6 @@ function printAgreement(n_clicks, lh) {
     if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
     var doc = buildLetterheadDoc({
         title: 'Agreement — ' + (lh.agreement_no || ''),
-        societyName: lh.society_name, societyAddress: lh.society_address,
-        logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         bodyHtml: '<div style="font-family:Georgia,serif;font-size:11pt;line-height:1.6">' + agreementToHtml(text) + '</div>',
         printWidth: '720px',
     });
@@ -92,16 +90,13 @@ function downloadAgreementPdf(n_clicks, lh) {
     var html = buildLetterheadPdfDoc({
         title: 'Agreement — ' + (lh.agreement_no || ''),
         filename: 'Agreement_' + (lh.society_name || 'download'),
-        societyName: lh.society_name, societyAddress: lh.society_address,
-        logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         bodyHtml: '<div style="font-family:Georgia,serif;font-size:11pt;line-height:1.6">' + agreementToHtml(text) + '</div>',
         printWidth: '720px',
     });
 
-    var w = window.open('', '_blank');
-    if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(html);
-    w.document.close();
+    var blob = new Blob([html], {type: 'text/html'});
+    var w = window.open(URL.createObjectURL(blob), '_blank');
+    if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
     return window.dash_clientside.no_update;
 }
 """,
@@ -118,10 +113,12 @@ function emailAgreement(n_clicks, lh) {
     if (!text) return window.dash_clientside.no_update;
     lh = lh || {};
 
-    window.location.href = (
+    var _a = document.createElement('a');
+    _a.href = (
         'mailto:?subject=' + encodeURIComponent('EstateHub Society Onboarding Agreement — ' + (lh.agreement_no || '')) +
         '&body=' + encodeURIComponent(text)
     );
+    _a.click();
     return window.dash_clientside.no_update;
 }
 """,

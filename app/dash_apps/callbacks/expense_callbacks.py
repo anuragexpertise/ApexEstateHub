@@ -91,10 +91,9 @@ function downloadExpensePdf(n_clicks, d) {
                   expenseHtml(d),
         printWidth: '600px',
     });
-    var w = window.open('', '_blank');
+    var blob = new Blob([html], {type: 'text/html'});
+    var w = window.open(URL.createObjectURL(blob), '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(html);
-    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
@@ -116,10 +115,12 @@ function emailExpense(n_clicks, d) {
         'Mode: ' + d.mode + (d.ref ? (' - Ref: ' + d.ref) : '') + '\n' +
         'Status: ' + d.status + (d.is_provisional ? ' (Provisional - Subject to verification)' : '')
     );
-    window.location.href = (
+    var _a = document.createElement('a');
+    _a.href = (
         'mailto:?subject=' + encodeURIComponent('Expense #' + d.expense_no) +
         '&body=' + encodeURIComponent(body)
     );
+    _a.click();
     return window.dash_clientside.no_update;
 }
 """,

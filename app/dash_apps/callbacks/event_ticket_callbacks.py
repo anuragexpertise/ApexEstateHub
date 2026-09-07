@@ -99,10 +99,9 @@ function downloadEventTicketPdf(n_clicks, d) {
         bodyHtml: ticketHtml(d),
         printWidth: '600px',
     });
-    var w = window.open('', '_blank');
+    var blob = new Blob([html], {type: 'text/html'});
+    var w = window.open(URL.createObjectURL(blob), '_blank');
     if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
-    w.document.write(html);
-    w.document.close();
     return window.dash_clientside.no_update;
 }
 """,
@@ -121,10 +120,12 @@ function emailEventTicket(n_clicks, d) {
         'Status: ' + (d.status || 'active').toUpperCase() + '\n' +
         'Verification code: ' + d.qr_payload
     );
-    window.location.href = (
+    var _a = document.createElement('a');
+    _a.href = (
         'mailto:?subject=' + encodeURIComponent(d.event_title + ' — Ticket') +
         '&body=' + encodeURIComponent(body)
     );
+    _a.click();
     return window.dash_clientside.no_update;
 }
 """,
