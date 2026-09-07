@@ -116,11 +116,7 @@ NO_EDIT_ACTION = {
     # society_id/apartment_id be changed without that validation, so
     # channels are view-only from the drilldown profile.
     "channels",
-    # master_societies has no form_master_society_edit — it's the same
-    # underlying societies table as "societies", just with an extra
-    # computed column for the Master dashboard's plan-breakdown lists.
     # Edit goes through the real "societies" entity's profile/edit form.
-    "master_societies",
 }
 
 # Image column names → rendered as image_upload in forms, image in profiles.
@@ -599,6 +595,13 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
         "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",
         "receipt_number", "previous_hash", "source_reference", "qr_payload",
         "reconciled_at", "reconciled_by",
+    },
+    "societies": {
+        "plan", "plan_validity",
+    },
+    "master_societies": {
+        "primary_bank_account_id", "secretary_name", "secretary_phone", "secretary_email",
+        "secretary_sign", "payment_qr", "login_background", "logo", "calc_start_date",
     },
 }
 
