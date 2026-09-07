@@ -4734,6 +4734,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
                 "secretary_name=%s,secretary_phone=%s,"
                 "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"
+                "registration_number=%s,tan_number=%s,"
                 "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) "
                 "WHERE id=%s",
                 (
@@ -4751,6 +4752,8 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("calc_start_date"),
                     d.get("pan_number"),
                     d.get("gstin"),
+                    d.get("registration_number"),
+                    d.get("tan_number"),
                     d.get("payment_qr"),
                     pk,
                 ),
