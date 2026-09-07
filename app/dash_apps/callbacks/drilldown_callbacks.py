@@ -3366,7 +3366,7 @@ def _save_entity(entity, card_id, data):
             return _save_vendor_pass(db, data, sid)
         if entity in ("event_ticket", "event_ticket_new"):
             return _save_event_ticket(db, data, sid)
-        if entity == "patrol_location":
+        if entity in ("patrol_location", "patrol_location_new"):
             return _save_patrol_location(db, data, sid, is_edit, pk)
         # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None

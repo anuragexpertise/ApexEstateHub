@@ -239,10 +239,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Event",        "field": "event_title",   "icon": "fa-calendar-alt"},
         {"label": "Booking Ref",  "field": "booking_reference", "icon": "fa-ticket-alt"},
     ],
-    "patrol_locations": [
-        {"label": "Active",       "field": "active", "icon": "fa-toggle-on", "format": "bool"},
-        {"label": "Scan Interval", "field": "scan_interval", "icon": "fa-clock"},
-    ],
+
 
     # NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
     # already resolved generically via _FK_HUMAN_ALIASES / _FK_LABEL_OVERRIDES
