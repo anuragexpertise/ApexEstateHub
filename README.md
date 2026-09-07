@@ -532,24 +532,35 @@ Any path to profile_apartment
 
 ---
 
-## 11. Gate Pass & QR Scanning
+## 11. QR Code & Access Control Architecture
 
-### QR Code Format
+The platform relies heavily on QR codes for access control, asset tracking, and auditing. Unlike simple static text, the QR architecture uses cryptographic signing to prevent forgery and a versioning system to allow for remote revocation of lost or stolen passes.
 
-QR payload is `Fernet`-encrypted JSON:
-```json
-{"entity_id": 42, "role": "apartment", "society_id": 1, "name": "Flat A-101", "ts": 1718000000}
-```
+### Core Cryptography & Generation
+- **Payload Format:** `<society_id>-<ROLE_CODE>-<entity_id>-<qr_version>-<signature>`.
+- **Signing (`SIGNING_SECRET`):** Each society configures a unique `SIGNING_SECRET` in their Setup Wizard (encrypted at rest in the database). This secret is used to generate an HMAC-SHA256 signature for the QR payload. This guarantees that a printed, static QR code cannot be forged by simply guessing sequential entity IDs.
+- **Legacy Unsigned Codes:** If a society hasn't configured a secret yet, or if they have old codes printed before the signing requirement, the system falls back to a 3-part unsigned payload (`<society_id>-<ROLE_CODE>-<entity_id>`).
 
-Generated via `qr_service.generate_static_qr_code()` using `cryptography.Fernet` + `qrcode[pil]`.
+### Identity & Versioning (Revocable Passes)
+Certain roles represent long-term identities (like a resident or a vendor). These passes are **versioned**, meaning their QR payload includes a `qr_version` nonce (a random 4-digit number).
+- **Versioned Roles:** Apartments (`APT`), Vendors (`VND`), Security Staff (`SEC`), Patrol Locations (`PTL`), and Admins (`ADM`).
+- **Revocation (`revoke_and_reissue`):** If a physical pass is lost or stolen, an Admin can revoke it. The system derives a completely new 4-digit nonce and updates the entity's `qr_version` column in the database. Because the database version no longer matches the version printed on the lost QR code, the old code instantly fails signature validation without affecting anyone else's pass.
+- **Admin Edge-Case:** A promoted apartment owner's Admin badge rides on their `apartments.qr_version` counter. A seeded first-admin falls back to their `users.qr_version` counter.
 
-### Gate Pass Evaluation Logic by Entity
+### Lookup & Utility Tags (Unversioned)
+Some QR codes act as immutable, physical lookup tags rather than access credentials. These are **unversioned** and cannot be "revoked" via `revoke_and_reissue`.
+- **Receipts (`RPT`)**: Scans perform a pure read against the `receipts` table to verify authenticity and current status (Pending/Confirmed).
+- **Assets (`AST`)**: Functions as a physical asset tag. Scans verify name, purchase value, and disposal status.
+- **Concerns (`CON`)**: Acts as a physical tag for a logged issue (e.g., stuck on a door). Scans return the concern type and real-time resolution status.
 
-| Entity | PASS condition | FAIL condition |
-|---|---|---|
-| Apartment | No `pending` receivables (due_date < today) | Has overdue receivables > 0 |
-| Vendor | `vendor_passes` row with `valid_until >= CURRENT_DATE` | No active pass |
-| Security | `gate_access` row with `time_out IS NULL` (on duty) | Not checked in |
+### Actionable Workflows
+- **Visitors (`VIS`)**: Scans enforce a strict Two-Actor security policy. Only pre-approved passes (`status='approved'`) are admitted instantly on scan. Pending passes resolve to `PENDING_CONFIRMATION` which triggers an app alert, forcing the guard to wait for explicit owner approval before entry is granted.
+- **Event Tickets (`EVT`)**: Scans verify ticket validity and **immediately mark the ticket as used** (`UPDATE event_ticket_items SET used = true`) to prevent double-scanning at the venue door.
+- **Patrol Locations (`PTL`)**: Scans enforce strict anti-spoofing via GPS geo-fencing (guard must be within 50 meters) and time-speed checks against their last scan (travel speed > 25km/h is rejected). Valid scans mark the assigned patrol task as `COMPLETED`.
+- **Security Attendance (`ATD`)**: Security guards clock in/out using a dynamically generated, 60-second expiring epoch QR code (`attendance_entry`). This time-boxes the scan to prevent replay attacks.
+
+### Physical NFC Integration
+For long-term physical passes (like vendor ID cards) or fixed patrol checkpoints, the dashboard integrates with the **Web NFC API**. An admin can click the "Write to NFC Tag" button on a QR modal to transmit the exact QR payload string directly into an NDEF-formatted physical NFC tag. Security guards can then tap the NFC tag with their phones instead of relying purely on the camera scanner.
 
 ### Camera Scanner (Security Portal)
 
@@ -568,13 +579,6 @@ Generated via `qr_service.generate_static_qr_code()` using `cryptography.Fernet`
 ```
 
 Additional controls: **Flip** (front/back toggle) · **Torch** (flashlight via `applyConstraints`) · **Emergency** (creates society-wide event) · **Call Admin** (shows admin phone from society profile)
-
-### gate_access Table
-
-```sql
-gate_access (id, society_id, role, entity_id, time_in, time_out)
--- role: 'a'=apartment, 'v'=vendor, 's'=security
-```
 
 ---
 
@@ -860,59 +864,6 @@ explicitly defers — not bugs, but easy to break by accident if a future
 change doesn't know the reasoning below. Distinct from [§19](#19-known-bugs--fixes-applied),
 which is already-fixed bugs, and [§18](#18-critical-dash-rules), which is
 Dash-framework footguns.
-
-### QR / Gate-Pass Signing
-
-- **Legacy unsigned codes still validate.** `QR_SIGNING_SECRET` is unset by
-  default (mirrors `VAPID_PRIVATE_KEY`/`VAPID_PUBLIC_KEY` in
-  `push_service.py` — both silently no-op until deliberately provisioned).
-  Once set, newly generated codes for versioned roles (`APT`/`VND`/`SEC`/`PTL`/`ADM`)
-  are HMAC-signed, but a previously-printed *unsigned* code for those same
-  roles still passes `validate_qr_code` during the reprint transition
-  window (`qr_service.py`). **Open item:** the "legacy unsigned still
-  accepted" branch is meant to be removed once every existing pass has
-  actually been reprinted — nothing in the code enforces that this has
-  happened.
-- **`revoke_and_reissue` doesn't check the caller's role itself.** It's the
-  single source of truth for bumping `qr_version`, but authorization
-  (admin-only) is the *calling* callback's job (`confirm_revoke_and_reissue`
-  in `qr_callbacks.py`). Any new code path that calls `revoke_and_reissue`
-  directly must re-implement that admin check — it will not fail safe on
-  its own.
-- **ADM's `qr_version` lives on two different counters depending on
-  history.** `entity_id` for an admin's QR is always `users.id`, but
-  `_current_qr_version`'s ADM branch resolves the actual version from
-  `apartments.qr_version` if the admin was promoted from an apartment owner
-  (linked_id still points at their old apartment row), or from
-  `users.qr_version` if they were seeded as the society's first admin
-  (no apartment to attach to). `revoke_and_reissue` mirrors this exact
-  dual-counter logic — any future QR/admin code must replicate *both*
-  branches identically or revocation will silently no-op for one of the
-  two admin types.
-- **`_QR_VERSIONED_ROLES` is intentionally narrow:** only
-  `APT`/`VND`/`SEC`/`PTL`. Concerns (`CON`) and event tickets (`EVT`) are
-  QR-*signable* lookups but are **not** versioned/reissuable — calling
-  `revoke_and_reissue` with either raises `ValueError` by design. (A
-  now-removed admin card briefly offered both in its picker — see the
-  `remove_broken_qr_manager.patch` history.)
-- **Viewing/printing/saving/emailing a QR must never bump `qr_version`** —
-  only an explicit admin revoke does. An earlier design auto-bumped on
-  repeat "Save," and was deliberately reverted (see the comment block at
-  the top of `qr_service.py`): the entity reporting a pass lost/stolen is
-  the only trustworthy signal, not a heuristic based on button clicks.
-- **`event_ticket`/`patrol_location` scans don't write to `gate_access`.**
-  `GATE_PERSON_ROLES` in `qr_callbacks.py` is deliberately just
-  `("apartment", "vendor", "security", "admin")` — those two roles log
-  themselves inside their own validators (`validate_event_ticket_qr`,
-  `validate_patrol_qr`) instead. Anything that reports gate traffic by
-  querying `gate_access` alone will silently undercount patrol rounds and
-  event admissions.
-- **`patrol_locations` is deliberately outside the generic drilldown
-  engine.** `registry.py`'s `_NO_AUTO_ACTIONS` opts it out of
-  `DRILLDOWN_MAP`-driven CRUD on purpose (read-only QR-scan profile);
-  `patrol_location_callbacks.py` is a self-contained add/list/scan module
-  instead. Generic drilldown changes elsewhere will not automatically
-  reach patrol locations.
 
 ### Concurrency / "First Writer Wins" Patterns
 
