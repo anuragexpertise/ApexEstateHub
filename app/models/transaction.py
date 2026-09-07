@@ -6,7 +6,7 @@ class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=False, index=True)
     trx_date = db.Column(db.Date, nullable=False, index=True)
-    acc_id = db.Column(db.Integer, db.ForeignKey('accounts.id'), nullable=True)
+    acc_id = db.Column(db.Integer, nullable=True)
     entity_id = db.Column(db.Integer, nullable=True, index=True)
     acc_particulars = db.Column(db.String(100), nullable=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
@@ -15,6 +15,7 @@ class Transaction(db.Model):
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     
     __table_args__ = (
+        db.ForeignKeyConstraint(['society_id', 'acc_id'], ['accounts.society_id', 'accounts.id']),
         db.Index('idx_trx_society_date', 'society_id', 'trx_date'),
         db.Index('idx_trx_society_status_date', 'society_id', 'status', 'trx_date'),
     )
@@ -26,8 +27,8 @@ class Account(db.Model):
     __tablename__ = 'accounts'
     
     id = db.Column(db.Integer, primary_key=True)
-    society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=False, index=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
+    society_id = db.Column(db.Integer, db.ForeignKey('societies.id', ondelete='CASCADE'), nullable=False, index=True, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
     tab_name = db.Column(db.String(20), nullable=True)
     header = db.Column(db.String(255), nullable=True)
     parent_account_id = db.Column(db.Integer, nullable=True, index=True)
@@ -39,6 +40,7 @@ class Account(db.Model):
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     
     __table_args__ = (
+        db.UniqueConstraint('society_id', 'name', name='uq_account_society_name'),
         db.Index('idx_accounts_society_tab', 'society_id', 'tab_name'),
         db.Index('idx_accounts_parent', 'parent_account_id'),
     )
