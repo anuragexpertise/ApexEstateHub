@@ -2,7 +2,7 @@
 ### The Complete Society Management Platform
 
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
-> Built on Python Dash + Flask + PostgreSQL (NeonDB/Aiven) · Hosted on ApexWeave
+> Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
 
 ---
 
@@ -671,14 +671,14 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | UI | Dash Bootstrap Components (DBC) | Cards, modals, badges |
 | Backend | Flask (embedded in Dash) | `app.server` for Flask routes |
 | Auth | JWT (PyJWT) + Werkzeug password hashing | Multi-method |
-| Database | PostgreSQL via NeonDB / Aiven | Serverless PostgreSQL |
+| Database | PostgreSQL via Aiven | Managed PostgreSQL |
 | DB Driver | psycopg2 + SQLAlchemy text() | Named params via `_to_pyformat()` |
 | ORM | SQLAlchemy `db.Model` + raw SQL | SQLAlchemy models in `app/models/` alongside `fn_*` stored functions |
 | Image Processing | Pillow (PIL) | WebP compression to ≤25KB |
 | Excel Export | pandas + openpyxl | |
 | QR | `qrcode[pil]` + `cryptography.Fernet` | Encrypted payloads |
 | Camera | jsQR (clientside) + `/api/scan-qr` | Server-side decode |
-| Hosting | ApexWeave | Gunicorn |
+| Hosting | Render | Gunicorn |
 
 ---
 
@@ -770,7 +770,7 @@ ApexEstateHub/
 │   └── assets/                               ← Static files + uploaded images
 │
 ├── database/
-│   ├── db_manager.py                         ← db._execute() → NeonDB/Aiven
+│   ├── db_manager.py                         ← db._execute() → Aiven
 │   ├── estatehub.sql                         ← Full schema + all fn_* functions
 │   ├── migrate.py                            ← Schema initialization (delegates demo seeding to seed.py)
 │   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns)
@@ -985,7 +985,7 @@ JWT_SECRET=<jwt-signing-secret>
 FERNET_KEY=<base64-fernet-key>   # for QR encryption
 ```
 
-### ApexWeave / Gunicorn
+### Render / Gunicorn
 
 ```bash
 gunicorn app:server -w 4 -b 0.0.0.0:8050 --timeout 120
@@ -993,7 +993,7 @@ gunicorn app:server -w 4 -b 0.0.0.0:8050 --timeout 120
 
 - Set `debug=False` in `app.run_server()` for production.
 - `/app/assets/` must be writable for image uploads.
-- NeonDB: use `?sslmode=require` and connection pooling.
+- Aiven: use `?sslmode=require` and connection pooling.
 - `suppress_callback_exceptions=True` is required in `app = Dash(...)` because list, profile, and form components are rendered dynamically.
 
 ### Database Reset Utility
