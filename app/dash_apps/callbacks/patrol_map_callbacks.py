@@ -16,13 +16,17 @@ clientside_callback(
     function(map_id, lat_val, lon_val) {
         if (!map_id) return window.dash_clientside.no_update;
 
+        console.log("[patrol-map] Init callback fired — container just mounted, starting readiness poll.");
+
         if (typeof L === 'undefined') {
             console.error("[patrol-map] Leaflet JS is not loaded yet — check that " +
                           "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js loaded " +
-                          "(open the Network tab: a blocked/failed request there " +
-                          "means the map can never initialize).");
+                          "(open the Network tab, filter set to 'All' or 'JS' — a " +
+                          "blocked/failed request there means the map can never " +
+                          "initialize; the default 'Fetch/XHR' filter will NOT show it).");
             return window.dash_clientside.no_update;
         }
+        console.log("[patrol-map] Leaflet JS is loaded (L is defined).");
 
         // Dash sorts dictionary keys alphabetically in the DOM id attribute
         var containerIdStr = '{"entity":"patrol_location","type":"patrol-map-container"}';
@@ -38,7 +42,8 @@ clientside_callback(
 
         function initMap(container) {
             if (container._leaflet_id) {
-                return; // already initialized
+                console.log("[patrol-map] Container already initialized, skipping.");
+                return;
             }
 
             var parsedLat = parseFloat(lat_val);
@@ -46,18 +51,31 @@ clientside_callback(
             var defaultLat = isNaN(parsedLat) ? 28.6139 : parsedLat;
             var defaultLon = isNaN(parsedLon) ? 77.2090 : parsedLon;
 
+            console.log("[patrol-map] Container ready (" + container.offsetWidth + "x" +
+                        container.offsetHeight + "px). Calling L.map()...");
             var map = L.map(container).setView([defaultLat, defaultLon], 16);
+            console.log("[patrol-map] L.map() succeeded. Adding OSM tile layer...");
 
+            var tileLoadedOnce = false;
             var tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
 
+            tiles.on('load', function() {
+                if (!tileLoadedOnce) {
+                    tileLoadedOnce = true;
+                    console.log("[patrol-map] ✅ Tiles loaded successfully — map should be visible now.");
+                }
+            });
+
             tiles.on('tileerror', function() {
-                console.error("[patrol-map] A map tile failed to load from " +
+                console.error("[patrol-map] ❌ A map tile failed to load from " +
                               "tile.openstreetmap.org — if this repeats for every " +
                               "tile, the tile server is likely blocked by a " +
                               "firewall/proxy/ad-blocker in this environment " +
-                              "rather than a bug in the app.");
+                              "rather than a bug in the app. Check the Network tab " +
+                              "(filter 'Img' or 'All') for the actual tile request " +
+                              "status code.");
             });
 
             var marker = null;
@@ -144,7 +162,7 @@ clientside_callback(
     Input({"type": "patrol-map-container", "entity": "patrol_location"}, "id"),
     State({"type": "form-field", "entity": "patrol_location", "field": "latitude"}, "value"),
     State({"type": "form-field", "entity": "patrol_location", "field": "longitude"}, "value"),
-    prevent_initial_call=True,
+    prevent_initial_call=False,
 )
 
 # ── 2. Coordinate sync — Dash-native Output, not a DOM hack ─────────────────
@@ -162,6 +180,7 @@ clientside_callback(
         if (!n_clicks) {
             return [window.dash_clientside.no_update, window.dash_clientside.no_update, window.dash_clientside.no_update];
         }
+        console.log("[patrol-map] Pin trigger clicked (n_clicks=" + n_clicks + ") — syncing coordinates into form fields.");
 
         var pickedBtnIdStr = '{"entity":"patrol_location","type":"patrol-map-picked"}';
         var readoutIdStr    = '{"entity":"patrol_location","type":"patrol-map-readout"}';

@@ -1933,6 +1933,28 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── PATROL LOCATIONS ────────────────────────────────────────────────
+        if entity == "patrol_locations":
+            if s:
+                rows = db._execute(
+                    "SELECT * FROM patrol_locations WHERE society_id=%s AND location_name ILIKE %s ORDER BY location_name LIMIT %s OFFSET %s",
+                    (sid, f"%{s}%", page_size, offset), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM patrol_locations WHERE society_id=%s AND location_name ILIKE %s",
+                    (sid, f"%{s}%"), fetch_one=True,
+                )
+            else:
+                rows = db._execute(
+                    "SELECT * FROM patrol_locations WHERE society_id=%s ORDER BY location_name LIMIT %s OFFSET %s",
+                    (sid, page_size, offset), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM patrol_locations WHERE society_id=%s",
+                    (sid,), fetch_one=True,
+                )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
