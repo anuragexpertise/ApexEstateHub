@@ -98,6 +98,20 @@ _QR_VERSIONED_ROLES = {
     "VND": "vendors",
     "SEC": "security_staff",
     "PTL": "patrol_locations",
+    # 2026-09: extended to the five document-verification roles that were
+    # left unsigned in the original 2026-08 rollout — see the qr_version
+    # migration note in estatehub.sql for why. No other code change was
+    # needed to wire these in: generate_qr_code/_current_qr_version/
+    # validate_qr_code/revoke_and_reissue are all already generic over
+    # _QR_VERSIONED_ROLES, and every call site for these five roles
+    # (renderers.py, drilldown_callbacks.py, receipt/expense prints)
+    # already goes through generate_qr_code rather than building the
+    # payload string itself.
+    "CON": "concerns",
+    "RPT": "receipts",
+    "EXP": "expenses",
+    "AST": "assets",
+    "NOC": "nocs",
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
