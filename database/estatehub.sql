@@ -1311,6 +1311,27 @@ ALTER TABLE societies DROP COLUMN IF EXISTS qr_signing_secret_hash;
 ALTER TABLE societies ADD COLUMN IF NOT EXISTS signing_secret_enc TEXT;
 ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_email VARCHAR(100);
 
+-- concerns/receipts/expenses/assets/nocs qr_version (2026-09 security fix):
+-- these five document-verification QR roles (CON/RPT/EXP/AST/NOC) were left
+-- out of the 2026-08 signing rollout that covered apartment/vendor/security/
+-- patrol_location/admin. All five use small sequential ids with no proof of
+-- having been legitimately issued, and — unlike the static gate passes —
+-- several expose sensitive data straight off an unauthenticated guess: a
+-- NOC leaks an owner's name and flat number, receipts/expenses leak amounts.
+-- Registering these tables in qr_service.py's _QR_VERSIONED_ROLES (which
+-- automatically adds them to _QR_SIGNABLE_ROLES) makes generate_qr_code and
+-- validate_qr_code start signing/verifying them exactly like the other five
+-- roles, with no other code changes needed since every call site already
+-- goes through those two generic functions. Same DEFAULT expression as the
+-- existing qr_version columns; same reissue mechanism (revoke_and_reissue)
+-- for entities that need their QR invalidated (e.g. a NOC gets reissued if
+-- a new one is printed for the same apartment).
+ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
+ALTER TABLE assets   ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
+ALTER TABLE nocs     ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
+
 -- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
 -- Auto-generate human-friendly receipt_number / transaction_number.
 -- ════════════════════════════════════════════════════════════════
