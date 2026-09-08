@@ -592,13 +592,18 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
 
         # Method D: Time-Speed Check against last scan
         if security_user_id:
+            # society_id added defense-in-depth: security_user_id is already
+            # a globally-unique users.id scoped to one society, so this
+            # wasn't cross-tenant exploitable, but every other query in this
+            # module scopes by society_id and this one shouldn't be the
+            # exception if that assumption ever changes.
             last_scan = db._execute("""
                 SELECT loc.latitude, loc.longitude, p.scanned_at 
                 FROM patrol_scans p 
                 JOIN patrol_locations loc ON p.location_id = loc.id
-                WHERE p.security_user_id = %s 
+                WHERE p.security_user_id = %s AND p.society_id = %s
                 ORDER BY p.scanned_at DESC LIMIT 1
-            """, (security_user_id,), fetch_one=True)
+            """, (security_user_id, society_id), fetch_one=True)
             
             if last_scan and last_scan.get("latitude") and loc_lat:
                 travel_dist = _haversine(loc_lat, loc_lon, last_scan["latitude"], last_scan["longitude"])
@@ -618,8 +623,8 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             db._execute("""
                 UPDATE patrol_tasks 
                 SET status = 'COMPLETED' 
-                WHERE security_user_id = %s AND location_id = %s AND status = 'PENDING'
-            """, (security_user_id, location_id))
+                WHERE security_user_id = %s AND location_id = %s AND society_id = %s AND status = 'PENDING'
+            """, (security_user_id, location_id, society_id))
 
         return {
             "status": "PASS",
