@@ -56,7 +56,7 @@ def _db_ok() -> bool:
 
 # ── Navigation helpers ────────────────────────────────────────────────────────
 
-def _make_nav_items(role, society_id, pathname):
+def _make_nav_items(role, society_id, pathname, user_type=None):
     """
     Build sidebar nav using dcc.Link — History API push, no page reload,
     all stores survive tab clicks, auth-store stays populated.
@@ -68,6 +68,18 @@ def _make_nav_items(role, society_id, pathname):
     items = []
     for tab in cfg["tabs"]:
         href      = tab["href"]
+        
+        # User Type Permissions Filtering for Apartment Portal
+        if role == "apartment":
+            if user_type in ("tenant", "visitor"):
+                # Hide financial tabs
+                if any(x in href for x in ("owner-financials", "owner-receipts", "owner-cashbook", "owner-charges")):
+                    continue
+            if user_type == "visitor":
+                # Hide concerns
+                if "owner-concerns" in href:
+                    continue
+
         label     = tab["label"]
         is_active = bool(pathname and href.rstrip("/") in pathname)
         
@@ -661,7 +673,7 @@ def register_shell_callbacks(app):
         return (
             _portal_content(role, society_id, pathname, auth=verified_auth),
             {"rendered": True, "ts": time.time()},
-            _make_nav_items(role, society_id, pathname),
+            _make_nav_items(role, society_id, pathname, verified_auth.get("user_type")),
             _breadcrumb(pathname),
             cfg["label"], portal_style,
             user_name, role.title(), avatar,

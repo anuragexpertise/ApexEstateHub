@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS users (
         )
     ),
     linked_id INT,
+    user_type VARCHAR(20) CHECK (user_type IN ('owner', 'family', 'tenant', 'visitor')) DEFAULT 'owner',
     -- Fallback qr_version for admin logins with no apartments row to key
     -- off (linked_id IS NULL — the seeded first-admin case). A promoted
     -- apartment owner (linked_id = apartments.id) uses apartments.qr_version
