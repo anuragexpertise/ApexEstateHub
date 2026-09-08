@@ -628,8 +628,8 @@ def seed_society(cur, conn) -> int:
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
             secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background, signing_secret_enc)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            payment_qr, logo, login_background, signing_secret_enc, primary_bank_account_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
@@ -637,7 +637,7 @@ def seed_society(cur, conn) -> int:
          SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
          SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background"),
-         SOCIETY.get("signing_secret_enc")),
+         SOCIETY.get("signing_secret_enc"), None),
     )
     conn.commit()
     cur.execute(
