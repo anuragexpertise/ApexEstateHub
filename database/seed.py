@@ -928,7 +928,27 @@ def seed_state_compliance_thresholds(cur, conn):
 
 
 def seed_accounts(cur, conn, society_id: int) -> int:
+    """
+    Insert this society's chart of accounts using the literal seed-constant
+    `aid` values as the real `accounts.id` (accounts.id is scoped per-society
+    since the composite PK migration, so the same small id can safely repeat
+    across societies).
+
+    IMPORTANT — insert order: `fk_account_parent` is DEFERRABLE INITIALLY
+    DEFERRED, but we still insert with parent_account_id=NULL on the first
+    pass and backfill parents in a second pass, committing once at the end.
+    This makes seeding order-independent: ACCOUNTS can be edited or appended
+    to without every parent having to appear before its children, and a
+    single failed row can't leave a partially-seeded, silently-incomplete
+    chart of accounts behind (the previous single-pass/per-row-commit version
+    relied on list order and swallowed ordering failures as a per-row
+    "skip" warning).
+    """
     created = 0
+    inserted_ids = set()
+
+    # 1st pass: insert with parent_account_id=NULL to avoid FK ordering
+    # requirements entirely.
     for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
         try:
             cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
@@ -940,15 +960,28 @@ def seed_accounts(cur, conn, society_id: int) -> int:
                     drcr_account, has_bf, drcr_bf, depreciation_percent,
                     is_depreciable, mutuality_nature, tds_section)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (aid, society_id, name, tab, header, parent,
+                (aid, society_id, name, tab, header, None,
                  drcr, has_bf, drcr_bf, dep, dep < 100,
                  MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
             )
-            conn.commit()
+            inserted_ids.add(aid)
             created += 1
         except Exception as exc:
             conn.rollback()
             log.warning("Account %s skip: %s", aid, exc)
+
+    # 2nd pass: backfill parent_account_id now that every row in this batch
+    # exists (only for rows we just inserted — pre-existing rows keep
+    # whatever parent they already had).
+    for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
+        if parent is not None and aid in inserted_ids:
+            cur.execute(
+                "UPDATE accounts SET parent_account_id = %s WHERE id = %s AND society_id = %s",
+                (parent, aid, society_id),
+            )
+
+    conn.commit()
+
     if society_id == 1:
         cur.execute(
             "SELECT setval(pg_get_serial_sequence('accounts','id'), "
