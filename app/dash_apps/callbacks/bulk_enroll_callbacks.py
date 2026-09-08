@@ -1,9 +1,9 @@
 # app/dash_apps/callbacks/bulk_enroll_callbacks.py
 """
-Bulk Enroll — CSV Upload for Apartments / Vendors / Security
+Bulk Enroll — Excel/CSV Upload for Apartments / Vendors / Security / Users / Assets
 ==============================================================
 Adds a "Bulk Enroll" button next to "New" on the Admin/Enroll list
-cards (list_apartments, list_vendors, list_security).
+cards (list_apartments, list_vendors, list_security, etc.).
 
 WHY APARTMENTS NEED email + password
 --------------------------------------
@@ -25,7 +25,7 @@ back the domain row too, rather than leaving an orphan with no login.
 is always the domain table's own id — never users.id (see
 fix_vendor_security_pk.sql for the vendor/security part of this).
 
-CSV column contract (header row required, case-insensitive, extra columns ignored):
+Upload column contract (header row required, case-insensitive, extra columns ignored):
 
   apartments : flat_number*, email*, password*, owner_name, mobile, apartment_size
   vendors    : email*, password*, name*, business_name, service_type, mobile
@@ -39,8 +39,8 @@ reported without rolling back rows already committed earlier in the file.
 from __future__ import annotations
 
 import base64
-import csv
 import io
+import pandas as pd
 
 from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
 from dash.exceptions import PreventUpdate
@@ -102,6 +102,30 @@ _BULK_TEMPLATES: dict[str, dict] = {
             "which is required for the on-duty toggle and gate QR."
         ),
     },
+    "apartment_users": {
+        "label": "Apartment Users",
+        "columns": [
+            "flat_number", "email", "password",
+            "name", "user_type",
+        ],
+        "required": ["flat_number", "email", "password", "name"],
+        "notes": (
+            "user_type can be owner, family, tenant, or visitor. "
+            "This creates additional logins tied to an existing apartment."
+        ),
+    },
+    "assets": {
+        "label": "Assets",
+        "columns": [
+            "asset_name", "company_name", "asset_sno",
+            "purchase_date", "purchase_value",
+        ],
+        "required": ["asset_name", "purchase_date", "purchase_value"],
+        "notes": (
+            "Depreciation rate defaults to 100%. "
+            "purchase_date must be in YYYY-MM-DD format."
+        ),
+    },
 }
 
 
@@ -114,7 +138,7 @@ def _instructions_for(entity: str) -> html.Div:
     req  = ", ".join(meta["required"])
     return html.Div([
         html.P(
-            f"Upload a CSV to enroll multiple {meta['label'].lower()} at once.",
+            f"Upload an Excel (.xlsx) or CSV file to enroll multiple {meta['label'].lower()} at once.",
             className="mb-1",
             style={"fontWeight": "600", "fontSize": "13px"},
         ),
@@ -173,28 +197,32 @@ def _render_results(results: dict, filename: str) -> html.Div:
 # CSV PARSER
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _parse_csv(contents: str) -> list[dict]:
+def _parse_upload(contents: str, filename: str) -> list[dict]:
     """
     Decode a dcc.Upload `contents` string (data URI) into a list of
-    lowercase-keyed row dicts. BOM-safe, strips whitespace, skips blank rows.
+    lowercase-keyed row dicts using pandas to parse Excel/CSV.
     """
     _content_type, content_string = contents.split(",", 1)
     decoded = base64.b64decode(content_string)
-    text    = decoded.decode("utf-8-sig")          # strips UTF-8 BOM if present
-    reader  = csv.DictReader(io.StringIO(text))
-    # Normalise header names to lowercase+stripped
-    reader.fieldnames = [
-        (f or "").strip().lower() for f in (reader.fieldnames or [])
-    ]
+    name = (filename or "").lower()
+    
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(decoded))
+    else:
+        df = pd.read_csv(io.StringIO(decoded.decode("utf-8-sig")))
+        
+    df.columns = [(str(c) or "").strip().lower() for c in df.columns]
+    
+    # Drop completely empty rows
+    df.dropna(how='all', inplace=True)
+    
     rows = []
-    for row in reader:
+    for _, row in df.iterrows():
         clean = {
-            (k or "").strip().lower(): (v or "").strip()
+            k: str(v).strip() if pd.notna(v) else ""
             for k, v in row.items()
-            if k
         }
-        if any(clean.values()):   # skip fully blank trailing rows
-            rows.append(clean)
+        rows.append(clean)
     return rows
 
 
@@ -457,6 +485,79 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
     return {"success": success, "failed": failed}
 
 
+def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    required = _BULK_TEMPLATES["apartment_users"]["required"]
+    success  = 0
+    failed: list[tuple[int, str]] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err))
+            continue
+
+        flat     = row["flat_number"].strip()
+        email    = row["email"].strip().lower()
+        password = row["password"].strip()
+        name     = row["name"].strip()
+        user_type = row.get("user_type", "family").strip().lower()
+        if user_type not in ("owner", "family", "tenant", "visitor"):
+            user_type = "family"
+
+        try:
+            apt_r = db._execute(
+                "SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s",
+                (sid, flat), fetch_one=True
+            )
+            if not apt_r:
+                failed.append((i, f"Apartment '{flat}' not found"))
+                continue
+            apt_id = apt_r["id"]
+            
+            db._execute(
+                "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type) "
+                "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s)",
+                (sid, email, generate_password_hash(password), apt_id, name, user_type),
+            )
+            success += 1
+        except Exception as e:
+            failed.append((i, f"Insert failed: {e}"))
+
+    return {"success": success, "failed": failed}
+
+def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    required = _BULK_TEMPLATES["assets"]["required"]
+    success  = 0
+    failed: list[tuple[int, str]] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err))
+            continue
+
+        try:
+            db._execute(
+                "INSERT INTO assets"
+                "(society_id, asset_name, company_name, asset_sno, purchase_date, purchase_value, depreciation_rate, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    sid,
+                    row["asset_name"].strip(),
+                    row.get("company_name") or None,
+                    row.get("asset_sno") or None,
+                    row["purchase_date"].strip(),
+                    _safe_float(row["purchase_value"]),
+                    100.00,
+                    user_id,
+                ),
+            )
+            success += 1
+        except Exception as e:
+            failed.append((i, f"Asset insert failed: {e}"))
+
+    return {"success": success, "failed": failed}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -498,7 +599,7 @@ def register_bulk_enroll_callbacks(app):
             raise PreventUpdate
         return False
 
-    # ── 3. Download CSV template ──────────────────────────────────────────────────
+    # ── 3. Download template ──────────────────────────────────────────────────
     @app.callback(
         Output("bulk-enroll-template-download", "data"),
         Input("bulk-enroll-template-btn",       "n_clicks"),
@@ -509,10 +610,15 @@ def register_bulk_enroll_callbacks(app):
     def download_bulk_enroll_template(n_clicks, entity):
         if not n_clicks or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
-        cols     = _BULK_TEMPLATES[entity]["columns"]
-        csv_text = ",".join(cols) + "\n"
-        return dcc.send_string(
-            csv_text, filename=f"{entity}_bulk_enroll_template.csv"
+        cols = _BULK_TEMPLATES[entity]["columns"]
+        df = pd.DataFrame(columns=cols)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+        
+        return dcc.send_bytes(
+            output.getvalue(), filename=f"{entity}_bulk_enroll_template.xlsx"
         )
 
     # ── 4. Process CSV upload → bulk insert → refresh list ────────────────────────
@@ -562,16 +668,16 @@ def register_bulk_enroll_callbacks(app):
         actor_id = get_current_user_id()
 
         try:
-            rows = _parse_csv(contents)
+            rows = _parse_upload(contents, filename)
         except Exception as e:
             return (
-                html.Div(f"Could not read CSV: {e}", style={"color": "#de5c52"}),
+                html.Div(f"Could not read upload: {e}", style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 
         if not rows:
             return (
-                html.Div("The CSV has no data rows.", style={"color": "#e59620"}),
+                html.Div("The upload has no data rows.", style={"color": "#e59620"}),
                 no_update, no_update, no_update, no_update,
             )
 
@@ -589,6 +695,10 @@ def register_bulk_enroll_callbacks(app):
             results = _bulk_insert_apartments(rows, sid, actor_id)
         elif entity == "vendors":
             results = _bulk_insert_vendors(rows, sid, actor_id)
+        elif entity == "apartment_users":
+            results = _bulk_insert_apartment_users(rows, sid, actor_id)
+        elif entity == "assets":
+            results = _bulk_insert_assets(rows, sid, actor_id)
         else:   # security
             results = _bulk_insert_security(rows, sid, actor_id)
 

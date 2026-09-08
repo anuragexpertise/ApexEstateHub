@@ -970,13 +970,13 @@ def render_list_card(card_id: str, title: str, icon: str,
                    "fontWeight": "600"},
         ))
 
-        # "Bulk Enroll" — CSV upload for the three enroll-tab entities.
+        # "Bulk Enroll" — CSV/Excel upload for the enroll-tab entities.
         # Uses the single global modal in app_shell.py (see
         # bulk_enroll_callbacks.py), not a per-card component, so it's just
         # a plain button id here — no pattern-matching MATCH/ALL needed.
-        if entity in ("apartments", "vendors", "security"):
+        if entity in ("apartments", "vendors", "security", "apartment_users", "assets"):
             header_right.append(dbc.Button(
-                [html.I(className="fas fa-file-csv me-1"), "Bulk Enroll"],
+                [html.I(className="fas fa-file-excel me-1"), "Bulk Enroll"],
                 id={"type": "btn-bulk-enroll", "entity": entity},
                 size="sm", color="success", outline=True,
                 style={"fontSize": "11px", "borderRadius": "8px",
