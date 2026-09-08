@@ -703,6 +703,13 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         return ("SELECT * FROM fn_apartments_list(%s,%s," + p_has_dues_sql + ") LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset))
 
+    if entity == "apartment_users":
+        if apt_id:
+            return ("SELECT * FROM vw_apartment_users WHERE society_id=%s AND apartment_id=%s LIMIT %s OFFSET %s",
+                    (sid, apt_id, page_size, offset))
+        return ("SELECT * FROM vw_apartment_users WHERE society_id=%s LIMIT %s OFFSET %s",
+                (sid, page_size, offset))
+
     # ── VENDORS ─────────────────────────────────────────────────────────
     if entity == "vendors":
         app_filter = filters.get("active_passes", None)
@@ -1096,6 +1103,25 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             "LEFT JOIN users au ON au.id=sr.assigned_by "
             "WHERE sr.society_id=%s" + extra_sql +
             " ORDER BY sr.roster_date DESC, sr.id DESC LIMIT %s OFFSET %s",
+            tuple([sid] + extra_params + [page_size, offset]),
+        )
+
+    # ── APARTMENT USERS ───────────────────────────────────────────────────
+    if entity == "apartment_users":
+        extra_sql, extra_params = "", []
+        if apt_id:
+            extra_sql = " AND linked_id=%s"
+            extra_params.append(apt_id)
+        if s:
+            return (
+                "SELECT * FROM vw_apartment_users WHERE society_id=%s" + extra_sql +
+                " AND (name ILIKE %s OR email ILIKE %s)"
+                " ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                tuple([sid] + extra_params + [f"%{s}%", f"%{s}%", page_size, offset]),
+            )
+        return (
+            "SELECT * FROM vw_apartment_users WHERE society_id=%s" + extra_sql +
+            " ORDER BY created_at DESC LIMIT %s OFFSET %s",
             tuple([sid] + extra_params + [page_size, offset]),
         )
 
@@ -1955,6 +1981,36 @@ def load_list(
                 )
             return rows, int((cnt or {}).get("n", len(rows)))
 
+        # ── APARTMENT USERS ───────────────────────────────────────────────────
+        if entity == "apartment_users":
+            extra_sql, extra_params = "", []
+            if apt_id:
+                extra_sql = " AND apartment_id=%s"
+                extra_params.append(apt_id)
+            if s:
+                rows = db._execute(
+                    "SELECT * FROM vw_apartment_users WHERE society_id=%s" + extra_sql +
+                    " AND (name ILIKE %s OR email ILIKE %s)"
+                    " ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                    tuple([sid] + extra_params + [f"%{s}%", f"%{s}%", page_size, offset]), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM vw_apartment_users WHERE society_id=%s" + extra_sql +
+                    " AND (name ILIKE %s OR email ILIKE %s)",
+                    tuple([sid] + extra_params + [f"%{s}%", f"%{s}%"]), fetch_one=True,
+                )
+            else:
+                rows = db._execute(
+                    "SELECT * FROM vw_apartment_users WHERE society_id=%s" + extra_sql +
+                    " ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                    tuple([sid] + extra_params + [page_size, offset]), fetch_all=True,
+                ) or []
+                cnt = db._execute(
+                    "SELECT COUNT(*) AS n FROM vw_apartment_users WHERE society_id=%s" + extra_sql,
+                    tuple([sid] + extra_params), fetch_one=True,
+                )
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         return [], 0
 
     except Exception as e:
@@ -2384,6 +2440,14 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         if entity_singular == "tds_rate":
             r = db._execute(
                 "SELECT * FROM tds_section_rates WHERE id=%s AND society_id=%s",
+                (pk, society_id), fetch_one=True,
+            )
+            return dict(r) if r else None
+
+        # ── APARTMENT USER ─────────────────────────────────────────────────────
+        if entity_singular == "apartment_user":
+            r = db._execute(
+                "SELECT * FROM vw_apartment_users WHERE id=%s AND society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
             return dict(r) if r else None

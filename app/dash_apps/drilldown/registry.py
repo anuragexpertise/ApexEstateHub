@@ -44,7 +44,9 @@ PK_MAP: dict = {
     "event_ticket_items": "id",
     "patrol_locations": "id",
     "compliance_settings": "id",
+    "apartment_users": "id",
 }
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -77,6 +79,7 @@ ENTITY_MAP: dict = {
     "event_ticket_items": "event_ticket",
     "patrol_locations": "patrol_location",
     "compliance_settings": "compliance_setting",
+    "apartment_users": "apartment_user",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -483,6 +486,10 @@ DRILLDOWN_MAP: dict = {
     "list_compliance_settings": {
         "target": "profile_compliance_setting",
         "label": "Compliance Settings",
+    },
+    "list_apartment_users": {
+        "target": "profile_apartment_user",
+        "label": "Member Details",
     },
     # ── PROFILE ACTIONS → FORM ────────────────────────────────────────────────
     "profile_apartment": {

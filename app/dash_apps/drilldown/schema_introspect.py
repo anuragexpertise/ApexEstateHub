@@ -269,6 +269,10 @@ _AUTH_FIELDS: dict[str, list[dict]] = {
         {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
         {"id": "password", "label": "Password",       "type": "password", "required": True},
     ],
+    "vw_apartment_users": [
+        {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
+        {"id": "password", "label": "Password",       "type": "password", "required": True},
+    ],
 }
 
 # Account-selection field overrides: these FK columns need a specific
@@ -496,6 +500,12 @@ _EXPLICIT_SELECT_OPTIONS: dict[tuple[str, str], list[dict]] = {
         {"label": "Vendors",    "value": "vendor"},
         {"label": "Security",   "value": "security"},
         {"label": "ALL",        "value": "all"},
+    ],
+    ("vw_apartment_users", "user_type"): [
+        {"label": "Owner",         "value": "owner"},
+        {"label": "Family Member", "value": "family"},
+        {"label": "Tenant",        "value": "tenant"},
+        {"label": "Visitor",       "value": "visitor"},
     ],
     # concerns.open_to intentionally NOT added here — left as free text /
     # excluded per instruction, even though the column doesn't exist yet.
