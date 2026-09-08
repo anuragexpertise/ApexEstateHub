@@ -140,6 +140,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # Apartments view channels and subscribe from the profile; create/approve/deny
     # are profile actions with server-side guards.
     ("apartment", "channels"):    {"view", "new"},
+    ("apartment", "apartment_users"): {"view", "new", "edit", "delete"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -202,7 +203,7 @@ def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]
         if user_type == "visitor":
             if entity == "concerns":
                 perms = set()  # No view or new
-            elif entity in ("receivables", "payables", "cashbook", "financials", "receipts"):
+            elif entity in ("receivables", "payables", "cashbook", "financials", "receipts", "apartment_users"):
                 perms = set()
         elif user_type == "tenant":
             if entity in ("receivables", "payables", "cashbook", "financials", "receipts"):

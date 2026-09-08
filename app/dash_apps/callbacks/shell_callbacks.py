@@ -176,6 +176,7 @@ def _make_nav_items(role, society_id, pathname, user_type=None):
 _PATH_LABELS = {
     "admin-portal":      "Dashboard",
     "owner-portal":      "Dashboard",
+    "owner-members":     "Members",
     "vendor-portal":     "Dashboard",
     "master":            "Societies",
     "master-societies":  "Societies",
@@ -279,6 +280,7 @@ def _portal_content(role, society_id, pathname, auth=None):
     if role == "apartment":
         apt_id = (auth or {}).get("apartment_id") or (auth or {}).get("linked_id")
         tab = (
+            "members"    if "/owner-members"    in p else
             "financials" if "/owner-financials" in p else
             "receivables" if "/owner-receivables" in p else
             "owner_receipts" if "/owner-receipts" in p else

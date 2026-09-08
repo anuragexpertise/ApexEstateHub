@@ -48,6 +48,7 @@ ROLE_CONFIG = {
         "icon": "fa-home",
         "tabs": [
             {"label": "Dashboard",   "href": "/dashboard/owner-portal",    "icon": "fa-th-large"},
+            {"label": "Members",     "href": "/dashboard/owner-members",   "icon": "fa-users"},
             {"label": "Financials",  "href": "/dashboard/owner-financials", "icon": "fa-book"},
             {"label": "Channels",    "href": "/dashboard/owner-channels",   "icon": "fa-bullhorn"},
             {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},

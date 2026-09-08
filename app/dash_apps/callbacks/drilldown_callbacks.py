@@ -3333,6 +3333,7 @@ def _save_entity(entity, card_id, data):
     pk      = data.get("id")
     try:
         if entity == "apartment":       return _save_user_entity(db, data, sid, "apartment", is_edit, pk)
+        if entity == "apartment_user":  return _save_apartment_user(db, data, sid, is_edit, pk)
         if entity == "vendor":          return _save_user_entity(db, data, sid, "vendor",   is_edit, pk)
         if entity == "security":        return _save_user_entity(db, data, sid, "security", is_edit, pk)
         if entity == "event":           return _save_event(db, data, sid, is_edit, pk)
@@ -4384,6 +4385,69 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
 
     _move_temp_images(role, domain_id, sid, d)
     return True, f"{role.title()} '{email}' created", domain_id
+
+def _save_apartment_user(db, d, sid, is_edit, pk):
+    from werkzeug.security import generate_password_hash
+    from app.dash_apps.auth_layer import get_current_user_id, get_current_linked_id
+    
+    email = (d.get("email") or "").strip()
+    if not email:
+        return False, "Email is required", None
+        
+    user_type = d.get("user_type", "visitor")
+    actor_uid = get_current_user_id()
+    apt_id = get_current_linked_id()
+    
+    # Enforce permissions: find the actor's user_type
+    actor_row = db._execute("SELECT user_type FROM users WHERE id=%s AND society_id=%s", (actor_uid, sid), fetch_one=True)
+    if not actor_row:
+        return False, "Unauthorised: Could not identify current user role", None
+        
+    actor_type = actor_row["user_type"]
+    if actor_type in ("family", "tenant") and user_type != "visitor":
+        return False, f"Unauthorised: {actor_type.title()} can only create 'visitor' members.", None
+    if actor_type == "visitor":
+        return False, "Unauthorised: Visitors cannot create members.", None
+        
+    if is_edit:
+        pw = (d.get("password") or "").strip()
+        name = (d.get("name") or "").strip()
+        set_parts, params = [], []
+        if email:
+            set_parts.append("email=%s"); params.append(email)
+        if name:
+            set_parts.append("name=%s"); params.append(name)
+        if pw:
+            set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
+        if user_type:
+            set_parts.append("user_type=%s"); params.append(user_type)
+            
+        params += [pk, sid, apt_id]
+        if not set_parts:
+            return True, "No changes to save", pk
+            
+        db._execute(
+            f"UPDATE users SET {', '.join(set_parts)} "
+            "WHERE id=%s AND society_id=%s AND linked_id=%s AND role='apartment'",
+            params,
+        )
+        return True, f"Member '{email}' updated", pk
+    else:
+        pw = d.get("password", "")
+        name = (d.get("name") or "").strip()
+        if not pw:
+            return False, "Password is required for new member", None
+            
+        try:
+            r = db._execute(
+                "INSERT INTO users(society_id, email, name, password_hash, role, login_method, linked_id, user_type, created_by) "
+                "VALUES(%s, %s, %s, %s, 'apartment', 'password', %s, %s, %s) RETURNING id",
+                (sid, email, name, generate_password_hash(pw), apt_id, user_type, actor_uid),
+                fetch_one=True,
+            )
+            return True, f"Member '{email}' added as {user_type.title()}", r["id"]
+        except Exception as e:
+            return False, f"Creation failed: {_clean_pg_error(e)}", None
 
 def _save_event(db, d, sid, is_edit, pk):
     _acc_id = d.get("account_id")
