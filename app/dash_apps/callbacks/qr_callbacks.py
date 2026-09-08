@@ -905,7 +905,12 @@ def register_qr_callbacks(app):
                         db._execute(
                             """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
                                VALUES (%s, %s, %s, NOW(), %s)""",
-                            (society_id, role_code, user_id, user_id),
+                            # created_by is an audit field recording WHO logged the
+                            # entry (the scanning guard/admin), not who entered —
+                            # was previously user_id (the scanned person's own id),
+                            # which made the audit trail unable to answer "which
+                            # guard let this person in".
+                            (society_id, role_code, user_id, scanning_user_id),
                         )
                     except Exception as e:
                         print(f"Gate log error: {e}")
@@ -985,7 +990,7 @@ def register_qr_callbacks(app):
                 try:
                     db._execute(
                         """UPDATE gate_access
-                           SET time_out = NOW()
+                           SET time_out = NOW(), updated_by = %s
                            WHERE id = (
                                SELECT id FROM gate_access
                                 WHERE society_id = %s
@@ -994,7 +999,10 @@ def register_qr_callbacks(app):
                                   AND time_out IS NULL
                                ORDER BY time_in DESC LIMIT 1
                            )""",
-                        (society_id, user_id, role_code),
+                        # updated_by records the scanning guard/admin who closed
+                        # out the shift — was previously left unset, unlike the
+                        # ATD self-clock-out path which already sets it.
+                        (scanning_user_id, society_id, user_id, role_code),
                     )
                 except Exception as e:
                     print(f"Gate exit log error: {e}")
@@ -1044,8 +1052,21 @@ def register_qr_callbacks(app):
     # admin_callbacks.py, which only ever showed a generic "Access Granted"
     # card and never actually opened anything for concern/receipt/expense/
     # asset QR types.
+    # NOTE (fixed): this used to be TWO separate callbacks both bound to the
+    # same manual-qr-validate-btn.n_clicks (one via MATCH for the result
+    # card, one via ALL for the toast/sound) — a single click fired
+    # validate_qr_code() TWICE. For read-only roles that was harmless, but
+    # for stateful roles it silently corrupted data: a second attendance-QR
+    # validation clocked the guard back out immediately after clocking in,
+    # a second patrol scan wrote a duplicate patrol_scans row, and a second
+    # event-ticket validation reported "already used" right after the first
+    # call's own success. Merged into one callback so validate_qr_code runs
+    # exactly once per click, with the card/toast/sound all derived from
+    # that single result.
     @app.callback(
         Output({"type": "manual-qr-result", "scope": MATCH}, "children"),
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
         Input({"type": "manual-qr-validate-btn", "scope": MATCH}, "n_clicks"),
         State({"type": "manual-qr-input", "scope": MATCH}, "value"),
         State("auth-store", "data"),
@@ -1066,9 +1087,22 @@ def register_qr_callbacks(app):
         result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
         user = result.get("user") or {}
         role = user.get("role")
+        passed = result.get("status") == "PASS"
 
-        if result.get("status") == "PASS" and role == "concern":
-            return render_concern_lookup_result(user["id"], society_id, auth_data)
+        default_toast = (
+            {"type": "success", "message": f"Found — {user.get('name', 'Concern')}"}
+            if passed and role == "concern" else
+            {"type": "success", "message": f"Valid — {user.get('name', 'Unknown')}"}
+            if passed else
+            {"type": "error", "message": result.get("reason", "Invalid QR code")}
+        )
+        default_sound = {"type": "success"} if passed else {"type": "error"}
+
+        if passed and role == "concern":
+            return (
+                render_concern_lookup_result(user["id"], society_id, auth_data),
+                default_toast, default_sound,
+            )
 
         # Visitor manual lookup mirrors the camera scan: a pending visitor
         # converges onto the two-actor alert flow instead of auto-admitting.
@@ -1077,98 +1111,49 @@ def register_qr_callbacks(app):
             if result.get("status") == "PENDING_CONFIRMATION" and vis_id:
                 from app.services.alert_service import trigger_visitor_alert
                 _ok, msg, _data = trigger_visitor_alert(vis_id, scanning_user_id)
-                return html.Div([
+                card = html.Div([
                     html.I(className="fas fa-user-clock fa-2x", style={"color": "#e59620"}),
                     html.H4("Pending Owner Approval", style={"color": "#e59620", "marginTop": "10px"}),
                     html.P(user.get("name", "Unknown")),
                     html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
                     html.Small(f"Owner notified — {msg}", style={"color": "#95a5a6"}),
                 ], className="text-center p-3", style={"backgroundColor": "#fef3c7", "borderRadius": "10px"})
+                # Previously this branch's toast/sound came from the second
+                # callback re-validating from scratch, which saw a
+                # non-"PASS" status and reported an error toast/sound right
+                # next to this warning-colored card — inconsistent UX on top
+                # of the double side effect. Now consistently "warning".
+                return card, {"type": "warning", "message": msg or "Owner notified — awaiting confirmation"}, {"type": "warning"}
 
-            if result.get("status") == "PASS":
-                return html.Div([
+            if passed:
+                card = html.Div([
                     html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
                     html.H4("Admitted", style={"color": "#2ecc71", "marginTop": "10px"}),
                     html.P(user.get("name", "Unknown")),
                     html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
                     html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style={"color": "#95a5a6"}),
                 ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
+                return card, default_toast, default_sound
 
-        if result.get("status") == "PASS":
-            return html.Div([
+        if passed:
+            card = html.Div([
                 html.I(className="fas fa-check-circle fa-2x", style={"color": "#2ecc71"}),
                 html.H4("Valid", style={"color": "#2ecc71", "marginTop": "10px"}),
                 html.P(user.get("name", "Unknown")),
                 html.Hr(),
                 html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
             ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
+            return card, default_toast, default_sound
 
         reason = result.get("reason", "Invalid QR code")
-        return html.Div([
+        card = html.Div([
             html.I(className="fas fa-times-circle fa-2x", style={"color": "#e74c3c"}),
             html.H4("Not Found", style={"color": "#e74c3c", "marginTop": "10px"}),
             html.P(reason),
             html.Hr(),
             html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
         ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"})
-
-    @app.callback(
-        Output("toast-store", "data", allow_duplicate=True),
-        Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
-        Input({"type": "manual-qr-validate-btn", "scope": ALL}, "n_clicks"),
-        State({"type": "manual-qr-input", "scope": ALL}, "value"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def validate_manual_qr_scoped_stores(n_clicks_list, qr_data_list, auth_data):
-        if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
-            raise PreventUpdate
-
-        role = get_current_user_role() or ""
-        if role not in ("admin", "master", "security"):
-            raise PreventUpdate
-
-        triggered_scope = ctx.triggered_id.get("scope")
-        triggered_idx = None
-
-        if ctx.inputs_list and ctx.inputs_list[0]:
-            for idx, item in enumerate(ctx.inputs_list[0]):
-                if item.get("id", {}).get("scope") == triggered_scope:
-                    triggered_idx = idx
-                    break
-
-        if triggered_idx is None or triggered_idx >= len(n_clicks_list) or not n_clicks_list[triggered_idx]:
-            raise PreventUpdate
-
-        qr_data = (qr_data_list[triggered_idx] or "").strip() if triggered_idx < len(qr_data_list) else ""
-        if not qr_data:
-            raise PreventUpdate
-
-        from app.services.qr_service import validate_qr_code
-        society_id = get_current_society_id()
-        scanning_user_id = get_current_user_id()
-        result = validate_qr_code(qr_data, society_id, scanning_user_id)
-        user = result.get("user") or {}
-        role = user.get("role")
-
-        if result.get("status") == "PASS" and role == "concern":
-            return (
-                {"type": "success", "message": f"Found — {user.get('name', 'Concern')}"},
-                {"type": "success"},
-            )
-
-        if result.get("status") == "PASS":
-            return (
-                {"type": "success", "message": f"Valid — {user.get('name', 'Unknown')}"},
-                {"type": "success"},
-            )
-
-        reason = result.get("reason", "Invalid QR code")
-        return (
-            {"type": "error", "message": reason},
-            {"type": "error"},
-        )
+        return card, default_toast, default_sound
 
     # ── 4. Render recent scans log ──────────────────────────────
     @app.callback(
