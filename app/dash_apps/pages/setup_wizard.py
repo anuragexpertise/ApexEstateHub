@@ -294,6 +294,7 @@ def render_category_content(category, society_id=None):
         from database.seed import ACCOUNTS
         inputs = [
             html.P("Configure general account parameters and view default accounts.", className="text-muted mb-3"),
+            html.P("Note: The primary_bank_account is set to 6311 by default. The Society's payment QR code must correspond to this bank. You can change this later in the Admin portal under the 'Settings' tab, 'Account' KPI.", className="text-info small mb-3"),
             dbc.Label("Payment QR Code Image"),
             html.Div([
                 html.Div([

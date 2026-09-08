@@ -1292,7 +1292,7 @@ DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
 ALTER TABLE societies
-ADD COLUMN IF NOT EXISTS primary_bank_account_id INT;
+ADD COLUMN IF NOT EXISTS primary_bank_account_id INT DEFAULT 6311;
 ALTER TABLE societies DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
 ALTER TABLE societies ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
 
