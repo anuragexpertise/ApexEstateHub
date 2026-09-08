@@ -348,12 +348,17 @@ def register_bank_reconcile_callbacks(app):
     def download_bank_template(n_clicks):
         if not n_clicks:
             raise PreventUpdate
-        header = ",".join(TEMPLATE_COLUMNS)
-        sample = (
-            "2026-09-01,NEFT-J DOE-MAINT SEP,,15000,UTR123456,842300\n"
-            "2026-09-03,CHQ 000512 PLUMBER PMT,8000,,000512,834300\n"
+        df = pd.DataFrame(columns=TEMPLATE_COLUMNS)
+        df.loc[0] = ["2026-09-01", "NEFT-J DOE-MAINT SEP", "", 15000, "UTR123456", 842300]
+        df.loc[1] = ["2026-09-03", "CHQ 000512 PLUMBER PMT", 8000, "", "000512", 834300]
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+            
+        return dcc.send_bytes(
+            output.getvalue(), filename="bank_statement_template.xlsx"
         )
-        return dcc.send_string(header + "\n" + sample, filename="bank_statement_template.csv")
 
     @app.callback(
         Output("bank-reconcile-result", "children", allow_duplicate=True),
