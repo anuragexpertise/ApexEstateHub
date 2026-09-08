@@ -80,6 +80,7 @@ def _build_auth(row: dict) -> dict | None:
         "user_id":           row["id"],
         "email":             row["email"],
         "role":              role,
+        "user_type":         row.get("user_type"),
         "society_id":        row.get("society_id"),
         "linked_id":         row.get("linked_id"),
         "security_id":       row.get("linked_id") if row.get("role") == "security" else None,
@@ -94,17 +95,17 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
     try:
         if society_id is None:
             return db._execute(
-                """SELECT id, email, role, society_id, linked_id, is_master_admin,
-                          password_hash, pin_hash, pattern_hash
+                """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
+                          password_hash, pin_hash, pattern_hash, locked_until
                     FROM users
                    WHERE email = :email
-                     AND is_master_admin = TRUE""",
+                     AND (society_id IS NULL OR is_master_admin = TRUE)""",
                 {"email": email},
                 fetch_one=True,
             )
         return db._execute(
-            """SELECT id, email, role, society_id, linked_id, is_master_admin,
-                      password_hash, pin_hash, pattern_hash
+            """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
+                      password_hash, pin_hash, pattern_hash, locked_until
                 FROM users
                WHERE email = :email
                  AND society_id = :sid""",

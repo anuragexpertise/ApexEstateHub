@@ -4202,7 +4202,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 params += [pk, sid]
                 db._execute(
                     f"UPDATE users SET {', '.join(set_parts)} "
-                    "WHERE linked_id=%s AND role='apartment' AND society_id=%s",
+                    "WHERE linked_id=%s AND role='apartment' AND society_id=%s AND user_type='owner'",
                     params,
                 )
             # Coerce boolean string from dropdown

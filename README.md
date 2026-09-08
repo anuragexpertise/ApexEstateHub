@@ -151,7 +151,7 @@ Primary management console. Scoped to `society_id`.
 - KPI dashboard customization (drag-and-drop layout editor)
 - Concern assignment and status tracking
 
-### 4.3 Owner Portal (Apartment)
+### 4.3 Apartment Portal (Owner / Family / Tenant / Visitor)
 Self-service for residents. Scoped to `[society_id, apartment_id]`.
 
 **Tabs:** Dashboard · My payables · My Charges · Events · Concerns · Cashbook · Settings
@@ -160,6 +160,16 @@ Self-service for residents. Scoped to `[society_id, apartment_id]`.
 - Raise and track maintenance concerns
 - View upcoming events, own gate pass QR
 - Default view: own apartment profile card below KPIs
+
+#### Apartment User Type Permissions Matrix
+
+| User Type | View Bills | Raise Concerns | Approve Gate Pass | Add Users |
+|---|---|---|---|---|
+| **owner** | Yes | Yes | Yes | family, tenant, visitor |
+| **family** | Yes | Yes | Yes | visitor only |
+| **tenant** | No | Yes | Yes | visitor only |
+| **visitor** | No | No | No | None |
+
 
 ### 4.4 Vendor Portal
 For registered service vendors. Scoped to `[society_id, vendor_id]`.

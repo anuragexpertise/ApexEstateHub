@@ -188,15 +188,27 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
 }
 
 
-def _perms_for(role: str, entity: str) -> set[str]:
+def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]:
     """Return allowed action set for role × entity."""
     key_specific = (role, entity)
     key_star     = (role, "*")
+    perms = set()
     if key_specific in _PORTAL_PERMS:
-        return _PORTAL_PERMS[key_specific]
-    if key_star in _PORTAL_PERMS:
-        return _PORTAL_PERMS[key_star]
-    return set()
+        perms = set(_PORTAL_PERMS[key_specific])
+    elif key_star in _PORTAL_PERMS:
+        perms = set(_PORTAL_PERMS[key_star])
+        
+    if role == "apartment":
+        if user_type == "visitor":
+            if entity == "concerns":
+                perms = set()  # No view or new
+            elif entity in ("receivables", "payables", "cashbook", "financials", "receipts"):
+                perms = set()
+        elif user_type == "tenant":
+            if entity in ("receivables", "payables", "cashbook", "financials", "receipts"):
+                perms = set()
+                
+    return perms
 
 # ── Human-readable FK resolution ────────────────────────────────────────
 # Prefer a joined alias from the row (e.g. fn_apt_charges returns
@@ -616,7 +628,7 @@ def render_list_card(card_id: str, title: str, icon: str,
     col_filters = {k: v for k, v in (col_filters or {}).items() if v not in (None, "")}
 
     # ── Resolve permissions for this role × entity ─────────────────────────
-    allowed = _perms_for(role, entity)
+    allowed = _perms_for(role, entity, auth_data.get("user_type"))
     # cashbook/ledger rows are paired display constructs from
     # fn_cashbook_paired_v3 / fn_account_ledger_fy — they carry no single
     # `id` column, so a per-row View/Edit/Delete button would resolve to
@@ -1211,7 +1223,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
     society_id = auth_data.get("society_id")
-    allowed    = _perms_for(role, entity)
+    allowed    = _perms_for(role, entity, auth_data.get("user_type"))
     entity_plural = to_plural(entity)
     hidden = _context_hidden_fields(filters)
 
@@ -1978,7 +1990,7 @@ def render_account_profile_card(card_id: str, title: str, icon: str,
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
-    allowed    = _perms_for(role, entity)
+    allowed    = _perms_for(role, entity, auth_data.get("user_type"))
     entity_plural = to_plural(entity)
     hidden = _context_hidden_fields(filters)
 
