@@ -87,9 +87,9 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
             """
             INSERT INTO accounts (
                 id, society_id, name, tab_name, header, parent_account_id,
-                drcr_account, has_bf, drcr_bf, depreciation_percent, is_depreciable
+                drcr_account, has_bf, drcr_bf, depreciation_percent, is_depreciable, created_by
             ) VALUES (:id, :society_id, :name, :tab_name, :header, :parent_account_id,
-                      :drcr_account, :has_bf, :drcr_bf, :depreciation_percent, :is_depreciable)
+                      :drcr_account, :has_bf, :drcr_bf, :depreciation_percent, :is_depreciable, :created_by)
             """,
             {
                 'id': account_id,
@@ -97,6 +97,7 @@ def create_account(society_id: int, account_id: int, data: dict) -> tuple[bool, 
                 'name': data["name"],
                 'tab_name': data.get("tab_name"),
                 'header': data.get("header"),
+                'created_by': get_current_user_id(),
                 'parent_account_id': data.get("parent_account_id", 1),
                 'drcr_account': data["drcr_account"],
                 'has_bf': data.get("has_bf", False),
