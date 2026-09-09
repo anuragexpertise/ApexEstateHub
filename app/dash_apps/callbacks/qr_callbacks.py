@@ -1063,16 +1063,33 @@ def register_qr_callbacks(app):
     # exactly once per click, with the card/toast/sound all derived from
     # that single result.
     @app.callback(
-        Output({"type": "manual-qr-result", "scope": MATCH}, "children"),
+        Output({"type": "manual-qr-result", "scope": ALL}, "children"),
         Output("toast-store", "data", allow_duplicate=True),
         Output("evaluate-pass-sound-store", "data", allow_duplicate=True),
-        Input({"type": "manual-qr-validate-btn", "scope": MATCH}, "n_clicks"),
-        State({"type": "manual-qr-input", "scope": MATCH}, "value"),
+        Input({"type": "manual-qr-validate-btn", "scope": ALL}, "n_clicks"),
+        State({"type": "manual-qr-input", "scope": ALL}, "value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def validate_manual_qr_scoped(n_clicks, qr_data, auth_data):
+    def validate_manual_qr_scoped(n_clicks_list, qr_data_list, auth_data):
+        if not ctx.triggered_id:
+            raise PreventUpdate
+
+        triggered_scope = ctx.triggered_id.get("scope")
+        
+        idx = -1
+        for i, input_data in enumerate(ctx.inputs_list[0]):
+            if input_data.get("id", {}).get("scope") == triggered_scope:
+                idx = i
+                break
+                
+        if idx == -1:
+            raise PreventUpdate
+            
+        n_clicks = n_clicks_list[idx]
+        qr_data = qr_data_list[idx]
+
         if not n_clicks or not (qr_data or "").strip():
             raise PreventUpdate
 
@@ -1097,8 +1114,13 @@ def register_qr_callbacks(app):
         )
         default_sound = {"type": "success"} if passed else {"type": "error"}
 
+        def _finish(card_html, toast_data, sound_data):
+            children_out = [no_update] * len(n_clicks_list)
+            children_out[idx] = card_html
+            return children_out, toast_data, sound_data
+
         if passed and role == "concern":
-            return (
+            return _finish(
                 render_concern_lookup_result(user["id"], society_id, auth_data),
                 default_toast, default_sound,
             )
@@ -1122,7 +1144,7 @@ def register_qr_callbacks(app):
                 # non-"PASS" status and reported an error toast/sound right
                 # next to this warning-colored card — inconsistent UX on top
                 # of the double side effect. Now consistently "warning".
-                return card, {"type": "warning", "message": msg or "Owner notified — awaiting confirmation"}, {"type": "warning"}
+                return _finish(card, {"type": "warning", "message": msg or "Owner notified — awaiting confirmation"}, {"type": "warning"})
 
             if passed:
                 card = html.Div([
@@ -1132,7 +1154,7 @@ def register_qr_callbacks(app):
                     html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
                     html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style={"color": "#95a5a6"}),
                 ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
-                return card, default_toast, default_sound
+                return _finish(card, default_toast, default_sound)
 
         if passed:
             card = html.Div([
@@ -1142,7 +1164,7 @@ def register_qr_callbacks(app):
                 html.Hr(),
                 html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
             ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
-            return card, default_toast, default_sound
+            return _finish(card, default_toast, default_sound)
 
         reason = result.get("reason", "Invalid QR code")
         card = html.Div([
@@ -1152,7 +1174,7 @@ def register_qr_callbacks(app):
             html.Hr(),
             html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
         ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"})
-        return card, default_toast, default_sound
+        return _finish(card, default_toast, default_sound)
 
     # ── 4. Render recent scans log ──────────────────────────────
     @app.callback(
