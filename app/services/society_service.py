@@ -8,6 +8,7 @@ Password hashing uses werkzeug (consistent with auth_service + seed).
 import logging
 from werkzeug.security import generate_password_hash
 from database.db_manager import db
+from app.security.audit_context import get_current_user_id
 
 log = logging.getLogger(__name__)
 
@@ -38,12 +39,20 @@ def get_society_details(society_id: int) -> dict | None:
 def create_society(data: dict) -> int | None:
     """Create society + admin user. Returns new society id or None."""
     try:
+        # Determine creator (could be passed in data during CLI/seed, else current user)
+        creator_id = data.get("created_by")
+        if creator_id is None:
+            try:
+                creator_id = get_current_user_id()
+            except RuntimeError:
+                pass  # Outside of app context
+
         result = db._execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
-                plan,plan_validity,calc_start_date, PAN_number, registration_number)
+                plan,plan_validity,calc_start_date, PAN_number, registration_number, created_by)
                VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
-                       :plan,:validity,:Calc, :pan, :reg_num)
+                       :plan,:validity,:Calc, :pan, :reg_num, :created_by)
                RETURNING id""",
             {
                 "name":     data["name"],
@@ -57,6 +66,7 @@ def create_society(data: dict) -> int | None:
                 "Calc":   data.get("Calc") or __import__("datetime").date.today().isoformat(),
                 "pan":    data.get("pan"),
                 "reg_num": data.get("reg_num"),
+                "created_by": creator_id,
             },
             fetch_one=True,
         )

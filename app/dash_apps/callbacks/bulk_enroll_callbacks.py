@@ -315,9 +315,9 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:
             usr_r = db._execute(
                 "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id) "
-                "VALUES (%s,%s,%s,'apartment','password',%s) RETURNING id",
-                (sid, email, generate_password_hash(password), apt_id),
+                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                (sid, email, generate_password_hash(password), apt_id, user_id),
                 fetch_one=True,
             )
             # linked_id was already set in the INSERT above; log the user id.
@@ -396,9 +396,9 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
         try:
             db._execute(
                 "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id) "
-                "VALUES (%s,%s,%s,'vendor','password',%s)",
-                (sid, email, generate_password_hash(password), ven_id),
+                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                "VALUES (%s,%s,%s,'vendor','password',%s,%s)",
+                (sid, email, generate_password_hash(password), ven_id, user_id),
             )
         except Exception as e:
             try:
@@ -465,9 +465,9 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
         try:
             db._execute(
                 "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id) "
-                "VALUES (%s,%s,%s,'security','password',%s)",
-                (sid, email, generate_password_hash(password), sec_id),
+                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                "VALUES (%s,%s,%s,'security','password',%s,%s)",
+                (sid, email, generate_password_hash(password), sec_id, user_id),
             )
         except Exception as e:
             try:
@@ -515,9 +515,9 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
             apt_id = apt_r["id"]
             
             db._execute(
-                "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type) "
-                "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s)",
-                (sid, email, generate_password_hash(password), apt_id, name, user_type),
+                "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type, created_by) "
+                "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s,%s)",
+                (sid, email, generate_password_hash(password), apt_id, name, user_type, user_id),
             )
             success += 1
         except Exception as e:

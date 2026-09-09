@@ -3418,9 +3418,9 @@ def _save_patrol_location(db, data, sid, is_edit, pk):
 
     if not is_edit:
         db._execute(
-            """INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-            (sid, loc_name, description, active, scan_interval, lat, lon, nfc)
+            """INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (sid, loc_name, description, active, scan_interval, lat, lon, nfc, get_current_user_id())
         )
         msg = f"Patrol location '{loc_name}' created."
         return True, msg, None
