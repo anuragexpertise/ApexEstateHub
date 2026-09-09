@@ -11,7 +11,6 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
-from app.services.qr_service import ROLE_CODE_MAP_REV, _QR_SIGNABLE_ROLES
 
 
 def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
@@ -1192,101 +1191,11 @@ def register_qr_callbacks(app):
         
         return items
 
-    # ── 5a-r1. Revoke & Reissue section visibility (admin-only) ────
-    # Gated server-side by role, not just hidden via CSS for cosmetics —
-    # the confirm callback below re-checks role independently too, so
-    # this is strictly a UX convenience (don't show a button a non-admin
-    # can't use), not the actual authorization boundary.
-    @app.callback(
-        Output('qr-modal-revoke-section', 'style'),
-        Input('qr-modal', 'is_open'),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def toggle_revoke_section_visibility(is_open):
-        if not is_open:
-            raise PreventUpdate
-        role = get_current_user_role() or ''
-        return {'display': 'block'} if role == 'admin' else {'display': 'none'}
-
-    # ── 5a-r2. Expand/collapse the reason picker ────────────────────
-    @app.callback(
-        Output('qr-modal-revoke-collapse', 'is_open'),
-        Output('qr-modal-revoke-reason', 'value'),
-        Input('qr-modal-revoke-toggle-btn', 'n_clicks'),
-        State('qr-modal-revoke-collapse', 'is_open'),
-        prevent_initial_call=True,
-    )
-    def toggle_revoke_collapse(n_clicks, is_open):
-        if not n_clicks:
-            raise PreventUpdate
-        # Clear any previously chosen reason on every open/close so a stale
-        # selection can't be silently reused for a different confirm click.
-        return not is_open, None
-
-    # ── 5a-r3. Confirm — the only place qr_version ever changes past
-    #           initial issuance. See qr_service.revoke_and_reissue.
-    @app.callback(
-        Output('qr-modal-img', 'src', allow_duplicate=True),
-        Output('qr-modal-text', 'value', allow_duplicate=True),
-        Output('qr-modal-revoke-collapse', 'is_open', allow_duplicate=True),
-        Output('toast-store', 'data', allow_duplicate=True),
-        Input('qr-modal-revoke-confirm-btn', 'n_clicks'),
-        State('qr-modal-revoke-reason', 'value'),
-        State('qr-entity-store', 'data'),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def confirm_revoke_and_reissue(n_clicks, reason, entity_data):
-        if not n_clicks or not entity_data:
-            raise PreventUpdate
-
-        # Real authorization boundary (server-guarded, admin-only) — the
-        # section-visibility callback above only hides the button from
-        # everyone else, it doesn't stop a direct callback invocation.
-        role = get_current_user_role() or ''
-        if role != 'admin':
-            return no_update, no_update, no_update, {
-                'type': 'error', 'message': 'Only an admin can revoke/reissue a QR code.'
-            }
-
-        if not reason:
-            return no_update, no_update, no_update, {
-                'type': 'warning', 'message': 'Select a reason before confirming.'
-            }
-
-        entity_role = entity_data.get('role')
-        entity_id = entity_data.get('entity_id')
-        entity_label = entity_data.get('name')
-        role_code = ROLE_CODE_MAP_REV.get(entity_role)
-        society_id = get_current_society_id()
-        actor_user_id = get_current_user_id()
-
-        if not entity_id or role_code not in _QR_SIGNABLE_ROLES:
-            return no_update, no_update, no_update, {
-                'type': 'error', 'message': 'This QR type cannot be revoked/reissued.'
-            }
-
-        from app.services.qr_service import revoke_and_reissue
-        try:
-            src, payload, old_nonce, new_nonce = revoke_and_reissue(
-                society_id, role_code, entity_id, reason, actor_user_id, entity_label,
-            )
-        except RuntimeError as e:
-            # QR_SIGNING_SECRET unset — no unsigned revoke exists.
-            return no_update, no_update, no_update, {'type': 'error', 'message': str(e)}
-        except ValueError as e:
-            return no_update, no_update, no_update, {'type': 'error', 'message': str(e)}
-
-        if not src:
-            return no_update, no_update, no_update, {
-                'type': 'error', 'message': f'Reissue failed: {payload}'
-            }
-
-        return src, payload, False, {
-            'type': 'success',
-            'message': f'QR reissued — old code revoked (reason: {reason}).',
-        }
+    # Revoke & Reissue callbacks (5a-r1/r2/r3) removed 2026-09 — moved to
+    # the dedicated Admin > Settings "Re-issue QR" tool. See
+    # app/dash_apps/callbacks/qr_reissue_callbacks.py, renderers.py's
+    # render_qr_reissue_card, and app_shell.py's _qr_modal (the removed
+    # qr-modal-revoke-section note explains the reasoning).
 
     # ── 5b. Save QR as PNG ────────────────────────────────────────
     # Pure read (2026-09) — reverted from an earlier design that stamped

@@ -312,4 +312,16 @@ def register_callbacks(app):
     #     form_patrol_location_new -> render_form_card), which already
     #     includes the interactive map (see patrol_map_callbacks.py).
 
+    # 21. Re-issue QR (Settings tab, admin-only) — entity lookup by role+id
+    #     or by pasting a QR string, signing-secret confirmation, and the
+    #     actual revoke_and_reissue call + log table refresh. Requires the
+    #     "form_qr_reissue" render branch in drilldown_callbacks.py and
+    #     renderers.render_qr_reissue_card. Replaces the old in-modal
+    #     Revoke & Reissue button removed from app_shell.py's _qr_modal.
+    try:
+        from .qr_reissue_callbacks import register_qr_reissue_callbacks
+        register_qr_reissue_callbacks(app)
+    except Exception as e:
+        print(f"⚠️ qr_reissue_callbacks failed: {e}")
+
     print("✅ All callbacks registered")

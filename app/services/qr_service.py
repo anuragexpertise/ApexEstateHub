@@ -805,6 +805,173 @@ def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int = None) 
         return {"status": "FAIL", "reason": f"NOC validation error: {str(e)}", "gate_action": "deny"}
 
 
+def verify_scanned_qr(qr_data: str, society_id: int) -> dict:
+    """
+    Strict verification for the Re-issue tool's "scan/paste existing QR"
+    path — this is deliberately STRICTER than validate_qr_code's normal
+    scan-time leniency. validate_qr_code still accepts a legacy unsigned
+    code for a versioned role (to not brick every pass mid-reprint-
+    rollout); this function does not — an admin using this tool to say
+    "here is the exact QR I'm holding" must be handed a code that is
+    genuinely signed, matches the entity's CURRENT qr_version, and belongs
+    to this society. Anything else (unsigned, garbled, wrong society,
+    stale/superseded nonce) is rejected outright rather than falling
+    through to "well, it parses". This does not check for statefulness
+    (e.g. an already-consumed event ticket) since it never dispatches to
+    a role-specific validator at all — it only confirms "this is a real,
+    currently-valid signed QR for role_code/entity_id in this society",
+    then hands off to resolve_entity_for_reissue for the human-readable
+    label the same as the manual lookup path does.
+
+    Returns {"role_code": str, "entity_id": int} on success,
+    {"error": str} otherwise.
+    """
+    parsed = parse_qr_payload(qr_data)
+    if "error" in parsed:
+        return {"error": parsed["error"]}
+
+    if parsed["society_id"] != society_id:
+        return {"error": "This QR was not issued by your society."}
+
+    role_code = parsed["role_code"]
+    if role_code not in _QR_SIGNABLE_ROLES:
+        return {"error": f"{role_code!r} QR codes cannot be re-issued."}
+
+    sig = parsed.get("sig")
+    qr_version = parsed.get("qr_version")
+    if sig is None:
+        return {"error": "This QR has no signature — it can't be confirmed as a "
+                          "genuinely issued code. Use the manual lookup instead."}
+
+    secret = _get_signing_secret(society_id)
+    if not secret:
+        return {"error": "This society has no Signing Secret configured yet."}
+
+    entity_id = parsed["entity_id"]
+    current_version = _current_qr_version(role_code, entity_id)
+    expected_sig = _qr_sign(secret, society_id, role_code, entity_id, qr_version)
+    if (
+        current_version is None
+        or qr_version != current_version
+        or not hmac.compare_digest(sig, expected_sig)
+    ):
+        return {"error": "This QR is invalid or was already superseded by a previous re-issue."}
+
+    return {"role_code": role_code, "entity_id": entity_id}
+
+
+def verify_signing_secret(society_id: int, typed_secret: str) -> bool:
+    """
+    Constant-time check that `typed_secret` matches this society's
+    configured SIGNING_SECRET. Used as a step-up confirmation before the
+    admin-only Re-issue tool is allowed to call revoke_and_reissue — typing
+    the actual secret (not just being logged in as admin) is the proof
+    that this is a deliberate, authorized action, since qr_reissue_log
+    entries can't be undone and immediately invalidate a real printed
+    pass. Returns False (never raises) if the society has no secret
+    configured yet or typed_secret is empty.
+    """
+    secret = _get_signing_secret(society_id)
+    if not secret or not typed_secret:
+        return False
+    return hmac.compare_digest(secret, typed_secret)
+
+
+def resolve_entity_for_reissue(role_code: str, entity_id: int, society_id: int,
+                                date_of_issue=None) -> dict:
+    """
+    Pure, side-effect-free lookup of a display label for a QR-signable
+    entity, for the admin-only "Re-issue QR" tool (Settings tab — see
+    render_qr_reissue_card / qr_reissue_callbacks.py). This is NOT part of
+    the scan/validate path and deliberately does not call validate_qr_code:
+    several of its role branches have real side effects when a code is
+    actually scanned — validate_patrol_qr logs a patrol_scans row and can
+    complete a patrol_tasks row, for instance — and an admin merely looking
+    an entity up while choosing what to reissue must never trigger those.
+
+    date_of_issue (a date, or an ISO "YYYY-MM-DD" string), when given, is
+    required to match the entity's own created_at date (issued_date for
+    NOC) as an extra WHERE-clause filter — not a separate post-lookup
+    comparison, so a right-ID-wrong-date guess gets the exact same generic
+    "not found" as a wrong ID, rather than confirming the ID exists. This
+    is what makes the manual path require actually knowing the entity's
+    record (something visible on the printed pass or in the admin's own
+    files), not just a guessable sequential id — the scan/paste path
+    (verify_scanned_qr) gets its equivalent proof of legitimacy from the
+    cryptographic signature instead.
+
+    Returns {"label": str} on success, {"error": str} if the role isn't
+    reissuable or no matching entity exists in this society. label is
+    meant to be passed straight through as revoke_and_reissue's
+    entity_label.
+    """
+    role_code = (role_code or "").upper().strip()
+    if role_code not in _QR_SIGNABLE_ROLES:
+        return {"error": f"{role_code!r} is not a re-issuable QR role"}
+
+    date_clause = " AND created_at::date = %s" if date_of_issue else ""
+    date_params = (date_of_issue,) if date_of_issue else ()
+    not_found_msg = (
+        "No record found matching that role, ID, and date of issue."
+        if date_of_issue else "Entity not found"
+    )
+
+    try:
+        if role_code == "ADM":
+            row = db._execute(
+                f"SELECT name FROM users WHERE id=%s AND role='admin' AND society_id=%s{date_clause}",
+                (entity_id, society_id) + date_params, fetch_one=True,
+            )
+            return {"label": row["name"]} if row else {"error": not_found_msg}
+
+        if role_code == "PTL":
+            row = db._execute(
+                f"SELECT location_name FROM patrol_locations WHERE id=%s AND society_id=%s{date_clause}",
+                (entity_id, society_id) + date_params, fetch_one=True,
+            )
+            return {"label": row["location_name"]} if row else {"error": not_found_msg}
+
+        if role_code in ("APT", "VND", "SEC"):
+            role_name = ROLE_CODE_MAP.get(role_code)
+            row = db._execute(
+                f"""SELECT u.name FROM users u
+                   WHERE u.linked_id=%s AND u.role=%s AND u.society_id=%s{date_clause}""",
+                (entity_id, role_name, society_id) + date_params, fetch_one=True,
+            )
+            return {"label": row["name"]} if row else {"error": not_found_msg}
+
+        # CON/RPT/EXP/AST/NOC: date filter needs its own small query first
+        # (NOC uses issued_date, not created_at) — the validators below are
+        # still used for the label/existence check itself, unchanged.
+        if date_of_issue:
+            date_col = "issued_date" if role_code == "NOC" else "created_at::date"
+            date_table = _QR_VERSIONED_ROLES[role_code]
+            row = db._execute(
+                f"SELECT 1 FROM {date_table} WHERE id=%s AND society_id=%s AND {date_col}=%s",
+                (entity_id, society_id, date_of_issue), fetch_one=True,
+            )
+            if not row:
+                return {"error": not_found_msg}
+
+        validator = {
+            "CON": validate_concern_qr,
+            "RPT": validate_receipt_qr,
+            "EXP": validate_expense_qr,
+            "AST": validate_asset_qr,
+            "NOC": validate_noc_qr,
+        }[role_code]
+        result = validator(entity_id, society_id)
+        user = result.get("user")
+        if user:
+            return {"label": user.get("name", f"{role_code} {entity_id}")}
+        # NOC's PASS/FAIL reflects valid/expired/revoked, not found-or-not —
+        # an expired/revoked NOC still returns a user dict above, so
+        # reaching here means a genuine "not found".
+        return {"error": result.get("reason", "Entity not found")}
+    except Exception as e:
+        return {"error": f"Lookup error: {str(e)}"}
+
+
 ATTENDANCE_QR_EXPIRY_SECONDS = 60
 
 

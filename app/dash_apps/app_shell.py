@@ -903,51 +903,14 @@ def _qr_modal() -> dbc.Modal:
                     # every 60th tick (see refresh_atd_qr in qr_callbacks.py).
                     dcc.Interval(id="qr-atd-refresh-interval", interval=1000,
                                  n_intervals=0, disabled=True),
-                    # Revoke & Reissue (2026-09) — admin-only, hidden for
-                    # everyone else by toggle_revoke_section_visibility in
-                    # qr_callbacks.py. Deliberately NOT wired to Save/Print/
-                    # Email — see qr_service.revoke_and_reissue's docstring:
-                    # this is the single, explicit, reasoned trigger for a
-                    # nonce change.
-                    html.Div(
-                        [
-                            html.Hr(),
-                            dbc.Button(
-                                [html.I(className="fas fa-rotate me-2"), "Revoke & Reissue QR"],
-                                id="qr-modal-revoke-toggle-btn", n_clicks=0,
-                                color="danger", outline=True, size="sm",
-                                style={"width": "100%"},
-                            ),
-                            dbc.Collapse(
-                                html.Div(
-                                    [
-                                        dbc.Label("Reason", style={"fontSize": "12px", "marginTop": "8px"}),
-                                        dcc.Dropdown(
-                                            id="qr-modal-revoke-reason",
-                                            options=[
-                                                {"label": "Lost",        "value": "lost"},
-                                                {"label": "Theft",       "value": "theft"},
-                                                {"label": "Mutilated",   "value": "mutilated"},
-                                                {"label": "Requested",   "value": "request"},
-                                                {"label": "Other",       "value": "other"},
-                                            ],
-                                            placeholder="Select a reason...",
-                                            clearable=False,
-                                        ),
-                                        dbc.Button(
-                                            "Confirm Revoke & Reissue",
-                                            id="qr-modal-revoke-confirm-btn", n_clicks=0,
-                                            color="danger", size="sm",
-                                            style={"width": "100%", "marginTop": "8px"},
-                                        ),
-                                    ],
-                                ),
-                                id="qr-modal-revoke-collapse", is_open=False,
-                            ),
-                        ],
-                        id="qr-modal-revoke-section",
-                        style={"display": "none"},
-                    ),
+                    # Revoke & Reissue was here (2026-09 in-modal button) —
+                    # moved 2026-09 to a dedicated Admin > Settings tool
+                    # ("Re-issue QR" KPI -> render_qr_reissue_card in
+                    # renderers.py, callbacks in qr_reissue_callbacks.py).
+                    # Revoking a printed pass is now a deliberate,
+                    # manually-targeted Settings-tab action requiring the
+                    # society's own SIGNING_SECRET typed in to confirm,
+                    # rather than a button sitting next to every QR view.
                 ])
             ),
             dbc.ModalFooter(

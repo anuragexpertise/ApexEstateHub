@@ -419,6 +419,28 @@ def _fy_date_range(fy: int) -> tuple[date, date]:
     return date(fy, 4, 1), date(fy + 1, 3, 31)
 
 
+def get_qr_reissue_log(society_id: int, limit: int = 20) -> list[dict]:
+    """
+    Recent QR revoke/reissue actions for this society, newest first — the
+    audit trail shown under the Settings-tab "Re-issue QR" tool. old_nonce/
+    new_nonce are masked to their last 2 digits in the SELECT itself so a
+    scanned/leaked full nonce doesn't sit in this admin-facing log too.
+    """
+    rows = db._execute(
+        """SELECT rl.role_code, rl.entity_id, rl.entity_label,
+                  RIGHT(rl.old_nonce, 2) AS old_nonce_tail,
+                  RIGHT(rl.new_nonce, 2) AS new_nonce_tail,
+                  rl.reason, rl.created_at, u.name AS actor_name
+           FROM qr_reissue_log rl
+           LEFT JOIN users u ON u.id = rl.actor_user_id
+           WHERE rl.society_id = %s
+           ORDER BY rl.created_at DESC
+           LIMIT %s""",
+        (society_id, limit), fetch_all=True,
+    )
+    return rows or []
+
+
 def get_available_financial_years(society_id: int) -> list[int]:
     """
     FY-start-year options for the Financials tab's FY selector: the
