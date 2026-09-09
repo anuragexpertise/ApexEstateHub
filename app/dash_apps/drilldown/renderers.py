@@ -3880,6 +3880,151 @@ def render_verify_receivable_card(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# RE-ISSUE QR CARD — Settings tab, admin-only. Resolve an entity (manual
+# role+id lookup or a pasted QR string), confirm with the society's own
+# SIGNING_SECRET, and call qr_service.revoke_and_reissue. Replaces the old
+# in-modal "Revoke & Reissue" button that used to live inside the Gate Pass
+# QR viewer (qr-modal) — see qr_reissue_callbacks.py for the callbacks.
+# ════════════════════════════════════════════════════════════════════════════
+
+_QR_REISSUE_ROLE_OPTIONS = [
+    {"label": "Apartment / Owner", "value": "APT"},
+    {"label": "Vendor",            "value": "VND"},
+    {"label": "Security Staff",    "value": "SEC"},
+    {"label": "Admin",             "value": "ADM"},
+    {"label": "Patrol Location",   "value": "PTL"},
+    {"label": "Concern",           "value": "CON"},
+    {"label": "Receipt",           "value": "RPT"},
+    {"label": "Expense",           "value": "EXP"},
+    {"label": "Asset",             "value": "AST"},
+    {"label": "NOC",               "value": "NOC"},
+]
+
+
+def _qr_reissue_log_rows(log_rows: list) -> list:
+    rows = [
+        html.Tr([
+            html.Td(str(r.get("created_at") or "")[:16]),
+            html.Td(r.get("role_code", "")),
+            html.Td(r.get("entity_label") or f"#{r.get('entity_id')}"),
+            html.Td(f"…{r.get('old_nonce_tail') or '--'} → …{r.get('new_nonce_tail') or '--'}"),
+            html.Td(r.get("reason", "")),
+            html.Td(r.get("actor_name") or "—"),
+        ])
+        for r in log_rows
+    ]
+    return rows or [html.Tr(html.Td("No re-issues yet.", colSpan=6, className="text-muted text-center"))]
+
+
+def render_qr_reissue_card(log_rows: list) -> html.Div:
+    """
+    log_rows come from loaders.get_qr_reissue_log — already masked to the
+    last 2 digits of each nonce (see that function's docstring); nothing
+    here needs to re-mask them.
+    """
+    color = "#de5c52"
+
+    entity_picker = html.Div([
+        html.H6("1. Find the entity", style={"fontWeight": "700", "marginBottom": "10px"}),
+        html.Div(
+            "Manual lookup requires the entity's exact date of issue (visible "
+            "on the printed pass / in its record) — this is what stops a "
+            "role+ID guess alone from finding a real entity to revoke.",
+            className="text-muted mb-2", style={"fontSize": "12px"},
+        ),
+        dbc.Row([
+            dbc.Col(dcc.Dropdown(
+                id="qr-reissue-role-select",
+                options=_QR_REISSUE_ROLE_OPTIONS,
+                placeholder="Role...", clearable=False,
+            ), width=4),
+            dbc.Col(dbc.Input(
+                id="qr-reissue-entity-id-input", type="number",
+                placeholder="Entity ID", min=1,
+            ), width=3),
+            dbc.Col(dcc.DatePickerSingle(
+                id="qr-reissue-issue-date", placeholder="Date of issue",
+                display_format="YYYY-MM-DD", style={"width": "100%"},
+            ), width=3),
+            dbc.Col(dbc.Button(
+                "Look Up", id="qr-reissue-lookup-btn", n_clicks=0,
+                color="secondary", style={"width": "100%"},
+            ), width=2),
+        ], className="g-2"),
+        html.Div("— or scan/paste the entity's existing, currently-valid QR —",
+                  className="text-center text-muted my-2", style={"fontSize": "12px"}),
+        dbc.Row([
+            dbc.Col(dbc.Textarea(
+                id="qr-reissue-qr-paste",
+                placeholder="Paste/scan the printed QR string, e.g. 1-APT-42-1234-abcd1234ef",
+                style={"minHeight": "44px", "fontFamily": "monospace", "fontSize": "13px"},
+            ), width=9),
+            dbc.Col(dbc.Button(
+                "Parse QR", id="qr-reissue-parse-btn", n_clicks=0,
+                color="secondary", style={"width": "100%"},
+            ), width=3),
+        ], className="g-2"),
+        html.Div(id="qr-reissue-resolved-display", className="mt-2"),
+        dcc.Store(id="qr-reissue-resolved-store"),
+    ], style={"padding": "16px", "borderBottom": "1px solid #eee"})
+
+    confirm_section = html.Div([
+        html.H6("2. Confirm the re-issue", style={"fontWeight": "700", "marginBottom": "10px"}),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Reason", style={"fontSize": "12px"}),
+                dcc.Dropdown(
+                    id="qr-reissue-reason",
+                    options=[
+                        {"label": "Lost",      "value": "lost"},
+                        {"label": "Theft",     "value": "theft"},
+                        {"label": "Mutilated", "value": "mutilated"},
+                        {"label": "Requested", "value": "request"},
+                        {"label": "Other",     "value": "other"},
+                    ],
+                    placeholder="Select a reason...", clearable=False,
+                ),
+            ], width=6),
+            dbc.Col([
+                dbc.Label("This society's Signing Secret", style={"fontSize": "12px"}),
+                dbc.Input(id="qr-reissue-secret-input", type="password",
+                          placeholder="Required to confirm"),
+            ], width=6),
+        ], className="g-2 mb-2"),
+        dbc.Button(
+            [html.I(className="fas fa-rotate me-2"), "Confirm Re-issue"],
+            id="qr-reissue-confirm-btn", n_clicks=0,
+            color="danger", style={"width": "100%"},
+        ),
+        html.Div(id="qr-reissue-result", className="mt-3"),
+    ], style={"padding": "16px", "borderBottom": "1px solid #eee"})
+
+    log_section = html.Div([
+        html.H6("Recent re-issues", style={"fontWeight": "700", "marginBottom": "10px"}),
+        dbc.Table(
+            [
+                html.Thead(html.Tr([html.Th(h) for h in
+                            ["When", "Role", "Entity", "Old→New", "Reason", "By"]])),
+                html.Tbody(_qr_reissue_log_rows(log_rows), id="qr-reissue-log-tbody"),
+            ],
+            bordered=False, hover=True, size="sm", responsive=True,
+        ),
+    ], style={"padding": "16px"})
+
+    return html.Div([
+        html.Div([
+            html.I(className="fas fa-rotate", style={"color": "#fff", "fontSize": "16px"}),
+        ], style={"width": "36px", "height": "36px", "borderRadius": "10px",
+                   "background": color, "display": "flex", "alignItems": "center",
+                   "justifyContent": "center", "margin": "16px"}),
+        entity_picker,
+        confirm_section,
+        log_section,
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # PAY DUES CARD  — FIFO payment form prefilled from apartment dues
 # ════════════════════════════════════════════════════════════════════════════
 

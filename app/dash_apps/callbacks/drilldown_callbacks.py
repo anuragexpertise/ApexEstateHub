@@ -592,6 +592,22 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, no_update
 
+            # ── Re-issue QR — Settings tab, admin-only. Custom card, not
+            # schema-driven. Replaces the old in-modal Revoke & Reissue
+            # button (see qr_service.revoke_and_reissue and
+            # renderers.render_qr_reissue_card).
+            if card_id == "kpi_qr_reissue":
+                if role != "admin":
+                    return no_update, no_update, no_update, no_update, {
+                        "_toast": {"type": "error", "message": "Admin only."}
+                    }
+                store = nav_state.initial_state(role, sid)
+                store = nav_state.navigate_to(store, "form_qr_reissue", "Re-issue QR")
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
             nav_info = DRILLDOWN_MAP.get(card_id, {})
             target = nav_info.get("target")
             if not target:
@@ -2887,6 +2903,20 @@ def _render_card(
                 page=page, page_size=page_size, fy_options=fy_options, selected_fy=selected_fy,
                 entity_id=entity_id
             )
+
+        # ── Re-issue QR — Settings tab, admin-only. Entity is resolved via
+        # either manual role+id lookup or a pasted QR string, both handled
+        # by qr_reissue_callbacks.py; this branch only renders the initial
+        # empty form plus the recent-actions log. Admin-only is enforced
+        # again here (not just at the KPI-click dispatch above), same
+        # belt-and-suspenders pattern as confirm_revoke_and_reissue used to
+        # follow for the in-modal version this replaces.
+        if card_id == "form_qr_reissue":
+            if get_current_user_role() != "admin":
+                return html.Div("Admin only.", className="text-danger p-3")
+            sid_val = filters.get("society_id")
+            log_rows = loaders.get_qr_reissue_log(sid_val) if sid_val else []
+            return renderers.render_qr_reissue_card(log_rows=log_rows)
 
         # ── Pay Dues — special FIFO form (not schema-driven) ─────────────────
         if card_id == "form_pay_dues_new":

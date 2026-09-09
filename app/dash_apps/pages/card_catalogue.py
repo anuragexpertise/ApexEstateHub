@@ -625,6 +625,21 @@ KPI_CARDS = {
         "title": "TDS Rates", "group": "settings",
     },
 
+    # Nav tile for the Re-issue QR tool (Settings tab, admin-only). Custom
+    # card, not schema-driven — same "View" + bypass-DRILLDOWN_MAP pattern
+    # as kpi_fy_closing_report/kpi_my_ledger (see the special-case dispatch
+    # in drilldown_callbacks.py and renderers.render_qr_reissue_card).
+    # Replaces the old in-modal "Revoke & Reissue" button that used to live
+    # inside the Gate Pass QR viewer (qr-modal) — moved here so revoking a
+    # printed pass is a deliberate Settings-tab action requiring the
+    # society's own SIGNING_SECRET, not a button next to every QR view.
+    "kpi_qr_reissue": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-rotate", "color": "#de5c52",
+        "title": "Re-issue QR", "group": "settings",
+    },
+
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
@@ -1109,6 +1124,7 @@ DEFAULT_LAYOUTS = {
             "kpi_time_qr",
             "kpi_patrol_locations",
             "kpi_tds_rates",
+            "kpi_qr_reissue",
         ],
         "channels": [
             "kpi_channels_total",
