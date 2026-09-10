@@ -271,10 +271,10 @@ def render_category_content(category, society_id=None):
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due, s_sink, s_repair, s_int = 0.0, 0.0, 1, 0.0, 0.0, 0.0
         if society_id:
-            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
-                s_sink, s_repair, s_int = row.get("apt_sinking_fund_rate", 0.0) or 0.0, row.get("apt_repair_fund_rate", 0.0) or 0.0, row.get("apt_interest_rate", 0.0) or 0.0
+                s_sink, s_repair, s_int = row.get("apt_sinking_fund_rate", 0.0) or 0.0, row.get("apt_repair_fund_rate", 0.0) or 0.0, row.get("apt_interest_pct", 0.0) or 0.0
         return [
             _render_banner("Apartment Charges", "Set default charges, billing cycle day, sinking fund, and repair fund rates for all apartments."),
             dbc.Row([dbc.Col([dbc.Label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([dbc.Label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
