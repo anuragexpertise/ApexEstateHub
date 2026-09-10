@@ -1511,18 +1511,15 @@ BEGIN
     SELECT a.society_id, p.tab_name
       INTO v_acc_society_id, v_parent_tab
       FROM accounts a
-      LEFT JOIN accounts p ON p.id = a.parent_account_id
-     WHERE a.id = NEW.primary_bank_account_id;
+      LEFT JOIN accounts p ON p.society_id = a.society_id AND p.id = a.parent_account_id
+     WHERE a.society_id = NEW.id AND a.id = NEW.primary_bank_account_id;
 
     IF v_acc_society_id IS NULL THEN
-        RAISE EXCEPTION 'primary_bank_account_id % does not exist', NEW.primary_bank_account_id;
-    END IF;
-    IF v_acc_society_id <> NEW.id THEN
-        RAISE EXCEPTION 'primary_bank_account_id % belongs to a different society (society %, not %)',
-            NEW.primary_bank_account_id, v_acc_society_id, NEW.id;
+        RAISE EXCEPTION 'primary_bank_account_id % does not exist for society %', NEW.primary_bank_account_id, NEW.id;
     END IF;
     IF v_parent_tab IS DISTINCT FROM 'BkAc' THEN
         RAISE EXCEPTION 'primary_bank_account_id % is not a child of the Bank Accounts (BkAc) header account',
+
             NEW.primary_bank_account_id;
     END IF;
 

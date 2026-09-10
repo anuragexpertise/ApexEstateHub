@@ -386,13 +386,8 @@ def register_drilldown_callbacks(app):
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
-            if entity_pk and str(entity_pk).strip() and society_id:
-                if entity == "society":
-                    target_dir = Path("app/assets") / str(society_id)
-                elif entity in ("apartment", "vendor", "security", "concern", "event"):
-                    target_dir = Path("app/assets") / str(society_id) / entity / str(entity_pk)
-                else:
-                    target_dir = Path("app/assets") / str(society_id) / f"{entity}_{entity_pk}"
+            if society_id:
+                target_dir = Path("app/assets") / str(society_id)
             else:
                 target_dir = Path("app/assets/default") / entity
 
@@ -413,9 +408,8 @@ def register_drilldown_callbacks(app):
             with open(file_path, "wb") as f:
                 f.write(webp_bytes)
 
-            if entity_pk and str(entity_pk).strip() and society_id:
-                web_path = (f"/assets/{society_id}/{safe_filename}" if entity == "society"
-                            else f"/assets/{society_id}/{entity}/{entity_pk}/{safe_filename}")
+            if society_id:
+                web_path = f"/assets/{society_id}/{safe_filename}"
             else:
                 web_path = f"/assets/default/{entity}/{safe_filename}"
 
@@ -1751,7 +1745,10 @@ def register_drilldown_callbacks(app):
                         raise ValueError("Could not compress image below 25KB")
 
                     from pathlib import Path as _Path
-                    _dir = _Path("app/assets/default") / entity_singular
+                    if sid:
+                        _dir = _Path("app/assets") / str(sid)
+                    else:
+                        _dir = _Path("app/assets/default") / entity_singular
                     _dir.mkdir(parents=True, exist_ok=True)
                     _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webp"
                     with open(_dir / _fname, "wb") as _f:
