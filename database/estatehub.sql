@@ -9194,13 +9194,13 @@ BEGIN
         UPDATE apt_charges_fines_basis
         SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
             apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
-            apt_repair_fund_rate = p_apt_repair, apt_interest_rate = p_apt_interest,
+            apt_repair_fund_rate = p_apt_repair, apt_interest_pct = p_apt_interest,
             updated_at = NOW(), updated_by = p_created_by
         WHERE id = v_apt_id;
     ELSE
         INSERT INTO apt_charges_fines_basis
             (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
-             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_rate, created_by)
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, created_by)
         VALUES
             (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
              p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest, p_created_by);
