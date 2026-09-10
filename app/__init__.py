@@ -131,6 +131,48 @@ def create_app(config_name: str | None = None) -> Flask:
     def serve_asset(filename):
         return send_from_directory(str(assets_path), filename)
 
+    @app.route("/print_doc/<doc_type>")
+    def print_doc(doc_type):
+        import os
+        base_dir = Path(__file__).parent.parent
+        if doc_type == "readme":
+            file_path = base_dir / "README.md"
+            title = "EstateHub Instructions"
+        elif doc_type == "agreement":
+            file_path = base_dir / "database" / "AGREEMENT.md"
+            title = "EstateHub Agreement"
+        else:
+            return "Document not found", 404
+            
+        content = ""
+        if os.path.exists(file_path):
+            with open(file_path, "r") as f:
+                content = f.read()
+                
+        # Simple HTML wrapper for printing
+        import html
+        escaped_content = html.escape(content)
+        html_page = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>{title}</title>
+            <style>
+                body {{ font-family: -apple-system, sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                pre {{ white-space: pre-wrap; font-family: inherit; }}
+                @media print {{
+                    .no-print {{ display: none; }}
+                }}
+            </style>
+        </head>
+        <body onload="window.print()">
+            <button class="no-print" onclick="window.print()" style="padding: 10px; margin-bottom: 20px; cursor: pointer;">Print</button>
+            <pre>{escaped_content}</pre>
+        </body>
+        </html>
+        """
+        return html_page
+
     # Flask-Login
     login_manager.login_view = "auth.login"
 

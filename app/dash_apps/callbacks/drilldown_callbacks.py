@@ -1867,6 +1867,7 @@ def register_drilldown_callbacks(app):
                     "validity": validity_date if validity_date else None,
                     "admin_email": admin_email,
                     "admin_password": admin_password,
+                    "created_by": auth.get("user_id") if auth else None,
                 })
                 if not nsid:
                     return (store, no_update, no_update, 

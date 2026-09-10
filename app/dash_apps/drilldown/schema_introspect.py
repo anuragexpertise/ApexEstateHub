@@ -67,7 +67,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
 _SYSTEM_COLUMNS = {
     "id", "society_id", "user_id", "created_at", "updated_at",
     "password_hash", "pin_hash", "pattern_hash", "linked_id",
-    "created_by", "updated_by", "qr_payload",
+    "created_by", "updated_by", "qr_payload", "qr_version",
     # per-society QR signing secret — reversible ciphertext (see
     # secret_vault.py), not just a hash like the auth fields above, so an
     # accidental raw-text edit through the generic form could silently
@@ -91,7 +91,7 @@ _SYSTEM_COLUMNS = {
 
 # System columns that should still appear in profile cards (audit trail).
 _PROFILE_VISIBLE_SYSTEM = {
-    "created_at", "updated_at", "created_by", "updated_by", "qr_payload",
+    "created_at", "updated_at", "created_by", "updated_by", "qr_payload", "qr_version",
     "bank_statement_line_id",
 }
 

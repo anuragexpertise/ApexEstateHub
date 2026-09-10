@@ -9091,7 +9091,18 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_ven_1mth          NUMERIC,
     p_bf_fy             INT,
     p_bf_json           JSONB,
-    p_created_by        INT
+    p_created_by        INT,
+    p_email             VARCHAR(30) DEFAULT NULL,
+    p_reg_num           VARCHAR(100) DEFAULT NULL,
+    p_apt_interest      NUMERIC DEFAULT 0,
+    p_sinking_fund_basis VARCHAR(20) DEFAULT 'per_sq_ft',
+    p_repair_fund_basis VARCHAR(20) DEFAULT 'per_sq_ft',
+    p_fund_gst_exempt   BOOLEAN DEFAULT TRUE,
+    p_fund_charges_int  BOOLEAN DEFAULT TRUE,
+    p_gst_cadence       VARCHAR(20) DEFAULT 'monthly',
+    p_gst_registered    BOOLEAN DEFAULT FALSE,
+    p_tds_no_pan        VARCHAR(10) DEFAULT 'warn',
+    p_export_fmt        VARCHAR(20) DEFAULT 'structured'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -9116,6 +9127,8 @@ BEGIN
         logo = COALESCE(p_logo, logo),
         address = COALESCE(p_address, address),
         phone = COALESCE(p_phone, phone),
+        email = COALESCE(p_email, email),
+        registration_number = COALESCE(p_reg_num, registration_number),
         login_background = COALESCE(p_login_bg, login_background),
         tan_number = COALESCE(p_tan, tan_number),
         gstin = COALESCE(p_gstin, gstin),
@@ -9124,17 +9137,36 @@ BEGIN
         secretary_name = COALESCE(p_sec_name, secretary_name),
         secretary_phone = COALESCE(p_sec_phone, secretary_phone),
         secretary_email = COALESCE(p_sec_email, secretary_email),
-        secretary_sign = COALESCE(p_sec_sign, secretary_sign)
+        secretary_sign = COALESCE(p_sec_sign, secretary_sign),
+        primary_bank_account_id = COALESCE(primary_bank_account_id, 6311),
+        created_by = COALESCE(created_by, p_created_by)
     WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; last value per section wins — see note above)
     IF p_tds_rates IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(p_tds_rates)
         LOOP
-            INSERT INTO tds_section_rates (society_id, section, rate, effective_from)
-            VALUES (p_society_id, v_item->>'section', (v_item->>'rate')::NUMERIC, '2024-04-01')
+            INSERT INTO tds_section_rates (
+                society_id, section, nature_of_income, rate, rate_no_pan, 
+                single_bill_threshold, annual_aggregate_threshold, effective_from
+            )
+            VALUES (
+                p_society_id, 
+                v_item->>'section', 
+                v_item->>'nature_of_income', 
+                (v_item->>'rate')::NUMERIC, 
+                (v_item->>'rate_no_pan')::NUMERIC,
+                (v_item->>'single_bill_threshold')::NUMERIC,
+                (v_item->>'annual_aggregate_threshold')::NUMERIC,
+                '2024-04-01'
+            )
             ON CONFLICT (society_id, section, effective_from)
-            DO UPDATE SET rate = EXCLUDED.rate;
+            DO UPDATE SET 
+                nature_of_income = EXCLUDED.nature_of_income,
+                rate = EXCLUDED.rate,
+                rate_no_pan = EXCLUDED.rate_no_pan,
+                single_bill_threshold = EXCLUDED.single_bill_threshold,
+                annual_aggregate_threshold = EXCLUDED.annual_aggregate_threshold;
         END LOOP;
     END IF;
 
@@ -9162,16 +9194,41 @@ BEGIN
         UPDATE apt_charges_fines_basis
         SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
             apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
-            apt_repair_fund_rate = p_apt_repair, updated_at = NOW(), updated_by = p_created_by
+            apt_repair_fund_rate = p_apt_repair, apt_interest_rate = p_apt_interest,
+            updated_at = NOW(), updated_by = p_created_by
         WHERE id = v_apt_id;
     ELSE
         INSERT INTO apt_charges_fines_basis
             (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
-             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, created_by)
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_rate, created_by)
         VALUES
             (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
-             p_apt_due_day, p_apt_sinking, p_apt_repair, p_created_by);
+             p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest, p_created_by);
     END IF;
+
+    -- 4.5) Society compliance settings
+    INSERT INTO society_compliance_settings (
+        society_id, sinking_fund_rate_basis, repair_fund_rate_basis, 
+        fund_gst_exempt, fund_charges_interest, gst_filing_cadence, 
+        gst_registered, gstin, tds_no_pan_action, default_export_format
+    )
+    VALUES (
+        p_society_id, p_sinking_fund_basis, p_repair_fund_basis,
+        p_fund_gst_exempt, p_fund_charges_int, p_gst_cadence,
+        p_gst_registered, p_gstin, p_tds_no_pan, p_export_fmt
+    )
+    ON CONFLICT (society_id)
+    DO UPDATE SET 
+        sinking_fund_rate_basis = EXCLUDED.sinking_fund_rate_basis,
+        repair_fund_rate_basis = EXCLUDED.repair_fund_rate_basis,
+        fund_gst_exempt = EXCLUDED.fund_gst_exempt,
+        fund_charges_interest = EXCLUDED.fund_charges_interest,
+        gst_filing_cadence = EXCLUDED.gst_filing_cadence,
+        gst_registered = EXCLUDED.gst_registered,
+        gstin = EXCLUDED.gstin,
+        tds_no_pan_action = EXCLUDED.tds_no_pan_action,
+        default_export_format = EXCLUDED.default_export_format,
+        updated_at = NOW();
 
     -- 5) Vendor charges default (ven_id IS NULL row = society-wide fallback)
     SELECT id INTO v_ven_id FROM ven_charges_fines_basis

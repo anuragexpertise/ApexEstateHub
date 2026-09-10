@@ -1,5 +1,5 @@
 import json
-from dash import Input, Output, State, ALL, callback, no_update, html, ctx
+from dash import Input, Output, State, ALL, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
@@ -29,6 +29,29 @@ def register_setup_wizard_callbacks(app):
             return get_setup_wizard_layout(society_id)
         
         return html.Div() # Clear wizard
+
+    app.clientside_callback(
+        """
+        function(toast) {
+            if (toast && toast.message && toast.message.includes('Setup completed')) {
+                if (!window.confetti) {
+                    var script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+                    script.onload = function() {
+                        window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
+                    };
+                    document.head.appendChild(script);
+                } else {
+                    window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
+                }
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("sw-error-msg", "style"), # dummy output
+        Input("toast-store", "data"),
+        prevent_initial_call=True
+    )
 
     @app.callback(
         Output("sw-current-step", "data"),
@@ -106,10 +129,12 @@ def register_setup_wizard_callbacks(app):
         Input("sw-close-btn", "n_clicks"),
         State({"type": "form-field-hidden", "entity": "society", "field": "logo"}, "value"),
         State("sw-society-address", "value"),
+        State("sw-society-email", "value"),
         State("sw-society-phone", "value"),
         State({"type": "form-field-hidden", "entity": "society", "field": "bg"}, "value"),
         State("sw-society-tan", "value"),
         State("sw-society-gstin", "value"),
+        State("sw-society-reg", "value"),
         State({"type": "form-field-hidden", "entity": "society", "field": "pay_qr"}, "value"),
         State("sw-calc-start-date", "date"),
         State("sw-sec-name", "value"),
@@ -121,14 +146,27 @@ def register_setup_wizard_callbacks(app):
         State("sw-i-agree", "value"),
         State("sw-admin-password", "value"),
         State("sw-qr-confirm-final", "value"),
-        State({"type": "sw-tds-rate", "index": ALL}, "value"),
+        State({"type": "tds-nature", "index": ALL}, "value"),
+        State({"type": "tds-rate", "index": ALL}, "value"),
+        State({"type": "tds-rate-no-pan", "index": ALL}, "value"),
+        State({"type": "tds-single-bill", "index": ALL}, "value"),
+        State({"type": "tds-agg-bill", "index": ALL}, "value"),
         State("sw-cgst", "value"),
         State("sw-sgst", "value"),
+        State("sw-comp-sink", "value"),
+        State("sw-comp-repair", "value"),
+        State("sw-comp-gst-exempt", "value"),
+        State("sw-comp-charges-int", "value"),
+        State("sw-comp-gst-cadence", "value"),
+        State("sw-comp-gst-reg", "value"),
+        State("sw-comp-tds-action", "value"),
+        State("sw-comp-export-fmt", "value"),
         State("sw-apt-maint-amt", "value"),
         State("sw-apt-maint-rate", "value"),
         State("sw-apt-due-day", "value"),
         State("sw-apt-sinking", "value"),
         State("sw-apt-repair", "value"),
+        State("sw-apt-interest", "value"),
         State("sw-ven-1day", "value"),
         State("sw-ven-7day", "value"),
         State("sw-ven-1mth", "value"),
@@ -140,12 +178,14 @@ def register_setup_wizard_callbacks(app):
         prevent_initial_call=True
     )
     def submit_setup_wizard(n_submit, n_close, 
-                            logo_data, address, phone, bg_data, 
-                            tan, gstin, pay_qr_data, calc_start, 
+                            logo_data, address, s_email, phone, bg_data, 
+                            tan, gstin, reg_num, pay_qr_data, calc_start, 
                             sec_name, sec_phone, sec_email, sec_sign_data, 
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
-                            tds_rates, cgst, sgst,
-                            apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair,
+                            tds_natures, tds_rates, tds_rates_no_pan, tds_single_bills, tds_agg_bills,
+                            cgst, sgst,
+                            c_sink, c_repair, c_gst_exempt, c_charges_int, c_gst_cad, c_gst_reg, c_tds_act, c_exp_fmt,
+                            apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair, apt_interest,
                             ven_1day, ven_7day, ven_1mth,
                             bf_fy, bf_ids, bf_amts, bf_remarks, auth):
         triggered = ctx.triggered_id
@@ -212,11 +252,17 @@ def register_setup_wizard_callbacks(app):
             # rows sharing section '194C' — the later one in this list wins
             # once persisted, a pre-existing schema/seed mismatch, not
             # something this fix resolves.
-            tds_pairs = [
-                {"section": item[0], "rate": float(tds_rates[idx])}
-                for idx, item in enumerate(TDS_SECTION_RATE_SEED)
-                if idx < len(tds_rates) and tds_rates[idx] not in (None, "")
-            ]
+            tds_pairs = []
+            for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+                if idx < len(tds_rates):
+                    tds_pairs.append({
+                        "section": item[0],
+                        "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
+                        "rate": float(tds_rates[idx] or 0),
+                        "rate_no_pan": float(tds_rates_no_pan[idx] or 0) if idx < len(tds_rates_no_pan) else 0.0,
+                        "single_bill_threshold": float(tds_single_bills[idx] or 0) if idx < len(tds_single_bills) else 0.0,
+                        "annual_aggregate_threshold": float(tds_agg_bills[idx] or 0) if idx < len(tds_agg_bills) else 0.0
+                    })
             
             bf_json = []
             if bf_ids and bf_amts:
@@ -244,8 +290,10 @@ def register_setup_wizard_callbacks(app):
             if form_data:
                 _move_temp_images("society", society_id, society_id, form_data)
 
+            s_email = str(s_email)[:100] if s_email else None
             tan = str(tan)[:10] if tan else None
             gstin = str(gstin)[:15] if gstin else None
+            reg_num = str(reg_num)[:100] if reg_num else None
             phone = str(phone)[:20] if phone else None
             sec_phone = str(sec_phone)[:20] if sec_phone else None
             sec_name = str(sec_name)[:100] if sec_name else None
@@ -266,7 +314,9 @@ def register_setup_wizard_callbacks(app):
                         CAST(:tds_json AS jsonb), :cgst, :sgst,
                         :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
-                        :bf_fy, CAST(:bf_json AS jsonb), :created_by
+                        :bf_fy, CAST(:bf_json AS jsonb), :created_by,
+                        :s_email, :reg_num, :apt_interest,
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt
                     ) AS result""",
                     {
                         "sid": society_id,
@@ -290,6 +340,17 @@ def register_setup_wizard_callbacks(app):
                         "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,
                         "bf_fy": bf_fy, "bf_json": json.dumps(bf_json),
                         "created_by": auth.get("user_id"),
+                        "s_email": s_email,
+                        "reg_num": reg_num,
+                        "apt_interest": apt_interest,
+                        "c_sink": c_sink,
+                        "c_repair": c_repair,
+                        "c_gst_exempt": c_gst_exempt,
+                        "c_charges_int": c_charges_int,
+                        "c_gst_cad": c_gst_cad,
+                        "c_gst_reg": c_gst_reg,
+                        "c_tds_act": c_tds_act,
+                        "c_exp_fmt": c_exp_fmt
                     },
                     fetch_one=True,
                 )
@@ -313,6 +374,12 @@ def register_setup_wizard_callbacks(app):
                 agreement_record = _get_or_create_agreement(db, society_id, auth.get("user_id"))
                 society = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
                 agreement_body = renderers.render_agreement_card(society=dict(society), agreement_record=agreement_record)
+                admin_note = html.Div([
+                    html.I(className="fas fa-info-circle me-2"),
+                    html.B("Note for Admin: "),
+                    "You can now Bulk Enroll Apartments, Users, Vendors, Security, and Assets."
+                ], className="alert alert-info mt-3")
+                agreement_body = html.Div([agreement_body, admin_note])
                 agreement_open = True
             except Exception as e:
                 print(f"⚠️  Agreement generation failed after setup: {e}")
