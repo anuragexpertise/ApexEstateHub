@@ -19,10 +19,27 @@ def load_conversation_data():
     return data
 
 CONVERSATION_DATA = load_conversation_data()
-CATEGORIES = [
-    "Society Details", "Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate",
-    "Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward", "Administrator", "Instructions", "Agreement"
-]
+WIZARD_GROUPS = {
+    "Organization Details": ["Society Details", "Administrator", "Instructions"],
+    "Tax & Compliance": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    "Billing & Accounts": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
+    "Finalization": ["Agreement"]
+}
+CATEGORIES = [step for group in WIZARD_GROUPS.values() for step in group]
+
+CATEGORY_ICONS = {
+    "Society Details": "fas fa-building",
+    "Administrator": "fas fa-user-shield",
+    "Instructions": "fas fa-info-circle",
+    "Society Compliance": "fas fa-gavel",
+    "TAN & TDS Rates": "fas fa-percent",
+    "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
+    "Apartment Charges": "fas fa-home",
+    "Vendor Charges": "fas fa-truck",
+    "Accounts": "fas fa-book",
+    "Brought Forward": "fas fa-arrow-right",
+    "Agreement": "fas fa-handshake"
+}
 
 def _render_banner(title, text):
     return dbc.Card([
@@ -33,6 +50,30 @@ def _render_banner(title, text):
     ], className="mb-4 shadow-sm border-0 bg-light")
 
 def render_category_content(category, society_id=None):
+    elements = []
+    
+    # Render conversational header if available
+    conv_info = next((item for item in CONVERSATION_DATA if item.get('Category') == category), None)
+    if conv_info and conv_info.get('Information'):
+        elements.append(
+            dbc.Alert(
+                [html.I(className="fas fa-lightbulb me-2"), conv_info['Information']],
+                color="info",
+                className="mb-3",
+                style={"fontSize": "13px"}
+            )
+        )
+        
+    # Add Print Button for specific categories
+    if category in ["Society Compliance", "TAN & TDS Rates", "Accounts"]:
+        elements.append(
+            html.Div([
+                dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
+                           id={"type": "sw-print-btn", "cat": category}, 
+                           color="outline-secondary", size="sm")
+            ], style={"textAlign": "right", "marginBottom": "15px"})
+        )
+
     if category == "Society Details":
         s_name, s_addr, s_pan, s_reg, s_phone, s_email = "", "", "", "", "", ""
         if society_id:
@@ -44,7 +85,7 @@ def render_category_content(category, society_id=None):
                 s_email = row.get("email", "") or ""
                 s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
-        return [
+        return elements + [
             _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
             dbc.Label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
@@ -194,7 +235,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2")
             inputs.append(row)
             
-        return [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
     elif category == "GSTIN & GST Rate":
         s_gstin = ""
         if society_id:
@@ -214,7 +255,7 @@ def render_category_content(category, society_id=None):
         turnover_val = (turnover_row or {}).get("value", 20.0)
         exempt_val = (exempt_row or {}).get("value", 7500.0)
         readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
-        return [
+        return elements + [
             _render_banner("GSTIN & GST Rate", "Configure this society's GSTIN and GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
             dbc.Label("GSTIN"),
             dbc.Input(id="sw-society-gstin", type="text", placeholder="Enter GSTIN...", value=s_gstin, className="mb-4"),
@@ -247,6 +288,10 @@ def render_category_content(category, society_id=None):
         inputs = [_render_banner("Compliance Settings", "Configure compliance parameters specific to this society. Reference rule links and thresholds are shown below.")]
         inputs.append(html.H6("Society Compliance Settings", className="mt-2 mb-3 text-primary"))
         inputs.append(dbc.Row([
+            dbc.Col([dbc.Label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
+            dbc.Col([dbc.Label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
+        ]))
+        inputs.append(dbc.Row([
             dbc.Col([dbc.Label("Sinking Fund Basis"), dbc.Select(id="sw-comp-sink", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_sink_basis, className="mb-3")], width=6),
             dbc.Col([dbc.Label("Repair Fund Basis"), dbc.Select(id="sw-comp-repair", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_repair_basis, className="mb-3")], width=6)
         ]))
@@ -267,7 +312,7 @@ def render_category_content(category, society_id=None):
         for item in STATE_COMPLIANCE_THRESHOLDS:
             state, key, val, val_text, unit, eff_from, eff_to, notes = item
             inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
-        return [html.Div(inputs, style={"maxHeight": "400px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"maxHeight": "400px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due, s_sink, s_repair, s_int = 0.0, 0.0, 1, 0.0, 0.0, 0.0
         if society_id:
@@ -275,7 +320,7 @@ def render_category_content(category, society_id=None):
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
                 s_sink, s_repair, s_int = row.get("apt_sinking_fund_rate", 0.0) or 0.0, row.get("apt_repair_fund_rate", 0.0) or 0.0, row.get("apt_interest_pct", 0.0) or 0.0
-        return [
+        return elements + [
             _render_banner("Apartment Charges", "Set default charges, billing cycle day, sinking fund, and repair fund rates for all apartments."),
             dbc.Row([dbc.Col([dbc.Label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([dbc.Label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
             dbc.Row([dbc.Col([dbc.Label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4), dbc.Col([dbc.Label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], width=4), dbc.Col([dbc.Label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], width=4)]),
@@ -287,7 +332,7 @@ def render_category_content(category, society_id=None):
             row = db._execute("SELECT vendor_1day, vendor_7day, vendor_1mth FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_v1, s_v7, s_v30 = row.get("vendor_1day", 0.0) or 0.0, row.get("vendor_7day", 0.0) or 0.0, row.get("vendor_1mth", 0.0) or 0.0
-        return [
+        return elements + [
             _render_banner("Vendor Charges", "Set default vendor pass charges (1-Day, 7-Day, 1-Month)."),
             dbc.Row([dbc.Col([dbc.Label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([dbc.Label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([dbc.Label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
         ]
@@ -382,7 +427,7 @@ def render_category_content(category, society_id=None):
                 dbc.Col(html.Span(f"{acc[8]}%" if acc[8] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
             ], className="mb-2")
             inputs.append(row)
-        return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Brought Forward":
         s_fy = 2024
         if society_id:
@@ -419,14 +464,14 @@ def render_category_content(category, society_id=None):
             ], className="mb-2")
             inputs.append(row)
             
-        return [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
     elif category == "Administrator":
         s_name, s_phone, s_email = "", "", ""
         if society_id:
             row = db._execute("SELECT secretary_name, secretary_phone, secretary_email FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name, s_phone, s_email = row.get("secretary_name", "") or "", row.get("secretary_phone", "") or "", row.get("secretary_email", "") or ""
-        return [
+        return elements + [
             _render_banner("Administrator Details", "Configure Secretary details, digital signature, and your secure QR SIGNING_SECRET. This secret is required to authenticate generated QR codes."),
             html.H6("Secretary Details", className="text-primary mb-3"),
             dbc.Label("Secretary Name"),
@@ -509,7 +554,7 @@ def render_category_content(category, society_id=None):
             with open(readme_path, 'r') as f:
                 readme_txt = f.read()
 
-        return [
+        return elements + [
             html.Div([
                 html.H5("EstateHub Instructions", className="text-primary mb-3", style={"display": "inline-block"}),
                 html.A([html.I(className="fas fa-print me-1"), "Print / Open in New Window"], 
@@ -521,6 +566,11 @@ def render_category_content(category, society_id=None):
                 style={"height": "350px", "overflowY": "auto", "backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             )
         ]
+    elif category == "Review":
+        return elements + [
+            _render_banner("Review & Confirm", "Please review the key settings below before finalizing the setup."),
+            html.Div(id="sw-review-content", style={"padding": "10px", "background": "#f8f9fa", "borderRadius": "8px"})
+        ]
     elif category == "Agreement":
         here = os.path.dirname(os.path.abspath(__file__))
         agreement_path = os.path.abspath(os.path.join(here, "../../../database/AGREEMENT.md"))
@@ -530,7 +580,7 @@ def render_category_content(category, society_id=None):
             with open(agreement_path, 'r') as f:
                 agreement_txt = f.read()
 
-        return [
+        return elements + [
             html.Div([
                 html.H5("EstateHub terms and agreements", className="text-primary mb-3", style={"display": "inline-block"}),
                 html.A([html.I(className="fas fa-print me-1"), "Print Agreement Template"], 
@@ -574,14 +624,15 @@ def get_setup_wizard_layout(society_id=None):
                 style={"background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)", "borderBottom": "none", "display": "flex", "justifyContent": "space-between"}
             ),
             dbc.ModalBody(
-                dbc.Row([
-                    # Left: Categories
+                dbc.Row(className="d-flex h-100", children=[
+                    # Navigation (Left)
                     dbc.Col(
                         [
+                            html.H3([html.I(className="fas fa-magic me-2"), "Setup Wizard"], style={"color": "#667eea", "fontWeight": "bold", "marginBottom": "30px", "fontSize": "1.5rem"}),
                             dbc.Nav(
                                 [
                                     dbc.NavLink(
-                                        cat,
+                                        [html.I(className=f"{CATEGORY_ICONS.get(cat, 'fas fa-circle')} me-2"), cat],
                                         active=True if i == 0 else False,
                                         id={"type": "sw-nav-item", "index": i},
                                         href="#",
@@ -594,26 +645,15 @@ def get_setup_wizard_layout(society_id=None):
                                 id="sw-nav-menu"
                             )
                         ],
-                        width=3,
-                        style={"borderRight": "1px solid #e0e0e0"}
+                        style={"flex": "0 0 250px", "borderRight": "1px solid #ddd", "paddingRight": "10px"}
                     ),
-                    # Right: Rules (Above) and Content (Below)
+                    
+                    # Content (Center)
                     dbc.Col(
-                        [
-                            # Rules (Above)
-                            html.Div(
-                                [
-                                    html.H5([html.I(className="fas fa-info-circle me-2"), "Rules & Regulations"], style={"fontWeight": "bold", "color": "#2c3e50"}),
-                                    html.Hr(style={"margin": "10px 0"}),
-                                    html.P(id="sw-banner-text", style={"fontSize": "14px", "color": "#4a5568", "lineHeight": "1.6", "marginBottom": "10px"}),
-                                    html.A("Learn More", id="sw-banner-link", href="#", target="_blank", className="btn btn-outline-info btn-sm")
-                                ],
-                                style={"background": "rgba(255,255,255,0.85)", "padding": "15px", "borderRadius": "10px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)", "marginBottom": "20px"}
-                            ),
-                            
-                            # Content (Below)
+                        className="d-flex flex-column",
+                        children=[
                             html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold", "marginBottom": "20px"}),
-                            html.Div(id="sw-category-content", style={"overflow": "auto", "maxHeight": "500px", "paddingRight": "10px"}, children=[
+                            html.Div(id="sw-category-content", style={"flex": "1", "overflowY": "auto", "paddingRight": "10px"}, children=[
                                 html.Div(
                                     render_category_content(cat, society_id),
                                     id={"type": "sw-step-container", "index": i},
@@ -629,11 +669,27 @@ def get_setup_wizard_layout(society_id=None):
                                     dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2"),
                                     dbc.Button("Submit Setup", id="sw-btn-submit", color="success", style={"display": "none"})
                                 ],
-                                style={"marginTop": "30px", "textAlign": "right"}
+                                style={"marginTop": "30px", "textAlign": "right", "paddingTop": "15px", "borderTop": "1px solid #eee"}
                             )
                         ],
-                        width=9,
-                        style={"padding": "0 20px"}
+                        style={"flex": "1", "padding": "0 20px"}
+                    ),
+
+                    # Rules & Compliance Panel (Right)
+                    dbc.Col(
+                        className="d-flex flex-column",
+                        children=[
+                            html.Div(
+                                [
+                                    html.H5([html.I(className="fas fa-book me-2"), "Acts & Rules"], style={"fontWeight": "bold", "color": "#2c3e50"}),
+                                    html.Hr(style={"margin": "10px 0"}),
+                                    html.Div(id="sw-compliance-rules-panel", style={"flex": "1", "fontSize": "12.5px", "color": "#3a4a5c", "overflowY": "auto"})
+                                ],
+                                className="d-flex flex-column h-100",
+                                style={"background": "rgba(255,255,255,0.85)", "padding": "15px", "borderRadius": "10px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"}
+                            )
+                        ],
+                        style={"flex": "0 0 300px", "paddingLeft": "10px"}
                     )
                 ]),
                 id="setup-wizard-modal-body",

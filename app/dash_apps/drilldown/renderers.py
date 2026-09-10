@@ -407,15 +407,12 @@ def get_image_url(image_path: str | None, society_id: int | None = None,
     if path.startswith(('http://', 'https://', 'data:image', '/assets/')):
         return path
     if '/' not in path and '\\' not in path:
-        if entity == "society" and pk is not None:
+        if society_id is not None:
+            return f"/assets/{society_id}/{path}"
+        elif entity == "society" and pk is not None:
             return f"/assets/{pk}/{path}"
-        elif society_id is not None and pk is not None:
-            if entity in ("apartment", "vendor", "security", "concern", "event"):
-                return f"/assets/{society_id}/{entity}/{pk}/{path}"
-            else:
-                return f"/assets/{society_id}/{entity}_{pk}/{path}"
-        elif society_id is not None or entity is not None:
-            return f"/assets/default/{entity or 'file'}/{path}"
+        elif entity is not None:
+            return f"/assets/default/{entity}/{path}"
         else:
             return f"/assets/default/{path}"
     return f"/assets/{path}"

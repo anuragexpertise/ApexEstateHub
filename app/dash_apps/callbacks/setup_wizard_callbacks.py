@@ -3,7 +3,7 @@ from dash import Input, Output, State, ALL, callback, no_update, html, ctx, clie
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
-from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content
+from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS
 
 def register_setup_wizard_callbacks(app):
 
@@ -38,10 +38,9 @@ def register_setup_wizard_callbacks(app):
         Output("sw-current-step", "data"),
         Output("sw-category-title", "children"),
         Output({"type": "sw-step-container", "index": ALL}, "style"),
-        Output("sw-banner-text", "children"),
-        Output("sw-banner-link", "href"),
-        Output("sw-banner-link", "style"),
+        Output("sw-compliance-rules-panel", "children"),
         Output({"type": "sw-nav-item", "index": ALL}, "active"),
+        Output({"type": "sw-nav-item", "index": ALL}, "children"),
         Output("sw-btn-prev", "disabled"),
         Output("sw-btn-next", "style"),
         Output("sw-btn-submit", "style"),
@@ -51,50 +50,108 @@ def register_setup_wizard_callbacks(app):
         Input({"type": "sw-nav-item", "index": ALL}, "n_clicks"),
         State("sw-current-step", "data"),
         State("sw-society-id", "data"),
+        State("sw-gst-registered", "value"),
+        State("sw-deducts-tds", "value"),
+        State("sw-qr-secret", "value"),
+        State("sw-qr-secret-confirm", "value"),
         prevent_initial_call=True
     )
-    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id):
-        # (society_id kept as a State for parity with the layout's dcc.Store,
-        # though this callback doesn't currently need it beyond triggering
-        # re-registration; the four sw-society-* / sw-qr-secret States that
-        # used to sit here were unused dead params — removed 2026-09.)
+    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm):
         triggered_id = ctx.triggered_id
         
-        # Validation for Step 0 and 7
         error_msg = ""
         new_step = current_step
         
+        import re
+        def is_strong_password(pwd):
+            if not pwd or len(pwd) < 8: return False
+            if not re.search(r"[A-Z]", pwd): return False
+            if not re.search(r"\d", pwd): return False
+            if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", pwd): return False
+            return True
+        
+        def get_next_valid_step(step, direction):
+            while 0 <= step < len(CATEGORIES):
+                if CATEGORIES[step] == "GSTIN & GST Rate" and not gst_reg:
+                    step += direction
+                elif CATEGORIES[step] == "TAN & TDS Rates" and not deducts_tds:
+                    step += direction
+                else:
+                    break
+            return max(0, min(step, len(CATEGORIES) - 1))
+            
         if triggered_id == "sw-btn-next" and n_next:
-            if current_step < len(CATEGORIES) - 1:
-                new_step = current_step + 1
+            if CATEGORIES[current_step] == "Administrator":
+                if not qr_secret or not qr_confirm:
+                    error_msg = "Please enter and confirm your SIGNING_SECRET."
+                elif qr_secret != qr_confirm:
+                    error_msg = "SIGNING_SECRET fields do not match."
+                elif not is_strong_password(qr_secret):
+                    error_msg = "SIGNING_SECRET must be at least 8 characters long, with 1 uppercase, 1 number, and 1 special character."
+                else:
+                    new_step = get_next_valid_step(current_step + 1, 1)
+            elif current_step < len(CATEGORIES) - 1:
+                new_step = get_next_valid_step(current_step + 1, 1)
         elif triggered_id == "sw-btn-prev" and n_prev:
             if current_step > 0:
-                new_step = current_step - 1
+                new_step = get_next_valid_step(current_step - 1, -1)
         elif isinstance(triggered_id, dict) and triggered_id["type"] == "sw-nav-item" and any(nav_clicks):
             clicked_step = triggered_id["index"]
-            new_step = clicked_step
+            if CATEGORIES[current_step] == "Administrator" and clicked_step > current_step:
+                if not qr_secret or not qr_confirm:
+                    error_msg = "Please enter and confirm your SIGNING_SECRET."
+                elif qr_secret != qr_confirm:
+                    error_msg = "SIGNING_SECRET fields do not match."
+                elif not is_strong_password(qr_secret):
+                    error_msg = "SIGNING_SECRET must be at least 8 characters long, with 1 uppercase, 1 number, and 1 special character."
+                else:
+                    new_step = get_next_valid_step(clicked_step, 1)
+            else:
+                new_step = get_next_valid_step(clicked_step, 1)
 
         cat_name = CATEGORIES[new_step]
         step_styles = [{"display": "block"} if i == new_step else {"display": "none"} for i in range(len(CATEGORIES))]
         
-        # Banner Data
-        banner_text = "No additional regulations found."
-        banner_link = "#"
-        link_style = {"display": "none"}
-        for row in CONVERSATION_DATA:
-            if row.get("Category") == cat_name:
-                banner_text = row.get("Act Summary text", banner_text)
-                banner_link = row.get("website link", "#")
-                link_style = {"display": "inline-block"}
-                break
+        # Fetch Rules from DB
+        from app.services.kpi_rule_links_service import get_links_for_categories
+        links_by_cat = get_links_for_categories([cat_name], state="ALL")
+        links = links_by_cat.get(cat_name, [])
+        
+        if links:
+            rules_html = [
+                html.Div([
+                    html.A(
+                        [html.I(className="fas fa-external-link-alt me-1"), lk.label], 
+                        href=lk.url, 
+                        target="_blank", 
+                        style={"fontWeight": "500", "color": "#0d6efd", "textDecoration": "none", "display": "block", "marginBottom": "5px"}
+                    ),
+                    html.P(lk.description, style={"fontSize": "11.5px", "color": "#6c757d", "marginBottom": "12px", "lineHeight": "1.4"})
+                ], style={"borderBottom": "1px solid #eee", "paddingBottom": "8px", "marginBottom": "8px"})
+                for lk in links
+            ]
+        else:
+            rules_html = [html.P("No specific compliance rules or external links found for this section.", style={"color": "#6c757d", "fontStyle": "italic"})]
 
         nav_active = [i == new_step for i in range(len(CATEGORIES))]
+        nav_children = []
+        for i, cat in enumerate(CATEGORIES):
+            cat_icon_cls = CATEGORY_ICONS.get(cat, 'fas fa-circle')
+            cat_icon = html.I(className=f"{cat_icon_cls} me-2")
+            if (cat == "GSTIN & GST Rate" and not gst_reg) or (cat == "TAN & TDS Rates" and not deducts_tds):
+                nav_children.append(html.Span([cat_icon, cat], style={"textDecoration": "line-through", "opacity": "0.5"}))
+            elif i < new_step:
+                nav_children.append(html.Span([cat_icon, cat, html.I(className="fas fa-check-circle text-success float-end", style={"marginTop": "4px"})]))
+            else:
+                nav_children.append(html.Span([cat_icon, cat]))
+                
         prev_disabled = (new_step == 0)
         
         next_style = {"display": "inline-block"} if new_step < len(CATEGORIES) - 1 else {"display": "none"}
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
-        return new_step, cat_name, step_styles, banner_text, banner_link, link_style, nav_active, prev_disabled, next_style, submit_style, error_msg
+        return new_step, cat_name, step_styles, rules_html, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
+
 
 
     @app.callback(
@@ -142,10 +199,10 @@ def register_setup_wizard_callbacks(app):
         State("sw-comp-gst-reg", "value"),
         State("sw-comp-tds-action", "value"),
         State("sw-comp-export-fmt", "value"),
-        State("sw-apt-maint-amt", "value"),
-        State("sw-apt-maint-rate", "value"),
-        State("sw-apt-due-day", "value"),
-        State("sw-apt-sinking", "value"),
+        State("sw-apt-amt", "value"),
+        State("sw-apt-rate", "value"),
+        State("sw-apt-due", "value"),
+        State("sw-apt-sink", "value"),
         State("sw-apt-repair", "value"),
         State("sw-apt-interest", "value"),
         State("sw-ven-1day", "value"),
@@ -366,10 +423,24 @@ def register_setup_wizard_callbacks(app):
                 print(f"⚠️  Agreement generation failed after setup: {e}")
 
             return (
-                False, no_update, no_update,
+                False, no_update, "/dashboard/admin-portal",
                 {"type": "success", "message": "Setup completed successfully!"},
                 no_update, "",
                 agreement_open, agreement_body,
-            )  # Close wizard modal, open Agreement modal
+            )  # Close wizard modal, redirect to admin dashboard, open Agreement modal
 
         return _noop
+
+    clientside_callback(
+        """
+        function(n_clicks) {
+            if (n_clicks) {
+                window.print();
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output({"type": "sw-print-btn", "cat": MATCH}, "id"),
+        Input({"type": "sw-print-btn", "cat": MATCH}, "n_clicks"),
+        prevent_initial_call=True
+    )
