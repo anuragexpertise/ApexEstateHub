@@ -245,6 +245,39 @@ def _breadcrumb(pathname):
     return items
 
 
+def _setup_pending_content(role):
+    """
+    Rendered by route_page in place of the real dashboard whenever the
+    society hasn't finished the Setup Wizard yet (societies.
+    signing_secret_enc IS NULL) — see app/security/setup_guard.py.
+
+    Admin also gets the interactive wizard modal on top of this (see
+    trigger_setup_wizard in setup_wizard_callbacks.py); this page is what
+    they'd see underneath it, or if the modal fails to render for any
+    reason — it is not itself a way to complete setup. Non-admin roles
+    (apartment/vendor/security) have no wizard to complete, so this is the
+    only thing they see for their society until an admin finishes setup.
+    """
+    if role == "admin":
+        message = ("Please complete the Setup Wizard to activate your "
+                    "society's dashboard.")
+    else:
+        message = ("Your society's administrator hasn't finished initial "
+                    "setup yet. Please check back once setup is complete.")
+
+    return html.Div(
+        [
+            html.I(className="fas fa-tools",
+                   style={"fontSize": "44px", "color": "#95a5a6", "marginBottom": "16px"}),
+            html.H4("Setup Not Complete", style={"fontWeight": "700"}),
+            html.P(message, className="text-muted",
+                   style={"maxWidth": "420px", "margin": "0 auto"}),
+        ],
+        className="text-center",
+        style={"paddingTop": "120px"},
+    )
+
+
 def _portal_content(role, society_id, pathname, auth=None):
     from app.dash_apps.pages.portal_pages import (
         master_portal_page, admin_portal_page, owner_portal_page,
@@ -630,6 +663,29 @@ def register_shell_callbacks(app):
             verified_auth["vendor_id"] = linked_id
         elif role == "security":
             verified_auth["security_id"] = linked_id
+
+        # Setup-completion gate. This is the ONE place all portal content
+        # for every role passes through, so it's the right chokepoint —
+        # unlike the previous state where the wizard modal (admin-only,
+        # triggered off auth-store rather than pathname) was the sole thing
+        # standing between any authenticated session and the full
+        # dashboard. See app/security/setup_guard.py for details on why
+        # this was broken for non-admin roles and unenforced server-side
+        # even for admin.
+        from app.security.setup_guard import society_setup_incomplete
+        if role != "master" and society_setup_incomplete(society_id):
+            return (
+                _setup_pending_content(role),
+                {"rendered": True, "ts": time.time()},
+                [],
+                _breadcrumb(pathname),
+                "", {},
+                email.split("@")[0].title() if email else "User",
+                role.title(), "?",
+                "EstateHub", "?",
+                "EstateHub", "/static/assets/EH_logo.png",
+                {},
+            )
 
         try:
             u_row = db._execute(

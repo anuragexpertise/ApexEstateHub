@@ -21,13 +21,15 @@ def register_setup_wizard_callbacks(app):
         society_id = auth.get("society_id")
         if not society_id:
             return no_update
-            
-        # Check if signing_secret_enc is NULL (setup not completed yet)
-        row = db._execute("SELECT signing_secret_enc FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-        if row and row.get("signing_secret_enc") is None:
+
+        # Setup-completion check now lives in one place — see
+        # app/security/setup_guard.py — instead of this callback carrying
+        # its own copy of the signing_secret_enc query.
+        from app.security.setup_guard import society_setup_incomplete
+        if society_setup_incomplete(society_id):
             # Trigger Wizard
             return get_setup_wizard_layout(society_id)
-        
+
         return html.Div() # Clear wizard
 
 

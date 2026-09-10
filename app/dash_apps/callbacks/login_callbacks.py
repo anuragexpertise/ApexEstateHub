@@ -91,15 +91,20 @@ def _build_auth_store(user: dict) -> dict:
 def _redirect(role: str, society_id) -> str:
     if role == "master":
         return "/dashboard/master-societies"
-        
-    if society_id is not None:
-        from database.db_manager import db
-        soc = db._execute(
-            "SELECT signing_secret_enc FROM societies WHERE id = :sid",
-            {"sid": society_id},
-            fetch_one=True
-        )
-        if soc and not soc.get("signing_secret_enc"):
+
+    # Only admin gets sent to the wizard pathname — admin is the only role
+    # that can complete it (see trigger_setup_wizard). Other roles just get
+    # their normal portal path below; route_page's setup gate (shell_
+    # callbacks.py) is what actually blocks them from seeing real content
+    # there if the society's setup isn't done, regardless of which pathname
+    # they land on. Previously this check applied to every role and sent
+    # apartment/vendor/security users to "/setup-wizard" too, a pathname
+    # nothing ever rendered content for on their behalf — they'd silently
+    # fall through to their normal dashboard with zero gate. See
+    # app/security/setup_guard.py for the one shared "is setup done?" check.
+    if role == "admin":
+        from app.security.setup_guard import society_setup_incomplete
+        if society_setup_incomplete(society_id):
             return "/setup-wizard"
 
     paths = {
