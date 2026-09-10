@@ -30,28 +30,7 @@ def register_setup_wizard_callbacks(app):
         
         return html.Div() # Clear wizard
 
-    app.clientside_callback(
-        """
-        function(toast) {
-            if (toast && toast.message && toast.message.includes('Setup completed')) {
-                if (!window.confetti) {
-                    var script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
-                    script.onload = function() {
-                        window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
-                    };
-                    document.head.appendChild(script);
-                } else {
-                    window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
-                }
-            }
-            return window.dash_clientside.no_update;
-        }
-        """,
-        Output("sw-error-msg", "style"), # dummy output
-        Input("toast-store", "data"),
-        prevent_initial_call=True
-    )
+
 
     @app.callback(
         Output("sw-current-step", "data"),

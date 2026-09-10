@@ -843,6 +843,20 @@ def register_shell_callbacks(app):
                 }
             };
             window.playEvaluationSound(data);
+
+            if (data.type === 'success') {
+                if (!window.confetti) {
+                    var script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+                    script.onload = function() {
+                        window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
+                    };
+                    document.head.appendChild(script);
+                } else {
+                    window.confetti({particleCount: 150, spread: 70, origin: {y: 0.6}});
+                }
+            }
+
             return window.dash_clientside.no_update;
         }
         """,

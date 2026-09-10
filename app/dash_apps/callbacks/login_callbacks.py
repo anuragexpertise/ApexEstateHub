@@ -91,6 +91,17 @@ def _build_auth_store(user: dict) -> dict:
 def _redirect(role: str, society_id) -> str:
     if role == "master":
         return "/dashboard/master-societies"
+        
+    if society_id is not None:
+        from database.db_manager import db
+        soc = db._execute(
+            "SELECT signing_secret_enc FROM societies WHERE id = :sid",
+            {"sid": society_id},
+            fetch_one=True
+        )
+        if soc and not soc.get("signing_secret_enc"):
+            return "/setup-wizard"
+
     paths = {
         "admin":     "/dashboard/admin-portal",
         "apartment": "/dashboard/owner-portal",
