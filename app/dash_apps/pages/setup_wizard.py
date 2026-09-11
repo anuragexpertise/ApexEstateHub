@@ -41,6 +41,111 @@ CATEGORY_ICONS = {
     "Agreement": "fas fa-handshake"
 }
 
+def _render_image_capture_control(entity, field):
+    """
+    Upload-or-camera control for a single image field, reusing the exact
+    working id/data-attribute pattern from renderers.py's "image_upload"
+    field type (cam-btn-/cam-snap-/cam-stop- id substrings, plus the
+    <video>/<canvas> elements camera_callbacks.py's clientside delegation
+    listens for).
+
+    The wizard previously built its own "Snap" buttons with
+    id={"type": "camera-snap-btn", ...} — a Dash pattern-matching dict id
+    that never matches the app's camera click-delegation listener (which
+    matches on id substrings like "cam-snap-"), and with no <video>/
+    <canvas> elements anywhere on the page for a capture to target. Those
+    buttons were inert: clicking "Snap" did nothing at all. Rebuilding the
+    control with the shared helper fixes that and keeps the wizard in
+    sync with the one working camera implementation instead of a second,
+    broken one.
+    """
+    cam_vid_id  = f"cam-vid-{entity}-{field}"
+    cam_cvs_id  = f"cam-cvs-{entity}-{field}"
+    cam_snap_id = f"cam-snap-{entity}-{field}"
+    cam_stop_id = f"cam-stop-{entity}-{field}"
+    cam_btn_id  = f"cam-btn-{entity}-{field}"
+    prev_img_id = f"cam-prev-{entity}-{field}"
+    hidden_marker = f'"entity": "{entity}", "field": "{field}"'
+
+    _btn_base = {
+        "display": "inline-flex", "alignItems": "center", "justifyContent": "center",
+        "cursor": "pointer", "userSelect": "none", "borderRadius": "8px",
+        "fontSize": "12px", "fontWeight": "600", "padding": "6px 14px", "border": "none",
+    }
+
+    return html.Div([
+        html.Div([
+            dcc.Upload(
+                id={"type": "form-upload", "entity": entity, "field": field},
+                children=html.Div([
+                    html.I(className="fas fa-cloud-upload-alt me-1"),
+                    "Upload / Drop",
+                ], style={"fontSize": "12px"}),
+                style={
+                    "flex": "1", "height": "42px", "lineHeight": "42px",
+                    "borderWidth": "2px", "borderStyle": "dashed", "borderRadius": "10px",
+                    "textAlign": "center", "borderColor": "#667eea",
+                    "background": "rgba(102,126,234,0.04)", "cursor": "pointer",
+                    "color": "#667eea", "minWidth": "110px",
+                },
+                multiple=False, accept="image/*",
+            ),
+            html.Div(
+                [html.I(className="fas fa-camera me-1"), "Camera"],
+                id=cam_btn_id,
+                **{
+                    "data-cam-video": cam_vid_id,
+                    "data-cam-canvas": cam_cvs_id,
+                    "data-cam-snap": cam_snap_id,
+                    "data-cam-stop": cam_stop_id,
+                },
+                style={
+                    **_btn_base, "flex": "0 0 auto", "height": "42px",
+                    "border": "2px dashed #17976e", "background": "rgba(23,151,110,0.06)",
+                    "color": "#17976e", "padding": "0 14px",
+                },
+            ),
+        ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
+
+        html.Video(
+            id=cam_vid_id, autoPlay=True, muted=True,
+            style={
+                "width": "100%", "maxHeight": "200px", "borderRadius": "10px",
+                "display": "none", "objectFit": "cover", "background": "#111",
+                "marginBottom": "6px",
+            },
+        ),
+        html.Canvas(id=cam_cvs_id, style={"display": "none"}),
+
+        html.Div([
+            html.Div(
+                [html.I(className="fas fa-circle me-1"), "Snap"],
+                id=cam_snap_id,
+                **{
+                    "data-cam-video": cam_vid_id, "data-cam-canvas": cam_cvs_id,
+                    "data-cam-stop": cam_stop_id, "data-preview-id": prev_img_id,
+                    "data-hidden-marker": hidden_marker,
+                },
+                style={**_btn_base, "background": "#de5c52", "color": "#fff", "display": "none"},
+            ),
+            html.Div(
+                [html.I(className="fas fa-stop me-1"), "Stop"],
+                id=cam_stop_id,
+                **{"data-cam-video": cam_vid_id, "data-cam-btn": cam_btn_id, "data-cam-snap": cam_snap_id},
+                style={**_btn_base, "background": "#7d8ea3", "color": "#fff", "display": "none"},
+            ),
+        ], style={"display": "flex", "gap": "6px", "justifyContent": "center", "marginBottom": "6px"}),
+
+        html.Div(id={"type": "image-preview", "entity": entity, "field": field}, style={"marginTop": "5px", "marginBottom": "15px"}),
+        html.Img(id=prev_img_id, style={
+            "display": "none", "maxWidth": "100%", "maxHeight": "160px",
+            "borderRadius": "8px", "marginTop": "6px", "border": "1px solid #ddd",
+        }),
+        dcc.Input(id={"type": "form-field-hidden", "entity": entity, "field": field}, type="hidden"),
+        dcc.Input(id={"type": "form-entity-pk", "entity": entity}, type="hidden", value=""),
+    ])
+
+
 def _render_banner(title, text):
     return dbc.Card([
         dbc.CardBody([
@@ -90,54 +195,7 @@ def render_category_content(category, society_id=None):
             dbc.Label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Society Logo (Image)"),
-            html.Div([
-                html.Div([
-                    dcc.Upload(
-                        id={"type": "form-upload", "entity": "society", "field": "logo"},
-                        children=html.Div([
-                            html.I(className="fas fa-cloud-upload-alt me-1"),
-                            "Upload / Drop",
-                        ], style={"fontSize": "12px"}),
-                        style={
-                            "flex":         "1",
-                            "height":       "42px",
-                            "lineHeight":   "42px",
-                            "borderWidth":  "2px",
-                            "borderStyle":  "dashed",
-                            "borderRadius": "10px",
-                            "textAlign":    "center",
-                            "borderColor":  "#667eea",
-                            "background":   "rgba(102,126,234,0.04)",
-                            "cursor":       "pointer",
-                            "color":        "#667eea",
-                            "minWidth":     "110px",
-                        },
-                        multiple=False, accept="image/*",
-                    ),
-                    html.Button([
-                        html.I(className="fas fa-camera me-1"),
-                        "Snap"
-                    ], id={"type": "camera-snap-btn", "entity": "society", "field": "logo"},
-                       style={
-                        "display":       "inline-flex",
-                        "alignItems":    "center",
-                        "justifyContent":"center",
-                        "cursor":        "pointer",
-                        "userSelect":    "none",
-                        "borderRadius":  "8px",
-                        "fontSize":      "12px",
-                        "fontWeight":    "600",
-                        "padding":       "6px 14px",
-                        "border":        "none",
-                        "background":    "#17976e",
-                        "color":         "white",
-                        "height":        "42px",
-                       })
-                ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
-                html.Div(id={"type": "image-preview", "entity": "society", "field": "logo"}, style={"marginTop": "5px", "marginBottom": "15px"}),
-                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "logo"}, type="hidden"),
-                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
-            ]),
+            _render_image_capture_control("society", "logo"),
             dbc.Label("Address"),
             dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
             dbc.Label("Email"),
@@ -149,54 +207,7 @@ def render_category_content(category, society_id=None):
             dbc.Label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
             dbc.Label("Login Background (Image)"),
-            html.Div([
-                html.Div([
-                    dcc.Upload(
-                        id={"type": "form-upload", "entity": "society", "field": "bg"},
-                        children=html.Div([
-                            html.I(className="fas fa-cloud-upload-alt me-1"),
-                            "Upload / Drop",
-                        ], style={"fontSize": "12px"}),
-                        style={
-                            "flex":         "1",
-                            "height":       "42px",
-                            "lineHeight":   "42px",
-                            "borderWidth":  "2px",
-                            "borderStyle":  "dashed",
-                            "borderRadius": "10px",
-                            "textAlign":    "center",
-                            "borderColor":  "#667eea",
-                            "background":   "rgba(102,126,234,0.04)",
-                            "cursor":       "pointer",
-                            "color":        "#667eea",
-                            "minWidth":     "110px",
-                        },
-                        multiple=False, accept="image/*",
-                    ),
-                    html.Button([
-                        html.I(className="fas fa-camera me-1"),
-                        "Snap"
-                    ], id={"type": "camera-snap-btn", "entity": "society", "field": "bg"},
-                       style={
-                        "display":       "inline-flex",
-                        "alignItems":    "center",
-                        "justifyContent":"center",
-                        "cursor":        "pointer",
-                        "userSelect":    "none",
-                        "borderRadius":  "8px",
-                        "fontSize":      "12px",
-                        "fontWeight":    "600",
-                        "padding":       "6px 14px",
-                        "border":        "none",
-                        "background":    "#17976e",
-                        "color":         "white",
-                        "height":        "42px",
-                       })
-                ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
-                html.Div(id={"type": "image-preview", "entity": "society", "field": "bg"}, style={"marginTop": "5px", "marginBottom": "15px"}),
-                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "bg"}, type="hidden"),
-                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
-            ]),
+            _render_image_capture_control("society", "bg"),
         ]
     elif category == "TAN & TDS Rates":
         from database.seed import TDS_SECTION_RATE_SEED
@@ -235,7 +246,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2")
             inputs.append(row)
             
-        return elements + [html.Div(inputs, style={"maxHeight": "350px", "overflowY": "auto", "overflowX": "hidden", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "GSTIN & GST Rate":
         s_gstin = ""
         if society_id:
@@ -287,8 +298,22 @@ def render_category_content(category, society_id=None):
                 c_export_fmt = row.get("default_export_format", c_export_fmt)
         inputs = [_render_banner("Compliance Settings", "Configure compliance parameters specific to this society. Reference rule links and thresholds are shown below.")]
         inputs.append(html.H6("Society Compliance Settings", className="mt-2 mb-3 text-primary"))
+        # NOTE: "Registered for GST?" is the single source of truth for
+        # whether this society is GST-registered — it both decides
+        # whether the "GSTIN & GST Rate" step is shown at all (see
+        # get_next_valid_step in setup_wizard_callbacks.py) and is what
+        # gets saved to society_compliance_settings.gst_registered.
+        # There used to be a *second*, unrelated "GST Registered" switch
+        # further down this same page that also claimed to represent this
+        # setting but was never linked to this one or to the step-skip
+        # logic — an admin could answer "Yes" here (showing the GSTIN
+        # step) while that switch still silently said "No" (or vice
+        # versa), and whichever one was touched last is what actually got
+        # written to the database. That duplicate switch has been
+        # removed; this radio now both drives navigation and is the value
+        # persisted on submit.
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
+            dbc.Col([dbc.Label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=c_gst_reg, inline=True, className="mb-3")], width=6),
             dbc.Col([dbc.Label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
         ]))
         inputs.append(dbc.Row([
@@ -301,10 +326,9 @@ def render_category_content(category, society_id=None):
         ]))
         inputs.append(dbc.Row([
             dbc.Col([dbc.Label("GST Filing Cadence"), dbc.Select(id="sw-comp-gst-cadence", options=[{"label": "Monthly", "value": "monthly"}, {"label": "QRMP", "value": "qrmp"}], value=c_gst_cadence, className="mb-3")], width=6),
-            dbc.Col([dbc.Label("GST Registered"), dbc.Switch(id="sw-comp-gst-reg", value=c_gst_reg, className="mb-3")], width=6)
+            dbc.Col([dbc.Label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
         ]))
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
             dbc.Col([dbc.Label("Export Format"), dbc.Select(id="sw-comp-export-fmt", options=[{"label": "Structured", "value": "structured"}, {"label": "GSTN Offline", "value": "gstn_offline"}, {"label": "TRACES 26Q", "value": "traces_26q"}], value=c_export_fmt, className="mb-3")], width=6)
         ]))
         inputs.append(html.Hr())
@@ -312,7 +336,7 @@ def render_category_content(category, society_id=None):
         for item in STATE_COMPLIANCE_THRESHOLDS:
             state, key, val, val_text, unit, eff_from, eff_to, notes = item
             inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
-        return elements + [html.Div(inputs, style={"maxHeight": "400px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due, s_sink, s_repair, s_int = 0.0, 0.0, 1, 0.0, 0.0, 0.0
         if society_id:
@@ -346,54 +370,7 @@ def render_category_content(category, society_id=None):
             _render_banner("Accounts Settings", "Configure accounting start date and Payment QR Code."),
             html.P("Note: The primary_bank_account is not set by default. The Society's payment QR code must correspond to this bank. You can set this later in the Admin portal under the 'Settings' tab, 'Account' KPI.", className="text-info small mb-3"),
             dbc.Label("Payment QR Code Image"),
-            html.Div([
-                html.Div([
-                    dcc.Upload(
-                        id={"type": "form-upload", "entity": "society", "field": "pay_qr"},
-                        children=html.Div([
-                            html.I(className="fas fa-cloud-upload-alt me-1"),
-                            "Upload / Drop",
-                        ], style={"fontSize": "12px"}),
-                        style={
-                            "flex":         "1",
-                            "height":       "42px",
-                            "lineHeight":   "42px",
-                            "borderWidth":  "2px",
-                            "borderStyle":  "dashed",
-                            "borderRadius": "10px",
-                            "textAlign":    "center",
-                            "borderColor":  "#667eea",
-                            "background":   "rgba(102,126,234,0.04)",
-                            "cursor":       "pointer",
-                            "color":        "#667eea",
-                            "minWidth":     "110px",
-                        },
-                        multiple=False, accept="image/*",
-                    ),
-                    html.Button([
-                        html.I(className="fas fa-camera me-1"),
-                        "Snap"
-                    ], id={"type": "camera-snap-btn", "entity": "society", "field": "pay_qr"},
-                       style={
-                        "display":       "inline-flex",
-                        "alignItems":    "center",
-                        "justifyContent":"center",
-                        "cursor":        "pointer",
-                        "userSelect":    "none",
-                        "borderRadius":  "8px",
-                        "fontSize":      "12px",
-                        "fontWeight":    "600",
-                        "padding":       "6px 14px",
-                        "border":        "none",
-                        "background":    "#17976e",
-                        "color":         "white",
-                        "height":        "42px",
-                       })
-                ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
-                html.Div(id={"type": "image-preview", "entity": "society", "field": "pay_qr"}, style={"marginTop": "5px", "marginBottom": "15px"}),
-                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "pay_qr"}, type="hidden"),
-                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
-            ]),
+            _render_image_capture_control("society", "pay_qr"),
             dbc.Label("Accounting/Calculation Start Date"),
             dcc.DatePickerSingle(id="sw-calc-start-date", date=s_calc, display_format='YYYY-MM-DD', className="mb-4 d-block"),
             html.Hr(),
@@ -427,7 +404,7 @@ def render_category_content(category, society_id=None):
                 dbc.Col(html.Span(f"{acc[8]}%" if acc[8] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
             ], className="mb-2")
             inputs.append(row)
-        return elements + [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Brought Forward":
         s_fy = 2024
         if society_id:
@@ -464,7 +441,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2")
             inputs.append(row)
             
-        return elements + [html.Div(inputs, style={"maxHeight": "450px", "overflow": "auto", "paddingRight": "5px"})]
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
         s_name, s_phone, s_email = "", "", ""
         if society_id:
@@ -481,54 +458,7 @@ def render_category_content(category, society_id=None):
             dbc.Label("Secretary Email"),
             dbc.Input(id="sw-sec-email", type="email", value=s_email, className="mb-3"),
             dbc.Label("Secretary Signature Image"),
-            html.Div([
-                html.Div([
-                    dcc.Upload(
-                        id={"type": "form-upload", "entity": "society", "field": "sec_sign"},
-                        children=html.Div([
-                            html.I(className="fas fa-cloud-upload-alt me-1"),
-                            "Upload / Drop",
-                        ], style={"fontSize": "12px"}),
-                        style={
-                            "flex":         "1",
-                            "height":       "42px",
-                            "lineHeight":   "42px",
-                            "borderWidth":  "2px",
-                            "borderStyle":  "dashed",
-                            "borderRadius": "10px",
-                            "textAlign":    "center",
-                            "borderColor":  "#667eea",
-                            "background":   "rgba(102,126,234,0.04)",
-                            "cursor":       "pointer",
-                            "color":        "#667eea",
-                            "minWidth":     "110px",
-                        },
-                        multiple=False, accept="image/*",
-                    ),
-                    html.Button([
-                        html.I(className="fas fa-camera me-1"),
-                        "Snap"
-                    ], id={"type": "camera-snap-btn", "entity": "society", "field": "sec_sign"},
-                       style={
-                        "display":       "inline-flex",
-                        "alignItems":    "center",
-                        "justifyContent":"center",
-                        "cursor":        "pointer",
-                        "userSelect":    "none",
-                        "borderRadius":  "8px",
-                        "fontSize":      "12px",
-                        "fontWeight":    "600",
-                        "padding":       "6px 14px",
-                        "border":        "none",
-                        "background":    "#17976e",
-                        "color":         "white",
-                        "height":        "42px",
-                       })
-                ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
-                html.Div(id={"type": "image-preview", "entity": "society", "field": "sec_sign"}, style={"marginTop": "5px", "marginBottom": "15px"}),
-                dcc.Input(id={"type": "form-field-hidden", "entity": "society", "field": "sec_sign"}, type="hidden"),
-                dcc.Input(id={"type": "form-entity-pk", "entity": "society"}, type="hidden", value=""),
-            ]),
+            _render_image_capture_control("society", "sec_sign"),
             html.Hr(),
             html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
             html.P(
@@ -563,7 +493,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2"),
             html.Div(
                 [dcc.Markdown(readme_txt)],
-                style={"height": "350px", "overflowY": "auto", "backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
+                style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             )
         ]
     elif category == "Review":
@@ -589,7 +519,7 @@ def render_category_content(category, society_id=None):
             ], className="mb-2"),
             html.Div(
                 [dcc.Markdown(agreement_txt)],
-                style={"height": "300px", "overflowY": "auto", "backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
+                style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             ),
             dbc.Label("Type 'I AGREE' below to proceed"),
             dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),

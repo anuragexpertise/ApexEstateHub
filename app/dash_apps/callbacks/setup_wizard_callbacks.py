@@ -196,7 +196,17 @@ def register_setup_wizard_callbacks(app):
         State("sw-comp-gst-exempt", "value"),
         State("sw-comp-charges-int", "value"),
         State("sw-comp-gst-cadence", "value"),
-        State("sw-comp-gst-reg", "value"),
+        # The old, separate "sw-comp-gst-reg" switch was removed from the
+        # Society Compliance page (setup_wizard.py) — it silently
+        # duplicated "Registered for GST?" (sw-gst-registered) without
+        # being linked to it, so a value entered on one could contradict
+        # whichever step/DB write actually used the other. This State now
+        # reuses sw-gst-registered — the same control the wizard's step
+        # navigation already treats as the single source of truth for
+        # this setting (see get_next_valid_step) — so the saved
+        # gst_registered value can never disagree with whether the
+        # GSTIN & GST Rate step was shown.
+        State("sw-gst-registered", "value"),
         State("sw-comp-tds-action", "value"),
         State("sw-comp-export-fmt", "value"),
         State("sw-apt-amt", "value"),

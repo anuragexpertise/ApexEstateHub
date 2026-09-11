@@ -364,9 +364,63 @@ def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
     )
 
 
+def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_id, label: str):
+    """
+    Shared save pipeline for BOTH the drag/drop Upload widget and the
+    device-camera Snap widget: compress to webp, write under the correct
+    society/entity temp dir, and return (preview_component, saved_filename).
+
+    Previously this logic lived only inside handle_image_upload (the
+    dcc.Upload "contents" callback). The camera-capture path
+    (camera_callbacks.py's snapCamCapture) never called it at all — it
+    wrote the raw, uncompressed base64 data-URL straight into the
+    form-field-hidden input, bypassing compression and disk storage
+    entirely. That raw data-URL (often several hundred KB of text) then
+    flowed into _move_temp_images (which only recognizes short on-disk
+    filenames and silently skips anything containing "/", so the image
+    was just dropped) and, for the Setup Wizard specifically, into
+    societies columns typed VARCHAR(100)/VARCHAR(255) — far too small to
+    hold a base64 photo. Net effect: a "successful" camera snap never
+    actually saved a usable image. Factoring the save step out here lets
+    both entry points (upload and camera) go through the same
+    compress-and-persist code, so a snapped photo is saved exactly like
+    an uploaded one.
+    """
+    if society_id:
+        target_dir = Path("app/assets") / str(society_id)
+    else:
+        target_dir = Path("app/assets/default") / entity
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    from app.dash_apps.drilldown.image_utils import compress_to_webp
+    webp_bytes = compress_to_webp(decoded)
+    if webp_bytes is None:
+        return (html.Small("✗ Could not compress image below 25KB",
+                            style={"color": "red"}), None)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"{field_name}_{timestamp}.webp"   # built AFTER compression, always webp
+    file_path = target_dir / safe_filename
+    with open(file_path, "wb") as f:
+        f.write(webp_bytes)
+
+    if society_id:
+        web_path = f"/assets/{society_id}/{safe_filename}"
+    else:
+        web_path = f"/assets/default/{entity}/{safe_filename}"
+
+    preview = html.Div([
+        html.Img(src=web_path, style={"maxWidth": "200px", "maxHeight": "150px",
+                                    "borderRadius": "8px", "border": "1px solid #ddd"}),
+        html.Small(f"✓ {label} ({file_path.stat().st_size // 1024}KB)",
+                style={"color": "#17976e", "marginTop": "5px", "display": "block"}),
+    ])
+    return preview, safe_filename
+
+
 def register_drilldown_callbacks(app):
 
-    # ── 0. Image upload ──────────────────────────────────────────────────────
+    # ── 0. Image upload (drag/drop or file picker) ─────────────────────────────
     @app.callback(
         Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
         Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
@@ -386,39 +440,51 @@ def register_drilldown_callbacks(app):
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
-            if society_id:
-                target_dir = Path("app/assets") / str(society_id)
-            else:
-                target_dir = Path("app/assets/default") / entity
-
-            target_dir.mkdir(parents=True, exist_ok=True)
-
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
-            from app.dash_apps.drilldown.image_utils import compress_to_webp
-            webp_bytes = compress_to_webp(decoded)
-            if webp_bytes is None:
-                return (html.Small("✗ Could not compress image below 25KB",
-                                    style={"color": "red"}), no_update)
+            preview, safe_filename = _save_captured_image(decoded, entity, field_name, society_id, filename)
+            if safe_filename is None:
+                return preview, no_update
+            return preview, safe_filename
+        except Exception as e:
+            return html.Small(f"✗ {e}", style={"color": "red"}), no_update
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_filename = f"{field_name}_{timestamp}.webp"   # built AFTER compression, always webp
-            file_path = target_dir / safe_filename
-            with open(file_path, "wb") as f:
-                f.write(webp_bytes)
+    # ── 0b. Camera capture (device Snap button) ─────────────────────────────────
+    # camera_callbacks.py's clientside snapCamCapture() writes the captured
+    # frame as a raw "data:image/...;base64,..." string into this same
+    # form-field-hidden input (the marker it targets is literally
+    # '"entity": "...", "field": "..."', matching this component's id). This
+    # callback recognizes that raw-data-URL shape, runs it through the same
+    # compress/save pipeline as a normal upload, and overwrites the hidden
+    # field with the real saved filename — so downstream code (submit
+    # handlers, _move_temp_images, DB columns) always sees a short filename,
+    # never a multi-hundred-KB inline image.
+    @app.callback(
+        Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children", allow_duplicate=True),
+        Output({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value", allow_duplicate=True),
+        Input({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "value"),
+        State("auth-store", "data"),
+        State({"type": "form-field-hidden", "entity": MATCH, "field": MATCH}, "id"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_camera_capture(hidden_value, auth, field_id):
+        if not hidden_value or not isinstance(hidden_value, str) or not hidden_value.startswith("data:image"):
+            # Already a plain filename (from an upload, or a previous run of
+            # this same callback) — nothing to do.
+            raise PreventUpdate
+        try:
+            society_id = (auth or {}).get("society_id")
+            entity = field_id.get("entity") if isinstance(field_id, dict) else None
+            field_name = field_id.get("field", "image")
 
-            if society_id:
-                web_path = f"/assets/{society_id}/{safe_filename}"
-            else:
-                web_path = f"/assets/default/{entity}/{safe_filename}"
+            content_type, content_string = hidden_value.split(",", 1)
+            decoded = base64.b64decode(content_string)
 
-            preview = html.Div([
-                html.Img(src=web_path, style={"maxWidth": "200px", "maxHeight": "150px",
-                                            "borderRadius": "8px", "border": "1px solid #ddd"}),
-                html.Small(f"✓ {filename} ({file_path.stat().st_size // 1024}KB)",
-                        style={"color": "#17976e", "marginTop": "5px", "display": "block"}),
-            ])
+            preview, safe_filename = _save_captured_image(decoded, entity, field_name, society_id, "Camera capture")
+            if safe_filename is None:
+                return preview, no_update
             return preview, safe_filename
         except Exception as e:
             return html.Small(f"✗ {e}", style={"color": "red"}), no_update
