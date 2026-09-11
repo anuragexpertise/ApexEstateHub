@@ -74,32 +74,36 @@ def connect():
 # ------------------------------------------------------------------
 
 def execute_sql_file(conn, sql_file):
-    with open(sql_file, "r", encoding="utf-8") as f:
-        sql = f.read()
+    if not os.path.isfile(sql_file):
+        raise FileNotFoundError(f"Schema file not found: {sql_file}")
 
-    print("\nRunning schema file...")
-    import sqlparse
-    stmts = sqlparse.split(sql)
-    ok = 0
-    err = 0
+    print("\nRunning schema file via psql...")
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
         conn.commit()
-        for stmt in stmts:
-            stmt = stmt.strip()
-            if not stmt:
-                continue
-            try:
-                cur.execute(stmt)
-                conn.commit()
-                ok += 1
-            except Exception as exc:
-                conn.rollback()
-                snippet = stmt[:120].replace("\n", " ")
-                print(f"\nFAILED:\n{snippet}")
-                print(exc)
-                err += 1
-    print(f"✓ DDL: {ok} ok, {err} skipped")
+
+    import subprocess
+    env = os.environ.copy()
+    if DB_PASSWORD:
+        env["PGPASSWORD"] = DB_PASSWORD
+    
+    cmd = [
+        "psql",
+        "-h", DB_HOST,
+        "-p", str(DB_PORT),
+        "-U", DB_USER,
+        "-d", DB_NAME,
+        "-v", "ON_ERROR_STOP=1",
+        "-q",
+        "-f", str(sql_file)
+    ]
+    
+    try:
+        res = subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+        print("✓ DDL executed successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"\nFAILED to execute schema:\n{e.stderr}")
+        raise
 
 
 # ------------------------------------------------------------------
