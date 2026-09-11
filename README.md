@@ -58,6 +58,11 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **DB** | PostgreSQL `fn_*` stored functions · `%s` parameterised queries via psycopg2 |
 | **Security Portal** | Pending receipt creation → admin verification workflow |
 | **NOC** | Eligibility check → rich-text editor → Print / Save HTML / Email |
+| **Gate Pass (NFC)** | Web NFC API — write signed pass payload directly to an NFC tag from the browser |
+| **Patrol** | Interactive Leaflet map for patrol-location create/reissue, with geofencing |
+| **Bank Reconciliation** | CSV/Excel bank-statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
+| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward) + Agreement e-sign flow with Print/PDF/Email |
+| **Bulk Enrollment** | CSV upload for apartments/vendors/security with template download |
 
 ---
 
@@ -73,21 +78,41 @@ Browser (Dash SPA)
 │
 ├── app_shell.py              ← Top-level layout: header, sidebar, modals, stores
 │
-├── callbacks/
+├── callbacks/                ← 34 modules registered in a single ordered
+│   │                            sequence by callbacks/__init__.py; the core
+│   │                            navigation/auth modules below, plus one
+│   │                            module per feature area (receipts, events,
+│   │                            vendor passes, expenses, bulk enroll, bank
+│   │                            reconciliation, channels, polls, patrol
+│   │                            locations/NFC, QR reissue, etc.)
 │   ├── shell_callbacks.py        ← URL routing, auth guard, sidebar, toast
 │   ├── login_callbacks.py        ← Password / PIN / Pattern / Master login
 │   ├── card_catalogue_callbacks.py  ← KPI value refresh (pattern-matched ALL)
 │   ├── drilldown_callbacks.py    ← Master router: KPI→List→Profile→Form
+│   ├── drillin_callbacks.py      ← Entity-picker / Bill-Group-pay modals
 │   ├── qr_callbacks.py           ← QR modal, camera, gate scan, emergency
+│   ├── qr_reissue_callbacks.py   ← Admin-only QR revoke/reissue (Settings tab)
+│   ├── patrol_map_callbacks.py   ← Leaflet map init for patrol locations
 │   ├── camera_callbacks.py       ← Image capture JS injection
 │   ├── noc_callbacks.py          ← Print / PDF / Email NOC (clientside)
+│   ├── agreement_callbacks.py    ← Print / PDF / Email society Agreement
 │   ├── customize_callbacks.py    ← DnD layout editor
 │   ├── customize_kpi_callbacks.py← KPI Inspector cascading dropdowns
+│   ├── list_inspector_callbacks.py / form_inspector_callbacks.py ← column/field config
+│   ├── setup_wizard_callbacks.py ← First-time society setup wizard
+│   ├── bulk_enroll_callbacks.py  ← CSV bulk upload for members/staff
+│   ├── bank_reconcile_callbacks.py ← Bank statement upload + reconciliation
+│   ├── channel_callbacks.py / poll_callbacks.py ← Alert channels · Polls
+│   ├── assign_to_callbacks.py / invite_to_callbacks.py / concern_bid_callbacks.py ← Concern workflow
+│   ├── receipt_callbacks.py / expense_callbacks.py / event_ticket_callbacks.py / vendor_pass_callbacks.py ← Print/Save/Email actions
+│   ├── form_autofill_callbacks.py / mode_conditional_callbacks.py / qty_stepper_callbacks.py ← form UX helpers (clientside)
+│   ├── account_callbacks.py      ← Self-service change password
 │   └── debug_callbacks.py        ← KPI Audit Report + SQL Tester
 │
 ├── drilldown/
 │   ├── loaders.py            ← All DB reads (fn_* functions + raw SQL)
 │   ├── renderers.py          ← HTML builders for list/profile/form/pay-dues/NOC cards
+│   ├── drillin.py            ← DRILLIN_CONFIG for entity-picker/Bill-Group modals
 │   ├── state.py              ← Navigation stack (drilldown-store)
 │   ├── registry.py           ← DRILLDOWN_MAP, ENTITY_MAP, PK_MAP
 │   ├── profile_actions.py    ← Per-entity action button definitions + FIELD_VISIBILITY
@@ -98,6 +123,10 @@ Browser (Dash SPA)
     ├── portal_pages.py       ← 5 portal page layouts (KPI rows + drill panel)
     └── card_catalogue.py     ← KPI_CARDS dict · DEFAULT_LAYOUTS · make_kpi_card()
 ```
+
+> See [§17 Codebase Map](#17-codebase-map) for the full, current file-by-file
+> breakdown (kept in sync with `callbacks/__init__.py`'s actual registration
+> order, not a hand-maintained summary).
 
 ### Single-Page Flow
 
@@ -741,15 +770,19 @@ ApexEstateHub/
 │   ├── dash_apps/
 │   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
 │   │   ├── layout.py                         ← Shared page layout and UI components
-│   │   ├── callbacks/
-│   │   │   ├── __init__.py                   ← Registration order & loader rules
+│   │   ├── callbacks/                        ← 34 modules; see registration order below
+│   │   │   ├── __init__.py                   ← Registration order & loader rules (source of truth — read this file directly for the current wiring, it's kept well-commented)
 │   │   │   ├── shell_callbacks.py            ← URL routing, auth guard, sidebar, toast
 │   │   │   ├── login_callbacks.py            ← All login methods + password reset
 │   │   │   ├── card_catalogue_callbacks.py   ← KPI refresh (single callback, ALL pattern)
 │   │   │   ├── drilldown_callbacks.py        ← Master router + form submit + default profile
-│   │   │   ├── qr_callbacks.py               ← QR modal, camera JS, gate scan, emergency
+│   │   │   ├── drillin_callbacks.py          ← Entity-picker modal (FK fields) + Bill-Group Pay picker
+│   │   │   ├── qr_callbacks.py               ← QR modal, camera JS, gate scan, emergency, NFC write
+│   │   │   ├── qr_reissue_callbacks.py       ← Admin-only Settings-tab Re-issue QR (revoke_and_reissue)
+│   │   │   ├── patrol_map_callbacks.py       ← Clientside Leaflet map init for patrol locations
 │   │   │   ├── camera_callbacks.py           ← Image capture JS (entity forms)
 │   │   │   ├── noc_callbacks.py              ← Print / PDF / Email NOC (clientside)
+│   │   │   ├── agreement_callbacks.py        ← Print / PDF / Email society Agreement (clientside)
 │   │   │   ├── customize_callbacks.py        ← DnD layout editor
 │   │   │   ├── customize_kpi_callbacks.py    ← KPI Inspector + _KPI_PORTAL_ENTRIES
 │   │   │   ├── list_inspector_callbacks.py   ← List column configuration
@@ -757,21 +790,33 @@ ApexEstateHub/
 │   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
 │   │   │   ├── bulk_enroll_callbacks.py      ← CSV bulk upload for members/staff
 │   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation
-│   │   │   ├── channel_callbacks.py          ← Channel subscriptions
+│   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
+│   │   │   ├── concern_bid_callbacks.py      ← Vendor "Save Bid" on a concern
+│   │   │   ├── invite_to_callbacks.py        ← Invite vendors/security to bid on a concern
+│   │   │   ├── channel_callbacks.py          ← Channel creation, subscribe/unsubscribe
 │   │   │   ├── poll_callbacks.py             ← Owner voting and poll management
 │   │   │   ├── account_callbacks.py          ← Account settings / change password
+│   │   │   ├── mode_conditional_callbacks.py ← Clientside field visibility (cheque_no/txn_id by Mode)
+│   │   │   ├── qty_stepper_callbacks.py      ← Clientside +/- quantity stepper (event ticket qty)
+│   │   │   ├── form_autofill_callbacks.py    ← Particulars auto-suggestion for Receipts/Expenses
+│   │   │   ├── receipt_callbacks.py          ← Receipt Print / Save / Email
+│   │   │   ├── event_ticket_callbacks.py     ← Event ticket Print / Save / Email
+│   │   │   ├── vendor_pass_callbacks.py      ← Vendor pass Print / Save / Email
+│   │   │   ├── expense_callbacks.py          ← Expense voucher Print / Save / Email
 │   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
-│   │   │   ├── admin_callbacks.py            ← [Disabled] Admin specific actions (unregistered)
-│   │   │   ├── owner_callbacks.py            ← [Disabled] Owner portal specific actions (unregistered)
-│   │   │   └── security_callbacks.py         ← [Disabled] Security portal specific actions (unregistered)
+│   │   │   ├── admin_callbacks.py            ← No-op registration slot (all callbacks pruned — see file docstring); kept so future admin-only callbacks have a documented slot
+│   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Was defined but **never registered** — the Security portal's Gate Alert buttons rendered with no listener; now wired in as step 6b
+│   │   │   └── kpi_rule_links_callbacks.py   ← ⚠️ Defined (`register_kpi_rule_links_callbacks`) but **not imported anywhere in `__init__.py`** — currently dead code; either wire it in or remove it (see [§20](#20--open-design-subtleties--flagged-caveats))
 │   │   ├── drilldown/
 │   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo
 │   │   │   ├── renderers.py                  ← list/profile/form/pay-dues/NOC card HTML
+│   │   │   ├── drillin.py                    ← DRILLIN_CONFIG for entity-picker/Bill-Group modals
 │   │   │   ├── state.py                      ← navigate_to, navigate_back, initial_state
 │   │   │   ├── registry.py                   ← DRILLDOWN_MAP, ENTITY_MAP, PK_MAP, helpers
 │   │   │   ├── profile_actions.py            ← PROFILE_ACTIONS + FIELD_VISIBILITY dicts
 │   │   │   ├── schema_introspect.py          ← Live schema → entity meta (lazy-cached)
-│   │   │   └── image_utils.py                ← compress_to_webp()
+│   │   │   ├── image_utils.py                ← compress_to_webp()
+│   │   │   └── `__init__ ().py`              ← ⚠️ Stray duplicate of `__init__.py` (note the space + parens in the filename) — looks like an accidental extra save, not imported by anything; safe to delete, see [§21](#21--legacy-code-cleanup-status)
 │   │   └── pages/
 │   │       ├── portal_pages.py               ← 5 portal page layouts
 │   │       ├── card_catalogue.py             ← KPI_CARDS, DEFAULT_LAYOUTS, make_kpi_card()
@@ -798,20 +843,67 @@ ApexEstateHub/
 
 ### Callback Registration Order (`callbacks/__init__.py`)
 
+Every module is registered inside its own `try/except`, so one broken
+module logs a `⚠️` and is skipped rather than crashing the whole app on
+boot — useful in dev, but it also means a silently-broken feature (like
+`security_callbacks` being unregistered for an unknown period, see
+[§19](#19-known-bugs--fixes-applied)) can go unnoticed unless someone
+reads the startup log. Current order, condensed (module names match the
+files in [§17](#3-architecture-overview) above):
+
 ```python
-register_shell_callbacks(app)          # 1. URL routing MUST be first
-register_login_callbacks(app)          # 2. Auth before data callbacks
-register_drilldown_callbacks(app)      # 3. Navigation engine (owns drill-content)
-register_card_catalogue_callbacks(app) # 4. KPI refresh
-register_customize_callbacks(app)      # 5. DnD layout editor
-register_qr_callbacks(app)             # 6. QR gate pass
-register_camera_callbacks(app)         # 7. Image capture JS
-register_customize_kpi_callbacks(app)  # 8. KPI inspector
-register_debug_callbacks(app)          # 9. Dev tools
-register_noc_callbacks(app)            # 10. NOC actions (last — dynamic IDs)
+register_shell_callbacks(app)              # 1.  URL routing MUST be first
+register_login_callbacks(app)              # 2.  Auth before data callbacks
+register_drilldown_callbacks(app)          # 3.  Navigation engine (owns drill-content)
+register_member_ledger_callbacks(app)      #     + member ledger, same module
+import patrol_map_callbacks                #     Leaflet map init (module-level registration)
+register_card_catalogue_callbacks(app)     # 4.  KPI refresh
+register_customize_callbacks(app)          # 5.  DnD layout editor
+register_qr_callbacks(app)                 # 6.  QR gate pass
+register_security_callbacks(app)           # 6b. Gate alerts — previously never called (fixed)
+register_camera_callbacks(app)             # 7.  Image capture JS
+register_customize_kpi_callbacks(app)      # 8.  KPI inspector
+register_list_inspector_callbacks(app)     # 8b. List column configuration
+register_form_inspector_callbacks(app)     #     Form field configuration
+register_setup_wizard_callbacks(app)       # 9.  First-time society setup wizard
+register_debug_callbacks(app)              # 10. Dev tools
+register_noc_callbacks(app)                # 10. NOC actions (clientside)
+register_agreement_callbacks(app)          # 10b. Agreement actions (clientside)
+register_admin_callbacks(app)              # 11. No-op slot (all callbacks pruned)
+register_form_autofill_callbacks(app)      # 12. Particulars auto-suggestion
+register_receipt_callbacks(app)            # 13. Receipt Print/Save/Email
+register_event_ticket_callbacks(app)       # 13b.Event ticket Print/Save/Email
+register_vendor_pass_callbacks(app)        # 13c.Vendor pass Print/Save/Email
+register_expense_callbacks(app)            # 13d.Expense Print/Save/Email
+register_bulk_enroll_callbacks(app)        # 14. CSV bulk upload
+register_bank_reconcile_callbacks(app)     # 14a2.Bank statement reconciliation
+register_assign_to_callbacks(app)          # 14b.Concern assignment
+register_concern_bid_callbacks(app)        # 14c.Vendor bid on concern
+register_invite_to_callbacks(app)          # 14d.Invite vendors/security to bid
+register_drillin_callbacks(app)            # 14e.Entity-picker modal
+register_pay_dues_bill_callbacks(app)      # 14f.Bill Group Pay picker
+register_channel_callbacks(app)            # 15. Channels
+register_poll_callbacks(app)               # 16. Polls
+register_account_callbacks(app)            # 17. Change password
+register_mode_conditional_callbacks(app)   # 18. Clientside field visibility
+register_qty_stepper_callbacks(app)        # 19. Clientside qty stepper
+register_qr_reissue_callbacks(app)         # 21. Admin QR revoke/reissue (Settings tab)
 ```
 
-> **Note on disabled callback modules:** `admin_callbacks.py`, `owner_callbacks.py`, and `security_callbacks.py` are intentionally **not registered** in `register_callbacks(app)` to prevent Dash from throwing a `NonExistentIdException` on startup. Gate scanning and payment actions are instead fully handled by `qr_callbacks.py` and the main `drilldown_callbacks.py` form handling engine.
+Not called anywhere: `register_kpi_rule_links_callbacks` (defined in
+`kpi_rule_links_callbacks.py`, never imported). `owner_callbacks.py` no
+longer exists in the codebase (removed).
+
+> **Note on `admin_callbacks.py` / `security_callbacks.py` (updated):** this
+> section previously said all three of `admin_callbacks.py`,
+> `owner_callbacks.py`, and `security_callbacks.py` were intentionally left
+> unregistered. That's no longer accurate: `owner_callbacks.py` has since
+> been deleted from the repo entirely; `admin_callbacks.py` **is**
+> registered, but as a documented no-op (all of its callbacks were pruned
+> because their target component IDs didn't exist — see step 11 above); and
+> `security_callbacks.py` **is now registered** (step 6b) — it was
+> previously an unintentional gap (the Gate Alert buttons had no listener),
+> not a deliberate omission, and has been fixed (see [§19](#19-known-bugs--fixes-applied)).
 
 ---
 
@@ -864,6 +956,7 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 | Patrol Locations list empty | List generation SQL was completely missing from `loaders.py` | Added `patrol_locations` branch to `load_list` in `loaders.py` using direct SQL query |
 | Duplicate list columns | `active` and `scan_interval` appeared twice in Patrol Locations list | Removed `patrol_locations` from `_COMPUTED_FIELDS` in `schema_introspect.py` since schema introspector already natively discovers them |
 | No NFC programming UI | "Program NFC" button opened generic QR modal with no way to write NFC | Added "Write to NFC Tag" button to `_qr_modal` (`app_shell.py`) and wired Web NFC API `NDEFReader().write()` callback (`qr_callbacks.py`) |
+| Security portal Gate Alert buttons non-functional | `security_callbacks.py` was fully implemented and its render function imported by `portal_pages.py`, but `register_security_callbacks(app)` itself was never called in `callbacks/__init__.py` — every School Bus/Taxi/Visitor gate-alert button rendered with no listener | Added the missing `register_security_callbacks(app)` call (step 6b) in `callbacks/__init__.py` |
 
 ---
 
@@ -932,6 +1025,14 @@ All dead, superseded, or bug-inducing code identified in previous phases has bee
 | `savers.py` | Entire redundant file | ~230 | ✅ Removed |
 
 **Total codebase reduction: ~1,500 lines of dead code.**
+
+### New cleanup candidates (found during this README pass, not yet actioned)
+
+| File | Issue | Suggested action |
+|---|---|---|
+| `app/dash_apps/callbacks/kpi_rule_links_callbacks.py` | `register_kpi_rule_links_callbacks()` is fully defined but not imported/called anywhere in `callbacks/__init__.py` | Either wire it in (if the feature is still wanted) or delete the file |
+| `app/dash_apps/drilldown/__init__ ().py` | Stray file (space + parentheses in the name) that duplicates `__init__.py`'s header — not imported by anything | Delete |
+| `app/dash_apps/callbacks/patrol_location_callbacks.py` | Already removed per its own `__init__.py` comment (2026-09) — confirmed gone from the working tree | No action needed; README previously described this as still-present dead code, now corrected |
 
 ---
 
