@@ -4059,11 +4059,7 @@ def _save_vendor_pass(db, d, sid):
     if pass_type != "free_1mth" and mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payables", None
 
-    # ── acc_id auto-derived from account name, NOT from ven_charges_fines_basis ──
-    acc_id = d.get("acc_id")
-    if not acc_id:
-        acc = _get_account_by_name(sid, "Society Charge")
-        acc_id = acc["id"] if acc else None
+    acc_id = 2318
 
     particulars = d.get("particulars") or ""
     if mode != "cash":
@@ -4490,18 +4486,24 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
         
     user_type = d.get("user_type", "visitor")
     actor_uid = get_current_user_id()
-    apt_id = get_current_linked_id()
     
-    # Enforce permissions: find the actor's user_type
-    actor_row = db._execute("SELECT user_type FROM users WHERE id=%s AND society_id=%s", (actor_uid, sid), fetch_one=True)
+    actor_row = db._execute("SELECT role, user_type FROM users WHERE id=%s AND society_id=%s", (actor_uid, sid), fetch_one=True)
     if not actor_row:
-        return False, "Unauthorised: Could not identify current user role", None
+        return False, "Unauthorised: Could not identify current user", None
         
+    actor_role = actor_row["role"]
     actor_type = actor_row["user_type"]
-    if actor_type in ("family", "tenant") and user_type != "visitor":
-        return False, f"Unauthorised: {actor_type.title()} can only create 'visitor' members.", None
-    if actor_type == "visitor":
-        return False, "Unauthorised: Visitors cannot create members.", None
+    
+    if actor_role in ("admin", "master"):
+        apt_id = d.get("apartment_id")
+        if not apt_id:
+            return False, "Apartment is required", None
+    else:
+        apt_id = get_current_linked_id()
+        if actor_type in ("family", "tenant") and user_type != "visitor":
+            return False, f"Unauthorised: {actor_type.title()} can only create 'visitor' members.", None
+        if actor_type == "visitor":
+            return False, "Unauthorised: Visitors cannot create members.", None
         
     if is_edit:
         pw = (d.get("password") or "").strip()
@@ -4515,14 +4517,16 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
             set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
         if user_type:
             set_parts.append("user_type=%s"); params.append(user_type)
+        if actor_role in ("admin", "master") and apt_id:
+            set_parts.append("linked_id=%s"); params.append(apt_id)
             
-        params += [pk, sid, apt_id]
+        params += [pk, sid]
         if not set_parts:
             return True, "No changes to save", pk
             
         db._execute(
             f"UPDATE users SET {', '.join(set_parts)} "
-            "WHERE id=%s AND society_id=%s AND linked_id=%s AND role='apartment'",
+            "WHERE id=%s AND society_id=%s AND role='apartment'",
             params,
         )
         return True, f"Member '{email}' updated", pk
