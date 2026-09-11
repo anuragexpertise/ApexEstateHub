@@ -1002,11 +1002,7 @@ def seed_accounts_created_by(cur, conn, society_id: int, admin_uid: int):
 
 def seed_society_created_by(cur, conn, society_id: int, admin_uid: int):
     """Backfill created_by on society seeded before admin user existed."""
-    cur.execute(
-        "UPDATE societies SET created_by = %s WHERE id = %s AND created_by IS NULL",
-        (admin_uid, society_id),
-    )
-    conn.commit()
+    pass
 
 
 def seed_admin_created_by(cur, conn, admin_uid: int):

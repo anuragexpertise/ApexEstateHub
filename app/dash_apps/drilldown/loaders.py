@@ -1063,7 +1063,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     if entity == "societies":
         sid = _sid(filters)
         if sid:
-            return ("SELECT * FROM fn_societies_list(%s) WHERE id=%s LIMIT %s OFFSET %s",
+            return ("SELECT * FROM fn_societies_list(%s, NULL, NULL, %s) LIMIT %s OFFSET %s",
                     (s, sid, page_size, offset))
         return ("SELECT * FROM fn_societies_list(%s) LIMIT %s OFFSET %s",
                 (s, page_size, offset))
