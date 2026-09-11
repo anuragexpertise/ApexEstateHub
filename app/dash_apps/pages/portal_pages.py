@@ -272,8 +272,27 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
         {"label": "Security",  "value": "security"},
     ]
     if active_tab == "master-settings":
+        import dash
+        app_obj = dash.get_app()
+        failed_cbs = getattr(app_obj, "_failed_callbacks", [])
+        
+        failed_alert = None
+        if failed_cbs:
+            alert_items = [html.Li(f"{f['module']}: {f['error']}", style={"fontSize": "13px"}) for f in failed_cbs]
+            failed_alert = dbc.Alert(
+                [
+                    html.H6([html.I(className="fas fa-exclamation-triangle me-2"), "Callback Registration Failures"], className="alert-heading", style={"fontWeight": "700"}),
+                    html.P("The following callback modules failed to register at startup. Related features will be broken:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                    html.Ul(alert_items, className="mb-0")
+                ],
+                color="danger",
+                className="mb-4 shadow-sm",
+                style={"border": "1px solid #f5c2c7"}
+            )
+
         return html.Div([
             _page_title("fa-crown", c, "Master Settings"),
+            failed_alert,
             _sec_hdr("Platform Configuration", "inspect and configure portals", "fa-cog"),
             dbc.Tabs(
                 id="master-inspector-tabs",

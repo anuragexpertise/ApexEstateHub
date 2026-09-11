@@ -15,313 +15,84 @@ def register_callbacks(app):
         print("📋 Callbacks already registered — skipping")
         return
     app._callbacks_registered = True
+    app._failed_callbacks = []
 
     print("📋 Registering callbacks...")
 
-    # 1. Shell FIRST (owns society-dropdown, guard_modal, route_page)
-    from .shell_callbacks import register_shell_callbacks
-    register_shell_callbacks(app)
+    import importlib
+    import pathlib
 
-    # 2. Login (writes auth-store with allow_duplicate=True)
-    from .login_callbacks import register_login_callbacks
-    register_login_callbacks(app)
+    # Define the intended order of callback registrations
+    CALLBACK_MODULES = [
+        "shell_callbacks",            # 1. Shell FIRST
+        "login_callbacks",            # 2. Login
+        "drilldown_callbacks",        # 3. Drilldown
+        "patrol_map_callbacks",       
+        "card_catalogue_callbacks",   # 4. Card catalogue
+        "customize_callbacks",        # 5. Customize
+        "qr_callbacks",               # 6. QR gate pass
+        "security_callbacks",         # 6b. Security gate-alert
+        "camera_callbacks",           # 7. Camera capture
+        "customize_kpi_callbacks",    # 8. KPI Inspector
+        "list_inspector_callbacks",   # 8b. List Inspector
+        "form_inspector_callbacks",   
+        "setup_wizard_callbacks",     # 9. Setup Wizard
+        "debug_callbacks",            # 10. Debug
+        "noc_callbacks",              # 10. NOC card buttons
+        "agreement_callbacks",        # 10b. Agreement card buttons
+        "admin_callbacks",            # 11. Admin callbacks
+        "form_autofill_callbacks",    # 12. Form autofill
+        "receipt_callbacks",          # 13. Receipt buttons
+        "event_ticket_callbacks",     # 13b. Event Ticket buttons
+        "vendor_pass_callbacks",      # 13c. Vendor Pass buttons
+        "expense_callbacks",          # 13d. Expense buttons
+        "bulk_enroll_callbacks",      # 14. Bulk Enroll
+        "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
+        "assign_to_callbacks",        # 14b. Assign-To
+        "concern_bid_callbacks",      # 14c. Concern Bid
+        "invite_to_callbacks",        # 14d. Invite-To
+        "drillin_callbacks",          # 14e. Drill-In (and pay dues)
+        "channel_callbacks",          # 15. Channel
+        "poll_callbacks",             # 16. Poll
+        "account_callbacks",          # 17. Account Settings
+        "mode_conditional_callbacks", # 18. Mode-conditional
+        "qty_stepper_callbacks",      # 19. Quantity stepper
+        "qr_reissue_callbacks",       # 21. Re-issue QR
+    ]
 
-    # 3. Drilldown — needs profile-action-trigger Store in app_shell
+    for mod_name in CALLBACK_MODULES:
+        full_mod_name = f"app.dash_apps.callbacks.{mod_name}"
+        try:
+            mod = importlib.import_module(full_mod_name)
+            
+            # Find and call any function starting with 'register_'
+            registered_any = False
+            for attr_name in dir(mod):
+                if attr_name.startswith("register_") and callable(getattr(mod, attr_name)):
+                    getattr(mod, attr_name)(app)
+                    registered_any = True
+            
+            # Some modules (e.g. patrol_map_callbacks) only have module-level clientside_callbacks
+            if not registered_any and "register_" not in "".join(dir(mod)):
+                pass
+                
+        except Exception as e:
+            err_msg = f"⚠️ {mod_name} failed: {e}"
+            print(err_msg)
+            import traceback; traceback.print_exc()
+            app._failed_callbacks.append({"module": mod_name, "error": str(e)})
+
+    # Startup-time check for unregistered callback modules
     try:
-        from .drilldown_callbacks import register_drilldown_callbacks, register_member_ledger_callbacks
-        register_drilldown_callbacks(app)
-        register_member_ledger_callbacks(app)
+        callbacks_dir = pathlib.Path(__file__).parent
+        all_callback_files = [f.stem for f in callbacks_dir.glob("*_callbacks.py")]
+        unregistered = set(all_callback_files) - set(CALLBACK_MODULES)
+        
+        for unreg_mod in unregistered:
+            content = (callbacks_dir / f"{unreg_mod}.py").read_text(encoding="utf-8")
+            if "def register_" in content:
+                print(f"⚠️  WARNING: Module {unreg_mod}.py contains a register_* function but is NOT listed in CALLBACK_MODULES in __init__.py!")
     except Exception as e:
-        print(f"⚠️ drilldown_callbacks failed: {e}")
-        import traceback; traceback.print_exc()
-
-    try:
-        import importlib
-        importlib.import_module('app.dash_apps.callbacks.patrol_map_callbacks')
-    except Exception as e:
-        print(f"⚠️ patrol_map_callbacks failed: {e}")
-
-    # 4. Card catalogue (KPI refresh + list loaders)
-    try:
-        from .card_catalogue_callbacks import register_card_catalogue_callbacks
-        register_card_catalogue_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ card_catalogue_callbacks failed: {e}")
-
-    # 5. Customize (DnD layout editor)
-    try:
-        from .customize_callbacks import register_customize_callbacks
-        register_customize_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ customize_callbacks failed: {e}")
-
-    # 6. QR gate pass callbacks
-    try:
-        from .qr_callbacks import register_qr_callbacks
-        register_qr_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ qr_callbacks failed: {e}")
-
-    # 6b. Security gate-alert callbacks (School Bus / Taxi trigger + escalate,
-    #     presumed-visitor notify/call, walk-in visitor, QR scan validate,
-    #     attendance clock-in/out). portal_pages.py already imports
-    #     render_gate_alerts_section from this module to render the buttons
-    #     on the security portal's Gate Pass Evaluation page, but
-    #     register_security_callbacks(app) itself was never called anywhere
-    #     in this registry — every one of those buttons has been rendered
-    #     with no callback listening on it, i.e. non-functional, since
-    #     whenever this file was added. Discovered while migrating this
-    #     file's auth-store usage to the server-verified session.
-    try:
-        from .security_callbacks import register_security_callbacks
-        register_security_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ security_callbacks failed: {e}")
-
-    # 7. Camera capture (clientside JS injection)
-    try:
-        from .camera_callbacks import register_camera_callbacks
-        register_camera_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ camera_callbacks failed: {e}")
-
-    # 8. KPI Inspector callbacks (Customize → KPI Inspector tab)
-    try:
-        from .customize_kpi_callbacks import register_customize_kpi_callbacks
-        register_customize_kpi_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ customize_kpi_callbacks failed: {e}")
-
-    # 8b. List Inspector callbacks (Customize → List Inspector tab)
-    try:
-        from .list_inspector_callbacks import register_list_inspector_callbacks
-        register_list_inspector_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ list_inspector_callbacks failed: {e}")
-
-    try:
-        from .form_inspector_callbacks import register_form_inspector_callbacks
-        register_form_inspector_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ form_inspector_callbacks failed: {e}")
-
-    # 9. Setup Wizard callbacks
-    try:
-        from .setup_wizard_callbacks import register_setup_wizard_callbacks
-        register_setup_wizard_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ setup_wizard_callbacks failed: {e}")
-
-    # 10. Debug LAST (writes customize-kpi-metadata, kpi-audit-table)
-    try:
-        from .debug_callbacks import register_debug_callbacks
-        register_debug_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ debug_callbacks failed: {e}")
-
-    # 10. NOC card buttons (Print / PDF / Email — clientside JS)
-    #     Requires dcc.Store(id='noc-action-store') in app_shell.py layout.
-    try:
-        from .noc_callbacks import register_noc_callbacks
-        register_noc_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ noc_callbacks failed: {e}")
-
-    # 10b. Agreement card buttons (Print / PDF / Email — clientside JS)
-    #     Requires dcc.Store(id='agreement-action-store') + agreement-modal
-    #     in app_shell.py layout.
-    try:
-        from .agreement_callbacks import register_agreement_callbacks
-        register_agreement_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ agreement_callbacks failed: {e}")
-
-    # 11. Admin callbacks — fully pruned. update_society_count,
-    #     update_recent_societies, enroll_member, and
-    #     validate_qr_code_admin were all removed from admin_callbacks.py:
-    #     their target component IDs don't exist anywhere in portal_pages.py.
-    #     Society counts come from the generic KPI system, enrollment goes
-    #     through the schema-driven "New" button flow, and the manual QR
-    #     paste-and-validate feature was moved to qr_callbacks.py's
-    #     validate_manual_qr_scoped (modular, scoped, opens concern profiles
-    #     inline). register_admin_callbacks is a no-op now — kept so the
-    #     registration slot remains documented for future admin-specific
-    #     callbacks. See admin_callbacks.py's module docstring for the full
-    #     rationale.
-    try:
-        from .admin_callbacks import register_admin_callbacks
-        register_admin_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ admin_callbacks failed: {e}")
-
-    # 12. Form autofill — particulars auto-suggestion for Receipts/Expenses
-    #     forms (implements the previously-unwired PARTICULARS_TEMPLATES
-    #     intent noted in estatehub.sql's schema comments).
-    try:
-        from .form_autofill_callbacks import register_form_autofill_callbacks
-        register_form_autofill_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ form_autofill_callbacks failed: {e}")
-
-    # 13. Receipt Print / Save / Email buttons (receipt-action-store dummy
-    #     Output — requires that store added to app_shell.py).
-    try:
-        from .receipt_callbacks import register_receipt_callbacks
-        register_receipt_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ receipt_callbacks failed: {e}")
-
-    # 13b. Event Ticket Print / Save / Email buttons (event-ticket-action-store
-    #      dummy Output — requires those stores added to app_shell.py). New
-    #      2026-08 — event tickets previously had no print/download flow.
-    try:
-        from .event_ticket_callbacks import register_event_ticket_callbacks
-        register_event_ticket_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ event_ticket_callbacks failed: {e}")
-
-    # 13c. Vendor Pass Print / Save / Email buttons (vendor-pass-action-store
-    #      dummy Output — requires those stores added to app_shell.py). New
-    #      2026-08 — vendor passes previously had no print/download flow.
-    try:
-        from .vendor_pass_callbacks import register_vendor_pass_callbacks
-        register_vendor_pass_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ vendor_pass_callbacks failed: {e}")
-
-    # 13d. Expense Print / Save / Email buttons (expense-action-store dummy
-    #      Output — requires those stores added to app_shell.py). New
-    #      2026-08 — expenses previously had no print/download flow.
-    try:
-        from .expense_callbacks import register_expense_callbacks
-        register_expense_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ expense_callbacks failed: {e}")
-
-    # 14. Bulk Enroll (CSV upload for apartments/vendors/security on the
-    #     Admin/Enroll tab). Requires "bulk-enroll-modal" +
-    #     "bulk-enroll-entity-store" in app_shell.py, and a "Bulk Enroll"
-    #     button rendered next to "New" in renderers.py::render_list_card.
-    try:
-        from .bulk_enroll_callbacks import register_bulk_enroll_callbacks
-        register_bulk_enroll_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ bulk_enroll_callbacks failed: {e}")
-
-    # 14a2. Bank Reconcile (CSV/Excel bank statement upload + per-row
-    #     Reconcile picker for list_receipts/list_expenses). Requires
-    #     "bank-reconcile-modal" + "bank-reconcile-picker-modal" +
-    #     their stores in app_shell.py, and a "Bulk Reconcile" button /
-    #     per-row "Reconcile" button rendered in renderers.py.
-    try:
-        from .bank_reconcile_callbacks import register_bank_reconcile_callbacks
-        register_bank_reconcile_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ bank_reconcile_callbacks failed: {e}")
-
-    # 14b. Assign-To modal (concern assignment to admins/vendors/security)
-    #     Requires "assign-to-modal" + "assign-to-store" in app_shell.py.
-    try:
-        from .assign_to_callbacks import register_assign_to_callbacks
-        register_assign_to_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ assign_to_callbacks failed: {e}")
-
-    # 14c. Concern Bid modal (vendor "Save Bid" action on a concern)
-    #     Requires "concern-bid-modal" + "concern-bid-store" in app_shell.py.
-    try:
-        from .concern_bid_callbacks import register_concern_bid_callbacks
-        register_concern_bid_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ concern_bid_callbacks failed: {e}")
-
-    # 14d. Invite-To modal (admin/owner invites vendors/security to bid)
-    #     Requires "invite-to-modal" + "invite-to-store" in app_shell.py.
-    try:
-        from .invite_to_callbacks import register_invite_to_callbacks
-        register_invite_to_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ invite_to_callbacks failed: {e}")
-
-    # 14e. Drill-In entity picker modal (New Receipt/Expense/Concern/… entity_id
-    #     and FK fields opted into drillin.py's DRILLIN_CONFIG).
-    #     Requires "drillin-modal" + "drillin-store" in app_shell.py.
-    try:
-        from .drillin_callbacks import register_drillin_callbacks
-        register_drillin_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ drillin_callbacks failed: {e}")
-
-    # 14f. Pay Dues Bill Group picker modal (Bill Group Pay tab in Pay Dues card).
-    #     Requires "pay-dues-bill-modal" + "pay-dues-bill-store" in app_shell.py.
-    try:
-        from .drillin_callbacks import register_pay_dues_bill_callbacks
-        register_pay_dues_bill_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ pay_dues_bill_callbacks failed: {e}")
-
-    # 15. Channel callbacks (Create Channel & Subscribe/Unsubscribe & View Subscribers)
-    try:
-        from .channel_callbacks import register_channel_callbacks
-        register_channel_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ channel_callbacks failed: {e}")
-
-    # 16. Poll callbacks (owner voting, admin CRUD, server-side user.id auth)
-    try:
-        from .poll_callbacks import register_poll_callbacks
-        register_poll_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ poll_callbacks failed: {e}")
-
-    # 17. Account Settings — self-service Change Password (all roles).
-    #     Requires "account-settings-modal" + "account-settings-btn" in
-    #     app_shell.py.
-    try:
-        from .account_callbacks import register_account_callbacks
-        register_account_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ account_callbacks failed: {e}")
-
-    # 18. Mode-conditional field visibility (Receipts/Expenses cheque_no /
-    #     transaction_id rows, shown only for the relevant payment Mode).
-    #     Clientside — no server state, no new Store needed.
-    try:
-        from .mode_conditional_callbacks import register_mode_conditional_callbacks
-        register_mode_conditional_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ mode_conditional_callbacks failed: {e}")
-
-    # 19. Quantity stepper (+/- buttons) for numeric qty fields — first
-    #     used by the Event Ticket form's Adult/Child Qty. Clientside.
-    try:
-        from .qty_stepper_callbacks import register_qty_stepper_callbacks
-        register_qty_stepper_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ qty_stepper_callbacks failed: {e}")
-
-    # 20. Patrol Locations standalone Settings-tab "Add Location" panel
-    #     (patrol_location_callbacks.py, added 2026-09) removed 2026-09:
-    #     render_patrol_locations_section() was never actually mounted
-    #     into portal_pages.py/app_shell.py, so its Add/List/QR-audit-
-    #     export callbacks all targeted component IDs that didn't exist
-    #     anywhere in the layout — dead code, including an INSERT that
-    #     never wrote latitude/longitude even if it had been reachable.
-    #     Patrol location creation now has exactly one path: the generic
-    #     drilldown list card's "New" button (list_patrol_locations ->
-    #     form_patrol_location_new -> render_form_card), which already
-    #     includes the interactive map (see patrol_map_callbacks.py).
-
-    # 21. Re-issue QR (Settings tab, admin-only) — entity lookup by role+id
-    #     or by pasting a QR string, signing-secret confirmation, and the
-    #     actual revoke_and_reissue call + log table refresh. Requires the
-    #     "form_qr_reissue" render branch in drilldown_callbacks.py and
-    #     renderers.render_qr_reissue_card. Replaces the old in-modal
-    #     Revoke & Reissue button removed from app_shell.py's _qr_modal.
-    try:
-        from .qr_reissue_callbacks import register_qr_reissue_callbacks
-        register_qr_reissue_callbacks(app)
-    except Exception as e:
-        print(f"⚠️ qr_reissue_callbacks failed: {e}")
+        print(f"⚠️  WARNING: Could not perform dead-code startup check: {e}")
 
     print("✅ All callbacks registered")
