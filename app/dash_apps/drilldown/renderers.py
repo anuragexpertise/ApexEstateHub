@@ -1254,6 +1254,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         if f.get("field") not in hidden
         and _field_visible(entity_plural, f.get("field"), role)
         and not (entity in ("concern", "event_ticket") and f.get("field") == "qr_payload")
+        and (not f.get("admin_only") or role == "admin")
     ]
     image_fields = [
         f for f in visible_fields
@@ -2008,6 +2009,7 @@ def render_account_profile_card(card_id: str, title: str, icon: str,
         f for f in fields
         if f.get("field") not in hidden
         and _field_visible(entity_plural, f.get("field"), role)
+        and (not f.get("admin_only") or role == "admin")
     ]
 
     def _field_cell(f: dict) -> html.Div:

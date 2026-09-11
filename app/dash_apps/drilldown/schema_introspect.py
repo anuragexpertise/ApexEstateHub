@@ -758,13 +758,15 @@ def build_entity_meta() -> dict:
                     **({"alias": _FK_HUMAN_ALIASES[name]} if name in _FK_HUMAN_ALIASES else {}),
                 })
 
-            # Profile fields: display all columns from schema_introspect
-            profile_fields.append({
-                "label": label,
-                "field": name,
-                "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
-                **({"type": "image"} if ftype == "image_upload" else {}),
-            })
+            # Profile fields: display schema columns + allowed system columns
+            if not is_system or name in _PROFILE_VISIBLE_SYSTEM:
+                profile_fields.append({
+                    "label": label,
+                    "field": name,
+                    "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
+                    **({"type": "image"} if ftype == "image_upload" else {}),
+                    **({"admin_only": True} if is_system else {}),
+                })
 
             if is_system:
                 continue
