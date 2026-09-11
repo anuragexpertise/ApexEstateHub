@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS societies (
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
     -- signing_secret_enc (renamed 2026-09 from qr_signing_secret_hash):
@@ -122,10 +121,6 @@ CREATE TABLE IF NOT EXISTS users (
 -- again, so there's nothing left that reads or writes these two columns.
 -- Dropped rather than left dangling on an already-provisioned database
 -- that may have run the earlier version of this migration.
-ALTER TABLE users
-DROP COLUMN IF EXISTS last_printed_at,
-DROP COLUMN IF EXISTS last_emailed_at,
-ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id SERIAL PRIMARY KEY,
@@ -234,20 +229,8 @@ CREATE TABLE IF NOT EXISTS security_staff (
 -- Same DROP-then-reset-DEFAULT treatment as users above — see that
 -- comment block for why last_printed_at/last_emailed_at are being
 -- removed again in the same release they were added.
-ALTER TABLE apartments
-DROP COLUMN IF EXISTS last_printed_at,
-DROP COLUMN IF EXISTS last_emailed_at,
-ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
-ALTER TABLE vendors
-DROP COLUMN IF EXISTS last_printed_at,
-DROP COLUMN IF EXISTS last_emailed_at,
-ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
-ALTER TABLE security_staff
-DROP COLUMN IF EXISTS last_printed_at,
-DROP COLUMN IF EXISTS last_emailed_at,
-ALTER COLUMN qr_version SET DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
@@ -313,7 +296,8 @@ CREATE TABLE IF NOT EXISTS concerns (
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id),
-    qr_payload VARCHAR(255)
+    qr_payload VARCHAR(255),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -481,6 +465,35 @@ CREATE TABLE IF NOT EXISTS receivables (
     reported_by INT REFERENCES users (id)
 );
 
+-- ── BANK RECONCILIATION ────────────────────────────────────────────
+-- bank_statement_lines: raw rows from an admin-uploaded CSV/Excel bank
+-- statement, kept even after matching (unlike a "consume and discard"
+-- import) so every reconciliation is traceable back to the actual bank
+-- line — mirrors the audit-trail convention already used by receipts/
+-- expenses (confirmed_by/confirmed_at). batch_id groups all rows from
+-- one upload so a bad upload can be identified together, though rows
+-- are not deleted as a batch (a matched row shouldn't vanish once a
+-- receipt/expense depends on it).
+CREATE TABLE IF NOT EXISTS bank_statement_lines (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    txn_date DATE NOT NULL,
+    description TEXT,
+    debit NUMERIC(10, 2),
+    credit NUMERIC(10, 2),
+    reference_no VARCHAR(100),
+    balance NUMERIC(12, 2),
+    batch_id UUID NOT NULL,
+    matched_entity VARCHAR(10) CHECK (matched_entity IN ('receipt', 'expense')),
+    matched_id INT,
+    match_confidence VARCHAR(10) CHECK (
+        match_confidence IN ('exact', 'fuzzy', 'manual')
+    ),
+    uploaded_by INT REFERENCES users (id),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (num_nonnulls(debit, credit) = 1)
+);
+
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
 CREATE TABLE IF NOT EXISTS receipts (
     id SERIAL PRIMARY KEY,
@@ -530,7 +543,10 @@ CREATE TABLE IF NOT EXISTS receipts (
     source_reference VARCHAR(255),
     qr_payload VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id)
+    created_by INT REFERENCES users (id),
+    reconciled_at TIMESTAMP,
+    reconciled_by INT REFERENCES users(id),
+    bank_statement_line_id INT REFERENCES bank_statement_lines (id)
 );
 
 COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
@@ -563,7 +579,8 @@ CREATE TABLE IF NOT EXISTS nocs (
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id)
+    created_by INT REFERENCES users (id),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
 COMMENT ON COLUMN nocs.status IS 'valid/expired are derived by validate_noc_qr() comparing valid_until to today; revoked is the only status ever written directly (via an explicit revoke action).';
@@ -644,37 +661,13 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id),
     tds_section VARCHAR(10),
-    receipt_number VARCHAR(64)
+    receipt_number VARCHAR(64),
+    reconciled_at TIMESTAMP,
+    reconciled_by INT REFERENCES users(id),
+    bank_statement_line_id INT REFERENCES bank_statement_lines (id),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
--- ── BANK RECONCILIATION ────────────────────────────────────────────
--- bank_statement_lines: raw rows from an admin-uploaded CSV/Excel bank
--- statement, kept even after matching (unlike a "consume and discard"
--- import) so every reconciliation is traceable back to the actual bank
--- line — mirrors the audit-trail convention already used by receipts/
--- expenses (confirmed_by/confirmed_at). batch_id groups all rows from
--- one upload so a bad upload can be identified together, though rows
--- are not deleted as a batch (a matched row shouldn't vanish once a
--- receipt/expense depends on it).
-CREATE TABLE IF NOT EXISTS bank_statement_lines (
-    id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    txn_date DATE NOT NULL,
-    description TEXT,
-    debit NUMERIC(10, 2),
-    credit NUMERIC(10, 2),
-    reference_no VARCHAR(100),
-    balance NUMERIC(12, 2),
-    batch_id UUID NOT NULL,
-    matched_entity VARCHAR(10) CHECK (matched_entity IN ('receipt', 'expense')),
-    matched_id INT,
-    match_confidence VARCHAR(10) CHECK (
-        match_confidence IN ('exact', 'fuzzy', 'manual')
-    ),
-    uploaded_by INT REFERENCES users (id),
-    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (num_nonnulls(debit, credit) = 1)
-);
 
 COMMENT ON TABLE bank_statement_lines IS
     'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates.';
@@ -691,15 +684,7 @@ CREATE INDEX IF NOT EXISTS idx_bank_lines_batch
 -- bank_statement_line_id is nullable: a manual reconcile (no matching
 -- bank line found/uploaded yet) stamps reconciled_at/reconciled_by with
 -- no line reference.
-ALTER TABLE receipts
-    ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMP,
-    ADD COLUMN IF NOT EXISTS reconciled_by INT REFERENCES users (id),
-    ADD COLUMN IF NOT EXISTS bank_statement_line_id INT REFERENCES bank_statement_lines (id);
 
-ALTER TABLE expenses
-    ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMP,
-    ADD COLUMN IF NOT EXISTS reconciled_by INT REFERENCES users (id),
-    ADD COLUMN IF NOT EXISTS bank_statement_line_id INT REFERENCES bank_statement_lines (id);
 
 CREATE INDEX IF NOT EXISTS idx_receipts_reconciled
     ON receipts (society_id, reconciled_at);
@@ -1270,11 +1255,7 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 
 -- Circular-reference FKs (societies <-> users)
 
-ALTER TABLE societies
-ADD CONSTRAINT societies_created_by_fkey FOREIGN KEY (created_by) REFERENCES users (id);
 
-ALTER TABLE societies
-DROP CONSTRAINT IF EXISTS societies_created_by_fkey;
 
 -- societies.primary_bank_account_id (2026-08)
 -- ==============================================
@@ -1307,9 +1288,6 @@ ALTER TABLE societies ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, pr
 --   * secretary_email added — needed for the post-onboarding society
 --     Agreement (see society_agreements below), which had no email field
 --     to print/send to at all before this.
-ALTER TABLE societies DROP COLUMN IF EXISTS qr_signing_secret_hash;
-ALTER TABLE societies ADD COLUMN IF NOT EXISTS signing_secret_enc TEXT;
-ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_email VARCHAR(100);
 
 -- concerns/receipts/expenses/assets/nocs qr_version (2026-09 security fix):
 -- these five document-verification QR roles (CON/RPT/EXP/AST/NOC) were left
@@ -1326,11 +1304,6 @@ ALTER TABLE societies ADD COLUMN IF NOT EXISTS secretary_email VARCHAR(100);
 -- existing qr_version columns; same reissue mechanism (revoke_and_reissue)
 -- for entities that need their QR invalidated (e.g. a NOC gets reissued if
 -- a new one is printed for the same apartment).
-ALTER TABLE concerns ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
-ALTER TABLE expenses ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
-ALTER TABLE assets   ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
-ALTER TABLE nocs     ADD COLUMN IF NOT EXISTS qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT;
 
 -- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
 -- Auto-generate human-friendly receipt_number / transaction_number.
@@ -6531,25 +6504,27 @@ CREATE OR REPLACE FUNCTION fn_societies_list(
     p_society_id INT     DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, name VARCHAR(100), email VARCHAR(30), phone VARCHAR(20),
-    pan_number VARCHAR(10), gstin VARCHAR(15), secretary_name VARCHAR(100),
-    plan VARCHAR(20), plan_status VARCHAR(10), plan_validity DATE,
-    calc_start_date DATE,
-    total_apartments INT, total_users INT, total_receivables NUMERIC(15,2),
-    created_at TIMESTAMP, secretary_phone VARCHAR(20)
+    id INT, name VARCHAR(100), PAN_number VARCHAR(10), TAN_number VARCHAR(10), logo VARCHAR(100),
+    address TEXT, email VARCHAR(30), phone VARCHAR(20), secretary_name VARCHAR(100),
+    secretary_phone VARCHAR(20), secretary_email VARCHAR(100), secretary_sign VARCHAR(100),
+    payment_qr VARCHAR(255), plan VARCHAR(20), plan_validity DATE, calc_start_date DATE,
+    login_background VARCHAR(100), created_at TIMESTAMP, gstin VARCHAR(15),
+    registration_number VARCHAR(100), signing_secret_enc TEXT, primary_bank_account_id INT,
+    plan_status VARCHAR(10), total_apartments INT, total_users INT, total_receivables NUMERIC(15,2)
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
     RETURN QUERY
     SELECT
-        s.id::INT, s.name::VARCHAR(100), s.email::VARCHAR(100), s.phone::VARCHAR(20),
-        s.PAN_number::VARCHAR(10), s.gstin::VARCHAR(15), s.secretary_name::VARCHAR(100),
-        s.plan::VARCHAR(20),
+        s.id::INT, s.name::VARCHAR(100), s.PAN_number::VARCHAR(10), s.TAN_number::VARCHAR(10), s.logo::VARCHAR(100),
+        s.address::TEXT, s.email::VARCHAR(30), s.phone::VARCHAR(20), s.secretary_name::VARCHAR(100),
+        s.secretary_phone::VARCHAR(20), s.secretary_email::VARCHAR(100), s.secretary_sign::VARCHAR(100),
+        s.payment_qr::VARCHAR(255), s.plan::VARCHAR(20), s.plan_validity::DATE, s.calc_start_date::DATE,
+        s.login_background::VARCHAR(100), s.created_at::TIMESTAMP, s.gstin::VARCHAR(15),
+        s.registration_number::VARCHAR(100), s.signing_secret_enc::TEXT, s.primary_bank_account_id::INT,
         CASE WHEN s.plan='Free' THEN 'Free'
              WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
              ELSE 'Expired' END::VARCHAR(10),
-        s.plan_validity::DATE,
-        s.calc_start_date::DATE,
         (SELECT COUNT(*)::INT FROM apartments WHERE society_id=s.id AND active=TRUE),
         (SELECT COUNT(*)::INT FROM users        WHERE society_id=s.id),
         (SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC(15,2)
@@ -6559,6 +6534,10 @@ BEGIN
     WHERE (p_search     IS NULL OR s.name ILIKE '%'||p_search||'%')
       AND (p_plan       IS NULL OR s.plan = p_plan)
       AND (p_society_id IS NULL OR s.id = p_society_id)
+      AND (p_status IS NULL OR
+           (p_status = 'expired' AND s.plan_validity < CURRENT_DATE) OR
+           (p_status = 'expiring_soon' AND s.plan_validity <= CURRENT_DATE + INTERVAL '30 days' AND s.plan_validity >= CURRENT_DATE)
+          )
     ORDER BY s.name;
 END;
 $$;

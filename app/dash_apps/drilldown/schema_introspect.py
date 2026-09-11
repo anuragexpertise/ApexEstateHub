@@ -251,6 +251,12 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Owner Name",      "field": "owner_name",      "icon": "fa-user"},
         {"label": "Owner Mobile",    "field": "owner_mobile",    "icon": "fa-phone"},
     ],
+    "societies": [
+        {"label": "Plan Status",       "field": "plan_status",       "icon": "fa-star"},
+        {"label": "Total Apartments",  "field": "total_apartments",  "icon": "fa-building"},
+        {"label": "Total Users",       "field": "total_users",       "icon": "fa-users"},
+        {"label": "Total Receivables", "field": "total_receivables", "icon": "fa-rupee-sign"},
+    ],
 }
 
 # Auth fields injected into apartment/vendor/security forms (from users
@@ -742,9 +748,7 @@ def build_entity_meta() -> dict:
             # List columns: skip system, images, and heavy text blobs
             if (
                 not is_system
-                and name not in ("created_at", "updated_at")
                 and ftype not in ("image_upload",)
-                and col["pg_type"] not in ("text",)
             ):
                 list_columns.append({
                     "name": label,
@@ -754,15 +758,13 @@ def build_entity_meta() -> dict:
                     **({"alias": _FK_HUMAN_ALIASES[name]} if name in _FK_HUMAN_ALIASES else {}),
                 })
 
-            # Profile fields: skip system PKs but include most others
-            # (audit/system columns in _PROFILE_VISIBLE_SYSTEM are still shown)
-            if not is_system or name in _PROFILE_VISIBLE_SYSTEM:
-                profile_fields.append({
-                    "label": label,
-                    "field": name,
-                    "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
-                    **({"type": "image"} if ftype == "image_upload" else {}),
-                })
+            # Profile fields: display all columns from schema_introspect
+            profile_fields.append({
+                "label": label,
+                "field": name,
+                "icon": "fa-image" if ftype == "image_upload" else "fa-circle-dot",
+                **({"type": "image"} if ftype == "image_upload" else {}),
+            })
 
             if is_system:
                 continue
