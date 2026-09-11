@@ -1,5 +1,5 @@
 import json
-from dash import Input, Output, State, ALL, callback, no_update, html, ctx, clientside_callback
+from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
