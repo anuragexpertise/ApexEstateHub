@@ -9114,8 +9114,7 @@ BEGIN
         secretary_phone = COALESCE(p_sec_phone, secretary_phone),
         secretary_email = COALESCE(p_sec_email, secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
-        primary_bank_account_id = COALESCE(primary_bank_account_id, 6311),
-        created_by = COALESCE(created_by, p_created_by)
+        primary_bank_account_id = COALESCE(primary_bank_account_id, 6311)
     WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; last value per section wins — see note above)
