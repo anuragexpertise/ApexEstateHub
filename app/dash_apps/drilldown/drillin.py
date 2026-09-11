@@ -53,7 +53,7 @@ from database.db_manager import db
 # caller-controlled table name that isn't in this set.
 # "accounts" added (2026-08) for receipts.acc_id / expenses.acc_id /
 # events.account_id — see DRILLIN_CONFIG below.
-_ALLOWED_TABLES = {"apartments", "vendors", "security_staff", "assets", "accounts"}
+_ALLOWED_TABLES = {"apartments", "vendors", "security_staff", "assets", "accounts", "tds_section_rates"}
 
 
 def _apartment_block(flat_number: str | None) -> str:
@@ -82,9 +82,9 @@ _TABLE_RULES = {
         "group_label": "Block",
     },
     "vendors": {
-        "label_col": "business_name",
-        "label_fallback_col": "name",
-        "sub_col": "mobile",
+        "label_col": "service_type",
+        "sub_col": "name",
+        "label_fallback_col": "business_name",
         "icon": "fas fa-truck",
         "color": "#17976e",
         "search_cols": ["business_name", "name", "mobile"],
@@ -92,8 +92,8 @@ _TABLE_RULES = {
         "group_label": "Service Type",
     },
     "security_staff": {
-        "label_col": "name",
-        "sub_col": "mobile",
+        "label_col": "shift",
+        "sub_col": "name",
         "icon": "fas fa-shield-alt",
         "color": "#e59620",
         "search_cols": ["name", "mobile"],
@@ -117,6 +117,15 @@ _TABLE_RULES = {
         "search_cols": ["name"],
         "group_fn": "special",   # handled directly in list_drillin_groups/items
         "group_label": "Category",
+    },
+    "tds_section_rates": {
+        "label_col": "section",
+        "sub_col": "nature_of_income",
+        "icon": "fas fa-percent",
+        "color": "#17976e",
+        "search_cols": ["section", "nature_of_income"],
+        "group_fn": None,
+        "group_label": None,
     },
 }
 
@@ -170,6 +179,14 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "label": "Expense Account",
         "filter": "drcr_account='Dr'",
     },
+    ("expenses", "tds_pct"): {
+        "mode": "single",
+        "table": "tds_section_rates",
+        "label": "TDS Rate",
+        "filter": "(effective_to IS NULL OR effective_to > CURRENT_DATE) AND effective_from <= CURRENT_DATE",
+        "value_col": "rate",
+        "value_col_no_pan": "rate_no_pan",
+    },
     # events.account_id (2026-08) — the income account event ticket sales
     # post to (fn_sell_event_ticket). Same accounts/Cr picker as
     # receipts.acc_id, just on a different table/field pair.
@@ -177,18 +194,12 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "mode": "single",
         "table": "accounts",
         "label": "Ticket Income Account",
-        "filter": "drcr_account='Cr'",
+        "filter": "parent_account_id=2319",
     },
     ("event_tickets", "acc_id"): {
         "mode": "single",
         "table": "accounts",
         "label": "Ticket Income Account",
-        "filter": "drcr_account='Cr'",
-    },
-    ("vendor_passes", "acc_id"): {
-        "mode": "single",
-        "table": "accounts",
-        "label": "Income Account",
         "filter": "drcr_account='Cr'",
     },
     ("asset_disposes", "acc_id"): {

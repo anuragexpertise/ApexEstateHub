@@ -335,10 +335,11 @@ def register_drillin_callbacks(app):
         Output("drillin-modal", "is_open", allow_duplicate=True),
         Input({"type": "drillin-item", "id": ALL}, "n_clicks"),
         State("drillin-store", "data"),
+        State({"type": "tds-autofill", "entity": ALL}, "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def drillin_select_item(_item_nc, store):
+    def drillin_select_item(_item_nc, store, tds_autofill_list):
         triggered = ctx.triggered_id
         if not triggered or not isinstance(triggered, dict):
             raise PreventUpdate
@@ -357,8 +358,25 @@ def register_drillin_callbacks(app):
         entity_id_val = "" if item_id in (None, "__none__") else str(item_id)
         society_id = get_current_society_id()
         label = None
+        actual_val = entity_id_val
         if entity_id_val and target_table and society_id:
             label = drillin_label_for(target_table, item_id, society_id)
+            if cfg.get("value_col"):
+                try:
+                    row = db._execute(f"SELECT * FROM {target_table} WHERE id=%s AND society_id=%s", (item_id, society_id), fetch_one=True)
+                    if row:
+                        val_col = cfg["value_col"]
+                        if cfg.get("value_col_no_pan"):
+                            # Check if vendor has PAN from tds-autofill store
+                            has_pan = True
+                            if tds_autofill_list and isinstance(tds_autofill_list, list) and len(tds_autofill_list) > 0:
+                                autofill_data = tds_autofill_list[0] or {}
+                                has_pan = autofill_data.get("pan_captured", True)
+                            if not has_pan and row.get(cfg["value_col_no_pan"]) is not None:
+                                val_col = cfg["value_col_no_pan"]
+                        actual_val = str(row.get(val_col, entity_id_val))
+                except Exception as e:
+                    print(f"⚠️  drillin_select_item value_col lookup: {e}")
 
         role_label = None
         if role_val:
@@ -393,7 +411,7 @@ def register_drillin_callbacks(app):
         for o in hidden_outputs:
             oid = o["id"]
             if oid.get("entity") == entity and oid.get("field") == field:
-                hidden_values.append(entity_id_val)
+                hidden_values.append(actual_val)
             elif role_fid and oid.get("entity") == entity and oid.get("field") == role_fid:
                 hidden_values.append(role_val or "")
             else:

@@ -49,12 +49,12 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "security_roster": "security_roster",
     "ledger":       "accounts",
     "polls":        "polls",
-    "visitors":           "visitors",
+    "visitors":     "visitors",
     "event_ticket_items": "event_ticket_items",
-    "patrol_locations":   "patrol_locations",
-    "tds_rates":          "tds_section_rates",
-    # "channels" was declared in the drilldown registry (PK_MAP,
-    # ENTITY_MAP, 5 KPI -> list_channels -> profile_channel mappings) but
+    "patrol_locations": "patrol_locations",
+    "apartment_users": "vw_apartment_users",
+    "tds_rates": "tds_section_rates",
+    "tds_section_rates": "tds_section_rates",
     # never registered here, so get_entity_meta()["channels"] never
     # existed and every Channels KPI card rendered a column-less/empty
     # list even after loaders.py grew a "channels" branch. See
@@ -275,7 +275,7 @@ _AUTH_FIELDS: dict[str, list[dict]] = {
         {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
         {"id": "password", "label": "Password",       "type": "password", "required": True},
     ],
-    "vw_apartment_users": [
+    "apartment_users": [
         {"id": "email",    "label": "Login Email",    "type": "email",    "required": True},
         {"id": "password", "label": "Password",       "type": "password", "required": True},
     ],
@@ -289,8 +289,10 @@ _ACCOUNT_DROPDOWN_OVERRIDES: dict[str, str] = {
     ("receivables",           "acc_id"):                 "account_dropdown_cr",
     ("receivables",           "interest_acc_id"):        "account_dropdown_cr",
     ("payables",              "acc_id"):                 "account_dropdown_dr",
-    ("assets",        "acc_id"):                 "account_dropdown_asset",
-    ("events",                "account_id"):      "account_dropdown_event_ticket",
+    ("asset_disposes",        "acc_id"):                 "drillin",
+    ("verify_receivable_amts","acc_id"):                 "drillin",
+    ("expenses",              "tds_pct"):                "drillin",
+    ("assets",                "acc_id"):                 "account_dropdown_asset",
 }
 
 # Preferred display columns when building FK option lists.
@@ -611,10 +613,6 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     },
     "societies": {
         "plan", "plan_validity",
-    },
-    "master_societies": {
-        "primary_bank_account_id", "secretary_name", "secretary_phone", "secretary_email",
-        "secretary_sign", "payment_qr", "login_background", "logo", "calc_start_date",
     },
 }
 

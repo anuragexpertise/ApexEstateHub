@@ -111,7 +111,12 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # Channels: admin creates; subscribe/trigger/approve-deny go through
     # profile actions with server-side guards (alert_service.py).
     ("admin", "channels"):     {"view", "new"},
+    ("admin", "tds_rates"):    {"view"},
+    ("admin", "tds_section_rates"): {"view"},
+    
     # ── MASTER: societies only (view + edit + new), no delete ─────────────
+    ("master", "tds_rates"):   {"view", "edit", "new", "delete"},
+    ("master", "tds_section_rates"): {"view", "edit", "new", "delete"},
     ("master", "societies"):   {"view", "edit", "new"},
     # master_societies (Master dashboard's plan-breakdown lists) rows open
     # the same profile_society/form_society_edit as "societies" above —
@@ -2304,6 +2309,15 @@ def render_form_card(card_id: str, title: str, icon: str,
     if entity == "society" and prefill.get("id") and (role or "admin") != "master":
         fields = [f for f in fields if f.get("id") != "plan"]
 
+    # Hide onboarding/operational details when editing a society from the
+    # master portal (focuses the form on billing/auth).
+    if entity == "society" and (role or "admin") == "master":
+        master_hidden = {
+            "primary_bank_account_id", "secretary_name", "secretary_phone", "secretary_email",
+            "secretary_sign", "payment_qr", "login_background", "logo", "calc_start_date",
+        }
+        fields = [f for f in fields if f.get("id") not in master_hidden]
+
     # A "role"-mode drill-in field (e.g. receipts.entity_id + receipts.role)
     # sets BOTH columns from one tap in the picker modal — the sibling role
     # column would otherwise still render as its own plain CHECK-options
@@ -2713,21 +2727,30 @@ def render_form_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "13px"},
                 optionHeight=40,
             )
-        elif ftype in ("account_dropdown_receipt", "account_dropdown_expense"):
-            # Cr accounts for receipts, Dr accounts for expenses
-            _drcr = "Cr" if ftype == "account_dropdown_receipt" else "Dr"
-            _ph   = "Select income account…" if _drcr == "Cr" else "Select expense account…"
+        elif ftype in ("account_dropdown_receipt", "account_dropdown_expense", "account_dropdown_cr", "account_dropdown_dr", "account_dropdown_asset"):
+            _drcr = None
+            _ph = "Select account…"
+            if ftype in ("account_dropdown_receipt", "account_dropdown_cr"):
+                _drcr = "Cr"
+                _ph = "Select income account…"
+            elif ftype in ("account_dropdown_expense", "account_dropdown_dr"):
+                _drcr = "Dr"
+                _ph = "Select expense account…"
+            elif ftype == "account_dropdown_asset":
+                _drcr = "Dr"
+                _ph = "Select asset account…"
+
             _acc_opts = []
             if society_id:
                 try:
-                    _rows = db._execute(
-                        "SELECT id, COALESCE(tab_name,'') AS tab_name, name "
-                        "FROM accounts "
-                        "WHERE society_id=%s AND drcr_account=%s "
-                        "ORDER BY tab_name, name",
-                        (society_id, _drcr),
-                        fetch_all=True,
-                    ) or []
+                    query = "SELECT id, COALESCE(tab_name,'') AS tab_name, name FROM accounts WHERE society_id=%s"
+                    params = [society_id]
+                    if _drcr:
+                        query += " AND drcr_account=%s"
+                        params.append(_drcr)
+                    query += " ORDER BY tab_name, name"
+                    
+                    _rows = db._execute(query, tuple(params), fetch_all=True) or []
                     _acc_opts = [
                         {
                             "label": f"{r['id']} — {r['tab_name']} — {r['name']}",
@@ -4384,59 +4407,9 @@ def render_vendor_pass_card(
             banner,
             dbc.Row(rate_cols, className="g-3"),
  
-            # ── Hidden identity fields ────────────────────────────────────
-            # vendor_user_id: read by _save_vendor_pass as p_user_id
-            dcc.Input(
-                id={"type": "form-field", "entity": entity_name, "field": "vendor_user_id"},
-                type="hidden", value=str(user_id or ""),
-            ),
-            dcc.Input(
-                id={"type": "form-field", "entity": entity_name, "field": "role"},
-                type="hidden", value="vendor",
-            ),
-            dcc.Input(
-                id={"type": "form-entity-pk", "entity": entity_name},
-                type="hidden", value=str(user_id or ""),
-            ),
- 
-            # ── Pass type ─────────────────────────────────────────────────
-            dbc.Row([
-                dbc.Col(dbc.Label("Pass Type *",
-                                  style={"fontSize": "12px", "fontWeight": "500",
-                                         "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dcc.Dropdown(
-                    id={"type": "form-field", "entity": entity_name, "field": "pass_type"},
-                    options=pass_options,
-                    value=None,
-                    placeholder="Select pass type…",
-                    clearable=False,
-                    style={"fontSize": "13px"},
-                ), width=8),
-            ], className="mb-2"),
- 
-            # ── Payment mode ──────────────────────────────────────────────
-            dbc.Row([
-                dbc.Col(dbc.Label("Payment Mode *",
-                                  style={"fontSize": "12px", "fontWeight": "500",
-                                         "color": "#555"}),
-                        width=4, style={"paddingTop": "6px"}),
-                dbc.Col(dcc.Dropdown(
-                    id={"type": "form-field", "entity": entity_name, "field": "mode"},
-                    options=[
-                        {"label": "Cash",          "value": "cash"},
-                        {"label": "UPI",           "value": "upi"},
-                        {"label": "Bank Transfer", "value": "bank"},
-                        {"label": "Cheque",        "value": "cheque"},
-                    ],
-                    value=prefill_mode,
-                    clearable=False,
-                    style={"fontSize": "13px"},
-                ), width=8),
-            ], className="mb-2"),
             dcc.Input(
                 id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
-                type="hidden", value="",
+                type="hidden", value="2318",
             ),
             dbc.Row([
                 dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),

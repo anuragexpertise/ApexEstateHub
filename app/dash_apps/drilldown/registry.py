@@ -45,6 +45,8 @@ PK_MAP: dict = {
     "patrol_locations": "id",
     "compliance_settings": "id",
     "apartment_users": "id",
+    "tds_rates": "id",
+    "tds_section_rates": "id",
 }
 
 
@@ -80,6 +82,12 @@ ENTITY_MAP: dict = {
     "patrol_locations": "patrol_location",
     "compliance_settings": "compliance_setting",
     "apartment_users": "apartment_user",
+    "tds_rates": "tds_rate",
+    "tds_section_rates": "tds_rate",
+    "asset_disposes": "asset_dispose",
+    "vendor_passes": "vendor_pass",
+    "verify_receivable_amts": "verify_receivable_amt",
+    "event_tickets": "event_ticket",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -674,6 +682,11 @@ try:
         DRILLDOWN_MAP["list_receivables"] = {
             "target": "profile_receivable",
             "label": "Receivable Details",
+        }
+    if "list_tds_rates" not in DRILLDOWN_MAP:
+        DRILLDOWN_MAP["list_tds_rates"] = {
+            "target": "profile_tds_rate",
+            "label": "TDS Rate Details",
         }
 except Exception:
     pass
