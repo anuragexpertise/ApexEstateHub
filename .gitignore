@@ -18,6 +18,11 @@ migrations/
 *.diff
 *.patch
 *.xlsx
+# conversation.xlsx is app content (per-Category "friendly message" copy
+# read by app/dash_apps/pages/setup_wizard.py's load_conversation_data),
+# not generated/exported data — it must ship with the repo or the Setup
+# Wizard silently renders with no guidance banners at all.
+!conversation.xlsx
 *.json
 generate_button_manifest.py
 run.log
