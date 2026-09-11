@@ -6528,8 +6528,7 @@ BEGIN
         (SELECT COUNT(*)::INT FROM apartments WHERE society_id=s.id AND active=TRUE),
         (SELECT COUNT(*)::INT FROM users        WHERE society_id=s.id),
         (SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC(15,2)
-         FROM receivables WHERE society_id=s.id AND status IN ('pending','partial')),
-        s.created_at::TIMESTAMP, s.secretary_phone::VARCHAR(20)
+         FROM receivables WHERE society_id=s.id AND status IN ('pending','partial'))
     FROM societies s
     WHERE (p_search     IS NULL OR s.name ILIKE '%'||p_search||'%')
       AND (p_plan       IS NULL OR s.plan = p_plan)

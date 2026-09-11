@@ -905,11 +905,11 @@ def register_shell_callbacks(app):
                     var script = document.createElement('script');
                     script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
                     script.onload = function() {
-                        window.confetti({particleCount: 300, spread: 180, origin: {y: 1.0}});
+                        window.confetti({particleCount: 300, spread: 120, origin: {y: 0.3}});
                     };
                     document.head.appendChild(script);
                 } else {
-                    window.confetti({particleCount: 300, spread: 180, origin: {y: 1.0}});
+                    window.confetti({particleCount: 300, spread: 120, origin: {y: 0.3}});
                 }
             }
 
