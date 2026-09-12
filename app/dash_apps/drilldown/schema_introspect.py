@@ -848,6 +848,7 @@ def build_entity_meta() -> dict:
             meta[ekey]["list_columns"] = [
                 {"name": "Ticket",  "field": "ticket_type",   "sortable": True},
                 {"name": "Event",   "field": "event_title",   "sortable": True},
+                {"name": "Buyer",   "field": "owner_name",    "sortable": True},
                 {"name": "Date",    "field": "event_date",    "sortable": True, "format": "date"},
                 {"name": "Venue",   "field": "venue",         "sortable": True},
                 {"name": "Booking", "field": "booking_reference", "sortable": False},

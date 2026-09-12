@@ -204,4 +204,21 @@ def register_event_ticket_callbacks(app):
             print(f"event ticket last_emailed_at stamp error: {e}")
         return no_update
 
-    print("  OK Event ticket callbacks registered (Print / PDF / Email)")
+    clientside_callback(
+        """
+        function(adult, child, prices) {
+            let a = parseInt(adult, 10) || 0;
+            let c = parseInt(child, 10) || 0;
+            let p1 = prices && prices.p1 ? parseFloat(prices.p1) : 0.0;
+            let p2 = prices && prices.p2 ? parseFloat(prices.p2) : 0.0;
+            let total = (a * p1) + (c * p2);
+            return 'Rs. ' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+        """,
+        Output({"type": "event-ticket-total-amt", "entity": "event_ticket"}, "children"),
+        Input({"type": "form-field", "entity": "event_ticket", "field": "quantity_adult"}, "value"),
+        Input({"type": "form-field", "entity": "event_ticket", "field": "quantity_child"}, "value"),
+        State({"type": "event-ticket-prices", "entity": "event_ticket"}, "data")
+    )
+
+    print("  OK Event ticket callbacks registered (Print / PDF / Email / Amount)")

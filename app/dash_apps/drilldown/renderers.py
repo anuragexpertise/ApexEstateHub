@@ -4658,6 +4658,7 @@ def _qty_stepper_row(entity_name: str, field_id: str, label: str, initial: int, 
         "width": "34px", "height": "34px", "padding": "0",
         "borderRadius": "8px", "fontWeight": "700", "fontSize": "16px",
         "lineHeight": "1",
+        "backgroundColor": "#ADD8E6", "color": "#15304f", "borderColor": "#ADD8E6", "border": "none",
     }
     return dbc.Row([
         dbc.Col(dbc.Label(label, style={"fontSize": "12px", "fontWeight": "500",
@@ -4666,7 +4667,7 @@ def _qty_stepper_row(entity_name: str, field_id: str, label: str, initial: int, 
         dbc.Col(html.Div([
             dbc.Button("−", id={"type": "qty-step", "entity": entity_name,
                                  "field": field_id, "dir": "down"},
-                       n_clicks=0, size="sm", color="light", outline=True,
+                       n_clicks=0, size="sm",
                        style=btn_style),
             dbc.Input(
                 id={"type": "form-field", "entity": entity_name, "field": field_id},
@@ -4677,7 +4678,7 @@ def _qty_stepper_row(entity_name: str, field_id: str, label: str, initial: int, 
             ),
             dbc.Button("+", id={"type": "qty-step", "entity": entity_name,
                                  "field": field_id, "dir": "up"},
-                       n_clicks=0, size="sm", color="light", outline=True,
+                       n_clicks=0, size="sm",
                        style=btn_style),
         ], style={"display": "flex", "alignItems": "center"}), width=8),
     ], className="mb-2")
@@ -4859,8 +4860,18 @@ def render_event_ticket_card(
 
             # -- Quantity (Adult / Child split) --
             _qty_stepper_row(entity_name, "quantity_adult", "Adult Qty *", 1, min_val=0),
-            (_qty_stepper_row(entity_name, "quantity_child", "Child Qty", 0, min_val=0)
-             if ticket_price2 and float(ticket_price2 or 0) > 0 else None),
+            html.Div(
+                _qty_stepper_row(entity_name, "quantity_child", "Child Qty", 0, min_val=0),
+                style={"display": "block"} if ticket_price2 and float(ticket_price2 or 0) > 0 else {"display": "none"}
+            ),
+            dcc.Store(
+                id={"type": "event-ticket-prices", "entity": entity_name},
+                data={"p1": float(ticket_price or 0), "p2": float(ticket_price2 or 0)}
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Label("Total Amount", style={"fontSize": "12px", "fontWeight": "600", "color": "#15304f"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(html.Div(f"Rs. {float(ticket_price or 0):,.2f}", id={"type": "event-ticket-total-amt", "entity": entity_name}, style={"fontSize": "14px", "fontWeight": "bold", "paddingTop": "4px", "color": "#c8781f"}), width=8),
+            ], className="mb-2"),
 
             # -- Payment mode ---------------------------------------------------
             dbc.Row([
@@ -4880,19 +4891,7 @@ def render_event_ticket_card(
                     style={"fontSize": "13px"},
                 ), width=8),
             ], className="mb-2"),
-            dcc.Input(
-                id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
-                type="hidden", value="",
-            ),
-            dbc.Row([
-                dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
-                dbc.Col(html.Div([
-                    html.I(className="fas fa-hand-pointer me-2", style={"color": "#7d8ea3"}),
-                    html.Span("Event Account", style={"flex": "1", "color": "#2a3b52", "fontWeight": "600"}),
-                    html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
-                ], id={"type": "drillin-trigger", "entity": entity_name, "field": "acc_id"}, n_clicks=0,
-                style={"display": "flex", "alignItems": "center", "padding": "10px 12px", "borderRadius": "10px", "border": "1px solid #dbe3ee", "background": "#fff", "cursor": "pointer", "fontSize": "13px"}), width=8),
-            ], className="mb-2"),
+
             dbc.Row([
                 dbc.Col(dbc.Label("Particulars", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dbc.Textarea(
