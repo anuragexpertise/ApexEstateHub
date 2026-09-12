@@ -5001,23 +5001,23 @@ def render_noc_card(apt: dict, society: dict,
     if existing_text:
         noc_text = existing_text
     else:
-            valid_until_dt = (noc_record or {}).get("valid_until")
-            if isinstance(valid_until_dt, str):
-                valid_until_dt = _date.fromisoformat(valid_until_dt)
-            valid_until_str = valid_until_dt.strftime("%d %B %Y") if valid_until_dt else "the last day of the current month"
-            
-            noc_text = (
-                f"NO OBJECTION CERTIFICATE\n"
-                f"Certificate No: {cert_no}\n"
-                f"{society_nm}\n\n"
-                f"Date: {today}\n\n"
-                f"To Whom It May Concern,\n\n"
-                f"This is to certify that {owner}, resident of Flat No. {flat_no}, "
-                f"{society_nm}, has cleared all outstanding dues and has no pending "
-                f"liabilities towards the Society as of the date of this certificate.\n\n"
-                f"The Society has no objection to the above-named member undertaking any "
-                f"legal, financial, or administrative transactions related to the said property.\n\n"
-                f"This certificate is issued upon request and is valid until {valid_until_str}.\n\n\n"
+        valid_until_dt = (noc_record or {}).get("valid_until")
+        if isinstance(valid_until_dt, str):
+            valid_until_dt = _date.fromisoformat(valid_until_dt)
+        valid_until_str = valid_until_dt.strftime("%d %B %Y") if valid_until_dt else "the last day of the current month"
+        
+        noc_text = (
+            f"NO OBJECTION CERTIFICATE\n"
+            f"Certificate No: {cert_no}\n"
+            f"{society_nm}\n\n"
+            f"Date: {today}\n\n"
+            f"To Whom It May Concern,\n\n"
+            f"This is to certify that {owner}, resident of Flat No. {flat_no}, "
+            f"{society_nm}, has cleared all outstanding dues and has no pending "
+            f"liabilities towards the Society as of the date of this certificate.\n\n"
+            f"The Society has no objection to the above-named member undertaking any "
+            f"legal, financial, or administrative transactions related to the said property.\n\n"
+            f"This certificate is issued upon request and is valid until {valid_until_str}.\n\n\n"
             f"Authorised Signatory\n\n"
             f"{sec_name}\n"
             f"Secretary / Authorised Representative\n"
