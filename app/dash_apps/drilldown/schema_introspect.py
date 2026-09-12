@@ -741,6 +741,8 @@ def build_entity_meta() -> dict:
             table  = col.get("table_name", "")
             ftype  = _map_type(col["pg_type"], name, table)
             label  = _FK_LABEL_OVERRIDES.get(name, _labelize(name))
+            if ekey == "attendance" and name == "entity_id":
+                label = "Security Name"
             is_system = name in _SYSTEM_COLUMNS or col["is_pk"]
 
             # List columns: skip system, images, and heavy text blobs

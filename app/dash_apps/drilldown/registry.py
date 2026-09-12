@@ -154,12 +154,12 @@ DRILLDOWN_MAP: dict = {
     "kpi_security_on_duty": {
         "target": "list_security",
         "label": "Security On Duty",
-        "filter": {"on_duty": True},
+        "filter": {"gate_pass": True},
     },
     "kpi_security_off_duty": {
         "target": "list_security",
         "label": "Security Off Duty",
-        "filter": {"on_duty": False},
+        "filter": {"gate_pass": False},
     },
     "kpi_events_total": {"target": "list_events", "label": "Upcoming Events"},
     "kpi_events_tickets": {
