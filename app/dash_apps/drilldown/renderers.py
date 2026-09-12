@@ -4408,6 +4408,10 @@ def render_vendor_pass_card(
             dbc.Row(rate_cols, className="g-3"),
  
             dcc.Input(
+                id={"type": "form-field", "entity": entity_name, "field": "pass_type"},
+                type="hidden", value="",
+            ),
+            dcc.Input(
                 id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
                 type="hidden", value="2318",
             ),
@@ -4427,37 +4431,45 @@ def render_vendor_pass_card(
                     value="", rows=2, style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8),
             ], className="mb-2"),
-            # ── Dummy anchor for the non-cash-field clientside toggle ───────
-            # (a real Store prop, rather than borrowing an unrelated prop
-            # like dcc.Dropdown's nonexistent "title" — see qr_callbacks.py).
-            # Plain id (not pattern-matched) since only one vendor-pass
-            # form card is ever active in the nav stack at a time.
-            dcc.Store(id="vp-noncash-dummy", data=None),
-            # ── Non-cash reference fields (shown via clientside toggle) ────
-            html.Div(
-                id={"type": "vp-noncash-wrap", "pk": str(user_id)},
-                style={"display": "none"},
-                children=[
-                    dbc.Row([
-                        dbc.Col(dbc.Label("Cheque No.",
-                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                                width=4, style={"paddingTop": "6px"}),
-                        dbc.Col(dbc.Input(
-                            id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
-                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
-                        ), width=8),
-                    ], className="mb-2"),
-                    dbc.Row([
-                        dbc.Col(dbc.Label("Payment Gateway ID",
-                                          style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
-                                width=4, style={"paddingTop": "6px"}),
-                        dbc.Col(dbc.Input(
-                            id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
-                            type="text", style={"fontSize": "13px", "borderRadius": "10px"},
-                        ), width=8),
-                    ], className="mb-2"),
-                ],
-            ),
+            # Mode
+            dbc.Row([
+                dbc.Col(dbc.Label("Payment Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity_name, "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ],
+                    value=prefill_mode, clearable=False, style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": entity_name, "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": entity_name, "field": "cheque_no"},
+               style={} if prefill_mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": entity_name, "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": entity_name, "field": "transaction_id"},
+               style={} if prefill_mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
             # ── Submit ────────────────────────────────────────────────────
             dbc.Button(
                 [html.I(className="fas fa-id-card me-2"), action_label],

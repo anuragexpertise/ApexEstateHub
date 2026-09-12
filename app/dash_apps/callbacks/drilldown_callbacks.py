@@ -2472,19 +2472,34 @@ def register_drilldown_callbacks(app):
     # ── Vendor Pass type card selection ──────────────────────────────────
     @app.callback(
         Output({"type": "form-field", "entity": "vendor_pass", "field": "pass_type"}, "value"),
+        Output({"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": ALL}, "style"),
         Input({"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": ALL}, "n_clicks"),
+        State({"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": ALL}, "id"),
+        State({"type": "pass-type-card", "entity": "vendor_pass", "field": "pass_type", "value": ALL}, "style"),
         State({"type": "form-field", "entity": "vendor_pass", "field": "pass_type"}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def select_pass_type(n_clicks_list, current_value):
+    def select_pass_type(n_clicks_list, card_ids, card_styles, current_value):
         if not ctx.triggered or not ctx.triggered[0]["value"]:
-            return no_update
+            return no_update, no_update
         triggered_id = json.loads(ctx.triggered[0]["prop_id"].split(".")[0])
         selected = triggered_id["value"]
         if selected == current_value:
-            return ""
-        return selected
+            selected = ""
+            
+        new_styles = []
+        for cid, cstyle in zip(card_ids, card_styles):
+            cstyle = cstyle.copy() if cstyle else {}
+            if cid["value"] == selected:
+                cstyle["border"] = "2px solid #17976e"
+                cstyle["background"] = "#f0faf6"
+            else:
+                cstyle["border"] = "2px solid #e8edf5"
+                cstyle["background"] = "white"
+            new_styles.append(cstyle)
+            
+        return selected, new_styles
 
     # ── Poll vote (inline on profile card) ─────────────────────────────────
     # NOTE (fixed 2026-08): this callback used to be defined AFTER
@@ -4061,7 +4076,11 @@ def _save_vendor_pass(db, d, sid):
 
     acc_id = 2318
 
-    particulars = d.get("particulars") or ""
+    particulars = (d.get("particulars") or "").strip()
+    if not particulars:
+        pass_labels = {"1day": "1-Day Pass", "7day": "7-Day Pass", "1mth": "Monthly Pass", "free_1mth": "Free 1-Month Pass"}
+        particulars = pass_labels.get(pass_type, pass_type)
+
     if mode != "cash":
         ref_bits = []
         if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
