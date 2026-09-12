@@ -1166,6 +1166,33 @@ def load_list(
     s      = search or None
 
     try:
+        # ── NOCS ────────────────────────────────────────────────────────────
+        if entity == "nocs":
+            base_sql = """
+                SELECT n.id, n.certificate_no, a.flat_number, a.owner_name, 
+                       n.issued_date, n.valid_until, n.status
+                FROM nocs n
+                LEFT JOIN apartments a ON a.id = n.apartment_id
+                WHERE n.society_id=%s
+            """
+            count_sql = "SELECT COUNT(*) AS n FROM nocs n LEFT JOIN apartments a ON a.id = n.apartment_id WHERE n.society_id=%s"
+            
+            if s:
+                search_cond = " AND (n.certificate_no ILIKE %s OR a.flat_number ILIKE %s)"
+                rows = db._execute(
+                    base_sql + search_cond + " ORDER BY n.created_at DESC LIMIT %s OFFSET %s",
+                    (sid, f"%{s}%", f"%{s}%", page_size, offset), fetch_all=True
+                ) or []
+                cnt = db._execute(count_sql + search_cond, (sid, f"%{s}%", f"%{s}%"), fetch_one=True)
+            else:
+                rows = db._execute(
+                    base_sql + " ORDER BY n.created_at DESC LIMIT %s OFFSET %s",
+                    (sid, page_size, offset), fetch_all=True
+                ) or []
+                cnt = db._execute(count_sql, (sid,), fetch_one=True)
+            
+            return rows, int((cnt or {}).get("n", len(rows)))
+
         # ── APARTMENTS ──────────────────────────────────────────────────────
         if entity == "apartments":
             # Portal scoping: apartment portal sees only their own flat

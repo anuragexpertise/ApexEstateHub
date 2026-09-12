@@ -257,7 +257,8 @@ CREATE TABLE IF NOT EXISTS assets (
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
     updated_by INT REFERENCES users (id),
-    qr_payload VARCHAR(255)
+    qr_payload VARCHAR(255),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
 
@@ -546,7 +547,8 @@ CREATE TABLE IF NOT EXISTS receipts (
     created_by INT REFERENCES users (id),
     reconciled_at TIMESTAMP,
     reconciled_by INT REFERENCES users(id),
-    bank_statement_line_id INT REFERENCES bank_statement_lines (id)
+    bank_statement_line_id INT REFERENCES bank_statement_lines (id),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
 COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt (creator), NOT who verified it — see confirmed_by.';
@@ -572,7 +574,7 @@ CREATE TABLE IF NOT EXISTS nocs (
         )
     ),
     issued_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    valid_until DATE NOT NULL, -- issued_date + 30 days, matches the "valid for 30 days" language already in the NOC template text
+    valid_until DATE NOT NULL, -- last day of the current month
     revoked_at TIMESTAMP,
     revoked_by INT REFERENCES users (id),
     qr_payload VARCHAR(255),

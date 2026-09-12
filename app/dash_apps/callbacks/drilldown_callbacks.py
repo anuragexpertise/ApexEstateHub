@@ -4772,7 +4772,8 @@ def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
     certificate_no format: NOC/<society_id>/<year>/<id> — assigned after
     insert since it embeds the row's own id.
     """
-    from datetime import date, timedelta
+    import calendar
+    from datetime import date
 
     existing = db._execute(
         "SELECT * FROM nocs WHERE society_id=%s AND apartment_id=%s "
@@ -4784,7 +4785,8 @@ def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
         return dict(existing)
 
     issued = date.today()
-    valid_until = issued + timedelta(days=30)
+    last_day = calendar.monthrange(issued.year, issued.month)[1]
+    valid_until = date(issued.year, issued.month, last_day)
     row = db._execute(
         "INSERT INTO nocs(society_id, apartment_id, body_text, status, "
         "issued_date, valid_until, created_by) "

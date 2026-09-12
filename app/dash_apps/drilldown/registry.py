@@ -47,6 +47,7 @@ PK_MAP: dict = {
     "apartment_users": "id",
     "tds_rates": "id",
     "tds_section_rates": "id",
+    "nocs": "id",
 }
 
 
@@ -88,6 +89,7 @@ ENTITY_MAP: dict = {
     "vendor_passes": "vendor_pass",
     "verify_receivable_amts": "verify_receivable_amt",
     "event_tickets": "event_ticket",
+    "nocs": "noc",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -139,6 +141,10 @@ DRILLDOWN_MAP: dict = {
         "target": "list_apartments",
         "label": "Apartments No Dues",
         "filter": {"pending_dues": {"eq":0.0}},
+    },
+    "kpi_nocs_total": {
+        "target": "list_nocs",
+        "label": "Issued NOCs",
     },
     "kpi_vendors_total": {"target": "list_vendors", "label": "All Vendors"},
     "kpi_vendors_passes": {
@@ -429,6 +435,7 @@ DRILLDOWN_MAP: dict = {
     "list_events": {"target": "profile_event", "label": "Event Details"},
     "list_concerns": {"target": "profile_concern", "label": "Concern Details"},
     "list_gate_logs": {"target": "profile_gate_log", "label": "Gate Log Details"},
+    "list_nocs": {"target": "profile_noc", "label": "NOC Details"},
     "list_receipts": {
         "target": "profile_receipt",
         "label": "Receipt Details",
@@ -583,6 +590,9 @@ DRILLDOWN_MAP: dict = {
     "profile_visitor": {
         "actions": {}
     },
+    "profile_noc": {
+        "actions": {}
+    },
     "profile_event_ticket": {
         "actions": {}
     },
@@ -644,7 +654,7 @@ def build_breadcrumb(nav_stack: list) -> list:
 #   - concern: highly-customized profile layout in renderers.py that embeds
 #     its own workflow action buttons (Assign, Bid, Resolve), skipping the
 #     generic footer entirely.
-_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "ledger", "channel"}
+_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "ledger", "channel", "noc"}
 
 # Ensure profile action mappings exist for entities.
 # This programmatically adds sensible defaults (edit prefill) and
