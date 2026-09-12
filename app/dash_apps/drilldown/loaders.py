@@ -1863,7 +1863,7 @@ def load_list(
                 extra_sql = " AND g.entity_id=%s"
                 extra_params.append(sec_id)
             rows = db._execute(
-                "SELECT g.*, COALESCE(s.name,'') AS staff_name "
+                "SELECT g.*, COALESCE(s.name,'') AS entity_name "
                 "FROM gate_access g "
                 "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='SEC' "
                 "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql +

@@ -1071,6 +1071,7 @@ DEFAULT_LAYOUTS = {
             "kpi_apartments_dues",
             "kpi_vendors_passes",
             "kpi_security_on_duty",
+            "kpi_attendance_count",
             "kpi_events_total",
             "kpi_concerns_not_closed",
             "kpi_concerns_assigned",
