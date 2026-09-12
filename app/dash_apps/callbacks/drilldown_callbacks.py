@@ -386,6 +386,14 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
     compress-and-persist code, so a snapped photo is saved exactly like
     an uploaded one.
     """
+    # ── Opportunistic cleanup of abandoned temp files ─────────────────────────
+    # Runs on every upload/snap so no separate scheduler is needed.
+    try:
+        from app.dash_apps.drilldown.image_utils import cleanup_temp_images
+        cleanup_temp_images(max_age_hours=2.0)
+    except Exception:
+        pass
+
     if society_id:
         target_dir = Path("app/assets") / str(society_id)
     else:
@@ -395,7 +403,7 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
     from app.dash_apps.drilldown.image_utils import compress_to_webp
     webp_bytes = compress_to_webp(decoded)
     if webp_bytes is None:
-        return (html.Small("✗ Could not compress image below 25KB",
+        return (html.Small("✗ Could not compress image below 50 KB",
                             style={"color": "red"}), None)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1808,7 +1816,7 @@ def register_drilldown_callbacks(app):
 
                     _webp_bytes = compress_to_webp(_decoded)
                     if _webp_bytes is None:
-                        raise ValueError("Could not compress image below 25KB")
+                        raise ValueError("Could not compress image below 50 KB")
 
                     from pathlib import Path as _Path
                     if sid:

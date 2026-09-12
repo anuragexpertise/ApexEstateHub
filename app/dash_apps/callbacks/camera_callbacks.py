@@ -1,138 +1,55 @@
 # app/dash_apps/callbacks/camera_callbacks.py
 """
-Camera capture handlers for image uploads
-"""
-from dash import Output, Input, clientside_callback, html
+Camera capture handlers for image uploads.
 
+Architecture note
+-----------------
+Camera helper functions (toggleCamCapture, snapCamCapture, stopCamCapture,
+_stopStream, _camStream) live in app/assets/camera_capture.js — the single
+source of truth.  Dash auto-serves that file as a global script on every page
+so those functions are available before any React component mounts.
+
+This module's only job is to register a *clientside callback* that installs
+the document-level click-delegation listener (initCamDelegation) once per
+navigation.  It deliberately does NOT re-define the camera functions here so
+there is zero code duplication.
+"""
+from dash import Output, Input, clientside_callback
+
+# Only the delegation initialiser lives here.  All camera functions
+# (toggleCamCapture, snapCamCapture, stopCamCapture, _stopStream) are defined
+# in app/assets/camera_capture.js and available as globals.
 _CAMERA_JS = """
 function initCamDelegation(pathname) {
-    // Guard against re-attaching the listener on every pathname change —
-    // this callback fires on Input("url","pathname"), which changes on
-    // every navigation, not just once at boot. Without the guard we'd
-    // stack a new document-level click listener per navigation.
+    // Guard against re-attaching the listener on every pathname change.
+    // This callback fires on Input("url","pathname") which changes on every
+    // navigation — without the guard we'd stack a new document-level listener
+    // per navigation visit.
     //
-    // NOTE: previously this whole block was wrapped in
-    // window.addEventListener('DOMContentLoaded', ...). Because this
-    // callback has prevent_initial_call=True and fires on pathname
-    // CHANGES (not the initial load), DOMContentLoaded has already fired
-    // in the browser by the time this code runs — so that listener was
-    // never actually attached, and camera-capture buttons never worked.
-    // Attaching directly (guarded) fixes this.
+    // NOTE: previously the whole block was wrapped in
+    // window.addEventListener('DOMContentLoaded', ...). Because this callback
+    // has prevent_initial_call=True and fires on pathname CHANGES (not the
+    // initial load), DOMContentLoaded has already fired in the browser by the
+    // time this code runs — so that listener was never actually attached, and
+    // camera-capture buttons never worked.  Attaching directly (guarded) fixes this.
     if (!window._camDelegated) {
         document.addEventListener('click', function(e) {
             var btn = e.target.closest('[id*="cam-btn-"]');
-            if (btn) {
-                toggleCamCapture(btn);
-            }
+            if (btn) toggleCamCapture(btn);
             var snap = e.target.closest('[id*="cam-snap-"]');
-            if (snap) {
-                snapCamCapture(snap);
-            }
+            if (snap) snapCamCapture(snap);
             var stop = e.target.closest('[id*="cam-stop-"]');
-            if (stop) {
-                stopCamCapture(stop);
-            }
+            if (stop) stopCamCapture(stop);
         });
         window._camDelegated = true;
     }
     return window.dash_clientside.no_update;
 }
-
-var _camStream = null;
-
-function toggleCamCapture(btn) {
-    var vidId  = btn.getAttribute('data-cam-video');
-    var vid    = document.getElementById(vidId);
-    var snapId = btn.getAttribute('data-cam-snap');
-    var snap   = document.getElementById(snapId);
-    var stopId = btn.getAttribute('data-cam-stop');
-    var stop   = document.getElementById(stopId);
-
-    if (_camStream) {
-        _stopStream();
-        btn.innerHTML = '<i class="fas fa-camera me-1"></i>Camera';
-        if (vid)  vid.style.display  = 'none';
-        if (snap) snap.style.display = 'none';
-        if (stop) stop.style.display = 'none';
-        return;
-    }
-
-    navigator.mediaDevices
-        .getUserMedia({ video: { facingMode: 'environment' } })
-        .then(function(stream) {
-            _camStream = stream;
-            if (vid) { vid.srcObject = stream; vid.style.display = 'block'; }
-            if (snap) snap.style.display = 'inline-block';
-            if (stop) stop.style.display = 'inline-block';
-            btn.innerHTML = '<i class="fas fa-camera-slash me-1"></i>Hide';
-        })
-        .catch(function(e) { alert('Camera error: ' + e.message); });
-}
-
-function snapCamCapture(btn) {
-    var vid    = document.getElementById(btn.getAttribute('data-cam-video'));
-    var cvs    = document.getElementById(btn.getAttribute('data-cam-canvas'));
-    var prevId = btn.getAttribute('data-preview-id');
-    var marker = btn.getAttribute('data-hidden-marker') || '';
-
-    if (!vid || !cvs) return;
-    cvs.width  = vid.videoWidth  || 640;
-    cvs.height = vid.videoHeight || 480;
-    cvs.getContext('2d').drawImage(vid, 0, 0, cvs.width, cvs.height);
-    var dataUrl = cvs.toDataURL('image/jpeg', 0.85);
-
-    // Show inline preview
-    var prev = document.getElementById(prevId);
-    if (prev) { prev.src = dataUrl; prev.style.display = 'block'; }
-
-    // Inject base64 into the Dash hidden input.
-    var hiddenInput = null;
-    if (marker) {
-        document.querySelectorAll('input[type=hidden]').forEach(function(el) {
-            if (el.id && el.id.indexOf(marker) >= 0) hiddenInput = el;
-        });
-    }
-    if (hiddenInput) {
-        var setter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value').set;
-        setter.call(hiddenInput, dataUrl);
-        hiddenInput.dispatchEvent(new Event('input',  { bubbles: true }));
-        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    _stopStream();
-    btn.style.display = 'none';
-    var stopEl = document.getElementById(
-        btn.getAttribute('data-cam-stop') || '');
-    if (stopEl) stopEl.style.display = 'none';
-}
-
-function stopCamCapture(btn) {
-    _stopStream();
-    var camBtn = document.getElementById(
-        btn.getAttribute('data-cam-btn') || '');
-    var vid  = document.getElementById(
-        btn.getAttribute('data-cam-video') || '');
-    var snap = document.getElementById(
-        btn.getAttribute('data-cam-snap') || '');
-    if (vid)    vid.style.display  = 'none';
-    if (snap)   snap.style.display = 'none';
-    if (camBtn) camBtn.innerHTML   =
-        '<i class="fas fa-camera me-1"></i>Camera';
-    btn.style.display = 'none';
-}
-
-function _stopStream() {
-    if (_camStream) {
-        _camStream.getTracks().forEach(function(t) { t.stop(); });
-        _camStream = null;
-    }
-}
 """
 
 
 def register_camera_callbacks(app):
-    # Register clientside callback for camera handling.
+    # Register clientside callback for camera delegation.
     #
     # Output target: 'cam-delegation-dummy' — a dedicated dcc.Store, NOT
     # 'qr-camera-store'. That store belongs to qr_callbacks.py's entry/exit

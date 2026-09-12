@@ -2643,6 +2643,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                         **{
                             "data-cam-video":     cam_vid_id,
                             "data-cam-canvas":    cam_cvs_id,
+                            "data-cam-btn":       cam_btn_id,   # ← NEW: lets snapCamCapture reset the Camera button label
                             "data-cam-stop":      cam_stop_id,
                             "data-preview-id":    prev_img_id,
                             "data-hidden-marker": hidden_marker,
@@ -2679,10 +2680,52 @@ def render_form_card(card_id: str, title: str, icon: str,
                     type="hidden", value=pre_val or "",
                 ),
   
+                # ── Edit-form existing image preview ──────────────────────
+                # When editing a record that already has an image, show it
+                # here so the user can see what is currently stored before
+                # deciding to replace it.  A new upload or camera snap will
+                # overwrite this div via the handle_image_upload /
+                # handle_camera_capture server callbacks.
                 html.Div(
                     id={"type": "image-preview", "entity": entity,
                         "field": fid},
                     style={"marginTop": "4px"},
+                    children=(
+                        [
+                            html.Img(
+                                src=get_image_url(
+                                    str(pre_val).strip(),
+                                    society_id,
+                                    entity,
+                                    prefill.get("id"),
+                                ),
+                                style={
+                                    "maxWidth":     "200px",
+                                    "maxHeight":    "150px",
+                                    "borderRadius": "8px",
+                                    "border":       "1px solid #ddd",
+                                    "display":      "block",
+                                    "objectFit":    "cover",
+                                },
+                            ),
+                            html.Small(
+                                "Current image — upload or snap to replace",
+                                style={
+                                    "color":     "#7d8ea3",
+                                    "fontSize":  "11px",
+                                    "marginTop": "4px",
+                                    "display":   "block",
+                                },
+                            ),
+                        ]
+                        if pre_val
+                        and isinstance(pre_val, str)
+                        and pre_val.strip()
+                        and get_image_url(
+                            str(pre_val).strip(), society_id, entity, prefill.get("id")
+                        )
+                        else []
+                    ),
                 ),
   
                 html.Img(
