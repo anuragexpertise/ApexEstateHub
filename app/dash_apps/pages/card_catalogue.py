@@ -133,6 +133,16 @@ KPI_CARDS = {
         "title": "Apts Dues Clear", "group": "gate-pass OK",
     },
 
+    "kpi_nocs_total": {
+        "query": """
+            SELECT COUNT(*) AS v FROM nocs WHERE society_id=%s
+        """,
+        "params": 1, "format": "number",
+        "icon": "fa-file-signature", "color": "#1d74d8",
+        "title": "Issued NOCs", "group": "nocs",
+    },
+
+
     # ══════════════════════════════════════════════════════════════════════
     # payables (security payroll — auto-generated, pending verification)
     # ══════════════════════════════════════════════════════════════════════
@@ -1079,6 +1089,7 @@ DEFAULT_LAYOUTS = {
             "kpi_assets_count",
             "kpi_receipts_pending",
             "kpi_channels_total",
+            "kpi_nocs_total",
         ],
         "enrolled": [
             "kpi_apartments_total",

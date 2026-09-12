@@ -61,6 +61,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     # NO_EDIT_ACTION and _COMPUTED_FIELDS below for the rest of the setup.
     "channels":     "alert_channels",
     "compliance_settings": "society_compliance_settings",
+    "nocs":         "nocs",
 }
 
 # Columns that are system/PK/auth — never shown in forms or lists.
@@ -108,7 +109,7 @@ NO_EDIT_ACTION = {
     "ledger",
     # Scan-only / event-managed entities: no CRUD forms, profile shown
     # read-only from the gate scan result.
-    "visitors", "event_ticket_items", "patrol_locations",
+    "visitors", "event_ticket_items", "patrol_locations", "nocs",
     # Channel lifecycle (create / subscribe / trigger / approve-deny) all
     # go through dedicated, validated flows in channel_callbacks.py and
     # alert_service.py — notably the apartment_id requirement for
