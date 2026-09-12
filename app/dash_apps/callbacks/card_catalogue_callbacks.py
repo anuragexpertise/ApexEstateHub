@@ -263,8 +263,7 @@ def register_card_catalogue_callbacks(app):
 
     @app.callback(
         Output({"type": "kpi-value", "card_id": ALL}, "children"),
-        Output("toast-store", "data", allow_duplicate=True),
-        Output("hdr-refresh-kpi-icon", "className", allow_duplicate=True),
+        Output("kpi-refresh-side-effects-store", "data"),
         # Manual refresh: the "Refresh KPI" button in the header
         # (app_shell.py's _header()). Only refetches the KPI row already
         # on screen — same cards, same portal/tab — it doesn't navigate or
@@ -300,10 +299,10 @@ def register_card_catalogue_callbacks(app):
         State({"type": "kpi-value", "card_id": ALL}, "id"),
         State("kpi-row", "style"),
         State("url", "pathname"),
-        prevent_initial_call="initial_duplicate",
     )
     @require_session
     def refresh_kpi_values(_refresh_clicks, _content_store, auth_data, kpi_ids, kpi_row_style, pathname):
+        print("refresh_kpi_values triggered by:", ctx.triggered_id, "kpi_ids:", kpi_ids)
         manual_refresh = ctx.triggered_id == "hdr-refresh-kpi-btn"
         icon_class = "fas fa-rotate"  # always reset the spin once we're done
 
@@ -316,7 +315,7 @@ def register_card_catalogue_callbacks(app):
             raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):
-            return ["—"] * len(kpi_ids), no_update, icon_class
+            return ["—"] * len(kpi_ids), {"toast": no_update, "icon_class": icon_class, "ts": time.time()}
 
         sid       = auth_data.get("society_id")
         role      = auth_data.get("role", "admin")
@@ -713,4 +712,15 @@ def register_card_catalogue_callbacks(app):
         else:
             toast = no_update
 
-        return results, toast, icon_class
+        return results, {"toast": toast, "icon_class": icon_class, "ts": time.time()}
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("hdr-refresh-kpi-icon", "className", allow_duplicate=True),
+        Input("kpi-refresh-side-effects-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_kpi_side_effects(data):
+        if not data:
+            raise PreventUpdate
+        return data.get("toast", no_update), data.get("icon_class", no_update)
