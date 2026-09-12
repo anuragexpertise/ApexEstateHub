@@ -805,8 +805,8 @@ ApexEstateHub/
 │   │   │   ├── expense_callbacks.py          ← Expense voucher Print / Save / Email
 │   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
 │   │   │   ├── admin_callbacks.py            ← No-op registration slot (all callbacks pruned — see file docstring); kept so future admin-only callbacks have a documented slot
-│   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Was defined but **never registered** — the Security portal's Gate Alert buttons rendered with no listener; now wired in as step 6b
-│   │   │   └── kpi_rule_links_callbacks.py   ← ⚠️ Defined (`register_kpi_rule_links_callbacks`) but **not imported anywhere in `__init__.py`** — currently dead code; either wire it in or remove it (see [§20](#20--open-design-subtleties--flagged-caveats))
+│   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Wired in as step 6b
+│   │   │   └── print_letterhead.py           ← Shared letterhead helper (logo · login_background watermark · secretary sign · verification QR) used by receipt, NOC, event-ticket, and any future print/PDF/email flow; not a callbacks module, imported by the print callback modules
 │   │   ├── drilldown/
 │   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo
 │   │   │   ├── renderers.py                  ← list/profile/form/pay-dues/NOC card HTML
@@ -843,67 +843,67 @@ ApexEstateHub/
 
 ### Callback Registration Order (`callbacks/__init__.py`)
 
-Every module is registered inside its own `try/except`, so one broken
-module logs a `⚠️` and is skipped rather than crashing the whole app on
-boot — useful in dev, but it also means a silently-broken feature (like
-`security_callbacks` being unregistered for an unknown period, see
-[§19](#19-known-bugs--fixes-applied)) can go unnoticed unless someone
-reads the startup log. Current order, condensed (module names match the
-files in [§17](#3-architecture-overview) above):
+`__init__.py` iterates a `CALLBACK_MODULES` list in a loop. For each
+module it imports it and calls **every function whose name starts with
+`register_`** — so a module like `drillin_callbacks.py` that exposes
+both `register_drillin_callbacks` and `register_pay_dues_bill_callbacks`
+has both called automatically from a single list entry. Each module is
+wrapped in a `try/except`, so one broken module logs a `⚠️` and is
+skipped rather than crashing the whole app on boot. A startup-time check
+also warns if any `*_callbacks.py` file on disk defines a `register_*`
+function but is absent from `CALLBACK_MODULES`. Current order
+(module names match the files in [§17](#3-architecture-overview) above):
 
 ```python
-register_shell_callbacks(app)              # 1.  URL routing MUST be first
-register_login_callbacks(app)              # 2.  Auth before data callbacks
-register_drilldown_callbacks(app)          # 3.  Navigation engine (owns drill-content)
-register_member_ledger_callbacks(app)      #     + member ledger, same module
-import patrol_map_callbacks                #     Leaflet map init (module-level registration)
-register_card_catalogue_callbacks(app)     # 4.  KPI refresh
-register_customize_callbacks(app)          # 5.  DnD layout editor
-register_qr_callbacks(app)                 # 6.  QR gate pass
-register_security_callbacks(app)           # 6b. Gate alerts — previously never called (fixed)
-register_camera_callbacks(app)             # 7.  Image capture JS
-register_customize_kpi_callbacks(app)      # 8.  KPI inspector
-register_list_inspector_callbacks(app)     # 8b. List column configuration
-register_form_inspector_callbacks(app)     #     Form field configuration
-register_setup_wizard_callbacks(app)       # 9.  First-time society setup wizard
-register_debug_callbacks(app)              # 10. Dev tools
-register_noc_callbacks(app)                # 10. NOC actions (clientside)
-register_agreement_callbacks(app)          # 10b. Agreement actions (clientside)
-register_admin_callbacks(app)              # 11. No-op slot (all callbacks pruned)
-register_form_autofill_callbacks(app)      # 12. Particulars auto-suggestion
-register_receipt_callbacks(app)            # 13. Receipt Print/Save/Email
-register_event_ticket_callbacks(app)       # 13b.Event ticket Print/Save/Email
-register_vendor_pass_callbacks(app)        # 13c.Vendor pass Print/Save/Email
-register_expense_callbacks(app)            # 13d.Expense Print/Save/Email
-register_bulk_enroll_callbacks(app)        # 14. CSV bulk upload
-register_bank_reconcile_callbacks(app)     # 14a2.Bank statement reconciliation
-register_assign_to_callbacks(app)          # 14b.Concern assignment
-register_concern_bid_callbacks(app)        # 14c.Vendor bid on concern
-register_invite_to_callbacks(app)          # 14d.Invite vendors/security to bid
-register_drillin_callbacks(app)            # 14e.Entity-picker modal
-register_pay_dues_bill_callbacks(app)      # 14f.Bill Group Pay picker
-register_channel_callbacks(app)            # 15. Channels
-register_poll_callbacks(app)               # 16. Polls
-register_account_callbacks(app)            # 17. Change password
-register_mode_conditional_callbacks(app)   # 18. Clientside field visibility
-register_qty_stepper_callbacks(app)        # 19. Clientside qty stepper
-register_qr_reissue_callbacks(app)         # 21. Admin QR revoke/reissue (Settings tab)
+"shell_callbacks"            # 1.  URL routing MUST be first
+"login_callbacks"            # 2.  Auth before data callbacks
+"drilldown_callbacks"        # 3.  Navigation engine (owns drill-content)
+"patrol_map_callbacks"       #     Leaflet map init (module-level clientside_callback)
+"card_catalogue_callbacks"   # 4.  KPI refresh
+"customize_callbacks"        # 5.  DnD layout editor
+"qr_callbacks"               # 6.  QR gate pass
+"security_callbacks"         # 6b. Gate alerts — previously never called (fixed)
+"camera_callbacks"           # 7.  Image capture JS
+"customize_kpi_callbacks"    # 8.  KPI inspector
+"list_inspector_callbacks"   # 8b. List column configuration
+"form_inspector_callbacks"   #     Form field configuration
+"setup_wizard_callbacks"     # 9.  First-time society setup wizard
+"debug_callbacks"            # 10. Dev tools
+"noc_callbacks"              # 10. NOC actions (clientside)
+"agreement_callbacks"        # 10b. Agreement actions (clientside)
+"admin_callbacks"            # 11. No-op slot (all callbacks pruned)
+"form_autofill_callbacks"    # 12. Particulars auto-suggestion
+"receipt_callbacks"          # 13. Receipt Print/Save/Email
+"event_ticket_callbacks"     # 13b. Event ticket Print/Save/Email
+"vendor_pass_callbacks"      # 13c. Vendor pass Print/Save/Email
+"expense_callbacks"          # 13d. Expense Print/Save/Email
+"bulk_enroll_callbacks"      # 14. CSV bulk upload
+"bank_reconcile_callbacks"   # 14a2. Bank statement reconciliation
+"assign_to_callbacks"        # 14b. Concern assignment
+"concern_bid_callbacks"      # 14c. Vendor bid on concern
+"invite_to_callbacks"        # 14d. Invite vendors/security to bid
+"drillin_callbacks"          # 14e. Entity-picker modal + Bill Group Pay (both register_* fns auto-called)
+"channel_callbacks"          # 15. Channels
+"poll_callbacks"             # 16. Polls
+"account_callbacks"          # 17. Change password
+"mode_conditional_callbacks" # 18. Clientside field visibility
+"qty_stepper_callbacks"      # 19. Clientside qty stepper
+"qr_reissue_callbacks"       # 21. Admin QR revoke/reissue (Settings tab)
 ```
 
-Not called anywhere: `register_kpi_rule_links_callbacks` (defined in
-`kpi_rule_links_callbacks.py`, never imported). `owner_callbacks.py` no
-longer exists in the codebase (removed).
+`owner_callbacks.py` no longer exists in the codebase (removed).
 
-> **Note on `admin_callbacks.py` / `security_callbacks.py` (updated):** this
-> section previously said all three of `admin_callbacks.py`,
-> `owner_callbacks.py`, and `security_callbacks.py` were intentionally left
-> unregistered. That's no longer accurate: `owner_callbacks.py` has since
-> been deleted from the repo entirely; `admin_callbacks.py` **is**
-> registered, but as a documented no-op (all of its callbacks were pruned
-> because their target component IDs didn't exist — see step 11 above); and
-> `security_callbacks.py` **is now registered** (step 6b) — it was
-> previously an unintentional gap (the Gate Alert buttons had no listener),
-> not a deliberate omission, and has been fixed (see [§19](#19-known-bugs--fixes-applied)).
+> **Note on `admin_callbacks.py`:** registered as a documented no-op — all
+> of its callbacks were pruned because their target component IDs didn't
+> exist (see step 11 above). `security_callbacks.py` **is** registered
+> (step 6b); it was previously an unintentional gap now fixed. `owner_callbacks.py`
+> has been deleted from the repo entirely.
+
+> **Note on `print_letterhead.py`:** this file lives in `callbacks/` by
+> convention (shared utilities alongside the print callbacks that use it)
+> but it is **not** a callbacks module — it defines no `register_*`
+> function and is not listed in `CALLBACK_MODULES`. The startup-time dead-
+> code check skips it correctly because it contains no `register_` symbol.
 
 ---
 
@@ -1026,13 +1026,12 @@ All dead, superseded, or bug-inducing code identified in previous phases has bee
 
 **Total codebase reduction: ~1,500 lines of dead code.**
 
-### New cleanup candidates (found during this README pass, not yet actioned)
+### Additional items cleaned up since last README pass
 
-| File | Issue | Suggested action |
-|---|---|---|
-| `app/dash_apps/callbacks/kpi_rule_links_callbacks.py` | `register_kpi_rule_links_callbacks()` is fully defined but not imported/called anywhere in `callbacks/__init__.py` | Either wire it in (if the feature is still wanted) or delete the file |
-| `app/dash_apps/drilldown/__init__ ().py` | Stray file (space + parentheses in the name) that duplicates `__init__.py`'s header — not imported by anything | Delete |
-| `app/dash_apps/callbacks/patrol_location_callbacks.py` | Already removed per its own `__init__.py` comment (2026-09) — confirmed gone from the working tree | No action needed; README previously described this as still-present dead code, now corrected |
+| File | Status |
+|---|---|
+| `app/dash_apps/callbacks/kpi_rule_links_callbacks.py` | ✅ Removed — `register_kpi_rule_links_callbacks()` was dead code; confirmed absent from working tree |
+| `app/dash_apps/drilldown/__init__ ().py` | ✅ Removed — stray duplicate file (space + parens in name) confirmed gone |
 
 ---
 
