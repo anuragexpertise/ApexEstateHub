@@ -956,7 +956,8 @@ def shell_layout() -> html.Div:
             # cookie-store: localStorage — society selection cookie
             dcc.Store(id="cookie-store",            storage_type="local", data={}),
             # ephemeral stores — memory (JS variable, reset on mount)
-            dcc.Store(id="toast-store",             storage_type="memory", data =None),
+            dcc.Store(id="toast-store",             storage_type="memory", data=None),
+            dcc.Store(id="kpi-refresh-side-effects-store", storage_type="memory", data=None),
             dcc.Store(id="sidebar-open-store",      storage_type="memory", data={"collapsed": False}),
             dcc.Store(id="profile-action-trigger",  storage_type="memory", data={"action": None, "params": {}}),
             dcc.Store(id="qr-entity-store",         storage_type="memory", data={}),
