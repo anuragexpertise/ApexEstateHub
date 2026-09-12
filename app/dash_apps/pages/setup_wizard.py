@@ -122,8 +122,11 @@ def _render_image_capture_control(entity, field):
                 [html.I(className="fas fa-circle me-1"), "Snap"],
                 id=cam_snap_id,
                 **{
-                    "data-cam-video": cam_vid_id, "data-cam-canvas": cam_cvs_id,
-                    "data-cam-stop": cam_stop_id, "data-preview-id": prev_img_id,
+                    "data-cam-video":     cam_vid_id,
+                    "data-cam-canvas":    cam_cvs_id,
+                    "data-cam-btn":       cam_btn_id,   # ← lets snapCamCapture reset the Camera button label
+                    "data-cam-stop":      cam_stop_id,
+                    "data-preview-id":    prev_img_id,
                     "data-hidden-marker": hidden_marker,
                 },
                 style={**_btn_base, "background": "#de5c52", "color": "#fff", "display": "none"},
