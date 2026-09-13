@@ -260,6 +260,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Total Apartments",  "field": "total_apartments",  "icon": "fa-building"},
         {"label": "Total Users",       "field": "total_users",       "icon": "fa-users"},
         {"label": "Total Receivables", "field": "total_receivables", "icon": "fa-rupee-sign"},
+        {"label": "Gate Logic",        "field": "gate_logic",        "icon": "fa-shield-alt"},
     ],
 }
 
@@ -507,6 +508,11 @@ def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dic
 # at all and shouldn't get one implicitly if it's ever added later without
 # an explicit decision here.
 _EXPLICIT_SELECT_OPTIONS: dict[tuple[str, str], list[dict]] = {
+    ("societies", "gate_logic"): [
+        {"label": "Entry & Exit", "value": "both"},
+        {"label": "Entry Only",   "value": "entry"},
+        {"label": "Exit Only",    "value": "exit"},
+    ],
     ("events", "open_to"): [
         {"label": "Apartments", "value": "apartment"},
         {"label": "Vendors",    "value": "vendor"},

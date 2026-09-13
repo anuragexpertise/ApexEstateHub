@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS societies (
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
+    gate_logic VARCHAR(10) DEFAULT 'both' CHECK (gate_logic IN ('entry', 'exit', 'both')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
@@ -9079,7 +9080,8 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_gst_cadence       VARCHAR(20) DEFAULT 'monthly',
     p_gst_registered    BOOLEAN DEFAULT FALSE,
     p_tds_no_pan        VARCHAR(10) DEFAULT 'warn',
-    p_export_fmt        VARCHAR(20) DEFAULT 'structured'
+    p_export_fmt        VARCHAR(20) DEFAULT 'structured',
+    p_gate_logic        VARCHAR(10) DEFAULT 'both'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -9115,6 +9117,7 @@ BEGIN
         secretary_phone = COALESCE(p_sec_phone, secretary_phone),
         secretary_email = COALESCE(p_sec_email, secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
+        gate_logic = COALESCE(p_gate_logic, gate_logic),
         primary_bank_account_id = COALESCE(primary_bank_account_id, 6311)
     WHERE id = p_society_id;
 

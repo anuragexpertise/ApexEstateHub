@@ -339,7 +339,21 @@ USERS = [
      "mobile": "9877000011", "alt_mobile": "9877000012",
      "alt_address": "44, Sanjay Place, Agra, UP - 282002",
      "apt_calc_start_date": "2026-06-01"},
+    # ── +2 family (in A-101), +2 tenants (in A-201), +2 visitors (in B-202) ──
+    {"role": "apartment", "email": "family1@sunriseresidency.com", "password": "Family1@2024",
+     "name": "Arnav Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111121"},
+    {"role": "apartment", "email": "family2@sunriseresidency.com", "password": "Family2@2024",
+     "name": "Riya Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111122"},
 
+    {"role": "apartment", "email": "tenant1@sunriseresidency.com", "password": "Tenant1@2024",
+     "name": "Mohit Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111121"},
+    {"role": "apartment", "email": "tenant2@sunriseresidency.com", "password": "Tenant2@2024",
+     "name": "Pooja Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111122"},
+
+    {"role": "apartment", "email": "visitor1@sunriseresidency.com", "password": "Visitor1@2024",
+     "name": "Ajay Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222231"},
+    {"role": "apartment", "email": "visitor2@sunriseresidency.com", "password": "Visitor2@2024",
+     "name": "Sunita Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222232"},
 
     # ── +10 vendors, each a distinct service type ──────────────────────
     {"role": "vendor",    "email": "vendor3@sunriseresidency.com",  "password": "Vendor3@2024",
@@ -1187,37 +1201,57 @@ def seed_users(cur, conn, society_id: int):
         ph = generate_password_hash(u["password"])
 
         if u["role"] == "apartment":
-            row = _one(
-                cur,
-                """INSERT INTO apartments
-                   (society_id,flat_number,owner_name,owner_photo,id_proof,
-                    mobile,alt_mobile,alt_address,
-                    apartment_size,apt_calc_start_date,active,created_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
-                   ON CONFLICT (society_id,flat_number) DO UPDATE
-                     SET owner_name = EXCLUDED.owner_name
-                   RETURNING id""",
-                (society_id, u["flat_number"], u["name"],
-                 f"photos/owner_{u['flat_number']}.jpg",
-                 f"id_proofs/owner_{u['flat_number']}.jpg",
-                 u.get("mobile", ""),
-                 u.get("alt_mobile", ""), u.get("alt_address", ""),
-                 u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
-                 admin_uid),
-            )
+            user_type = u.get("user_type", "owner")
+            if user_type == "owner":
+                row = _one(
+                    cur,
+                    """INSERT INTO apartments
+                       (society_id,flat_number,owner_name,owner_photo,id_proof,
+                        mobile,alt_mobile,alt_address,
+                        apartment_size,apt_calc_start_date,active,created_by)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
+                       ON CONFLICT (society_id,flat_number) DO UPDATE
+                         SET owner_name = EXCLUDED.owner_name
+                       RETURNING id""",
+                    (society_id, u["flat_number"], u["name"],
+                     f"photos/owner_{u['flat_number']}.jpg",
+                     f"id_proofs/owner_{u['flat_number']}.jpg",
+                     u.get("mobile", ""),
+                     u.get("alt_mobile", ""), u.get("alt_address", ""),
+                     u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
+                     admin_uid),
+                )
+            else:
+                row = _one(
+                    cur,
+                    """INSERT INTO apartments
+                       (society_id,flat_number,owner_name,owner_photo,id_proof,
+                        mobile,alt_mobile,alt_address,
+                        apartment_size,apt_calc_start_date,active,created_by)
+                       VALUES (%s,%s,'Pending',%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
+                       ON CONFLICT (society_id,flat_number) DO UPDATE SET active=TRUE
+                       RETURNING id""",
+                    (society_id, u["flat_number"],
+                     f"photos/member_{u['flat_number']}.jpg",
+                     f"id_proofs/member_{u['flat_number']}.jpg",
+                     u.get("mobile", ""),
+                     u.get("alt_mobile", ""), u.get("alt_address", ""),
+                     u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
+                     admin_uid),
+                )
             conn.commit()
             linked_id = row["id"] if row else None
             row = _one(
                 cur,
-                """INSERT INTO users (society_id,email,password_hash,role,login_method,name,linked_id)
-                   VALUES (%s,%s,%s,'apartment','password',%s,%s)
+                """INSERT INTO users (society_id,email,password_hash,role,login_method,name,linked_id,user_type)
+                   VALUES (%s,%s,%s,'apartment','password',%s,%s,%s)
                    ON CONFLICT (email) DO NOTHING RETURNING id""",
-                (society_id, u["email"], ph, u["name"], linked_id),
+                (society_id, u["email"], ph, u["name"], linked_id, user_type),
             )
             conn.commit()
             uid = row["id"] if row else None
             if uid:
-                print(f"  ✓ Owner    {u['email']}  /  {u['password']}  [{u['flat_number']}]")
+                print(f"  ✓ {user_type.title():8} {u['email']}  /  {u['password']}  [{u['flat_number']}]")
 
         elif u["role"] == "vendor":
             row = _one(
