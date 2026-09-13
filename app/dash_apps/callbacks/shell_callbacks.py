@@ -145,17 +145,21 @@ def _make_nav_items(role, society_id, pathname, user_type=None):
                 "Polls": "polls",
                 "Attendance": "attendance",
                 "Users": "security",
+                "Members": "apartment_users",
                 "Receipts": "receipts",
                 "Expenses": "expenses",
                 "Bills Paid": "receipts",
                 "Bills Due": "receivables",
                 "Payables": "payables",
                 "Charges": "apt_charges",
+                "Societies": "master_societies",
             }
             mapped_plural = _TAB_ENTITY_MAP.get(label)
             if mapped_plural and "new" in _perms_for(role, mapped_plural):
-                singular = "security" if mapped_plural == "security" else mapped_plural.rstrip('s')
-                action_buttons.append(_make_btn(singular, "fa-plus", "#1d74d8", f"New {label.rstrip('s')}"))
+                from app.dash_apps.drilldown.registry import to_singular
+                singular = "security" if mapped_plural == "security" else to_singular(mapped_plural)
+                tooltip_label = label if label.endswith('s') == False else to_singular(mapped_plural).replace('_', ' ').title()
+                action_buttons.append(_make_btn(singular, "fa-plus", "#1d74d8", f"New {tooltip_label}"))
 
         items.append(
             html.Li(

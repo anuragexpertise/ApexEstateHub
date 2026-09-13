@@ -142,6 +142,10 @@ DRILLDOWN_MAP: dict = {
         "label": "Apartments No Dues",
         "filter": {"pending_dues": {"eq":0.0}},
     },
+    "kpi_apartment_members": {
+        "target": "list_apartment_users",
+        "label": "Apartment Members",
+    },
     "kpi_nocs_total": {
         "target": "list_nocs",
         "label": "Issued NOCs",

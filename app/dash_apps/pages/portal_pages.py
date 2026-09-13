@@ -709,6 +709,13 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    if active_tab in ("members", "owner_members", "owner-members"):
+        return html.Div([
+            _page_title("fa-users", c, "Members", "directory of flat owners and residents"),
+            _kpi_row_dynamic("owner", "members", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
     # ── Financials ────────────────────────────────────────────────────────
     if active_tab == "financials":
         return html.Div([
