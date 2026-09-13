@@ -1041,7 +1041,7 @@ def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: in
     }
 
 
-def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None, lat: float = None, lon: float = None) -> dict:
+def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None, lat: float = None, lon: float = None, mode: str = "entry") -> dict:
     """
     Server-side validation with standard hyphenated format (<society_id>-<ROLE_CODE>-<entity_id>).
     Dispatches to role-specific validators.
@@ -1196,6 +1196,18 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 "gate_action": "allow",
             }
         else:
+            # Check society gate_logic for override
+            gate_logic_row = db._execute("SELECT gate_logic FROM societies WHERE id = %s", (qr_society_id,), fetch_one=True)
+            gate_logic = (gate_logic_row or {}).get("gate_logic", "both")
+            
+            if (gate_logic == "entry" and mode == "exit") or (gate_logic == "exit" and mode == "entry"):
+                return {
+                    "status": "PASS",
+                    "user": base_user,
+                    "message": f"{result.get('reason', 'Access granted')} (Allowed by gate logic)",
+                    "gate_action": "allow",
+                }
+
             return {
                 "status": "FAIL",
                 "reason": result.get("reason", "Access denied"),

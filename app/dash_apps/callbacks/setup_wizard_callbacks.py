@@ -173,6 +173,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-tan", "value"),
         State("sw-society-gstin", "value"),
         State("sw-society-reg", "value"),
+        State("sw-gate-logic", "value"),
         State({"type": "form-field-hidden", "entity": "society", "field": "pay_qr"}, "value"),
         State("sw-calc-start-date", "date"),
         State("sw-sec-name", "value"),
@@ -227,7 +228,7 @@ def register_setup_wizard_callbacks(app):
     )
     def submit_setup_wizard(n_submit, n_close, 
                             logo_data, address, s_email, phone, bg_data, 
-                            tan, gstin, reg_num, pay_qr_data, calc_start, 
+                            tan, gstin, reg_num, gate_logic, pay_qr_data, calc_start, 
                             sec_name, sec_phone, sec_email, sec_sign_data, 
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
                             tds_natures, tds_rates, tds_rates_no_pan, tds_single_bills, tds_agg_bills,
@@ -364,7 +365,7 @@ def register_setup_wizard_callbacks(app):
                         :ven_1, :ven_7, :ven_30,
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
-                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic
                     ) AS result""",
                     {
                         "sid": society_id,
@@ -378,6 +379,7 @@ def register_setup_wizard_callbacks(app):
                         "pay_qr": qr_path,
                         "calc_start": calc_start,
                         "sec_name": sec_name,
+                        "gate_logic": gate_logic,
                         "sec_phone": sec_phone,
                         "sec_email": sec_email,
                         "sec_sign": sign_path,

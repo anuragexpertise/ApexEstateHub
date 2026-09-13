@@ -183,9 +183,9 @@ def render_category_content(category, society_id=None):
         )
 
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg, s_phone, s_email = "", "", "", "", "", ""
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic = "", "", "", "", "", "", "both"
         if society_id:
-            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
@@ -193,6 +193,7 @@ def render_category_content(category, society_id=None):
                 s_email = row.get("email", "") or ""
                 s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
+                s_gate_logic = row.get("gate_logic", "both") or "both"
         return elements + [
             _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
             dbc.Label("Society Name"),
@@ -209,6 +210,17 @@ def render_category_content(category, society_id=None):
             dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
+            dbc.Label("Gate Pass Enforcement"),
+            dbc.Select(
+                id="sw-gate-logic",
+                options=[
+                    {"label": "Deny Both Entry and Exit", "value": "both"},
+                    {"label": "Deny Entry Only", "value": "entry"},
+                    {"label": "Deny Exit Only", "value": "exit"},
+                ],
+                value=s_gate_logic,
+                className="mb-3"
+            ),
             dbc.Label("Login Background (Image)"),
             _render_image_capture_control("society", "bg"),
         ]
