@@ -733,6 +733,17 @@ KPI_CARDS = {
         "title": "Maintenance Rules", "group": "monthly",
     },
 
+    "kpi_apartment_members": {
+        "query": """
+            SELECT COUNT(*) AS v
+            FROM users
+            WHERE society_id=%s AND linked_id=%s AND role='apartment'
+        """,
+        "params": 2, "format": "number",
+        "icon": "fa-users", "color": "#18794e",
+        "title": "Apartment Members", "group": "directory",
+    },
+
     # Nav tile for the "My Transactions" passbook (loaders.get_member_ledger).
     # Custom card, not schema-driven — same "View" + bypass-DRILLDOWN_MAP
     # pattern as kpi_fy_closing_report / kpi_time_qr (see the special-case
@@ -1178,6 +1189,9 @@ DEFAULT_LAYOUTS = {
         "polls": [
             "kpi_polls_total",
             "kpi_polls_active"],
+        "members": [
+            "kpi_apartment_members",
+        ],
         "settings": ["kpi_owner_member_since"],
     },
     "vendor": {
