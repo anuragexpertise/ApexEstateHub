@@ -217,6 +217,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     ],
     "security": [
         {"label": "Shifts Completed", "field": "shift_count",  "icon": "fa-clock", "format": "shift_count"},
+        {"label": "Shift Count", "field": "shifts_this_month", "icon": "fa-calendar-check", "format": "number"},
         {"label": "Duty Status",      "field": "gate_pass",    "icon": "fa-shield-alt", "format": "duty_status"},
         {"label": "Salary Due",       "field": "salary_due",   "icon": "fa-rupee-sign"},
         {"label": "Salary Paid",      "field": "salary_paid",  "icon": "fa-check-circle"},

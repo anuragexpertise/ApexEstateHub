@@ -4679,7 +4679,7 @@ CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFA
 RETURNS TABLE (
     id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
     shift VARCHAR(20), mobile VARCHAR(15), active BOOLEAN, salary_per_shift NUMERIC(10,2),
-    joining_date DATE, shift_count BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), gate_pass BOOLEAN
+    joining_date DATE, shift_count BIGINT, shifts_this_month BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), gate_pass BOOLEAN
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -4688,6 +4688,7 @@ BEGIN
     WITH pay_sum AS (
         SELECT entity_id AS staff_id,
             COUNT(*)::BIGINT AS shifts_completed,
+            COUNT(*) FILTER (WHERE shift_date >= DATE_TRUNC('month', CURRENT_DATE))::BIGINT AS shifts_this_month,
             COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0)::NUMERIC(15,2) AS salary_due,
             COALESCE(SUM(amount) FILTER (WHERE status='verified'), 0)::NUMERIC(15,2) AS salary_paid
         FROM payables p WHERE p.society_id = p_society_id AND p.role = 'security' GROUP BY entity_id
@@ -4698,6 +4699,7 @@ BEGIN
         COALESCE(s.mobile,'—')::VARCHAR(15), COALESCE(s.active,TRUE)::BOOLEAN,
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
         COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
+        COALESCE(ps.shifts_this_month, 0)::BIGINT AS shifts_this_month,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
         EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=s.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
     FROM security_staff s
