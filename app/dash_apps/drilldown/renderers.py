@@ -2303,10 +2303,13 @@ def render_form_card(card_id: str, title: str, icon: str,
     # do anything would just be confusing, so it's hidden here and replaced
     # with a short locked-flat note instead.
     _owner_locked_apartment_field = (
-        entity_plural == "concerns" and (role or "admin") == "apartment"
+        entity_plural in ("concerns", "apartment_users") and (role or "admin") == "apartment"
     )
     if _owner_locked_apartment_field:
         fields = [f for f in fields if f.get("id") != "apartment_id"]
+        # Hide email field for new apartment_users if created by owner
+        if entity_plural == "apartment_users":
+            fields = [f for f in fields if f.get("id") != "email"]
 
     # The society 'plan' is owned by the platform (master): a society admin can
     # see it on the list/profile (rendered read-only there) but must NOT change
@@ -2353,9 +2356,9 @@ def render_form_card(card_id: str, title: str, icon: str,
         ))
 
     if _owner_locked_apartment_field and not prefill.get("id"):
+        locked_msg = "This concern will be raised for your own flat." if entity_plural == "concerns" else "This member will be added to your own flat."
         form_rows.append(dbc.Alert(
-            [html.I(className="fas fa-lock me-2"),
-             "This concern will be raised for your own flat."],
+            [html.I(className="fas fa-lock me-2"), locked_msg],
             color="secondary",
             style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px"},
         ))
