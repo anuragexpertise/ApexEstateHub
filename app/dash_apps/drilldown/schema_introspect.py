@@ -64,11 +64,13 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "nocs":         "nocs",
 }
 
-# Columns that are system/PK/auth — never shown in forms or lists.
+# Columns that are system/PK/auth — never shown in lists.
 _SYSTEM_COLUMNS = {
     "id", "society_id", "user_id", "created_at", "updated_at",
     "password_hash", "pin_hash", "pattern_hash", "linked_id",
     "created_by", "updated_by", "qr_payload", "qr_version",
+    "confirmed_at", "confirmed_by", "last_printed_at", "last_emailed_at",
+    "previous_hash","source_reference","reconciled_at","reconciled_by",
     # per-society QR signing secret — reversible ciphertext (see
     # secret_vault.py), not just a hash like the auth fields above, so an
     # accidental raw-text edit through the generic form could silently
@@ -93,7 +95,8 @@ _SYSTEM_COLUMNS = {
 # System columns that should still appear in profile cards (audit trail).
 _PROFILE_VISIBLE_SYSTEM = {
     "created_at", "updated_at", "created_by", "updated_by", "qr_payload", "qr_version",
-    "bank_statement_line_id",
+    "bank_statement_line_id","confirmed_at", "confirmed_by", "last_printed_at", "last_emailed_at",
+    "previous_hash","source_reference","reconciled_at","reconciled_by"
 }
 
 # Entities with no Edit action (immutable ledger / read-only tabs).
@@ -598,6 +601,9 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     },
     "concerns": {
         "status", "qr_payload",
+    },
+    "apartment_users": {
+        "email",
     },
     "receipts": {
         "status", "confirmed_by", "confirmed_at", "last_printed_at", "last_emailed_at",

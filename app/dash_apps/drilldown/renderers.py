@@ -2451,6 +2451,15 @@ def render_form_card(card_id: str, title: str, icon: str,
                 o if isinstance(o, dict) else {"label": o.title(), "value": o}
                 for o in f.get("options", [])
             ]
+            
+            # Filter user_type options for apartment_users based on logged in user's role
+            if entity == "apartment_users" and fid == "user_type" and role == "apartment":
+                caller_type = auth_data.get("user_type")
+                if caller_type in ("family", "tenant"):
+                    opts = [o for o in opts if o["value"] == "visitor"]
+                elif caller_type == "visitor":
+                    opts = []
+                    
             ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
                 options=opts, value=pre_val,
