@@ -111,6 +111,9 @@ def _style_kpi_value(card_id, value, raw):
 # resolve_seed_kpi_value() so portal_pages.py can compute the SAME cache key
 # refresh_kpi_values() would use, without duplicating any SQL here.
 SCOPED_CARD_IDS = {
+    "admin": {
+        "kpi_concerns_assigned",
+    },
     "apartment": {
         "kpi_apartments_dues", "kpi_receivables_total", "kpi_advance_credits",
         "kpi_my_pending_dues", "kpi_my_overdue_dues", "kpi_receipts_month",
@@ -342,6 +345,16 @@ def register_card_catalogue_callbacks(app):
         # Scoped KPI overrides: return (override_sql, params) or None to use default.
         def _scoped_override(card_id: str):
             """Return (sql, params) scoped to the portal entity, or None for default."""
+            if role == "admin" and own_user_id:
+                overrides = {
+                    "kpi_concerns_assigned": (
+                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned'",
+                        (sid, own_user_id),
+                    )
+                }
+                return overrides.get(card_id)
+
             if role == "apartment" and apt_id:
                 overrides = {
                     # dues / receivables scoped to this apartment

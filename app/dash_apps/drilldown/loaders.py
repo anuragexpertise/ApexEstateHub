@@ -1261,12 +1261,26 @@ def load_list(
                     (sid, s, p_sec_id), fetch_all=True,
                 ) or []
                 return rows, len(rows)
+
+            gate_pass = filters.get("gate_pass")
+            extra = ""
+            if gate_pass is not None:
+                if isinstance(gate_pass, dict):
+                    if gate_pass.get("eq") is True or gate_pass.get("gt") is not None:
+                        extra = " WHERE gate_pass = TRUE"
+                    elif gate_pass.get("eq") is False:
+                        extra = " WHERE gate_pass = FALSE"
+                elif str(gate_pass).lower() == "true":
+                    extra = " WHERE gate_pass = TRUE"
+                elif str(gate_pass).lower() == "false":
+                    extra = " WHERE gate_pass = FALSE"
+
             rows = db._execute(
-                "SELECT * FROM fn_security_list(%s,%s) LIMIT %s OFFSET %s",
+                "SELECT * FROM fn_security_list(%s,%s)" + extra + " LIMIT %s OFFSET %s",
                 (sid, s, page_size, offset), fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM fn_security_list(%s,NULL)", (sid,), fetch_one=True,
+                "SELECT COUNT(*) AS n FROM fn_security_list(%s,NULL)" + extra, (sid,), fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
@@ -1423,6 +1437,15 @@ def load_list(
             # scoped) KPI badge above it. _build_list_sql already had this
             # fix — load_list (the actual live path) did not. See
             # Concerns_Workflow_Review.md §3.2.
+            
+            adm_assignee_id = filters.get("adm_assignee_id")
+            assigned_status = filters.get("assigned_status")
+            if adm_assignee_id and assigned_status:
+                extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='ADM' AND ca.entity_id=%s"
+                params.append(adm_assignee_id)
+                extra += " AND ca.status=%s)"
+                params.append(assigned_status)
+
             vnd_assignee_id = filters.get("vnd_assignee_id")
             if vnd_assignee_id:
                 extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s"
@@ -1855,6 +1878,22 @@ def load_list(
             if sec_id:
                 extra_sql = " AND g.entity_id=%s"
                 extra_params.append(sec_id)
+            
+            shift_time_in_to = filters.get("shift_time_in_to")
+            if shift_time_in_to:
+                extra_sql += " AND g.time_in < %s"
+                extra_params.append(shift_time_in_to)
+
+            shift_time_out_from = filters.get("shift_time_out_from")
+            if shift_time_out_from:
+                extra_sql += " AND g.time_out >= %s"
+                extra_params.append(shift_time_out_from)
+
+            shift_time_out_to = filters.get("shift_time_out_to")
+            if shift_time_out_to:
+                extra_sql += " AND g.time_out < %s"
+                extra_params.append(shift_time_out_to)
+
             rows = db._execute(
                 "SELECT g.*, COALESCE(s.name,'') AS entity_name "
                 "FROM gate_access g "
@@ -1864,8 +1903,8 @@ def load_list(
                 [sid] + extra_params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
-                "SELECT COUNT(*) AS n FROM gate_access "
-                "WHERE society_id=%s AND role='SEC'" + extra_sql,
+                "SELECT COUNT(*) AS n FROM gate_access g "
+                "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql,
                 [sid] + extra_params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
