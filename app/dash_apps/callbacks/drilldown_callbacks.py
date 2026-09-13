@@ -114,6 +114,16 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
         # Matches the KPI's own query: status='pending' AND visit_date=CURRENT_DATE.
         return {"visit_date": today.isoformat()}
 
+    if card_id == "kpi_attendance_count":
+        from dateutil.relativedelta import relativedelta
+        start_of_month = today.replace(day=1)
+        start_of_next_month = start_of_month + relativedelta(months=1)
+        return {
+            "shift_time_in_to": start_of_next_month.isoformat(),
+            "shift_time_out_from": start_of_month.isoformat(),
+            "shift_time_out_to": start_of_next_month.isoformat(),
+        }
+
     return {}
 from app.dash_apps.drilldown import loaders, renderers, state as nav_state
 import  app.services.push_service as PushService
@@ -5382,6 +5392,10 @@ def _validate_transaction_account(db, acc_id, society_id, transaction_type):
 def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     role = get_current_user_role()
     f = dict(filters)
+    if role == "admin":
+        adm_user_id = get_current_user_id()
+        if adm_user_id:
+            f["adm_assignee_id"] = adm_user_id
     if role == "apartment":
         apt_id = get_current_linked_id()
         if apt_id:

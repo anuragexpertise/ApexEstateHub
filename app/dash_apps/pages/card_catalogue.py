@@ -843,7 +843,9 @@ KPI_CARDS = {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access
             WHERE society_id=%s AND role='SEC'
-              AND time_in >= DATE_TRUNC('month', CURRENT_DATE)
+              AND time_in < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              AND time_out >= DATE_TRUNC('month', CURRENT_DATE)
+              AND time_out < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
         """,
         "params": 1, "format": "number",
         "icon": "fa-clock", "color": "#b63b3b",
