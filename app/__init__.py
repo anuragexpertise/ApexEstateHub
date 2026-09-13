@@ -143,6 +143,14 @@ def create_app(config_name: str | None = None) -> Flask:
     CORS(app)
     _register_error_handlers(app)
 
+    # Initialize background jobs
+    if not app.config.get('TESTING') and not os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        try:
+            from app.services.scheduler import init_scheduler
+            init_scheduler()
+        except Exception as e:
+            log.error(f"Failed to initialize scheduler: {e}")
+
     # Asset dirs
     assets_path = Path(__file__).parent / "assets"
     _ensure_asset_dirs(assets_path)

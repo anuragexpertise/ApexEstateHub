@@ -11,7 +11,7 @@ Portal-aware CRUD buttons:
 """
 
 from __future__ import annotations
-from datetime import datetime, date
+from datetime import datetime, date, time, timezone
 from pathlib import Path
 from decimal import Decimal
 
@@ -276,7 +276,12 @@ def _humanize_string(val: str) -> str:
 # as dd/mm/yyyy only — appending a synthetic 00:00:00 would be misleading.
 def _format_datetime(val) -> str:
     if isinstance(val, datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        val = val.astimezone()
         return val.strftime("%d/%m/%Y %H:%M:%S")
+    if isinstance(val, time):
+        return val.strftime("%H:%M:%S")
     if isinstance(val, date):
         return val.strftime("%d/%m/%Y")
     if isinstance(val, str):

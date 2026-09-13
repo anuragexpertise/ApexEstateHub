@@ -473,44 +473,44 @@ EVENTS = [
 
 CONCERNS = [
     {"flat_number": "A-101", "type": "plumbing",   "status": "open",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "Water leakage from bathroom ceiling — needs urgent attention."},
     {"flat_number": "B-202", "type": "electrical", "status": "in_progress",
-     "preferred_time": "afternoon",
+     "preferred_time": "14:00:00",
      "desc": "Main corridor light flickering near staircase. Sparks observed twice.",
      "assign_role": "SEC", "assign_name": "Ramu Singh"},
     {"flat_number": "A-102", "type": "carpentry", "status": "open",
-     "preferred_time": "anytime",
+     "preferred_time": "00:00:00",
      "desc": "Main door hinge broken and door doesn't close properly."},
     {"flat_number": "A-103", "type": "painting", "status": "in_progress",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "Living room wall paint peeling due to water seepage from above.",
      "assign_role": "VND", "assign_name": "ColorMax Painters"},
     {"flat_number": "A-202", "type": "pest_control", "status": "open",
-     "preferred_time": "evening",
+     "preferred_time": "18:00:00",
      "desc": "Cockroach infestation reported in the kitchen area."},
     {"flat_number": "A-203", "type": "housekeeping", "status": "resolved",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "Common corridor on 2nd floor was left uncleaned for three days."},
     {"flat_number": "B-101", "type": "security", "status": "open",
-     "preferred_time": "night",
+     "preferred_time": "21:00:00",
      "desc": "Night-shift security guard found absent from the main gate post.",
      "assign_role": "SEC", "assign_name": "Mahesh Chand"},
     {"flat_number": "B-102", "type": "parking", "status": "in_progress",
-     "preferred_time": "anytime",
+     "preferred_time": "00:00:00",
      "desc": "Unauthorized vehicle repeatedly parked in the owner's allotted slot."},
     {"flat_number": "B-203", "type": "elevator", "status": "open",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "Lift makes a loud grinding noise between the 3rd and 4th floors.",
      "assign_role": "VND", "assign_name": "LiftCare Elevators"},
     {"flat_number": "B-204", "type": "water_supply", "status": "resolved",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "No water supply for about two hours during the morning peak."},
     {"flat_number": "C-101", "type": "noise", "status": "closed",
-     "preferred_time": "evening",
+     "preferred_time": "18:00:00",
      "desc": "Loud construction noise from a renovation continued past permitted hours."},
     {"flat_number": "C-102", "type": "garbage", "status": "open",
-     "preferred_time": "morning",
+     "preferred_time": "09:00:00",
      "desc": "Garbage bin near the C-block entrance has not been cleared for two days."},
 ]
 
@@ -1327,7 +1327,7 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
                         (society_id, apt_id, con["type"]))
         if existing:
             continue
-        preferred_time = con.get("preferred_time", "anytime")
+        preferred_time = con.get("preferred_time", "00:00:00")
         # qr_payload deliberately NOT set here — fn_trg_concerns_qr (BEFORE
         # INSERT trigger) fills it in as the canonical "<society_id>-CON-<id>"
         # format automatically once NEW.id is known. Explicitly passing a

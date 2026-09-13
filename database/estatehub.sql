@@ -290,7 +290,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL,
     concern_type VARCHAR(50),
     description TEXT,
-    preferred_time VARCHAR(20),
+    preferred_time TIME,
     status VARCHAR(20) NOT NULL DEFAULT 'open',
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -6636,7 +6636,7 @@ CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT, p_society_id INT
 RETURNS TABLE (
     id INT, society_id INT, apartment_id INT, concern_type VARCHAR(50),
     description TEXT, status VARCHAR(20), assigned_to VARCHAR(100),
-    preferred_time VARCHAR(20), days_open BIGINT, created_at TIMESTAMP, image TEXT, subtitle TEXT,
+    preferred_time TIME, days_open BIGINT, created_at TIMESTAMP, image TEXT, subtitle TEXT,
     flat_number VARCHAR(20)
 )
 LANGUAGE SQL STABLE AS $$
@@ -6655,7 +6655,7 @@ LANGUAGE SQL STABLE AS $$
             LEFT JOIN security_staff s ON s.id = ca.entity_id AND ca.role = 'SEC'
             WHERE ca.concern_id = c.id
            )::VARCHAR(100) AS assigned_to,
-           c.preferred_time::VARCHAR(20),
+           c.preferred_time::TIME,
            EXTRACT(DAY FROM AGE(CURRENT_DATE, c.created_at))::BIGINT,
            c.created_at::TIMESTAMP, c.image::TEXT,
            ('Flat '||COALESCE(a.flat_number, c.apartment_id::TEXT)||' - '||c.concern_type)::TEXT,

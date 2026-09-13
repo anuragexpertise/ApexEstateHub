@@ -1255,6 +1255,29 @@ def shell_layout() -> html.Div:
                             es.addEventListener('message', function(e) {
                                 try {
                                     var payload = JSON.parse(e.data);
+                                    
+                                    if (payload.type === 'kpi_update') {
+                                        var group = payload.workflow_group;
+                                        var currentPath = window.location.pathname;
+                                        var shouldRefresh = false;
+                                        
+                                        if (group === 'financials' && (currentPath.includes('financials') || currentPath.includes('receipts') || currentPath.includes('cashbook') || currentPath.includes('dues') || currentPath.includes('receivables'))) shouldRefresh = true;
+                                        else if (group === 'concerns' && currentPath.includes('concerns')) shouldRefresh = true;
+                                        else if (group === 'events' && currentPath.includes('events')) shouldRefresh = true;
+                                        else if (group === 'polls' && currentPath.includes('polls')) shouldRefresh = true;
+                                        else if (group === 'channels' && currentPath.includes('channels')) shouldRefresh = true;
+                                        // "all" groups or overview could be added here
+                                        else if (currentPath.endsWith('-portal') || currentPath === '/dashboard/') shouldRefresh = true;
+                                        
+                                        if (shouldRefresh) {
+                                            var btn = document.getElementById('hdr-refresh-kpi-btn');
+                                            if (btn && !btn.disabled) {
+                                                btn.click();
+                                            }
+                                        }
+                                        return; // Skip toast and tone
+                                    }
+
                                     var data = payload.data || {};
                                     var title = data.name || data.visitor_name || data.channel_type || 'Alert';
                                     var body = '';
