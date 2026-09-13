@@ -1440,11 +1440,14 @@ def load_list(
             
             adm_assignee_id = filters.get("adm_assignee_id")
             assigned_status = filters.get("assigned_status")
-            if adm_assignee_id and assigned_status:
+            if adm_assignee_id:
                 extra += " AND EXISTS (SELECT 1 FROM concerns_assigns ca WHERE ca.concern_id=c.id AND ca.role='ADM' AND ca.entity_id=%s"
                 params.append(adm_assignee_id)
-                extra += " AND ca.status=%s)"
-                params.append(assigned_status)
+                # Apply assigned_status filter if requested, otherwise just check they are assigned
+                if assigned_status:
+                    extra += " AND ca.status=%s"
+                    params.append(assigned_status)
+                extra += ")"
 
             vnd_assignee_id = filters.get("vnd_assignee_id")
             if vnd_assignee_id:

@@ -519,6 +519,10 @@ _EXPLICIT_SELECT_OPTIONS: dict[tuple[str, str], list[dict]] = {
         {"label": "Security",   "value": "security"},
         {"label": "ALL",        "value": "all"},
     ],
+    ("security", "gate_pass"): [
+        {"label": "On duty", "value": True},
+        {"label": "Off duty", "value": False},
+    ],
     ("vw_apartment_users", "user_type"): [
         {"label": "Owner",         "value": "owner"},
         {"label": "Family Member", "value": "family"},
