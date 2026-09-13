@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 
 from database.db_manager import db
+from app.services.redis_broker import notify_kpi_update
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,7 @@ def send_bulk_push(user_ids, title, body, url=None, society_id=None):
 
 def notify_poll_created(society_id, poll_title):
     """Notify all apartment owners in the society when a new poll is created."""
+    notify_kpi_update(society_id, "polls")
     targets = get_notification_targets(society_id, roles=["apartment"])
     if not targets:
         return 0, 0
@@ -246,6 +248,7 @@ def notify_poll_created(society_id, poll_title):
 def notify_poll_results_declared(society_id, poll_title):
     """Notify all apartment owners in the society when an admin declares
     results for a poll (mirrors notify_poll_created's audience/pattern)."""
+    notify_kpi_update(society_id, "polls")
     targets = get_notification_targets(society_id, roles=["apartment"])
     if not targets:
         return 0, 0
@@ -258,6 +261,7 @@ def notify_event_created(society_id, event_title, open_to="all", event_date=None
     Push a new-event alert to everyone matching open_to.
     open_to: 'apartment' | 'vendor' | 'security' | 'all'
     """
+    notify_kpi_update(society_id, "events")
     role_map = {
         "apartment": ["apartment"],
         "vendor":    ["vendor"],
@@ -278,6 +282,7 @@ def notify_concern_created(society_id, apartment_id, concern_type):
     """Notify all admins in the society, plus the apartment owner (if the
     concern wasn't raised by the owner themself, e.g. admin raised it on
     their behalf), when a new concern is raised."""
+    notify_kpi_update(society_id, "concerns")
     from database.db_manager import db
     targets = list(get_notification_targets(society_id, roles=["admin"]))
     if apartment_id:
@@ -310,6 +315,7 @@ def notify_concern_assigned(society_id, concern_id, concern_type, assignments):
     is already users.id. For 'VND'/'SEC', entity_id is vendors.id /
     security_staff.id and must be translated to the linked users.id.
     """
+    notify_kpi_update(society_id, "concerns")
     from database.db_manager import db
     sent, failed = 0, 0
     label = concern_type.replace('_', ' ').title() if concern_type else "Concern"
@@ -364,6 +370,7 @@ def _concern_notify_targets(society_id, apartment_id):
 
 def notify_concern_bid_saved(society_id, apartment_id, concern_type, vendor_label=None):
     """Vendor saved/updated a bid — notify admin + the concern's creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -375,6 +382,7 @@ def notify_concern_bid_saved(society_id, apartment_id, concern_type, vendor_labe
 
 def notify_concern_resolved_by_vendor(society_id, apartment_id, concern_type):
     """Vendor marked their assignment resolved — notify admin + creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -386,6 +394,7 @@ def notify_concern_resolved_by_vendor(society_id, apartment_id, concern_type):
 def notify_concern_declined(society_id, apartment_id, concern_type, vendor_label=None):
     """Vendor/security declined an invitation — notify admin + creator
     apartment so they know to re-invite someone else (§2.11)."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -397,6 +406,7 @@ def notify_concern_declined(society_id, apartment_id, concern_type, vendor_label
 
 def notify_concern_accepted(society_id, apartment_id, concern_type, admin_label=None):
     """Admin accepted an assigned concern — notify admin + creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -409,6 +419,7 @@ def notify_concern_accepted(society_id, apartment_id, concern_type, admin_label=
 def notify_concern_declined_by_admin(society_id, apartment_id, concern_type, admin_label=None):
     """Admin declined an assigned concern — notify admin + creator apartment
     so they know to re-assign someone else."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -420,6 +431,7 @@ def notify_concern_declined_by_admin(society_id, apartment_id, concern_type, adm
 
 def notify_concern_resolved_by_admin(society_id, apartment_id, concern_type):
     """Admin marked their assignment resolved — notify admin + creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -430,6 +442,7 @@ def notify_concern_resolved_by_admin(society_id, apartment_id, concern_type):
 
 def notify_concern_resolved_by_security(society_id, apartment_id, concern_type):
     """Security marked their assignment resolved — notify admin + creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -442,6 +455,7 @@ def notify_concern_closed(society_id, apartment_id, concern_type, assignments=No
     """Admin/Owner closed a concern — notify admin, the creator apartment,
     and every assignee. `assignments` is the list of rows returned by
     loaders.get_concern_assignments() (each with role/entity_id)."""
+    notify_kpi_update(society_id, "concerns")
     from database.db_manager import db
     targets = _concern_notify_targets(society_id, apartment_id)
     role_lookup = {"VND": "vendor", "SEC": "security"}
@@ -468,6 +482,7 @@ def notify_concern_closed(society_id, apartment_id, concern_type, assignments=No
 
 def notify_concern_invited(society_id, concern_id, concern_type, assignments):
     """Admin/Owner invited vendors/security to bid — notify the invited entities."""
+    notify_kpi_update(society_id, "concerns")
     from database.db_manager import db
     targets = []
     role_lookup = {"VND": "vendor", "SEC": "security"}
@@ -491,6 +506,7 @@ def notify_concern_invited(society_id, concern_id, concern_type, assignments):
 
 def notify_concern_invite_bid_saved(society_id, apartment_id, concern_type, vendor_label=None):
     """Vendor submitted a bid on an invite — notify admin + the concern's creator apartment."""
+    notify_kpi_update(society_id, "concerns")
     targets = _concern_notify_targets(society_id, apartment_id)
     if not targets:
         return 0, 0
@@ -504,6 +520,10 @@ def notify_payment_received(user_id, amount, particulars=None):
     """Confirm to the payer that their payment was recorded."""
     if not user_id:
         return False, "No user_id"
+    from database.db_manager import db
+    row = db._execute("SELECT society_id FROM users WHERE id = %s", (user_id,), fetch_one=True)
+    if row:
+        notify_kpi_update(row["society_id"], "financials", exclude_user_id=user_id)
     title = "💰 Payment Received"
     body = f"₹{float(amount):,.2f} received" + (f" — {particulars}" if particulars else "")
     return send_push_notification(user_id, title, body, url="/dashboard/owner-cashbook")
@@ -511,6 +531,7 @@ def notify_payment_received(user_id, amount, particulars=None):
 
 def notify_admin_payment_recorded(society_id, amount, particulars=None, exclude_user_id=None):
     """Let admins know a payment was recorded (e.g. by security at the gate)."""
+    notify_kpi_update(society_id, "financials")
     targets = get_notification_targets(society_id, roles=["admin"], exclude_user_id=exclude_user_id)
     if not targets:
         return 0, 0
@@ -537,6 +558,7 @@ def notify_channel_created(society_id, channel_name, channel_type, apartment_id=
     School Bus: notify all apartment owners.
     Taxi/Visitor: notify the linked apartment owner only.
     """
+    notify_kpi_update(society_id, "channels")
     from app.services.alert_service import get_channel_subscribers
     if channel_type == "school_bus":
         targets = get_notification_targets(society_id, roles=["apartment"])

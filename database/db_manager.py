@@ -100,6 +100,10 @@ class DatabaseManager:
                 # Only append if not already present
                 if 'sslrootcert=' not in dsn:
                     dsn = dsn + f"&sslrootcert={ca_path}"
+                    
+        # Force PostgreSQL to operate in the local system timezone
+        tz = os.getenv("TZ", "Asia/Kolkata")
+        dsn += f"&options=-c%20timezone={tz}"
 
         return dsn
 

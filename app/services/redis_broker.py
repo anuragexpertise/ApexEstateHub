@@ -152,3 +152,15 @@ class RedisBroker:
 
 
 broker = RedisBroker()
+
+def notify_kpi_update(society_id: int, workflow_group: str, exclude_user_id: int = None):
+    """
+    Publish a KPI update event to all active streams for a given society.
+    workflow_group: e.g. "financials", "concerns", "events", "polls"
+    """
+    broker.publish({
+        "type": "kpi_update",
+        "society_id": society_id,
+        "workflow_group": workflow_group,
+        "exclude_user_id": exclude_user_id,
+    })

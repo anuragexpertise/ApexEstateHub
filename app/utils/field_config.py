@@ -515,11 +515,13 @@ FIELD_CONFIG = {
             "tooltip": "Detailed description of the issue — be specific for faster resolution",
         },
         "preferred_time": {
+            "type": "time",
+            "step": 1,
             "visible": ALL_ROLES,
             "editable": ADMIN_MASTER,
-            "default": "anytime",
+            "default": "00:00:00",
             "validation": {},
-            "tooltip": "Preferred time for resolution (e.g., morning, afternoon, anytime)",
+            "tooltip": "Preferred time for resolution",
         },
         "image": {
             "visible": ADMIN_MASTER,

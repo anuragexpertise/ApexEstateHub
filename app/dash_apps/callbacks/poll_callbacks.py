@@ -98,6 +98,14 @@ def register_poll_callbacks(app):
         choices = [c1 or '', c2 or '', c3 or '', c4 or '', c5 or '']
         is_edit = bool(poll_id)
 
+        import datetime as _dt
+        if ends_at:
+            try:
+                _naive = _dt.datetime.strptime(ends_at, "%Y-%m-%dT%H:%M")
+                ends_at = _naive.astimezone().astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
         try:
             if is_edit:
                 result = db._execute(
