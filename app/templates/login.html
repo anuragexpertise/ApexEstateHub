@@ -148,7 +148,7 @@
                     return;
                 }
                 var start = performance.now();
-                fetch('/auth/check-auth', {
+                fetch('/health', {
                     method: 'GET',
                     headers: {'Content-Type': 'application/json'},
                     cache: 'no-store',

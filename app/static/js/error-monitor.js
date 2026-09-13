@@ -63,6 +63,8 @@
                 if (!response.ok) {
                     if (!navigator.onLine) {
                         showBanner('No network connection — changes may not have saved. Reconnecting…');
+                    } else if (response.status === 503) {
+                        showBanner('Database connection lost. Please try again shortly.');
                     } else if (response.status >= 500) {
                         showBanner('Connection issue — that action may not have completed. Please retry.');
                     } else {

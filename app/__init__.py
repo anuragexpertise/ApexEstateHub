@@ -85,6 +85,27 @@ def _register_error_handlers(app: Flask) -> None:
         if isinstance(exc, HTTPException):
             return exc
         log.exception("Unhandled exception on %s %s", request.method, request.path)
+        
+        # Check for database connection errors specifically
+        is_db_error = False
+        try:
+            import psycopg2
+            if isinstance(exc, psycopg2.OperationalError):
+                is_db_error = True
+        except ImportError:
+            pass
+            
+        if is_db_error:
+            if _wants_json():
+                return jsonify({
+                    "success": False,
+                    "message": "Database connection temporarily unavailable. Please try again shortly.",
+                }), 503
+            return _ERROR_PAGE.format(
+                title="Database Unreachable",
+                message="We lost connection to the database. Please try again in a moment.",
+            ), 503
+
         if _wants_json():
             return jsonify({
                 "success": False,
