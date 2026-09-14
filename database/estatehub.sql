@@ -1196,6 +1196,7 @@ CREATE TABLE IF NOT EXISTS polls (
     created_by INT REFERENCES users (id),
     title VARCHAR(200) NOT NULL,
     description TEXT,
+    open_to VARCHAR(20) NOT NULL DEFAULT 'no_dues' CHECK (open_to IN ('no_dues', 'all_members')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
         status IN (
             'active',
@@ -1220,9 +1221,10 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     id SERIAL PRIMARY KEY,
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     user_id INT NOT NULL REFERENCES users (id),
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
     choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
     cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (poll_id, user_id)
+    UNIQUE (poll_id, apartment_id)
 );
 
 -- SECTION 15: INDIAN CHS/RWA COMPLIANCE — TDS (Phase 4)
@@ -1463,8 +1465,8 @@ CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
 CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
 
 CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_user ON poll_votes (poll_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_apartment ON poll_votes (apartment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_apartment ON poll_votes (poll_id, apartment_id);
 
 CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup
     ON tds_section_rates (society_id, section, effective_from);
@@ -7627,8 +7629,8 @@ BEGIN
         p.results_announced_at,
         p.created_at,
         COALESCE((SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id), 0)::BIGINT,
-        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
-        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND user_id = p_user_id),
+        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE id = p_user_id)),
+        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE id = p_user_id)),
         p.ends_at
     FROM polls p
     WHERE p.id = p_poll_id
@@ -7666,6 +7668,8 @@ CREATE OR REPLACE FUNCTION fn_cast_vote(
 ) RETURNS TABLE (success BOOLEAN, message TEXT, total_votes BIGINT) LANGUAGE plpgsql AS $$
 DECLARE
     v_poll      polls%ROWTYPE;
+    v_user      users%ROWTYPE;
+    v_apt_id    INT;
     v_existing  INT;
     v_total     BIGINT;
 BEGIN
@@ -7674,6 +7678,21 @@ BEGIN
     IF NOT FOUND THEN
         RETURN QUERY SELECT FALSE, 'Poll not found'::TEXT, 0::BIGINT;
         RETURN;
+    END IF;
+
+    SELECT * INTO v_user FROM users WHERE id = p_user_id;
+    IF v_user.role != 'apartment' OR v_user.user_type != 'owner' THEN
+        RETURN QUERY SELECT FALSE, 'Only apartment owners can vote'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+    
+    v_apt_id := v_user.linked_id;
+
+    IF v_poll.open_to = 'no_dues' THEN
+        IF fn_apartment_overdue_outstanding(v_apt_id) > 0 THEN
+            RETURN QUERY SELECT FALSE, 'Your apartment has outstanding dues'::TEXT, 0::BIGINT;
+            RETURN;
+        END IF;
     END IF;
 
     IF v_poll.status <> 'active' THEN
@@ -7692,21 +7711,21 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT id INTO v_existing FROM poll_votes WHERE poll_id = p_poll_id AND user_id = p_user_id;
+    SELECT id INTO v_existing FROM poll_votes WHERE poll_id = p_poll_id AND apartment_id = v_apt_id;
     IF v_existing IS NOT NULL THEN
-        RETURN QUERY SELECT FALSE, 'You have already voted in this poll'::TEXT, 0::BIGINT;
+        RETURN QUERY SELECT FALSE, 'A vote has already been cast for this apartment'::TEXT, 0::BIGINT;
         RETURN;
     END IF;
 
-    INSERT INTO poll_votes (poll_id, user_id, choice)
-    VALUES (p_poll_id, p_user_id, p_choice);
+    INSERT INTO poll_votes (poll_id, user_id, apartment_id, choice)
+    VALUES (p_poll_id, p_user_id, v_apt_id, p_choice);
 
     SELECT COUNT(*) INTO v_total FROM poll_votes WHERE poll_id = p_poll_id;
 
     RETURN QUERY SELECT TRUE, 'Vote cast successfully'::TEXT, v_total;
 EXCEPTION
     WHEN unique_violation THEN
-        RETURN QUERY SELECT FALSE, 'You have already voted in this poll'::TEXT, 0::BIGINT;
+        RETURN QUERY SELECT FALSE, 'A vote has already been cast for this apartment'::TEXT, 0::BIGINT;
 END;
 $$;
 

@@ -518,6 +518,10 @@ _EXPLICIT_SELECT_OPTIONS: dict[tuple[str, str], list[dict]] = {
         {"label": "Security",   "value": "security"},
         {"label": "ALL",        "value": "all"},
     ],
+    ("polls", "open_to"): [
+        {"label": "Members with no due", "value": "no_dues"},
+        {"label": "All members",         "value": "all_members"},
+    ],
     ("security", "gate_pass"): [
         {"label": "On duty", "value": True},
         {"label": "Off duty", "value": False},
