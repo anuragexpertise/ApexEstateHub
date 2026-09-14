@@ -22,22 +22,27 @@ def create_event(
     account_id: int = None,
     open_to: str = "all",
     image: str = None,
+    capacity: int = None,
     created_by: int = None,
 ):
     """Create an event in society."""
+    import html
+    title = html.escape(title) if title else title
+    description = html.escape(description) if description else description
+    venue = html.escape(venue) if venue else venue
     try:
         row = db._execute("""
             INSERT INTO events (
                 society_id, title, description, venue, event_date, event_time,
                 open_to, account_id, ticket_name, ticket_price,
-                ticket_name2, ticket_price2, image, created_at, created_by
+                ticket_name2, ticket_price2, image, capacity, created_at, created_by
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
             RETURNING id
         """, (
             society_id, title, description, venue, event_date, event_time,
             open_to, account_id, ticket_name, ticket_price,
-            ticket_name2, ticket_price2, image, created_by,
+            ticket_name2, ticket_price2, image, capacity, created_by,
         ), fetch_one=True)
         return row["id"], "Event created successfully"
     except Exception as e:
@@ -90,13 +95,14 @@ def book_event_tickets(
 
         event_ticket_id = ticket_id
         created_items = []
+        ticket_status = 'active' if (r or {}).get("status") == 'confirmed' else 'pending'
 
         for i in range(quantity_adult):
             item_row = db._execute("""
                 INSERT INTO event_ticket_items (event_ticket_id, society_id, ticket_type, qr_payload, status)
-                VALUES (%s, %s, 'ADULT', 'TEMP_QR', 'active')
+                VALUES (%s, %s, 'ADULT', 'TEMP_QR', %s)
                 RETURNING id
-            """, (event_ticket_id, society_id), fetch_one=True)
+            """, (event_ticket_id, society_id, ticket_status), fetch_one=True)
 
             item_id = item_row["id"]
             qr_img, payload = generate_qr_code(society_id, "EVT", item_id)
@@ -112,9 +118,9 @@ def book_event_tickets(
         for i in range(quantity_child):
             item_row = db._execute("""
                 INSERT INTO event_ticket_items (event_ticket_id, society_id, ticket_type, qr_payload, status)
-                VALUES (%s, %s, 'CHILD', 'TEMP_QR', 'active')
+                VALUES (%s, %s, 'CHILD', 'TEMP_QR', %s)
                 RETURNING id
-            """, (event_ticket_id, society_id), fetch_one=True)
+            """, (event_ticket_id, society_id, ticket_status), fetch_one=True)
 
             item_id = item_row["id"]
             qr_img, payload = generate_qr_code(society_id, "EVT", item_id)

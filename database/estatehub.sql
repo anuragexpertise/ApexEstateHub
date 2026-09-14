@@ -280,7 +280,8 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id)
+    updated_by INT REFERENCES users (id),
+    capacity INT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS concerns (
@@ -1080,6 +1081,7 @@ CREATE TABLE IF NOT EXISTS event_ticket_items (
     scanned_by INT REFERENCES users (id),
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -1634,6 +1636,21 @@ BEGIN
      WHERE id = p_receipt_id;
 
     RETURN v_number;
+END;
+$$;
+
+-- AFTER UPDATE trigger: activate event tickets when receipt is confirmed.
+DROP FUNCTION IF EXISTS fn_trg_receipt_confirm_activate_tickets () CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_trg_receipt_confirm_activate_tickets()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.status = 'confirmed' AND OLD.status = 'pending' THEN
+        UPDATE event_tickets SET status = 'active' WHERE receipt_id = NEW.id;
+        UPDATE event_ticket_items SET status = 'active'
+        WHERE event_ticket_id IN (SELECT id FROM event_tickets WHERE receipt_id = NEW.id);
+    END IF;
+    RETURN NEW;
 END;
 $$;
 
@@ -3870,6 +3887,10 @@ BEGIN
         RAISE EXCEPTION 'This event is open to residents only';
     END IF;
 
+    IF v_event.event_date < CURRENT_DATE THEN
+        RAISE EXCEPTION 'Cannot sell tickets for past events';
+    END IF;
+
     IF v_role = 'apartment' THEN
         SELECT flat_number INTO v_buyer_label FROM apartments WHERE id = v_entity_id;
     ELSIF v_role = 'vendor' THEN
@@ -3892,6 +3913,19 @@ BEGIN
     v_amount := COALESCE(v_event.ticket_price, 0) * COALESCE(p_quantity_adult, 0)
              + COALESCE(v_event.ticket_price2, 0) * COALESCE(p_quantity_child, 0);
     v_total_qty := COALESCE(p_quantity_adult, 0) + COALESCE(p_quantity_child, 0);
+
+    IF v_event.capacity IS NOT NULL THEN
+        DECLARE
+            v_sold_qty INT;
+        BEGIN
+            SELECT COALESCE(SUM(quantity_adult + quantity_child), 0) INTO v_sold_qty
+            FROM event_tickets WHERE event_id = p_event_id AND status != 'cancelled';
+            IF (v_sold_qty + v_total_qty) > v_event.capacity THEN
+                RAISE EXCEPTION 'Event capacity exceeded';
+            END IF;
+        END;
+    END IF;
+
     v_desc := COALESCE(p_particulars,
         'Event Ticket x' || v_total_qty || ' - ' || COALESCE(v_event.title,'') ||
         ' - ' || COALESCE(v_buyer_label,''));
@@ -3951,7 +3985,7 @@ BEGIN
     INSERT INTO event_tickets(
         society_id, event_id, user_id, quantity_adult, quantity_child, amount, receipt_id, issued_date, status, created_at
     ) VALUES (
-        v_society_id, p_event_id, p_user_id, COALESCE(p_quantity_adult, 0), COALESCE(p_quantity_child, 0), v_amount, v_receipt_id, p_issued_date, 'active', NOW()
+        v_society_id, p_event_id, p_user_id, COALESCE(p_quantity_adult, 0), COALESCE(p_quantity_child, 0), v_amount, v_receipt_id, p_issued_date, CASE WHEN v_status = 'confirmed' THEN 'active' ELSE 'pending' END, NOW()
     ) RETURNING id INTO v_ticket_id;
 
     receipt_id := v_receipt_id;
@@ -8597,6 +8631,13 @@ CREATE TRIGGER trg_receipt_hash_insert
     BEFORE INSERT ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_insert();
+
+DROP TRIGGER IF EXISTS trg_receipt_confirm_activate_tickets ON receipts;
+
+CREATE TRIGGER trg_receipt_confirm_activate_tickets
+    AFTER UPDATE OF status ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_receipt_confirm_activate_tickets();
 
 DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
 

@@ -4646,6 +4646,10 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
             return False, f"Creation failed: {_clean_pg_error(e)}", None
 
 def _save_event(db, d, sid, is_edit, pk):
+    from app.security.audit_context import get_current_user_role
+    if get_current_user_role() not in ("admin", "master"):
+        return False, "Unauthorised: Only admins can create or edit events.", None
+
     _acc_id = d.get("account_id")
     _acc_id = int(_acc_id) if _acc_id not in (None, "", "None") else None
 
@@ -4659,8 +4663,19 @@ def _save_event(db, d, sid, is_edit, pk):
     except (TypeError, ValueError):
         _ticket_price2 = 0
 
+    try:
+        _capacity = int(d.get("capacity") or 0)
+        _capacity = _capacity if _capacity > 0 else None
+    except (TypeError, ValueError):
+        _capacity = None
+
     _ticket_name = (d.get("ticket_name") or "Adult").strip()
     _ticket_name2 = (d.get("ticket_name2") or "Child").strip()
+
+    import html
+    title = html.escape((d.get("title") or "").strip())
+    description = html.escape((d.get("description") or "").strip())
+    venue = html.escape((d.get("venue") or "").strip())
 
     if is_edit:
         _img = d.get("image") or None
@@ -4668,17 +4683,18 @@ def _save_event(db, d, sid, is_edit, pk):
         _upd_by_clause = ", updated_by=%s"
         _upd_by_param = (d.get("user_id"),)
         _img_param = (
-            d.get("title"),
-            d.get("description"),
+            title,
+            description,
             d.get("event_date"),
             d.get("event_time"),
-            d.get("venue"),
+            venue,
             d.get("open_to", "all"),
             _acc_id,
             _ticket_name,
             _ticket_price,
             _ticket_name2,
             _ticket_price2,
+            _capacity,
         )
         if _img:
             _img_param += (_img,)
@@ -4686,17 +4702,16 @@ def _save_event(db, d, sid, is_edit, pk):
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
             f"event_time=%s, venue=%s, open_to=%s, account_id=%s, "
-            f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s"
+            f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s, capacity=%s"
             f"{_img_clause}{_upd_by_clause} "
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
         try:    
-            PushService.notify_event_created(sid, d.get("title", "Event"), d.get("open_to", "all"), d.get("event_date"))
+            PushService.notify_event_created(sid, title or "Event", d.get("open_to", "all"), d.get("event_date"))
         except Exception as e:
             print(f"⚠️  notify_event_created failed: {e}")
         return True, "Event updated", pk
-    title = (d.get("title") or "").strip()
     if not title:
         return False, "Title is required", None
 
@@ -4704,8 +4719,8 @@ def _save_event(db, d, sid, is_edit, pk):
         society_id=sid,
         title=title,
         event_date=d.get("event_date"),
-        venue=d.get("venue"),
-        description=d.get("description"),
+        venue=venue,
+        description=description,
         event_time=d.get("event_time"),
         ticket_price=_ticket_price,
         ticket_price2=_ticket_price2,
@@ -4714,6 +4729,7 @@ def _save_event(db, d, sid, is_edit, pk):
         account_id=_acc_id,
         open_to=d.get("open_to", "all"),
         image=d.get("image"),
+        capacity=_capacity,
         created_by=d.get("user_id"),
     )
     if not event_id:
