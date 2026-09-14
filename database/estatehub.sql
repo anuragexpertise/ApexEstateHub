@@ -4870,7 +4870,8 @@ RETURNS TABLE (
     cheque_no VARCHAR(50), transaction_id VARCHAR(255), status VARCHAR(20),
     confirmed_by INT, confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP, last_emailed_at TIMESTAMP, created_at TIMESTAMP,
-    reconciled_at TIMESTAMP, reconciled_by INT, bank_statement_line_id INT
+    reconciled_at TIMESTAMP, reconciled_by INT, bank_statement_line_id INT,
+    initiated_by VARCHAR(100)
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -4894,12 +4895,14 @@ BEGIN
         r.confirmed_by::INT, r.confirmed_at::TIMESTAMP,
         r.last_printed_at::TIMESTAMP, r.last_emailed_at::TIMESTAMP,
         r.created_at::TIMESTAMP,
-        r.reconciled_at::TIMESTAMP, r.reconciled_by::INT, r.bank_statement_line_id::INT
+        r.reconciled_at::TIMESTAMP, r.reconciled_by::INT, r.bank_statement_line_id::INT,
+        COALESCE(u.name, '')::VARCHAR(100) AS initiated_by
     FROM receipts r
     LEFT JOIN accounts      a  ON a.id  = r.acc_id
     LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.role = 'apartment'
     LEFT JOIN vendors       v  ON  v.id = r.entity_id AND r.role = 'vendor'
     LEFT JOIN security_staff s ON  s.id = r.entity_id AND r.role = 'security'
+    LEFT JOIN users          u ON  u.id = COALESCE(r.user_id, r.created_by)
     WHERE r.society_id = p_society_id
       AND (p_entity_id   IS NULL OR r.entity_id = p_entity_id)
       AND (p_entity_role IS NULL OR r.role = p_entity_role)
