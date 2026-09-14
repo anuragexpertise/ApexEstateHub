@@ -32,8 +32,11 @@ def _expense_html_js() -> str:
             row('Paid To', d.payee + ' (' + d.role + ')') +
             row('Particulars', d.particulars) +
             row('Account', d.account) +
-            row('Amount', '\\u20B9' + d.amount) +
-            row('TDS %', d.tds_pct + '%') +
+            (d.tds_pct > 0 
+                ? (row('Gross Amount', '\\u20B9' + d.amount) + 
+                   row('TDS (' + d.tds_pct + '%' + (d.tds_section ? ' - ' + d.tds_section : '') + ')', '- \\u20B9' + d.tds_amount) + 
+                   row('Net Amount', '\\u20B9' + d.net_amount))
+                : row('Amount', '\\u20B9' + d.amount)) +
             row('Mode', d.mode + (d.ref ? (' \\u2014 Ref: ' + d.ref) : '')) +
             row('Status', d.status) +
             '</table>'
@@ -110,8 +113,11 @@ function emailExpense(n_clicks, d) {
         'Paid To: ' + d.payee + ' (' + d.role + ')\n' +
         'Particulars: ' + d.particulars + '\n' +
         'Account: ' + d.account + '\n' +
-        'Amount: Rs. ' + d.amount + '\n' +
-        'TDS %: ' + d.tds_pct + '%\n' +
+        (d.tds_pct > 0 
+            ? ('Gross Amount: Rs. ' + d.amount + '\n' +
+               'TDS (' + d.tds_pct + '%' + (d.tds_section ? ' - ' + d.tds_section : '') + '): - Rs. ' + d.tds_amount + '\n' +
+               'Net Amount: Rs. ' + d.net_amount + '\n')
+            : ('Amount: Rs. ' + d.amount + '\n')) +
         'Mode: ' + d.mode + (d.ref ? (' - Ref: ' + d.ref) : '') + '\n' +
         'Status: ' + d.status + (d.is_provisional ? ' (Provisional - Subject to verification)' : '')
     );

@@ -5580,16 +5580,22 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
         except Exception as e:
             print(f"⚠️  expense QR render failed: {e}")
 
+    tds_pct = float(expense.get("tds_pct") or 0)
+    tds_section = expense.get("tds_section") or ""
+    tds_amount = (amount * tds_pct / 100) if tds_pct else 0
+    net_amount = amount - tds_amount
+
     print_data = {
         "expense_no": expense_no, "date": e_date, "payee": payee,
         "role": role_lbl, "particulars": particulars, "account": account,
         "amount": f"{amount:,.2f}", "mode": mode, "ref": ref, "status": status,
+        "tds_pct": tds_pct, "tds_section": tds_section, 
+        "tds_amount": f"{tds_amount:,.2f}", "net_amount": f"{net_amount:,.2f}",
         "society_name": society_nm, "society_address": society_addr,
         "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
         "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
         "qr_url": qr_url, "qr_caption": QR_CAPTION,
         "is_provisional": (expense.get("status") in ("pending", "unverified")),
-        "tds_pct": tds_pct,
     }
 
     def _row(label, value):
@@ -5627,8 +5633,9 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
             _row("Paid To", f"{payee} ({role_lbl})"),
             _row("Particulars", particulars),
             _row("Account", account),
-            _row("Amount", f"₹{amount:,.2f}"),
-            _row("TDS %", f"{tds_pct}%" if tds_pct else "—"),
+            _row("Gross Amount", f"₹{amount:,.2f}") if tds_pct > 0 else _row("Amount", f"₹{amount:,.2f}"),
+            _row(f"TDS ({tds_pct}%{(' - ' + tds_section) if tds_section else ''})", f"- ₹{tds_amount:,.2f}") if tds_pct > 0 else None,
+            _row("Net Amount", f"₹{net_amount:,.2f}") if tds_pct > 0 else None,
             _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
             _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})]) if expense.get("status") in ("pending", "unverified") else status),
             html.Div([
