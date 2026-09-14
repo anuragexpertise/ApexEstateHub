@@ -817,6 +817,7 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
     issued_date DATE DEFAULT CURRENT_DATE,
     valid_until DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
+    receipt_id INT REFERENCES receipts (id),
     created_at TIMESTAMP DEFAULT NOW(),
     created_by INT REFERENCES users (id),
     UNIQUE (
@@ -1649,6 +1650,7 @@ BEGIN
         UPDATE event_tickets SET status = 'active' WHERE receipt_id = NEW.id;
         UPDATE event_ticket_items SET status = 'active'
         WHERE event_ticket_id IN (SELECT id FROM event_tickets WHERE receipt_id = NEW.id);
+        UPDATE vendor_passes SET status = 'active' WHERE receipt_id = NEW.id;
     END IF;
     RETURN NEW;
 END;
@@ -2005,8 +2007,11 @@ BEGIN
         JOIN users u ON u.id = vp.user_id
         WHERE u.linked_id = p_entity_id
           AND u.role = 'vendor'
-          AND vp.status = 'active';
-        IF v_pass_expiry IS NULL OR v_pass_expiry < CURRENT_DATE THEN
+          AND vp.status = 'active'
+          AND CURRENT_DATE >= vp.issued_date
+          AND CURRENT_DATE <= vp.valid_until;
+
+        IF v_pass_expiry IS NULL THEN
             RETURN QUERY SELECT FALSE, 'No active vendor pass'::TEXT, 0::NUMERIC(15,2);
         ELSE
             RETURN QUERY SELECT TRUE,
@@ -3800,9 +3805,9 @@ BEGIN
     END IF;
 
     INSERT INTO vendor_passes(
-        society_id, user_id, pass_type, issued_date, valid_until, status, created_at
+        society_id, user_id, pass_type, issued_date, valid_until, status, receipt_id, created_at
     ) VALUES (
-        v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, 'active', NOW()
+        v_society_id, p_user_id, p_pass_type, p_issued_date, v_valid_until, v_status, v_receipt_id, NOW()
     ) RETURNING id INTO v_pass_id;
 
     receipt_id := v_receipt_id;
