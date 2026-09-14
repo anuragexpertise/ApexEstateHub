@@ -30,6 +30,7 @@
 20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
 21. [🗑️ Legacy Code Removal Guide](#21-️-legacy-code-removal-guide)
 22. [Deployment Notes](#22-deployment-notes)
+23. [Table of Workflows](#23-table-of-workflows)
 
 ---
 
@@ -1126,48 +1127,74 @@ If VS Code shows missing import warnings on Flask/Dash components, it is usually
 
 Or press `Ctrl+Shift+P` → **Python: Select Interpreter** and select your active virtual environment.
 
-### Portal WorkFlows Review Table (Detailed System Names)
+## 23. Table of Workflows
 
-The following table maps the user workflows for each tab across the different application portals, using the exact system identifiers (KPIs, Lists, Profiles, Forms) defined in the application's configuration (`DEFAULT_LAYOUTS` and `DRILLDOWN_MAP`).
+### Overview
 
-| Portal | WorkFlow Name | Ux interactions |
-| :--- | :--- | :--- |
-| **Admin Portal** | View Admin Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_apartments_dues`> ->list<`list_apartments`> ->profile<`profile_apartment`> ->card<View>]<br>*(Also: `kpi_vendors_passes` -> `list_vendors`, `kpi_gate_logs` -> `list_gate_logs`, etc.)* |
-| | Manage Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_receipts_month`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->actionButton<Verify> ->form<`form_receipt_edit`>]<br>*(Also: `kpi_expenses_month` -> `list_expenses`, `kpi_cashbook_open` -> `list_cashbook`)* |
-| | Manage Channels | Tap/Click 'Tab'<`channels`> [->Kpi<`kpi_channels_total`> ->list<`list_channels`> ->profile<`profile_channel`> ->actionButton<Edit> ->form<`form_channel_edit`>] |
-| | Enroll Members | Tap/Click 'Tab'<`enrolled`> [->Kpi<`kpi_apartments_total`> ->list<`list_apartments`> ->actionButton<Add> ->form<`form_apartment_new`>]<br>*(Also: `list_vendors`, `list_security`)* |
-| | Manage Assets | Tap/Click 'Tab'<`assets`> [->Kpi<`kpi_assets_count`> ->list<`list_assets`> ->profile<`profile_asset`> ->actionButton<Buy/Sell> ->form<`form_asset_new`>] |
-| | Manage Events | Tap/Click 'Tab'<`events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->actionButton<Edit> ->form<`form_event_edit`>] |
-| | Manage Concerns | Tap/Click 'Tab'<`concerns`> [->Kpi<`kpi_concerns_not_closed`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Update> ->form<`form_concern_edit`>] |
-| | Manage Polls | Tap/Click 'Tab'<`polls`> [->Kpi<`kpi_polls_total`> ->list<`list_polls`> ->profile<`profile_poll`> ->actionButton<Edit> ->form<`form_poll_edit`>] |
-| | Evaluate Pass | Tap/Click 'Tab'<`evaluate_pass`> [->quick-link<Scan/ManualQR> -card<`manual_qr_card`>] |
-| | Customize Layout | Tap/Click 'Tab'<`customize`> [->quick-link<SelectKPIs> -card<`customize_layout`>] |
-| | Manage Settings | Tap/Click 'Tab'<`settings`> [->quick-link<UpdateSettings> -form<`form_settings_edit`>] |
-| **Owner Portal** | View Owner Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_my_pending_dues`> ->list<`list_receivables`> ->profile<`profile_receivable`> ->card<View>] |
-| | View Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_my_receipts`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
-| | Manage Channel Alerts | Tap/Click 'Tab'<`owner_channels`> [->Kpi<`kpi_channels_active`> ->list<`list_channels`> ->actionButton<Subscribe> ->form<`form_channel_subscribe`>] |
-| | View Bills Due | Tap/Click 'Tab'<`owner_dues`> [->Kpi<`kpi_my_overdue_dues`> ->list<`list_receivables`> ->profile<`profile_receivable`> ->card<View>] |
-| | View Bills Paid | Tap/Click 'Tab'<`owner_receipts`> [->Kpi<`kpi_my_receipts`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
-| | View Events | Tap/Click 'Tab'<`owner_events`> [->Kpi<`kpi_events_tickets`> ->list<`list_event_ticket_items`> ->profile<`profile_event_ticket`> ->card<View>] |
-| | Report Concerns | Tap/Click 'Tab'<`concerns`> [->Kpi<`kpi_concerns_open`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Add> ->form<`form_concern_new`>] |
-| | Vote in Polls | Tap/Click 'Tab'<`owner_polls`> [->Kpi<`kpi_polls_active`> ->list<`list_polls`> ->profile<`profile_poll`> ->actionButton<Vote> ->form<`form_poll_vote`>] |
-| | Update Profile | Tap/Click 'Tab'<`owner_settings`> [->quick-link<UpdateProfile> -form<`form_apartment_edit`>] |
-| **Vendor Portal** | View Vendor Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_vendors_payables_due`> ->list<`list_payables`> ->profile<`profile_payment`> ->card<View>] |
-| | View Financials | Tap/Click 'Tab'<`financials`> [->Kpi<`kpi_receipts_total`> ->list<`list_receipts`> ->profile<`profile_receipt`> ->card<View>] |
-| | Manage Passes | Tap/Click 'Tab'<`passes`> [->Kpi<`kpi_my_pass_expiry`> ->list<`list_vendors`> ->profile<`profile_vendor`> ->card<View>] |
-| | View Events | Tap/Click 'Tab'<`vendor_events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->card<View>] |
-| | Report Concerns | Tap/Click 'Tab'<`concerns`> [->quick-link<`vendor_concern_lookup`> -card<`manual_qr_card`>] |
-| | Update Profile | Tap/Click 'Tab'<`vendor_settings`> [->quick-link<UpdateProfile> -form<`form_vendor_edit`>] |
-| **Security Portal**| Evaluate Pass | Tap/Click 'Tab'<`pass_evaluation`> [->quick-link<Scan/ManualQR> -card<`manual_qr_card`>] |
-| | Mark Attendance | Tap/Click 'Tab'<`attendance`> [->quick-link<ClockIn/Out> -card<`attendance_status`>] |
-| | View Users | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_security_on_duty`> ->list<`list_security`> ->profile<`profile_security`> ->card<View>] |
-| | Add Receipts | Tap/Click 'Tab'<`security_receipt`> [->Kpi<`kpi_receipts_in_hand_total`> ->list<`list_receipts`> ->actionButton<Add> ->form<`form_receipt_new`>] |
-| | View Events | Tap/Click 'Tab'<`security_events`> [->Kpi<`kpi_events_total`> ->list<`list_events`> ->profile<`profile_event`> ->card<View>] |
-| | Report Concerns | Tap/Click 'Tab'<`security_concerns`> [->Kpi<`kpi_concerns_open`> ->list<`list_concerns`> ->profile<`profile_concern`> ->actionButton<Add> ->form<`form_concern_new`>] |
-| | Update Profile | Tap/Click 'Tab'<`security_settings`> [->quick-link<UpdateProfile> -form<`form_security_edit`>] |
-| **Master Portal** | View Master Dashboard | Tap/Click 'Tab'<`dashboard`> [->Kpi<`kpi_societies_total`> ->list<`list_societies`> ->profile<`profile_society`> ->actionButton<Edit> ->form<`form_society_edit`>] |
-| | Create Society | Tap/Click 'Tab'<`master-create`> [->quick-link<FillDetails> -form<`master-create-society-btn`>] |
-| | Platform Settings | Tap/Click 'Tab'<`master-settings`> [->Kpi<`kpi_societies_expiring_soon`> ->list<`list_societies`> ->profile<`profile_society`> ->card<View>] |
+The following tables map every user-reachable workflow in the application, organized by Portal → Tab → KPI/Quick-link → Drill Target, with the goal of each workflow. The **Name of Workflow** column can serve as a semantic grouping key for KPIs.
+
+#### 🟠 MASTER Portal (role: `master`)
+
+| Name of Workflow | Sequence of Interaction on UI/UX | Goal of Workflow |
+|---|---|---|
+| **Master → Society Overview** | Sidebar: Societies → Dashboard tab → 7 KPI cards (`kpi_societies_total`, `kpi_societies_free`, `kpi_societies_9apts`, `kpi_societies_99apts`, `kpi_societies_999apts`, `kpi_societies_unlimited`, `kpi_societies_expiring_soon`) → click any → `list_master_societies` → row → `profile_society` → Edit / Compliance Settings | View/manage all societies on the platform, monitor plan distribution and expirations |
+| **Master → KPI Inspector** | Sidebar: Settings → `master-settings` tab → Inspector KPI sub-tab → Select Portal/Tab/KPI → View SQL, Test SQL, Export, Integrate | Inspect, test, and edit KPI SQL queries; run KPI Audit |
+| **Master → List Inspector** | Sidebar: Settings → `master-settings` tab → Inspector List sub-tab → Select list → Load SQL → View result box | Inspect list SQL queries and data; run List Audit |
+| **Master → Form Inspector** | Sidebar: Settings → `master-settings` tab → Inspector Form sub-tab → Select form → Preview | Inspect and audit all schema-driven forms |
+
+#### 🔵 ADMIN Portal (role: `admin`)
+
+| Name of Workflow | Sequence of Interaction on UI/UX | Goal of Workflow |
+|---|---|---|
+| **Admin → Society Dashboard** | Sidebar: Dashboard → 12 KPI cards (`kpi_apartments_dues`, `kpi_vendors_passes`, `kpi_security_on_duty`, `kpi_attendance_count`, `kpi_events_total`, `kpi_concerns_not_closed`, `kpi_concerns_assigned`, `kpi_gate_logs`, `kpi_assets_count`, `kpi_receipts_pending`, `kpi_channels_total`, `kpi_nocs_total`) → drill panel | High-level society health overview; one-click drill into any entity |
+| **Admin → Enrolled Members** | Sidebar: Enrolled → 3 KPI cards (`kpi_apartments_total`, `kpi_vendors_total`, `kpi_security_total`) → `list_apartments` / `list_vendors` / `list_security` → profile → Edit / Gate Pass / Pay Dues / Sell Pass / Toggle Duty | CRUD for apartments, vendors, security staff; sidebar `+` quick-link for New |
+| **Admin → Financials** | Sidebar: Financials → 10 KPI cards (`kpi_receipts_month`, `kpi_receipts_total`, `kpi_expenses_month`, `kpi_expenses_total`, `kpi_security_salaries_due`, `kpi_cash_in_hand`, `kpi_bank_balance`, `kpi_cashbook_open`, `kpi_ledger_open`, `kpi_fy_closing_report`) → lists / reports; sidebar `+` New Receipt / `−` New Expense | Track income/expenses, cashbook, ledger; create receipts/expenses; FY closing report |
+| **Admin → Channels** | Sidebar: Channels → 3 KPI cards (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Create / Subscribe / Trigger Alert / View Subscribers | Manage school bus, taxi, visitor alert channels and subscriptions |
+| **Admin → Assets** | Sidebar: Assets → 2 KPI cards (`kpi_assets_count`, `kpi_assets_value`) → `list_assets` → `profile_asset` → Edit / Dispose | Buy, manage, depreciate, and dispose of society assets |
+| **Admin → Events** | Sidebar: Events → 2 KPI cards (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Edit / Sell Tickets | Create/edit events, sell/manage event tickets |
+| **Admin → Concerns** | Sidebar: Concerns → 2 KPI cards (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Invite / Assign / Accept / Decline / Resolved / Close | Full concern lifecycle management |
+| **Admin → Polls** | Sidebar: Polls → 2 KPI cards (`kpi_polls_total`, `kpi_polls_active`) → `list_polls` → `profile_poll` → Edit / Declare Results / Close | Create, manage, and close community polls |
+| **Admin → Evaluate Pass** | Sidebar: Evaluate Pass → QR Scanner → Entry IN / Exit OUT / NFC Patrol; Manual QR entry; Recent Scans; KPIs (`kpi_events_total`, `kpi_concerns_assigned`) | Gate access control via QR scanning (shared with Security portal) |
+| **Admin → Customize** | Sidebar: Customize → Layout Editor → Select Portal/Tab → Drag-and-drop KPIs → Save/Reset | Customize KPI dashboard layout per portal/tab per society |
+| **Admin → Settings** | Sidebar: Settings → 10 KPI cards (`kpi_societies_calc_start_date`, `kpi_plan_validity`, `kpi_accounts_count`, `kpi_apt_charges_count`, `kpi_ven_charges_count`, `kpi_compliance_settings`, `kpi_time_qr`, `kpi_patrol_locations`, `kpi_tds_rates`, `kpi_qr_reissue`) → drill into respective entities | Society config: accounts, charge rules, compliance, attendance QR, patrol, TDS, QR reissue |
+
+#### 🟢 OWNER (Apartment) Portal (role: `apartment`)
+
+| Name of Workflow | Sequence of Interaction on UI/UX | Goal of Workflow |
+|---|---|---|
+| **Owner → My Dashboard** | Sidebar: Dashboard → 7 KPI cards (`kpi_my_pending_dues`, `kpi_my_overdue_dues`, `kpi_advance_credits`, `kpi_gate_logs`, `kpi_concerns_not_closed`, `kpi_events_total`, `kpi_channels_total`) → drill panel | Personal overview: dues, gate logs, concerns, events, channels |
+| **Owner → Members** | Sidebar: Members → 1 KPI (`kpi_apartment_members`) → `list_apartment_users` → `profile_apartment_user` | View family members, tenants, visitors registered to the flat |
+| **Owner → Financials** | Sidebar: Financials → 4 KPIs (`kpi_my_pending_dues`, `kpi_my_overdue_dues`, `kpi_maintenance_charges`, `kpi_my_ledger`) → receivables / charges / My Transactions passbook | View personal dues, charge rules, and transaction history |
+| **Owner → Channels** | Sidebar: Channels → 3 KPIs (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Subscribe | Subscribe to school bus/taxi/visitor alert channels |
+| **Owner → Bills Paid** | Sidebar: Bills Paid → KPI (`kpi_receipts_total`) → `list_receipts` → `profile_receipt` → Print | View own confirmed receipts and print them |
+| **Owner → Events** | Sidebar: Events → 2 KPIs (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Buy Tickets | View events, buy tickets, view purchased tickets |
+| **Owner → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Invite / Assign / Close | Raise, track, and close own concerns |
+| **Owner → Polls** | Sidebar: Polls → 2 KPIs (`kpi_polls_total`, `kpi_polls_active`) → `list_polls` → `profile_poll` (vote) | View and vote in community polls |
+| **Owner → Settings** | Sidebar: Settings → 1 KPI (`kpi_owner_member_since`) → `list_apartments` (self-scoped) → `profile_apartment` → Edit | View/edit own apartment profile |
+
+#### 🟡 VENDOR Portal (role: `vendor`)
+
+| Name of Workflow | Sequence of Interaction on UI/UX | Goal of Workflow |
+|---|---|---|
+| **Vendor → My Dashboard** | Sidebar: Dashboard → 5 KPIs (`kpi_my_pass_expiry`, `kpi_gate_logs`, `kpi_concerns_invited`, `kpi_concerns_assigned`, `kpi_events_total`) → drill panel | Gate pass status, assigned concerns, events overview |
+| **Vendor → Financials** | Sidebar: Financials → 2 KPIs (`kpi_receipts_total`, `kpi_ven_charges_count`) → `list_receipts` / `list_ven_charges` | View own receipts and charge rules |
+| **Vendor → Passes** | Sidebar: Passes → 2 KPIs (`kpi_my_pass_expiry`, `kpi_vendors_passes`) → `list_vendors` (self-scoped) → `profile_vendor` → Buy Pass / Gate Pass | View/buy own gate passes |
+| **Vendor → Events** | Sidebar: Events → 1 KPI (`kpi_events_total`) → `list_events` → `profile_event` → Buy Tickets | View events and buy tickets |
+| **Vendor → Concerns** | Sidebar: Concerns → 3 KPIs (`kpi_concerns_invited`, `kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Bid / Decline / Resolved; Manual QR concern lookup | Vendor concern workflow: receive invites, bid, get assigned, resolve |
+| **Vendor → Settings** | Sidebar: Settings → 1 KPI (`kpi_vendors_date`) → `list_vendors` (self-scoped) → `profile_vendor` → Edit | View/edit own vendor profile |
+
+#### 🔴 SECURITY Portal (role: `security`)
+
+| Name of Workflow | Sequence of Interaction on UI/UX | Goal of Workflow |
+|---|---|---|
+| **Security → Pass Evaluation** | Sidebar: Pass Eval → QR Scanner → Entry IN / Exit OUT / NFC Patrol; KPIs (`kpi_events_total`, `kpi_concerns_assigned`); Manual QR entry; Recent Scans; Emergency button | Primary gate duty: scan QR passes for entry/exit, NFC patrol check-ins |
+| **Security → Channels** | Sidebar: Channels → 5 KPIs (`kpi_channels_total`, `kpi_channels_pending`, `kpi_channels_pending_bus`, `kpi_channels_pending_taxi`, `kpi_presumed_visitor`) → lists | Monitor and act on pending gate alerts (bus/taxi/visitor) |
+| **Security → Attendance** | Sidebar: Attendance → Clock In / Clock Out buttons | Clock in/out for shift duty |
+| **Security → Receipts** | Sidebar: Receipts → 1 KPI (`kpi_security_receipts`) → `list_receipts` (self-scoped) | View own collected receipts |
+| **Security → Events** | Sidebar: Events → 1 KPI (`kpi_events_total`) → `list_events` | View upcoming events |
+| **Security → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Resolved | View and resolve assigned concerns |
+| **Security → Users** | Sidebar: Users → 3 KPIs (`kpi_security_total`, `kpi_security_on_duty`, `kpi_security_off_duty`) → `list_security` → `profile_security` | View fellow security staff duty roster |
+| **Security → Settings** | Sidebar: Settings → 1 KPI (`kpi_time_qr`) → Attendance QR | View/manage own profile, attendance QR |
 
 ---
 

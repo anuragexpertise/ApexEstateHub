@@ -25,9 +25,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "concerns":     "concerns",
     "gate_logs":    "gate_access",
     "receipts":     "receipts",
-    "receipts": "receipts",         # ← alias added
     "expenses":     "expenses",
-    "expenses": "expenses",         # ← alias added
     "cashbook":     "transactions",
     "receivables":  "receivables",
     "payables":     "payables",

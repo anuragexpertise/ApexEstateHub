@@ -4630,7 +4630,7 @@ CREATE OR REPLACE FUNCTION fn_vendors_list(
     p_has_passes BOOLEAN DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
+    id INT, user_id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
     business_name VARCHAR(100), service_type VARCHAR(30), mobile VARCHAR(15), active BOOLEAN,
     pass_expiry DATE, gate_pass BOOLEAN, active_passes INT,
     pan_number VARCHAR(10), gstin VARCHAR(15)
@@ -4677,7 +4677,7 @@ DROP FUNCTION IF EXISTS fn_security_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (
-    id INT, user_id INT, email VARCHAR(30), society_id INT, name VARCHAR(100),
+    id INT, user_id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
     shift VARCHAR(20), mobile VARCHAR(15), active BOOLEAN, salary_per_shift NUMERIC(10,2),
     joining_date DATE, shift_count BIGINT, shifts_this_month BIGINT, salary_due NUMERIC(15,2), salary_paid NUMERIC(15,2), gate_pass BOOLEAN
 )
@@ -6276,18 +6276,19 @@ CREATE OR REPLACE FUNCTION fn_gate_logs_named(
     p_date       DATE DEFAULT NULL
 )
 RETURNS TABLE (
-    id INT, society_id INT, role VARCHAR(1), entity_id INT,
+    id INT, society_id INT, role VARCHAR(3), entity_id INT,
     entity_name TEXT, time_in TIMESTAMP, time_out TIMESTAMP, duration_min INT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
     RETURN QUERY
     SELECT
-        g.id::INT, g.society_id::INT, g.role::VARCHAR(1), g.entity_id::INT,
+        g.id::INT, g.society_id::INT, g.role::VARCHAR(3), g.entity_id::INT,
         CASE
-            WHEN g.role = 'ADM' THEN COALESCE(ap.flat_number||' — '||COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
+            WHEN g.role = 'APT' THEN COALESCE(ap.flat_number||' — '||COALESCE(ap.owner_name,''), 'Apt #'||g.entity_id::TEXT)
             WHEN g.role = 'VND' THEN COALESCE(v.name||COALESCE(' ('||v.service_type||')',''), 'Vendor #'||g.entity_id::TEXT)
             WHEN g.role = 'SEC' THEN COALESCE(ss.name||COALESCE(' ('||ss.shift||')',''), 'Security #'||g.entity_id::TEXT)
+            WHEN g.role = 'ADM' THEN COALESCE(u.name, u.email, 'Admin #'||g.entity_id::TEXT)
             ELSE 'Unknown #'||g.entity_id::TEXT
         END::TEXT,
         g.time_in::TIMESTAMP, g.time_out::TIMESTAMP,
@@ -6295,16 +6296,17 @@ BEGIN
              THEN EXTRACT(EPOCH FROM (g.time_out - g.time_in))::INT / 60
              ELSE NULL END::INT
     FROM gate_access g
-    LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'ADM'
+    LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'APT'
     LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'VND'
     LEFT JOIN security_staff ss ON ss.id = g.entity_id AND g.role = 'SEC'
-    LEFT JOIN users su ON su.id = g.entity_id AND g.role = 'SEC'
+    LEFT JOIN users         u ON u.id = g.entity_id AND g.role = 'ADM'
     WHERE g.society_id = p_society_id
       AND (p_date   IS NULL OR g.time_in::DATE = p_date)
       AND (p_search IS NULL OR CASE
-           WHEN g.role='ADM' THEN ap.flat_number||' '||COALESCE(ap.owner_name,'')
+           WHEN g.role='APT' THEN ap.flat_number||' '||COALESCE(ap.owner_name,'')
            WHEN g.role='VND' THEN v.name
            WHEN g.role='SEC' THEN ss.name
+           WHEN g.role='ADM' THEN u.name
            ELSE '' END ILIKE '%'||p_search||'%')
     ORDER BY g.time_in DESC;
 END;
@@ -8395,14 +8397,14 @@ SELECT
         SELECT 1
         FROM gate_access ga2
         WHERE
-            ga2.entity_id = u.id
+            ga2.entity_id = s.id
             AND ga2.role = 'SEC'
             AND ga2.time_out IS NULL
     ) AS gate_pass
 FROM
     users u
     JOIN security_staff s ON s.id = u.linked_id
-    LEFT JOIN gate_access ga ON ga.entity_id = u.id
+    LEFT JOIN gate_access ga ON ga.entity_id = s.id
     AND ga.role = 'SEC'
 WHERE
     u.role = 'security'
