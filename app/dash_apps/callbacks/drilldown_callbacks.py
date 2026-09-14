@@ -4030,6 +4030,19 @@ def _save_asset_dispose(db, d, sid):
     except (ValueError, TypeError):
         return False, "Invalid sale value", None
 
+    tds_amount = d.get("tds_amount")
+    if tds_amount:
+        try:
+            tds_amount = float(tds_amount)
+            if tds_amount < 0:
+                return False, "TDS amount cannot be negative", None
+            if tds_amount >= sale_value:
+                return False, "TDS amount must be less than Sale value", None
+        except (ValueError, TypeError):
+            tds_amount = 0
+    else:
+        tds_amount = 0
+
     mode = d.get("mode", "cash")
     particulars = d.get("particulars") or ""
     acc_id = d.get("acc_id")
@@ -4047,7 +4060,7 @@ def _save_asset_dispose(db, d, sid):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_dispose_asset(%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_dispose_asset(%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 asset_id,
                 sale_value,
@@ -4055,12 +4068,12 @@ def _save_asset_dispose(db, d, sid):
                 d.get("user_id"),
                 d.get("sale_date") or dt_date.today().isoformat(),
                 particulars,
+                acc_id,
+                tds_amount
             ),
             fetch_one=True,
         )
         receipt_id = (r or {}).get("receipt_id")
-        if receipt_id and acc_id:
-            db._execute("UPDATE receipts SET acc_id = %s WHERE id = %s", (acc_id, receipt_id))
         msg = f"Asset disposed — receipt #{receipt_id} [[receipt:{receipt_id}]]"
         return True, msg, receipt_id
     except Exception as e:
@@ -4269,19 +4282,20 @@ def _save_event_ticket(db, d, sid):
 
 
 def _save_asset(db, d, sid, is_edit, pk):
+    asset_name = (d.get("asset_name") or "").strip()
+    if not asset_name:
+        return False, "Asset name is required", None
+
     if is_edit:
         db._execute(
             "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, "
             "updated_by=%s "
             "WHERE id=%s AND society_id=%s",
-            (d.get("asset_name"), d.get("asset_SNo"), d.get("company_name"), d.get("user_id"), pk, sid),
+            (asset_name, d.get("asset_SNo"), d.get("company_name"), d.get("user_id"), pk, sid),
         )
         return True, "Asset updated", pk
 
     # New asset purchase — calls fn_buy_asset which also creates an expense + transaction
-    asset_name = (d.get("asset_name") or "").strip()
-    if not asset_name:
-        return False, "Asset name is required", None
 
     purchase_value = d.get("purchase_value")
     if not purchase_value:
@@ -4312,7 +4326,7 @@ def _save_asset(db, d, sid, is_edit, pk):
                 purchase_value,
                 acc_id,
                 d.get("purchase_date") or dt_date.today().isoformat(),
-                d.get("installation_date"),
+                d.get("installation_date") or None,
                 d.get("mode", "cash"),
                 d.get("user_id"),
                 d.get("particulars") or f"Asset Purchase — {asset_name}",
