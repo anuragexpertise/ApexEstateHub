@@ -4137,7 +4137,8 @@ CREATE OR REPLACE FUNCTION fn_dispose_asset(
     p_created_by  INT     DEFAULT NULL,
     p_sale_date   DATE    DEFAULT CURRENT_DATE,
     p_particulars TEXT    DEFAULT NULL,
-    p_acc_id      INT     DEFAULT NULL
+    p_acc_id      INT     DEFAULT NULL,
+    p_tds_amount  NUMERIC DEFAULT 0
 )
 RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT)
 LANGUAGE plpgsql AS $$
@@ -4153,6 +4154,8 @@ DECLARE
     v_gst_exp_acc INT;
     v_cgst_acc    INT;
     v_sgst_acc    INT;
+    v_tds_rec_acc INT;
+    v_net_sale    NUMERIC(15,2);
 BEGIN
     SELECT * INTO v_asset FROM assets WHERE id = p_asset_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Asset not found'; END IF;
@@ -4183,6 +4186,29 @@ BEGIN
     v_bank_acc := fn_resolve_bank_leg(v_asset.society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
+    v_net_sale := p_sale_value - COALESCE(p_tds_amount, 0);
+    IF v_net_sale < 0 THEN RAISE EXCEPTION 'TDS amount cannot exceed sale value'; END IF;
+
+    -- Dr: TDS Receivable
+    IF COALESCE(p_tds_amount, 0) > 0 THEN
+        SELECT id INTO v_tds_rec_acc FROM accounts
+        WHERE society_id = v_asset.society_id AND name ILIKE '%TDS Receivable%' AND drcr_account = 'Dr'
+        LIMIT 1;
+
+        IF v_tds_rec_acc IS NULL THEN
+            RAISE EXCEPTION 'Cannot apply TDS: No TDS Receivable account configured for this society. Please set one in Settings > Accounts.';
+        END IF;
+
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_asset.society_id, 'Dr', p_sale_date, v_tds_rec_acc, p_asset_id, 'assets',
+            'TDS Deducted on Asset Sale - ' || v_asset.asset_name,
+            p_tds_amount, 'journal', 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+        );
+    END IF;
+
     -- Fixed (2026-08): this leg was previously written unconditionally
     -- (no IF v_bank_acc IS NOT NULL guard, unlike every other writer
     -- function) — mode='cash' now resolves v_bank_acc to NULL (see
@@ -4195,14 +4221,14 @@ BEGIN
     -- leg below instead, since this one may not run.
     --
     -- Dr: cash / bank (sale proceeds) — non-cash mode only
-    IF v_bank_acc IS NOT NULL THEN
+    IF v_bank_acc IS NOT NULL AND v_net_sale > 0 THEN
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
             v_asset.society_id, 'Dr', p_sale_date, v_bank_acc, p_asset_id, 'assets',
             'Cash received - ' || v_desc,
-            p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
+            v_net_sale, p_mode, 'paid', p_created_by, NOW(), 'assets', p_asset_id, v_journal_id
         );
     END IF;
 

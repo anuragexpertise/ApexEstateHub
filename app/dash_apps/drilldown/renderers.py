@@ -4655,6 +4655,14 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
                 ), width=8),
             ], className="mb-2"),
             dbc.Row([
+                dbc.Col(dbc.Label("TDS Deducted (₹)", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dcc.Input(
+                    id={"type": "form-field", "entity": "asset_dispose", "field": "tds_amount"},
+                    type="number", value="", min=0, step=0.01,
+                    style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
                 dbc.Col(dbc.Label("Sale Date *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
                 dbc.Col(dcc.Input(
                     id={"type": "form-field", "entity": "asset_dispose", "field": "sale_date"},
