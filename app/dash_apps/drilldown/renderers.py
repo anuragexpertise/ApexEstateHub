@@ -4320,6 +4320,79 @@ def render_pay_dues_card(
         ], style={"paddingTop": "15px"})
     ])
 
+    selective_tab = dbc.Tab(label="Selective Pay", tab_id="selective", children=[
+        html.Div([
+            dbc.Row([
+                dbc.Col(dbc.Label("Receivable IDs (Comma sep)", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due_selective", "field": "receivable_ids"},
+                    type="text", placeholder="e.g. 101,102", style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due_selective", "field": "amount"},
+                    type="number", min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
+                dbc.Col(dcc.Dropdown(
+                    id={"type": "form-field", "entity": "pay_due_selective", "field": "mode"},
+                    options=[
+                        {"label": "Cash",          "value": "cash"},
+                        {"label": "Bank Transfer", "value": "bank"},
+                        {"label": "UPI",           "value": "upi"},
+                        {"label": "Cheque",        "value": "cheque"},
+                        {"label": "Other",         "value": "other"},
+                    ], value=prefill_mode, clearable=False, style={"fontSize": "13px"},
+                ), width=8),
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Reference", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
+                dbc.Col(dbc.Input(
+                    id={"type": "form-field", "entity": "pay_due_selective", "field": "reference"},
+                    type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                ), width=8)
+            ], className="mb-2"),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Cheque No.",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due_selective", "field": "cheque_no"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due_selective", "field": "cheque_no"},
+               style={} if prefill_mode == "cheque" else {"display": "none"}),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(dbc.Label("Payment Gateway ID",
+                                      style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}),
+                            width=4, style={"paddingTop": "6px"}),
+                    dbc.Col(dbc.Input(
+                        id={"type": "form-field", "entity": "pay_due_selective", "field": "transaction_id"},
+                        type="text", style={"fontSize": "13px", "borderRadius": "10px"},
+                    ), width=8),
+                ], className="mb-2"),
+            ], id={"type": "mode-conditional-row", "entity": "pay_due_selective", "field": "transaction_id"},
+               style={} if prefill_mode in ("upi", "bank", "card", "crypto") else {"display": "none"}),
+            
+            dcc.Input(id={"type": "form-field", "entity": "pay_due_selective", "field": "role"}, type="hidden", value="apartment"),
+            dcc.Input(id={"type": "form-field", "entity": "pay_due_selective", "field": "entity_id"}, type="hidden", value=str(entity_id or "")),
+            
+            dbc.Button(
+                [html.I(className="fas fa-check me-2"), "Apply Payment (Selective)"],
+                id={"type": "form-submit", "entity": "pay_due_selective", "card_id": "form_pay_dues_new"},
+                n_clicks=0, color="success", className="mt-3 w-100",
+                style={"borderRadius": "12px", "fontWeight": "700"},
+            ),
+        ], style={"paddingTop": "15px"})
+    ])
+
     return html.Div([
         html.Div(
             html.Div([
@@ -4338,7 +4411,7 @@ def render_pay_dues_card(
         ),
         html.Div([
             html.Div([
-                dbc.Tabs([fifo_tab, bill_group_tab], active_tab="fifo", style={"borderBottom": f"2px solid {color}33"}),
+                dbc.Tabs([fifo_tab, bill_group_tab, selective_tab], active_tab="fifo", style={"borderBottom": f"2px solid {color}33"}),
             ], style={"flex": "1", "minWidth": "260px"}),
             render_payment_qr_widget(society_id),
         ], style={"padding": "16px", "display": "flex", "flexWrap": "wrap", "gap": "16px", "alignItems": "flex-start"}),
