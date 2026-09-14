@@ -322,15 +322,8 @@ def register_drillin_callbacks(app):
 
     # ── 2. Item tapped -> write into the target form's hidden fields ───────
     @app.callback(
-        # allow_duplicate=True required on BOTH wildcard outputs: the
-        # form-field-hidden pattern is already claimed by the camera-
-        # capture callback (drilldown_callbacks.py, MATCH variant) and by
-        # drillin_clear below (ALL variant) — Dash rejects the whole
-        # client-side callback graph if any later claimant of an
-        # already-used Output pattern omits this, which otherwise breaks
-        # *every* callback on the page (including unrelated ones like the
-        # login screen's society dropdown), not just this one.
         Output({"type": "form-field-hidden", "entity": ALL, "field": ALL}, "value", allow_duplicate=True),
+        Output({"type": "form-field", "entity": ALL, "field": ALL}, "value", allow_duplicate=True),
         Output({"type": "drillin-trigger", "entity": ALL, "field": ALL}, "children", allow_duplicate=True),
         Output("drillin-modal", "is_open", allow_duplicate=True),
         Input({"type": "drillin-item", "id": ALL}, "n_clicks"),
@@ -361,10 +354,10 @@ def register_drillin_callbacks(app):
         actual_val = entity_id_val
         if entity_id_val and target_table and society_id:
             label = drillin_label_for(target_table, item_id, society_id)
-            if cfg.get("value_col"):
+            if cfg.get("value_col") or cfg.get("fill_fields"):
                 try:
                     row = db._execute(f"SELECT * FROM {target_table} WHERE id=%s AND society_id=%s", (item_id, society_id), fetch_one=True)
-                    if row:
+                    if row and cfg.get("value_col"):
                         val_col = cfg["value_col"]
                         if cfg.get("value_col_no_pan"):
                             # Check if vendor has PAN from tds-autofill store
@@ -376,7 +369,7 @@ def register_drillin_callbacks(app):
                                 val_col = cfg["value_col_no_pan"]
                         actual_val = str(row.get(val_col, entity_id_val))
                 except Exception as e:
-                    print(f"⚠️  drillin_select_item value_col lookup: {e}")
+                    print(f"⚠️  drillin_select_item value_col/fill_fields lookup: {e}")
 
         role_label = None
         if role_val:
@@ -406,6 +399,14 @@ def register_drillin_callbacks(app):
         # belongs to this form/field gets updated — every other currently
         # rendered form-field-hidden / drillin-trigger on the page is left
         # untouched via no_update. ──────────────────────────────────────────
+        
+        fill_fields = cfg.get("fill_fields") or {}
+        fill_values = {}
+        if fill_fields and 'row' in locals() and row:
+            for ff, fcol in fill_fields.items():
+                val = row.get(fcol)
+                fill_values[ff] = str(val) if val is not None else ""
+
         hidden_outputs = ctx.outputs_list[0]
         hidden_values = []
         for o in hidden_outputs:
@@ -414,10 +415,21 @@ def register_drillin_callbacks(app):
                 hidden_values.append(actual_val)
             elif role_fid and oid.get("entity") == entity and oid.get("field") == role_fid:
                 hidden_values.append(role_val or "")
+            elif oid.get("entity") == entity and oid.get("field") in fill_values:
+                hidden_values.append(fill_values[oid.get("field")])
             else:
                 hidden_values.append(no_update)
 
-        trigger_outputs = ctx.outputs_list[1]
+        standard_outputs = ctx.outputs_list[1]
+        standard_values = []
+        for o in standard_outputs:
+            oid = o["id"]
+            if oid.get("entity") == entity and oid.get("field") in fill_values:
+                standard_values.append(fill_values[oid.get("field")])
+            else:
+                standard_values.append(no_update)
+
+        trigger_outputs = ctx.outputs_list[2]
         trigger_values = []
         for o in trigger_outputs:
             oid = o["id"]
@@ -426,7 +438,7 @@ def register_drillin_callbacks(app):
             else:
                 trigger_values.append(no_update)
 
-        return hidden_values, trigger_values, False
+        return hidden_values, standard_values, trigger_values, False
 
     # ── 3. Clear selection ───────────────────────────────────────────────
     @app.callback(
