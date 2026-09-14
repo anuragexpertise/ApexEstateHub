@@ -134,161 +134,7 @@ def run_schema(conn):
     return ok, err
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# INCREMENTAL ALTERATIONS — safe ALTER for existing installations
-# (tables created by older schema versions that need column/constraint updates)
-# ═════════════════════════════════════════════════════════════════════════════
 
-def run_migrations(conn):
-    """
-    Apply all incremental schema changes needed by existing databases.
-    Each ALTER is wrapped in its own savepoint so one failure doesn't block others.
-
-    Note: Column additions are now defined inline in estatehub.sql CREATE TABLE
-    statements. This function only handles:
-    - Function replacements (fn_fy_closing_report)
-    - Dead column cleanup (accounts.bf_amount)
-    """
-    alterations = [
-        # fn_fy_closing_report: add depth + sort_path for Ledger Index tree
-        "DROP FUNCTION IF EXISTS fn_fy_closing_report(integer, integer)",
-        """CREATE OR REPLACE FUNCTION fn_fy_closing_report(
-            p_society_id             INT,
-            p_fy                     INT
-        )
-         RETURNS TABLE (
-            account_id           INT,
-            account_name         TEXT,
-            tab_name             TEXT,
-            parent_account_id    INT,
-            drcr_account         TEXT,
-            has_bf               BOOLEAN,
-            own_bf               NUMERIC(15,2),
-            own_movement         NUMERIC(15,2),
-            depreciation_charge  NUMERIC(15,2),
-            own_closing          NUMERIC(15,2),
-            total_closing        NUMERIC(15,2),
-            display_side         TEXT,
-            display_amount       NUMERIC(15,2),
-            depth                INT,
-            sort_path            TEXT
-        ) LANGUAGE plpgsql STABLE AS $$
-        DECLARE
-            v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
-            v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
-            v_total_depreciation NUMERIC(15,2);
-            v_depreciation_acc_id INT;
-        BEGIN
-            v_depreciation_acc_id := fn_resolve_depreciation_account(p_society_id);
-
-            SELECT COALESCE(SUM(fn_account_depreciation(p_society_id, a.id, p_fy)), 0)
-            INTO v_total_depreciation
-            FROM accounts a
-            WHERE a.society_id = p_society_id;
-
-            RETURN QUERY
-            WITH RECURSIVE tree AS (
-                SELECT a.id, a.parent_account_id, 0 AS depth,
-                       LPAD(a.id::TEXT, 10, '0') AS sort_path
-                FROM accounts a
-                WHERE a.society_id = p_society_id AND a.parent_account_id IS NULL
-                UNION ALL
-                SELECT c.id, c.parent_account_id, t.depth + 1,
-                       t.sort_path || '.' || LPAD(c.id::TEXT, 10, '0')
-                FROM accounts c
-                JOIN tree t ON c.parent_account_id = t.id
-                WHERE c.society_id = p_society_id
-            ),
-            leaf_closing AS (
-                SELECT
-                    a.id,
-                    a.name::TEXT,
-                    a.tab_name::TEXT,
-                    a.parent_account_id,
-                    a.drcr_account::TEXT,
-                    a.has_bf,
-                    CASE WHEN a.has_bf THEN -fn_resolve_bf_amount_fy(p_society_id, a.id, p_fy) ELSE 0 END AS own_bf,
-                    COALESCE((
-                        SELECT SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
-                                         WHEN t.entry_side = 'Dr' THEN -t.amount
-                                         ELSE 0 END)
-                        FROM transactions t
-                        WHERE t.acc_id = a.id AND t.society_id = p_society_id
-                          AND t.status = 'paid'
-                          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-                    ), 0)
-                    - CASE WHEN a.id = v_depreciation_acc_id THEN v_total_depreciation ELSE 0 END
-                      AS own_movement_raw,
-                    fn_account_depreciation(p_society_id, a.id, p_fy) AS depreciation_charge,
-                    tree.depth,
-                    tree.sort_path
-                FROM accounts a
-                JOIN tree ON tree.id = a.id
-                WHERE a.society_id = p_society_id
-            ),
-            leaf_final AS (
-                SELECT
-                    lc.id, lc.name, lc.tab_name, lc.parent_account_id, lc.drcr_account, lc.has_bf,
-                    lc.depth, lc.sort_path,
-                    lc.own_bf, (lc.own_movement_raw + lc.depreciation_charge) AS own_movement,
-                    lc.depreciation_charge,
-                    (lc.own_bf + lc.own_movement_raw + lc.depreciation_charge) AS own_closing
-                FROM leaf_closing lc
-            ),
-            ancestry AS (
-                SELECT id AS acc_id, id AS ancestor_id
-                FROM leaf_final
-                UNION ALL
-                SELECT anc.acc_id, lf.parent_account_id
-                FROM ancestry anc
-                JOIN leaf_final lf ON lf.id = anc.ancestor_id
-                WHERE lf.parent_account_id IS NOT NULL
-            ),
-            rollup AS (
-                SELECT anc.ancestor_id AS id, SUM(lf.own_closing) AS total_closing
-                FROM ancestry anc
-                JOIN leaf_final lf ON lf.id = anc.acc_id
-                GROUP BY anc.ancestor_id
-            )
-            SELECT
-                lf.id, lf.name, lf.tab_name, lf.parent_account_id, lf.drcr_account, lf.has_bf,
-                lf.own_bf, lf.own_movement, lf.depreciation_charge, lf.own_closing,
-                r.total_closing,
-                CASE WHEN r.total_closing >= 0 THEN 'Cr' ELSE 'Dr' END,
-                ABS(r.total_closing),
-                lf.depth,
-                lf.sort_path
-            FROM leaf_final lf
-            JOIN rollup r ON r.id = lf.id
-            ORDER BY lf.sort_path;
-        END;
-        $$;""",
-        "ALTER TABLE societies ADD COLUMN IF NOT EXISTS duty_hrs VARCHAR(2) DEFAULT '8' CHECK (duty_hrs IN ('8', '12'))",
-        "ALTER TABLE security_roster DROP CONSTRAINT IF EXISTS security_roster_shift_type_check",
-        "ALTER TABLE security_roster ADD CONSTRAINT security_roster_shift_type_check CHECK (shift_type IN ('morning', 'evening', 'night', 'day'))",
-    ]
-
-    ok = 0
-    skipped = 0
-    with conn.cursor() as cur:
-        for sql in alterations:
-            try:
-                cur.execute("SAVEPOINT migration_alter")
-                cur.execute(sql)
-                cur.execute("RELEASE SAVEPOINT migration_alter")
-                conn.commit()
-                ok += 1
-            except Exception as exc:
-                cur.execute("ROLLBACK TO SAVEPOINT migration_alter")
-                conn.commit()
-                skipped += 1
-                snippet = sql[:80]
-                print(f"  ↷ Skipped (already applied?): {snippet}… — {exc!s:.60}")
-
-    print(f"  ✓ Migrations applied: {ok} ok, {skipped} skipped")
-
-    # ── Data migration: users.push_subscription → push_subscriptions ────────
-    _migrate_push_subscriptions(conn)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -341,9 +187,7 @@ def main():
     ok, err = run_schema(conn)
     print(f"  ✓ DDL: {ok} ok, {err} skipped")
 
-    # ── Incremental alterations for existing databases ────────────────────
-    print("  ⟳ Running incremental migrations…")
-    run_migrations(conn)
+
 
     # ── Seed decision ─────────────────────────────────────────────────────
     if args.no_seed:
@@ -420,51 +264,6 @@ def main():
     if conn is not None:
         conn.close()
     _summary()
-
-
-def _migrate_push_subscriptions(conn):
-    """
-    Migrate any existing users.push_subscription JSON blob into the new
-    push_subscriptions table (one row per user, using the single legacy
-    subscription as that user's desktop subscription).
-    """
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, push_subscription
-                  FROM users
-                 WHERE push_subscription IS NOT NULL
-            """)
-            rows = cur.fetchall()
-            if not rows:
-                print("  ✓ Push subscriptions: nothing to migrate")
-                return
-
-            migrated = 0
-            for row in rows:
-                try:
-                    sub = json.loads(row["push_subscription"]) if isinstance(row["push_subscription"], str) else row["push_subscription"]
-                except Exception:
-                    continue
-                endpoint = sub.get("endpoint", "")
-                p256dh = sub.get("keys", {}).get("p256dh", "")
-                auth = sub.get("keys", {}).get("auth", "")
-                if not endpoint:
-                    continue
-                try:
-                    cur.execute("""
-                        INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (user_id, endpoint) DO NOTHING
-                    """, (row["id"], endpoint, p256dh, auth, "legacy-migration"))
-                    migrated += 1
-                except Exception:
-                    pass
-            conn.commit()
-            print(f"  ✓ Push subscriptions: migrated {migrated}/{len(rows)}")
-    except Exception as exc:
-        print(f"  ⚠ Push subscription migration failed: {exc}")
-        conn.rollback()
 
 
 def _summary():
