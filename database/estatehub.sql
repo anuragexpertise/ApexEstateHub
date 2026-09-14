@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
     joining_date DATE DEFAULT CURRENT_DATE,
     shift VARCHAR(20),
     salary_per_shift NUMERIC(10, 2),
+    ptl_penalty NUMERIC(10, 2) DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3742,8 +3743,9 @@ BEGIN
     LIMIT 1;
 
     FOR rec IN
-        SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift, sr.attendance_status,
-               EXTRACT(EPOCH FROM (ga.time_out - ga.time_in)) / 3600.0 AS duration_hours
+        SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift, ss.ptl_penalty, sr.attendance_status,
+               EXTRACT(EPOCH FROM (ga.time_out - ga.time_in)) / 3600.0 AS duration_hours,
+               ga.time_in, ga.time_out, u2.id AS user_id
         FROM security_roster sr
         JOIN security_staff ss ON ss.id = sr.security_id
         JOIN users u2 ON u2.linked_id = sr.security_id AND u2.role = 'security'
@@ -3761,6 +3763,11 @@ BEGIN
         
         DECLARE
             v_fraction NUMERIC(3, 2);
+            v_expected_scans INT := 0;
+            v_actual_scans INT := 0;
+            v_missed_scans INT := 0;
+            v_penalty NUMERIC(10, 2) := 0;
+            v_final_amount NUMERIC(10, 2) := 0;
         BEGIN
             IF rec.attendance_status = 'leave_paid' THEN
                 v_fraction := 1.0;
@@ -3774,12 +3781,36 @@ BEGIN
                 v_desc := v_desc || ' (Short shift: ' || ROUND(rec.duration_hours::NUMERIC, 1) || 'h - Review required)';
             END IF;
 
+            v_final_amount := COALESCE(rec.salary_per_shift, 0) * v_fraction;
+
+            IF rec.attendance_status != 'leave_paid' AND v_fraction > 0 THEN
+                SELECT COALESCE(SUM(FLOOR((rec.duration_hours * 60.0) / NULLIF(pl.scan_interval, 120))), 0)
+                INTO v_expected_scans
+                FROM patrol_locations pl
+                WHERE pl.society_id = p_society_id AND pl.active = TRUE;
+
+                SELECT COUNT(*) INTO v_actual_scans
+                FROM patrol_scans
+                WHERE security_user_id = rec.user_id
+                  AND scanned_at >= rec.time_in
+                  AND scanned_at <= rec.time_out;
+
+                IF v_actual_scans < v_expected_scans THEN
+                    v_missed_scans := v_expected_scans - v_actual_scans;
+                    v_penalty := v_missed_scans * COALESCE(rec.ptl_penalty, 0);
+                    v_final_amount := GREATEST(0, v_final_amount - v_penalty);
+                    IF v_penalty > 0 THEN
+                        v_desc := v_desc || ' (Penalty: ₹' || v_penalty || ' for ' || v_missed_scans || ' missed patrol scans)';
+                    END IF;
+                END IF;
+            END IF;
+
             INSERT INTO payables(
                 society_id, entity_id, role, acc_id, description,
                 roster_id, shift_date, shift_fraction, amount, status, due_date, created_at
             ) VALUES (
                 p_society_id, rec.security_id, 'security', v_acc_id, v_desc,
-                rec.roster_id, rec.roster_date, v_fraction, COALESCE(rec.salary_per_shift, 0) * v_fraction,
+                rec.roster_id, rec.roster_date, v_fraction, v_final_amount,
                 'pending', rec.roster_date, NOW()
             );
 
@@ -3796,7 +3827,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION trg_payable_update_amount() RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.role = 'security' THEN
+    IF NEW.role = 'security' AND NEW.shift_fraction IS DISTINCT FROM OLD.shift_fraction THEN
         NEW.amount := (SELECT salary_per_shift FROM security_staff WHERE id = NEW.entity_id) * NEW.shift_fraction;
     END IF;
     RETURN NEW;

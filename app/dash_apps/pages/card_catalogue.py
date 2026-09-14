@@ -46,6 +46,22 @@ KPI_CARDS = {
         "title": "Total Receivables", "group": "pending dues",
     },
 
+    "kpi_ptl_to_scan": {
+        "query": """
+            SELECT pl.location_name || ' (in ' || GREATEST(0, COALESCE(pl.scan_interval, 120) - EXTRACT(EPOCH FROM (NOW() - COALESCE(MAX(ps.scanned_at), CURRENT_DATE::TIMESTAMP)))/60)::INT || 'm)' AS v
+            FROM patrol_locations pl
+            LEFT JOIN patrol_scans ps ON ps.location_id = pl.id AND ps.security_user_id = %s AND ps.scanned_at >= CURRENT_DATE
+            WHERE pl.society_id = %s AND pl.active = TRUE
+            GROUP BY pl.id, pl.location_name, pl.scan_interval
+            ORDER BY MAX(ps.scanned_at) ASC NULLS FIRST
+            LIMIT 1;
+        """,
+        "params": 2, "format": "text",
+        "icon": "fa-map-marker-alt", "color": "#ff9800",
+        "title": "PTL to Scan", "group": "patrol",
+        "scoped": True,
+    },
+
     "kpi_channels_total": {
         "query": """
             SELECT COUNT(*) AS v FROM alert_channels WHERE society_id=%s
@@ -1257,6 +1273,7 @@ DEFAULT_LAYOUTS = {
             "kpi_presumed_visitor",
         ],
         "pass_evaluation": [
+            "kpi_ptl_to_scan",
             "kpi_events_total",
             "kpi_concerns_assigned",
         ],
