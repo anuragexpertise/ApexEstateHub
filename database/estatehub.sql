@@ -4482,6 +4482,9 @@ BEGIN
         -- through to the pre-existing single-leg behavior.
         IF COALESCE(p_tds_pct, 0) > 0 THEN
             v_tds_acc := fn_resolve_tds_account(p_society_id);
+            IF v_tds_acc IS NULL THEN
+                RAISE EXCEPTION 'Cannot apply TDS: No TDS Payable account configured for this society. Please set one in Settings > Accounts.';
+            END IF;
         END IF;
  
         IF v_tds_acc IS NOT NULL THEN

@@ -3579,6 +3579,8 @@ def _save_receipt_v3(db, d, sid):
         amt = float(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
+        if amt > 1000000:
+            return False, "Amount exceeds maximum limit (₹1,000,000)", None
     except (ValueError, TypeError):
         return False, "Invalid amount", None
 
@@ -3593,6 +3595,21 @@ def _save_receipt_v3(db, d, sid):
     particulars = (d.get("particulars") or d.get("acc_particulars") or "").strip()
     if not particulars:
         return False, "Particulars are required", None
+        
+    raw_entity = d.get("entity_id")
+    try:
+        entity_id = int(raw_entity) if raw_entity not in (None, "") else None
+    except (ValueError, TypeError):
+        return False, "Invalid entity ID", None
+
+    receipt_date = d.get("receipt_date") or dt_date.today().isoformat()
+    try:
+        soc_info = db._execute("SELECT calc_start_date FROM societies WHERE id = %s", (sid,), fetch_one=True)
+        if soc_info and soc_info.get("calc_start_date"):
+            if receipt_date < str(soc_info["calc_start_date"]):
+                return False, f"Receipt date cannot be earlier than {soc_info['calc_start_date']}", None
+    except Exception:
+        pass
 
     try:
         r = db._execute(
@@ -3602,14 +3619,15 @@ def _save_receipt_v3(db, d, sid):
                 acc_id,         # p_acc_id
                 particulars,    # p_particulars
                 amt,            # p_amount
-                d.get("entity_id"),
+                entity_id,      # p_entity_id
                 d.get("role", "other"),
                 d.get("mode", "cash"),
-                d.get("receipt_date") or dt_date.today().isoformat(),
+                receipt_date,
                 d.get("user_id"),
                 d.get("cheque_no"),
                 d.get("transaction_id"),
                 d.get("source_reference"),
+
             ),
             fetch_one=True,
         )
@@ -3641,6 +3659,8 @@ def _save_expense_v3(db, d, sid):
         amt = float(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
+        if amt > 1000000:
+            return False, "Amount exceeds maximum limit (₹1,000,000)", None
     except (ValueError, TypeError):
         return False, "Invalid amount", None
 
@@ -3714,6 +3734,15 @@ def _save_expense_v3(db, d, sid):
             None,
         )
 
+    expense_date = d.get("expense_date") or dt_date.today().isoformat()
+    try:
+        soc_info = db._execute("SELECT calc_start_date FROM societies WHERE id = %s", (sid,), fetch_one=True)
+        if soc_info and soc_info.get("calc_start_date"):
+            if expense_date < str(soc_info["calc_start_date"]):
+                return False, f"Expense date cannot be earlier than {soc_info['calc_start_date']}", None
+    except Exception:
+        pass
+
     try:
         r = db._execute(
             "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -3722,10 +3751,10 @@ def _save_expense_v3(db, d, sid):
                 acc_id,
                 particulars,
                 amt,
-                d.get("entity_id"),
+                vendor_id,
                 d.get("role", "other"),
                 d.get("mode", "cash"),
-                d.get("expense_date") or dt_date.today().isoformat(),
+                expense_date,
                 d.get("user_id"),
                 d.get("cheque_no"),
                 d.get("transaction_id"),
