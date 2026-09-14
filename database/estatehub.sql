@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS societies (
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
     gate_logic VARCHAR(10) DEFAULT 'both' CHECK (gate_logic IN ('entry', 'exit', 'both')),
+    duty_hrs VARCHAR(2) DEFAULT '8' CHECK (duty_hrs IN ('8', '12')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
@@ -373,7 +374,10 @@ CREATE TABLE IF NOT EXISTS security_roster (
     security_id INT NOT NULL REFERENCES security_staff (id) ON DELETE CASCADE,
     roster_date DATE NOT NULL,
     shift_type VARCHAR(20) CHECK (
-        shift_type IN ('morning', 'evening', 'night')
+        shift_type IN ('morning', 'evening', 'night', 'day')
+    ),
+    attendance_status VARCHAR(20) DEFAULT 'scheduled' CHECK (
+        attendance_status IN ('scheduled', 'present', 'absent', 'leave_paid', 'leave_unpaid')
     ),
     assigned_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW(),
@@ -724,6 +728,7 @@ CREATE TABLE IF NOT EXISTS payables (
     description TEXT NOT NULL DEFAULT 'Payment', -- becomes acc_particulars in transactions
     roster_id INT REFERENCES security_roster (id),
     shift_date DATE,
+    shift_fraction NUMERIC(3, 2) DEFAULT 1.0,
     amount NUMERIC(10, 2) NOT NULL,
     mode VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
@@ -3463,32 +3468,70 @@ BEGIN
     LIMIT 1;
 
     FOR rec IN
-        SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift
+        SELECT sr.id AS roster_id, sr.security_id, sr.roster_date, ss.salary_per_shift, sr.attendance_status,
+               EXTRACT(EPOCH FROM (ga.time_out - ga.time_in)) / 3600.0 AS duration_hours
         FROM security_roster sr
         JOIN security_staff ss ON ss.id = sr.security_id
         JOIN users u2 ON u2.linked_id = sr.security_id AND u2.role = 'security'
-        JOIN gate_access ga
+        LEFT JOIN gate_access ga
              ON ga.entity_id = u2.id
             AND ga.role = 'SEC'
             AND ga.time_in::DATE = sr.roster_date
             AND ga.time_out IS NOT NULL
         WHERE sr.society_id = p_society_id
           AND sr.roster_date <= CURRENT_DATE
+          AND (ga.id IS NOT NULL OR sr.attendance_status = 'leave_paid')
           AND NOT EXISTS (SELECT 1 FROM payables p WHERE p.roster_id = sr.id)
     LOOP
         v_desc := 'Salary ' || TO_CHAR(rec.roster_date, 'DD-Mon-YYYY');
+        
+        DECLARE
+            v_fraction NUMERIC(3, 2);
+        BEGIN
+            IF rec.attendance_status = 'leave_paid' THEN
+                v_fraction := 1.0;
+                v_desc := v_desc || ' (Paid Leave)';
+            ELSIF rec.duration_hours >= 8.0 THEN
+                v_fraction := 1.0;
+            ELSIF rec.duration_hours >= 4.0 THEN
+                v_fraction := 0.5;
+            ELSE
+                v_fraction := 0.0;
+                v_desc := v_desc || ' (Short shift: ' || ROUND(rec.duration_hours::NUMERIC, 1) || 'h - Review required)';
+            END IF;
 
-        INSERT INTO payables(
-            society_id, entity_id, role, acc_id, description,
-            roster_id, shift_date, amount, status, due_date, created_at
-        ) VALUES (
-            p_society_id, rec.security_id, 'security', v_acc_id, v_desc,
-            rec.roster_id, rec.roster_date, COALESCE(rec.salary_per_shift, 0),
-            'pending', rec.roster_date, NOW()
-        );
+            INSERT INTO payables(
+                society_id, entity_id, role, acc_id, description,
+                roster_id, shift_date, shift_fraction, amount, status, due_date, created_at
+            ) VALUES (
+                p_society_id, rec.security_id, 'security', v_acc_id, v_desc,
+                rec.roster_id, rec.roster_date, v_fraction, COALESCE(rec.salary_per_shift, 0) * v_fraction,
+                'pending', rec.roster_date, NOW()
+            );
+
+            -- Automatically mark attendance as present if they worked at all and weren't on leave
+            IF rec.attendance_status NOT IN ('leave_paid', 'leave_unpaid', 'absent') THEN
+                UPDATE security_roster 
+                SET attendance_status = 'present' 
+                WHERE id = rec.roster_id AND attendance_status = 'scheduled';
+            END IF;
+        END;
     END LOOP;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION trg_payable_update_amount() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.role = 'security' THEN
+        NEW.amount := (SELECT salary_per_shift FROM security_staff WHERE id = NEW.entity_id) * NEW.shift_fraction;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payable_update_amount ON payables;
+CREATE TRIGGER payable_update_amount BEFORE UPDATE ON payables
+FOR EACH ROW EXECUTE FUNCTION trg_payable_update_amount();
 
 -- fn_verify_payment: entry_side + TDS split
 -- ============================================
@@ -4689,7 +4732,7 @@ BEGIN
     RETURN QUERY
     WITH pay_sum AS (
         SELECT entity_id AS staff_id,
-            COUNT(*)::BIGINT AS shifts_completed,
+            COUNT(*)::BIGINT AS shift_count,
             COUNT(*) FILTER (WHERE shift_date >= DATE_TRUNC('month', CURRENT_DATE))::BIGINT AS shifts_this_month,
             COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0)::NUMERIC(15,2) AS salary_due,
             COALESCE(SUM(amount) FILTER (WHERE status='verified'), 0)::NUMERIC(15,2) AS salary_paid
@@ -4700,7 +4743,7 @@ BEGIN
         COALESCE(s.name, u.email, 'Security #'||s.id)::VARCHAR(100), COALESCE(s.shift,'—')::VARCHAR(20),
         COALESCE(s.mobile,'—')::VARCHAR(15), COALESCE(s.active,TRUE)::BOOLEAN,
         COALESCE(s.salary_per_shift,0)::NUMERIC(10,2), s.joining_date::DATE,
-        COALESCE(ps.shifts_completed, 0)::BIGINT AS shift_count,
+        COALESCE(ps.shift_count, 0)::BIGINT AS shift_count,
         COALESCE(ps.shifts_this_month, 0)::BIGINT AS shifts_this_month,
         COALESCE(ps.salary_due, 0)::NUMERIC(15,2), COALESCE(ps.salary_paid, 0)::NUMERIC(15,2),
         EXISTS(SELECT 1 FROM gate_access ga WHERE ga.entity_id=s.id AND ga.role='SEC' AND ga.time_out IS NULL)::BOOLEAN AS gate_pass
@@ -9141,6 +9184,7 @@ BEGIN
         secretary_email = COALESCE(p_sec_email, secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
         gate_logic = COALESCE(p_gate_logic, gate_logic),
+        duty_hrs = COALESCE(p_duty_hrs, duty_hrs),
         primary_bank_account_id = COALESCE(primary_bank_account_id, 6311)
     WHERE id = p_society_id;
 

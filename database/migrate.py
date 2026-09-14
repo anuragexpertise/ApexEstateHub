@@ -263,6 +263,9 @@ def run_migrations(conn):
             ORDER BY lf.sort_path;
         END;
         $$;""",
+        "ALTER TABLE societies ADD COLUMN IF NOT EXISTS duty_hrs VARCHAR(2) DEFAULT '8' CHECK (duty_hrs IN ('8', '12'))",
+        "ALTER TABLE security_roster DROP CONSTRAINT IF EXISTS security_roster_shift_type_check",
+        "ALTER TABLE security_roster ADD CONSTRAINT security_roster_shift_type_check CHECK (shift_type IN ('morning', 'evening', 'night', 'day'))",
     ]
 
     ok = 0

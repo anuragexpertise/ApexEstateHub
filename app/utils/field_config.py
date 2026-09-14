@@ -331,7 +331,7 @@ FIELD_CONFIG = {
             "validation": {
                 "required": "Shift is required.",
             },
-            "tooltip": "Duty shift: morning (6AM-2PM), evening (2PM-10PM), night (10PM-6AM)",
+            "tooltip": "Duty shift: morning/evening/night (8-hour) or day/night (12-hour)",
         },
         "salary_per_shift": {
             "visible": ADMIN_ONLY,

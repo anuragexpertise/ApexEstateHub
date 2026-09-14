@@ -183,9 +183,9 @@ def render_category_content(category, society_id=None):
         )
 
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic = "", "", "", "", "", "", "both"
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs = "", "", "", "", "", "", "both", "8"
         if society_id:
-            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
@@ -194,6 +194,7 @@ def render_category_content(category, society_id=None):
                 s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
                 s_reg = row.get("registration_number", "") or ""
                 s_gate_logic = row.get("gate_logic", "both") or "both"
+                s_duty_hrs = row.get("duty_hrs", "8") or "8"
         return elements + [
             _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
             dbc.Label("Society Name"),
@@ -219,6 +220,16 @@ def render_category_content(category, society_id=None):
                     {"label": "Deny Exit Only", "value": "exit"},
                 ],
                 value=s_gate_logic,
+                className="mb-3"
+            ),
+            dbc.Label("Security Duty Hours"),
+            dbc.Select(
+                id="sw-duty-hrs",
+                options=[
+                    {"label": "8 Hours (morning, evening, night)", "value": "8"},
+                    {"label": "12 Hours (day, night)", "value": "12"},
+                ],
+                value=s_duty_hrs,
                 className="mb-3"
             ),
             dbc.Label("Login Background (Image)"),

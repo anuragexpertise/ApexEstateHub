@@ -104,10 +104,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
     # ── SECURITY ─────────────────────────────────────────────────────────────
     "security": [
         {
-            "label": "Show Cashbook",
-            "action_id": "show_cashbook",
-            "target_card": "list_cashbook",
-            "icon": "fa-book",
+            "label": "My Transactions",
+            "action_id": "show_my_ledger",
+            "target_card": "form_my_ledger",
+            "icon": "fa-file-invoice-dollar",
             "color": "info",
         },
         {

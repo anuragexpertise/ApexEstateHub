@@ -228,6 +228,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     "payables": [
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
         {"label": "Shift Date",       "field": "shift_date",   "icon": "fa-calendar"},
+        {"label": "Shift Fraction",   "field": "shift_fraction", "icon": "fa-adjust"},
         {"label": "Days Overdue",     "field": "days_overdue", "icon": "fa-clock"},
     ],
     "assets": [
