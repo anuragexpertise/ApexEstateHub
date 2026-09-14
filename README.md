@@ -1,4 +1,4 @@
-# ApexEstateHub
+# EstateHub
 ### The Complete Society Management Platform
 
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
@@ -8,7 +8,7 @@
 
 ## Table of Contents
 
-1. [What is ApexEstateHub?](#1-what-is-apexestatehub)
+1. [What is EstateHub?](#1-what-is-estatehub)
 2. [Feature Highlights](#2-feature-highlights)
 3. [Architecture Overview](#3-architecture-overview)
 4. [The Five Portals](#4-the-five-portals)
@@ -34,9 +34,9 @@
 
 ---
 
-## 1. What is ApexEstateHub?
+## 1. What is EstateHub?
 
-**ApexEstateHub** (also referred to internally as *EstateHub*) is a **multi-tenant society management web application** that gives housing societies, apartment complexes, and gated communities a single platform to manage residents, vendors, security staff, finances, events, and gate access — all without page reloads.
+**EstateHub** is a **multi-tenant society management web application** that gives housing societies, apartment complexes, and gated communities a single platform to manage residents, vendors, security staff, finances, events, and gate access — all without page reloads.
 
 Each society gets its own fully isolated data silo scoped by `society_id`. A **Master Admin** oversees all societies on the platform. Within each society, an **Admin** manages day-to-day operations across five role-scoped portals, each seeing only data relevant to them.
 
@@ -498,7 +498,7 @@ WHERE r.acc_id IS NULL AND r.role='apartment' AND r.status IN ('pending','partia
 
 ### Interest Calculation & Subtleties
 
-ApexEstateHub calculates simple interest on overdue maintenance receivables dynamically. Key subtleties to note regarding financial calculations:
+EstateHub calculates simple interest on overdue maintenance receivables dynamically. Key subtleties to note regarding financial calculations:
 
 1. **Daily Pro-Rata Formula**: Interest is calculated using a standard banking 30-day month pro-rata basis:
    `Interest = Unpaid Principal × Monthly Rate × (Total Days Elapsed / 30.0)`.
@@ -762,7 +762,7 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 ## 17. Codebase Map
 
 ```
-ApexEstateHub/
+EstateHub/
 │
 ├── app/
 │   ├── auth/                                 ← JWT handler and token logic
@@ -1198,4 +1198,4 @@ The following tables map every user-reachable workflow in the application, organ
 
 ---
 
-*ApexEstateHub — Built for societies that mean business.*
+*EstateHub — Built for societies that mean business.*
