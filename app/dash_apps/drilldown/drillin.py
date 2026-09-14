@@ -119,11 +119,11 @@ _TABLE_RULES = {
         "group_label": "Category",
     },
     "tds_section_rates": {
-        "label_col": "section",
-        "sub_col": "nature_of_income",
+        "label_fn": lambda r: f"{r.get('rate', '')}%",
+        "sub_fn": lambda r: f"{r.get('section', '')} - {r.get('nature_of_income', '')}",
         "icon": "fas fa-percent",
         "color": "#17976e",
-        "search_cols": ["section", "nature_of_income"],
+        "search_cols": ["section", "nature_of_income", "rate"],
         "group_fn": None,
         "group_label": None,
     },
@@ -292,10 +292,18 @@ def role_target_table(config: dict, role_key: str) -> dict | None:
 
 
 def _label_and_sub(rules: dict, row: dict) -> tuple[str, str]:
-    label = row.get(rules["label_col"]) or row.get(rules.get("label_fallback_col") or "", "")
-    label = label or f"#{row.get('id')}"
-    sub_col = rules.get("sub_col")
-    sub = row.get(sub_col, "") if sub_col else ""
+    if "label_fn" in rules:
+        label = rules["label_fn"](row)
+    else:
+        label = row.get(rules.get("label_col", "")) or row.get(rules.get("label_fallback_col") or "", "")
+        label = label or f"#{row.get('id')}"
+        
+    if "sub_fn" in rules:
+        sub = rules["sub_fn"](row)
+    else:
+        sub_col = rules.get("sub_col")
+        sub = row.get(sub_col, "") if sub_col else ""
+        
     return str(label), str(sub or "")
 
 
