@@ -91,9 +91,6 @@ CREATE TABLE IF NOT EXISTS users (
     -- actually gets bumped (always admin-initiated, never automatic).
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     login_method VARCHAR(20) DEFAULT 'password',
-    -- push_subscription is DEPRECATED; use push_subscriptions table instead.
-    -- Kept here for migration compatibility only.
-    push_subscription TEXT,
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until TIMESTAMP,
