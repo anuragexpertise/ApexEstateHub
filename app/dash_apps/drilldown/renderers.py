@@ -5459,11 +5459,18 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
             qr_url = qr_img or ""
         except Exception as e:
             print(f"⚠️  receipt QR render failed: {e}")
+            
+    tds_pct = float(receipt.get("tds_pct") or 0)
+    tds_section = receipt.get("tds_section") or ""
+    tds_amount = (amount * tds_pct / 100) if tds_pct else 0
+    net_amount = amount - tds_amount
 
     print_data = {
         "receipt_no": receipt_no, "date": r_date, "payer": payer,
         "role": role_lbl, "particulars": particulars, "account": account,
         "amount": f"{amount:,.2f}", "mode": mode, "ref": ref, "status": status,
+        "tds_pct": tds_pct, "tds_section": tds_section, 
+        "tds_amount": f"{tds_amount:,.2f}", "net_amount": f"{net_amount:,.2f}",
         "society_name": society_nm, "society_address": society_addr,
         "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
         "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
