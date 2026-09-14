@@ -6319,7 +6319,7 @@ CREATE OR REPLACE FUNCTION fn_gate_logs_named(
 )
 RETURNS TABLE (
     id INT, society_id INT, role VARCHAR(3), entity_id INT,
-    entity_name TEXT, time_in TIMESTAMP, time_out TIMESTAMP, duration_min INT
+    entity_name TEXT, time_in TIMESTAMP, time_out TIMESTAMP, duration_min INT, scanned_by TEXT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -6336,12 +6336,20 @@ BEGIN
         g.time_in::TIMESTAMP, g.time_out::TIMESTAMP,
         CASE WHEN g.time_out IS NOT NULL
              THEN EXTRACT(EPOCH FROM (g.time_out - g.time_in))::INT / 60
-             ELSE NULL END::INT
+             ELSE NULL END::INT,
+        COALESCE(
+            CASE WHEN creator.role = 'security' THEN (SELECT s.name FROM security_staff s WHERE s.id = creator.linked_id)
+                 ELSE creator.name 
+            END, 
+            creator.email, 
+            'System'
+        )::TEXT AS scanned_by
     FROM gate_access g
     LEFT JOIN apartments   ap ON ap.id = g.entity_id AND g.role = 'APT'
     LEFT JOIN vendors       v ON  v.id = g.entity_id AND g.role = 'VND'
     LEFT JOIN security_staff ss ON ss.id = g.entity_id AND g.role = 'SEC'
     LEFT JOIN users         u ON u.id = g.entity_id AND g.role = 'ADM'
+    LEFT JOIN users   creator ON creator.id = g.created_by
     WHERE g.society_id = p_society_id
       AND (p_date   IS NULL OR g.time_in::DATE = p_date)
       AND (p_search IS NULL OR CASE
