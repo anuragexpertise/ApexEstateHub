@@ -247,16 +247,9 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Event",        "field": "event_title",   "icon": "fa-calendar-alt"},
         {"label": "Booking Ref",  "field": "booking_reference", "icon": "fa-ticket-alt"},
     ],
-}
 
-_HIDDEN_ON_LIST: dict[str, set[str]] = {
-    "active_assets": {
-        "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
-        "itc_claimed", "gst_disposal_liability"
-    }
-}
 
-# NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
+    # NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
     # already resolved generically via _FK_HUMAN_ALIASES / _FK_LABEL_OVERRIDES
     # below, same as every other apartment_id FK column — no separate entry
     # needed here.
@@ -331,6 +324,13 @@ def _map_type(pg_type: str, col_name: str, table_name: str = "") -> str:
 def _extract_check_options(check_clause: str) -> list[str]:
     return re.findall(r"'([^']*)'", check_clause or "")
 
+
+_HIDDEN_ON_LIST: dict[str, set[str]] = {
+    "active_assets": {
+        "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
+        "itc_claimed", "gst_disposal_liability"
+    }
+}
 
 _SCHEMA_CACHE: dict | None = None
 
