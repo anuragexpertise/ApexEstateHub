@@ -186,6 +186,9 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "filter": "(effective_to IS NULL OR effective_to > CURRENT_DATE) AND effective_from <= CURRENT_DATE",
         "value_col": "rate",
         "value_col_no_pan": "rate_no_pan",
+        "fill_fields": {
+            "tds_section": "section"
+        }
     },
     # events.account_id (2026-08) — the income account event ticket sales
     # post to (fn_sell_event_ticket). Same accounts/Cr picker as
