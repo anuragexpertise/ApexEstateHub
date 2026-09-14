@@ -165,13 +165,13 @@ class TestScenarioB_ReceiptLedgerLoop:
         _save_receipt_v3(
             patched_db,
             {"amount": 100, "acc_id": 2311, "particulars": "Jan", "entity_id": 101,
-             "role": "apartment", "user_id": 1, "receipt_date": "2026-01-15"},
+             "role": "apartment", "user_id": 1, "receipt_date": "2026-05-15"},
             1,
         )
         _save_receipt_v3(
             patched_db,
             {"amount": 200, "acc_id": 2311, "particulars": "Feb", "entity_id": 101,
-             "role": "apartment", "user_id": 1, "receipt_date": "2026-02-15"},
+             "role": "apartment", "user_id": 1, "receipt_date": "2026-06-15"},
             1,
         )
         # The fake _fn_receipts_list returns all for simplicity;
