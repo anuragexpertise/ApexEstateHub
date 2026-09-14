@@ -3470,6 +3470,261 @@ BEGIN
 END;
 $$;
 
+-- Core logic for selective payments
+CREATE OR REPLACE FUNCTION fn_apply_apartment_dues_selective_core(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_receivable_ids INT[],
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_confirmed_by INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL,
+    p_source_table VARCHAR DEFAULT 'receivables',
+    p_source_id    INT     DEFAULT NULL
+)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT, receipt_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id INT;
+    v_maint_acc_id INT;
+    v_remaining  NUMERIC(15,2) := p_amount;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_bank_acc   INT;
+    rec          RECORD;
+    v_take        NUMERIC(15,2);
+    v_row_residual NUMERIC(15,2);
+    v_row_int      NUMERIC(15,2);
+    v_row_prin     NUMERIC(15,2);
+    v_pay_int      NUMERIC(15,2);
+    v_pay_prin     NUMERIC(15,2);
+    v_fallback_int_acc INT;
+    v_total_take   NUMERIC(15,2) := 0;
+    v_first_trx_id INT;
+    v_receipt_id   INT;
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+
+    SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
+
+    SELECT id INTO v_fallback_int_acc FROM accounts
+    WHERE society_id = v_society_id AND name ILIKE '%Due Interest%' AND drcr_account = 'Cr' LIMIT 1;
+
+    SELECT id INTO v_maint_acc_id FROM accounts
+    WHERE society_id = v_society_id AND name ILIKE '%Society Maintenance Charge%' AND drcr_account = 'Cr' LIMIT 1;
+
+    IF v_maint_acc_id IS NULL THEN
+        RAISE EXCEPTION 'Maintenance account not found for society %', v_society_id;
+    END IF;
+
+    v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    FOR rec IN
+        SELECT id, amount, paid_amount, paid_principal, base_amount,
+               interest_amount, interest_acc_id, acc_id, confirmed_by
+          FROM receivables
+         WHERE entity_id = p_apartment_id AND role = 'apartment'
+           AND status IN ('pending','partial')
+           AND id = ANY(p_receivable_ids)
+         ORDER BY due_date ASC NULLS LAST, id ASC
+         FOR UPDATE
+    LOOP
+        EXIT WHEN v_remaining <= 0;
+
+        v_row_residual := rec.amount - rec.paid_amount;
+        v_row_int      := LEAST(
+            rec.interest_amount - GREATEST(rec.paid_amount - rec.paid_principal, 0),
+            v_row_residual);
+        v_row_int      := GREATEST(v_row_int, 0);
+        v_row_prin     := v_row_residual - v_row_int;
+
+        v_pay_int  := LEAST(v_remaining, v_row_int);
+        v_pay_prin := LEAST(v_remaining - v_pay_int, v_row_prin);
+        v_take     := v_pay_int + v_pay_prin;
+        IF v_take <= 0 THEN CONTINUE; END IF;
+
+        UPDATE receivables
+             SET paid_amount    = rec.paid_amount + v_take,
+                 paid_principal = rec.paid_principal + v_pay_prin,
+                 status         = CASE WHEN rec.paid_amount + v_take >= rec.amount
+                                        THEN 'paid' ELSE 'partial' END,
+                 confirmed_by   = COALESCE(p_confirmed_by, rec.confirmed_by),
+                 confirmed_at   = NOW()
+             WHERE id = rec.id;
+
+        v_total_take := v_total_take + v_take;
+        v_remaining  := v_remaining - v_take;
+    END LOOP;
+
+    IF v_total_take > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_society_id, p_mode), p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Selective Maintenance Payment'),
+            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+    END IF;
+
+    IF v_remaining > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
+            COALESCE(p_particulars, 'Selective Maintenance Payment') || ' (Advance)',
+            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+        ) RETURNING id INTO v_trx_id;
+        IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
+    END IF;
+
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            'Cash received - Selective Payment',
+            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
+        );
+    END IF;
+
+    IF v_remaining > 0 THEN
+        INSERT INTO receivables (
+            society_id, entity_id, role, acc_id, interest_acc_id,
+            description, base_amount, amount, paid_amount, paid_principal,
+            status, confirmed_by, confirmed_at, created_at
+        ) VALUES (
+            v_society_id, p_apartment_id, 'apartment', v_maint_acc_id,
+            COALESCE(v_fallback_int_acc, v_maint_acc_id),
+            'Advance Credit (Selective)', v_remaining, v_remaining, 0, 0,
+            'credit', p_confirmed_by, NOW(), NOW()
+        );
+    END IF;
+
+    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
+        v_receipt_id := p_source_id;
+    ELSE
+        INSERT INTO receipts (
+            society_id, user_id, entity_id, role, receipt_date, acc_id,
+            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
+        ) VALUES (
+            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
+            COALESCE(p_particulars, 'Selective Maintenance Payment'),
+            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
+        ) RETURNING id INTO v_receipt_id;
+    END IF;
+
+    RETURN QUERY SELECT v_first_trx_id,
+        (p_amount - v_remaining)::NUMERIC(15,2),
+        v_remaining::NUMERIC(15,2),
+        v_journal_id,
+        v_receipt_id;
+END;
+$$;
+
+-- Admin-immediate selective payment
+CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_selective(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_receivable_ids INT[],
+    p_mode         VARCHAR DEFAULT 'cash',
+    p_confirmed_by INT     DEFAULT NULL,
+    p_particulars  TEXT    DEFAULT NULL
+)
+RETURNS TABLE(transaction_id INT, allocated NUMERIC, unallocated NUMERIC, journal_id INT, receipt_id INT)
+LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM fn_apply_apartment_dues_selective_core(
+        p_apartment_id, p_amount, p_receivable_ids, p_mode, p_confirmed_by, p_particulars,
+        'receivables', NULL
+    );
+END;
+$$;
+
+-- Owner self-reporting selective payment
+CREATE OR REPLACE FUNCTION fn_report_apartment_payment_selective(
+    p_apartment_id INT,
+    p_amount       NUMERIC,
+    p_receivable_ids INT[],
+    p_mode         VARCHAR,
+    p_reported_by  INT,
+    p_cheque_no    VARCHAR DEFAULT NULL,
+    p_trx_id       VARCHAR DEFAULT NULL
+)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_society_id INT;
+    v_receipt_id INT;
+    v_owns       BOOLEAN;
+    v_ref        VARCHAR(255);
+BEGIN
+    SELECT society_id INTO v_society_id FROM apartments WHERE id = p_apartment_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Apartment not found'; END IF;
+
+    SELECT EXISTS (
+        SELECT 1 FROM users
+        WHERE id = p_reported_by
+          AND (role = 'admin' OR is_master_admin OR linked_id = p_apartment_id)
+    ) INTO v_owns;
+    IF NOT v_owns THEN RAISE EXCEPTION 'Unauthorized: User does not own apartment %', p_apartment_id; END IF;
+
+    v_ref := 'SELECTIVE:' || array_to_string(p_receivable_ids, ',');
+
+    INSERT INTO receipts(
+        society_id, user_id, entity_id, role, receipt_date,
+        acc_id, particulars, amount, mode, cheque_no, transaction_id, status, created_by, source_reference
+    ) VALUES (
+        v_society_id, p_reported_by, p_apartment_id, 'apartment', CURRENT_DATE,
+        NULL, 'Owner Reported Payment (Selective)', p_amount, p_mode, p_cheque_no, p_trx_id, 'pending', p_reported_by, v_ref
+    ) RETURNING id INTO v_receipt_id;
+
+    RETURN v_receipt_id;
+END;
+$$;
+
+-- Admin confirmation of owner's reported selective payment
+CREATE OR REPLACE FUNCTION fn_confirm_apartment_self_payment_selective(
+    p_receipt_id   INT,
+    p_confirmed_by INT,
+    p_mode         VARCHAR DEFAULT NULL
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_receipt   receipts%ROWTYPE;
+    v_result    RECORD;
+    v_receivable_ids INT[];
+BEGIN
+    SELECT * INTO v_receipt FROM receipts
+     WHERE id = p_receipt_id AND role = 'apartment' AND status = 'pending'
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'Error: Receipt not found or not pending';
+    END IF;
+
+    IF v_receipt.source_reference NOT LIKE 'SELECTIVE:%' THEN
+        RETURN 'Error: Receipt is not a selective payment receipt';
+    END IF;
+
+    v_receivable_ids := string_to_array(substring(v_receipt.source_reference from 11), ',')::INT[];
+
+    SELECT * INTO v_result FROM fn_apply_apartment_dues_selective_core(
+        v_receipt.entity_id, v_receipt.amount, v_receivable_ids, COALESCE(p_mode, v_receipt.mode),
+        p_confirmed_by, v_receipt.particulars, 'receipts', v_receipt.id
+    );
+
+    UPDATE receipts
+       SET status = 'confirmed', confirmed_by = p_confirmed_by, confirmed_at = NOW()
+     WHERE id = p_receipt_id;
+
+    RETURN 'Success: Selective payment confirmed and posted — transaction #' || v_result.transaction_id::TEXT;
+END;
+$$;
+
 -- SECTION 5: payables ENGINE (security payroll, roster-driven)
 -- ════════════════════════════════════════════════════════════════
 
@@ -4405,6 +4660,19 @@ BEGIN
     IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found for this society', p_acc_id; END IF;
     IF v_drcr = 'Dr' THEN
         RAISE EXCEPTION 'Account % is a Dr (expense) account — use fn_save_expense for expenses', p_acc_id;
+    END IF;
+
+    -- SECURITY FIX: Verify entity_id belongs to p_society_id to prevent cross-tenant IDOR
+    IF p_entity_id IS NOT NULL THEN
+        IF p_role = 'apartment' AND NOT EXISTS (SELECT 1 FROM apartments WHERE id = p_entity_id AND society_id = p_society_id) THEN
+            RAISE EXCEPTION 'Entity ID % is not a valid apartment in society %', p_entity_id, p_society_id;
+        ELSIF p_role = 'vendor' AND NOT EXISTS (SELECT 1 FROM vendors WHERE id = p_entity_id AND society_id = p_society_id) THEN
+            RAISE EXCEPTION 'Entity ID % is not a valid vendor in society %', p_entity_id, p_society_id;
+        ELSIF p_role = 'security' AND NOT EXISTS (SELECT 1 FROM security_staff WHERE id = p_entity_id AND society_id = p_society_id) THEN
+            RAISE EXCEPTION 'Entity ID % is not valid security staff in society %', p_entity_id, p_society_id;
+        ELSIF p_role = 'assets' AND NOT EXISTS (SELECT 1 FROM assets WHERE id = p_entity_id AND society_id = p_society_id) THEN
+            RAISE EXCEPTION 'Entity ID % is not a valid asset in society %', p_entity_id, p_society_id;
+        END IF;
     END IF;
 
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin

@@ -3484,6 +3484,8 @@ def _save_entity(entity, card_id, data):
             return _save_pay_dues(db, data, sid)
         if entity == "pay_due_bg":
             return _save_pay_due_bg(db, data, sid)
+        if entity == "pay_due_selective":
+            return _save_pay_due_selective(db, data, sid)
         if entity == "verify_receivable_amt":
             return _save_verify_receivable_amt(db, data, sid)
         if entity == "reject_receivable_amt":
@@ -3935,6 +3937,65 @@ def _save_pay_due_bg(db, d, sid):
         if msg.startswith("Success"):
             return True, msg, None
         return False, msg, None
+    except Exception as e:
+        return False, f"Database error: {e}", None
+
+def _save_pay_due_selective(db, d, sid):
+    apt_id = d.get("entity_id")
+    if not apt_id: return False, "Apartment ID is required", None
+    
+    rec_ids_raw = d.get("receivable_ids", "")
+    if not rec_ids_raw: return False, "Receivable IDs are required for selective payment", None
+    
+    try:
+        rec_ids = [int(x.strip()) for x in rec_ids_raw.split(",") if x.strip()]
+        if not rec_ids: raise ValueError
+    except:
+        return False, "Invalid receivable IDs (must be comma separated integers)", None
+
+    amt = d.get("amount")
+    if not amt: return False, "Amount is required", None
+    try:
+        amt = float(amt)
+        if amt <= 0: return False, "Amount must be > 0", None
+    except:
+        return False, "Invalid amount", None
+
+    mode = d.get("mode", "cash")
+    ref = d.get("reference") or ""
+    if mode != "cash":
+        ref_bits = []
+        if d.get("cheque_no"):      ref_bits.append(f"Cheque #{d['cheque_no']}")
+        if d.get("transaction_id"): ref_bits.append(f"Txn {d['transaction_id']}")
+        if ref_bits:
+            ref = (ref + " — " if ref else "") + " / ".join(ref_bits)
+            
+    user_id = d.get("user_id")
+    try: user_id = int(user_id) if user_id else None
+    except: user_id = None
+
+    actor_role = None
+    if user_id:
+        actor_user = db._execute("SELECT role FROM users WHERE id = %s", (user_id,), fetch_one=True)
+        actor_role = actor_user["role"] if actor_user else None
+
+    if actor_role in ("admin", "master"):
+        try:
+            res = db._execute(
+                "SELECT * FROM fn_pay_apartment_dues_selective(%s, %s, %s, %s, %s, %s)",
+                (apt_id, amt, rec_ids, mode, user_id, ref), fetch_one=True
+            )
+            return True, f"Success: Selective payment posted — transaction #{res['transaction_id']}", res['transaction_id']
+        except Exception as e:
+            return False, f"Database error: {e}", None
+
+    # Owner self-reporting
+    try:
+        res = db._execute(
+            "SELECT fn_report_apartment_payment_selective(%s, %s, %s, %s, %s, %s, %s) as receipt_id",
+            (apt_id, amt, rec_ids, mode, user_id, d.get("cheque_no"), d.get("transaction_id")), fetch_one=True
+        )
+        return True, f"Success: Payment reported (pending confirmation) [[receipt:{res['receipt_id']}]]", None
     except Exception as e:
         return False, f"Database error: {e}", None
 

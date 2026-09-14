@@ -2850,14 +2850,20 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
     """
     try:
         marker = db._execute(
-            "SELECT role, acc_id FROM receipts WHERE id = %s AND status = 'pending'",
+            "SELECT role, acc_id, source_reference FROM receipts WHERE id = %s AND status = 'pending'",
             (receipt_id,), fetch_one=True,
         )
         if marker and marker.get("role") == "apartment" and marker.get("acc_id") is None:
-            r = db._execute(
-                "SELECT fn_confirm_apartment_self_payment(%s,%s,%s) as msg",
-                (receipt_id, confirmed_by, mode), fetch_one=True,
-            )
+            if marker.get("source_reference") and marker["source_reference"].startswith("SELECTIVE:"):
+                r = db._execute(
+                    "SELECT fn_confirm_apartment_self_payment_selective(%s,%s,%s) as msg",
+                    (receipt_id, confirmed_by, mode), fetch_one=True,
+                )
+            else:
+                r = db._execute(
+                    "SELECT fn_confirm_apartment_self_payment(%s,%s,%s) as msg",
+                    (receipt_id, confirmed_by, mode), fetch_one=True,
+                )
             msg = (r or {}).get("msg", "Done")
             ok = not str(msg).lower().startswith("error")
             if ok:
