@@ -4328,6 +4328,18 @@ def _save_asset(db, d, sid, is_edit, pk):
     except Exception as e:
         return False, _clean_pg_error(e), None
 
+def _safe_int(val, default=0):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+def _safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash
 
@@ -4392,35 +4404,37 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         pw = d.get("password", "")
         if not pw:
             return False, "Password is required", None
+        if len(pw) < 6:
+            return False, "Password must be at least 6 characters long", None
 
         # apartments row FIRST, then users — the reverse of vendor/security
         # below. flat_number is the natural key here (not email), and if
         # the users insert then fails we roll back the apartments row so
         # the flat slot is freed for retry. Mirrors _bulk_insert_apartments'
         # documented reasoning in bulk_enroll_callbacks.py.
-        r = db._execute(
-            "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-            "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
-            (sid, flat, d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
-             d.get("alt_mobile"), d.get("alt_address"),
-             d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
-            fetch_one=True,
-        )
-        apt_id = r["id"] if r else None
-        if not apt_id:
-            return False, "Apartment insert failed", None
-
         try:
-            db._execute(
-                "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
-                "VALUES(%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
-                (sid, email, generate_password_hash(pw), apt_id, d.get("user_id")),
-                fetch_one=True,
-            )
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
+                    "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active,created_by) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                    (sid, flat, d.get("owner_name"), d.get("mobile"), _safe_int(d.get("apartment_size")),
+                     d.get("alt_mobile"), d.get("alt_address"),
+                     d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
+                )
+                r = cur.fetchone()
+                apt_id = r["id"] if r else None
+                if not apt_id:
+                    raise Exception("Apartment insert failed")
+
+                cur.execute(
+                    "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
+                    "VALUES(%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                    (sid, email, generate_password_hash(pw), apt_id, d.get("user_id")),
+                )
         except Exception as e:
-            db._execute("DELETE FROM apartments WHERE id=%s AND society_id=%s", (apt_id, sid))
-            return False, f"User account creation failed (apartment rolled back): {_clean_pg_error(e)}", None
+            return False, f"User account creation failed (rolled back): {_clean_pg_error(e)}", None
 
         _move_temp_images("apartment", apt_id, sid, d)
         return True, f"Apartment '{flat}' created", apt_id
@@ -4459,7 +4473,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 "updated_by=%s "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (d.get("name"), d.get("mobile"), d.get("shift"),
-                 d.get("salary_per_shift"), d.get("joining_date"), sec_active,
+                 _safe_float(d.get("salary_per_shift")), d.get("joining_date"), sec_active,
                  d.get("photo"), d.get("id_proof"), d.get("user_id"), pk, sid),
             )
         else:
@@ -4495,48 +4509,52 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required", None
+    if len(pw) < 6:
+        return False, "Password must be at least 6 characters long", None
     if role == "vendor" and not (d.get("business_name") or "").strip():
         return False, "Business Name is required", None
 
-    # domain row FIRST, then users — same reasoning as apartment above: if
-    # the users insert then fails (e.g. duplicate email), roll back the
-    # vendor/security_staff row rather than leaving an orphan with no login.
-    if role == "security":
-        dr = db._execute(
-            "INSERT INTO security_staff(society_id,name,mobile,shift,salary_per_shift,joining_date,photo,id_proof,active,created_by) "
-            "VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
-            (sid, d.get("name"), d.get("mobile"), d.get("shift"),
-             d.get("salary_per_shift"),
-             d.get("photo"), d.get("id_proof"), d.get("user_id")), fetch_one=True,
-        )
-    else:
-        pan = (d.get("pan_number") or "").strip().upper()
-        gstin = (d.get("gstin") or "").strip().upper()
-        if pan and not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]$', pan):
-            return False, "Invalid PAN format (expected: ABCDE1234F)", None
-        if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
-            return False, "Invalid GSTIN format (expected: 15 alphanumeric characters)", None
-        dr = db._execute(
-            "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,service_description,photo,logo,license,active,created_by,pan_number,gstin) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
-            (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
-             d.get("service_description"),
-             d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"),
-             pan or None, gstin or None), fetch_one=True,
-        )
-    domain_id = dr["id"] if dr else None
-    if not domain_id:
-        return False, f"{role.title()} insert failed", None
-
     try:
-        db._execute(
-            "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
-            "VALUES(%s,%s,%s,%s,'password',%s,%s) RETURNING id",
-            (sid, email, generate_password_hash(pw), role, domain_id, d.get("user_id")),
-            fetch_one=True,
-        )
+        with db._conn() as conn:
+            cur = conn.cursor()
+            if role == "security":
+                cur.execute(
+                    "INSERT INTO security_staff(society_id,name,mobile,shift,salary_per_shift,joining_date,photo,id_proof,active,created_by) "
+                    "VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
+                    (sid, d.get("name"), d.get("mobile"), d.get("shift"),
+                     _safe_float(d.get("salary_per_shift")),
+                     d.get("photo"), d.get("id_proof"), d.get("user_id"))
+                )
+                dr = cur.fetchone()
+            else:
+                pan = (d.get("pan_number") or "").strip().upper()
+                gstin = (d.get("gstin") or "").strip().upper()
+                if pan and not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]$', pan):
+                    raise ValueError("Invalid PAN format (expected: ABCDE1234F)")
+                if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
+                    raise ValueError("Invalid GSTIN format (expected: 15 alphanumeric characters)")
+                cur.execute(
+                    "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,service_description,photo,logo,license,active,created_by,pan_number,gstin) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
+                    (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
+                     d.get("service_description"),
+                     d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"),
+                     pan or None, gstin or None)
+                )
+                dr = cur.fetchone()
+
+            domain_id = dr["id"] if dr else None
+            if not domain_id:
+                raise Exception(f"{role.title()} insert failed")
+
+            cur.execute(
+                "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
+                "VALUES(%s,%s,%s,%s,'password',%s,%s) RETURNING id",
+                (sid, email, generate_password_hash(pw), role, domain_id, d.get("user_id"))
+            )
+    except ValueError as ve:
+        return False, str(ve), None
     except Exception as e:
-        db._execute(f"DELETE FROM {domain_table} WHERE id=%s AND society_id=%s", (domain_id, sid))
         return False, f"User account creation failed ({role} rolled back): {_clean_pg_error(e)}", None
 
     _move_temp_images(role, domain_id, sid, d)

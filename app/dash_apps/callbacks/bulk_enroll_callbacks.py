@@ -284,54 +284,45 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         email    = row["email"].strip().lower()
         password = row["password"].strip()
 
-        # ── 1. Insert apartment row ──────────────────────────────────────────
-        try:
-            apt_r = db._execute(
-                "INSERT INTO apartments"
-                "(society_id, flat_number, owner_name, mobile, apartment_size, "
-                "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
-                (
-                    sid,
-                    flat,
-                    row.get("owner_name") or None,
-                    row.get("mobile")     or None,
-                    _safe_int(row.get("apartment_size")),
-                    row.get("alt_mobile") or None,
-                    row.get("alt_address") or None,
-                    row.get("owner_photo") or None,
-                    row.get("id_proof") or None,
-                    row.get("apt_calc_start_date") or None,
-                    user_id,
-                ),
-                fetch_one=True,
-            )
-            apt_id = apt_r["id"]
-        except Exception as e:
-            failed.append((i, f"Apartment insert failed: {e}"))
+        if len(password) < 6:
+            failed.append((i, "Password must be at least 6 characters long"))
             continue
 
-        # ── 2. Insert users row ──────────────────────────────────────────────
         try:
-            usr_r = db._execute(
-                "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
-                (sid, email, generate_password_hash(password), apt_id, user_id),
-                fetch_one=True,
-            )
-            # linked_id was already set in the INSERT above; log the user id.
-            _ = usr_r["id"]
-        except Exception as e:
-            # Roll back the apartment row so the flat slot is freed.
-            try:
-                db._execute(
-                    "DELETE FROM apartments WHERE id=%s AND society_id=%s",
-                    (apt_id, sid),
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO apartments"
+                    "(society_id, flat_number, owner_name, mobile, apartment_size, "
+                    "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active, created_by) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                    (
+                        sid,
+                        flat,
+                        row.get("owner_name") or None,
+                        row.get("mobile")     or None,
+                        _safe_int(row.get("apartment_size")),
+                        row.get("alt_mobile") or None,
+                        row.get("alt_address") or None,
+                        row.get("owner_photo") or None,
+                        row.get("id_proof") or None,
+                        row.get("apt_calc_start_date") or None,
+                        user_id,
+                    ),
                 )
-            except Exception:
-                pass
-            failed.append((i, f"User account creation failed (apartment row rolled back): {e}"))
+                apt_r = cur.fetchone()
+                apt_id = apt_r["id"] if apt_r else None
+                if not apt_id:
+                    raise Exception("Apartment insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                    (sid, email, generate_password_hash(password), apt_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, f"Insert failed (rolled back): {e}"))
             continue
 
         success += 1
@@ -364,51 +355,46 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
         name     = row["name"].strip()
         biz_name = (row.get("business_name") or name or email).strip()
 
-        # ── 1. vendors row ───────────────────────────────────────────────────
-        try:
-            ven_r = db._execute(
-                "INSERT INTO vendors"
-                "(society_id, business_name, name, service_type, mobile, service_description, "
-                "photo, logo, license, active, created_by, pan_number, gstin) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
-                (
-                    sid,
-                    biz_name,
-                    name,
-                    row.get("service_type") or None,
-                    row.get("mobile")       or None,
-                    row.get("service_description") or None,
-                    row.get("photo") or None,
-                    row.get("logo") or None,
-                    row.get("license") or None,
-                    user_id,
-                    row.get("pan_number") or None,
-                    row.get("gstin") or None,
-                ),
-                fetch_one=True,
-            )
-            ven_id = ven_r["id"]
-        except Exception as e:
-            failed.append((i, f"Vendor record insert failed: {e}"))
+        if len(password) < 6:
+            failed.append((i, "Password must be at least 6 characters long"))
             continue
 
-        # ── 2. users row (linked_id set inline) ────────────────────────────────
         try:
-            db._execute(
-                "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                "VALUES (%s,%s,%s,'vendor','password',%s,%s)",
-                (sid, email, generate_password_hash(password), ven_id, user_id),
-            )
-        except Exception as e:
-            try:
-                db._execute(
-                    "DELETE FROM vendors WHERE id=%s AND society_id=%s",
-                    (ven_id, sid),
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO vendors"
+                    "(society_id, business_name, name, service_type, mobile, service_description, "
+                    "photo, logo, license, active, created_by, pan_number, gstin) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
+                    (
+                        sid,
+                        biz_name,
+                        name,
+                        row.get("service_type") or None,
+                        row.get("mobile")       or None,
+                        row.get("service_description") or None,
+                        row.get("photo") or None,
+                        row.get("logo") or None,
+                        row.get("license") or None,
+                        user_id,
+                        row.get("pan_number") or None,
+                        row.get("gstin") or None,
+                    ),
                 )
-            except Exception:
-                pass
-            failed.append((i, f"User account creation failed (vendor rolled back): {e}"))
+                ven_r = cur.fetchone()
+                ven_id = ven_r["id"] if ven_r else None
+                if not ven_id:
+                    raise Exception("Vendor record insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'vendor','password',%s,%s)",
+                    (sid, email, generate_password_hash(password), ven_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, f"Insert failed (rolled back): {e}"))
             continue
 
         success += 1
@@ -438,46 +424,41 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
         password = row["password"].strip()
         name     = row["name"].strip()
 
-        # ── 1. security_staff row ────────────────────────────────────────────
-        try:
-            sec_r = db._execute(
-                "INSERT INTO security_staff"
-                "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
-                (
-                    sid,
-                    name,
-                    row.get("mobile")            or None,
-                    row.get("shift")             or None,
-                    _safe_float(row.get("salary_per_shift")),
-                    row.get("photo") or None,
-                    row.get("id_proof") or None,
-                    user_id,
-                ),
-                fetch_one=True,
-            )
-            sec_id = sec_r["id"]
-        except Exception as e:
-            failed.append((i, f"Security staff record insert failed: {e}"))
+        if len(password) < 6:
+            failed.append((i, "Password must be at least 6 characters long"))
             continue
 
-        # ── 2. users row (linked_id set inline) ────────────────────────────────
         try:
-            db._execute(
-                "INSERT INTO users"
-                "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                "VALUES (%s,%s,%s,'security','password',%s,%s)",
-                (sid, email, generate_password_hash(password), sec_id, user_id),
-            )
-        except Exception as e:
-            try:
-                db._execute(
-                    "DELETE FROM security_staff WHERE id=%s AND society_id=%s",
-                    (sec_id, sid),
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO security_staff"
+                    "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active, created_by) "
+                    "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
+                    (
+                        sid,
+                        name,
+                        row.get("mobile")            or None,
+                        row.get("shift")             or None,
+                        _safe_float(row.get("salary_per_shift")),
+                        row.get("photo") or None,
+                        row.get("id_proof") or None,
+                        user_id,
+                    ),
                 )
-            except Exception:
-                pass
-            failed.append((i, f"User account creation failed (security staff rolled back): {e}"))
+                sec_r = cur.fetchone()
+                sec_id = sec_r["id"] if sec_r else None
+                if not sec_id:
+                    raise Exception("Security staff record insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'security','password',%s,%s)",
+                    (sid, email, generate_password_hash(password), sec_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, f"Insert failed (rolled back): {e}"))
             continue
 
         success += 1
@@ -504,21 +485,27 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
         if user_type not in ("owner", "family", "tenant", "visitor"):
             user_type = "family"
 
+        if len(password) < 6:
+            failed.append((i, "Password must be at least 6 characters long"))
+            continue
+
         try:
-            apt_r = db._execute(
-                "SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s",
-                (sid, flat), fetch_one=True
-            )
-            if not apt_r:
-                failed.append((i, f"Apartment '{flat}' not found"))
-                continue
-            apt_id = apt_r["id"]
-            
-            db._execute(
-                "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type, created_by) "
-                "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s,%s)",
-                (sid, email, generate_password_hash(password), apt_id, name, user_type, user_id),
-            )
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s",
+                    (sid, flat)
+                )
+                apt_r = cur.fetchone()
+                if not apt_r:
+                    raise Exception(f"Apartment '{flat}' not found")
+                apt_id = apt_r["id"]
+                
+                cur.execute(
+                    "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type, created_by) "
+                    "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s,%s)",
+                    (sid, email, generate_password_hash(password), apt_id, name, user_type, user_id),
+                )
             success += 1
         except Exception as e:
             failed.append((i, f"Insert failed: {e}"))
