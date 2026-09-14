@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 
 from flask import Flask, jsonify, request
-from flask_login import LoginManager
+from flask_login import LoginManager, login_required
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
@@ -161,8 +161,10 @@ def create_app(config_name: str | None = None) -> Flask:
         return send_from_directory(str(assets_path), filename)
 
     @app.route("/print_doc/<doc_type>")
+    @login_required
     def print_doc(doc_type):
         import os
+        import markdown
         base_dir = Path(__file__).parent.parent
         if doc_type == "readme":
             file_path = base_dir / "README.md"
@@ -178,9 +180,9 @@ def create_app(config_name: str | None = None) -> Flask:
             with open(file_path, "r") as f:
                 content = f.read()
                 
-        # Simple HTML wrapper for printing
-        import html
-        escaped_content = html.escape(content)
+        # Parse Markdown to HTML
+        html_content = markdown.markdown(content)
+        
         html_page = f"""
         <!DOCTYPE html>
         <html>
@@ -196,8 +198,9 @@ def create_app(config_name: str | None = None) -> Flask:
         </head>
         <body onload="window.print()">
             <button class="no-print" onclick="window.print()" style="padding: 10px; margin-bottom: 20px; cursor: pointer;">Print</button>
-            <pre>{escaped_content}</pre>
+            <div>{html_content}</div>
         </body>
+
         </html>
         """
         return html_page

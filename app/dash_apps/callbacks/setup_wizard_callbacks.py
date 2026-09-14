@@ -224,6 +224,7 @@ def register_setup_wizard_callbacks(app):
         State({"type": "sw-bf-amt", "acc_id": ALL}, "id"),
         State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
         State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
+        State("sw-tds-effective-date", "date"),
         State("auth-store", "data"),
         prevent_initial_call=True
     )
@@ -237,7 +238,7 @@ def register_setup_wizard_callbacks(app):
                             c_sink, c_repair, c_gst_exempt, c_charges_int, c_gst_cad, c_gst_reg, c_tds_act, c_exp_fmt,
                             apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair, apt_interest,
                             ven_1day, ven_7day, ven_1mth,
-                            bf_fy, bf_ids, bf_amts, bf_remarks, auth):
+                            bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date, auth):
         triggered = ctx.triggered_id
         _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
 
@@ -261,6 +262,15 @@ def register_setup_wizard_callbacks(app):
             # touch is_open / sw-error-msg.
             if not auth or not auth.get("society_id"):
                 return True, no_update, no_update, no_update, no_update, "Session error — please log in again.", no_update, no_update
+
+            import time
+            if not hasattr(app, "_setup_rate_limits"):
+                app._setup_rate_limits = {}
+            uid = auth.get("user_id")
+            now = time.time()
+            if uid in app._setup_rate_limits and now - app._setup_rate_limits[uid] < 5:
+                return True, no_update, no_update, no_update, no_update, "Please wait before submitting again.", no_update, no_update
+            app._setup_rate_limits[uid] = now
 
             if i_agree != 'I AGREE':
                 return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", no_update, no_update
@@ -366,7 +376,7 @@ def register_setup_wizard_callbacks(app):
                         :ven_1, :ven_7, :ven_30,
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
-                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date
                     ) AS result""",
                     {
                         "sid": society_id,
@@ -402,7 +412,8 @@ def register_setup_wizard_callbacks(app):
                         "c_gst_cad": c_gst_cad,
                         "c_gst_reg": c_gst_reg,
                         "c_tds_act": c_tds_act,
-                        "c_exp_fmt": c_exp_fmt
+                        "c_exp_fmt": c_exp_fmt,
+                        "tds_effective_date": tds_effective_date or '2024-04-01'
                     },
                     fetch_one=True,
                 )

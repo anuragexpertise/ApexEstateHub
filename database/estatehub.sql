@@ -9158,7 +9158,8 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_gst_registered    BOOLEAN DEFAULT FALSE,
     p_tds_no_pan        VARCHAR(10) DEFAULT 'warn',
     p_export_fmt        VARCHAR(20) DEFAULT 'structured',
-    p_gate_logic        VARCHAR(10) DEFAULT 'both'
+    p_gate_logic        VARCHAR(10) DEFAULT 'both',
+    p_tds_effective_date DATE DEFAULT '2024-04-01'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -9215,7 +9216,7 @@ BEGIN
                 (v_item->>'rate_no_pan')::NUMERIC,
                 (v_item->>'single_bill_threshold')::NUMERIC,
                 (v_item->>'annual_aggregate_threshold')::NUMERIC,
-                '2024-04-01'
+                p_tds_effective_date
             )
             ON CONFLICT (society_id, section, effective_from)
             DO UPDATE SET 

@@ -246,6 +246,12 @@ def render_category_content(category, society_id=None):
             _render_banner("TAN & TDS Rates", "Configure TAN and TDS Section rates. Values are pre-filled with standards."),
             dbc.Label("TAN Number"),
             dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN...", value=s_tan, className="mb-4"),
+            dbc.Label("TDS Effective Date"),
+            html.Div(dcc.DatePickerSingle(
+                id="sw-tds-effective-date",
+                date="2024-04-01",
+                display_format="YYYY-MM-DD"
+            ), className="mb-4"),
             html.Hr(),
             html.H6("TDS Rates", className="text-primary mb-3")
         ]
