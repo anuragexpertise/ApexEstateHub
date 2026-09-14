@@ -112,6 +112,7 @@ _QR_VERSIONED_ROLES = {
     "EXP": "expenses",
     "AST": "assets",
     "NOC": "nocs",
+    "EVT": "event_ticket_items",
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
@@ -421,10 +422,12 @@ def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user
     try:
         item = db._execute("""
             SELECT eti.*, et.booking_reference, et.event_id,
-                   e.title as event_title, e.event_date, e.venue
+                   e.title as event_title, e.event_date, e.venue,
+                   r.status as receipt_status
               FROM event_ticket_items eti
               JOIN event_tickets et ON et.id = eti.event_ticket_id
               JOIN events e ON e.id = et.event_id
+              LEFT JOIN receipts r ON r.id = et.receipt_id
              WHERE eti.id = %s AND eti.society_id = %s
         """, (ticket_item_id, society_id), fetch_one=True)
 
@@ -439,6 +442,9 @@ def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user
             }
         if item["status"] == "cancelled":
             return {"status": "FAIL", "reason": "Ticket has been cancelled", "gate_action": "deny"}
+        
+        if item["status"] == "pending" or item.get("receipt_status") == "pending":
+            return {"status": "FAIL", "reason": "Ticket payment is pending confirmation", "gate_action": "deny"}
 
         # Mark ticket item as USED
         db._execute("""
