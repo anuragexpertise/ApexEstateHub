@@ -79,6 +79,10 @@ def _make_nav_items(role, society_id, pathname, user_type=None):
                 # Hide concerns
                 if "owner-concerns" in href:
                     continue
+            if user_type != "owner":
+                # Hide polls
+                if "owner-polls" in href:
+                    continue
 
         label     = tab["label"]
         is_active = bool(pathname and href.rstrip("/") in pathname)

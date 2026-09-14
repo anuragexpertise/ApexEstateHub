@@ -2463,13 +2463,20 @@ def render_form_card(card_id: str, title: str, icon: str,
                 elif caller_type == "visitor":
                     opts = []
                     
-            ctrl = dcc.Dropdown(
-                id={"type": "form-field", "entity": entity, "field": fid},
-                options=opts, value=pre_val,
-                placeholder=f"Select {f['label']}…",
-                clearable=not required,
-                style={"fontSize": "13px"},
-            )
+            if entity == "polls" and fid == "open_to":
+                ctrl = dbc.RadioItems(
+                    id={"type": "form-field", "entity": entity, "field": fid},
+                    options=opts, value=pre_val or "no_dues",
+                    inline=True, style={"fontSize": "13px", "marginTop": "8px"}
+                )
+            else:
+                ctrl = dcc.Dropdown(
+                    id={"type": "form-field", "entity": entity, "field": fid},
+                    options=opts, value=pre_val,
+                    placeholder=f"Select {f['label']}…",
+                    clearable=not required,
+                    style={"fontSize": "13px"},
+                )
         elif ftype == "textarea":
             ctrl = dbc.Textarea(
                 id={"type": "form-field", "entity": entity, "field": fid},
