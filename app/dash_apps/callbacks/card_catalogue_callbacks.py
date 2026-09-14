@@ -129,6 +129,7 @@ SCOPED_CARD_IDS = {
         "kpi_security_shift_count", "kpi_security_salary_due",
         "kpi_receipts_month", "kpi_gate_logs", "kpi_concerns_open",
         "kpi_concerns_assigned", "kpi_concerns_resolved",
+        "kpi_ptl_to_scan",
     },
 }
 

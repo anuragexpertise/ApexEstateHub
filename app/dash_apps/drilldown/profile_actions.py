@@ -267,8 +267,15 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
 
-    # ── payables  (read-only tab — Verify is the only action) ───────────────
     "payables": [
+        {
+            "label": "Edit",
+            "action_id": "edit",
+            "target_card": "form_payables",
+            "icon": "fa-edit",
+            "color": "primary",
+            "roles": ["admin"],
+        },
         {
             "label": "Verify",
             "action_id": "verify_payment",
