@@ -36,6 +36,7 @@ PK_MAP: dict = {
     "receivables": "id",
     "payables": "id",
     "assets": "id",
+    "active_assets": "id",
     "security_roster": "id",
     "ledger": "row_date",
     "channels": "id",
@@ -72,8 +73,9 @@ ENTITY_MAP: dict = {
     "ven_charges": "ven_charge",
     "attendance": "attendance_entry",
     "receivables": "receivable",
-    "payables": "payment",
+    "payables": "payable",
     "assets": "asset",
+    "active_assets": "asset",
     "security_roster": "security_roster",
     "ledger": "ledger",
     "channels": "channel",
@@ -392,8 +394,8 @@ DRILLDOWN_MAP: dict = {
     "kpi_ledger_open": {"target": "list_ledger_index", "label": "Ledger Index"},
     # NOTE: "kpi_assets_total" doesn't exist in KPI_CARDS — the real card id
     # is "kpi_assets_count" (titled "Active Assets" in card_catalogue.py).
-    "kpi_assets_count": {"target": "list_assets", "label": "All Assets"},
-    "kpi_assets_value": {"target": "list_assets", "label": "All Assets"},
+    "kpi_assets_count": {"target": "list_active_assets", "label": "Active Assets"},
+    "kpi_assets_value": {"target": "list_active_assets", "label": "Active Assets"},
     "kpi_apt_charges_count": {
         "target": "list_apt_charges",
         "label": "Apartment Charges Rules",
@@ -457,6 +459,7 @@ DRILLDOWN_MAP: dict = {
     "list_ledger": {"target": "profile_account", "label": "Account Ledger"},
     "list_ledger_index": {"target": "profile_account", "label": "Account Profile"},
     "list_assets": {"target": "profile_asset", "label": "Asset Details"},
+    "list_active_assets": {"target": "profile_asset", "label": "Asset Details"},
     "list_apt_charges": {
         "target": "profile_apt_charge",
         "label": "Apartment Charge Details",

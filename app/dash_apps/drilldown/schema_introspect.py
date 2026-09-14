@@ -30,6 +30,7 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "receivables":  "receivables",
     "payables":     "payables",
     "assets":       "assets",
+    "active_assets": "assets",
     "societies":    "societies",
     # master_societies is a distinct list entity (Master dashboard's plan-
     # breakdown KPIs), backed by a joined query with an extra
@@ -214,7 +215,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "GSTIN",         "field": "gstin",         "icon": "fa-id-card"},
     ],
     "security": [
-        {"label": "Shifts Completed", "field": "shift_count",  "icon": "fa-clock", "format": "shift_count"},
+        {"label": "Shifts till date", "field": "shift_count",  "icon": "fa-clock", "format": "shift_count"},
         {"label": "Shift Count", "field": "shifts_this_month", "icon": "fa-calendar-check", "format": "number"},
         {"label": "Duty Status",      "field": "gate_pass",    "icon": "fa-shield-alt", "format": "duty_status"},
         {"label": "Salary Due",       "field": "salary_due",   "icon": "fa-rupee-sign"},
@@ -235,6 +236,9 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Book Value",       "field": "book_value",   "icon": "fa-coins"},
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
     ],
+    "gate_logs": [
+        {"label": "Scanned-by",       "field": "scanned_by",   "icon": "fa-user-check"},
+    ],
     "visitors": [
         {"label": "Flat",           "field": "flat_number", "icon": "fa-home"},
         {"label": "Owner",          "field": "owner_name",  "icon": "fa-user"},
@@ -243,9 +247,16 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Event",        "field": "event_title",   "icon": "fa-calendar-alt"},
         {"label": "Booking Ref",  "field": "booking_reference", "icon": "fa-ticket-alt"},
     ],
+}
 
+_HIDDEN_ON_LIST: dict[str, set[str]] = {
+    "active_assets": {
+        "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
+        "itc_claimed", "gst_disposal_liability"
+    }
+}
 
-    # NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
+# NOTE: apartment_id's human alias ("Apartment" -> flat_number) is
     # already resolved generically via _FK_HUMAN_ALIASES / _FK_LABEL_OVERRIDES
     # below, same as every other apartment_id FK column — no separate entry
     # needed here.
@@ -770,6 +781,7 @@ def build_entity_meta() -> dict:
             if (
                 not is_system
                 and ftype not in ("image_upload",)
+                and name not in _HIDDEN_ON_LIST.get(ekey, set())
             ):
                 list_columns.append({
                     "name": label,

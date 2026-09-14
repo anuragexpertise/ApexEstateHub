@@ -5394,7 +5394,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
     f = dict(filters)
     if role == "admin":
         adm_user_id = get_current_user_id()
-        if adm_user_id:
+        if adm_user_id and filters.get("assigned_status"):
             f["adm_assignee_id"] = adm_user_id
     if role == "apartment":
         apt_id = get_current_linked_id()

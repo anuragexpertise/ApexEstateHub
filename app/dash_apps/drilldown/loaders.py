@@ -1018,7 +1018,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
                 tuple(base_params + [page_size, offset]))
 
     # ── ASSETS ──────────────────────────────────────────────────────────
-    if entity == "assets":
+    if entity in ("assets", "active_assets"):
         disposed = filters.get("disposed", False)
         return ("SELECT * FROM fn_asset_list(%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, disposed, page_size, offset))
@@ -1703,7 +1703,7 @@ def load_list(
             return rows, int((cnt or {}).get("n", len(rows)))
 
         # ── ASSETS (admin CRUD + view elsewhere) ─────────────────────────
-        if entity == "assets":
+        if entity in ("assets", "active_assets"):
             disposed = filters.get("disposed", False)
             rows = db._execute(
                 "SELECT * FROM fn_asset_list(%s,%s,%s) LIMIT %s OFFSET %s",
