@@ -366,6 +366,16 @@ def register_customize_callbacks(app):
     def integrate_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
         if not n_clicks or not (sql_text or "").strip():
             return no_update
+        if not auth_data or auth_data.get("role") != "master":
+            return dbc.Alert("Unauthorized: Master role required.", color="danger", className="mt-2", style={"fontSize": "12px"})
+            
+        sql_upper = sql_text.upper()
+        if "DELETE " in sql_upper or "DROP " in sql_upper:
+            if "-- DELETE THIS SOCIETY" not in sql_upper:
+                return dbc.Alert(
+                    "Destructive query detected. Append '-- DELETE THIS SOCIETY' to confirm.",
+                    color="danger", className="mt-2 py-2", style={"fontSize": "12px"}
+                )
         import time
 
         from database.db_manager import db
