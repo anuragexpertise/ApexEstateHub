@@ -909,7 +909,7 @@ def register_qr_callbacks(app):
                             # was previously user_id (the scanned person's own id),
                             # which made the audit trail unable to answer "which
                             # guard let this person in".
-                            (society_id, role_code, user_id, scanning_user_id),
+                            (society_id, role_code, user.get("linked_id") if role_code in ["APT", "VND", "SEC"] else user_id, scanning_user_id),
                         )
                     except Exception as e:
                         print(f"Gate log error: {e}")

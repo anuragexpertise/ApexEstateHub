@@ -879,7 +879,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_eid   = eid or apt_id or ven_id or sec_id
         p_etype = (
             "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
-        ) if not eid else None
+        ) if not eid else filters.get("entity_role")
         sec_uid = filters.get("user_id") if filters.get("security_id") else None
         date_from = filters.get("date_from")
         date_to   = filters.get("date_to")
@@ -933,10 +933,8 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     if entity == "expenses":
         p_eid   = eid or ven_id or sec_id or apt_id
         p_etype = (
-            "vendor" if ven_id and not eid else
-            "security" if sec_id and not eid else
-            "apartment" if apt_id and not eid else None
-        )
+            "vendor" if ven_id else "security" if sec_id else "apartment" if apt_id else None
+        ) if not eid else filters.get("entity_role")
         return ("SELECT * FROM fn_expenses_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_eid, p_etype, page_size, offset))
 
@@ -945,7 +943,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_eid   = eid or apt_id or ven_id or sec_id
         p_etype = (
             "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
-        ) if not eid else None
+        ) if not eid else filters.get("entity_role")
         fy = filters.get("financial_year", _current_fy())
         fy_start, fy_end = _fy_date_range(fy)
         # Fixed (2026-08): this called fn_cashbook_paired_v2, which no
@@ -978,7 +976,7 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         p_eid    = eid or apt_id or ven_id or sec_id
         p_etype  = (
             "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
-        ) if not eid else None
+        ) if not eid else filters.get("entity_role")
         date_from = filters.get("date_from")
         date_to   = filters.get("date_to")
         base_params = [sid, s, p_status, p_eid, p_etype]
@@ -1582,10 +1580,8 @@ def load_list(
         if entity == "expenses":
             p_eid   = eid or ven_id or sec_id or apt_id
             p_etype = (
-                "vendor" if ven_id and not eid else
-                "security" if sec_id and not eid else
-                "apartment" if apt_id and not eid else None
-            )
+                "vendor" if ven_id else "security" if sec_id else "apartment" if apt_id else None
+            ) if not eid else filters.get("entity_role")
             rows = db._execute(
                 "SELECT * FROM fn_expenses_list(%s,%s,%s,%s) LIMIT %s OFFSET %s",
                 (sid, s, p_eid, p_etype, page_size, offset), fetch_all=True,
@@ -1601,7 +1597,7 @@ def load_list(
             p_eid   = eid or apt_id or ven_id or sec_id
             p_etype = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
-            ) if not eid else None
+            ) if not eid else filters.get("entity_role")
             fy = filters.get("financial_year", _current_fy())
             fy_start, fy_end = _fy_date_range(fy)
 
@@ -1661,7 +1657,7 @@ def load_list(
             p_eid    = eid or apt_id or ven_id or sec_id
             p_etype  = (
                 "apartment" if apt_id else "vendor" if ven_id else "security" if sec_id else None
-            ) if not eid else None
+            ) if not eid else filters.get("entity_role")
             date_from = filters.get("date_from")
             date_to   = filters.get("date_to")
             rows = db._execute(
