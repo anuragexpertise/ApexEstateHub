@@ -189,90 +189,48 @@ def register_poll_callbacks(app):
         prevent_initial_call=True,
     )
 
-    # ── Poll List Print ──────────────────────────────────────────────────
+    # ── Poll Profile Print/PDF/Email ──────────────────────────────────────
     from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, LETTERHEAD_JS, clientside_iife
     from dash import clientside_callback
-    import datetime
-
-    @app.callback(
-        Output("poll-print-data", "data"),
-        Input("poll-btn-print", "n_clicks"),
-        State("auth-store", "data"),
-        prevent_initial_call=True,
-    )
-    def fetch_polls_for_print(n_clicks, auth_data):
-        if not n_clicks:
-            return no_update
-        user_id, society_id = _get_user_from_auth(auth_data)
-        if not society_id:
-            return no_update
-        try:
-            society = db._execute("SELECT * FROM societies WHERE id = %s", (society_id,), fetch_one=True)
-            lh = get_letterhead_assets(society, society_id) if society else {}
-        except Exception as e:
-            logger.error(f"Error fetching letterhead: {e}")
-            lh = {}
-        
-        try:
-            polls = db._execute("SELECT id, title, status, ends_at, total_votes FROM fn_polls_list(%s, NULL, NULL)", (society_id,), fetch_all=True)
-            polls = polls or []
-        except Exception as e:
-            logger.error(f"Error fetching polls for print: {e}")
-            polls = []
-            
-        html_str = """
-        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-            <thead>
-                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #ddd;">
-                    <th style="padding: 10px; text-align: left;">ID</th>
-                    <th style="padding: 10px; text-align: left;">Title</th>
-                    <th style="padding: 10px; text-align: left;">Status</th>
-                    <th style="padding: 10px; text-align: left;">Total Votes</th>
-                    <th style="padding: 10px; text-align: left;">Ends At</th>
-                </tr>
-            </thead>
-            <tbody>
+    
+    def _poll_to_html_js() -> str:
+        return """
+        function pollHtml(d) {
+            var res = '<h3 style="text-align:center;margin:10px 0 6px">Poll: ' + d.title + '</h3>' +
+                      '<div style="text-align:center;font-size:11px;color:#999;margin-bottom:18px">' +
+                      'Status: ' + (d.status || 'active').toUpperCase() + '</div>';
+            if (d.description) {
+                res += '<p style="font-size:12px;color:#555;margin-bottom:15px">' + d.description + '</p>';
+            }
+            res += '<table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:20px">';
+            if (d.choices && d.vote_counts) {
+                for (var i = 0; i < d.choices.length; i++) {
+                    var ch = d.choices[i];
+                    var cnt = d.vote_counts['choice_' + (i + 1)] || 0;
+                    var pct = d.total_votes > 0 ? (cnt / d.total_votes * 100).toFixed(1) : 0;
+                    res += '<tr><td style="padding:6px 0;color:#777;width:60%">' + ch + '</td>' +
+                           '<td style="padding:6px 0;font-weight:600;text-align:right">' + cnt + ' votes (' + pct + '%)</td></tr>';
+                }
+            }
+            res += '</table><div style="font-size:12px;color:#888;text-align:right">Total Votes: ' + (d.total_votes || 0) + '</div>';
+            return res;
+        }
         """
-        for p in polls:
-            ends_at_str = p.get('ends_at') or 'No End Time'
-            if isinstance(ends_at_str, datetime.datetime):
-                ends_at_str = ends_at_str.strftime('%d/%m/%Y %H:%M')
-            elif isinstance(ends_at_str, str):
-                try:
-                    _dt_obj = datetime.datetime.fromisoformat(ends_at_str.replace('Z', '+00:00'))
-                    ends_at_str = _dt_obj.strftime('%d/%m/%Y %H:%M')
-                except Exception:
-                    ends_at_str = ends_at_str[:16]
-            status = p.get('status', '').replace('_', ' ').title()
-            html_str += f"""
-                <tr style="border-bottom: 1px solid #ddd;">
-                    <td style="padding: 10px;">{p['id']}</td>
-                    <td style="padding: 10px;">{p['title']}</td>
-                    <td style="padding: 10px;">{status}</td>
-                    <td style="padding: 10px;">{p.get('total_votes', 0)}</td>
-                    <td style="padding: 10px;">{ends_at_str}</td>
-                </tr>
-            """
-        html_str += "</tbody></table>"
-        
-        return {"lh": lh, "polls_html": html_str}
 
     _POLL_PRINT_JS = clientside_iife(
-        LETTERHEAD_JS + r"""
-    function printPollList(data) {
-        if (!data || !data.lh || !data.polls_html) return window.dash_clientside.no_update;
-        var lh = data.lh;
+        LETTERHEAD_JS + _poll_to_html_js() + r"""
+    function printPoll(n_clicks, d) {
+        if (!n_clicks || !d) return window.dash_clientside.no_update;
         var w = window.open('', '_blank');
-        if (!w) { alert('Pop-up blocked.'); return window.dash_clientside.no_update; }
-        
+        if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
         var doc = buildLetterheadDoc({
-            title: 'Community Polls',
-            societyName: lh.society_name, societyAddress: lh.society_address,
-            logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
-            signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
-            qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
-            bodyHtml: '<div style="font-family:Georgia,serif;font-size:11pt;line-height:1.6">' + data.polls_html + '</div>',
-            printWidth: '700px',
+            title: d.title + ' — Poll Record',
+            societyName: d.society_name, societyAddress: d.society_address,
+            logoUrl: d.logo_url, backgroundUrl: d.background_url,
+            signatureUrl: d.signature_url, secretaryName: d.secretary_name,
+            qrUrl: d.qr_url, qrCaption: d.qr_caption,
+            bodyHtml: pollHtml(d),
+            printWidth: '600px',
         });
         w.document.write(doc);
         w.document.close();
@@ -280,13 +238,67 @@ def register_poll_callbacks(app):
         setTimeout(function() { w.print(); }, 500);
         return window.dash_clientside.no_update;
     }
-    """,
-        "printPollList",
+    """, "printPoll")
+
+    _POLL_PDF_JS = clientside_iife(
+        LETTERHEAD_JS + _poll_to_html_js() + r"""
+    function pdfPoll(n_clicks, d) {
+        if (!n_clicks || !d) return window.dash_clientside.no_update;
+        var html = buildLetterheadPdfDoc({
+            title: d.title + ' — Poll Record',
+            filename: 'Poll_' + d.id,
+            societyName: d.society_name, societyAddress: d.society_address,
+            logoUrl: d.logo_url, backgroundUrl: d.background_url,
+            signatureUrl: d.signature_url, secretaryName: d.secretary_name,
+            qrUrl: d.qr_url, qrCaption: d.qr_caption,
+            bodyHtml: pollHtml(d),
+            printWidth: '600px',
+        });
+        var blob = new Blob([html], {type: 'text/html'});
+        var w = window.open(URL.createObjectURL(blob), '_blank');
+        if (!w) { alert('Pop-up blocked'); return window.dash_clientside.no_update; }
+        return window.dash_clientside.no_update;
+    }
+    """, "pdfPoll")
+
+    _POLL_EMAIL_JS = clientside_iife(r"""
+    function emailPoll(n_clicks, d) {
+        if (!n_clicks || !d) return window.dash_clientside.no_update;
+        var body = d.title + ' — Poll Record\nStatus: ' + (d.status || 'active').toUpperCase() + '\n\n';
+        if (d.choices && d.vote_counts) {
+            for (var i = 0; i < d.choices.length; i++) {
+                var cnt = d.vote_counts['choice_' + (i + 1)] || 0;
+                body += d.choices[i] + ': ' + cnt + ' votes\n';
+            }
+        }
+        body += '\nTotal Votes: ' + (d.total_votes || 0);
+        var mailto = 'mailto:?subject=' + encodeURIComponent('Poll Record: ' + d.title) + 
+                     '&body=' + encodeURIComponent(body);
+        window.location.href = mailto;
+        return window.dash_clientside.no_update;
+    }
+    """, "emailPoll")
+
+    clientside_callback(
+        _POLL_PRINT_JS,
+        Output('poll-print-dummy', 'data', allow_duplicate=True),
+        Input('poll-btn-print', 'n_clicks'),
+        State('poll-print-data', 'data'),
+        prevent_initial_call=True,
     )
 
-    app.clientside_callback(
-        _POLL_PRINT_JS,
-        Output("poll-print-dummy", "data"),
-        Input("poll-print-data", "data"),
+    clientside_callback(
+        _POLL_PDF_JS,
+        Output('poll-print-dummy', 'data', allow_duplicate=True),
+        Input('poll-btn-pdf', 'n_clicks'),
+        State('poll-print-data', 'data'),
+        prevent_initial_call=True,
+    )
+
+    clientside_callback(
+        _POLL_EMAIL_JS,
+        Output('poll-print-dummy', 'data', allow_duplicate=True),
+        Input('poll-btn-email', 'n_clicks'),
+        State('poll-print-data', 'data'),
         prevent_initial_call=True,
     )

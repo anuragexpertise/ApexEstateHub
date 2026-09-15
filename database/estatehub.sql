@@ -1220,7 +1220,9 @@ CREATE TABLE IF NOT EXISTS polls (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
     ends_at TIMESTAMP,
-    reminder_sent_at TIMESTAMP
+    reminder_sent_at TIMESTAMP,
+    -- app/services/qr_service.py _QR_VERSIONED_ROLES and revoke_and_reissue.
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
 CREATE TABLE IF NOT EXISTS poll_votes (
@@ -1965,6 +1967,14 @@ BEGIN
     IF NEW.qr_payload IS NULL OR TRIM(NEW.qr_payload) = '' THEN
         NEW.qr_payload := NEW.society_id || '-PTL-' || NEW.id;
     END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_trg_polls_qr()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.qr_version = (1000 + FLOOR(RANDOM() * 9000))::INT;
     RETURN NEW;
 END;
 $$;
@@ -9069,6 +9079,13 @@ CREATE TRIGGER trg_patrol_locations_qr
     BEFORE INSERT ON patrol_locations
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_patrol_locations_qr();
+
+DROP TRIGGER IF EXISTS trg_polls_qr ON polls;
+
+CREATE TRIGGER trg_polls_qr
+    BEFORE UPDATE ON polls
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_polls_qr();
 
 DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
 
