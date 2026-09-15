@@ -647,7 +647,7 @@ def register_card_catalogue_callbacks(app):
             select_parts = []
             batch_params: list = []
             for slot, (idx, card_id, q, params, fmt, ckey, is_scoped) in enumerate(pending):
-                select_parts.append(f"SELECT {slot} AS slot, ({q})::text AS v")
+                select_parts.append(f"SELECT {slot} AS slot, ({q.strip().rstrip(';')})::text AS v")
                 batch_params.extend(params)
 
             batch_sql = " UNION ALL ".join(select_parts)
