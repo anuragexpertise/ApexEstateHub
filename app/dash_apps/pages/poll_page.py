@@ -89,6 +89,18 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
                     dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="YYYY-MM-DDTHH:MM",
                               value=_to_datetime_local(prefill.get("ends_at"))),
                 ], width=4, className="mb-3"),
+                dbc.Col([
+                    dbc.Label("Open To", html_for="poll-open-to"),
+                    dcc.Dropdown(
+                        id="poll-open-to",
+                        options=[
+                            {"label": "Members with no dues", "value": "no_dues"},
+                            {"label": "ALL members", "value": "all_members"},
+                        ],
+                        value=prefill.get("open_to") or "no_dues",
+                        clearable=False,
+                    ),
+                ], width=4, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([
