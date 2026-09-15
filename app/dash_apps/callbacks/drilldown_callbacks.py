@@ -3508,8 +3508,8 @@ def _save_patrol_location(db, data, sid, is_edit, pk):
     description = data.get("description")
     active = data.get("active", True)
     scan_interval = data.get("scan_interval")
-    lat = data.get("latitude")
-    lon = data.get("longitude")
+    lat = None if data.get("latitude") == "" else data.get("latitude")
+    lon = None if data.get("longitude") == "" else data.get("longitude")
     nfc = data.get("nfc_enabled", False)
 
     if not loc_name:
