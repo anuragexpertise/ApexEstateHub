@@ -7868,7 +7868,8 @@ CREATE OR REPLACE FUNCTION fn_create_poll(
     p_choice_3     VARCHAR(100) DEFAULT NULL,
     p_choice_4     VARCHAR(100) DEFAULT NULL,
     p_choice_5     VARCHAR(100) DEFAULT NULL,
-    p_ends_at      TIMESTAMP DEFAULT NULL
+    p_ends_at      TIMESTAMP DEFAULT NULL,
+    p_open_to      VARCHAR(20) DEFAULT 'no_dues'
 ) RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
     v_poll_id INT;
@@ -7877,8 +7878,8 @@ BEGIN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
     END IF;
 
-    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at)
-    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at)
+    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at, open_to)
+    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at, p_open_to)
     RETURNING id INTO v_poll_id;
 
     RETURN v_poll_id;

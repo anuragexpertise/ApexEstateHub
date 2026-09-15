@@ -640,8 +640,17 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     # inline here via the KPI -> List -> Profile flow, same as
     # Concerns/Events; nothing in the app links to those tabs anymore.
     if active_tab in ("polls", "admin_polls"):
+        c = _C["master"]
         return html.Div([
-            _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            html.Div([
+                _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+                html.Div([
+                    dbc.Button([html.I(className="fas fa-print me-2"), "Print List"], 
+                               id="poll-btn-print", size="sm", outline=True, style={"borderColor": c, "color": c})
+                ], style={"marginLeft": "auto"})
+            ], style={"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between"}),
+            dcc.Store(id="poll-print-data", storage_type="memory"),
+            dcc.Store(id="poll-print-dummy", storage_type="memory"),
             _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
             _divider(), _drill_panel(),
         ], className="portal-page")
@@ -789,8 +798,17 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
 
     # ── Polls ──────────────────────────────────────────────────
     if active_tab in ("polls", "owner_polls"):
+        c = _C["master"]
         return html.Div([
-            _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            html.Div([
+                _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+                html.Div([
+                    dbc.Button([html.I(className="fas fa-print me-2"), "Print List"], 
+                               id="poll-btn-print", size="sm", outline=True, style={"borderColor": c, "color": c})
+                ], style={"marginLeft": "auto"})
+            ], style={"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between"}),
+            dcc.Store(id="poll-print-data", storage_type="memory"),
+            dcc.Store(id="poll-print-dummy", storage_type="memory"),
             _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
             _divider(), _drill_panel(),
         ], className="portal-page")
