@@ -8048,8 +8048,8 @@ BEGIN
         p.results_announced_at,
         p.created_at,
         COALESCE((SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id), 0)::BIGINT,
-        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE id = p_user_id)),
-        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE id = p_user_id)),
+        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE users.id = p_user_id)),
+        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE users.id = p_user_id)),
         p.ends_at
     FROM polls p
     WHERE p.id = p_poll_id
