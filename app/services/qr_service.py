@@ -113,6 +113,7 @@ _QR_VERSIONED_ROLES = {
     "AST": "assets",
     "NOC": "nocs",
     "EVT": "event_ticket_items",
+    "POL": "polls",
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
