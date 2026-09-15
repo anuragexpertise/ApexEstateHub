@@ -8,7 +8,7 @@ Also checks for expired tasks and generates missed alerts.
 
 import sys
 import os
-import random
+import secrets
 from datetime import datetime, timedelta
 
 # Ensure app path is in sys.path
@@ -61,7 +61,7 @@ def assign_random_patrols():
     """Assign a random active patrol location to each on-duty guard."""
     # Find all on-duty security guards (checked in but not checked out)
     on_duty_guards = db._execute("""
-        SELECT u.id AS user_id, u.society_id, u.name AS guard_name
+        SELECT DISTINCT u.id AS user_id, u.society_id, u.name AS guard_name
         FROM gate_access ga
         JOIN users u ON ga.entity_id = u.linked_id AND u.role = 'security' AND u.society_id = ga.society_id
         WHERE ga.role = 'SEC' AND ga.time_out IS NULL
@@ -79,16 +79,26 @@ def assign_random_patrols():
         if pending:
             continue
 
-        # Get a random active patrol location
+        # Get active patrol locations
         locations = db._execute(
-            "SELECT id, location_name FROM patrol_locations WHERE society_id = %s AND active = TRUE",
+            "SELECT id, location_name, scan_interval FROM patrol_locations WHERE society_id = %s AND active = TRUE",
             (society_id,), fetch_all=True
         ) or []
 
         if not locations:
             continue
             
-        loc = random.choice(locations)
+        # Filter for overdue locations based on scan_interval
+        overdue_locations = []
+        for loc in locations:
+            last_scan = db._execute("SELECT scanned_at FROM patrol_scans WHERE location_id = %s ORDER BY scanned_at DESC LIMIT 1", (loc["id"],), fetch_one=True)
+            interval = loc.get("scan_interval") or 120
+            if not last_scan or (datetime.now() - last_scan["scanned_at"]).total_seconds() > (interval * 60):
+                overdue_locations.append(loc)
+                
+        # Prefer overdue locations, fallback to any active location
+        pool = overdue_locations if overdue_locations else locations
+        loc = secrets.choice(pool)
         expires_at = datetime.now() + timedelta(minutes=15)
         
         db._execute("""

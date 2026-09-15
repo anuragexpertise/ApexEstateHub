@@ -594,7 +594,7 @@ def _haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int = None, lat: float = None, lon: float = None) -> dict:
+def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int = None, lat: float = None, lon: float = None, mode: str = "entry") -> dict:
     """Log security patrol point scan with anti-spoofing checks."""
     try:
         loc = db._execute("""
@@ -604,11 +604,18 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
         if not loc:
             return {"status": "FAIL", "reason": "Patrol location not found or inactive", "gate_action": "deny"}
 
+        if loc.get("nfc_enabled") and mode != "NFC":
+            return {"status": "FAIL", "reason": "NFC scan required for this location", "gate_action": "deny"}
+
         # Method A: Geo-Fencing (if GPS is available and location has coords)
         loc_lat, loc_lon = loc.get("latitude"), loc.get("longitude")
-        distance = _haversine(loc_lat, loc_lon, lat, lon)
-        if distance is not None and distance > 50:  # 50 meters tolerance
-            return {"status": "FAIL", "reason": f"Spoofing detected: {int(distance)}m away from location", "gate_action": "deny"}
+        if loc_lat is not None and loc_lon is not None:
+            if lat is None or lon is None:
+                return {"status": "FAIL", "reason": "GPS coordinates required for this location", "gate_action": "deny"}
+            
+            distance = _haversine(loc_lat, loc_lon, lat, lon)
+            if distance is not None and distance > 50:  # 50 meters tolerance
+                return {"status": "FAIL", "reason": f"Spoofing detected: {int(distance)}m away from location", "gate_action": "deny"}
 
         # Method D: Time-Speed Check against last scan
         if security_user_id:
@@ -625,8 +632,8 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
                 ORDER BY p.scanned_at DESC LIMIT 1
             """, (security_user_id, society_id), fetch_one=True)
             
-            if last_scan and last_scan.get("latitude") and loc_lat:
-                travel_dist = _haversine(loc_lat, loc_lon, last_scan["latitude"], last_scan["longitude"])
+            if last_scan and last_scan.get("latitude") and lat is not None:
+                travel_dist = _haversine(lat, lon, last_scan["latitude"], last_scan["longitude"])
                 time_diff = (datetime.now() - last_scan["scanned_at"]).total_seconds()
                 
                 if time_diff > 0 and travel_dist is not None:
@@ -643,7 +650,11 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             db._execute("""
                 UPDATE patrol_tasks 
                 SET status = 'COMPLETED' 
-                WHERE security_user_id = %s AND location_id = %s AND society_id = %s AND status = 'PENDING'
+                WHERE id = (
+                    SELECT id FROM patrol_tasks 
+                    WHERE security_user_id = %s AND location_id = %s AND society_id = %s AND status = 'PENDING'
+                    ORDER BY assigned_at DESC LIMIT 1
+                )
             """, (security_user_id, location_id, society_id))
 
         return {
@@ -1095,7 +1106,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
         elif role == "visitor":
             return validate_visitor_qr(entity_id, qr_society_id, security_user_id)
         elif role == "patrol_location":
-            return validate_patrol_qr(entity_id, qr_society_id, security_user_id, lat=lat, lon=lon)
+            return validate_patrol_qr(entity_id, qr_society_id, security_user_id, lat=lat, lon=lon, mode=mode)
         elif role == "attendance_entry":
             # entity_id here is the epoch issued_at, not a row id
             return validate_attendance_qr(entity_id, qr_society_id, security_user_id)
