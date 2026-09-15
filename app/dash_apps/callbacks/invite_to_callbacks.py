@@ -393,77 +393,121 @@ def register_invite_to_callbacks(app):
                 return False, {"type": "error", "message": "Only Admin or the concern creator can invite candidates."}, no_update, no_update, no_update
 
         try:
-            # Fetch prior VND/SEC assignee rows (any lifecycle stage) so we
-            # only touch what actually needs to change.
-            prior_rows = db._execute(
-                "SELECT role, entity_id, status FROM concerns_assigns "
-                "WHERE concern_id=%s AND society_id=%s AND role IN ('VND', 'SEC')",
-                (concern_id, society_id), fetch_all=True,
-            ) or []
-            prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
-            prior_keys = set(prior_by_key.keys())
-
-            selected_keys = {k for k, v in selected.items() if v}
-            to_delete = prior_keys - selected_keys
-            to_insert = selected_keys - prior_keys
-
-            # Only remove rows still sitting at 'invited' — once someone has
-            # submitted a bid or been assigned/resolved/closed, unchecking
-            # them here must not silently wipe that progress.
-            for key in to_delete:
-                if prior_by_key.get(key) != "invited":
-                    continue
-                parts = key.split("-", 1)
-                role = parts[0]
-                try:
-                    entity_id = int(parts[1])
-                except (IndexError, ValueError):
-                    continue
-                db._execute(
-                    "DELETE FROM concerns_assigns "
-                    "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited'",
-                    (concern_id, society_id, role, entity_id),
+            with db._conn() as conn:
+                cur = conn.cursor()
+                # Fetch prior VND/SEC assignee rows (any lifecycle stage) so we
+                # only touch what actually needs to change.
+                cur.execute(
+                    "SELECT role, entity_id, status FROM concerns_assigns "
+                    "WHERE concern_id=%s AND society_id=%s AND role IN ('VND', 'SEC') FOR UPDATE",
+                    (concern_id, society_id)
                 )
+                prior_rows = [dict(r) for r in cur.fetchall()]
+                prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
+                prior_keys = set(prior_by_key.keys())
 
-            inserted = 0
-            newly_invited = []
-            for key in to_insert:
-                parts = key.split("-", 1)
-                role = parts[0]
-                try:
-                    entity_id = int(parts[1])
-                except (IndexError, ValueError):
-                    continue
-                db._execute(
-                    "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
-                    "VALUES (%s, %s, %s, %s, %s, 'invited', NULL) "
-                    "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
-                    "  status='invited', bid_amount=NULL, invited_by=EXCLUDED.invited_by, updated_at=NOW() "
-                    "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
-                    "RETURNING id",
-                    (concern_id, society_id, role, entity_id, actor_user_id), fetch_one=True,
-                )
-                inserted += 1
-                newly_invited.append((role, entity_id))
+                selected_keys = {k for k, v in selected.items() if v}
+                to_delete = prior_keys - selected_keys
+                to_insert = selected_keys - prior_keys
 
-            # Push-notify only the newly-invited entities.
-            if newly_invited:
-                try:
-                    from app.services.push_service import notify_concern_invited
-                    concern_row = db._execute(
-                        "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
-                        (concern_id, society_id), fetch_one=True,
+                # Only remove rows still sitting at 'invited' — once someone has
+                # submitted a bid or been assigned/resolved/closed, unchecking
+                # them here must not silently wipe that progress.
+                for key in to_delete:
+                    if prior_by_key.get(key) != "invited":
+                        continue
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    cur.execute(
+                        "DELETE FROM concerns_assigns "
+                        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited'",
+                        (concern_id, society_id, role, entity_id),
                     )
-                    notify_concern_invited(
-                        society_id, concern_id,
-                        (concern_row or {}).get("concern_type", "other"),
-                        newly_invited,
-                    )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).exception(
-                        "notify_concern_invited failed (concern_id=%s): %s", concern_id, e,
-                    )
+
+                inserted = 0
+                newly_invited = []
+                newly_assigned_sec = []
+                for key in to_insert:
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    
+                    if role == "SEC":
+                        cur.execute(
+                            "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
+                            "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
+                            "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                            "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
+                            "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
+                            (concern_id, society_id, role, entity_id, actor_user_id)
+                        )
+                        inserted += 1
+                        newly_assigned_sec.append((role, entity_id))
+                        
+                        cur.execute(
+                            "DELETE FROM concerns_assigns "
+                            "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id != %s "
+                            "AND status IN ('invited', 'bid_submitted')",
+                            (concern_id, society_id, role, entity_id),
+                        )
+                    else:
+                        cur.execute(
+                            "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
+                            "VALUES (%s, %s, %s, %s, %s, 'invited', NULL) "
+                            "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                            "  status='invited', bid_amount=NULL, invited_by=EXCLUDED.invited_by, updated_at=NOW() "
+                            "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
+                            (concern_id, society_id, role, entity_id, actor_user_id)
+                        )
+                        inserted += 1
+                        newly_invited.append((role, entity_id))
+
+                # Push-notify only the newly-invited entities.
+                if newly_invited:
+                    try:
+                        from app.services.push_service import notify_concern_invited
+                        cur.execute(
+                            "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (concern_id, society_id)
+                        )
+                        concern_row = cur.fetchone()
+                        notify_concern_invited(
+                            society_id, concern_id,
+                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            newly_invited,
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_invited failed (concern_id=%s): %s", concern_id, e,
+                        )
+
+                # Push-notify only the newly-assigned SEC entities.
+                if newly_assigned_sec:
+                    try:
+                        from app.services.push_service import notify_concern_assigned
+                        cur.execute(
+                            "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (concern_id, society_id)
+                        )
+                        concern_row = cur.fetchone()
+                        notify_concern_assigned(
+                            society_id, concern_id,
+                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            newly_assigned_sec,
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_assigned failed (concern_id=%s): %s", concern_id, e,
+                        )
 
             # Refresh the concern list/profile
             from app.dash_apps.callbacks.drilldown_callbacks import _render_current
