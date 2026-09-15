@@ -43,7 +43,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-hand-holding-usd", "color": "#17976e",
-        "title": "Total Receivables", "group": "pending dues",
+        "title": "Total Receivables", "group": "Financials",
     },
 
     "kpi_ptl_to_scan": {
@@ -58,7 +58,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "text",
         "icon": "fa-map-marker-alt", "color": "#ff9800",
-        "title": "PTL to Scan", "group": "patrol",
+        "title": "PTL to Scan", "group": "Pass Evaluation",
         "scoped": True,
     },
 
@@ -68,7 +68,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-bullhorn", "color": "#1d74d8",
-        "title": "Alert Channels", "group": "channels",
+        "title": "Alert Channels", "group": "Channels",
     },
 
     "kpi_channels_active": {
@@ -77,7 +77,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#17976e",
-        "title": "Active Channels", "group": "channels",
+        "title": "Active Channels", "group": "Channels",
     },
 
     "kpi_channels_pending": {
@@ -86,7 +86,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-hourglass-half", "color": "#e59620",
-        "title": "Pending Gate Approvals", "group": "channels",
+        "title": "Pending Gate Approvals", "group": "Channels",
     },
 
     "kpi_receivables_overdue": {
@@ -98,7 +98,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-exclamation-circle", "color": "#de5c52",
-        "title": "Overdue Dues", "group": "overdue",
+        "title": "Overdue Dues", "group": "Financials",
     },
 
     "kpi_advance_credits": {
@@ -109,7 +109,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-hand-point-down", "color": "#0ea5a8",
-        "title": "Advance Credits", "group": "prepaid",
+        "title": "Advance Credits", "group": "Financials",
     },
     "kpi_receipts_pending": {
         "query": """
@@ -119,7 +119,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-hourglass-half", "color": "#e59620",
-        "title": "Receipts Pending Confirmation", "group": "awaiting admin",
+        "title": "Receipts Pending Confirmation", "group": "Financials",
     },
 
     "kpi_apartments_dues": {
@@ -131,7 +131,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-exclamation-triangle", "color": "#de5c52",
-        "title": "Apts With Dues", "group": "pending dues",
+        "title": "Apts With Dues", "group": "Society Dashboard",
     },
 
     "kpi_apartments_no_dues": {
@@ -146,7 +146,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#17976e",
-        "title": "Apts Dues Clear", "group": "gate-pass OK",
+        "title": "Apts Dues Clear", "group": "Society Dashboard",
     },
 
     "kpi_nocs_total": {
@@ -155,7 +155,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-file-signature", "color": "#1d74d8",
-        "title": "Issued NOCs", "group": "nocs",
+        "title": "Issued NOCs", "group": "Society Dashboard",
     },
 
 
@@ -171,7 +171,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-wallet", "color": "#de5c52",
-        "title": "Total Payables", "group": "pending salary",
+        "title": "Total Payables", "group": "Financials",
     },
 
     "kpi_security_salaries_due": {
@@ -182,7 +182,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-user-shield", "color": "#b63b3b",
-        "title": "Security Salary Due", "group": "unpaid shifts",
+        "title": "Security Salary Due", "group": "Financials",
     },
 
     "kpi_security_salaries_paid": {
@@ -193,7 +193,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-check-double", "color": "#17976e",
-        "title": "Security Salary Paid", "group": "verified",
+        "title": "Security Salary Paid", "group": "Financials",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -209,7 +209,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-receipt", "color": "#17976e",
-        "title": "Receipts (Month)", "group": "manual credits",
+        "title": "Receipts (Month)", "group": "Financials",
     },
 
     "kpi_receipts_total": {
@@ -220,7 +220,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-receipt", "color": "#17976e",
-        "title": "Receipts (All)", "group": "all time",
+        "title": "Receipts (All)", "group": "Financials",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -236,7 +236,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-wallet", "color": "#de5c52",
-        "title": "Expenses (Month)", "group": "manual debits",
+        "title": "Expenses (Month)", "group": "Financials",
     },
 
     "kpi_payables_this_month": {
@@ -248,7 +248,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-money-check-alt", "color": "#e59620",
-        "title": "Payables (This Month)", "group": "monthly payables",
+        "title": "Payables (This Month)", "group": "Financials",
     },
 
     "kpi_receivables_this_month": {
@@ -260,7 +260,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-hand-holding-usd", "color": "#de5c52",
-        "title": "Receivables (This Month)", "group": "monthly receivables",
+        "title": "Receivables (This Month)", "group": "Financials",
     },
 
     "kpi_expenses_total": {
@@ -271,7 +271,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-receipt", "color": "#c0392b",
-        "title": "Expenses (All-Time)", "group": "manual debits",
+        "title": "Expenses (All-Time)", "group": "Financials",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -300,7 +300,7 @@ KPI_CARDS = {
         """,
         "params": 3, "format": "currency",
         "icon": "fa-coins", "color": "#2c3e50",
-        "title": "Current Balance", "group": "net position",
+        "title": "Current Balance", "group": "Financials",
     },
 
     "kpi_cash_in_hand": {
@@ -321,7 +321,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "currency",
         "icon": "fa-money-bill-wave", "color": "#27ae60",
-        "title": "Cash in Hand", "group": "physical cash",
+        "title": "Cash in Hand", "group": "Financials",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -332,14 +332,14 @@ KPI_CARDS = {
         "query": "SELECT COUNT(*) AS v FROM apartments WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-home", "color": "#1859b8",
-        "title": "Apartments", "group": "active",
+        "title": "Apartments", "group": "Enrolled Members",
     },
 
     "kpi_vendors_total": {
         "query": "SELECT COUNT(*) AS v FROM vendors WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-truck", "color": "#b98a07",
-        "title": "Vendors", "group": "registered",
+        "title": "Vendors", "group": "Enrolled Members",
     },
 
     "kpi_vendors_passes": {
@@ -350,14 +350,14 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-id-card", "color": "#b98a07",
-        "title": "Vendors w/ Pass", "group": "active pass",
+        "title": "Vendors w/ Pass", "group": "Passes",
     },
 
     "kpi_security_total": {
         "query": "SELECT COUNT(*) AS v FROM security_staff WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-user-shield", "color": "#b63b3b",
-        "title": "Security Staff", "group": "active",
+        "title": "Security Staff", "group": "Enrolled Members",
     },
 
     "kpi_security_on_duty": {
@@ -367,7 +367,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-shield-alt", "color": "#691b1b",
-        "title": "On Duty Now", "group": "active guards",
+        "title": "On Duty Now", "group": "Users",
     },
 
     "kpi_security_off_duty": {
@@ -380,7 +380,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "number",
         "icon": "fa-user-clock", "color": "#8a8f98",
-        "title": "Off Duty", "group": "not clocked in",
+        "title": "Off Duty", "group": "Users",
     },
 
     "kpi_security_shifts_pending": {
@@ -390,7 +390,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-clock", "color": "#e59620",
-        "title": "Shifts Unpaid", "group": "awaiting verify",
+        "title": "Shifts Unpaid", "group": "Users",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -404,7 +404,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-calendar-check", "color": "#8e44ad",
-        "title": "Upcoming Events", "group": "scheduled",
+        "title": "Upcoming Events", "group": "Events",
     },
 
     # Owner portal: how many event tickets this owner has bought for upcoming
@@ -419,7 +419,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-ticket-alt", "color": "#2563eb",
-        "title": "Tickets Bought", "group": "events",
+        "title": "Tickets Bought", "group": "Events",
     },
 
     "kpi_concerns_open": {
@@ -429,7 +429,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-hand-point-up", "color": "#de5c52",
-        "title": "Open Concerns", "group": "pending issues",
+        "title": "Open Concerns", "group": "Concerns",
     },
 
     # Admin/Owner: every concern not yet closed (open OR assigned OR
@@ -442,7 +442,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-hand-point-up", "color": "#de5c52",
-        "title": "Not Closed Concerns", "group": "pending issues",
+        "title": "Not Closed Concerns", "group": "Concerns",
     },
 
     # Admin/Owner: every concern regardless of status. Deliberately
@@ -456,7 +456,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-list", "color": "#3f7cd6",
-        "title": "Total Concerns", "group": "pending issues",
+        "title": "Total Concerns", "group": "Concerns",
     },
 
     # Vendor-only: count of concerns_assigns rows currently assigned to
@@ -470,7 +470,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-tools", "color": "#e59620",
-        "title": "Assigned To Me", "group": "pending issues",
+        "title": "Assigned To Me", "group": "Concerns",
     },
 
     # Vendor/Security: count of concerns_assigns rows this caller has been
@@ -483,7 +483,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-envelope-open-text", "color": "#8e44ad",
-        "title": "Invited", "group": "pending issues",
+        "title": "Invited", "group": "Concerns",
     },
 
     # Vendor/Security: count of concerns_assigns rows this caller has
@@ -496,7 +496,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#27ae60",
-        "title": "Resolved", "group": "pending issues",
+        "title": "Resolved", "group": "Concerns",
     },
 
     # ════════════════════════════════════════════════════════════════
@@ -507,14 +507,14 @@ KPI_CARDS = {
         "query": "SELECT COUNT(*) AS v FROM polls WHERE society_id=%s",
         "params": 1, "format": "number",
         "icon": "fa-poll", "color": "#1859b8",
-        "title": "Total Polls", "group": "polling",
+        "title": "Total Polls", "group": "Polls",
     },
 
     "kpi_polls_active": {
         "query": "SELECT COUNT(*) AS v FROM polls WHERE society_id=%s AND status='active'",
         "params": 1, "format": "number",
         "icon": "fa-circle-check", "color": "#2ecc71",
-        "title": "Active Polls", "group": "polling",
+        "title": "Active Polls", "group": "Polls",
     },
 
 
@@ -529,7 +529,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-receipt", "color": "#1abc9c",
-        "title": "Gate Logs Today", "group": "entries",
+        "title": "Gate Logs Today", "group": "Society Dashboard",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -543,7 +543,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-boxes", "color": "#6c5ce7",
-        "title": "Active Assets", "group": "inventory",
+        "title": "Active Assets", "group": "Assets",
     },
 
     "kpi_assets_value": {
@@ -553,7 +553,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-coins", "color": "#6c5ce7",
-        "title": "Assets at Cost", "group": "gross value",
+        "title": "Assets at Cost", "group": "Assets",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -564,28 +564,28 @@ KPI_CARDS = {
         "query": "SELECT calc_start_date AS v FROM societies WHERE id=%s",
         "params": 1, "format": "date",
         "icon": "fa-clock", "color": "#34ee45",
-        "title": "Calc Start Date", "group": "billing from",
+        "title": "Calc Start Date", "group": "Settings",
     },
 
     "kpi_plan_validity": {
         "query": "SELECT plan_validity AS v FROM societies WHERE id=%s",
         "params": 1, "format": "date",
         "icon": "fa-calendar-times", "color": "#e67e22",
-        "title": "Plan Expires", "group": "validity",
+        "title": "Plan Expires", "group": "Settings",
     },
 
     "kpi_accounts_count": {
         "query": "SELECT COUNT(*) AS v FROM accounts WHERE society_id=%s",
         "params": 1, "format": "number",
         "icon": "fa-book-open", "color": "#6c5ce7",
-        "title": "Accounts", "group": "chart",
+        "title": "Accounts", "group": "Settings",
     },
 
     "kpi_ledger_open": {
         "query": "SELECT COUNT(*) AS v FROM accounts WHERE society_id=%s",
         "params": 1, "format": "number",
         "icon": "fa-columns", "color": "#1d74d8",
-        "title": "Open Ledger", "group": "chart",
+        "title": "Open Ledger", "group": "Financials",
     },
 
     # Nav tile for the Cashbook list (fn_cashbook_paired_v3). Unlike
@@ -598,7 +598,7 @@ KPI_CARDS = {
         "query": "SELECT COUNT(*) AS v FROM transactions WHERE society_id=%s AND status='paid'",
         "params": 1, "format": "number",
         "icon": "fa-book", "color": "#17976e",
-        "title": "Open Cashbook", "group": "chart",
+        "title": "Open Cashbook", "group": "Financials",
     },
 
     # Nav tile for the FY Closing Report (fn_fy_closing_report). Shared
@@ -610,21 +610,21 @@ KPI_CARDS = {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-file-invoice-dollar", "color": "#17976e",
-        "title": "FY Closing Report", "group": "chart",
+        "title": "FY Closing Report", "group": "Financials",
     },
 
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#1859b8",
-        "title": "Apt Charge Rules", "group": "active",
+        "title": "Apt Charge Rules", "group": "Settings",
     },
 
     "kpi_ven_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM ven_charges_fines_basis WHERE society_id=%s AND ven_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#b98a07",
-        "title": "Vendor Charge Rules", "group": "active",
+        "title": "Vendor Charge Rules", "group": "Settings",
     },
 
     # Nav tile for the Compliance Settings page. Click routes through
@@ -634,21 +634,21 @@ KPI_CARDS = {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-scale-balanced", "color": "#2563eb",
-        "title": "Compliance Settings", "group": "settings",
+        "title": "Compliance Settings", "group": "Settings",
     },
 
     "kpi_patrol_locations": {
         "query": "SELECT COUNT(*) AS v FROM patrol_locations WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-map-location-dot", "color": "#17976e",
-        "title": "Patrol Locations", "group": "settings",
+        "title": "Patrol Locations", "group": "Settings",
     },
 
     "kpi_tds_rates": {
         "query": "SELECT COUNT(*) AS v FROM tds_section_rates WHERE society_id=%s",
         "params": 1, "format": "number",
         "icon": "fa-percent", "color": "#8e44ad",
-        "title": "TDS Rates", "group": "settings",
+        "title": "TDS Rates", "group": "Settings",
     },
 
     # Nav tile for the Re-issue QR tool (Settings tab, admin-only). Custom
@@ -663,20 +663,20 @@ KPI_CARDS = {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-rotate", "color": "#de5c52",
-        "title": "Re-issue QR", "group": "settings",
+        "title": "Re-issue QR", "group": "Settings",
     },
 
     # ══════════════════════════════════════════════════════════════════════
     # MASTER ADMIN
     # ══════════════════════════════════════════════════════════════════════
 
-    "kpi_societies_total":    {"query": "SELECT COUNT(*) AS v FROM societies",                  "params": 0, "format": "number",   "icon": "fa-building",            "color": "#c96a19", "title": "Total Societies",  "group": "platform"},
-    "kpi_societies_free":     {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='Free'", "params": 0, "format": "number",   "icon": "fa-circle",              "color": "#7d8ea3", "title": "Free Plans",       "group": "total"},
-    "kpi_societies_9apts":    {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='9Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "9Apts Plans", "group": "active"},
-    "kpi_societies_99apts":   {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='99Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "99Apts Plans", "group": "active"},
-    "kpi_societies_999apts":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='999Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "999Apts Plans", "group": "active"},
-    "kpi_societies_unlimited":{"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='unlimited' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "Unlimited Plans", "group": "active"},
-    "kpi_societies_expired":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan_validity<CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-exclamation-triangle", "color": "#de5c52", "title": "Expired Plans", "group": "renewal needed"},
+    "kpi_societies_total":    {"query": "SELECT COUNT(*) AS v FROM societies",                  "params": 0, "format": "number",   "icon": "fa-building",            "color": "#c96a19", "title": "Total Societies",  "group": "Society Overview"},
+    "kpi_societies_free":     {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='Free'", "params": 0, "format": "number",   "icon": "fa-circle",              "color": "#7d8ea3", "title": "Free Plans",       "group": "Society Overview"},
+    "kpi_societies_9apts":    {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='9Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "9Apts Plans", "group": "Society Overview"},
+    "kpi_societies_99apts":   {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='99Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "99Apts Plans", "group": "Society Overview"},
+    "kpi_societies_999apts":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='999Apts' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "999Apts Plans", "group": "Society Overview"},
+    "kpi_societies_unlimited":{"query": "SELECT COUNT(*) AS v FROM societies WHERE plan='unlimited' AND plan_validity>=CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-star", "color": "#17976e", "title": "Unlimited Plans", "group": "Society Overview"},
+    "kpi_societies_expired":  {"query": "SELECT COUNT(*) AS v FROM societies WHERE plan_validity<CURRENT_DATE", "params": 0, "format": "number", "icon": "fa-exclamation-triangle", "color": "#de5c52", "title": "Expired Plans", "group": "Society Overview"},
     "kpi_societies_expiring_soon": {
         "query": """
             SELECT COUNT(*) AS v FROM societies
@@ -685,7 +685,7 @@ KPI_CARDS = {
         """,
         "params": 0, "format": "number",
         "icon": "fa-hourglass-half", "color": "#e2a03f",
-        "title": "Expiring Soon", "group": "next 30 days",
+        "title": "Expiring Soon", "group": "Society Overview",
     },
     # kpi_master_apartments_total REMOVED (2026-09, per plan) — not part of
     # the Master "Societies" tab's 7 KPIs, and wasn't referenced by any
@@ -706,7 +706,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "currency",    # second %s = apartment_id
         "icon": "fa-rupee-sign", "color": "#de5c52",
-        "title": "My Pending Dues", "group": "to pay",
+        "title": "My Pending Dues", "group": "Financials",
     },
 
     "kpi_time_qr": {
@@ -716,7 +716,7 @@ KPI_CARDS = {
         "query": "SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::TIME(0) AS v",
         "params": 0, "format": "time",
         "icon": "fa-qrcode", "color": "#1859b8",
-        "title": "Attendance QR", "group": "gate punch-clock",
+        "title": "Attendance QR", "group": "Settings",
     },
 
     "kpi_owner_member_since": {
@@ -727,7 +727,7 @@ KPI_CARDS = {
         "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s",
         "params": 1, "format": "date",
         "icon": "fa-calendar-check", "color": "#1859b8",
-        "title": "Member Since", "group": "enrolled",
+        "title": "Member Since", "group": "Settings",
     },
 
     "kpi_my_overdue_dues": {
@@ -739,14 +739,14 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "currency",
         "icon": "fa-exclamation-circle", "color": "#de5c52",
-        "title": "My Overdue Dues", "group": "overdue",
+        "title": "My Overdue Dues", "group": "Financials",
     },
 
     "kpi_maintenance_charges": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#e59620",
-        "title": "Maintenance Rules", "group": "monthly",
+        "title": "Maintenance Rules", "group": "Financials",
     },
 
     "kpi_apartment_members": {
@@ -757,7 +757,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "number",
         "icon": "fa-users", "color": "#18794e",
-        "title": "Apartment Members", "group": "directory",
+        "title": "Apartment Members", "group": "Members",
     },
 
     # Nav tile for the "My Transactions" passbook (loaders.get_member_ledger).
@@ -770,7 +770,7 @@ KPI_CARDS = {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-receipt", "color": "#18794e",
-        "title": "My Transactions", "group": "passbook",
+        "title": "My Transactions", "group": "Financials",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -784,7 +784,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-hand-point-up", "color": "#de5c52",
-        "title": "Shifts Active", "group": "on duty",
+        "title": "Shifts Active", "group": "Pass Evaluation",
     },
 
     "kpi_receipts_in_hand_total": {
@@ -795,21 +795,21 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-money-bill-wave", "color": "#27ae60",
-        "title": "Receipts-in-hand", "group": "total Cr",
+        "title": "Receipts-in-hand", "group": "Pass Evaluation",
     },
 
     "kpi_security_date": {
         "query": "SELECT joining_date AS v FROM security_staff WHERE society_id=%s AND active=TRUE LIMIT 1",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#de5c52",
-        "title": "Joined", "group": "profile",
+        "title": "Joined", "group": "Settings",
     },
 
     "kpi_security_salary_per_shift": {
         "query": "SELECT salary_per_shift AS v FROM security_staff WHERE society_id=%s AND active=TRUE LIMIT 1",
         "params": 1, "format": "currency",
         "icon": "fa-rupee-sign", "color": "#b63b3b",
-        "title": "Salary per Shift", "group": "profile",
+        "title": "Salary per Shift", "group": "Settings",
     },
 
     # ══════════════════════════════════════════════════════════════════════
@@ -820,7 +820,7 @@ KPI_CARDS = {
         "query": "SELECT created_at::DATE AS v FROM vendors WHERE society_id=%s AND active=TRUE LIMIT 1",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#de5c52",
-        "title": "Registered", "group": "profile",
+        "title": "Registered", "group": "Settings",
     },
 
     "kpi_my_pass_expiry": {
@@ -831,28 +831,28 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "date",
         "icon": "fa-id-card", "color": "#b98a07",
-        "title": "Pass Expiry", "group": "gate-pass",
+        "title": "Pass Expiry", "group": "Passes",
     },
     
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#1859b8",
-        "title": "Apt Charge Rules", "group": "active",
+        "title": "Apt Charge Rules", "group": "Settings",
     },
  
     "kpi_ven_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM ven_charges_fines_basis WHERE society_id=%s AND ven_status=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#b98a07",
-        "title": "Vendor Charge Rules", "group": "active",
+        "title": "Vendor Charge Rules", "group": "Settings",
     },
  
     "kpi_sec_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM payables WHERE society_id=%s AND role='security' AND status='pending'",
         "params": 1, "format": "number",
         "icon": "fa-file-invoice", "color": "#b63b3b",
-        "title": "Security Pending Pays", "group": "active",
+        "title": "Security Pending Pays", "group": "Settings",
     },
  
     "kpi_attendance_count": {
@@ -865,7 +865,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-clock", "color": "#b63b3b",
-        "title": "Shifts (Month)", "group": "attendance",
+        "title": "Shifts (Month)", "group": "Society Dashboard",
     },
 
     "kpi_security_roster_count": {
@@ -875,7 +875,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-calendar-check", "color": "#1859b8",
-        "title": "Shifts Rostered (Upcoming)", "group": "enroll",
+        "title": "Shifts Rostered (Upcoming)", "group": "Users",
     },
  
     "kpi_maintenance_due": {
@@ -887,7 +887,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-home", "color": "#de5c52",
-        "title": "Maintenance Due", "group": "apartment dues",
+        "title": "Maintenance Due", "group": "Financials",
     },
  
     "kpi_late_fees_due": {
@@ -900,7 +900,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-exclamation-circle", "color": "#de5c52",
-        "title": "Late Fees Due", "group": "interest",
+        "title": "Late Fees Due", "group": "Financials",
     },
  
     "kpi_vendors_payables_due": {
@@ -911,7 +911,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-truck", "color": "#b98a07",
-        "title": "Vendor Payables", "group": "pending",
+        "title": "Vendor Payables", "group": "Financials",
     },
  
     "kpi_amc_due": {
@@ -926,7 +926,7 @@ KPI_CARDS = {
         """,
         "params": 2, "format": "currency",
         "icon": "fa-tools", "color": "#6c5ce7",
-        "title": "AMC Expenses", "group": "maintenance",
+        "title": "AMC Expenses", "group": "Financials",
     },
  
     "kpi_apartments_fines": {
@@ -939,7 +939,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-gavel", "color": "#de5c52",
-        "title": "Interest Accrued", "group": "fines",
+        "title": "Interest Accrued", "group": "Financials",
     },
  
     "kpi_apartments_other_charges": {
@@ -950,7 +950,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-list-alt", "color": "#e59620",
-        "title": "Apt Other Charges", "group": "all rules",
+        "title": "Apt Other Charges", "group": "Financials",
     },
  
     "kpi_vendors_fines": {
@@ -963,7 +963,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-id-badge", "color": "#b98a07",
-        "title": "Vendor Pass Income", "group": "fines",
+        "title": "Vendor Pass Income", "group": "Financials",
     },
  
     "kpi_vendors_other_charges": {
@@ -974,7 +974,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-list-alt", "color": "#b98a07",
-        "title": "Vendor Other Charges", "group": "all rules",
+        "title": "Vendor Other Charges", "group": "Financials",
     },
 
     "kpi_security_other_charges": {
@@ -985,7 +985,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-list-alt", "color": "#b63b3b",
-        "title": "Security Pay Records", "group": "all rules",
+        "title": "Security Pay Records", "group": "Financials",
     },
   
     "kpi_security_salaries_paid": {
@@ -996,7 +996,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-check-double", "color": "#17976e",
-        "title": "Security Salary Paid", "group": "verified",
+        "title": "Security Salary Paid", "group": "Financials",
     },
     "kpi_security_paid_for_month": {
         "query": """
@@ -1007,7 +1007,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-check-circle", "color": "#17976e",
-        "title": "Salary Paid (Month)", "group": "verified this month",
+        "title": "Salary Paid (Month)", "group": "Financials",
     },
   
     "kpi_security_receipts": {
@@ -1018,7 +1018,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-receipt", "color": "#17976e",
-        "title": "My Receipts", "group": "collected",
+        "title": "My Receipts", "group": "Receipts",
     },
   
     "kpi_security_shift": {
@@ -1028,7 +1028,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#17976e",
-        "title": "Completed Shifts", "group": "done",
+        "title": "Completed Shifts", "group": "Pass Evaluation",
     },
 
     "kpi_presumed_visitor": {
@@ -1038,7 +1038,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-user-clock", "color": "#e59620",
-        "title": "Presumed Visitors", "group": "awaiting owner",
+        "title": "Presumed Visitors", "group": "Channels",
     },
 
     "kpi_channels_pending_bus": {
@@ -1052,7 +1052,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-bus", "color": "#e59620",
-        "title": "Pending Bus Alerts", "group": "channels",
+        "title": "Pending Bus Alerts", "group": "Channels",
     },
 
     "kpi_channels_pending_taxi": {
@@ -1066,14 +1066,14 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "number",
         "icon": "fa-taxi", "color": "#e59620",
-        "title": "Pending Taxi Alerts", "group": "channels",
+        "title": "Pending Taxi Alerts", "group": "Channels",
     },
  
     "kpi_apartments_date": {
         "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND active=TRUE",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#18794e",
-        "title": "First Apt Added", "group": "profile",
+        "title": "First Apt Added", "group": "Settings",
     },
  
     "kpi_receipts_total": {
@@ -1083,7 +1083,7 @@ KPI_CARDS = {
         """,
         "params": 1, "format": "currency",
         "icon": "fa-receipt", "color": "#17976e",
-        "title": "Receipts (All)", "group": "all time",
+        "title": "Receipts (All)", "group": "Financials",
     },
 }
 

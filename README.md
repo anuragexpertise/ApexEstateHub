@@ -1131,7 +1131,9 @@ Or press `Ctrl+Shift+P` → **Python: Select Interpreter** and select your activ
 
 ### Overview
 
-The following tables map every user-reachable workflow in the application, organized by Portal → Tab → KPI/Quick-link → Drill Target, with the goal of each workflow. The **Name of Workflow** column can serve as a semantic grouping key for KPIs.
+The following tables map every user-reachable workflow in the application, organized by Portal → Tab → KPI/Quick-link → Drill Target, with the goal of each workflow. 
+
+> **Note on KPI Groups:** The `group` attribute for all KPIs in `card_catalogue.py` has been semantically aligned with the **Name of Workflow** listed below. When using the Customize Layout editor or KPI Inspector, you will see KPIs grouped precisely by these workflow names (e.g., *Society Dashboard*, *Financials*, *Pass Evaluation*).
 
 #### 🟠 MASTER Portal (role: `master`)
 

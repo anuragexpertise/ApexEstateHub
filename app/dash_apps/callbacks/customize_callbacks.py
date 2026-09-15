@@ -471,7 +471,7 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
         # mixed underlying types (NUMERIC vs DATE, etc.) and Postgres
         # requires one common type across all UNION branches.
         for slot, (card_id, query, params, fmt, ckey) in enumerate(pending):
-            select_parts.append(f"SELECT {slot} AS slot, ({query})::text AS v")
+            select_parts.append(f"SELECT {slot} AS slot, ({query.strip().rstrip(';')})::text AS v")
             batch_params.extend(params)
 
         batch_sql = " UNION ALL ".join(select_parts)
