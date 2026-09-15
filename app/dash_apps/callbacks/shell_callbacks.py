@@ -697,8 +697,10 @@ def register_shell_callbacks(app):
 
         try:
             u_row = db._execute(
-                "SELECT name FROM users WHERE id = %s", (user_id,), fetch_one=True)
+                "SELECT name, user_type FROM users WHERE id = %s", (user_id,), fetch_one=True)
             user_name = (u_row or {}).get("name") or email.split("@")[0].title()
+            if u_row and u_row.get("user_type"):
+                verified_auth["user_type"] = u_row["user_type"]
         except Exception:
             user_name = email.split("@")[0].title()
 

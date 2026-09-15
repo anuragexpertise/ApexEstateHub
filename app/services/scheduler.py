@@ -3,23 +3,74 @@ import logging
 from database.db_manager import db
 import app.services.push_service as PushService
 from app.services.redis_broker import redis_sync, _REDIS_URL
+import threading
+import time
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-def expire_polls_job():
-    """
-    Checks for expired polls and triggers their expiry logic.
-    Uses a Redis lock to ensure that if multiple gunicorn workers
-    are running this background scheduler, only one executes the job.
-    """
+poll_event_signal = threading.Event()
+
+def _get_next_poll_event_time():
+    query = '''
+    SELECT MIN(event_time) AS next_run FROM (
+        SELECT ends_at AS event_time FROM polls WHERE status = 'active' AND ends_at > NOW()
+        UNION
+        SELECT ends_at - INTERVAL '15 minutes' AS event_time FROM polls WHERE status = 'active' AND reminder_sent_at IS NULL AND (ends_at - INTERVAL '15 minutes') > NOW()
+    ) sub;
+    '''
+    try:
+        res = db._execute(query, fetch_one=True)
+        return res.get('next_run') if res else None
+    except Exception as e:
+        logger.error(f"Error fetching next poll event time: {e}")
+        return None
+
+def poll_scheduler_loop():
+    logger.info("Event-driven poll scheduler loop started.")
+    while True:
+        poll_event_signal.clear()
+        next_run = _get_next_poll_event_time()
+        
+        if not next_run:
+            poll_event_signal.wait()
+            continue
+            
+        now = datetime.now()
+        wait_seconds = (next_run - now).total_seconds()
+        
+        if wait_seconds > 0:
+            poll_event_signal.wait(timeout=wait_seconds)
+            if poll_event_signal.is_set():
+                continue
+                
+        expire_polls_job()
+        time.sleep(1)
+
+def poll_redis_listener_loop():
     if not redis_sync or not _REDIS_URL:
-        # Fallback if no redis, but might run multiple times if multiple workers
+        return
+    while True:
+        try:
+            r = redis_sync.Redis.from_url(_REDIS_URL, socket_timeout=5, socket_connect_timeout=5)
+            pubsub = r.pubsub()
+            pubsub.subscribe("poll_schedule_update")
+            logger.info("Poll scheduler Redis listener subscribed.")
+            for message in pubsub.listen():
+                if message["type"] == "message":
+                    poll_event_signal.set()
+            pubsub.close()
+            r.close()
+        except Exception as exc:
+            time.sleep(2)
+
+def expire_polls_job():
+    if not redis_sync or not _REDIS_URL:
         _run_poll_expiry()
         return
 
     try:
         r = redis_sync.Redis.from_url(_REDIS_URL, socket_timeout=2)
-        # Try to acquire a lock for 50 seconds (since job runs every 60 seconds)
         acquired = r.set("lock:expire_polls_job", "locked", nx=True, ex=50)
         r.close()
         
@@ -35,8 +86,6 @@ def _run_poll_expiry():
         logger.error(f"Error executing fn_declare_expired_polls: {e}")
 
     try:
-        # Check for polls ending in the next 15 minutes across all societies
-        # We need distinct society IDs to fetch targets correctly.
         societies = db._execute("SELECT id FROM societies", fetch_all=True)
         for row in (societies or []):
             sid = row["id"]
@@ -61,8 +110,9 @@ def _run_poll_expiry():
         logger.error(f"Error in poll push reminders: {e}")
 
 def init_scheduler():
-    scheduler = BackgroundScheduler()
-    # Run every minute
-    scheduler.add_job(func=expire_polls_job, trigger="interval", seconds=60)
-    scheduler.start()
-    logger.info("APScheduler initialized for background jobs.")
+    t1 = threading.Thread(target=poll_scheduler_loop, daemon=True, name="poll-scheduler")
+    t1.start()
+    
+    t2 = threading.Thread(target=poll_redis_listener_loop, daemon=True, name="poll-redis-listener")
+    t2.start()
+    logger.info("Event-driven poll scheduler initialized.")

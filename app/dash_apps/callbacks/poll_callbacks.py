@@ -107,6 +107,16 @@ def register_poll_callbacks(app):
             except Exception:
                 pass
 
+        def _publish_schedule_update():
+            try:
+                from app.services.redis_broker import redis_sync, _REDIS_URL
+                if redis_sync and _REDIS_URL:
+                    r = redis_sync.Redis.from_url(_REDIS_URL, socket_timeout=2)
+                    r.publish("poll_schedule_update", '{"type":"message"}')
+                    r.close()
+            except Exception as e:
+                logger.error(f"Failed to publish schedule update: {e}")
+
         try:
             if is_edit:
                 result = db._execute(
@@ -124,6 +134,7 @@ def register_poll_callbacks(app):
                         html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
                         "Poll couldn't be updated — it may already have votes, or be closed.",
                     ], className="alert alert-warning mt-2")
+                _publish_schedule_update()
                 return html.Div([
                     html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                     f"Poll '{title}' updated successfully.",
@@ -143,6 +154,7 @@ def register_poll_callbacks(app):
                 PushService.notify_poll_created(society_id, title)
             except Exception as e:
                 logger.error(f"Poll creation push notify failed: {e}")
+            _publish_schedule_update()
             return html.Div([
                 html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                 f"Poll '{title}' created successfully! (ID: {new_poll_id})",
@@ -194,8 +206,12 @@ def register_poll_callbacks(app):
         user_id, society_id = _get_user_from_auth(auth_data)
         if not society_id:
             return no_update
-        
-        lh = get_letterhead_assets(society_id)
+        try:
+            society = db._execute("SELECT * FROM societies WHERE id = %s", (society_id,), fetch_one=True)
+            lh = get_letterhead_assets(society, society_id) if society else {}
+        except Exception as e:
+            logger.error(f"Error fetching letterhead: {e}")
+            lh = {}
         
         try:
             polls = db._execute("SELECT id, title, status, ends_at, total_votes FROM fn_polls_list(%s, NULL, NULL)", (society_id,), fetch_all=True)
