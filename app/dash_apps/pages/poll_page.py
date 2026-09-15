@@ -86,7 +86,7 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Poll Ends At (optional)", html_for="poll-ends-at"),
-                    dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="YYYY-MM-DDTHH:MM",
+                    dbc.Input(id="poll-ends-at", type="datetime-local", placeholder="DD/MM/YYYY HH:MM",
                               value=_to_datetime_local(prefill.get("ends_at"))),
                 ], width=4, className="mb-3"),
                 dbc.Col([
@@ -94,8 +94,8 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
                     dcc.Dropdown(
                         id="poll-open-to",
                         options=[
-                            {"label": "Members with no dues", "value": "no_dues"},
-                            {"label": "ALL members", "value": "all_members"},
+                            {"label": "Apartment (1 owner vote) with no dues", "value": "no_dues"},
+                            {"label": "ALL Apartments(1 owner vote)", "value": "all_members"},
                         ],
                         value=prefill.get("open_to") or "no_dues",
                         clearable=False,

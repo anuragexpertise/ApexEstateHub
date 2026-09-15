@@ -236,10 +236,13 @@ def register_poll_callbacks(app):
         for p in polls:
             ends_at_str = p.get('ends_at') or 'No End Time'
             if isinstance(ends_at_str, datetime.datetime):
-                ends_at_str = ends_at_str.strftime('%Y-%m-%d %H:%M')
+                ends_at_str = ends_at_str.strftime('%d/%m/%Y %H:%M')
             elif isinstance(ends_at_str, str):
-                ends_at_str = ends_at_str[:16]
-                
+                try:
+                    _dt_obj = datetime.datetime.fromisoformat(ends_at_str.replace('Z', '+00:00'))
+                    ends_at_str = _dt_obj.strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    ends_at_str = ends_at_str[:16]
             status = p.get('status', '').replace('_', ' ').title()
             html_str += f"""
                 <tr style="border-bottom: 1px solid #ddd;">
