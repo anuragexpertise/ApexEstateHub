@@ -317,6 +317,9 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
     This function is restricted to apartment-owner users only.
     """
     try:
+        if action not in ("approve", "deny"):
+            return False, f"Invalid action: {action}"
+
         new_state = "resolved" if action == "approve" else "denied"
 
         event = db._execute("""
@@ -543,6 +546,9 @@ def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
     SECURITY: Security staff CANNOT call this function.
     """
     try:
+        if action not in ("approve", "deny"):
+            return False, f"Invalid action: {action}"
+
         new_state = "resolved" if action == "approve" else "denied"
         visitor_status = "entered" if action == "approve" else "denied"
 
@@ -850,6 +856,10 @@ def get_channel_subscribers(channel_id: int, society_id: int = None):
             tuple(params), fetch_one=True
         )
         if not ch:
+            if society_id is not None:
+                exists = db._execute("SELECT id FROM alert_channels WHERE id = %s", (channel_id,), fetch_one=True)
+                if exists:
+                    logger.warning(f"SECURITY: Unauthorized access attempt to channel {channel_id} scoped by society {society_id}")
             return {"channel_name": "Channel", "subscribers": []}
 
         subs = get_channel_subscribers_with_profile(channel_id)
