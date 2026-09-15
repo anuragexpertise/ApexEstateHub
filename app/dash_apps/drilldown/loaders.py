@@ -127,6 +127,11 @@ def list_assignable_vendors(society_id: int, search: str | None = None, concern_
         sql += " JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s AND ca.status IN ('invited', 'bid_submitted')"
     sql += " WHERE v.society_id=%s AND v.active=TRUE"
     params: list = ([concern_id] if concern_id else []) + [society_id]
+    
+    if concern_id:
+        sql += " AND v.service_type ILIKE (SELECT concern_type FROM concerns WHERE id=%s)"
+        params.append(concern_id)
+
     if search:
         sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
@@ -190,6 +195,11 @@ def list_invitable_vendors(society_id: int, search: str | None = None, concern_i
         sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = v.id AND ca.role='VND' AND ca.concern_id=%s"
     sql += " WHERE v.society_id=%s AND v.active=TRUE"
     params: list = ([concern_id] if concern_id else []) + [society_id]
+    
+    if concern_id:
+        sql += " AND v.service_type ILIKE (SELECT concern_type FROM concerns WHERE id=%s)"
+        params.append(concern_id)
+
     if search:
         sql += " AND (v.business_name ILIKE %s OR v.name ILIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
