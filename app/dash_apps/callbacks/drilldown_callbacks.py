@@ -4348,12 +4348,25 @@ def _save_asset(db, d, sid, is_edit, pk):
         return False, "Asset name is required", None
 
     if is_edit:
-        db._execute(
-            "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, "
-            "updated_by=%s "
-            "WHERE id=%s AND society_id=%s",
-            (asset_name, d.get("asset_SNo"), d.get("company_name"), d.get("user_id"), pk, sid),
-        )
+        disposed = d.get("disposed", False)
+        if disposed:
+            db._execute(
+                "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s, itc_claimed=%s, gst_disposal_liability=%s, "
+                "disposed=%s, disposed_at=%s, sale_value=%s, sale_acc_id=%s, disposed_by=%s, "
+                "updated_by=%s "
+                "WHERE id=%s AND society_id=%s",
+                (asset_name, d.get("asset_sno") or d.get("asset_SNo"), d.get("company_name"), d.get("depreciation_rate"), d.get("itc_claimed"), d.get("gst_disposal_liability"),
+                 disposed, d.get("disposed_at"), d.get("sale_value"), d.get("sale_acc_id"), d.get("disposed_by"),
+                 d.get("user_id"), pk, sid),
+            )
+        else:
+            db._execute(
+                "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s, "
+                "updated_by=%s "
+                "WHERE id=%s AND society_id=%s",
+                (asset_name, d.get("asset_sno") or d.get("asset_SNo"), d.get("company_name"), d.get("depreciation_rate"),
+                 d.get("user_id"), pk, sid),
+            )
         return True, "Asset updated", pk
 
     # New asset purchase — calls fn_buy_asset which also creates an expense + transaction
@@ -4396,6 +4409,8 @@ def _save_asset(db, d, sid, is_edit, pk):
         )
         asset_id = (r or {}).get("asset_id")
         expense_id = (r or {}).get("expense_id")
+        if asset_id:
+            db._execute("UPDATE assets SET depreciation_rate=%s, itc_claimed=%s, gst_disposal_liability=%s WHERE id=%s", (d.get("depreciation_rate"), d.get("itc_claimed"), d.get("gst_disposal_liability"), asset_id))
         msg = f"Asset '{asset_name}' purchased (₹{purchase_value:,.2f})"
         if expense_id:
             msg += f" [[expense:{expense_id}]]"
@@ -5021,9 +5036,9 @@ def _save_gate_log(db, d, sid):
     if not eid:
         return False, "Entity ID required", None
     r = db._execute(
-        "INSERT INTO gate_access(society_id,role,entity_id,time_in,created_by) "
-        "VALUES(%s,%s,%s,NOW(),%s)",
-        (sid, d.get("role", "v"), eid, d.get("user_id")),
+        "INSERT INTO gate_access(society_id,role,entity_id,time_in,time_out,created_by) "
+        "VALUES(%s,%s,%s,COALESCE(%s::timestamp, NOW()),%s,%s)",
+        (sid, d.get("role", "v"), eid, d.get("time_in"), d.get("time_out"), d.get("user_id")),
     )
     return True, "Gate log created", None
 
@@ -5074,7 +5089,8 @@ def _save_society(db, d, sid, is_edit, pk):
                 "secretary_name=%s,secretary_phone=%s,"
                 "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"
                 "registration_number=%s,tan_number=%s,"
-                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) "
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr), "
+                "secretary_email=%s, gate_logic=%s, duty_hrs=%s, primary_bank_account_id=%s "
                 "WHERE id=%s",
                 (
                     d.get("name"),
@@ -5094,6 +5110,10 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("registration_number"),
                     d.get("tan_number"),
                     d.get("payment_qr"),
+                    d.get("secretary_email"),
+                    d.get("gate_logic"),
+                    d.get("duty_hrs"),
+                    d.get("primary_bank_account_id"),
                     pk,
                 ),
             )
@@ -5104,7 +5124,8 @@ def _save_society(db, d, sid, is_edit, pk):
                 "login_background=COALESCE(NULLIF(%s, ''), login_background),"
                 "secretary_sign=COALESCE(NULLIF(%s, ''), secretary_sign),"
                 "secretary_name=%s,secretary_phone=%s,"
-                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr) "
+                "payment_qr=COALESCE(NULLIF(%s, ''), payment_qr), "
+                "secretary_email=%s, gate_logic=%s, duty_hrs=%s, primary_bank_account_id=%s "
                 "WHERE id=%s",
                 (
                     d.get("email"),
@@ -5116,6 +5137,10 @@ def _save_society(db, d, sid, is_edit, pk):
                     d.get("secretary_name"),
                     d.get("secretary_phone"),
                     d.get("payment_qr"),
+                    d.get("secretary_email"),
+                    d.get("gate_logic"),
+                    d.get("duty_hrs"),
+                    d.get("primary_bank_account_id"),
                     pk,
                 ),
             )
@@ -5242,13 +5267,16 @@ def _save_account(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE accounts SET "
-            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s, updated_by=%s "
+            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s, updated_by=%s, "
+            "parent_account_id=%s, mutuality_nature=%s "
             "WHERE id=%s AND society_id=%s",
             (
-                bf_val != 0,
+                bf_val != 0 or d.get("has_bf", False),
                 float(dep_pct)   if dep_pct   not in (None, "") else 100,
                 bool(is_dep)     if is_dep is not None else False,
                 d.get("user_id"),
+                d.get("parent_account_id"),
+                d.get("mutuality_nature"),
                 pk, sid,
             ),
         )
@@ -5288,19 +5316,20 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, depreciation_percent, is_depreciable, income_nature, tds_section, created_by"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, drcr_bf, depreciation_percent, is_depreciable, mutuality_nature, tds_section, parent_account_id, created_by"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
             d.get("header")   or None,
             drcr,
-            bf_amount != 0,                      # has_bf
+            bf_amount != 0 or d.get("has_bf", False),
             drcr_bf,                             # drcr_bf mirrors drcr_account
             dep_pct,
             is_dep,
-            d.get("income_nature") or "mutual",
+            d.get("mutuality_nature") or "mutual",
             d.get("tds_section") or None,
+            d.get("parent_account_id"),
             d.get("user_id"),
         ),
     )

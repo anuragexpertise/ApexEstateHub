@@ -2361,9 +2361,7 @@ def render_form_card(card_id: str, title: str, icon: str,
     )
     if _owner_locked_apartment_field:
         fields = [f for f in fields if f.get("id") != "apartment_id"]
-        # Hide email field for new apartment_users if created by owner
-        if entity_plural == "apartment_users":
-            fields = [f for f in fields if f.get("id") != "email"]
+
 
     # The society 'plan' is owned by the platform (master): a society admin can
     # see it on the list/profile (rendered read-only there) but must NOT change

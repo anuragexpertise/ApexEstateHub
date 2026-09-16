@@ -1,0 +1,71 @@
+import re
+
+def patch_file():
+    with open('app/dash_apps/callbacks/drilldown_callbacks.py', 'r') as f:
+        content = f.read()
+
+    # 1. Gate Logs
+    content = content.replace(
+        '"INSERT INTO gate_access(society_id,role,entity_id,time_in,created_by) "\n        "VALUES(%s,%s,%s,NOW(),%s)",\n        (sid, d.get("role", "v"), eid, d.get("user_id")),',
+        '"INSERT INTO gate_access(society_id,role,entity_id,time_in,time_out,created_by) "\n        "VALUES(%s,%s,%s,COALESCE(%s::timestamp, NOW()),%s,%s)",\n        (sid, d.get("role", "v"), eid, d.get("time_in"), d.get("time_out"), d.get("user_id")),'
+    )
+
+    # 2. Asset
+    content = content.replace(
+        '"UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, "\n            "updated_by=%s "\n            "WHERE id=%s AND society_id=%s",\n            (asset_name, d.get("asset_SNo"), d.get("company_name"), d.get("user_id"), pk, sid),',
+        '"UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s, itc_claimed=%s, gst_disposal_liability=%s, "\n            "updated_by=%s "\n            "WHERE id=%s AND society_id=%s",\n            (asset_name, d.get("asset_sno") or d.get("asset_SNo"), d.get("company_name"), d.get("depreciation_rate"), d.get("itc_claimed"), d.get("gst_disposal_liability"), d.get("user_id"), pk, sid),'
+    )
+    # Also add the UPDATE after fn_buy_asset returns
+    after_buy = 'asset_id = (r or {}).get("asset_id")\n        expense_id = (r or {}).get("expense_id")'
+    patched_after_buy = 'asset_id = (r or {}).get("asset_id")\n        expense_id = (r or {}).get("expense_id")\n        if asset_id:\n            db._execute("UPDATE assets SET depreciation_rate=%s, itc_claimed=%s, gst_disposal_liability=%s WHERE id=%s", (d.get("depreciation_rate"), d.get("itc_claimed"), d.get("gst_disposal_liability"), asset_id))'
+    content = content.replace(after_buy, patched_after_buy)
+
+    # 3. Patrol Locations
+    content = content.replace(
+        '"UPDATE patrol_locations\\n               SET location_name=%s, description=%s, active=%s, scan_interval=%s, latitude=%s, longitude=%s, nfc_enabled=%s\\n               WHERE id=%s AND society_id=%s",\n            (loc_name, description, active, scan_interval, lat, lon, nfc, pk, sid)',
+        '"UPDATE patrol_locations\\n               SET location_name=%s, description=%s, active=%s, scan_interval=%s, latitude=%s, longitude=%s, nfc_enabled=%s, schedule_start=%s, schedule_end=%s\\n               WHERE id=%s AND society_id=%s",\n            (loc_name, description, active, scan_interval, lat, lon, nfc, d.get("schedule_start"), d.get("schedule_end"), pk, sid)'
+    )
+    content = content.replace(
+        '"INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled, created_by)\\n               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",\n            (sid, loc_name, description, active, scan_interval, lat, lon, nfc, get_current_user_id())',
+        '"INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled, schedule_start, schedule_end, created_by)\\n               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",\n            (sid, loc_name, description, active, scan_interval, lat, lon, nfc, d.get("schedule_start"), d.get("schedule_end"), get_current_user_id())'
+    )
+
+    # 4. Societies
+    master_update = '"UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"\\\n                "logo=COALESCE(NULLIF(%s, \'\'), logo),"\\\n                "login_background=COALESCE(NULLIF(%s, \'\'), login_background),"\\\n                "secretary_sign=COALESCE(NULLIF(%s, \'\'), secretary_sign),"\\\n                "secretary_name=%s,secretary_phone=%s,"\\\n                "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"\\\n                "registration_number=%s,tan_number=%s,"\\\n                "payment_qr=COALESCE(NULLIF(%s, \'\'), payment_qr) "\\\n                "WHERE id=%s",\n                (\n                    d.get("name"),\n                    d.get("email"),\n                    d.get("phone"),\n                    d.get("address"),\n                    d.get("plan", "Free"),\n                    d.get("logo"),\n                    d.get("login_background"),\n                    d.get("secretary_sign"),\n                    d.get("secretary_name"),\n                    d.get("secretary_phone"),\n                    d.get("plan_validity"),\n                    d.get("calc_start_date"),\n                    d.get("pan_number"),\n                    d.get("gstin"),\n                    d.get("registration_number"),\n                    d.get("tan_number"),\n                    d.get("payment_qr"),\n                    pk,\n                ),'
+    master_update_fixed = '"UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"\\\n                "logo=COALESCE(NULLIF(%s, \'\'), logo),"\\\n                "login_background=COALESCE(NULLIF(%s, \'\'), login_background),"\\\n                "secretary_sign=COALESCE(NULLIF(%s, \'\'), secretary_sign),"\\\n                "secretary_name=%s,secretary_phone=%s,"\\\n                "plan_validity=%s,calc_start_date=%s,PAN_number=%s,gstin=%s,"\\\n                "registration_number=%s,tan_number=%s,"\\\n                "payment_qr=COALESCE(NULLIF(%s, \'\'), payment_qr), "\\\n                "secretary_email=%s, gate_logic=%s, duty_hrs=%s, primary_bank_account_id=%s "\\\n                "WHERE id=%s",\n                (\n                    d.get("name"),\n                    d.get("email"),\n                    d.get("phone"),\n                    d.get("address"),\n                    d.get("plan", "Free"),\n                    d.get("logo"),\n                    d.get("login_background"),\n                    d.get("secretary_sign"),\n                    d.get("secretary_name"),\n                    d.get("secretary_phone"),\n                    d.get("plan_validity"),\n                    d.get("calc_start_date"),\n                    d.get("pan_number"),\n                    d.get("gstin"),\n                    d.get("registration_number"),\n                    d.get("tan_number"),\n                    d.get("payment_qr"),\n                    d.get("secretary_email"),\n                    d.get("gate_logic"),\n                    d.get("duty_hrs"),\n                    d.get("primary_bank_account_id"),\n                    pk,\n                ),'
+    content = content.replace(master_update, master_update_fixed)
+
+    admin_update = '"UPDATE societies SET email=%s,phone=%s,address=%s,"\\\n                "logo=COALESCE(NULLIF(%s, \'\'), logo),"\\\n                "login_background=COALESCE(NULLIF(%s, \'\'), login_background),"\\\n                "secretary_sign=COALESCE(NULLIF(%s, \'\'), secretary_sign),"\\\n                "secretary_name=%s,secretary_phone=%s,"\\\n                "payment_qr=COALESCE(NULLIF(%s, \'\'), payment_qr) "\\\n                "WHERE id=%s",\n                (\n                    d.get("email"),\n                    d.get("phone"),\n                    d.get("address"),\n                    d.get("logo"),\n                    d.get("login_background"),\n                    d.get("secretary_sign"),\n                    d.get("secretary_name"),\n                    d.get("secretary_phone"),\n                    d.get("payment_qr"),\n                    pk,\n                ),'
+    admin_update_fixed = '"UPDATE societies SET email=%s,phone=%s,address=%s,"\\\n                "logo=COALESCE(NULLIF(%s, \'\'), logo),"\\\n                "login_background=COALESCE(NULLIF(%s, \'\'), login_background),"\\\n                "secretary_sign=COALESCE(NULLIF(%s, \'\'), secretary_sign),"\\\n                "secretary_name=%s,secretary_phone=%s,"\\\n                "payment_qr=COALESCE(NULLIF(%s, \'\'), payment_qr), "\\\n                "secretary_email=%s, gate_logic=%s, duty_hrs=%s, primary_bank_account_id=%s "\\\n                "WHERE id=%s",\n                (\n                    d.get("email"),\n                    d.get("phone"),\n                    d.get("address"),\n                    d.get("logo"),\n                    d.get("login_background"),\n                    d.get("secretary_sign"),\n                    d.get("secretary_name"),\n                    d.get("secretary_phone"),\n                    d.get("payment_qr"),\n                    d.get("secretary_email"),\n                    d.get("gate_logic"),\n                    d.get("duty_hrs"),\n                    d.get("primary_bank_account_id"),\n                    pk,\n                ),'
+    content = content.replace(admin_update, admin_update_fixed)
+
+    # 5. Accounts
+    acc_update = '"UPDATE accounts SET name=%s, tab_name=%s, header=%s, "\\\n            "drcr_account=%s, drcr_bf=%s, depreciation_percent=%s, "\\\n            "is_depreciable=%s, tds_section=%s "\\\n            "WHERE id=%s AND society_id=%s",\n            (\n                name,\n                d.get("tab_name"),\n                d.get("header"),\n                d.get("drcr_account", False),\n                d.get("drcr_bf", False),\n                d.get("depreciation_percent"),\n                d.get("is_depreciable", False),\n                d.get("tds_section"),\n                pk,\n                sid,\n            ),'
+    acc_update_fixed = '"UPDATE accounts SET name=%s, tab_name=%s, header=%s, "\\\n            "drcr_account=%s, drcr_bf=%s, depreciation_percent=%s, "\\\n            "is_depreciable=%s, tds_section=%s, "\\\n            "parent_account_id=%s, has_bf=%s, mutuality_nature=%s "\\\n            "WHERE id=%s AND society_id=%s",\n            (\n                name,\n                d.get("tab_name"),\n                d.get("header"),\n                d.get("drcr_account", False),\n                d.get("drcr_bf", False),\n                d.get("depreciation_percent"),\n                d.get("is_depreciable", False),\n                d.get("tds_section"),\n                d.get("parent_account_id"),\n                d.get("has_bf", False),\n                d.get("mutuality_nature"),\n                pk,\n                sid,\n            ),'
+    content = content.replace(acc_update, acc_update_fixed)
+    
+    acc_insert = '"INSERT INTO accounts(society_id, name, tab_name, header, "\\\n            "drcr_account, drcr_bf, depreciation_percent, is_depreciable, "\\\n            "tds_section) "\\\n            "VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)",\n            (\n                sid,\n                name,\n                d.get("tab_name"),\n                d.get("header"),\n                d.get("drcr_account", False),\n                d.get("drcr_bf", False),\n                d.get("depreciation_percent"),\n                d.get("is_depreciable", False),\n                d.get("tds_section"),\n            ),'
+    acc_insert_fixed = '"INSERT INTO accounts(society_id, name, tab_name, header, "\\\n            "drcr_account, drcr_bf, depreciation_percent, is_depreciable, "\\\n            "tds_section, parent_account_id, has_bf, mutuality_nature) "\\\n            "VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",\n            (\n                sid,\n                name,\n                d.get("tab_name"),\n                d.get("header"),\n                d.get("drcr_account", False),\n                d.get("drcr_bf", False),\n                d.get("depreciation_percent"),\n                d.get("is_depreciable", False),\n                d.get("tds_section"),\n                d.get("parent_account_id"),\n                d.get("has_bf", False),\n                d.get("mutuality_nature"),\n            ),'
+    content = content.replace(acc_insert, acc_insert_fixed)
+
+    # 6. Security Roster
+    sroster = '"UPDATE security_roster SET shift_type=%s WHERE id=%s AND society_id=%s",\n            (d.get("shift_type"), pk, sid),'
+    sroster_fixed = '"UPDATE security_roster SET shift_type=%s, attendance_status=%s WHERE id=%s AND society_id=%s",\n            (d.get("shift_type"), d.get("attendance_status"), pk, sid),'
+    content = content.replace(sroster, sroster_fixed)
+    sroster_i = '"INSERT INTO security_roster (society_id, security_id, roster_date, shift_type, created_by) "\n            "VALUES (%s, %s, %s, %s, %s)",\n            (sid, sec_id, d.get("roster_date"), d.get("shift_type"), get_current_user_id()),'
+    sroster_i_fixed = '"INSERT INTO security_roster (society_id, security_id, roster_date, shift_type, attendance_status, created_by) "\n            "VALUES (%s, %s, %s, %s, %s, %s)",\n            (sid, sec_id, d.get("roster_date"), d.get("shift_type"), d.get("attendance_status"), get_current_user_id()),'
+    content = content.replace(sroster_i, sroster_i_fixed)
+
+    # 7. Channels
+    chan_update = '"UPDATE channels SET channel_type=%s, name=%s, identifier=%s, apartment_id=%s, is_recurring=%s "\n            "WHERE id=%s AND society_id=%s",\n            (c_type, name, ident, d.get("apartment_id"), d.get("is_recurring", False), pk, sid),'
+    chan_update_fixed = '"UPDATE channels SET channel_type=%s, name=%s, identifier=%s, apartment_id=%s, is_recurring=%s, active=%s "\n            "WHERE id=%s AND society_id=%s",\n            (c_type, name, ident, d.get("apartment_id"), d.get("is_recurring", False), d.get("active", True), pk, sid),'
+    content = content.replace(chan_update, chan_update_fixed)
+    chan_insert = '"INSERT INTO channels (society_id, channel_type, name, identifier, apartment_id, is_recurring) "\n            "VALUES (%s, %s, %s, %s, %s, %s)",\n            (sid, c_type, name, ident, d.get("apartment_id"), d.get("is_recurring", False)),'
+    chan_insert_fixed = '"INSERT INTO channels (society_id, channel_type, name, identifier, apartment_id, is_recurring, active) "\n            "VALUES (%s, %s, %s, %s, %s, %s, %s)",\n            (sid, c_type, name, ident, d.get("apartment_id"), d.get("is_recurring", False), d.get("active", True)),'
+    content = content.replace(chan_insert, chan_insert_fixed)
+
+    with open('app/dash_apps/callbacks/drilldown_callbacks.py', 'w') as f:
+        f.write(content)
+
+if __name__ == '__main__':
+    patch_file()
