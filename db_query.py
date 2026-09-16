@@ -14,7 +14,7 @@ Features:
   - Interactive SQL shell with history
   - Execute SQL files
   - Pretty-print results
-  - Export to CSV/JSON
+  - Export to XLSX/JSON
   - Connection pooling
 """
 
@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime
 import json
-import csv
+
 from typing import List, Tuple, Optional, Dict, Any
 from io import StringIO
 # import readline  # Enables command history
@@ -59,7 +59,7 @@ DB_SSL_KEY = os.getenv("DATABASE_SSL_KEY")
 DB_SSL_ROOT = os.getenv("DATABASE_SSL_ROOT_CERT")
 
 # Output configuration
-OUTPUT_FORMAT = "table"  # table, json, csv
+OUTPUT_FORMAT = "table"  # table, json, xlsx
 MAX_ROWS_DISPLAY = 100
 HISTORY_FILE = Path.home() / ".db_query_history"
 
@@ -205,15 +205,17 @@ class OutputFormatter:
         return json.dumps(rows, indent=2, default=str)
     
     @staticmethod
-    def format_csv(rows: List[Dict]) -> str:
-        """Format as CSV."""
+    def format_xlsx(rows: List[Dict]) -> bytes:
+        """Format as XLSX."""
         if not rows:
-            return ""
+            return b""
         
-        output = StringIO()
-        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
-        writer.writeheader()
-        writer.writerows(rows)
+        import pandas as pd
+        import io
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
         return output.getvalue()
     
     @staticmethod
@@ -221,8 +223,8 @@ class OutputFormatter:
         """Format results based on type."""
         if format_type == "json":
             return OutputFormatter.format_json(rows)
-        elif format_type == "csv":
-            return OutputFormatter.format_csv(rows)
+        elif format_type == "xlsx":
+            return OutputFormatter.format_xlsx(rows)
         else:  # table
             return OutputFormatter.format_table(rows)
 
@@ -263,7 +265,7 @@ class DatabaseShell:
         print("\nCommands:")
         print("  .help          - Show help")
         print("  .format json   - Switch to JSON output")
-        print("  .format csv    - Switch to CSV output")
+        print("  .format xlsx   - Switch to XLSX output")
         print("  .format table  - Switch to table output")
         print("  .export FILE   - Export last results to file")
         print("  .tables        - List all tables")
@@ -320,7 +322,7 @@ class DatabaseShell:
 Commands:
   .help              - Show this help
   .tables            - List all tables in database
-  .format [type]     - Switch output format (table/json/csv)
+  .format [type]     - Switch output format (table/json/xlsx)
   .export [file]     - Export last results to file
   .quit              - Exit shell
             """)
@@ -455,7 +457,7 @@ def main():
     )
     parser.add_argument(
         "--format",
-        choices=["table", "json", "csv"],
+        choices=["table", "json", "xlsx"],
         default="table",
         help="Output format (default: table)"
     )

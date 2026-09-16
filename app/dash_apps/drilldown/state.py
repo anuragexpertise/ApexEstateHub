@@ -34,7 +34,7 @@ def initial_state(role: str = "admin", society_id: int | None = None) -> dict:
         "active_card": home_card,
         "prefill":     {},
         "filters":     {"society_id": society_id},
-        "csv_entity":  None,
+        "xlsx_entity":  None,
     }
 
 

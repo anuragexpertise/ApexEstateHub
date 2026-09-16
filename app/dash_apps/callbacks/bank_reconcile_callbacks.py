@@ -1,12 +1,12 @@
 # app/dash_apps/callbacks/bank_reconcile_callbacks.py
 """
-Bank Statement Reconciliation — CSV/Excel Upload + Per-Row Reconcile
+Bank Statement Reconciliation — Excel Upload + Per-Row Reconcile
 ======================================================================
 Adds two things to the Admin portal:
 
   1. A "Bulk Reconcile" button next to "New" on list_receipts /
      list_expenses (see renderers.py), opening a modal to upload a bank
-     statement (CSV or Excel) against that list. Uses the same
+     statement (Excel) against that list. Uses the same
      upload/template-download shape as bulk_enroll_callbacks.py.
 
   2. A per-row "Reconcile" button (list-reconcile) on any unreconciled
@@ -76,7 +76,7 @@ _ENTITY_LABELS = {"receipts": "Receipts", "expenses": "Expenses"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STATEMENT PARSER (CSV or Excel)
+# STATEMENT PARSER (Excel)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _parse_statement(contents: str, filename: str) -> pd.DataFrame:
@@ -93,7 +93,7 @@ def _parse_statement(contents: str, filename: str) -> pd.DataFrame:
     if name.endswith((".xlsx", ".xls")):
         df = pd.read_excel(io.BytesIO(decoded))
     else:
-        df = pd.read_csv(io.StringIO(decoded.decode("utf-8-sig")))
+        raise ValueError("Only Excel (.xlsx, .xls) files are supported.")
 
     df.columns = [str(c).strip().lower() for c in df.columns]
 
@@ -217,7 +217,7 @@ def _instructions_for(entity: str) -> html.Div:
     label = _ENTITY_LABELS.get(entity, entity.title())
     return html.Div([
         html.P(
-            f"Upload a bank statement (CSV or Excel) to reconcile against {label.lower()}.",
+            f"Upload a bank statement (Excel) to reconcile against {label.lower()}.",
             className="mb-1",
             style={"fontWeight": "600", "fontSize": "13px"},
         ),
@@ -398,7 +398,7 @@ def register_bank_reconcile_callbacks(app):
         actor_id = get_current_user_id()
 
         try:
-            df = _parse_statement(contents, filename or "statement.csv")
+            df = _parse_statement(contents, filename or "statement.xlsx")
         except Exception as e:
             return (
                 html.Div(f"Could not read file: {e}", style={"color": "#de5c52"}),

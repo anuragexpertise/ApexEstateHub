@@ -3020,17 +3020,17 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# EXPORT CSV
+# EXPORT XLSX
 # ════════════════════════════════════════════════════════════════════════════
 
-def export_csv(entity: str, filters: dict) -> str:
+def export_xlsx(entity: str, filters: dict) -> bytes:
     rows, _ = load_list(entity, filters, page=1, page_size=10_000)
     if not rows:
-        return ""
-    import csv
+        return b""
+    import pandas as pd
     import io
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
-    writer.writeheader()
-    writer.writerows(rows)
+    df = pd.DataFrame(rows)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
     return buf.getvalue()

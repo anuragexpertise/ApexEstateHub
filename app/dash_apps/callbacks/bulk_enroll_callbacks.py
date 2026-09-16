@@ -1,6 +1,6 @@
 # app/dash_apps/callbacks/bulk_enroll_callbacks.py
 """
-Bulk Enroll — Excel/CSV Upload for Apartments / Vendors / Security / Users / Assets
+Bulk Enroll — Excel Upload for Apartments / Vendors / Security / Users / Assets
 ==============================================================
 Adds a "Bulk Enroll" button next to "New" on the Admin/Enroll list
 cards (list_apartments, list_vendors, list_security, etc.).
@@ -55,12 +55,12 @@ from app.security.audit_context import (
     get_current_society_id,
 )
 
-# Defense-in-depth cap: a huge CSV (accidental or malicious) would otherwise
+# Defense-in-depth cap: a huge Excel file (accidental or malicious) would otherwise
 # trigger unbounded serial INSERTs with no upper bound.
 MAX_BULK_ROWS = 500
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CSV CONTRACT PER ENTITY
+# EXCEL CONTRACT PER ENTITY
 # ══════════════════════════════════════════════════════════════════════════════
 _BULK_TEMPLATES: dict[str, dict] = {
     "apartments": {
@@ -138,7 +138,7 @@ def _instructions_for(entity: str) -> html.Div:
     req  = ", ".join(meta["required"])
     return html.Div([
         html.P(
-            f"Upload an Excel (.xlsx) or CSV file to enroll multiple {meta['label'].lower()} at once.",
+            f"Upload an Excel (.xlsx) file to enroll multiple {meta['label'].lower()} at once.",
             className="mb-1",
             style={"fontWeight": "600", "fontSize": "13px"},
         ),
@@ -194,13 +194,13 @@ def _render_results(results: dict, filename: str) -> html.Div:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CSV PARSER
+# EXCEL PARSER
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _parse_upload(contents: str, filename: str) -> list[dict]:
     """
     Decode a dcc.Upload `contents` string (data URI) into a list of
-    lowercase-keyed row dicts using pandas to parse Excel/CSV.
+    lowercase-keyed row dicts using pandas to parse Excel.
     """
     _content_type, content_string = contents.split(",", 1)
     decoded = base64.b64decode(content_string)
@@ -209,7 +209,7 @@ def _parse_upload(contents: str, filename: str) -> list[dict]:
     if name.endswith((".xlsx", ".xls")):
         df = pd.read_excel(io.BytesIO(decoded))
     else:
-        df = pd.read_csv(io.StringIO(decoded.decode("utf-8-sig")))
+        raise ValueError("Only Excel (.xlsx, .xls) files are supported.")
         
     df.columns = [(str(c) or "").strip().lower() for c in df.columns]
     
@@ -256,7 +256,7 @@ def _check_required(row: dict, required_cols: list[str]) -> str | None:
 
 def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
-    For each CSV row:
+    For each Excel row:
       1. Insert into apartments → get apartments.id
       2. Insert into users (role='apartment') → get users.id
       3. Set users.linked_id = apartments.id
@@ -332,7 +332,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
 
 def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
-    For each CSV row:
+    For each Excel row:
       1. Insert into vendors
       2. Insert into users (role='vendor', linked_id=vendors.id set inline)
       If step 2 fails, roll back the vendors row so the row can be retried
@@ -404,7 +404,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
 
 def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
-    For each CSV row:
+    For each Excel row:
       1. Insert into security_staff
       2. Insert into users (role='security', linked_id=security_staff.id set inline)
       If step 2 fails, roll back the security_staff row — same reasoning as
@@ -608,7 +608,7 @@ def register_bulk_enroll_callbacks(app):
             output.getvalue(), filename=f"{entity}_bulk_enroll_template.xlsx"
         )
 
-    # ── 4. Process CSV upload → bulk insert → refresh list ────────────────────────
+    # ── 4. Process Excel upload → bulk insert → refresh list ────────────────────────
     @app.callback(
         Output("bulk-enroll-result",        "children",   allow_duplicate=True),
         Output("drilldown-store",           "data",       allow_duplicate=True),
@@ -689,7 +689,7 @@ def register_bulk_enroll_callbacks(app):
         else:   # security
             results = _bulk_insert_security(rows, sid, actor_id)
 
-        result_ui = _render_results(results, filename or "upload.csv")
+        result_ui = _render_results(results, filename or "upload.xlsx")
 
         # Refresh the underlying list card so new rows appear immediately.
         from .drilldown_callbacks import _render_current

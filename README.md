@@ -53,7 +53,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Entities** | Apartments · Vendors · Security Staff · Societies · Accounts · Assets |
 | **Operations** | Events · Concerns/Complaints · Gate Logs · Attendance · NOC |
 | **Gate Pass** | Fernet-encrypted QR · Dual-mode camera scanner · Entry IN / Exit OUT |
-| **Reports** | CSV & XLS export on every list · KPI Audit Report |
+| **Reports** | XLSX export on every list · KPI Audit Report |
 | **Customization** | Drag-and-drop KPI layout editor per portal+tab · KPI SQL Inspector |
 | **Images** | WebP compression · Logo · Login background · Secretary sign · Profile photos |
 | **DB** | PostgreSQL `fn_*` stored functions · `%s` parameterised queries via psycopg2 |
@@ -61,9 +61,9 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **NOC** | Eligibility check → rich-text editor → Print / Save HTML / Email |
 | **Gate Pass (NFC)** | Web NFC API — write signed pass payload directly to an NFC tag from the browser |
 | **Patrol** | Interactive Leaflet map for patrol-location create/reissue, with geofencing |
-| **Bank Reconciliation** | CSV/Excel bank-statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
+| **Bank Reconciliation** | Excel bank-statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
 | **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward) + Agreement e-sign flow with Print/PDF/Email |
-| **Bulk Enrollment** | CSV upload for apartments/vendors/security with template download |
+| **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
 
 ---
 
@@ -101,7 +101,7 @@ Browser (Dash SPA)
 │   ├── customize_kpi_callbacks.py← KPI Inspector cascading dropdowns
 │   ├── list_inspector_callbacks.py / form_inspector_callbacks.py ← column/field config
 │   ├── setup_wizard_callbacks.py ← First-time society setup wizard
-│   ├── bulk_enroll_callbacks.py  ← CSV bulk upload for members/staff
+│   ├── bulk_enroll_callbacks.py  ← Excel bulk upload for members/staff
 │   ├── bank_reconcile_callbacks.py ← Bank statement upload + reconciliation
 │   ├── channel_callbacks.py / poll_callbacks.py ← Alert channels · Polls
 │   ├── assign_to_callbacks.py / invite_to_callbacks.py / concern_bid_callbacks.py ← Concern workflow
@@ -789,7 +789,7 @@ EstateHub/
 │   │   │   ├── list_inspector_callbacks.py   ← List column configuration
 │   │   │   ├── form_inspector_callbacks.py   ← Form field configuration
 │   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
-│   │   │   ├── bulk_enroll_callbacks.py      ← CSV bulk upload for members/staff
+│   │   │   ├── bulk_enroll_callbacks.py      ← Excel bulk upload for members/staff
 │   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation
 │   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
 │   │   │   ├── concern_bid_callbacks.py      ← Vendor "Save Bid" on a concern
@@ -878,7 +878,7 @@ function but is absent from `CALLBACK_MODULES`. Current order
 "event_ticket_callbacks"     # 13b. Event ticket Print/Save/Email
 "vendor_pass_callbacks"      # 13c. Vendor pass Print/Save/Email
 "expense_callbacks"          # 13d. Expense Print/Save/Email
-"bulk_enroll_callbacks"      # 14. CSV bulk upload
+"bulk_enroll_callbacks"      # 14. Excel bulk upload
 "bank_reconcile_callbacks"   # 14a2. Bank statement reconciliation
 "assign_to_callbacks"        # 14b. Concern assignment
 "concern_bid_callbacks"      # 14c. Vendor bid on concern
