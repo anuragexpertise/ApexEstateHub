@@ -590,42 +590,7 @@ POLLS = [
 # not a balanced trial (see module docstring). Keyed by acc_id, applied
 # for FY 2026.
 BF_FY = 2026
-BF_VALUES = {
-    633:  100_000.00,    # CiH — Cash-in-hand
-    2:  1_000_000.00,    # CapAc — Capital Account
-    3:  0.00,    #  Loan & Advances Taken
-    5:  0.00,    # ImAs — Immovable Assets
-    7:  0.00,         # Loans & Advances Given
-    6312:  50_000.00,    # ICICI
-    6311:  50_000.00,    # SBI
-    61:    10_000.00,    # Furniture
-    62:    10_000.00,    # Investments
-    632:        0.00,    # Deposits (Assets)
-    64:         0.00,    # Instruments
-    65:         0.00,    # Car
-    9:          0.00,    # Sundry Creditors ("SCr")
-    8:          0.00,    # Sundry Debtors ("SDr") -- HEADER, not a leaf.
-                         #   Kept at 0 now that 81/82 exist below; the
-                         #   header itself is only ever posted to by
-                         #   fn_post_receivable_accrual's accrual leg
-                         #   (2026-08), same convention as 631 "Bank
-                         #   Accounts" staying 0 while 6311/6312 carry
-                         #   real money.
-    81:   780_000.00,    # Sundry Debtors (Digital) -- opening receivable
-                         #   balance, naturally Dr-sided (drcr_bf='Dr').
-                         #   Arbitrarily parked entirely on the Digital
-                         #   leaf for demo purposes (no historical
-                         #   cash-vs-digital split exists for this BF
-                         #   figure); real societies should split this
-                         #   across 81/82 to match actual history. This
-                         #   is the deliberate balancing figure that
-                         #   brings the Bal-root total_closing to exactly
-                         #   0.00 for the seeded BF_FY -- see the note in
-                         #   this module's docstring. If you change any
-                         #   other BF_VALUES entry, recompute this one so
-                         #   the books still tie out (own_bf sums to zero
-                         #   across every has_bf=TRUE account).
-}
+BF_VALUES = {}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1675,6 +1640,10 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
 
 RECEIPT_TYPES = [
     # (date, acc_id, particulars, amount, entity_key, role, mode)
+    ("2026-04-01", 2311,  "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
+     "owner2", "apartment", "cash"),
+    ("2026-04-02", 2311,  "Apartment Maintenance - Annual Bulk Payment A-102", 120000.00,
+     "owner4", "apartment", "cash"),
     ("2026-04-08", 212,   "Old Furniture Sold (scrap dealer pickup)", 3500.00,
      None, "other", "cash"),
     ("2026-04-22", 2318,  "NOC / Ownership Transfer Fee - A-102", 1000.00,
