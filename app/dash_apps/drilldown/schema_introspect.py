@@ -107,7 +107,7 @@ _PROFILE_VISIBLE_SYSTEM = {
 # than the generic schema-driven form, so it isn't affected by the
 # schema-driven field list below.
 NO_EDIT_ACTION = {
-    "gate_logs", "cashbook", "receivables", "payables",
+    "gate_logs", "cashbook", "receivables",
     "ledger",
     # Scan-only / event-managed entities: no CRUD forms, profile shown
     # read-only from the gate scan result.
@@ -227,9 +227,6 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
         {"label": "Account",          "field": "account_name", "icon": "fa-book"},
     ],
     "payables": [
-        {"label": "Account",          "field": "account_name", "icon": "fa-book"},
-        {"label": "Shift Date",       "field": "shift_date",   "icon": "fa-calendar"},
-        {"label": "Shift Fraction",   "field": "shift_fraction", "icon": "fa-adjust"},
         {"label": "Days Overdue",     "field": "days_overdue", "icon": "fa-clock"},
     ],
     "assets": [
@@ -332,6 +329,9 @@ _HIDDEN_ON_LIST: dict[str, set[str]] = {
     "active_assets": {
         "disposed", "disposed_at", "sale_value", "sale_acc_id", "disposed_by",
         "itc_claimed", "gst_disposal_liability"
+    },
+    "nocs": {
+        "body_text"
     }
 }
 
@@ -648,6 +648,9 @@ _HIDDEN_ON_FORM: dict[str, set[str]] = {
     },
     "societies": {
         "plan", "plan_validity",
+    },
+    "payables": {
+        "status", "paid_at", "confirmed_by", "confirmed_at",
     },
 }
 
