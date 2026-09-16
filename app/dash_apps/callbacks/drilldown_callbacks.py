@@ -768,6 +768,9 @@ def register_drilldown_callbacks(app):
             entity = id_dict.get("entity")
             pk = id_dict.get("pk")
             action = id_dict.get("action")
+            
+            if entity:
+                entity = _resolve_entity_singular(id_dict)
 
             # ── QR / Gate Pass modal — does NOT navigate, fires trigger ──────────
             if action == "show_qr":
@@ -4739,11 +4742,7 @@ def _save_event(db, d, sid, is_edit, pk):
     except (TypeError, ValueError):
         _ticket_price2 = 0
 
-    try:
-        _capacity = int(d.get("capacity") or 0)
-        _capacity = _capacity if _capacity > 0 else None
-    except (TypeError, ValueError):
-        _capacity = None
+
 
     _ticket_name = (d.get("ticket_name") or "Adult").strip()
     _ticket_name2 = (d.get("ticket_name2") or "Child").strip()
@@ -4756,8 +4755,6 @@ def _save_event(db, d, sid, is_edit, pk):
     if is_edit:
         _img = d.get("image") or None
         _img_clause = ", image=%s" if _img else ""
-        _upd_by_clause = ", updated_by=%s"
-        _upd_by_param = (d.get("user_id"),)
         _img_param = (
             title,
             description,
@@ -4770,16 +4767,15 @@ def _save_event(db, d, sid, is_edit, pk):
             _ticket_price,
             _ticket_name2,
             _ticket_price2,
-            _capacity,
         )
         if _img:
             _img_param += (_img,)
-        _img_param += _upd_by_param + (pk, sid)
+        _img_param += (pk, sid)
         db._execute(
             "UPDATE events SET title=%s, description=%s, event_date=%s, "
             f"event_time=%s, venue=%s, open_to=%s, account_id=%s, "
-            f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s, capacity=%s"
-            f"{_img_clause}{_upd_by_clause} "
+            f"ticket_name=%s, ticket_price=%s, ticket_name2=%s, ticket_price2=%s"
+            f"{_img_clause} "
             "WHERE id=%s AND society_id=%s",
             _img_param,
         )
@@ -4805,8 +4801,6 @@ def _save_event(db, d, sid, is_edit, pk):
         account_id=_acc_id,
         open_to=d.get("open_to", "all"),
         image=d.get("image"),
-        capacity=_capacity,
-        created_by=d.get("user_id"),
     )
     if not event_id:
         return False, msg, None
