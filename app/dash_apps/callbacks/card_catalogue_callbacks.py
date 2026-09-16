@@ -29,7 +29,7 @@ _KPI_CACHE: dict[str, tuple[str, float]] = {}
 # confirm/delete in drilldown_callbacks.py now call invalidate_kpi_cache()
 # explicitly on success, so this TTL is a backstop for the handful of write
 # paths that don't route through those handlers (e.g. QR gate-access scans,
-# bulk CSV enroll) rather than the primary staleness control.
+# bulk Excel enroll) rather than the primary staleness control.
 _CACHE_TTL_SECONDS = 60.0
 
 

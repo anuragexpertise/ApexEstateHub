@@ -15,7 +15,7 @@ Drill-Down UX Engine — Master Callback Router (ENHANCED)
    Pagination      → same list, new page
    Search          → same list, filtered
    Column sort     → same list, sorted (NEW)
-   CSV/XLS download → streamed file (NEW: both formats)
+   XLSX download → streamed file (NEW: both formats)
    Bulk upload     → XLS import (NEW)
    Form submit     → save → back → refresh list
 
@@ -2179,24 +2179,24 @@ def register_drilldown_callbacks(app):
             {"display": "none"} if hide_kpis else {"display": "grid"},
         )
 
-    # ── 3. CSV DOWNLOAD ───────────────────────────────────────────────────────
+    # ── 3. XLSX DOWNLOAD ───────────────────────────────────────────────────────
     @app.callback(
-        Output({"type": "csv-download-trigger", "entity": MATCH}, "data"),
-        Input({"type": "btn-csv-download", "entity": MATCH}, "n_clicks"),
+        Output({"type": "xlsx-download-trigger", "entity": MATCH}, "data"),
+        Input({"type": "btn-xlsx-download", "entity": MATCH}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def download_csv(n_clicks, store, auth):
+    def download_xlsx(n_clicks, store, auth):
         if not n_clicks:
             return no_update
         entity = ctx.triggered_id.get("entity", "data")
         filters = nav_state.get_filters(store or {})
         filters["society_id"] = get_current_society_id()
         filters = _apply_portal_filters(filters, auth or {})
-        csv_str = loaders.export_csv(entity, filters)
-        return dcc.send_string(csv_str, filename=f"{entity}_{dt_date.today()}.csv")
+        xlsx_bytes = loaders.export_xlsx(entity, filters)
+        return dcc.send_bytes(xlsx_bytes, filename=f"{entity}_{dt_date.today()}.xlsx")
 
     # ── 3a. EXPENSE-FORM TDS AUTOFILL (Phase 4.3) ─────────────────────────────
     # When the account (acc_id) or the linked entity (entity_id) drill-in
@@ -2329,7 +2329,7 @@ def register_drilldown_callbacks(app):
 
     # ── 3b. CASHBOOK / LEDGER FY EXPORT ─────────────────────────────────────────
     # Full-FY workbook in the CB2025-2026.xlsx reference layout — distinct from
-    # the generic CSV/XLS buttons above, which just dump whatever page of rows
+    # the generic XLSX buttons above, which just dump whatever page of rows
     # is currently on-screen. Cashbook needs no account_id (society + FY +
     # entity scoping); Ledger needs the account_id the drilldown is currently
     # scoped to (set when navigating in via Account profile -> "View Ledger").

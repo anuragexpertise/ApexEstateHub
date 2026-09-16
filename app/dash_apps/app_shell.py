@@ -393,7 +393,7 @@ def _bulk_enroll_modal() -> dbc.Modal:
                 html.Div([
                     html.Div(id="bulk-enroll-instructions", className="mb-2"),
                     dbc.Button(
-                        [html.I(className="fas fa-file-download me-2"), "Download CSV Template"],
+                        [html.I(className="fas fa-file-download me-2"), "Download Excel Template"],
                         id="bulk-enroll-template-btn", n_clicks=0,
                         color="secondary", outline=True, size="sm",
                         className="mb-3",
@@ -403,7 +403,7 @@ def _bulk_enroll_modal() -> dbc.Modal:
                         id="bulk-enroll-upload",
                         children=html.Div([
                             html.I(className="fas fa-cloud-upload-alt me-2"),
-                            "Drag & drop or click to select a CSV file",
+                            "Drag & drop or click to select an Excel file",
                         ]),
                         style={
                             "width": "100%", "height": "70px", "lineHeight": "70px",
@@ -413,7 +413,7 @@ def _bulk_enroll_modal() -> dbc.Modal:
                             "background": "rgba(102,126,234,0.04)",
                             "color": "#667eea", "cursor": "pointer",
                         },
-                        multiple=False, accept=".csv",
+                        multiple=False, accept=".xlsx,.xls",
                     ),
                     dcc.Loading(
                         html.Div(id="bulk-enroll-result", className="mt-3"),
@@ -432,7 +432,7 @@ def _bulk_enroll_modal() -> dbc.Modal:
 
 
 # ── Bank Reconcile modals ────────────────────────────────────────────────────────
-# Two modals: a bulk upload modal (mirrors _bulk_enroll_modal — CSV/Excel
+# Two modals: a bulk upload modal (mirrors _bulk_enroll_modal — Excel
 # upload + template download, opened by the "Bulk Reconcile" button next to
 # "New" on list_receipts/list_expenses), and a per-row picker modal (mirrors
 # _pay_dues_bill_modal — a tappable candidate list, opened by the row-level
@@ -488,7 +488,7 @@ def _bank_reconcile_modal() -> dbc.Modal:
                         id="bank-reconcile-upload",
                         children=html.Div([
                             html.I(className="fas fa-cloud-upload-alt me-2"),
-                            "Drag & drop or click to select a CSV or Excel file",
+                            "Drag & drop or click to select an Excel file",
                         ]),
                         style={
                             "width": "100%", "height": "70px", "lineHeight": "70px",
@@ -498,7 +498,7 @@ def _bank_reconcile_modal() -> dbc.Modal:
                             "background": "rgba(102,126,234,0.04)",
                             "color": "#667eea", "cursor": "pointer",
                         },
-                        multiple=False, accept=".csv,.xlsx,.xls",
+                        multiple=False, accept=".xlsx,.xls",
                     ),
                     dcc.Loading(
                         html.Div(id="bank-reconcile-result", className="mt-3"),

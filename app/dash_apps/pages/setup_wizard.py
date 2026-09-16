@@ -1,5 +1,5 @@
 import os
-import csv
+
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db

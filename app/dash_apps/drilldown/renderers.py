@@ -977,7 +977,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                    "fontWeight": "600"},
         ))
 
-        # "Bulk Enroll" — CSV/Excel upload for the enroll-tab entities.
+        # "Bulk Enroll" — Excel upload for the enroll-tab entities.
         # Uses the single global modal in app_shell.py (see
         # bulk_enroll_callbacks.py), not a per-card component, so it's just
         # a plain button id here — no pattern-matching MATCH/ALL needed.
@@ -990,7 +990,7 @@ def render_list_card(card_id: str, title: str, icon: str,
                        "fontWeight": "600"},
             ))
 
-        # "Bulk Reconcile" — CSV/Excel bank statement upload against
+        # "Bulk Reconcile" — Excel bank statement upload against
         # receipts/expenses. Same single-global-modal pattern as Bulk
         # Enroll above (see bank_reconcile_callbacks.py).
         if entity in ("receipts", "expenses"):
@@ -1009,7 +1009,7 @@ def render_list_card(card_id: str, title: str, icon: str,
     # call). The dropdown here is the only place that FY can be changed —
     # previously there was none; both views silently defaulted to the
     # current FY with no way to look at a prior year on-screen (the plain
-    # CSV/XLS buttons below export whatever page is currently on-screen,
+    # XLSX buttons below export whatever page is currently on-screen,
     # not a full-FY workbook in the CB2025-2026.xlsx reference layout,
     # which is what the dedicated Export button produces instead).
     if entity in ("cashbook", "ledger") and fy_options:
@@ -1087,12 +1087,12 @@ def render_list_card(card_id: str, title: str, icon: str,
                    "borderRadius": "8px"},
         ),
         dbc.Button(
-            [html.I(className="fas fa-download me-1"), "CSV"],
-            id={"type": "btn-csv-download", "entity": entity},
+            [html.I(className="fas fa-download me-1"), "XLSX"],
+            id={"type": "btn-xlsx-download", "entity": entity},
             size="sm", color="secondary", outline=True,
             style={"fontSize": "11px", "borderRadius": "8px"},
         ),
-        dcc.Download(id={"type": "csv-download-trigger", "entity": entity}),
+        dcc.Download(id={"type": "xlsx-download-trigger", "entity": entity}),
         dcc.Download(id={"type": "xls-download-trigger", "entity": entity}),
     ]
 
@@ -1109,7 +1109,7 @@ def render_list_card(card_id: str, title: str, icon: str,
     # table every other entity uses — a chart of accounts is inherently
     # hierarchical (accounts.parent_account_id), and a flat table with a
     # "Parent" column doesn't convey that structure the way actual nesting
-    # does. header_right (search/CSV/New, built above) carries over
+    # does. header_right (search/XLSX/New, built above) carries over
     # unchanged; only the body swaps from table+pager to tree.
     if entity == "accounts":
         return render_accounts_tree_card(title, icon, rows, entity, total_rows, header_right)
