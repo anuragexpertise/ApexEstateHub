@@ -98,7 +98,7 @@ def list_assignable_admins(society_id: int, search: str | None = None, concern_i
     sql += " FROM users u"
     if concern_id:
         sql += " LEFT JOIN concerns_assigns ca ON ca.entity_id = u.id AND ca.role='ADM' AND ca.concern_id=%s"
-    sql += " WHERE u.society_id=%s AND u.role='admin' AND u.active=TRUE"
+    sql += " WHERE u.society_id=%s AND u.role='admin'"
     params: list = ([concern_id] if concern_id else []) + [society_id]
     if search:
         sql += " AND (u.name ILIKE %s OR u.email ILIKE %s)"

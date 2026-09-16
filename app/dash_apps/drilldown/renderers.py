@@ -3858,7 +3858,7 @@ def render_member_ledger_card(
         
         html.Div([
             dbc.Button(
-                "Pay Now", id={"type": "kpi-card-div", "card_id": "form_pay_dues_new"},
+                "Pay Now", id={"type": "profile-action", "entity": "apartment", "pk": str(entity_id) if entity_id else "", "action": "pay_dues"},
                 size="sm", color="success",
                 style={"fontSize": "12px", "borderRadius": "8px", "marginRight": "16px",
                        "fontWeight": "600"}

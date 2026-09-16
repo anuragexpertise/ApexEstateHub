@@ -181,8 +181,6 @@ CREATE TABLE IF NOT EXISTS apartments (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users (id),
-    updated_by INT REFERENCES users (id),
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
 
@@ -278,11 +276,7 @@ CREATE TABLE IF NOT EXISTS events (
     ticket_name2 VARCHAR(20) DEFAULT 'Child',
     ticket_price2 NUMERIC(10, 2) DEFAULT 0,
     image TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
-    updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id),
-    capacity INT DEFAULT NULL
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS concerns (
@@ -4214,18 +4208,6 @@ BEGIN
     v_amount := COALESCE(v_event.ticket_price, 0) * COALESCE(p_quantity_adult, 0)
              + COALESCE(v_event.ticket_price2, 0) * COALESCE(p_quantity_child, 0);
     v_total_qty := COALESCE(p_quantity_adult, 0) + COALESCE(p_quantity_child, 0);
-
-    IF v_event.capacity IS NOT NULL THEN
-        DECLARE
-            v_sold_qty INT;
-        BEGIN
-            SELECT COALESCE(SUM(quantity_adult + quantity_child), 0) INTO v_sold_qty
-            FROM event_tickets WHERE event_id = p_event_id AND status != 'cancelled';
-            IF (v_sold_qty + v_total_qty) > v_event.capacity THEN
-                RAISE EXCEPTION 'Event capacity exceeded';
-            END IF;
-        END;
-    END IF;
 
     v_desc := COALESCE(p_particulars,
         'Event Ticket x' || v_total_qty || ' - ' || COALESCE(v_event.title,'') ||

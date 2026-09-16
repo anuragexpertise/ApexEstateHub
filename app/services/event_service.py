@@ -22,8 +22,6 @@ def create_event(
     account_id: int = None,
     open_to: str = "all",
     image: str = None,
-    capacity: int = None,
-    created_by: int = None,
 ):
     """Create an event in society."""
     import html
@@ -35,14 +33,14 @@ def create_event(
             INSERT INTO events (
                 society_id, title, description, venue, event_date, event_time,
                 open_to, account_id, ticket_name, ticket_price,
-                ticket_name2, ticket_price2, image, capacity, created_at, created_by
+                ticket_name2, ticket_price2, image, created_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING id
         """, (
             society_id, title, description, venue, event_date, event_time,
             open_to, account_id, ticket_name, ticket_price,
-            ticket_name2, ticket_price2, image, capacity, created_by,
+            ticket_name2, ticket_price2, image,
         ), fetch_one=True)
         return row["id"], "Event created successfully"
     except Exception as e:
