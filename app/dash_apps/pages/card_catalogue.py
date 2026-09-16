@@ -305,21 +305,9 @@ KPI_CARDS = {
 
     "kpi_cash_in_hand": {
         "query": """
-            WITH cr AS (
-                SELECT COALESCE(SUM(t.amount),0) AS amt
-                FROM transactions t JOIN accounts a ON a.id=t.acc_id
-                WHERE t.society_id=%s AND t.status='paid'
-                  AND a.drcr_account='Cr' AND t.mode='cash'
-            ),
-            dr AS (
-                SELECT COALESCE(SUM(t.amount),0) AS amt
-                FROM transactions t JOIN accounts a ON a.id=t.acc_id
-                WHERE t.society_id=%s AND t.status='paid'
-                  AND a.drcr_account='Dr' AND t.mode='cash'
-            )
-            SELECT (cr.amt - dr.amt) AS v FROM cr, dr
+            SELECT fn_cih_balance_asof(%s, CURRENT_DATE) AS v
         """,
-        "params": 2, "format": "currency",
+        "params": 1, "format": "currency",
         "icon": "fa-money-bill-wave", "color": "#27ae60",
         "title": "Cash in Hand", "group": "Financials",
     },
