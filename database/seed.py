@@ -89,6 +89,9 @@ Usage
 import os
 import sys
 import logging
+import random
+import string
+import datetime
 import argparse
 from datetime import date
 
@@ -607,8 +610,8 @@ def seed_society(cur, conn) -> int:
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
             secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background, signing_secret_enc, duty_hrs, primary_bank_account_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            payment_qr, logo, login_background, signing_secret_enc, duty_hrs, primary_bank_account_id, registration_number)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
@@ -616,7 +619,7 @@ def seed_society(cur, conn) -> int:
          SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
          SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background"),
-         SOCIETY.get("signing_secret_enc"), SOCIETY.get("duty_hrs", "8"), None),
+         SOCIETY.get("signing_secret_enc"), SOCIETY.get("duty_hrs", "8"), None, "".join(random.choices(string.ascii_uppercase + string.digits, k=5))),
     )
     conn.commit()
     cur.execute(
@@ -754,8 +757,8 @@ def seed_kpi_rule_links(cur, conn):
             continue
         cur.execute(
             """INSERT INTO kpi_rule_links
-               (category, state, label, url, description, sort_order, is_active, effective_from)
-               VALUES (%s,%s,%s,%s,%s,%s,TRUE,CURRENT_DATE)
+               (category, state, label, url, description, sort_order, is_active, effective_from, effective_to)
+               VALUES (%s,%s,%s,%s,%s,%s,TRUE,CURRENT_DATE,NULL)
                ON CONFLICT DO NOTHING""",
             (category, state, label, url, description, sort_order),
         )
@@ -874,8 +877,8 @@ def seed_gst_rates(cur, conn):
     cur.execute("SELECT 1 FROM gst_rates")
     if not cur.fetchone():
         cur.execute(
-            """INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
-               VALUES (%s, %s, %s, %s)""",
+            """INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from, effective_to)
+               VALUES (%s, %s, %s, %s, NULL)""",
             (SOCIETY_ID, 9.00, 9.00, '2017-07-01')
         )
         conn.commit()
@@ -1173,8 +1176,8 @@ def seed_users(cur, conn, society_id: int):
                     """INSERT INTO apartments
                        (society_id,flat_number,owner_name,owner_photo,id_proof,
                         mobile,alt_mobile,alt_address,
-                        apartment_size,apt_calc_start_date,active,created_by)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
+                        apartment_size,apt_calc_start_date,active)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
                        ON CONFLICT (society_id,flat_number) DO UPDATE
                          SET owner_name = EXCLUDED.owner_name
                        RETURNING id""",
@@ -1183,8 +1186,7 @@ def seed_users(cur, conn, society_id: int):
                      f"id_proofs/owner_{u['flat_number']}.jpg",
                      u.get("mobile", ""),
                      u.get("alt_mobile", ""), u.get("alt_address", ""),
-                     u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
-                     admin_uid),
+                     u.get("apartment_size", 1000), u.get("apt_calc_start_date")),
                 )
             else:
                 row = _one(
@@ -1192,8 +1194,8 @@ def seed_users(cur, conn, society_id: int):
                     """INSERT INTO apartments
                        (society_id,flat_number,owner_name,owner_photo,id_proof,
                         mobile,alt_mobile,alt_address,
-                        apartment_size,apt_calc_start_date,active,created_by)
-                       VALUES (%s,%s,'Pending',%s,%s,%s,%s,%s,%s,%s,TRUE,%s)
+                        apartment_size,apt_calc_start_date,active)
+                       VALUES (%s,%s,'Pending',%s,%s,%s,%s,%s,%s,%s,TRUE)
                        ON CONFLICT (society_id,flat_number) DO UPDATE SET active=TRUE
                        RETURNING id""",
                     (society_id, u["flat_number"],
@@ -1201,8 +1203,7 @@ def seed_users(cur, conn, society_id: int):
                      f"id_proofs/member_{u['flat_number']}.jpg",
                      u.get("mobile", ""),
                      u.get("alt_mobile", ""), u.get("alt_address", ""),
-                     u.get("apartment_size", 1000), u.get("apt_calc_start_date"),
-                     admin_uid),
+                     u.get("apartment_size", 1000), u.get("apt_calc_start_date")),
                 )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -1308,12 +1309,11 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
             continue
         cur.execute(
             """INSERT INTO events (society_id,title,description,event_date,event_time,venue,open_to,
-                account_id,ticket_name,ticket_price,ticket_name2,ticket_price2,created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                account_id,ticket_name,ticket_price,ticket_name2,ticket_price2,image)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)""",
             (society_id, ev["title"], ev["description"], ev["date"], ev["time"], ev["venue"],
              ev["open_to"], ev.get("account_id"), ev.get("ticket_name", "Adult"),
-             ev.get("ticket_price", 0), ev.get("ticket_name2", "Child"), ev.get("ticket_price2", 0),
-             created_by),
+             ev.get("ticket_price", 0), ev.get("ticket_name2", "Child"), ev.get("ticket_price2", 0)),
         )
         conn.commit()
         print(f"  ✓ Event    '{ev['title']}' on {ev['date']}")
@@ -1572,15 +1572,15 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
-            created_by, source_table, journal_id)
-           VALUES (%s,'Dr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
+            created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
+           VALUES (%s,'Dr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
-            created_by, source_table, journal_id)
-           VALUES (%s,'Cr',%s,64,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
+            created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
+           VALUES (%s,'Cr',%s,64,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     conn.commit()
@@ -1593,15 +1593,15 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
-            created_by, source_table, journal_id)
-           VALUES (%s,'Dr',%s,23,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
+            created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
+           VALUES (%s,'Dr',%s,23,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
-            created_by, source_table, journal_id)
-           VALUES (%s,'Cr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s)""",
+            created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
+           VALUES (%s,'Cr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
