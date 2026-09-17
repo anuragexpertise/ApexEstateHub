@@ -2935,7 +2935,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
         if role == "apartments":
             rows = db._execute(
                 "SELECT id, flat_number, owner_name FROM apartments "
-                "WHERE society_id=%s AND active=TRUE ORDER BY flat_number",
+                "WHERE society_id=%s AND apartments.active=TRUE ORDER BY flat_number",
                 (society_id,), fetch_all=True,
             ) or []
             return [

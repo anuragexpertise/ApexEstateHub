@@ -73,7 +73,7 @@ KPI_CARDS = {
 
     "kpi_channels_active": {
         "query": """
-            SELECT COUNT(*) AS v FROM alert_channels WHERE society_id=%s AND active=TRUE
+            SELECT COUNT(*) AS v FROM alert_channels WHERE society_id=%s AND alert_channels.active=TRUE
         """,
         "params": 1, "format": "number",
         "icon": "fa-check-circle", "color": "#17976e",
@@ -317,14 +317,14 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════════════
 
     "kpi_apartments_total": {
-        "query": "SELECT COUNT(*) AS v FROM apartments WHERE society_id=%s AND active=TRUE",
+        "query": "SELECT COUNT(*) AS v FROM apartments WHERE society_id=%s AND apartments.active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-home", "color": "#1859b8",
         "title": "Apartments", "group": "Enrolled Members",
     },
 
     "kpi_vendors_total": {
-        "query": "SELECT COUNT(*) AS v FROM vendors WHERE society_id=%s AND active=TRUE",
+        "query": "SELECT COUNT(*) AS v FROM vendors WHERE society_id=%s AND vendors.active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-truck", "color": "#b98a07",
         "title": "Vendors", "group": "Enrolled Members",
@@ -342,7 +342,7 @@ KPI_CARDS = {
     },
 
     "kpi_security_total": {
-        "query": "SELECT COUNT(*) AS v FROM security_staff WHERE society_id=%s AND active=TRUE",
+        "query": "SELECT COUNT(*) AS v FROM security_staff WHERE society_id=%s AND security_staff.active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-user-shield", "color": "#b63b3b",
         "title": "Security Staff", "group": "Enrolled Members",
@@ -361,7 +361,7 @@ KPI_CARDS = {
     "kpi_security_off_duty": {
         "query": """
             SELECT GREATEST(
-                (SELECT COUNT(*) FROM security_staff WHERE society_id=%s AND active=TRUE) -
+                (SELECT COUNT(*) FROM security_staff WHERE society_id=%s AND security_staff.active=TRUE) -
                 (SELECT COUNT(*) FROM gate_access WHERE society_id=%s AND role='SEC' AND time_out IS NULL),
                 0
             ) AS v
@@ -626,7 +626,7 @@ KPI_CARDS = {
     },
 
     "kpi_patrol_locations": {
-        "query": "SELECT COUNT(*) AS v FROM patrol_locations WHERE society_id=%s AND active=TRUE",
+        "query": "SELECT COUNT(*) AS v FROM patrol_locations WHERE society_id=%s AND patrol_locations.active=TRUE",
         "params": 1, "format": "number",
         "icon": "fa-map-location-dot", "color": "#17976e",
         "title": "Patrol Locations", "group": "Settings",
@@ -787,14 +787,14 @@ KPI_CARDS = {
     },
 
     "kpi_security_date": {
-        "query": "SELECT joining_date AS v FROM security_staff WHERE society_id=%s AND active=TRUE LIMIT 1",
+        "query": "SELECT joining_date AS v FROM security_staff WHERE society_id=%s AND security_staff.active=TRUE LIMIT 1",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#de5c52",
         "title": "Joined", "group": "Settings",
     },
 
     "kpi_security_salary_per_shift": {
-        "query": "SELECT salary_per_shift AS v FROM security_staff WHERE society_id=%s AND active=TRUE LIMIT 1",
+        "query": "SELECT salary_per_shift AS v FROM security_staff WHERE society_id=%s AND security_staff.active=TRUE LIMIT 1",
         "params": 1, "format": "currency",
         "icon": "fa-rupee-sign", "color": "#b63b3b",
         "title": "Salary per Shift", "group": "Settings",
@@ -805,7 +805,7 @@ KPI_CARDS = {
     # ══════════════════════════════════════════════════════════════════════
 
     "kpi_vendors_date": {
-        "query": "SELECT created_at::DATE AS v FROM vendors WHERE society_id=%s AND active=TRUE LIMIT 1",
+        "query": "SELECT created_at::DATE AS v FROM vendors WHERE society_id=%s AND vendors.active=TRUE LIMIT 1",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#de5c52",
         "title": "Registered", "group": "Settings",
@@ -1058,7 +1058,7 @@ KPI_CARDS = {
     },
  
     "kpi_apartments_date": {
-        "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND active=TRUE",
+        "query": "SELECT MIN(created_at)::DATE AS v FROM apartments WHERE society_id=%s AND apartments.active=TRUE",
         "params": 1, "format": "date",
         "icon": "fa-calendar-alt", "color": "#18794e",
         "title": "First Apt Added", "group": "Settings",
