@@ -434,7 +434,7 @@ def register_setup_wizard_callbacks(app):
             try:
                 from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
                 from app.dash_apps.drilldown import renderers
-                agreement_record = _get_or_create_agreement(db, society_id, auth.get("user_id"))
+                agreement_record = _get_or_create_agreement(db, society_id)
                 society = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
                 agreement_body = renderers.render_agreement_card(society=dict(society), agreement_record=agreement_record)
                 admin_note = html.Div([

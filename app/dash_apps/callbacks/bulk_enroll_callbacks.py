@@ -291,11 +291,16 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:
             with db._conn() as conn:
                 cur = conn.cursor()
+                # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
+                # updated_by removal elsewhere in this file): apartments has
+                # never had a created_by column — this insert previously
+                # referenced it anyway, which would throw "column does not
+                # exist" on every bulk apartment enrollment.
                 cur.execute(
                     "INSERT INTO apartments"
                     "(society_id, flat_number, owner_name, mobile, apartment_size, "
-                    "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active, created_by) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                    "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
                     (
                         sid,
                         flat,
@@ -307,7 +312,6 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
                         row.get("owner_photo") or None,
                         row.get("id_proof") or None,
                         row.get("apt_calc_start_date") or None,
-                        user_id,
                     ),
                 )
                 apt_r = cur.fetchone()
@@ -365,8 +369,8 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
                 cur.execute(
                     "INSERT INTO vendors"
                     "(society_id, business_name, name, service_type, mobile, service_description, "
-                    "photo, logo, license, active, created_by, pan_number, gstin) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
+                    "photo, logo, license, active, pan_number, gstin) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s) RETURNING id",
                     (
                         sid,
                         biz_name,
@@ -377,7 +381,6 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
                         row.get("photo") or None,
                         row.get("logo") or None,
                         row.get("license") or None,
-                        user_id,
                         row.get("pan_number") or None,
                         row.get("gstin") or None,
                     ),
@@ -433,8 +436,8 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO security_staff"
-                    "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active, created_by) "
-                    "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
+                    "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active) "
+                    "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE) RETURNING id",
                     (
                         sid,
                         name,
@@ -443,7 +446,6 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
                         _safe_float(row.get("salary_per_shift")),
                         row.get("photo") or None,
                         row.get("id_proof") or None,
-                        user_id,
                     ),
                 )
                 sec_r = cur.fetchone()
@@ -526,8 +528,8 @@ def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict
         try:
             db._execute(
                 "INSERT INTO assets"
-                "(society_id, asset_name, company_name, asset_sno, purchase_date, purchase_value, depreciation_rate, created_by) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                "(society_id, asset_name, company_name, asset_sno, purchase_date, purchase_value, depreciation_rate) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (
                     sid,
                     row["asset_name"].strip(),
@@ -536,7 +538,6 @@ def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict
                     row["purchase_date"].strip(),
                     _safe_float(row["purchase_value"]),
                     100.00,
-                    user_id,
                 ),
             )
             success += 1

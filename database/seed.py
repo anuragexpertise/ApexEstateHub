@@ -973,15 +973,6 @@ def seed_accounts(cur, conn, society_id: int) -> int:
     return created
 
 
-def seed_accounts_created_by(cur, conn, society_id: int, admin_uid: int):
-    """Backfill created_by on accounts seeded before admin user existed."""
-    cur.execute(
-        "UPDATE accounts SET created_by = %s WHERE society_id = %s AND created_by IS NULL",
-        (admin_uid, society_id),
-    )
-    conn.commit()
-
-
 def seed_society_created_by(cur, conn, society_id: int, admin_uid: int):
     """Backfill created_by on society seeded before admin user existed."""
     pass
@@ -1094,14 +1085,14 @@ def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
         cur.execute(
             """INSERT INTO brought_forward
                (society_id, financial_year, acc_id, drcr_bf, bf_amount,
-                is_auto_calculated, remarks, created_by)
-               VALUES (%s,%s,%s,%s,%s,FALSE,%s,%s)
+                is_auto_calculated, remarks)
+               VALUES (%s,%s,%s,%s,%s,FALSE,%s)
                ON CONFLICT ON CONSTRAINT uq_bf_society_fy_acc
                DO UPDATE SET bf_amount = EXCLUDED.bf_amount,
                              drcr_bf   = EXCLUDED.drcr_bf,
                              updated_at = NOW()""",
             (society_id, BF_FY, acc_id, drcr, amount,
-             f"Opening balance for FY {BF_FY}", admin_uid),
+             f"Opening balance for FY {BF_FY}"),
         )
         conn.commit()
 
@@ -1224,16 +1215,16 @@ def seed_users(cur, conn, society_id: int):
                 cur,
                 """INSERT INTO vendors
                    (society_id,business_name,name,logo,license,photo,
-                    service_type,mobile,service_description,active,created_by,
+                    service_type,mobile,service_description,active,
                     pan_number,gstin)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s) RETURNING id""",
                 (society_id, u.get("business_name", u["name"]), u["name"],
                  f"logos/{u.get('business_name', u['name']).replace(' ', '_').lower()}.png",
                  f"licenses/{u.get('business_name', u['name']).replace(' ', '_').lower()}.pdf",
                  f"photos/{u['name'].replace(' ', '_').lower()}.jpg",
                  u.get("service_type", "General"), u.get("mobile", ""),
                  u.get("service_description", "Best in town"),
-                 admin_uid, u.get("pan_number"), u.get("gstin")),
+                 u.get("pan_number"), u.get("gstin")),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -1254,14 +1245,13 @@ def seed_users(cur, conn, society_id: int):
                 cur,
                 """INSERT INTO security_staff
                    (society_id,name,photo,id_proof,mobile,shift,salary_per_shift,
-                    joining_date,active,created_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE,%s) RETURNING id""",
+                    joining_date,active)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,TRUE) RETURNING id""",
                 (society_id, u["name"],
                  f"photos/{u['name'].replace(' ', '_').lower()}.jpg",
                  f"id_proofs/{u['name'].replace(' ', '_').lower()}.jpg",
                  u.get("mobile", ""),
-                 u.get("shift", "morning"), u.get("salary", 10000),
-                 admin_uid),
+                 u.get("shift", "morning"), u.get("salary", 10000)),
             )
             conn.commit()
             linked_id = row["id"] if row else None
@@ -1391,9 +1381,9 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
             """INSERT INTO apt_charges_fines_basis
                (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
                 apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
-                apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)
-               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s,%s)""",
-             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True, admin_uid),
+                apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
+               VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s)""",
+             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True),
         )
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
@@ -1411,9 +1401,9 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                 """INSERT INTO apt_charges_fines_basis
                    (society_id, apt_id, start_date, end_date, apt_maintenance_rate,
                     apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
-                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)
-                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s,%s)""",
-                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True, admin_uid),
+                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
+                   VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
+                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
@@ -1425,9 +1415,9 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         cur.execute(
             """INSERT INTO ven_charges_fines_basis
                (society_id, ven_id, start_date, end_date, vendor_1day, vendor_7day, vendor_1mth,
-                ven_status, created_by)
-               VALUES (%s,NULL,%s,NULL,%s,%s,%s,TRUE,%s)""",
-            (society_id, SOCIETY["calc_start_date"], 100.0, 500.0, 2000.0, admin_uid),
+                ven_status)
+               VALUES (%s,NULL,%s,NULL,%s,%s,%s,TRUE)""",
+            (society_id, SOCIETY["calc_start_date"], 100.0, 500.0, 2000.0),
         )
         conn.commit()
         print("  ✓ Vendor charge basis added")
@@ -1447,10 +1437,10 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
         for i, d in enumerate(roster_dates):
             cur.execute(
                 """INSERT INTO security_roster (society_id, security_id, roster_date, shift_type,
-                    assigned_by, created_by)
-                   VALUES (%s,%s,%s,%s,%s,%s)
+                    assigned_by)
+                   VALUES (%s,%s,%s,%s,%s)
                    ON CONFLICT (society_id, security_id, roster_date) DO NOTHING""",
-                (society_id, sec_id, d, g.get("shift", "morning"), admin_uid, admin_uid),
+                (society_id, sec_id, d, g.get("shift", "morning"), admin_uid),
             )
             conn.commit()
 
@@ -1520,13 +1510,11 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
         cur.execute(
             """INSERT INTO assets
                (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,
-                acc_id,depreciation_rate,last_depreciation_date,disposed,
-                created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE,%s)""",
+                acc_id,depreciation_rate,last_depreciation_date,disposed)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE)""",
             (society_id, a["company_name"], a["asset_name"], a["asset_SNo"],
              a["purchase_date"], a["purchase_value"], a["acc_id"],
-             a["depreciation_rate"], a["last_depreciation_date"],
-             admin_uid),
+             a["depreciation_rate"], a["last_depreciation_date"]),
         )
         conn.commit()
         print(f"  ✓ Asset    '{a['asset_name']}' — book_value=0, disposed=FALSE (still in use)")
@@ -1739,11 +1727,10 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
         cur.execute(
             """INSERT INTO expenses
                (society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
-                amount, mode, status, tds_pct, tds_section, created_by, created_at)
-               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
+                amount, mode, status, tds_pct, tds_section, created_at)
+               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,NOW())""",
             (society_id, security_user_id, None, "2026-07-16",
-             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00,
-             admin_uid),
+             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00),
         )
         conn.commit()
         print("  ✓ Expense (salary paid, status=pending, needs admin confirmation): ₹12000")
@@ -1824,11 +1811,11 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
         row = _one(
             cur,
             f"""INSERT INTO polls
-                (society_id, created_by, title, description, status, choice_count,
+                (society_id, title, description, status, choice_count,
                  choice_1, choice_2, choice_3, choice_4, choice_5, ends_at)
-                VALUES (%s,%s,%s,%s,'active',%s,%s,%s,%s,%s,%s,{ends_at})
+                VALUES (%s,%s,%s,'active',%s,%s,%s,%s,%s,%s,{ends_at})
                 RETURNING id""",
-            (society_id, admin_uid, p["title"], p["description"], len(choices),
+            (society_id, p["title"], p["description"], len(choices),
              choice_cols["choice_1"], choice_cols["choice_2"], choice_cols["choice_3"],
              choice_cols["choice_4"], choice_cols["choice_5"]),
         )
@@ -1886,7 +1873,6 @@ def run_seed(conn):
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
     seed_gst_rates(cur, conn)
-    seed_accounts_created_by(cur, conn, society_id, admin_uid)
     seed_society_created_by(cur, conn, society_id, admin_uid)
     seed_admin_created_by(cur, conn, admin_uid)
 

@@ -1,9 +1,25 @@
 import os
 import re
 
-tables_with_created_by = ['societies', 'users', 'accounts', 'apartments', 'vendors', 'security_staff', 'events', 'concerns', 'security_roster', 'receivables', 'receipts', 'nocs', 'society_agreements', 'expenses', 'payables', 'transactions', 'vendor_passes', 'apt_charges_fines_basis', 'ven_charges_fines_basis', 'gate_access', 'patrol_locations', 'polls']
+import os
+import re
 
-tables_with_updated_by = ['accounts', 'apartments', 'vendors', 'security_staff', 'events', 'concerns', 'apt_charges_fines_basis', 'ven_charges_fines_basis', 'gate_access']
+# NOTE (2026-09, created_by/updated_by admin-only audit): these two lists
+# were previously aspirational/stale — several entries (societies,
+# apartments, events) never actually had these columns, and several more
+# (accounts, security_staff/vendors' created_by, security_roster,
+# receivables, payables, nocs, society_agreements, apt/ven_charges_fines_basis,
+# brought_forward, patrol_locations, polls) were admin-only tables that have
+# since had created_by/updated_by removed (tracking WHICH admin did an
+# admin-only action added no value). Kept as-is because multiple roles
+# create/update them: users (apartment_users self-service), concerns
+# (apartment/vendor/admin), receipts, transactions, vendor_passes (admin
+# "Sell Pass" + vendor "Buy Pass"), gate_access (security clock-in/out, QR
+# scans, admin toggle). vendors/security_staff kept updated_by only (self-
+# service profile edit) but lost created_by (enrollment is admin-only).
+tables_with_created_by = ['users', 'concerns', 'receipts', 'transactions', 'vendor_passes', 'gate_access']
+
+tables_with_updated_by = ['vendors', 'security_staff', 'concerns', 'gate_access']
 
 def scan_file(filepath):
     with open(filepath, 'r') as f:

@@ -3230,7 +3230,7 @@ def _render_card(
             noc_record = None
             if eligible and apt_id and sid_val:
                 try:
-                    noc_record = _get_or_create_active_noc(db, sid_val, apt_id, get_current_user_id())
+                    noc_record = _get_or_create_active_noc(db, sid_val, apt_id)
                 except Exception as e:
                     print(f"⚠️  NOC issuance failed: {e}")
             return renderers.render_noc_card(
@@ -3520,9 +3520,9 @@ def _save_patrol_location(db, data, sid, is_edit, pk):
 
     if not is_edit:
         db._execute(
-            """INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled, created_by)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (sid, loc_name, description, active, scan_interval, lat, lon, nfc, get_current_user_id())
+            """INSERT INTO patrol_locations (society_id, location_name, description, active, scan_interval, latitude, longitude, nfc_enabled)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (sid, loc_name, description, active, scan_interval, lat, lon, nfc)
         )
         msg = f"Patrol location '{loc_name}' created."
         return True, msg, None
@@ -4355,20 +4355,18 @@ def _save_asset(db, d, sid, is_edit, pk):
         if disposed:
             db._execute(
                 "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s, itc_claimed=%s, gst_disposal_liability=%s, "
-                "disposed=%s, disposed_at=%s, sale_value=%s, sale_acc_id=%s, disposed_by=%s, "
-                "updated_by=%s "
+                "disposed=%s, disposed_at=%s, sale_value=%s, sale_acc_id=%s, disposed_by=%s "
                 "WHERE id=%s AND society_id=%s",
                 (asset_name, d.get("asset_sno") or d.get("asset_SNo"), d.get("company_name"), d.get("depreciation_rate"), d.get("itc_claimed"), d.get("gst_disposal_liability"),
                  disposed, d.get("disposed_at"), d.get("sale_value"), d.get("sale_acc_id"), d.get("disposed_by"),
-                 d.get("user_id"), pk, sid),
+                 pk, sid),
             )
         else:
             db._execute(
-                "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s, "
-                "updated_by=%s "
+                "UPDATE assets SET asset_name=%s, asset_SNo=%s, company_name=%s, depreciation_rate=%s "
                 "WHERE id=%s AND society_id=%s",
                 (asset_name, d.get("asset_sno") or d.get("asset_SNo"), d.get("company_name"), d.get("depreciation_rate"),
-                 d.get("user_id"), pk, sid),
+                 pk, sid),
             )
         return True, "Asset updated", pk
 
@@ -4471,18 +4469,23 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             apt_active = d.get("active", True)
             if isinstance(apt_active, str):
                 apt_active = apt_active.lower() == "true"
+            # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
+            # updated_by removal elsewhere in this file): apartments has
+            # never had a created_by/updated_by column in the schema —
+            # this UPDATE/INSERT pair previously referenced them anyway,
+            # which would throw "column does not exist" on every apartment
+            # create/edit. Removed here; not something this merge dropped.
             r = db._execute(
                 "UPDATE apartments SET owner_name=%s,mobile=%s,apartment_size=%s,"
                 "alt_mobile=%s,alt_address=%s,apt_calc_start_date=%s,active=%s,"
                 "owner_photo=COALESCE(NULLIF(%s, ''), owner_photo),"
-                "id_proof=COALESCE(NULLIF(%s, ''), id_proof),"
-                "updated_by=%s "
+                "id_proof=COALESCE(NULLIF(%s, ''), id_proof) "
                 "WHERE id=%s AND society_id=%s RETURNING id",
                 (
                     d.get("owner_name"), d.get("mobile"), d.get("apartment_size") or 0,
                     d.get("alt_mobile"), d.get("alt_address"), d.get("apt_calc_start_date"),
                     apt_active, d.get("owner_photo"), d.get("id_proof"),
-                    d.get("user_id"), pk, sid,
+                    pk, sid,
                 ),
                 fetch_one=True,
             )
@@ -4510,11 +4513,11 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-                    "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active,created_by) "
-                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+                    "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
                     (sid, flat, d.get("owner_name"), d.get("mobile"), _safe_int(d.get("apartment_size")),
                      d.get("alt_mobile"), d.get("alt_address"),
-                     d.get("owner_photo"), d.get("id_proof"), d.get("user_id")),
+                     d.get("owner_photo"), d.get("id_proof")),
                 )
                 r = cur.fetchone()
                 apt_id = r["id"] if r else None
@@ -4612,11 +4615,11 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             cur = conn.cursor()
             if role == "security":
                 cur.execute(
-                    "INSERT INTO security_staff(society_id,name,mobile,shift,salary_per_shift,joining_date,photo,id_proof,active,created_by) "
-                    "VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE,%s) RETURNING id",
+                    "INSERT INTO security_staff(society_id,name,mobile,shift,salary_per_shift,joining_date,photo,id_proof,active) "
+                    "VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE) RETURNING id",
                     (sid, d.get("name"), d.get("mobile"), d.get("shift"),
                      _safe_float(d.get("salary_per_shift")),
-                     d.get("photo"), d.get("id_proof"), d.get("user_id"))
+                     d.get("photo"), d.get("id_proof"))
                 )
                 dr = cur.fetchone()
             else:
@@ -4627,11 +4630,11 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 if gstin and not re.match(r'^[A-Z0-9]{15}$', gstin):
                     raise ValueError("Invalid GSTIN format (expected: 15 alphanumeric characters)")
                 cur.execute(
-                    "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,service_description,photo,logo,license,active,created_by,pan_number,gstin) "
-                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s) RETURNING id",
+                    "INSERT INTO vendors(society_id,business_name,name,service_type,mobile,service_description,photo,logo,license,active,pan_number,gstin) "
+                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s) RETURNING id",
                     (sid, d.get("business_name"), d.get("name"), d.get("service_type"), d.get("mobile"),
                      d.get("service_description"),
-                     d.get("photo"), d.get("logo"), d.get("license"), d.get("user_id"),
+                     d.get("photo"), d.get("logo"), d.get("license"),
                      pan or None, gstin or None)
                 )
                 dr = cur.fetchone()
@@ -4927,12 +4930,15 @@ def _save_channel(db, d, sid, is_edit, pk):
     return False, msg or "Failed to create channel.", None
 
 
-def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
+def _get_or_create_active_noc(db, society_id, apartment_id):
     """
     Returns the apartment's currently-valid nocs row, creating one if none
     exists. This is what gives a printed NOC a real id/certificate_no for
     the verification QR (validate_noc_qr in qr_service.py) to check —
     previously NOCs were pure preview text with no DB record at all.
+
+    No created_by param/column: "Issue NOC" is roles:["admin"] only, so
+    tracking WHICH admin issued it added no value.
 
     certificate_no format: NOC/<society_id>/<year>/<id> — assigned after
     insert since it embeds the row's own id.
@@ -4954,9 +4960,9 @@ def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
     valid_until = date(issued.year, issued.month, last_day)
     row = db._execute(
         "INSERT INTO nocs(society_id, apartment_id, body_text, status, "
-        "issued_date, valid_until, created_by) "
-        "VALUES(%s,%s,'',%s,%s,%s,%s) RETURNING *",
-        (society_id, apartment_id, "valid", issued, valid_until, created_by),
+        "issued_date, valid_until) "
+        "VALUES(%s,%s,'',%s,%s,%s) RETURNING *",
+        (society_id, apartment_id, "valid", issued, valid_until),
         fetch_one=True,
     )
     noc_id = row["id"]
@@ -4972,13 +4978,16 @@ def _get_or_create_active_noc(db, society_id, apartment_id, created_by):
     return dict(updated)
 
 
-def _get_or_create_agreement(db, society_id, created_by):
+def _get_or_create_agreement(db, society_id):
     """
     Returns the society's persisted Agreement record (society_agreements),
     creating it once if it doesn't exist yet. Called right after the Setup
     Wizard completes (submit_setup_wizard) to auto-show the Agreement, and
     again later by anyone reprinting it — get-or-create makes both callers
     safe to call unconditionally without a separate existence check.
+
+    No created_by param/column: only ever created via the admin-only Setup
+    Wizard, so tracking WHICH admin added no value.
 
     Snapshots society/secretary details onto the row at creation time
     (mirrors nocs' body_text pattern — see its comment) so a later edit to
@@ -5005,13 +5014,12 @@ def _get_or_create_agreement(db, society_id, created_by):
     row = db._execute(
         "INSERT INTO society_agreements("
         "society_id, body_text, society_name, society_address, registration_number, "
-        "secretary_name, secretary_email, secretary_sign, created_by) "
-        "VALUES(%s,'',%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+        "secretary_name, secretary_email, secretary_sign) "
+        "VALUES(%s,'',%s,%s,%s,%s,%s,%s) RETURNING *",
         (
             society_id,
             society.get("name"), society.get("address"), society.get("registration_number"),
             society.get("secretary_name"), society.get("secretary_email"), society.get("secretary_sign"),
-            created_by,
         ),
         fetch_one=True,
     )
@@ -5153,23 +5161,29 @@ def _current_fy() -> int:
     return today.year - 1 if today.month < 4 else today.year
 
 
-def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount, user_id=None):
+def _upsert_brought_forward(db, sid, acc_id, drcr_bf, bf_amount):
     """Manual admin edit via Settings -> Accounts always wins over an
     auto-calculated year-end value — sets is_auto_calculated=FALSE.
     (fn_close_financial_year, the year-end-close function this flag was
     originally written to protect against, was removed 2026-08 — it had
     an unfixed entry_side bug and no callers. The is_auto_calculated flag
     is left in place since it's still meaningful: it distinguishes a
-    hand-entered BF from anything a future auto-close might write.)"""
+    hand-entered BF from anything a future auto-close might write.)
+
+    No created_by/updated_by params: brought_forward is admin-only
+    (Settings -> Accounts, or the admin-only Setup Wizard) — those
+    columns were removed from the table since tracking WHICH admin
+    added no value.
+    """
     fy = _current_fy()
     db._execute(
         "INSERT INTO brought_forward "
-        "(society_id, financial_year, acc_id, drcr_bf, bf_amount, is_auto_calculated, created_at, created_by) "
-        "VALUES (%s,%s,%s,%s,%s,FALSE,NOW(),%s) "
+        "(society_id, financial_year, acc_id, drcr_bf, bf_amount, is_auto_calculated, created_at) "
+        "VALUES (%s,%s,%s,%s,%s,FALSE,NOW()) "
         "ON CONFLICT (society_id, financial_year, acc_id) DO UPDATE SET "
         "drcr_bf=EXCLUDED.drcr_bf, bf_amount=EXCLUDED.bf_amount, "
-        "is_auto_calculated=FALSE, updated_at=NOW(), updated_by=%s",
-        (sid, fy, acc_id, drcr_bf, bf_amount, user_id, user_id),
+        "is_auto_calculated=FALSE, updated_at=NOW()",
+        (sid, fy, acc_id, drcr_bf, bf_amount),
     )
 
 
@@ -5261,14 +5275,13 @@ def _save_account(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE accounts SET "
-            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s, updated_by=%s, "
+            "has_bf=%s, depreciation_percent=%s, is_depreciable=%s, "
             "parent_account_id=%s, mutuality_nature=%s "
             "WHERE id=%s AND society_id=%s",
             (
                 bf_val != 0 or d.get("has_bf", False),
                 float(dep_pct)   if dep_pct   not in (None, "") else 100,
                 bool(is_dep)     if is_dep is not None else False,
-                d.get("user_id"),
                 d.get("parent_account_id"),
                 d.get("mutuality_nature"),
                 pk, sid,
@@ -5281,7 +5294,7 @@ def _save_account(db, d, sid, is_edit, pk):
             "SELECT drcr_bf FROM accounts WHERE id=%s AND society_id=%s",
             (pk, sid), fetch_one=True,
         ) or {}
-        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val, d.get("user_id"))
+        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val)
 
         return True, "Account updated", pk
 
@@ -5310,8 +5323,8 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, depreciation_percent, is_depreciable, mutuality_nature, tds_section, parent_account_id, created_by"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, drcr_bf, depreciation_percent, is_depreciable, mutuality_nature, tds_section, parent_account_id"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
@@ -5324,10 +5337,9 @@ def _save_account(db, d, sid, is_edit, pk):
             d.get("mutuality_nature") or "mutual",
             d.get("tds_section") or None,
             d.get("parent_account_id"),
-            d.get("user_id"),
         ),
     )
-    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount, d.get("user_id"))
+    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount)
 
     return True, f"Account '{name}' created", next_id
 
@@ -5336,7 +5348,9 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
     # NOTE: apt_charges_fines_basis columns are id, society_id, apt_id,
     # start_date, end_date, apt_maintenance_amount, apt_maintenance_rate,
     # apt_due_day, apt_interest_pct, apt_status, apt_sinking_fund_rate,
-    # apt_repair_fund_rate, charges_interest, created_by, updated_by.
+    # apt_repair_fund_rate, charges_interest. created_by/updated_by were
+    # removed (2026-09): this is an admin-only settings table with no
+    # self-service, so tracking WHICH admin added no value.
     # There is no apt_delay_fine / apt_fine column — those were stale
     # leftovers from an older schema.
     apt_status = d.get("apt_status")
@@ -5362,7 +5376,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
             " apt_maintenance_amount=%s, apt_maintenance_rate=%s, apt_due_day=%s,"
             " apt_interest_pct=%s, apt_status=%s, apt_sinking_fund_rate=%s,"
-            " apt_repair_fund_rate=%s, charges_interest=%s, updated_by=%s "
+            " apt_repair_fund_rate=%s, charges_interest=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("apt_id"),
@@ -5376,7 +5390,6 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
                 sinking_rate,
                 repair_rate,
                 charges_interest if charges_interest is not None else True,
-                d.get("user_id"),
                 pk,
                 sid,
             ),
@@ -5389,8 +5402,8 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
         " apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_interest_pct,"
-        " apt_status, apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, created_by)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        " apt_status, apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (
             sid,
             apt_id,
@@ -5404,7 +5417,6 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             sinking_rate,
             repair_rate,
             charges_interest if charges_interest is not None else True,
-            d.get("user_id"),
         ),
         fetch_one=True,
     )
@@ -5427,8 +5439,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
 
         db._execute(
             "UPDATE ven_charges_fines_basis SET ven_id=%s, start_date=%s, end_date=%s,"
-            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s,"
-            " updated_by=%s "
+            " vendor_1day=%s, vendor_7day=%s, vendor_1mth=%s, ven_status=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("ven_id"),
@@ -5438,7 +5449,6 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
                 d.get("vendor_7day"),
                 d.get("vendor_1mth"),
                 ven_status if ven_status is not None else True,
-                d.get("user_id"),
                 pk,
                 sid,
             ),
@@ -5455,9 +5465,9 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         return False, "Invalid numeric value", None
     r = db._execute(
         "INSERT INTO ven_charges_fines_basis(society_id, ven_id, start_date, end_date,"
-        " vendor_1day, vendor_7day, vendor_1mth, ven_status, created_by)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
-        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth, d.get("user_id")),
+        " vendor_1day, vendor_7day, vendor_1mth, ven_status)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+        (sid, ven_id, start_date, d.get("end_date"), v1day, v7day, v1mth),
         fetch_one=True,
     )
     return (
@@ -5493,9 +5503,9 @@ def _save_security_roster(db, d, sid, is_edit, pk):
 
     try:
         r = db._execute(
-            "INSERT INTO security_roster(society_id, security_id, roster_date, shift_type, assigned_by, created_by)"
-            " VALUES(%s,%s,%s,%s,%s,%s) RETURNING id",
-            (sid, security_id, roster_date, shift_type, assigned_by, d.get("user_id")),
+            "INSERT INTO security_roster(society_id, security_id, roster_date, shift_type, assigned_by)"
+            " VALUES(%s,%s,%s,%s,%s) RETURNING id",
+            (sid, security_id, roster_date, shift_type, assigned_by),
             fetch_one=True,
         )
     except Exception as e:

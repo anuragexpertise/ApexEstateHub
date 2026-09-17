@@ -7,7 +7,9 @@ from typing import Optional, Dict, Any
 class Poll:
     id: int
     society_id: int
-    created_by: Optional[int] = None
+    # created_by removed: poll creation is admin-only (save_poll requires
+    # role=="admin"), so tracking WHICH admin added no value — the DB
+    # column was dropped 2026-09.
     title: str = ""
     description: Optional[str] = None
     status: str = "active"
