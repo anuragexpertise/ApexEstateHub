@@ -487,7 +487,7 @@ def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dic
             try:
                 rows = db._execute(
                     "SELECT DISTINCT service_type FROM vendors "
-                    "WHERE society_id=%s AND active=TRUE "
+                    "WHERE society_id=%s AND vendors.active=TRUE "
                     "AND service_type IS NOT NULL AND TRIM(service_type) != '' "
                     "ORDER BY service_type",
                     (society_id,), fetch_all=True,

@@ -582,7 +582,7 @@ def register_security_callbacks(app):
         apartment_id = None
         if flat and flat.strip():
             apt = db._execute("""
-                SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s AND active=TRUE
+                SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s AND apartments.active=TRUE
             """, (society_id, flat.strip()), fetch_one=True)
             if apt:
                 apartment_id = apt["id"]
