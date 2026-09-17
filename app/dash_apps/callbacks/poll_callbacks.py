@@ -141,10 +141,10 @@ def register_poll_callbacks(app):
                 ], className="alert alert-success mt-2")
 
             result = db._execute(
-                "SELECT fn_create_poll(%s::INT, %s::INT, %s::VARCHAR(200), %s::TEXT, "
+                "SELECT fn_create_poll(%s::INT, %s::VARCHAR(200), %s::TEXT, "
                 "%s::SMALLINT, %s::VARCHAR(100), %s::VARCHAR(100), %s::VARCHAR(100), "
                 "%s::VARCHAR(100), %s::VARCHAR(100), %s::TIMESTAMP, %s::VARCHAR(20)) AS poll_id",
-                (society_id, user_id, title, description, choice_count,
+                (society_id, title, description, choice_count,
                  choices[0], choices[1], choices[2], choices[3], choices[4],
                  ends_at or None, open_to or 'no_dues'),
                 fetch_one=True

@@ -2565,14 +2565,21 @@ def check_noc_eligibility(apartment_id: int) -> dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
+    # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/updated_by
+    # removal elsewhere in this codebase): apartments, receipts, expenses,
+    # receivables, payables, and societies have never had an updated_by
+    # column — the branches below previously set it anyway, which would
+    # throw "column does not exist" on every delete/cancel/reject action
+    # for those six entity types. Only vendors/security_staff/concerns
+    # actually have updated_by, so only those branches keep it.
     try:
         from app.security.audit_context import get_current_user_id
         _upd_by = get_current_user_id()
         if entity_plural == "apartments":
             # Trigger will block if outstanding dues > 0
             db._execute(
-                "UPDATE apartments SET active=FALSE, updated_by=%s WHERE id=%s AND society_id=%s",
-                (_upd_by, pk, society_id),
+                "UPDATE apartments SET active=FALSE WHERE id=%s AND society_id=%s",
+                (pk, society_id),
             )
             return True, "Apartment deactivated"
 
@@ -2609,31 +2616,31 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 
         if entity_plural == "receipts":
             db._execute(
-                "UPDATE receipts SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
-                (_upd_by, pk, society_id),
+                "UPDATE receipts SET status='cancelled' WHERE id=%s AND society_id=%s",
+                (pk, society_id),
             )
             return True, "Receipt cancelled"
 
         if entity_plural == "expenses":
             db._execute(
-                "UPDATE expenses SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
-                (_upd_by, pk, society_id),
+                "UPDATE expenses SET status='cancelled' WHERE id=%s AND society_id=%s",
+                (pk, society_id),
             )
             return True, "Expense cancelled"
 
         if entity_plural == "receivables":
             db._execute(
-                "UPDATE receivables SET status='cancelled', updated_by=%s WHERE id=%s AND society_id=%s",
-                (_upd_by, pk, society_id),
+                "UPDATE receivables SET status='cancelled' WHERE id=%s AND society_id=%s",
+                (pk, society_id),
             )
             return True, "Receivable cancelled"
 
         if entity_plural == "payables":
             # Only pending payables can be cancelled; verified ones are locked in transactions
             db._execute(
-                "UPDATE payables SET status='cancelled', updated_by=%s "
+                "UPDATE payables SET status='cancelled' "
                 "WHERE id=%s AND society_id=%s AND status='pending'",
-                (_upd_by, pk, society_id),
+                (pk, society_id),
             )
             return True, "Payment cancelled (if it was still pending)"
 
@@ -2662,8 +2669,8 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 
         if entity_plural == "societies":
             db._execute(
-                "UPDATE societies SET plan_validity=CURRENT_DATE-1, updated_by=%s WHERE id=%s",
-                (_upd_by, pk,)
+                "UPDATE societies SET plan_validity=CURRENT_DATE-1 WHERE id=%s",
+                (pk,)
             )
             return True, "Society plan expired"
 

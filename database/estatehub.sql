@@ -156,9 +156,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id),
+    -- created_by/updated_by removed: accounts (chart-of-accounts) are
+    -- admin-only create+edit per _PORTAL_PERMS — no other role ever
+    -- touches this table, so tracking WHICH admin added no value.
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
     CONSTRAINT fk_account_parent FOREIGN KEY (society_id, parent_account_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 ,
@@ -200,7 +201,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users (id),
+    -- created_by removed: only admin ever creates a vendor (enrollment).
+    -- updated_by kept: a vendor can self-edit their own profile too.
     updated_by INT REFERENCES users (id),
     pan_number VARCHAR(10),
     gstin VARCHAR(15)
@@ -221,7 +223,8 @@ CREATE TABLE IF NOT EXISTS security_staff (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    created_by INT REFERENCES users (id),
+    -- created_by removed: only admin ever creates a guard (enrollment).
+    -- updated_by kept: a guard can self-edit their own profile too.
     updated_by INT REFERENCES users (id)
 );
 
@@ -253,9 +256,10 @@ CREATE TABLE IF NOT EXISTS assets (
     itc_claimed NUMERIC(12, 2) DEFAULT 0, -- ITC claimed at purchase, if any (sec. 16 CGST Act); 0 = no ITC ever claimed on this asset
     gst_disposal_liability NUMERIC(12, 2), -- sec. 18(6)/Rule 44(6) liability computed at disposal, for audit trail
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id),
+    -- created_by/updated_by removed: assets are admin-only create+edit
+    -- (dispose_asset is also roles:["admin"]) — disposed_by is kept,
+    -- that's a distinct action already covered above.
     qr_payload VARCHAR(255),
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
@@ -375,7 +379,8 @@ CREATE TABLE IF NOT EXISTS security_roster (
     ),
     assigned_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
+    -- created_by removed: roster assignment is admin-only (assigned_by
+    -- already records who assigned the shift).
     UNIQUE (
         society_id,
         security_id,
@@ -454,8 +459,10 @@ CREATE TABLE IF NOT EXISTS receivables (
     ),
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id)
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    -- created_by removed: receivables are always system-generated (auto
+    -- billing, penalties, advance-credit) or admin-confirmed
+    -- (confirmed_by already covers that) — no INSERT path ever stamped it.
 ,
     bill_group_id UUID DEFAULT gen_random_uuid(),
     reported_amount NUMERIC(10, 2),
@@ -580,7 +587,7 @@ CREATE TABLE IF NOT EXISTS nocs (
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
+    -- created_by removed: "Issue NOC" is roles:["admin"] only.
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
@@ -609,8 +616,9 @@ CREATE TABLE IF NOT EXISTS society_agreements (
     qr_payload VARCHAR(255),
     last_printed_at TIMESTAMP,
     last_emailed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id)
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    -- created_by removed: only created via the admin-only Setup Wizard
+    -- completion (_get_or_create_agreement) — never by any other role.
 );
 
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
@@ -660,7 +668,8 @@ CREATE TABLE IF NOT EXISTS expenses (
     source_reference VARCHAR(255),
     qr_payload VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
+    -- created_by removed: it was a pure duplicate of user_id (see
+    -- fn_save_expense — both were always set to p_created_by).
     tds_section VARCHAR(10),
     receipt_number VARCHAR(64),
     reconciled_at TIMESTAMP,
@@ -738,7 +747,8 @@ CREATE TABLE IF NOT EXISTS payables (
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by INT REFERENCES users (id),
+    -- created_by removed: payables are always auto-generated by the
+    -- payroll calc function, never stamped by any INSERT path.
     CONSTRAINT uq_payment_roster UNIQUE (roster_id)
 );
 
@@ -856,9 +866,9 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     apt_interest_pct NUMERIC(5, 2) DEFAULT 1.75,
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users (id),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id),
+    -- created_by/updated_by removed: apt charge/fine basis is an
+    -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
     apt_sinking_fund_rate NUMERIC(10,2) DEFAULT 0,
     apt_repair_fund_rate NUMERIC(10,2) DEFAULT 0,
     charges_interest BOOLEAN DEFAULT TRUE
@@ -876,9 +886,9 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
     vendor_1mth NUMERIC(10, 2) DEFAULT 0,
     ven_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by INT REFERENCES users (id),
-    updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id)
+    updated_at TIMESTAMP
+    -- created_by/updated_by removed: ven charge/fine basis is an
+    -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
 );
 
 -- ── Gate access & other tables ─────────────────────────────────
@@ -903,10 +913,11 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     bf_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (bf_amount >= 0),
     is_auto_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- FALSE once a human hand-edits this row (see drilldown_callbacks.py); no automatic writer exists as of 2026-08 (fn_close_financial_year removed)
     remarks VARCHAR(200),
-    created_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
-    updated_by INT REFERENCES users (id),
+    -- created_by/updated_by removed: brought_forward is only ever
+    -- touched via admin's Settings -> Accounts edit or the admin-only
+    -- Setup Wizard — no other role reaches _upsert_brought_forward.
     CONSTRAINT uq_bf_society_fy_acc UNIQUE (
         society_id,
         financial_year,
@@ -1178,8 +1189,9 @@ CREATE TABLE IF NOT EXISTS patrol_locations (
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     nfc_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    created_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW()
+    -- created_by removed: patrol_location create/edit is admin-only
+    -- per _PORTAL_PERMS (no self-service role).
 );
 
 CREATE TABLE IF NOT EXISTS patrol_scans (
@@ -1194,7 +1206,8 @@ CREATE TABLE IF NOT EXISTS patrol_scans (
 CREATE TABLE IF NOT EXISTS polls (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    created_by INT REFERENCES users (id),
+    -- created_by removed: save_poll requires role=="admin" explicitly;
+    -- fn_create_poll/fn_edit_poll are admin-only reachable.
     title VARCHAR(200) NOT NULL,
     description TEXT,
     open_to VARCHAR(20) NOT NULL DEFAULT 'no_dues' CHECK (open_to IN ('no_dues', 'all_members')),
@@ -3944,11 +3957,11 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role,
         expense_date, acc_id, particulars, amount, mode,
-        status, confirmed_by, confirmed_at, source_reference, created_at, created_by
+        status, confirmed_by, confirmed_at, source_reference, created_at
     ) VALUES (
         v_pay.society_id, p_confirmed_by, v_pay.entity_id, v_pay.role,
         CURRENT_DATE, v_pay.acc_id, v_pay.description, v_pay.amount, p_mode,
-        'confirmed', p_confirmed_by, NOW(), NULL, NOW(), p_confirmed_by
+        'confirmed', p_confirmed_by, NOW(), NULL, NOW()
     ) RETURNING id INTO v_expense_id;
 
     UPDATE payables
@@ -4326,10 +4339,10 @@ BEGIN
 
     INSERT INTO assets(
         society_id, company_name, asset_name, asset_SNo, purchase_date, installation_date, purchase_value,
-        acc_id, depreciation_rate, created_at, created_by, itc_claimed
+        acc_id, depreciation_rate, created_at, itc_claimed
     ) VALUES (
         p_society_id, p_company_name, p_asset_name, p_asset_sno, p_purchase_date, p_installation_date, p_purchase_value,
-        p_acc_id, v_dep_rate, NOW(), p_created_by, COALESCE(p_itc_claimed, 0)
+        p_acc_id, v_dep_rate, NOW(), COALESCE(p_itc_claimed, 0)
     ) RETURNING id INTO v_asset_id;
 
     v_desc := COALESCE(p_particulars, 'Asset Purchase - ' || p_asset_name);
@@ -4360,11 +4373,11 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role,
         expense_date, acc_id, particulars, amount, mode,
-        status, confirmed_by, confirmed_at, source_reference, created_at, created_by
+        status, confirmed_by, confirmed_at, source_reference, created_at
     ) VALUES (
         p_society_id, p_created_by, v_asset_id, 'assets',
         p_purchase_date, p_acc_id, v_desc, p_purchase_value, p_mode,
-        'confirmed', p_created_by, NOW(), NULL, NOW(), p_created_by
+        'confirmed', p_created_by, NOW(), NULL, NOW()
     ) RETURNING id INTO v_expense_id;
 
     RETURN QUERY SELECT v_asset_id, v_expense_id, v_trx_id, v_journal_id;
@@ -4819,13 +4832,13 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
-        source_reference, created_at, created_by, tds_pct, tds_section
+        source_reference, created_at, tds_pct, tds_section
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_expense_date, p_acc_id, p_particulars,
         p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
-        p_source_reference, NOW(), p_created_by, p_tds_pct, p_tds_section
+        p_source_reference, NOW(), p_tds_pct, p_tds_section
     ) RETURNING id INTO v_expense_id;
  
     IF v_status = 'confirmed' THEN
@@ -7847,10 +7860,13 @@ $$;
 -- POLLING SYSTEM FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
 
--- fn_create_poll: Admin creates a new poll
+-- fn_create_poll: Admin creates a new poll.
+-- No p_created_by param: poll creation is admin-only (save_poll requires
+-- role=="admin"), so a creator column/param adds no value.
+DROP FUNCTION IF EXISTS fn_create_poll (INT, INT, VARCHAR, TEXT, SMALLINT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, VARCHAR);
+
 CREATE OR REPLACE FUNCTION fn_create_poll(
     p_society_id   INT,
-    p_created_by   INT,
     p_title        VARCHAR(200),
     p_description  TEXT DEFAULT NULL,
     p_choice_count SMALLINT DEFAULT 2,
@@ -7869,8 +7885,11 @@ BEGIN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
     END IF;
 
-    INSERT INTO polls (society_id, created_by, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at, open_to)
-    VALUES (p_society_id, p_created_by, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at, p_open_to)
+    -- p_created_by kept as a param for backward-compat call sites, but no
+    -- longer stored — poll creation is admin-only (save_poll requires
+    -- role=="admin"), so tracking WHICH admin added no value.
+    INSERT INTO polls (society_id, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at, open_to)
+    VALUES (p_society_id, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at, p_open_to)
     RETURNING id INTO v_poll_id;
 
     RETURN v_poll_id;
@@ -9516,7 +9535,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_ven_1mth          NUMERIC,
     p_bf_fy             INT,
     p_bf_json           JSONB,
-    p_created_by        INT,
+    p_created_by        INT,  -- kept for signature compat; no longer stored (apt/ven charge basis and brought_forward are admin-only, so created_by/updated_by were removed from those tables)
     p_email             VARCHAR(30) DEFAULT NULL,
     p_reg_num           VARCHAR(100) DEFAULT NULL,
     p_apt_interest      NUMERIC DEFAULT 0,
@@ -9623,15 +9642,15 @@ BEGIN
         SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
             apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
             apt_repair_fund_rate = p_apt_repair, apt_interest_pct = p_apt_interest,
-            updated_at = NOW(), updated_by = p_created_by
+            updated_at = NOW()
         WHERE id = v_apt_id;
     ELSE
         INSERT INTO apt_charges_fines_basis
             (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
-             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, created_by)
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct)
         VALUES
             (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
-             p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest, p_created_by);
+             p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest);
     END IF;
 
     -- 4.5) Society compliance settings
@@ -9666,13 +9685,13 @@ BEGIN
     IF v_ven_id IS NOT NULL THEN
         UPDATE ven_charges_fines_basis
         SET vendor_1day = p_ven_1day, vendor_7day = p_ven_7day, vendor_1mth = p_ven_1mth,
-            updated_at = NOW(), updated_by = p_created_by
+            updated_at = NOW()
         WHERE id = v_ven_id;
     ELSE
         INSERT INTO ven_charges_fines_basis
-            (society_id, ven_id, start_date, vendor_1day, vendor_7day, vendor_1mth, created_by)
+            (society_id, ven_id, start_date, vendor_1day, vendor_7day, vendor_1mth)
         VALUES
-            (p_society_id, NULL, CURRENT_DATE, p_ven_1day, p_ven_7day, p_ven_1mth, p_created_by);
+            (p_society_id, NULL, CURRENT_DATE, p_ven_1day, p_ven_7day, p_ven_1mth);
     END IF;
 
     -- 6) Brought forward (multiple opening-balance rows passed as JSON)
@@ -9680,12 +9699,12 @@ BEGIN
         FOR v_item IN SELECT * FROM jsonb_array_elements(p_bf_json)
         LOOP
             IF (v_item->>'bf_amount')::NUMERIC > 0 THEN
-                INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, created_by, is_auto_calculated)
-                SELECT p_society_id, p_bf_fy, (v_item->>'acc_id')::INT, a.drcr_bf, (v_item->>'bf_amount')::NUMERIC, v_item->>'remarks', p_created_by, FALSE
+                INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, is_auto_calculated)
+                SELECT p_society_id, p_bf_fy, (v_item->>'acc_id')::INT, a.drcr_bf, (v_item->>'bf_amount')::NUMERIC, v_item->>'remarks', FALSE
                 FROM accounts a WHERE a.id = (v_item->>'acc_id')::INT AND a.society_id = p_society_id
                 ON CONFLICT (society_id, financial_year, acc_id)
                 DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount,
-                              remarks = EXCLUDED.remarks, updated_at = NOW(), updated_by = p_created_by,
+                              remarks = EXCLUDED.remarks, updated_at = NOW(),
                               is_auto_calculated = FALSE;
             END IF;
         END LOOP;
