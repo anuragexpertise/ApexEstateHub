@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS societies (
     -- society stay unsigned until it is set. Also doubles as the
     -- "has this society finished onboarding" flag the Setup Wizard
     -- trigger checks, same role the old column played.
-    signing_secret_enc TEXT
+    signing_secret_enc TEXT,
+    primary_bank_account_id INT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -1280,8 +1281,6 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 -- header account. Per-mode bank routing (UPI -> ICICI, Cheque -> SBI,
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
-ALTER TABLE societies
-ADD COLUMN IF NOT EXISTS primary_bank_account_id INT;
 ALTER TABLE societies DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
 ALTER TABLE societies ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
 
