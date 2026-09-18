@@ -1334,13 +1334,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
             qr_img, qr_payload = generate_qr_code(qr_society_id, "EVT", pk_val)
             if qr_img:
                 status = record_dict.get("status", "")
-                color = (
-                    "#27ae60" if status == "used"
-                    else "#e74c3c" if status == "cancelled"
-                    else "#dc3545" if status == "pending"
-                    else "#27ae60"
-                )
-                is_provisional = status == "pending"
+                color = "#27ae60" if status == "used" else ("#e74c3c" if status == "cancelled" else "#27ae60")
 
                 from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
                 society_row = db._execute(
@@ -1362,7 +1356,6 @@ def render_profile_card(card_id: str, title: str, icon: str,
                     "society_name": letterhead["society_name"], "society_address": letterhead["society_address"],
                     "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
                     "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
-                    "is_provisional": is_provisional,
                 }
 
                 event_ticket_qr_section.append(
@@ -1392,13 +1385,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
                             "fontFamily": "monospace", "marginTop": "4px",
                         }),
                         html.Div(
-                            [
-                                f"Status: {status.title() if status else 'Active'}",
-                                html.Strong(
-                                    " (Provisional - Subject to realization of funds)",
-                                    style={"color": "#dc3545", "marginLeft": "5px"},
-                                ) if is_provisional else None,
-                            ],
+                            f"Status: {status.title() if status else 'Active'}",
                             style={"fontSize": "10px", "color": color,
                                    "fontWeight": "600", "marginTop": "4px"},
                         ),

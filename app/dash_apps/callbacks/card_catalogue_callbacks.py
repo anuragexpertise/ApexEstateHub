@@ -123,13 +123,13 @@ SCOPED_CARD_IDS = {
     "vendor": {
         "kpi_receipts_month", "kpi_receivables_total", "kpi_my_pass_expiry",
         "kpi_gate_logs", "kpi_concerns_open", "kpi_concerns_assigned",
-        "kpi_concerns_invited", "kpi_concerns_resolved", "kpi_events_tickets",
+        "kpi_concerns_invited", "kpi_concerns_resolved",
     },
     "security": {
         "kpi_security_shift_count", "kpi_security_salary_due",
         "kpi_receipts_month", "kpi_gate_logs", "kpi_concerns_open",
         "kpi_concerns_assigned", "kpi_concerns_resolved",
-        "kpi_ptl_to_scan", "kpi_events_tickets",
+        "kpi_ptl_to_scan",
     },
 }
 
@@ -413,8 +413,7 @@ def register_card_catalogue_callbacks(app):
             "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
             "JOIN event_tickets et ON et.id = eti.event_ticket_id "
             "JOIN events e ON e.id = et.event_id "
-            "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-            "AND et.status IN ('pending','active')",
+            "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE",
             (own_user_id,),
         ),
                     # kpi_concerns_total is deliberately NOT overridden here —
@@ -505,17 +504,6 @@ def register_card_catalogue_callbacks(app):
                         "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='resolved'",
                         (sid, vendor_id),
                     ) if vendor_id else None,
-                    # Vendor's own bought event tickets for upcoming events —
-                    # scoped to the vendor user's user_id, same pattern as
-                    # the apartment override above.
-                    "kpi_events_tickets": (
-                        "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
-                        "JOIN event_tickets et ON et.id = eti.event_ticket_id "
-                        "JOIN events e ON e.id = et.event_id "
-                        "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-                        "AND et.status IN ('pending','active')",
-                        (own_user_id,),
-                    ) if own_user_id else None,
                 }
                 return overrides.get(card_id)
 
@@ -568,17 +556,6 @@ def register_card_catalogue_callbacks(app):
                         "AND (time_out IS NULL OR time_out::DATE > CURRENT_DATE)",
                         (sid,),
                     ),
-                    # Security staffer's own bought event tickets for
-                    # upcoming events — scoped to their user_id, same
-                    # pattern as the apartment/vendor overrides above.
-                    "kpi_events_tickets": (
-                        "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
-                        "JOIN event_tickets et ON et.id = eti.event_ticket_id "
-                        "JOIN events e ON e.id = et.event_id "
-                        "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-                        "AND et.status IN ('pending','active')",
-                        (own_user_id,),
-                    ) if own_user_id else None,
                 }
                 return overrides.get(card_id)
 
