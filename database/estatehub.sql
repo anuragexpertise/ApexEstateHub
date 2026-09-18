@@ -4292,6 +4292,76 @@ BEGIN
 END;
 $$;
 
+-- fn_verify_event_ticket: Admin verifies a pending event ticket purchase
+-- (created by apartment/vendor/security portal) → verifies the associated
+-- receipt and updates event_tickets + event_ticket_items to 'active'.
+-- ════════════════════════════════════════════════════════════════════════════
+
+DROP FUNCTION IF EXISTS fn_verify_event_ticket CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_verify_event_ticket(
+    p_event_ticket_id INT,
+    p_confirmed_by    INT,
+    p_mode            VARCHAR DEFAULT NULL
+)
+RETURNS TABLE(event_ticket_id INT, receipt_id INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_et     event_tickets%ROWTYPE;
+    v_rec    receipts%ROWTYPE;
+    v_result RECORD;
+    v_journal_id INT;
+BEGIN
+    -- Lock and fetch the event ticket
+    SELECT * INTO v_et FROM event_tickets WHERE id = p_event_ticket_id FOR UPDATE;
+    IF NOT FOUND THEN
+        event_ticket_id := p_event_ticket_id; receipt_id := NULL; msg := 'Error: Event ticket not found'; RETURN NEXT; RETURN;
+    END IF;
+    
+    IF v_et.status = 'active' THEN
+        event_ticket_id := p_event_ticket_id; receipt_id := v_et.receipt_id; msg := 'Already verified'; RETURN NEXT; RETURN;
+    END IF;
+    
+    IF v_et.status = 'cancelled' THEN
+        event_ticket_id := p_event_ticket_id; receipt_id := v_et.receipt_id; msg := 'Error: Event ticket is cancelled'; RETURN NEXT; RETURN;
+    END IF;
+    
+    -- Verify the associated receipt if exists
+    IF v_et.receipt_id IS NOT NULL THEN
+        SELECT * INTO v_rec FROM receipts WHERE id = v_et.receipt_id FOR UPDATE;
+        IF NOT FOUND THEN
+            event_ticket_id := p_event_ticket_id; receipt_id := v_et.receipt_id; msg := 'Error: Associated receipt not found'; RETURN NEXT; RETURN;
+        END IF;
+        
+        IF v_rec.status = 'pending' THEN
+            -- Call fn_verify_receipt to post transactions and update receipt
+            FOR v_result IN SELECT * FROM fn_verify_receipt(v_et.receipt_id, p_confirmed_by, p_mode) LOOP
+                IF v_result.msg LIKE 'Error:%' THEN
+                    event_ticket_id := p_event_ticket_id; receipt_id := v_et.receipt_id; msg := v_result.msg; RETURN NEXT; RETURN;
+                END IF;
+            END LOOP;
+        ELSIF v_rec.status = 'cancelled' THEN
+            event_ticket_id := p_event_ticket_id; receipt_id := v_et.receipt_id; msg := 'Error: Receipt is cancelled'; RETURN NEXT; RETURN;
+        END IF;
+    END IF;
+    
+    -- Update event_tickets to active
+    UPDATE event_tickets
+    SET status = 'active'
+    WHERE id = p_event_ticket_id;
+    
+    -- Update event_ticket_items to active
+    UPDATE event_ticket_items
+    SET status = 'active'
+    WHERE event_ticket_id = p_event_ticket_id;
+    
+    event_ticket_id := p_event_ticket_id;
+    receipt_id := v_et.receipt_id;
+    msg := 'Verified: event ticket #' || p_event_ticket_id::TEXT || ' and ' || COALESCE(v_et.receipt_id, 0)::TEXT || ' items updated to active';
+    RETURN NEXT;
+END;
+$$;
+
 -- SECTION 7: ASSET PURCHASE / DISPOSAL  (double-entry)
 --
 -- fn_buy_asset:     Dr Asset account  +  Cr Cash/Bank (NO expense row).
