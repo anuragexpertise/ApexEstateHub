@@ -1241,6 +1241,31 @@ def register_drilldown_callbacks(app):
                     content, bc, db_err = _render_current(store, auth)
                 return store, content, bc, kpi_style, toast
 
+            # ── Verify event ticket (admin only, from event_ticket_items list) ────────
+            elif action == "verify_event_ticket":
+                if not _require_admin(auth):
+                    toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
+                    return store, content, bc, {"display": "none"}, toast
+                user_id = get_current_user_id()
+                # pk is event_ticket_items.id (ticket_item_id); need to get parent event_tickets.id
+                et_row = db._execute(
+                    "SELECT event_ticket_id FROM event_ticket_items WHERE id = %s",
+                    (int(pk),), fetch_one=True,
+                )
+                if not et_row:
+                    toast = {"_toast": {"type": "error", "message": "Event ticket item not found"}}
+                    return store, content, bc, {"display": "none"}, toast
+                event_ticket_id = et_row["event_ticket_id"]
+                ok, msg = loaders.verify_event_ticket(event_ticket_id, confirmed_by=user_id)
+                # BUGFIX: strip the [[event_ticket:<id>]] marker before it reaches the toast.
+                msg = re.sub(r"\s*\[\[event_ticket:\d+\]\]", "", msg).strip()
+                store["refresh"] = True
+                toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
+                content, bc, db_err = _render_current(store, auth)
+                store["refresh"] = False
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, toast
+
             # ── Toggle Duty (security profile — admin-only manual clock in/out) ────
             elif action == "toggle_duty":
                 # Admin-only (profile_actions.py roles=["admin"]) — a guard's

@@ -601,7 +601,9 @@ DRILLDOWN_MAP: dict = {
         "actions": {}
     },
     "profile_event_ticket": {
-        "actions": {}
+        "actions": {
+            "verify_event_ticket": {"target": None, "prefill": {}},
+        }
     },
     "profile_patrol_location": {
         "actions": {}

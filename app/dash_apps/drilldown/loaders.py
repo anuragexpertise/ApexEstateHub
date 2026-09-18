@@ -1318,7 +1318,7 @@ def load_list(
                 extra += " AND (e.title ILIKE %s OR eti.ticket_type ILIKE %s)"
                 params += [f"%{s}%", f"%{s}%"]
             rows = db._execute(
-                "SELECT eti.id AS id, eti.id AS ticket_item_id, "
+                "SELECT eti.id AS id, eti.id AS ticket_item_id, et.id AS event_ticket_id, "
                 "  eti.ticket_type, eti.status, eti.qr_payload, eti.scanned_at, "
                 "  et.event_id, et.booking_reference, et.amount AS booking_amount, "
                 "  e.title AS event_title, e.event_date, e.venue, "
@@ -2921,6 +2921,25 @@ def verify_expense(expense_id: int, confirmed_by: int, mode: str = None) -> tupl
         return not str(msg).lower().startswith("error"), msg
     except Exception as e:
         return False, str(e)
+
+# ════════════════════════════════════════════════════════════════════════════
+# VERIFY EVENT TICKET
+# ════════════════════════════════════════════════════════════════════════════
+
+def verify_event_ticket(event_ticket_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
+    """Admin verifies a pending event ticket purchase → verifies receipt and activates tickets."""
+    try:
+        r = db._execute(
+            "SELECT * FROM fn_verify_event_ticket(%s,%s,%s)",
+            (event_ticket_id, confirmed_by, mode),
+            fetch_one=True,
+        )
+        msg = (r or {}).get("msg", "Done")
+        msg = f"{msg} [[event_ticket:{event_ticket_id}]]"
+        return not str(msg).lower().startswith("error"), msg
+    except Exception as e:
+        return False, str(e)
+
 # ════════════════════════════════════════════════════════════════════════════
 # ACCOUNT DROPDOWN OPTIONS
 # ════════════════════════════════════════════════════════════════════════════

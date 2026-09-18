@@ -392,6 +392,28 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
         },
     ],
 
+    # ── EVENT TICKETS (purchased tickets) ─────────────────────────────────────
+    "event_tickets": [
+        {
+            "label": "Verify",
+            "action_id": "verify_event_ticket",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-check-double",
+            "color": "success",
+            "roles": ["admin"],
+        },
+    ],
+    "event_ticket_items": [
+        {
+            "label": "Verify",
+            "action_id": "verify_event_ticket",
+            "target_card": None,          # server-side only — no navigation
+            "icon": "fa-check-double",
+            "color": "success",
+            "roles": ["admin"],
+        },
+    ],
+
     # ── CHANNELS ─────────────────────────────────────────────────────────────
     "channels": [
         {
