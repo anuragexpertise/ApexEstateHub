@@ -1083,7 +1083,7 @@ CREATE TABLE IF NOT EXISTS event_ticket_items (
     ),
     qr_payload VARCHAR(255) UNIQUE NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
-        status IN ('active', 'used', 'cancelled')
+        status IN ('active', 'pending', 'used', 'cancelled')
     ),
     scanned_at TIMESTAMP,
     scanned_by INT REFERENCES users (id),
