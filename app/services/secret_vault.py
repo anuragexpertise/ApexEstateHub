@@ -32,54 +32,42 @@ signed/printed QR pass across the whole platform needing reissue), so
 treat it like any other production credential: generate it once, store it
 only in your secrets manager / host env vars, and never commit it.
 
+2026-09 fix: this module previously called AWS KMS (boto3) here while
+every comment/seed helper/doc string above still described a Fernet
+symmetric key — a leftover mismatch. ApexEstateHub runs on ApexWeave, not
+AWS, so there is no KMS to call; encrypt_secret() was silently falling
+back to raw base64 (NOT encryption) on every BotoCoreError/ClientError,
+which is how the demo society ended up with signing_secret_enc=None
+(seed.py's _seed_signing_secret swallows the exception). Switched to
+actually using Fernet, matching what was always documented here.
+
 Generate one with:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
 import os
 from functools import lru_cache
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from cryptography.fernet import Fernet, InvalidToken
 
 class SecretVaultError(RuntimeError):
     pass
 
 @lru_cache(maxsize=1)
-def _kms_client():
-    return boto3.client('kms', region_name=os.getenv("AWS_REGION", "ap-south-1"))
+def _fernet() -> Fernet:
+    key = os.getenv("SECRET_VAULT_KEY")
+    if not key:
+        raise SecretVaultError("SECRET_VAULT_KEY (Fernet key) is not configured.")
+    try:
+        return Fernet(key.encode())
+    except (ValueError, TypeError) as e:
+        raise SecretVaultError(f"SECRET_VAULT_KEY is not a valid Fernet key: {e}")
 
 def encrypt_secret(plaintext: str) -> str:
-    key_id = os.getenv("SECRET_VAULT_KEY")
-    if not key_id:
-        raise SecretVaultError("SECRET_VAULT_KEY (KMS Key ID) is not configured.")
-    try:
-        import base64
-        response = _kms_client().encrypt(
-            KeyId=key_id,
-            Plaintext=plaintext.encode()
-        )
-        return base64.b64encode(response['CiphertextBlob']).decode('utf-8')
-    except (BotoCoreError, ClientError) as e:
-        # Fallback to plain if we can't connect, for local dev
-        # In production this should hard fail, but here we mock it
-        import base64
-        return base64.b64encode(plaintext.encode()).decode('utf-8')
+    return _fernet().encrypt(plaintext.encode()).decode("utf-8")
 
 def decrypt_secret(token: str):
     if not token:
         return None
     try:
-        import base64
-        decoded_blob = base64.b64decode(token.encode('utf-8'))
-        response = _kms_client().decrypt(
-            CiphertextBlob=decoded_blob
-        )
-        return response['Plaintext'].decode('utf-8')
-    except (BotoCoreError, ClientError):
-        # Fallback for mock KMS
-        import base64
-        try:
-            return base64.b64decode(token.encode('utf-8')).decode('utf-8')
-        except Exception:
-            return None
-    except Exception:
+        return _fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
         return None

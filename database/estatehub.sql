@@ -9507,6 +9507,14 @@ $$;
 -- never sees the plaintext SIGNING_SECRET and does no hashing/encryption
 -- of its own (contrast the old p_qr_hash, which arrived pre-hashed too,
 -- but as a one-way werkzeug hash instead of reversible ciphertext).
+-- 2026-09 fix: p_duty_hrs was missing from this parameter list even
+-- though the body below already referenced it (duty_hrs =
+-- COALESCE(p_duty_hrs, duty_hrs)) and setup_wizard_callbacks.py already
+-- passed a :duty_hrs value positionally in this exact slot. The extra
+-- argument with no matching parameter made every call fail to resolve
+-- ("function fn_complete_society_setup(integer, unknown, ...) does not
+-- exist") before the body ever ran. Added here, matching the Python
+-- call's position (right after gate_logic, before tds_effective_date).
 CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_society_id        INT,
     p_signing_secret_enc TEXT,
@@ -9548,6 +9556,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_tds_no_pan        VARCHAR(10) DEFAULT 'warn',
     p_export_fmt        VARCHAR(20) DEFAULT 'structured',
     p_gate_logic        VARCHAR(10) DEFAULT 'both',
+    p_duty_hrs           VARCHAR(2) DEFAULT '8',
     p_tds_effective_date DATE DEFAULT '2024-04-01'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
