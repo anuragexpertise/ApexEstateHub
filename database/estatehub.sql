@@ -4353,7 +4353,7 @@ BEGIN
     -- Update event_ticket_items to active
     UPDATE event_ticket_items
     SET status = 'active'
-    WHERE event_ticket_items.event_ticket_id = p_event_ticket_id;
+    WHERE event_ticket_id = p_event_ticket_id;
     
     event_ticket_id := p_event_ticket_id;
     receipt_id := v_et.receipt_id;
