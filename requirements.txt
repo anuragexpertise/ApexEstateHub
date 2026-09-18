@@ -53,4 +53,3 @@ gunicorn>=21.0.0
 pytest>=7.0.0
 sqlparse>=0.5.0
 Markdown
-boto3
