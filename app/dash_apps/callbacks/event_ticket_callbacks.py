@@ -72,8 +72,7 @@ function printEventTicket(n_clicks, d) {
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
         qrUrl: d.qr_url, qrCaption: d.qr_caption,
-        bodyHtml: (d.is_provisional ? '<div style="text-align:center;color:#dc3545;font-weight:bold;margin-bottom:15px;">Provisional - Subject to realization of funds</div>' : '') +
-                  ticketHtml(d),
+        bodyHtml: ticketHtml(d),
         printWidth: '600px',
     });
     w.document.write(doc);
@@ -97,8 +96,7 @@ function downloadEventTicketPdf(n_clicks, d) {
         logoUrl: d.logo_url, backgroundUrl: d.background_url,
         signatureUrl: d.signature_url, secretaryName: d.secretary_name,
         qrUrl: d.qr_url, qrCaption: d.qr_caption,
-        bodyHtml: (d.is_provisional ? '<div style="text-align:center;color:#dc3545;font-weight:bold;margin-bottom:15px;">Provisional - Subject to realization of funds</div>' : '') +
-                  ticketHtml(d),
+        bodyHtml: ticketHtml(d),
         printWidth: '600px',
     });
     var blob = new Blob([html], {type: 'text/html'});
@@ -119,7 +117,7 @@ function emailEventTicket(n_clicks, d) {
         'Ticket Type: ' + d.ticket_type + '\n' +
         'Date & Time: ' + d.event_date + ' ' + d.event_time + '\n' +
         'Venue: ' + d.venue + '\n' +
-        'Status: ' + (d.status || 'active').toUpperCase() + (d.is_provisional ? ' (Provisional - Subject to realization of funds)' : '') + '\n' +
+        'Status: ' + (d.status || 'active').toUpperCase() + '\n' +
         'Verification code: ' + d.qr_payload
     );
     var _a = document.createElement('a');
