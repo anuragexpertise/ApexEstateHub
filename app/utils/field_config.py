@@ -535,7 +535,7 @@ FIELD_CONFIG = {
             "editable": ADMIN_ONLY,
             "default": "open",
             "validation": {},
-            "tooltip": "Current status: open, in_progress, resolved, closed",
+            "tooltip": "Current status: open, assigned, resolved, closed",
         },
     },
 

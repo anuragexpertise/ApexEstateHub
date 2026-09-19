@@ -1079,7 +1079,7 @@ seeds a single demo society ("Sunrise Residency", `society_id = 1`) with:
 | Vendors | 12 | 12 distinct service types (Plumbing, Gardening, Electrical, Carpentry, Painting, Pest Control, Housekeeping, CCTV & Security, AC Repair, Elevator Maintenance, Catering, Landscaping) |
 | Security staff | 12 | Mixed morning/evening/night shifts, roster + gate-log attendance for the first two guards |
 | Events | 12 | Spread across the demo financial year, all `open_to = 'all'` |
-| Concerns | 12 | Mixed types/statuses (`open`, `in_progress`, `resolved`, `closed`); several pre-assigned to a vendor or security guard via `concerns_assigns` |
+| Concerns | 11 | Mixed types/statuses (`open`, `assigned`, `resolved`, `closed`); several pre-assigned to a vendor or security guard via `concerns_assigns` |
 | Chart-of-accounts | 50 | Identical to the legacy `migrate.py` account tree |
 
 Re-running the seed is safe — every insert is guarded by an existence check

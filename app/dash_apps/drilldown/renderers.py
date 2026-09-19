@@ -265,7 +265,7 @@ _SNAKE_CASE_RE = _re.compile(r"^[a-z0-9]+(_[a-z0-9]+)+$")
 
 def _humanize_string(val: str) -> str:
     """
-    Turn raw snake_case enum/status text ('in_progress', 'bank')
+    Turn raw snake_case enum/status text ('bid_submitted', 'bank')
     into readable Title Case ('In Progress', 'Bank Transfer').
     Only touches strings that look like a code/enum value (all-lowercase,
     underscore-separated) so real data — emails, names, flat numbers,

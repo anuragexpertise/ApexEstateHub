@@ -915,10 +915,8 @@ class FakeDB:
             return {"status": "closed"}
         if all(s in ("resolved", "closed") for s in statuses):
             return {"status": "resolved"}
-        if any(s == "assigned" for s in statuses):
-            return {"status": "in_progress"}
-        if any(s == "bid_submitted" for s in statuses):
-            return {"status": "in_progress"}
+        if any(s in ("assigned", "accepted", "bid_submitted") for s in statuses):
+            return {"status": "assigned"}
         if any(s == "invited" for s in statuses):
             return {"status": "open"}
         return {"status": "open"}

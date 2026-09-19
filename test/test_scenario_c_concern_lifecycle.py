@@ -119,7 +119,7 @@ class TestScenarioC_ConcernLifecycle:
         _seed_concern_world(patched_db)
         loaders.assign_concern(1, 1, "VND", 201, assigned_by=1)
         result = patched_db._fn_sync_concern_status({"p0": 1, "p1": 1}, fetch_one=True, fetch_all=False)
-        assert result["status"] == "in_progress"
+        assert result["status"] == "assigned"
 
     def test_decline_invitation(self, patched_db):
         _seed_concern_world(patched_db)

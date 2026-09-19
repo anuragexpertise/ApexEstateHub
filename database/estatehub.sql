@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS concerns (
     concern_type VARCHAR(50),
     description TEXT,
     preferred_time TIME,
-    status VARCHAR(20) NOT NULL DEFAULT 'open',
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'assigned', 'resolved', 'closed')),
     image TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by INT REFERENCES users (id),
