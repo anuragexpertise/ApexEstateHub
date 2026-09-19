@@ -2284,14 +2284,14 @@ BEGIN
     -- caller skips that line)
     SELECT id INTO v_sinking_acc_id FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%Sinking Fund%'
-      AND drcr_account = 'Cr'
+      AND name ILIKE '%Sinking Fund Reserve%'
+      AND drcr_account = 'Dr'
     LIMIT 1;
 
     SELECT id INTO v_repair_acc_id FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%Repair Fund%'
-      AND drcr_account = 'Cr'
+      AND name ILIKE '%Repair & Maintenance Fund Reserve%'
+      AND drcr_account = 'Dr'
     LIMIT 1;
 
     SELECT id INTO v_cgst_acc_id FROM accounts
