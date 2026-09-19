@@ -867,6 +867,8 @@ def render_list_card(card_id: str, title: str, icon: str,
                 act_roles = act.get("roles")
                 if act_roles and role not in act_roles:
                     continue
+                if not _action_visible(row_dict, act):
+                    continue
                 # Skip actions that already have dedicated buttons above
                 if act_id in ("edit", "delete", "view"):
                     continue
@@ -1707,6 +1709,8 @@ def render_profile_card(card_id: str, title: str, icon: str,
         act_roles = act.get("roles")
         if act_roles and role not in act_roles:        # ← NEW: respects PROFILE_ACTIONS roles
             continue
+        if not _action_visible(record_dict, act):
+            continue
         if act_id == "edit"   and "edit"   not in allowed: continue
         if act_id == "delete" and "delete" not in allowed: continue
         # ── Poll lifecycle guards ────────────────────────────────────────
@@ -2263,6 +2267,8 @@ def render_account_profile_card(card_id: str, title: str, icon: str,
         act_id = act.get("action_id", "")
         act_roles = act.get("roles")
         if act_roles and role not in act_roles:
+            continue
+        if not _action_visible(record_dict, act):
             continue
         if act_id == "edit" and "edit" not in allowed:
             continue
@@ -3396,6 +3402,23 @@ def model_to_display(record) -> dict:
     if hasattr(record, "to_dict"):
         return record.to_dict(include_calculated=True)
     return record if isinstance(record, dict) else {}
+
+
+def _action_visible(record: dict, action: dict) -> bool:
+    """Check if an action should be visible for the given record.
+
+    Actions can specify a 'condition' dict like:
+        {"field": "status", "equals": "pending"}
+    which means the action is only visible when record[field] == equals.
+    """
+    condition = action.get("condition")
+    if not condition:
+        return True
+    field = condition.get("field")
+    expected = condition.get("equals")
+    if field is None or expected is None:
+        return True
+    return (record or {}).get(field) == expected
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -5622,10 +5645,11 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
         "is_provisional": (receipt.get("status") in ("pending", "unverified")),
     }
 
-    def _row(label, value):
+    def _row(label, value, value_style=None):
+        value_style = value_style or {}
         return dbc.Row([
             dbc.Col(html.Small(label, style={"color": "#7d8ea3", "fontWeight": "600"}), width=4),
-            dbc.Col(html.Span(str(value), style={"fontWeight": "500"}), width=8),
+            dbc.Col(html.Span(str(value), style={"fontWeight": "500", **value_style}), width=8),
         ], className="mb-2", style={"fontSize": "12px"})
 
     return dbc.Card([
@@ -5659,7 +5683,14 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
             _row("Account", account),
             _row("Amount", f"₹{amount:,.2f}"),
             _row("Mode", mode + (f" — Ref: {ref}" if ref else "")),
-            _row("Status", html.Span([status, html.Strong(" (Provisional - Subject to realization of funds)", style={"color": "#dc3545", "marginLeft": "5px"})]) if receipt.get("status") in ("pending", "unverified") else status),
+            _row(
+                "Status",
+                f"{status} (Provisional - Subject to realization of funds)" if receipt.get("status") in ("pending", "unverified") else status,
+                value_style={
+                    "color": "#dc3545" if receipt.get("status") in ("pending", "unverified") else
+                             "#27ae60" if receipt.get("status") == "confirmed" else "#15304f",
+                },
+            ),
             html.Div([
                 html.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],

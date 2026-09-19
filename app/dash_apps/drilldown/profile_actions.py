@@ -401,6 +401,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "icon": "fa-check-double",
             "color": "success",
             "roles": ["admin"],
+            "condition": {"field": "status", "equals": "pending"},
         },
     ],
     "event_ticket_items": [
@@ -411,6 +412,7 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "icon": "fa-check-double",
             "color": "success",
             "roles": ["admin"],
+            "condition": {"field": "status", "equals": "pending"},
         },
     ],
 
