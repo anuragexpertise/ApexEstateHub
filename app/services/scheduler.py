@@ -81,33 +81,51 @@ def expire_polls_job():
 
 def _run_poll_expiry():
     try:
-        db._execute("SELECT fn_declare_expired_polls()")
-    except Exception as e:
-        logger.error(f"Error executing fn_declare_expired_polls: {e}")
+        societies = db._execute("SELECT id FROM societies", fetch_all=True) or []
+        for society in societies:
+            society_id = society["id"]
+            expired = db._execute(
+                "SELECT id, society_id, title FROM fn_declare_expired_polls(%s)",
+                (society_id,), fetch_all=True,
+            ) or []
+            for poll in expired:
+                try:
+                    from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+                    invalidate_kpi_cache("polls")
+                    PushService.notify_poll_results_declared(
+                        society_id, poll.get("title") or "Untitled poll"
+                    )
+                except Exception:
+                    logger.exception(
+                        "poll expiry notification failed (poll_id=%s, society_id=%s)",
+                        poll.get("id"), society_id,
+                    )
+    except Exception:
+        logger.exception("poll expiry job failed")
 
     try:
-        societies = db._execute("SELECT id FROM societies", fetch_all=True)
-        for row in (societies or []):
-            sid = row["id"]
+        societies = db._execute("SELECT id FROM societies", fetch_all=True) or []
+        for society in societies:
+            society_id = society["id"]
             soon_rows = db._execute(
-                "SELECT * FROM fn_get_polls_ending_soon(%s, %s)",
-                (sid, 15), fetch_all=True,
-            )
+                "SELECT * FROM fn_get_polls_ending_soon(%s, 15)",
+                (society_id,), fetch_all=True,
+            ) or []
             if soon_rows:
-                targets = PushService.get_notification_targets(sid, roles=["apartment"])
+                targets = PushService.get_notification_targets(society_id, roles=["apartment"])
                 if targets:
                     for soon in soon_rows:
                         PushService.send_bulk_push(
                             targets, "⏰ Poll Ending Soon",
                             f"Poll '{soon['title']}' ends at {soon['ends_at']}",
-                            url="/dashboard/polls", society_id=sid,
+                            url="/dashboard/polls", society_id=society_id,
                         )
                         db._execute(
                             "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
                             (soon["id"],),
                         )
-    except Exception as e:
-        logger.error(f"Error in poll push reminders: {e}")
+    except Exception:
+        logger.exception("poll reminder job failed")
 
 def init_scheduler():
     t1 = threading.Thread(target=poll_scheduler_loop, daemon=True, name="poll-scheduler")
