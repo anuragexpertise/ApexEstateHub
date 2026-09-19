@@ -42,9 +42,9 @@ class ReceivableStatus(str, Enum):
 
 class ConcernStatus(str, Enum):
     OPEN = "open"
-    INVITE = "invite"
-    IN_PROGRESS = "in_progress"
+    ASSIGNED = "assigned"
     RESOLVED = "resolved"
+    CLOSED = "closed"
 
 class SocietyPlan(str, Enum):
     FREE = "Free"
