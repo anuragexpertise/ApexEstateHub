@@ -194,8 +194,6 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # see card_catalogue.py / portal_pages.py / app_shell.py.
     ("security", "*"):            set(),
     ("apartment", "polls"):       {"view"},
-    ("vendor", "polls"):          {"view"},
-    ("security", "polls"):        {"view"},
 }
 
 
@@ -1910,59 +1908,62 @@ def render_profile_card(card_id: str, title: str, icon: str,
                 ], className="text-success mt-2")
             )
 
-        try:
-            from app.services.qr_service import generate_qr_code
-            from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
-            qr_society_id = record_dict.get("society_id") or society_id
-            qr_img, qr_payload = generate_qr_code(qr_society_id, "POL", pk_val)
-            society_row = db._execute(
-                "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
-                "FROM societies WHERE id = %s",
-                (qr_society_id,), fetch_one=True,
-            ) or {}
-            letterhead = get_letterhead_assets(society_row, qr_society_id)
-            poll_print_data = {
-                "id": pk_val,
-                "title": title,
-                "description": record_dict.get("description", ""),
-                "status": poll_status,
-                "total_votes": total_votes,
-                "choices": choices,
-                "vote_counts": vote_counts,
-                "qr_url": qr_img, "qr_payload": qr_payload, "qr_caption": QR_CAPTION,
-                "society_name": letterhead["society_name"], "society_address": letterhead["society_address"],
-                "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
-                "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
-            }
-        except Exception as e:
-            print(f"⚠️  poll QR/letterhead render failed: {e}")
-            poll_print_data = {}
+        poll_print_data = {}
+        if show_results:
+            try:
+                from app.services.qr_service import generate_qr_code
+                from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+                qr_society_id = record_dict.get("society_id") or society_id
+                qr_img, qr_payload = generate_qr_code(qr_society_id, "POL", pk_val)
+                society_row = db._execute(
+                    "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
+                    "FROM societies WHERE id = %s",
+                    (qr_society_id,), fetch_one=True,
+                ) or {}
+                letterhead = get_letterhead_assets(society_row, qr_society_id)
+                poll_print_data = {
+                    "id": pk_val,
+                    "title": title,
+                    "description": record_dict.get("description", ""),
+                    "status": poll_status,
+                    "total_votes": total_votes,
+                    "choices": choices,
+                    "vote_counts": vote_counts,
+                    "qr_url": qr_img, "qr_payload": qr_payload, "qr_caption": QR_CAPTION,
+                    "society_name": letterhead["society_name"], "society_address": letterhead["society_address"],
+                    "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
+                    "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
+                }
+            except Exception as e:
+                print(f"⚠️  poll QR/letterhead render failed: {e}")
+                poll_print_data = {}
 
-        _poll_ui.append(
-            html.Div([
-                html.Button(
-                    [html.I(className="fas fa-print me-2"), "Print"],
-                    id="poll-btn-print", n_clicks=0,
-                    className="btn btn-outline-primary",
-                    style={"borderRadius": "10px", "fontWeight": "600"}
-                ),
-                html.Button(
-                    [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
-                    id="poll-btn-pdf", n_clicks=0,
-                    className="btn btn-outline-danger",
-                    style={"borderRadius": "10px", "fontWeight": "600"}
-                ),
-                html.Button(
-                    [html.I(className="fas fa-envelope me-2"), "Email Poll"],
-                    id="poll-btn-email", n_clicks=0,
-                    className="btn btn-outline-info",
-                    style={"borderRadius": "10px", "fontWeight": "600"}
-                ),
-                dcc.Store(id="poll-print-data", data=poll_print_data, storage_type="memory"),
-            ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
-                      "marginTop": "10px", "paddingTop": "10px",
-                      "borderTop": "1px dashed #ddd"})
-        )
+        if show_results:
+            _poll_ui.append(
+                html.Div([
+                    html.Button(
+                        [html.I(className="fas fa-print me-2"), "Print"],
+                        id="poll-btn-print", n_clicks=0,
+                        className="btn btn-outline-primary",
+                        style={"borderRadius": "10px", "fontWeight": "600"}
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-file-pdf me-2"), "Save as PDF"],
+                        id="poll-btn-pdf", n_clicks=0,
+                        className="btn btn-outline-danger",
+                        style={"borderRadius": "10px", "fontWeight": "600"}
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-envelope me-2"), "Email Poll"],
+                        id="poll-btn-email", n_clicks=0,
+                        className="btn btn-outline-info",
+                        style={"borderRadius": "10px", "fontWeight": "600"}
+                    ),
+                    dcc.Store(id="poll-print-data", data=poll_print_data, storage_type="memory"),
+                ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                          "marginTop": "10px", "paddingTop": "10px",
+                          "borderTop": "1px dashed #ddd"})
+            )
 
     # ── Universal Entity Banner ──────────────────────────────────────────────────
     _entity_banner = []

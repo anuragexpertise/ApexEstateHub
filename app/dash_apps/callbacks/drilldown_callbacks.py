@@ -1057,6 +1057,19 @@ def register_drilldown_callbacks(app):
                     (int(pk), int(user_id), int(sid)), fetch_one=True
                 )
                 ok = bool((result or {}).get("ok"))
+                if ok:
+                    try:
+                        poll_row = db._execute(
+                            "SELECT title FROM polls WHERE id=%s AND society_id=%s",
+                            (pk, sid), fetch_one=True,
+                        )
+                        if poll_row:
+                            PushService.notify_poll_closed(sid, poll_row.get("title"))
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_poll_closed failed (poll_id=%s): %s", pk, e,
+                        )
                 invalidate_kpi_cache()
                 store["refresh"] = True
                 toast = {"_toast": {
@@ -2596,8 +2609,8 @@ def register_drilldown_callbacks(app):
             # "SELECT fn_cast_vote(...) AS success", which doesn't expand
             # a set-returning function's columns).
             result = db._execute(
-                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::SMALLINT)",
-                (poll_id, user_id, choice), fetch_one=True
+                "SELECT * FROM fn_cast_vote(%s::INT, %s::INT, %s::INT, %s::SMALLINT)",
+                (poll_id, user_id, society_id, choice), fetch_one=True
             )
             ok = bool((result or {}).get("success"))
             msg = (result or {}).get("message") or ("Vote recorded" if ok else "Your vote could not be recorded")

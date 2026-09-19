@@ -246,14 +246,23 @@ def notify_poll_created(society_id, poll_title):
 
 
 def notify_poll_results_declared(society_id, poll_title):
-    """Notify all apartment owners in the society when an admin declares
-    results for a poll (mirrors notify_poll_created's audience/pattern)."""
+    """Notify all apartment owners in the society when poll results are declared."""
     notify_kpi_update(society_id, "polls")
     targets = get_notification_targets(society_id, roles=["apartment"])
     if not targets:
         return 0, 0
     body = f"Results are in for: {poll_title}"
     return send_bulk_push(targets, "📊 Poll Results Declared", body, url="/dashboard/polls", society_id=society_id)
+
+
+def notify_poll_closed(society_id, poll_title):
+    """Notify apartment owners when voting closes for a poll."""
+    notify_kpi_update(society_id, "polls")
+    targets = get_notification_targets(society_id, roles=["apartment"])
+    if not targets:
+        return 0, 0
+    body = f"Voting has closed for: {poll_title}"
+    return send_bulk_push(targets, "📊 Poll Closed", body, url="/dashboard/polls", society_id=society_id)
 
 
 def notify_event_created(society_id, event_title, open_to="all", event_date=None):

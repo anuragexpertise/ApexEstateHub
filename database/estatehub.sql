@@ -7933,7 +7933,7 @@ $$;
 -- fn_create_poll: Admin creates a new poll.
 -- No p_created_by param: poll creation is admin-only (save_poll requires
 -- role=="admin"), so a creator column/param adds no value.
-DROP FUNCTION IF EXISTS fn_create_poll (INT, INT, VARCHAR, TEXT, SMALLINT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, VARCHAR);
+DROP FUNCTION IF EXISTS fn_create_poll (INT, VARCHAR, TEXT, SMALLINT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, VARCHAR);
 
 CREATE OR REPLACE FUNCTION fn_create_poll(
     p_society_id   INT,
@@ -7955,9 +7955,14 @@ BEGIN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
     END IF;
 
-    -- p_created_by kept as a param for backward-compat call sites, but no
-    -- longer stored — poll creation is admin-only (save_poll requires
-    -- role=="admin"), so tracking WHICH admin added no value.
+    IF p_open_to NOT IN ('no_dues', 'all_members') THEN
+        RAISE EXCEPTION 'open_to must be no_dues or all_members';
+    END IF;
+
+    IF p_ends_at IS NOT NULL AND p_ends_at <= NOW() THEN
+        RAISE EXCEPTION 'ends_at must be in the future';
+    END IF;
+
     INSERT INTO polls (society_id, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at, open_to)
     VALUES (p_society_id, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at, p_open_to)
     RETURNING id INTO v_poll_id;
@@ -8160,9 +8165,12 @@ END;
 $$;
 
 -- fn_cast_vote: User casts a vote (server-side auth via p_user_id)
+DROP FUNCTION IF EXISTS fn_cast_vote (INT, INT, SMALLINT);
+
 CREATE OR REPLACE FUNCTION fn_cast_vote(
     p_poll_id  INT,
     p_user_id  INT,
+    p_society_id INT,
     p_choice   SMALLINT
 ) RETURNS TABLE (success BOOLEAN, message TEXT, total_votes BIGINT) LANGUAGE plpgsql AS $$
 DECLARE
@@ -8172,7 +8180,7 @@ DECLARE
     v_existing  INT;
     v_total     BIGINT;
 BEGIN
-    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id;
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
 
     IF NOT FOUND THEN
         RETURN QUERY SELECT FALSE, 'Poll not found'::TEXT, 0::BIGINT;
@@ -8180,12 +8188,21 @@ BEGIN
     END IF;
 
     SELECT * INTO v_user FROM users WHERE id = p_user_id;
-    IF v_user.role != 'apartment' OR v_user.user_type != 'owner' THEN
+    IF NOT FOUND OR v_user.role != 'apartment' OR v_user.user_type != 'owner' THEN
         RETURN QUERY SELECT FALSE, 'Only apartment owners can vote'::TEXT, 0::BIGINT;
         RETURN;
     END IF;
-    
-    v_apt_id := v_user.linked_id;
+
+    IF v_user.society_id IS DISTINCT FROM v_poll.society_id THEN
+        RETURN QUERY SELECT FALSE, 'User and poll belong to different societies'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
+
+    SELECT id INTO v_apt_id FROM apartments WHERE id = v_user.linked_id AND society_id = v_poll.society_id;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT FALSE, 'Apartment not found in this society'::TEXT, 0::BIGINT;
+        RETURN;
+    END IF;
 
     IF v_poll.open_to = 'no_dues' THEN
         IF fn_apartment_overdue_outstanding(v_apt_id) > 0 THEN
@@ -8200,7 +8217,6 @@ BEGIN
     END IF;
 
     IF v_poll.ends_at IS NOT NULL AND v_poll.ends_at <= NOW() THEN
-        PERFORM fn_declare_expired_polls();
         RETURN QUERY SELECT FALSE, 'This poll has ended'::TEXT, 0::BIGINT;
         RETURN;
     END IF;
@@ -8225,6 +8241,7 @@ BEGIN
 EXCEPTION
     WHEN unique_violation THEN
         RETURN QUERY SELECT FALSE, 'A vote has already been cast for this apartment'::TEXT, 0::BIGINT;
+        RETURN;
 END;
 $$;
 
@@ -8261,6 +8278,10 @@ BEGIN
     END IF;
 
     IF v_poll.status <> 'active' THEN
+        RETURN FALSE;
+    END IF;
+
+    IF p_ends_at IS NOT NULL AND p_ends_at <= NOW() THEN
         RETURN FALSE;
     END IF;
 
@@ -8343,16 +8364,21 @@ END;
 $$;
 
 -- fn_declare_expired_polls: Auto-declare results for polls that have passed their end time
-CREATE OR REPLACE FUNCTION fn_declare_expired_polls()
-RETURNS VOID LANGUAGE plpgsql AS $$
+DROP FUNCTION IF EXISTS fn_declare_expired_polls();
+
+CREATE OR REPLACE FUNCTION fn_declare_expired_polls(p_society_id INT DEFAULT NULL)
+RETURNS TABLE (id INT, society_id INT, title VARCHAR(200)) LANGUAGE plpgsql AS $$
 BEGIN
+    RETURN QUERY
     UPDATE polls
        SET status = 'results_declared',
            results_announced_at = NOW(),
            updated_at = NOW()
      WHERE status = 'active'
        AND ends_at IS NOT NULL
-       AND ends_at <= NOW();
+       AND ends_at <= NOW()
+       AND (p_society_id IS NULL OR society_id = p_society_id)
+     RETURNING polls.id, polls.society_id, polls.title;
 END;
 $$;
 

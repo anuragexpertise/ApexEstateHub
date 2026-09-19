@@ -2,6 +2,7 @@ from dash import Input, Output, State, html, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 import app.services.push_service as PushService
+from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -103,9 +104,18 @@ def register_poll_callbacks(app):
         if ends_at:
             try:
                 _naive = _dt.datetime.strptime(ends_at, "%Y-%m-%dT%H:%M")
-                ends_at = _naive.astimezone().astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
+                _utc = _naive.astimezone().astimezone(_dt.timezone.utc)
+                if _utc <= _dt.datetime.now(_dt.timezone.utc):
+                    return html.Div([
+                        html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                        "Poll end time must be in the future.",
+                    ], className="alert alert-warning mt-2")
+                ends_at = _utc.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return html.Div([
+                    html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
+                    "Enter a valid poll end date and time.",
+                ], className="alert alert-warning mt-2")
 
         def _publish_schedule_update():
             try:
@@ -135,6 +145,7 @@ def register_poll_callbacks(app):
                         "Poll couldn't be updated — it may already have votes, or be closed.",
                     ], className="alert alert-warning mt-2")
                 _publish_schedule_update()
+                invalidate_kpi_cache()
                 return html.Div([
                     html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                     f"Poll '{title}' updated successfully.",
@@ -155,6 +166,7 @@ def register_poll_callbacks(app):
             except Exception as e:
                 logger.error(f"Poll creation push notify failed: {e}")
             _publish_schedule_update()
+            invalidate_kpi_cache()
             return html.Div([
                 html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                 f"Poll '{title}' created successfully! (ID: {new_poll_id})",
@@ -196,6 +208,7 @@ def register_poll_callbacks(app):
     def _poll_to_html_js() -> str:
         return """
         function pollHtml(d) {
+            if (d.status !== 'results_declared') return 'Poll results are not declared yet.';
             var res = '<h3 style="text-align:center;margin:10px 0 6px">Poll: ' + d.title + '</h3>' +
                       '<div style="text-align:center;font-size:11px;color:#999;margin-bottom:18px">' +
                       'Status: ' + (d.status || 'active').toUpperCase() + '</div>';
@@ -220,7 +233,7 @@ def register_poll_callbacks(app):
     _POLL_PRINT_JS = clientside_iife(
         LETTERHEAD_JS + _poll_to_html_js() + r"""
     function printPoll(n_clicks, d) {
-        if (!n_clicks || !d) return window.dash_clientside.no_update;
+        if (!n_clicks || !d || d.status !== 'results_declared') return window.dash_clientside.no_update;
         var w = window.open('', '_blank');
         if (!w) { alert('Pop-up blocked - please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
         var doc = buildLetterheadDoc({
@@ -243,7 +256,7 @@ def register_poll_callbacks(app):
     _POLL_PDF_JS = clientside_iife(
         LETTERHEAD_JS + _poll_to_html_js() + r"""
     function pdfPoll(n_clicks, d) {
-        if (!n_clicks || !d) return window.dash_clientside.no_update;
+        if (!n_clicks || !d || d.status !== 'results_declared') return window.dash_clientside.no_update;
         var html = buildLetterheadPdfDoc({
             title: d.title + ' — Poll Record',
             filename: 'Poll_' + d.id,
@@ -263,7 +276,7 @@ def register_poll_callbacks(app):
 
     _POLL_EMAIL_JS = clientside_iife(r"""
     function emailPoll(n_clicks, d) {
-        if (!n_clicks || !d) return window.dash_clientside.no_update;
+        if (!n_clicks || !d || d.status !== 'results_declared') return window.dash_clientside.no_update;
         var body = d.title + ' — Poll Record\nStatus: ' + (d.status || 'active').toUpperCase() + '\n\n';
         if (d.choices && d.vote_counts) {
             for (var i = 0; i < d.choices.length; i++) {
