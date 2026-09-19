@@ -4,6 +4,8 @@
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
 > Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
 
+> 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment-notes) for details.
+
 ---
 
 ## Table of Contents
@@ -1092,6 +1094,8 @@ python3 database/migrate.py --seed       # schema init + seed in one step
 ```
 
 ### Database Migrations
+
+> **`database/estatehub.sql` is the single source of truth for the schema.** Every table, view, and `fn_*` stored function is defined there — it is what `database/reset_database.py` loads to rebuild the database from scratch, and it is the file to consult (or diff) before trusting any other description of the schema, including the summaries elsewhere in this README.
 
 All database stored procedures and queries are prefixed with `fn_` and use `%s` positional parameter placeholders (psycopg2 style). Schema changes require updating:
 1. The corresponding SQL function definitions in `database/estatehub.sql`.
