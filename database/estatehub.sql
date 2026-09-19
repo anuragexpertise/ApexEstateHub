@@ -2285,13 +2285,13 @@ BEGIN
     SELECT id INTO v_sinking_acc_id FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Sinking Fund Reserve%'
-      AND drcr_account = 'Dr'
+      AND drcr_account = 'Cr'
     LIMIT 1;
 
     SELECT id INTO v_repair_acc_id FROM accounts
     WHERE society_id = p_society_id
       AND name ILIKE '%Repair & Maintenance Fund Reserve%'
-      AND drcr_account = 'Dr'
+      AND drcr_account = 'Cr'
     LIMIT 1;
 
     SELECT id INTO v_cgst_acc_id FROM accounts
