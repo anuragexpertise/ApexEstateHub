@@ -2940,6 +2940,28 @@ def verify_event_ticket(event_ticket_id: int, confirmed_by: int, mode: str = Non
     except Exception as e:
         return False, str(e)
 
+
+def verify_event_ticket_item(item_id: int, confirmed_by: int, society_id: int) -> tuple[bool, str]:
+    """Admin verifies a single pending event ticket item — does NOT touch other items under the same ticket."""
+    try:
+        r = db._execute(
+            "UPDATE event_ticket_items SET status = 'active', scanned_at = NOW(), scanned_by = %s "
+            "WHERE id = %s AND status = 'pending' AND society_id = %s "
+            "RETURNING id, event_ticket_id",
+            (confirmed_by, item_id, society_id), fetch_one=True,
+        )
+        if not r:
+            return False, "Event ticket item not found or not pending"
+        et_id = r.get("event_ticket_id")
+        db._execute(
+            "UPDATE event_tickets SET status = 'active' "
+            "WHERE id = %s AND status != 'active' AND status != 'cancelled'",
+            (et_id,),
+        )
+        return True, f"Verified event ticket item #{item_id}"
+    except Exception as e:
+        return False, str(e)
+
 # ════════════════════════════════════════════════════════════════════════════
 # ACCOUNT DROPDOWN OPTIONS
 # ════════════════════════════════════════════════════════════════════════════
