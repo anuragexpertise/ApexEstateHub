@@ -90,7 +90,6 @@ ENTITY_MAP: dict = {
     "asset_disposes": "asset_dispose",
     "vendor_passes": "vendor_pass",
     "verify_receivable_amts": "verify_receivable_amt",
-    "event_tickets": "event_ticket",
     "nocs": "noc",
 }
 

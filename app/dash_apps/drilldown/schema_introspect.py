@@ -892,7 +892,6 @@ def build_entity_meta() -> dict:
                 {"name": "Buyer",   "field": "owner_name",    "sortable": True},
                 {"name": "Date",    "field": "event_date",    "sortable": True, "format": "date"},
                 {"name": "Venue",   "field": "venue",         "sortable": True},
-                {"name": "Booking", "field": "booking_reference", "sortable": False},
                 {"name": "Status",  "field": "status",        "sortable": True},
             ]
 

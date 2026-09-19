@@ -404,6 +404,7 @@ KPI_CARDS = {
             JOIN event_tickets et ON et.id = eti.event_ticket_id
             JOIN events e ON e.id = et.event_id
             WHERE et.society_id=%s AND e.event_date>=CURRENT_DATE
+            AND et.status IN ('pending','active')
         """,
         "params": 1, "format": "number",
         "icon": "fa-ticket-alt", "color": "#2563eb",
@@ -1226,7 +1227,8 @@ DEFAULT_LAYOUTS = {
             "kpi_ven_charges_count",
             "kpi_vendors_other_charges"],
         "events": [
-            "kpi_events_total"],
+            "kpi_events_total",
+            "kpi_events_tickets"],
         "settings": ["kpi_vendors_date"],
     },
     "security": {
@@ -1249,7 +1251,7 @@ DEFAULT_LAYOUTS = {
         # app_shell.py, shell_callbacks.py, portal_pages.py, and
         # renderers.py's _PORTAL_PERMS for the matching removals.
         "security_receipts": ["kpi_security_receipts"],
-        "security_events": ["kpi_events_total"],
+        "security_events": ["kpi_events_total", "kpi_events_tickets"],
         "security_concerns": [
             "kpi_concerns_assigned",
             "kpi_concerns_resolved"],
