@@ -1322,6 +1322,8 @@ def load_list(
                 "  eti.ticket_type, eti.status, eti.qr_payload, eti.scanned_at, "
                 "  et.event_id, et.booking_reference, et.amount AS booking_amount, "
                 "  e.title AS event_title, e.event_date, e.venue, "
+                "  e.ticket_price, e.ticket_price2, "
+                "  CASE WHEN eti.ticket_type = 'ADULT' THEN e.ticket_price ELSE e.ticket_price2 END AS price, "
                 "  u.name AS owner_name "
                 "FROM event_ticket_items eti "
                 "JOIN event_tickets et ON et.id = eti.event_ticket_id "
@@ -2328,6 +2330,9 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             return dict(r) if r else None
 
         # ── EVENT TICKET (profile opened after Sell/Buy Event) ───────────────
+        # pk = event_tickets.id for Sell/Buy flow; falls through to the
+        # event_ticket_items lookup below when the pk belongs to the items
+        # table (list→profile click / gate QR scan).
         if entity_singular == "event_ticket":
             r = db._execute(
                 "SELECT et.*, e.title AS event_title, e.event_date, e.event_time, e.venue "
@@ -2336,7 +2341,8 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "WHERE et.id=%s AND et.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )
-            return dict(r) if r else None
+            if r:
+                return dict(r)
 
         # ── ASSET (admin CRUD + view) ─────────────────────────────────────────
         if entity_singular == "asset":
