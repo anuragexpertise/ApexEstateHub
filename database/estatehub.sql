@@ -6720,6 +6720,311 @@ BEGIN
 END;
 $$;
 
+-- ═════════════════════════════════════════════════════════════════════════════
+-- SECTION 12b: THREE-STATEMENT FINANCIAL REPORTS (P2 Item 1)
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- fn_receipts_payments_fy
+-- =========================
+-- Receipts & Payments Account (Cash Basis) for a given FY.
+-- Returns: line_type ('Opening'|'Receipt'|'Payment'|'Closing'), account_code,
+-- account_name, dr_amount, cr_amount
+-- Logic:
+--   1. Opening balances of cash/bank accounts from fn_fy_closing_report
+--   2. Receipts: all cash/bank receipt transactions (mode IN cash/cheque/upi/card/bank/crypto)
+--      grouped by income account (Cr side, drcr_account='Cr')
+--   3. Payments: all cash/bank expense transactions grouped by expense account
+--      (Dr side, drcr_account='Dr')
+--   4. Closing balances of cash/bank accounts from fn_fy_closing_report
+-- Journal entries (mode='journal') are excluded (non-cash).
+-- Traditional two-column format: Dr column = Receipts, Cr column = Payments.
+
+DROP FUNCTION IF EXISTS fn_receipts_payments_fy (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_receipts_payments_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    line_type    VARCHAR,
+    account_code INT,
+    account_name VARCHAR,
+    dr_amount    NUMERIC(15,2),
+    cr_amount    NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+BEGIN
+    RETURN QUERY
+    WITH closing AS (
+        SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
+    ),
+    bkac_base AS (
+        SELECT sort_path FROM closing WHERE tab_name = 'BkAc' LIMIT 1
+    ),
+    cash_bank_accs AS (
+        SELECT c.account_id, c.account_name, c.own_bf, c.total_closing
+        FROM closing c
+        CROSS JOIN bkac_base b
+        WHERE c.tab_name = 'CiH'
+           OR (b.sort_path IS NOT NULL AND c.sort_path LIKE b.sort_path || '.%')
+    ),
+    receipts AS (
+        SELECT 'Receipt'::VARCHAR AS line_type,
+               t.acc_id::INT AS account_code,
+               a.name::VARCHAR AS account_name,
+               SUM(t.amount)::NUMERIC(15,2) AS dr_amount,
+               0::NUMERIC(15,2) AS cr_amount
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = p_society_id
+        WHERE t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+          AND t.entry_side = 'Cr'
+          AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
+          AND a.drcr_account = 'Cr'
+        GROUP BY t.acc_id, a.name
+    ),
+    payments AS (
+        SELECT 'Payment'::VARCHAR AS line_type,
+               t.acc_id::INT AS account_code,
+               a.name::VARCHAR AS account_name,
+               0::NUMERIC(15,2) AS dr_amount,
+               SUM(t.amount)::NUMERIC(15,2) AS cr_amount
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = p_society_id
+        WHERE t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+          AND t.entry_side = 'Dr'
+          AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
+          AND a.drcr_account = 'Dr'
+        GROUP BY t.acc_id, a.name
+    )
+    SELECT line_type, account_code, account_name, dr_amount, cr_amount
+    FROM (
+        -- Opening balance (single aggregate line)
+        SELECT 1 AS sort_order,
+               'Opening'::VARCHAR AS line_type,
+               NULL::INT AS account_code,
+               'Cash & Bank Balances b/f'::VARCHAR AS account_name,
+               COALESCE(SUM(CASE WHEN c.own_bf < 0 THEN ABS(c.own_bf) ELSE 0 END), 0)::NUMERIC(15,2) AS dr_amount,
+               COALESCE(SUM(CASE WHEN c.own_bf >= 0 THEN c.own_bf ELSE 0 END), 0)::NUMERIC(15,2) AS cr_amount
+        FROM cash_bank_accs c
+        WHERE c.own_bf IS NOT NULL AND c.own_bf != 0
+        HAVING COALESCE(SUM(CASE WHEN c.own_bf < 0 THEN ABS(c.own_bf) ELSE 0 END), 0) > 0
+            OR COALESCE(SUM(CASE WHEN c.own_bf >= 0 THEN c.own_bf ELSE 0 END), 0) > 0
+
+        UNION ALL
+
+        -- Receipts
+        SELECT 2 AS sort_order, line_type, account_code, account_name, dr_amount, cr_amount
+        FROM receipts
+
+        UNION ALL
+
+        -- Payments
+        SELECT 3 AS sort_order, line_type, account_code, account_name, dr_amount, cr_amount
+        FROM payments
+
+        UNION ALL
+
+        -- Closing balance (single aggregate line)
+        SELECT 4 AS sort_order,
+               'Closing'::VARCHAR AS line_type,
+               NULL::INT AS account_code,
+               'Cash & Bank Balances c/f'::VARCHAR AS account_name,
+               COALESCE(SUM(CASE WHEN c.total_closing < 0 THEN ABS(c.total_closing) ELSE 0 END), 0)::NUMERIC(15,2) AS dr_amount,
+               COALESCE(SUM(CASE WHEN c.total_closing >= 0 THEN c.total_closing ELSE 0 END), 0)::NUMERIC(15,2) AS cr_amount
+        FROM cash_bank_accs c
+        WHERE c.total_closing IS NOT NULL AND c.total_closing != 0
+        HAVING COALESCE(SUM(CASE WHEN c.total_closing < 0 THEN ABS(c.total_closing) ELSE 0 END), 0) > 0
+            OR COALESCE(SUM(CASE WHEN c.total_closing >= 0 THEN c.total_closing ELSE 0 END), 0) > 0
+    ) ordered
+    ORDER BY sort_order, account_name;
+END;
+$$;
+
+-- fn_income_expenditure_fy
+-- ========================
+-- Income & Expenditure Account (Accrual Basis) for a given FY.
+-- Returns: statement_section ('Income'|'Expenditure'|'Surplus/Deficit'),
+-- account_code, account_name, amount
+-- Logic:
+--   Pulls from fn_fy_closing_report, classifies accounts by:
+--   - Capital Account (tab_name='CapAc') descendants = P&L accounts
+--   - Income: drcr_account='Cr' (Cr-natured P&L accounts)
+--   - Expenditure: drcr_account='Dr' (Dr-natured P&L accounts)
+--   - Amount = ABS(total_closing) from fn_fy_closing_report
+--   Surplus/Deficit = Total Income - Total Expenditure
+
+DROP FUNCTION IF EXISTS fn_income_expenditure_fy (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_income_expenditure_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    statement_section VARCHAR,
+    account_code      INT,
+    account_name      VARCHAR,
+    amount            NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    WITH closing AS (
+        SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
+    ),
+    cap_ac AS (
+        SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
+    ),
+    pl_accs AS (
+        SELECT c.*
+        FROM closing c
+        CROSS JOIN cap_ac ca
+        WHERE ca.sort_path IS NOT NULL
+          AND c.sort_path LIKE ca.sort_path || '.%'
+          AND c.total_closing IS NOT NULL
+          AND c.total_closing != 0
+    ),
+    income_accs AS (
+        SELECT 'Income'::VARCHAR AS statement_section,
+               account_id::INT AS account_code,
+               account_name::VARCHAR AS account_name,
+               ABS(total_closing)::NUMERIC(15,2) AS amount
+        FROM pl_accs
+        WHERE drcr_account = 'Cr'
+    ),
+    expense_accs AS (
+        SELECT 'Expenditure'::VARCHAR AS statement_section,
+               account_id::INT AS account_code,
+               account_name::VARCHAR AS account_name,
+               ABS(total_closing)::NUMERIC(15,2) AS amount
+        FROM pl_accs
+        WHERE drcr_account = 'Dr'
+    ),
+    totals AS (
+        SELECT COALESCE(SUM(amount), 0) AS income_total
+        FROM income_accs
+    )
+    SELECT statement_section, account_code, account_name, amount
+    FROM (
+        SELECT 1 AS sort_order, statement_section, account_code, account_name, amount
+        FROM income_accs
+        UNION ALL
+        SELECT 2, statement_section, account_code, account_name, amount
+        FROM expense_accs
+        UNION ALL
+        SELECT 3, 'Surplus/Deficit'::VARCHAR, NULL::INT,
+               CASE WHEN t.income_total >= (SELECT COALESCE(SUM(amount),0) FROM expense_accs)
+                    THEN 'Surplus' ELSE 'Deficit' END,
+               ABS(t.income_total - (SELECT COALESCE(SUM(amount),0) FROM expense_accs))::NUMERIC(15,2)
+        FROM totals t
+    ) ordered
+    ORDER BY sort_order, account_name;
+END;
+$$;
+
+-- fn_balance_sheet_fy
+-- ===================
+-- Balance Sheet (Position Statement) for a given FY.
+-- Returns: statement_section ('Assets'|'Liabilities'|'Equity'),
+-- account_code, account_name, amount
+-- Logic:
+--   Uses fn_fy_closing_report closing balances.
+--   Assets: drcr_account='Dr' AND NOT under Capital Account
+--   Liabilities: drcr_account='Cr' AND NOT under Capital Account
+--   Equity: Capital Account (tab_name='CapAc') + Surplus/Deficit from I&E
+--   Amount = ABS(total_closing) with proper sign per section
+
+DROP FUNCTION IF EXISTS fn_balance_sheet_fy (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_balance_sheet_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    statement_section VARCHAR,
+    account_code      INT,
+    account_name      VARCHAR,
+    amount            NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    WITH closing AS (
+        SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
+    ),
+    cap_ac AS (
+        SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
+    ),
+    bs_accs AS (
+        SELECT c.*
+        FROM closing c
+        CROSS JOIN cap_ac ca
+        WHERE c.total_closing IS NOT NULL
+          AND c.total_closing != 0
+          AND (ca.sort_path IS NULL OR c.sort_path NOT LIKE ca.sort_path || '.%')
+    ),
+    asset_accs AS (
+        SELECT 'Assets'::VARCHAR AS statement_section,
+               account_id::INT AS account_code,
+               account_name::VARCHAR AS account_name,
+               CASE WHEN total_closing < 0 THEN ABS(total_closing)
+                    ELSE total_closing END::NUMERIC(15,2) AS amount
+        FROM bs_accs
+        WHERE drcr_account = 'Dr'
+    ),
+    liability_accs AS (
+        SELECT 'Liabilities'::VARCHAR AS statement_section,
+               account_id::INT AS account_code,
+               account_name::VARCHAR AS account_name,
+               CASE WHEN total_closing >= 0 THEN total_closing
+                    ELSE ABS(total_closing) END::NUMERIC(15,2) AS amount
+        FROM bs_accs
+        WHERE drcr_account = 'Cr'
+    ),
+    cap_acc AS (
+        SELECT 'Equity'::VARCHAR AS statement_section,
+               account_id::INT AS account_code,
+               account_name::VARCHAR AS account_name,
+               total_closing::NUMERIC(15,2) AS amount
+        FROM closing
+        WHERE tab_name = 'CapAc'
+    ),
+    ie_surplus AS (
+        SELECT COALESCE(SUM(CASE WHEN drcr_account='Cr' THEN ABS(total_closing) ELSE 0 END), 0) -
+               COALESCE(SUM(CASE WHEN drcr_account='Dr' THEN ABS(total_closing) ELSE 0 END), 0) AS surplus
+        FROM closing c
+        CROSS JOIN cap_ac ca
+        WHERE ca.sort_path IS NOT NULL
+          AND c.sort_path LIKE ca.sort_path || '.%'
+          AND c.total_closing IS NOT NULL
+          AND c.total_closing != 0
+    )
+    SELECT statement_section, account_code, account_name, amount
+    FROM (
+        SELECT 1 AS sort_order, statement_section, account_code, account_name, amount
+        FROM asset_accs
+        UNION ALL
+        SELECT 2, statement_section, account_code, account_name, amount
+        FROM liability_accs
+        UNION ALL
+        SELECT 3, statement_section, account_code, account_name, amount
+        FROM cap_acc
+        UNION ALL
+        SELECT 4, 'Equity'::VARCHAR, NULL::INT,
+               'Current Year Surplus/Deficit'::VARCHAR,
+               surplus::NUMERIC(15,2)
+        FROM ie_surplus
+    ) ordered
+    ORDER BY sort_order, account_name;
+END;
+$$;
+
 -- Trailing / FY-scoped turnover from Cr-side income transactions.
 -- Used for the GST threshold check (society-level ₹20L) and for
 -- determining filing cadence. Computed on demand, never stored.

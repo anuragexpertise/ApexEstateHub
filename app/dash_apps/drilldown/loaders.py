@@ -3074,6 +3074,46 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# FINANCIAL STATEMENTS LOADERS (P2 Item 1)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_receipts_payments(society_id: int, fy: int) -> list[dict]:
+    """Load Receipts & Payments Account data for a given FY."""
+    try:
+        return db._execute(
+            "SELECT * FROM fn_receipts_payments_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_receipts_payments: {e}")
+        return []
+
+
+def get_income_expenditure(society_id: int, fy: int) -> list[dict]:
+    """Load Income & Expenditure Account data for a given FY."""
+    try:
+        return db._execute(
+            "SELECT * FROM fn_income_expenditure_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_income_expenditure: {e}")
+        return []
+
+
+def get_balance_sheet(society_id: int, fy: int) -> list[dict]:
+    """Load Balance Sheet data for a given FY."""
+    try:
+        return db._execute(
+            "SELECT * FROM fn_balance_sheet_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_balance_sheet: {e}")
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # EXPORT XLSX
 # ════════════════════════════════════════════════════════════════════════════
 
