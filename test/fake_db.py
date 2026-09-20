@@ -888,10 +888,14 @@ class FakeDB:
             rate = 5.0 if rcm_category == "gta" else 18.0
             cgst = round(amt * (rate / 2) / 100.0, 2)
             sgst = round(amt * (rate / 2) / 100.0, 2)
+            # itc_eligible=True by default here (mirrors _fn_compute_rcm_liability's
+            # fake, which is gated on the stubbed turnover being above threshold) —
+            # so the Dr leg goes to Input Tax Credit (RCM), acc 634, not the
+            # expense account.
             if cgst > 0:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
-                    "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
+                    "id": tid, "society_id": sid, "acc_id": 634, "entity_id": None,
                     "amount": cgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"RCM CGST — {particulars}",
@@ -900,7 +904,7 @@ class FakeDB:
                 })
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
-                    "id": tid, "society_id": sid, "acc_id": 401, "entity_id": None,
+                    "id": tid, "society_id": sid, "acc_id": 43, "entity_id": None,
                     "amount": cgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"CGST Payable (RCM) — {particulars}",
@@ -910,7 +914,7 @@ class FakeDB:
             if sgst > 0:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
-                    "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
+                    "id": tid, "society_id": sid, "acc_id": 634, "entity_id": None,
                     "amount": sgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"RCM SGST — {particulars}",
@@ -919,7 +923,7 @@ class FakeDB:
                 })
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
-                    "id": tid, "society_id": sid, "acc_id": 402, "entity_id": None,
+                    "id": tid, "society_id": sid, "acc_id": 44, "entity_id": None,
                     "amount": sgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"SGST Payable (RCM) — {particulars}",
@@ -957,8 +961,8 @@ class FakeDB:
             cgst = round(amt * (rate / 2) / 100.0, 2)
             sgst = round(amt * (rate / 2) / 100.0, 2)
             if cgst > 0:
-                for side, acc, label in (("Dr", acc_id, f"RCM CGST — {particulars}"),
-                                          ("Cr", 401, f"CGST Payable (RCM) — {particulars}")):
+                for side, acc, label in (("Dr", 634, f"RCM CGST — {particulars}"),
+                                          ("Cr", 43, f"CGST Payable (RCM) — {particulars}")):
                     tid = self._next_id("transactions")
                     self.tables["transactions"].append({
                         "id": tid, "society_id": sid, "acc_id": acc, "entity_id": None,
@@ -968,8 +972,8 @@ class FakeDB:
                         "journal_id": 9998,
                     })
             if sgst > 0:
-                for side, acc, label in (("Dr", acc_id, f"RCM SGST — {particulars}"),
-                                          ("Cr", 402, f"SGST Payable (RCM) — {particulars}")):
+                for side, acc, label in (("Dr", 634, f"RCM SGST — {particulars}"),
+                                          ("Cr", 44, f"SGST Payable (RCM) — {particulars}")):
                     tid = self._next_id("transactions")
                     self.tables["transactions"].append({
                         "id": tid, "society_id": sid, "acc_id": acc, "entity_id": None,
@@ -1041,35 +1045,53 @@ class FakeDB:
     def _fn_resolve_gst_accounts(self, p, fetch_one, fetch_all):
         return {"cgst_acc_id": 401, "sgst_acc_id": 402}
 
+    def _fn_resolve_rcm_gst_accounts(self, p, fetch_one, fetch_all):
+        # Segregated RCM ledger heads (Phase 2) — distinct from the
+        # regular output-GST accounts above.
+        return {"cgst_acc_id": 43, "sgst_acc_id": 44, "igst_acc_id": 45, "itc_acc_id": 634}
+
     def _fn_compute_rcm_liability(self, p, fetch_one, fetch_all):
+        society_id = p.get("p0") or p.get("society_id")
         expense_id = p.get("p1") or p.get("expense_id")
         expense = next(
             (r for r in self.tables.get("expenses", []) if r.get("id") == expense_id),
             None,
         )
+        empty = {
+            "taxable_value": 0, "cgst_amount": 0, "sgst_amount": 0, "igst_amount": 0,
+            "cgst_acc_id": 43, "sgst_acc_id": 44, "igst_acc_id": 45, "itc_acc_id": 634,
+            "itc_eligible": False,
+        }
         if not expense:
-            return {
-                "taxable_value": 0,
-                "cgst_amount": 0,
-                "sgst_amount": 0,
-                "cgst_acc_id": 401,
-                "sgst_acc_id": 402,
-            }
+            return empty
+        # Registration gate (Phase 2): mirrors the real turnover-threshold
+        # check — _fn_society_turnover_fy is stubbed at ₹25L, above the
+        # ₹20L default, so this fake stays liable by default (matching
+        # prior fake behavior) but honors an explicit override for tests
+        # that want to exercise the below-threshold path.
+        turnover = self._fn_society_turnover_fy(p, fetch_one, fetch_all)
+        threshold = 2000000.0
+        if turnover <= threshold:
+            return empty
         amount = float(expense.get("amount", 0))
         rcm_cat = expense.get("rcm_category") or ""
         rate = 5.0 if rcm_cat == "gta" else 18.0
+        # Fake DB doesn't model per-vendor/society state, so this fake
+        # always takes the intra-state (CGST+SGST) branch — the IGST
+        # branch is exercised only against the real SQL functions.
         cgst = round(amount * (rate / 2) / 100.0, 2)
         sgst = round(amount * (rate / 2) / 100.0, 2)
         return {
-            "taxable_value": amount,
-            "cgst_amount": cgst,
-            "sgst_amount": sgst,
-            "cgst_acc_id": 401,
-            "sgst_acc_id": 402,
+            "taxable_value": amount, "cgst_amount": cgst, "sgst_amount": sgst, "igst_amount": 0,
+            "cgst_acc_id": 43, "sgst_acc_id": 44, "igst_acc_id": 45, "itc_acc_id": 634,
+            "itc_eligible": True,
         }
 
     def _fn_post_rcm_liability(self, p, fetch_one, fetch_all):
         return None
+
+    def _fn_pay_rcm_liability(self, p, fetch_one, fetch_all):
+        return {"transaction_id": None, "rows_marked": 0, "total_paid": 0}
 
     def _fn_society_turnover_fy(self, p, fetch_one, fetch_all):
         return 2500000.0
