@@ -6803,7 +6803,7 @@ BEGIN
           AND a.drcr_account = 'Dr'
         GROUP BY t.acc_id, a.name
     )
-    SELECT line_type, account_code, account_name, dr_amount, cr_amount
+    SELECT o.line_type, o.account_code, o.account_name, o.dr_amount, o.cr_amount
     FROM (
         -- Opening balance (single aggregate line)
         SELECT 1 AS sort_order,
@@ -6820,14 +6820,14 @@ BEGIN
         UNION ALL
 
         -- Receipts
-        SELECT 2 AS sort_order, line_type, account_code, account_name, dr_amount, cr_amount
-        FROM receipts
+        SELECT 2 AS sort_order, r.line_type, r.account_code, r.account_name, r.dr_amount, r.cr_amount
+        FROM receipts r
 
         UNION ALL
 
         -- Payments
-        SELECT 3 AS sort_order, line_type, account_code, account_name, dr_amount, cr_amount
-        FROM payments
+        SELECT 3 AS sort_order, p.line_type, p.account_code, p.account_name, p.dr_amount, p.cr_amount
+        FROM payments p
 
         UNION ALL
 
@@ -6842,8 +6842,8 @@ BEGIN
         WHERE c.total_closing IS NOT NULL AND c.total_closing != 0
         HAVING COALESCE(SUM(CASE WHEN c.total_closing < 0 THEN ABS(c.total_closing) ELSE 0 END), 0) > 0
             OR COALESCE(SUM(CASE WHEN c.total_closing >= 0 THEN c.total_closing ELSE 0 END), 0) > 0
-    ) ordered
-    ORDER BY sort_order, account_name;
+    ) o
+    ORDER BY o.sort_order, o.account_name;
 END;
 $$;
 
@@ -6892,39 +6892,39 @@ BEGIN
     ),
     income_accs AS (
         SELECT 'Income'::VARCHAR AS statement_section,
-               account_id::INT AS account_code,
-               account_name::VARCHAR AS account_name,
-               ABS(total_closing)::NUMERIC(15,2) AS amount
-        FROM pl_accs
-        WHERE drcr_account = 'Cr'
+               pa.account_id::INT AS account_code,
+               pa.account_name::VARCHAR AS account_name,
+               ABS(pa.total_closing)::NUMERIC(15,2) AS amount
+        FROM pl_accs pa
+        WHERE pa.drcr_account = 'Cr'
     ),
     expense_accs AS (
         SELECT 'Expenditure'::VARCHAR AS statement_section,
-               account_id::INT AS account_code,
-               account_name::VARCHAR AS account_name,
-               ABS(total_closing)::NUMERIC(15,2) AS amount
-        FROM pl_accs
-        WHERE drcr_account = 'Dr'
+               pa.account_id::INT AS account_code,
+               pa.account_name::VARCHAR AS account_name,
+               ABS(pa.total_closing)::NUMERIC(15,2) AS amount
+        FROM pl_accs pa
+        WHERE pa.drcr_account = 'Dr'
     ),
     totals AS (
-        SELECT COALESCE(SUM(amount), 0) AS income_total
-        FROM income_accs
+        SELECT COALESCE(SUM(ia.amount), 0) AS income_total
+        FROM income_accs ia
     )
-    SELECT statement_section, account_code, account_name, amount
+    SELECT o.statement_section, o.account_code, o.account_name, o.amount
     FROM (
-        SELECT 1 AS sort_order, statement_section, account_code, account_name, amount
-        FROM income_accs
+        SELECT 1 AS sort_order, i.statement_section, i.account_code, i.account_name, i.amount
+        FROM income_accs i
         UNION ALL
-        SELECT 2, statement_section, account_code, account_name, amount
-        FROM expense_accs
+        SELECT 2, e.statement_section, e.account_code, e.account_name, e.amount
+        FROM expense_accs e
         UNION ALL
         SELECT 3, 'Surplus/Deficit'::VARCHAR, NULL::INT,
-               CASE WHEN t.income_total >= (SELECT COALESCE(SUM(amount),0) FROM expense_accs)
+               CASE WHEN t.income_total >= (SELECT COALESCE(SUM(ea.amount),0) FROM expense_accs ea)
                     THEN 'Surplus' ELSE 'Deficit' END,
-               ABS(t.income_total - (SELECT COALESCE(SUM(amount),0) FROM expense_accs))::NUMERIC(15,2)
+               ABS(t.income_total - (SELECT COALESCE(SUM(ea.amount),0) FROM expense_accs ea))::NUMERIC(15,2)
         FROM totals t
-    ) ordered
-    ORDER BY sort_order, account_name;
+    ) o
+    ORDER BY o.sort_order, o.account_name;
 END;
 $$;
 
@@ -6971,29 +6971,29 @@ BEGIN
     ),
     asset_accs AS (
         SELECT 'Assets'::VARCHAR AS statement_section,
-               account_id::INT AS account_code,
-               account_name::VARCHAR AS account_name,
-               CASE WHEN total_closing < 0 THEN ABS(total_closing)
-                    ELSE total_closing END::NUMERIC(15,2) AS amount
-        FROM bs_accs
-        WHERE drcr_account = 'Dr'
+               ba.account_id::INT AS account_code,
+               ba.account_name::VARCHAR AS account_name,
+               CASE WHEN ba.total_closing < 0 THEN ABS(ba.total_closing)
+                    ELSE ba.total_closing END::NUMERIC(15,2) AS amount
+        FROM bs_accs ba
+        WHERE ba.drcr_account = 'Dr'
     ),
     liability_accs AS (
         SELECT 'Liabilities'::VARCHAR AS statement_section,
-               account_id::INT AS account_code,
-               account_name::VARCHAR AS account_name,
-               CASE WHEN total_closing >= 0 THEN total_closing
-                    ELSE ABS(total_closing) END::NUMERIC(15,2) AS amount
-        FROM bs_accs
-        WHERE drcr_account = 'Cr'
+               ba.account_id::INT AS account_code,
+               ba.account_name::VARCHAR AS account_name,
+               CASE WHEN ba.total_closing >= 0 THEN ba.total_closing
+                    ELSE ABS(ba.total_closing) END::NUMERIC(15,2) AS amount
+        FROM bs_accs ba
+        WHERE ba.drcr_account = 'Cr'
     ),
     cap_acc AS (
         SELECT 'Equity'::VARCHAR AS statement_section,
-               account_id::INT AS account_code,
-               account_name::VARCHAR AS account_name,
-               total_closing::NUMERIC(15,2) AS amount
-        FROM closing
-        WHERE tab_name = 'CapAc'
+               c.account_id::INT AS account_code,
+               c.account_name::VARCHAR AS account_name,
+               c.total_closing::NUMERIC(15,2) AS amount
+        FROM closing c
+        WHERE c.tab_name = 'CapAc'
     ),
     ie_surplus AS (
         SELECT COALESCE(SUM(CASE WHEN drcr_account='Cr' THEN ABS(total_closing) ELSE 0 END), 0) -
@@ -7005,23 +7005,23 @@ BEGIN
           AND c.total_closing IS NOT NULL
           AND c.total_closing != 0
     )
-    SELECT statement_section, account_code, account_name, amount
+    SELECT o.statement_section, o.account_code, o.account_name, o.amount
     FROM (
-        SELECT 1 AS sort_order, statement_section, account_code, account_name, amount
-        FROM asset_accs
+        SELECT 1 AS sort_order, a.statement_section, a.account_code, a.account_name, a.amount
+        FROM asset_accs a
         UNION ALL
-        SELECT 2, statement_section, account_code, account_name, amount
-        FROM liability_accs
+        SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount
+        FROM liability_accs l
         UNION ALL
-        SELECT 3, statement_section, account_code, account_name, amount
-        FROM cap_acc
+        SELECT 3, c.statement_section, c.account_code, c.account_name, c.amount
+        FROM cap_acc c
         UNION ALL
         SELECT 4, 'Equity'::VARCHAR, NULL::INT,
                'Current Year Surplus/Deficit'::VARCHAR,
-               surplus::NUMERIC(15,2)
-        FROM ie_surplus
-    ) ordered
-    ORDER BY sort_order, account_name;
+               s.surplus::NUMERIC(15,2)
+        FROM ie_surplus s
+    ) o
+    ORDER BY o.sort_order, o.account_name;
 END;
 $$;
 

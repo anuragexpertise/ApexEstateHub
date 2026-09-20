@@ -565,6 +565,51 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
         return [], str(e)
 
 
+def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    """
+    Wraps fn_receipts_payments_fy(society_id, fy).
+    Returns Receipts & Payments Account rows (cash basis).
+    """
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_receipts_payments_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        return rows, None
+    except Exception as e:
+        return [], str(e)
+
+
+def get_income_expenditure_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    """
+    Wraps fn_income_expenditure_fy(society_id, fy).
+    Returns Income & Expenditure Account rows (accrual basis).
+    """
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_income_expenditure_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        return rows, None
+    except Exception as e:
+        return [], str(e)
+
+
+def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    """
+    Wraps fn_balance_sheet_fy(society_id, fy).
+    Returns Balance Sheet rows (position statement).
+    """
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_balance_sheet_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        return rows, None
+    except Exception as e:
+        return [], str(e)
+
+
 def get_member_ledger(
     society_id: int, entity_id: int, role: str,
     page: int = 1, page_size: int = 50,
