@@ -892,7 +892,7 @@ class FakeDB:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
                     "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
-                    "amount": cgst, "mode": "cash", "status": "paid",
+                    "amount": cgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"RCM CGST — {particulars}",
                     "entry_side": "Dr", "source_table": "expenses", "source_id": new_id,
@@ -901,7 +901,7 @@ class FakeDB:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
                     "id": tid, "society_id": sid, "acc_id": 401, "entity_id": None,
-                    "amount": cgst, "mode": "cash", "status": "paid",
+                    "amount": cgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"CGST Payable (RCM) — {particulars}",
                     "entry_side": "Cr", "source_table": "expenses", "source_id": new_id,
@@ -911,7 +911,7 @@ class FakeDB:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
                     "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
-                    "amount": sgst, "mode": "cash", "status": "paid",
+                    "amount": sgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"RCM SGST — {particulars}",
                     "entry_side": "Dr", "source_table": "expenses", "source_id": new_id,
@@ -920,7 +920,7 @@ class FakeDB:
                 tid = self._next_id("transactions")
                 self.tables["transactions"].append({
                     "id": tid, "society_id": sid, "acc_id": 402, "entity_id": None,
-                    "amount": sgst, "mode": "cash", "status": "paid",
+                    "amount": sgst, "mode": "journal", "status": "paid",
                     "trx_date": date.today().isoformat(),
                     "particulars": f"SGST Payable (RCM) — {particulars}",
                     "entry_side": "Cr", "source_table": "expenses", "source_id": new_id,
@@ -944,6 +944,40 @@ class FakeDB:
             "trx_date": date.today().isoformat(), "particulars": row.get("particulars"),
             "entry_side": "Dr",
         })
+        # RCM: mirrors _fn_save_expense's RCM branch — expenses confirmed via
+        # this (pending-expense confirm) path previously never triggered RCM
+        # liability posting at all.
+        if row.get("rcm_applicable"):
+            sid = row.get("society_id")
+            acc_id = row.get("acc_id")
+            particulars = row.get("particulars")
+            amt = float(row.get("amount", 0))
+            rcm_category = row.get("rcm_category")
+            rate = 5.0 if rcm_category == "gta" else 18.0
+            cgst = round(amt * (rate / 2) / 100.0, 2)
+            sgst = round(amt * (rate / 2) / 100.0, 2)
+            if cgst > 0:
+                for side, acc, label in (("Dr", acc_id, f"RCM CGST — {particulars}"),
+                                          ("Cr", 401, f"CGST Payable (RCM) — {particulars}")):
+                    tid = self._next_id("transactions")
+                    self.tables["transactions"].append({
+                        "id": tid, "society_id": sid, "acc_id": acc, "entity_id": None,
+                        "amount": cgst, "mode": "journal", "status": "paid",
+                        "trx_date": date.today().isoformat(), "particulars": label,
+                        "entry_side": side, "source_table": "expenses", "source_id": eid,
+                        "journal_id": 9998,
+                    })
+            if sgst > 0:
+                for side, acc, label in (("Dr", acc_id, f"RCM SGST — {particulars}"),
+                                          ("Cr", 402, f"SGST Payable (RCM) — {particulars}")):
+                    tid = self._next_id("transactions")
+                    self.tables["transactions"].append({
+                        "id": tid, "society_id": sid, "acc_id": acc, "entity_id": None,
+                        "amount": sgst, "mode": "journal", "status": "paid",
+                        "trx_date": date.today().isoformat(), "particulars": label,
+                        "entry_side": side, "source_table": "expenses", "source_id": eid,
+                        "journal_id": 9998,
+                    })
         return {"msg": "verified"}
 
     def _fn_current_financial_year(self, p, fetch_one, fetch_all):
