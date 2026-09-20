@@ -214,12 +214,19 @@ ACCOUNTS = [
     (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  False, 100),
     (41,   "CGST Payable",               "CGST",       "CGST Payable",                4,  "Cr",  False, 100),
     (42,   "SGST Payable",               "SGST",       "SGST Payable",                4,  "Cr",  False, 100),
+    # RCM (2026-09, Phase 2): segregated from the CGST/SGST Payable accounts
+    # above so GSTR-3B Table 3.1(d) (RCM) reconciles independently of
+    # Table 3.1(a) (outward supply) — previously RCM posted to acc 41/42.
+    (43,   "CGST Payable (RCM)",         "CGSTRCM",    "CGST Payable (Reverse Charge)", 4,  "Cr",  False, 100),
+    (44,   "SGST Payable (RCM)",         "SGSTRCM",    "SGST Payable (Reverse Charge)", 4,  "Cr",  False, 100),
+    (45,   "IGST Payable (RCM)",         "IGSTRCM",    "IGST Payable (Reverse Charge, inter-state RCM)", 4, "Cr", False, 100),
     (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True, 100),
     (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", False, 100),
     (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  10),
     (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True, 100),
     (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", False, 100),
     (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", False, 100),
+    (634,   "Input Tax Credit (RCM)",     "ITCRCM",     "Input Tax Credit — RCM (recoverable)", 63, "Dr", False, 100),
     (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", True, 100),
     (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", True, 100),
     (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", True, 100),
@@ -259,6 +266,7 @@ SOCIETY = {
     "TAN_number":       "BLRS12345E",
     "gstin":            "27AAAAA0000A1Z5",
     "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
+    "state":            "Uttar Pradesh",
     "email":            "admin@sunriseresidency.com",
     "phone":            "9876543210",
     "secretary_name":   "Ramesh Kumar",
@@ -605,12 +613,12 @@ def seed_society(cur, conn) -> int:
 
     cur.execute(
         """INSERT INTO societies
-           (id, name, PAN_number, TAN_number, gstin, address, email, phone, secretary_name,
+           (id, name, PAN_number, TAN_number, gstin, address, state, email, phone, secretary_name,
             secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
             payment_qr, logo, login_background, signing_secret_enc, duty_hrs, primary_bank_account_id, registration_number)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
-        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"],
+        (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"], SOCIETY.get("state"),
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],
          SOCIETY["secretary_phone"], SOCIETY.get("secretary_email"), SOCIETY.get("secretary_sign"),
          SOCIETY["plan"], SOCIETY["plan_validity"],
@@ -1215,15 +1223,15 @@ def seed_users(cur, conn, society_id: int):
                 """INSERT INTO vendors
                    (society_id,business_name,name,logo,license,photo,
                     service_type,mobile,service_description,active,
-                    pan_number,gstin)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s) RETURNING id""",
+                    pan_number,gstin,rcm_category,state)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s,%s) RETURNING id""",
                 (society_id, u.get("business_name", u["name"]), u["name"],
                  f"logos/{u.get('business_name', u['name']).replace(' ', '_').lower()}.png",
                  f"licenses/{u.get('business_name', u['name']).replace(' ', '_').lower()}.pdf",
                  f"photos/{u['name'].replace(' ', '_').lower()}.jpg",
                  u.get("service_type", "General"), u.get("mobile", ""),
                  u.get("service_description", "Best in town"),
-                 u.get("pan_number"), u.get("gstin")),
+                 u.get("pan_number"), u.get("gstin"), u.get("rcm_category"), u.get("state")),
             )
             conn.commit()
             linked_id = row["id"] if row else None
