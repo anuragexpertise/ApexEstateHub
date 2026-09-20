@@ -211,3 +211,100 @@ def generate_gst_summary_excel(
     wb.save(buf)
     buf.seek(0)
     return buf.getvalue()
+
+
+def generate_rcm_summary_excel(
+    db,
+    society_id: int,
+    fy: int,
+    filename_prefix: str = "RCMSummary",
+) -> bytes:
+    """Monthly RCM liability report for GSTR-3B Table 3.1(d).
+
+    One row per month: taxable_value, cgst_amount, sgst_amount, total_rcm_gst.
+    Data source: rcm_liability table.
+    """
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    rows = db._execute(
+        "SELECT liability_date AS period_month, taxable_value, cgst_amount, sgst_amount, gstr_filed "
+        "FROM rcm_liability WHERE society_id = %s AND liability_date >= %s AND liability_date <= %s "
+        "ORDER BY liability_date",
+        (society_id, MAKE_DATE(fy, 4, 1), MAKE_DATE(fy + 1, 3, 31)), fetch_all=True,
+    ) or []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    ws = wb.create_sheet(title="RCM Liability")
+    ws.cell(row=1, column=1, value=f"RCM Liability Summary — FY {fy}-{fy+1}")
+    ws.cell(row=1, column=1).font = _FONT_TITLE
+
+    headers = [
+        "Month", "Taxable Value", "CGST (RCM)",
+        "SGST (RCM)", "Total RCM GST", "GSTR Filed",
+    ]
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    r = 3
+    t_taxable = 0.0
+    t_cgst = 0.0
+    t_sgst = 0.0
+    for row in rows:
+        period = row.get("period_month")
+        taxable = float(row.get("taxable_value", 0) or 0)
+        cgst = float(row.get("cgst_amount", 0) or 0)
+        sgst = float(row.get("sgst_amount", 0) or 0)
+        gstr_filed = row.get("gstr_filed", False)
+
+        values = [
+            period, taxable, cgst, sgst, cgst + sgst,
+            "Yes" if gstr_filed else "No",
+        ]
+        for col, val in enumerate(values, start=1):
+            cell = ws.cell(row=r, column=col, value=val)
+            cell.font = _FONT_BODY
+            cell.border = _BORDER_ALL
+            if col == 1:
+                cell.alignment = _ALIGN_C
+                cell.number_format = _FMT_DATE
+            elif col in (2, 3, 4, 5):
+                cell.alignment = _ALIGN_R
+                cell.number_format = _FMT_AMT
+            else:
+                cell.alignment = _ALIGN_C
+        r += 1
+        t_taxable += taxable
+        t_cgst += cgst
+        t_sgst += sgst
+
+    totals = [
+        "TOTAL", t_taxable, t_cgst, t_sgst, t_cgst + t_sgst, "",
+    ]
+    for col, val in enumerate(totals, start=1):
+        cell = ws.cell(row=r, column=col, value=val)
+        cell.font = _FONT_TOTAL
+        cell.fill = _FILL_TOTAL
+        cell.border = _BORDER_ALL
+        if col == 1:
+            cell.alignment = _ALIGN_L
+        elif col in (2, 3, 4, 5):
+            cell.alignment = _ALIGN_R
+            cell.number_format = _FMT_AMT
+        else:
+            cell.alignment = _ALIGN_C
+
+    filename = f"{filename_prefix}_FY{fy}-{fy+1}.xlsx"
+    wb._gst_filename = filename  # type: ignore[attr-defined]
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()

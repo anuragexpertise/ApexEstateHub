@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     updated_by INT REFERENCES users (id),
     pan_number VARCHAR(10),
     gstin VARCHAR(15),
+    rcm_category VARCHAR(50),
     payee_type VARCHAR(20) CHECK (payee_type IN ('individual', 'huf', 'company', 'firm', 'llp', 'other')) DEFAULT 'other'
 );
 
@@ -671,11 +672,29 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- created_by removed: it was a pure duplicate of user_id (see
     -- fn_save_expense — both were always set to p_created_by).
     tds_section VARCHAR(10),
+    rcm_applicable BOOLEAN DEFAULT FALSE,
+    rcm_category VARCHAR(50),
     receipt_number VARCHAR(64),
     reconciled_at TIMESTAMP,
     reconciled_by INT REFERENCES users(id),
     bank_statement_line_id INT REFERENCES bank_statement_lines (id),
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
+);
+
+CREATE TABLE IF NOT EXISTS rcm_liability (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    expense_id INT REFERENCES expenses(id) ON DELETE SET NULL,
+    vendor_id INT REFERENCES vendors(id) ON DELETE SET NULL,
+    rcm_category VARCHAR(50) NOT NULL,
+    taxable_value NUMERIC(12,2) NOT NULL,
+    cgst_amount NUMERIC(12,2) NOT NULL,
+    sgst_amount NUMERIC(12,2) NOT NULL,
+    liability_date DATE NOT NULL,
+    gstr_filed BOOLEAN DEFAULT FALSE,
+    gstr_filed_date DATE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    created_by INT REFERENCES users(id)
 );
 
 
@@ -4887,7 +4906,9 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
     p_trx_id           VARCHAR DEFAULT NULL,
     p_source_reference VARCHAR DEFAULT NULL,
     p_tds_pct          NUMERIC DEFAULT 10,
-    p_tds_section      VARCHAR DEFAULT NULL
+    p_tds_section      VARCHAR DEFAULT NULL,
+    p_rcm_applicable   BOOLEAN DEFAULT FALSE,
+    p_rcm_category     VARCHAR DEFAULT NULL
 )
 RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20), cash_warning TEXT)
 LANGUAGE plpgsql AS $$
@@ -4903,6 +4924,8 @@ DECLARE
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
     v_cash_warning TEXT;
+    v_rcm_cgst   NUMERIC(15,2) := 0;
+    v_rcm_sgst   NUMERIC(15,2) := 0;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
@@ -4941,13 +4964,15 @@ BEGIN
     INSERT INTO expenses(
         society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
         amount, mode, cheque_no, transaction_id, status, confirmed_by, confirmed_at,
-        source_reference, created_at, tds_pct, tds_section
+        source_reference, created_at, tds_pct, tds_section,
+        rcm_applicable, rcm_category
     ) VALUES (
         p_society_id, p_created_by, p_entity_id, p_role, p_expense_date, p_acc_id, p_particulars,
         p_amount, p_mode, p_cheque_no, p_trx_id, v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
-        p_source_reference, NOW(), p_tds_pct, p_tds_section
+        p_source_reference, NOW(), p_tds_pct, p_tds_section,
+        p_rcm_applicable, p_rcm_category
     ) RETURNING id INTO v_expense_id;
  
     IF v_status = 'confirmed' THEN
@@ -5009,6 +5034,18 @@ BEGIN
                 'Cash paid - ' || p_particulars,
                 p_amount, p_mode, 'paid', p_created_by, NOW(), 'expenses', v_expense_id, v_journal_id
             );
+        END IF;
+
+        -- RCM: self-invoiced GST liability on payments to unregistered parties
+        IF p_rcm_applicable THEN
+            v_rcm_cgst := 0;
+            v_rcm_sgst := 0;
+            SELECT COALESCE(rcm.cgst_amount, 0), COALESCE(rcm.sgst_amount, 0)
+              INTO v_rcm_cgst, v_rcm_sgst
+              FROM fn_compute_rcm_liability(p_society_id, v_expense_id) AS rcm;
+            IF v_rcm_cgst > 0 OR v_rcm_sgst > 0 THEN
+                PERFORM fn_post_rcm_liability(p_society_id, v_expense_id, v_rcm_cgst, v_rcm_sgst);
+            END IF;
         END IF;
     ELSE
         v_trx_id := NULL;
@@ -5097,6 +5134,189 @@ BEGIN
     LIMIT 1;
 
     RETURN QUERY SELECT v_cgst, v_sgst;  -- NULLs if not found — caller treats that as "GST not configured"
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- RCM: Compute GST liability on expenses paid to unregistered
+-- parties (self-invoiced mechanism).
+--
+-- Triggered when an expense has rcm_applicable = TRUE.
+-- Rate mapping (Notification No. 13/2017-Central Tax (Rate)):
+--   gta        — GTA (Goods Transport Agency) services   5%  (2.5%+2.5%)
+--   advocate   — Legal services                          18%
+--   arbitration — Arbitral tribunal services             18%
+--   sponsorship — Sponsorship services                   18%
+--   government — Government services                     18%
+--   director   — Director sitting fees                   18%
+--   insurance  — Insurance agent commission              18%
+--   recovery   — Recovery agent services                 18%
+--   other      — Other notified categories              18% (default)
+-- ════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_compute_rcm_liability (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_compute_rcm_liability(
+    p_society_id  INT,
+    p_expense_id  INT
+)
+RETURNS TABLE (
+    taxable_value NUMERIC(15,2),
+    cgst_amount   NUMERIC(15,2),
+    sgst_amount   NUMERIC(15,2),
+    cgst_acc_id   INT,
+    sgst_acc_id   INT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_expense     expenses%ROWTYPE;
+    v_vendor_rcm  VARCHAR(50);
+    v_rcm_cat     VARCHAR(50);
+    v_rate        NUMERIC(5,2);
+    v_cgst_rate   NUMERIC(5,2);
+    v_sgst_rate   NUMERIC(5,2);
+    v_cgst_acc    INT;
+    v_sgst_acc    INT;
+BEGIN
+    SELECT * INTO v_expense
+      FROM expenses WHERE id = p_expense_id AND society_id = p_society_id;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT 0::NUMERIC(15,2), 0::NUMERIC(15,2),
+            0::NUMERIC(15,2), NULL::INT, NULL::INT;
+        RETURN;
+    END IF;
+
+    -- Determine RCM category: vendor pre-classification takes
+    -- priority, else use the expense form selection.
+    SELECT rcm_category INTO v_vendor_rcm
+      FROM vendors WHERE id = v_expense.entity_id AND society_id = p_society_id;
+
+    v_rcm_cat := COALESCE(v_vendor_rcm, v_expense.rcm_category);
+    IF v_rcm_cat IS NULL OR v_rcm_cat = '' THEN
+        RETURN QUERY SELECT 0::NUMERIC(15,2), 0::NUMERIC(15,2),
+            0::NUMERIC(15,2), NULL::INT, NULL::INT;
+        RETURN;
+    END IF;
+
+    -- Rate lookup by category
+    SELECT CASE v_rcm_cat
+        WHEN 'gta' THEN 5.00
+        ELSE 18.00
+    END INTO v_rate;
+
+    v_cgst_rate := v_rate / 2;
+    v_sgst_rate := v_rate / 2;
+
+    taxable_value := v_expense.amount;
+    cgst_amount   := ROUND(taxable_value * v_cgst_rate / 100.0, 2);
+    sgst_amount   := ROUND(taxable_value * v_sgst_rate / 100.0, 2);
+
+    -- Resolve CGST/SGST payable accounts (reuse fn_resolve_gst_accounts)
+    SELECT cgst_acc_id, sgst_acc_id INTO v_cgst_acc, v_sgst_acc
+      FROM fn_resolve_gst_accounts(p_society_id);
+
+    RETURN QUERY SELECT
+        taxable_value, cgst_amount, sgst_amount, v_cgst_acc, v_sgst_acc;
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════
+-- RCM: Post self-invoiced GST liability.
+--
+-- Inserts into rcm_liability table and posts two journal entries:
+--   Dr Expense Account (ITC claimable)  /  Cr CGST Payable (RCM)
+--   Dr Expense Account (ITC claimable)  /  Cr SGST Payable (RCM)
+-- Same journal_id as the parent expense for traceability.
+-- ════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_post_rcm_liability (INT, INT, NUMERIC, NUMERIC) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_post_rcm_liability(
+    p_society_id  INT,
+    p_expense_id  INT,
+    p_cgst        NUMERIC,
+    p_sgst        NUMERIC
+)
+RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_expense     expenses%ROWTYPE;
+    v_exp_acc     INT;
+    v_cgst_acc    INT;
+    v_sgst_acc    INT;
+    v_journal_id  INT;
+    v_vendor_id   INT;
+    v_rcm_cat     VARCHAR(50);
+BEGIN
+    SELECT * INTO v_expense
+      FROM expenses WHERE id = p_expense_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Expense % not found', p_expense_id; END IF;
+
+    -- Expense account (Dr side) — same account as the original expense
+    v_exp_acc := v_expense.acc_id;
+
+    -- Vendor reference
+    v_vendor_id := v_expense.entity_id;
+    v_rcm_cat   := COALESCE(v_expense.rcm_category, '');
+
+    -- Resolve CGST/SGST payable accounts
+    SELECT cgst_acc_id, sgst_acc_id INTO v_cgst_acc, v_sgst_acc
+      FROM fn_resolve_gst_accounts(p_society_id);
+
+    IF v_cgst_acc IS NULL OR v_sgst_acc IS NULL THEN
+        RAISE WARNING 'RCM liability for expense % not posted to ledger: CGST/SGST payable accounts not configured for society % — liability recorded in rcm_liability table only',
+            p_expense_id, p_society_id;
+    END IF;
+
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Insert into rcm_liability tracking table
+    INSERT INTO rcm_liability (
+        society_id, expense_id, vendor_id, rcm_category,
+        taxable_value, cgst_amount, sgst_amount, liability_date,
+        created_by
+    ) VALUES (
+        p_society_id, p_expense_id, v_vendor_id, v_rcm_cat,
+        v_expense.amount, p_cgst, p_sgst, v_expense.expense_date,
+        v_expense.user_id
+    );
+
+    -- Post journal entries (only if accounts resolved)
+    IF v_cgst_acc IS NOT NULL AND p_cgst > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, 'Dr', v_expense.expense_date, v_exp_acc, v_vendor_id, v_expense.role,
+            'RCM CGST — ' || v_expense.particulars,
+            p_cgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+        );
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, 'Cr', v_expense.expense_date, v_cgst_acc, v_vendor_id, v_expense.role,
+            'CGST Payable (RCM) — ' || v_expense.particulars,
+            p_cgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+        );
+    END IF;
+
+    IF v_sgst_acc IS NOT NULL AND p_sgst > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, 'Dr', v_expense.expense_date, v_exp_acc, v_vendor_id, v_expense.role,
+            'RCM SGST — ' || v_expense.particulars,
+            p_sgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+        );
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, 'Cr', v_expense.expense_date, v_sgst_acc, v_vendor_id, v_expense.role,
+            'SGST Payable (RCM) — ' || v_expense.particulars,
+            p_sgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+        );
+    END IF;
 END;
 $$;
 

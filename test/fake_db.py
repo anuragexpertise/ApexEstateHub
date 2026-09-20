@@ -872,14 +872,60 @@ class FakeDB:
         particulars = p.get("p2") or p.get("particulars", "")
         amt = float(p.get("p3") or p.get("amount", 0))
         user_id = p.get("p8") or p.get("user_id")
+        rcm_applicable = p.get("p14") or p.get("rcm_applicable", False)
+        rcm_category = p.get("p15") or p.get("rcm_category") or None
         user = next((u for u in self.tables.get("users", []) if u.get("id") == user_id), None)
         status = "confirmed" if (user and user.get("role") == "admin") else "pending"
         new_id = self._next_id("expenses")
         row = {
             "id": new_id, "society_id": sid, "acc_id": acc_id, "particulars": particulars,
             "amount": amt, "user_id": user_id, "status": status,
+            "rcm_applicable": rcm_applicable, "rcm_category": rcm_category,
         }
         self.tables["expenses"].append(dict(row))
+        if status == "confirmed" and rcm_applicable:
+            self._fn_post_rcm_liability(None, None, None)
+            rate = 5.0 if rcm_category == "gta" else 18.0
+            cgst = round(amt * (rate / 2) / 100.0, 2)
+            sgst = round(amt * (rate / 2) / 100.0, 2)
+            if cgst > 0:
+                tid = self._next_id("transactions")
+                self.tables["transactions"].append({
+                    "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
+                    "amount": cgst, "mode": "cash", "status": "paid",
+                    "trx_date": date.today().isoformat(),
+                    "particulars": f"RCM CGST — {particulars}",
+                    "entry_side": "Dr", "source_table": "expenses", "source_id": new_id,
+                    "journal_id": 9999,
+                })
+                tid = self._next_id("transactions")
+                self.tables["transactions"].append({
+                    "id": tid, "society_id": sid, "acc_id": 401, "entity_id": None,
+                    "amount": cgst, "mode": "cash", "status": "paid",
+                    "trx_date": date.today().isoformat(),
+                    "particulars": f"CGST Payable (RCM) — {particulars}",
+                    "entry_side": "Cr", "source_table": "expenses", "source_id": new_id,
+                    "journal_id": 9999,
+                })
+            if sgst > 0:
+                tid = self._next_id("transactions")
+                self.tables["transactions"].append({
+                    "id": tid, "society_id": sid, "acc_id": acc_id, "entity_id": None,
+                    "amount": sgst, "mode": "cash", "status": "paid",
+                    "trx_date": date.today().isoformat(),
+                    "particulars": f"RCM SGST — {particulars}",
+                    "entry_side": "Dr", "source_table": "expenses", "source_id": new_id,
+                    "journal_id": 9999,
+                })
+                tid = self._next_id("transactions")
+                self.tables["transactions"].append({
+                    "id": tid, "society_id": sid, "acc_id": 402, "entity_id": None,
+                    "amount": sgst, "mode": "cash", "status": "paid",
+                    "trx_date": date.today().isoformat(),
+                    "particulars": f"SGST Payable (RCM) — {particulars}",
+                    "entry_side": "Cr", "source_table": "expenses", "source_id": new_id,
+                    "journal_id": 9999,
+                })
         return {"expense_id": new_id, "status": status}
 
     def _fn_verify_expense(self, p, fetch_one, fetch_all):
@@ -960,6 +1006,36 @@ class FakeDB:
 
     def _fn_resolve_gst_accounts(self, p, fetch_one, fetch_all):
         return {"cgst_acc_id": 401, "sgst_acc_id": 402}
+
+    def _fn_compute_rcm_liability(self, p, fetch_one, fetch_all):
+        expense_id = p.get("p1") or p.get("expense_id")
+        expense = next(
+            (r for r in self.tables.get("expenses", []) if r.get("id") == expense_id),
+            None,
+        )
+        if not expense:
+            return {
+                "taxable_value": 0,
+                "cgst_amount": 0,
+                "sgst_amount": 0,
+                "cgst_acc_id": 401,
+                "sgst_acc_id": 402,
+            }
+        amount = float(expense.get("amount", 0))
+        rcm_cat = expense.get("rcm_category") or ""
+        rate = 5.0 if rcm_cat == "gta" else 18.0
+        cgst = round(amount * (rate / 2) / 100.0, 2)
+        sgst = round(amount * (rate / 2) / 100.0, 2)
+        return {
+            "taxable_value": amount,
+            "cgst_amount": cgst,
+            "sgst_amount": sgst,
+            "cgst_acc_id": 401,
+            "sgst_acc_id": 402,
+        }
+
+    def _fn_post_rcm_liability(self, p, fetch_one, fetch_all):
+        return None
 
     def _fn_society_turnover_fy(self, p, fetch_one, fetch_all):
         return 2500000.0

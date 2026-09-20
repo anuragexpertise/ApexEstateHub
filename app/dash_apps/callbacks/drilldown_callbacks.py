@@ -57,7 +57,7 @@ from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export, asset_export, financial_statements_export
+from database import cashbook_export, ledger_export, tds_export, gst_export, rcm_export, income_tax_export, asset_export, financial_statements_export
 from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -2482,6 +2482,9 @@ def register_drilldown_callbacks(app):
         elif entity == "gst_summary":
             data = gst_export.generate_gst_summary_excel(None, sid, fy)
             filename = f"GSTSummary_FY{fy}-{fy+1}.xlsx"
+        elif entity == "rcm_liability":
+            data = rcm_export.generate_rcm_excel(None, sid, fy)
+            filename = f"RCMLiability_FY{fy}-{fy+1}.xlsx"
         elif entity == "fixed_asset_register":
             data = asset_export.generate_fixed_asset_register_excel(None, sid, fy)
             filename = f"FixedAssetRegister_FY{fy}-{fy+1}.xlsx"
@@ -2570,6 +2573,31 @@ def register_drilldown_callbacks(app):
         return dcc.send_bytes(
             output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx"
         )
+
+    # ── RCM: Mark GSTR Filed ────────────────────────────────────
+    @app.callback(
+        Output({"type": "btn-rcm-gstr-file", "entity": MATCH}, "color"),
+        Input({"type": "btn-rcm-gstr-file", "entity": MATCH}, "n_clicks"),
+        State("drilldown-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def mark_rcm_gstr_filed(n_clicks, store):
+        if not n_clicks:
+            return no_update
+        sid = get_current_society_id()
+        if not sid:
+            return no_update
+        import datetime
+        today = datetime.date.today()
+        month_start = today.replace(day=1)
+        month_end = (month_start + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
+        db._execute(
+            "UPDATE rcm_liability SET gstr_filed = TRUE, gstr_filed_date = %s "
+            "WHERE society_id = %s AND liability_date >= %s AND liability_date <= %s AND NOT gstr_filed",
+            (today, sid, month_start.isoformat(), month_end.isoformat()),
+        )
+        return "success"
 
     # ── Vendor Pass type card selection ──────────────────────────────────
     @app.callback(
@@ -3821,6 +3849,20 @@ def _save_expense_v3(db, d, sid):
         vendor_id = int(entity_id) if entity_id not in (None, "") else None
     except (TypeError, ValueError):
         vendor_id = None
+
+    # RCM autofill: when a vendor is selected with a pre-classified
+    # rcm_category, auto-check RCM on the expense form (GSTRCM.md §B).
+    rcm_applicable = d.get("rcm_applicable")
+    rcm_category = d.get("rcm_category")
+    if not rcm_applicable and vendor_id:
+        v_rcm = db._execute(
+            "SELECT rcm_category FROM vendors WHERE id=%s AND society_id=%s",
+            (vendor_id, sid), fetch_one=True,
+        )
+        if v_rcm and v_rcm.get("rcm_category"):
+            rcm_applicable = True
+            rcm_category = v_rcm["rcm_category"]
+
     payment_nature = d.get("payment_nature")
     tds_sug = tds_compliance.suggest_expense_tax_fields(
         db, sid, acc_id, vendor_id, amt, expense_date=d.get("expense_date"),
@@ -3873,7 +3915,7 @@ def _save_expense_v3(db, d, sid):
 
     try:
         r = db._execute(
-            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "SELECT * FROM fn_save_expense(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 acc_id,
@@ -3889,6 +3931,8 @@ def _save_expense_v3(db, d, sid):
                 d.get("source_reference"),
                 tds_pct,
                 tds_section,
+                rcm_applicable,
+                rcm_category,
             ),
             fetch_one=True,
         )
