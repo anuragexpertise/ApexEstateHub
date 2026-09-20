@@ -387,6 +387,34 @@ def _resolve_society_state(record_dict: dict, society_id: int | None) -> str:
     return "ALL"
 
 
+def _rcm_monthly_total(selected_fy: int | None, store: dict | None) -> float:
+    """Current-month RCM liability total for the register card."""
+    if not selected_fy or not store:
+        return 0.0
+    fy = selected_fy
+    from database.db_manager import db as _db
+    from database import db_manager
+    db_instance = db_manager.db
+    if db_instance is None:
+        return 0.0
+    import datetime
+    today = datetime.date.today()
+    month_start = today.replace(day=1)
+    try:
+        rows = db_instance._execute(
+            "SELECT COALESCE(SUM(cgst_amount + sgst_amount), 0) AS total "
+            "FROM rcm_liability "
+            "WHERE society_id = %s "
+            "AND liability_date >= %s AND liability_date < %s",
+            (store.get("society_id", store.get("sid", 0)),
+             month_start.isoformat(),
+             (month_start + datetime.timedelta(days=32)).replace(day=1).isoformat()),
+            fetch_one=True,
+        ) or {}
+        return float(rows.get("total", 0) or 0)
+    except Exception:
+        return 0.0
+
 
 # ── Fields hidden because the current view is already scoped to them ──────
 def _context_hidden_fields(filters: dict | None) -> set[str]:
@@ -3689,6 +3717,14 @@ def render_fy_closing_card(rows: list, error: str | None,
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "gst_summary"}),
                 dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export RCM Liability"],
+                    id={"type": "btn-fy-export", "entity": "rcm_liability"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "rcm_liability"}),
+                dbc.Button(
                     [html.I(className="fas fa-file-excel me-2"), "Export TDS Summary"],
                     id={"type": "btn-fy-export", "entity": "tds_summary"},
                     size="sm", color="success", outline=True,
@@ -3698,6 +3734,29 @@ def render_fy_closing_card(rows: list, error: str | None,
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "tds_summary"}),
             ]) if selected_fy else None,
         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start", "flexWrap": "wrap"}),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.Strong("RCM Liability Register", style={"fontSize": "13px"}),
+                        html.Div(
+                            f"Current month RCM liability: ₹{_rcm_monthly_total(selected_fy, store):,.2f}",
+                            style={"fontSize": "11px", "color": "#555"},
+                        ),
+                    ],
+                    style={"marginBottom": "6px"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-check me-1"), "Mark GSTR Filed"],
+                    id={"type": "btn-rcm-gstr-file", "entity": "rcm_liability"},
+                    size="sm", color="primary", outline=True,
+                    style={"fontSize": "11px"},
+                ),
+            ],
+            style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
+                   "border": "1px solid #dee2e6", "borderRadius": "8px",
+                   "padding": "10px 14px", "marginTop": "10px"},
+        ) if selected_fy else None,
     ], style={"padding": "12px 16px",
               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
 

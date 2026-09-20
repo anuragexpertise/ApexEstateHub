@@ -267,6 +267,13 @@ FIELD_CONFIG = {
             },
             "tooltip": "GST Identification Number (15 characters, e.g., 27AAAAA0000A1Z5)",
         },
+        "rcm_category": {
+            "visible": ADMIN_MASTER,
+            "editable": ADMIN_ONLY,
+            "default": "",
+            "validation": {},
+            "tooltip": "RCM category pre-classification: gta, advocate, arbitration, sponsorship, other",
+        },
         "active": {
             "visible": ADMIN_MASTER,
             "editable": ADMIN_ONLY,
@@ -276,7 +283,7 @@ FIELD_CONFIG = {
         },
     },
 
-    # ═════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # SECURITY STAFF
     # ═════════════════════════════════════════════════════════════════════════
     "security": {
@@ -745,9 +752,23 @@ FIELD_CONFIG = {
             "validation": {},
             "tooltip": "External reference or note",
         },
+        "rcm_applicable": {
+            "visible": ADMIN_MASTER,
+            "editable": ADMIN_ONLY,
+            "default": False,
+            "validation": {},
+            "tooltip": "Reverse Charge Mechanism applicable — society pays GST directly to govt",
+        },
+        "rcm_category": {
+            "visible": ADMIN_MASTER,
+            "editable": ADMIN_ONLY,
+            "default": "",
+            "validation": {},
+            "tooltip": "RCM category: gta, advocate, arbitration, sponsorship, other",
+        },
     },
 
-    # ═════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # ASSETS
     # ═════════════════════════════════════════════════════════════════════════
     "assets": {

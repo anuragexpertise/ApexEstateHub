@@ -591,6 +591,10 @@ def _build_field(col: dict) -> dict:
         field["type"] = "select"
         field["dynamic_options"] = "tds_sections"
 
+    elif (table, name) in (("expenses", "rcm_category"), ("vendors", "rcm_category")):
+        field["type"] = "select"
+        field["options"] = ["gta", "advocate", "arbitration", "sponsorship", "government", "director", "insurance", "recovery", "other"]
+
     elif col["check_options"]:
         field["type"] = "select"
         field["options"] = col["check_options"]
@@ -687,6 +691,9 @@ _NEW_FORM_DEFAULTS: dict[str, dict] = {
         # fn_save_expense silently falls back to the old single-leg
         # behavior regardless of what's entered here.
         "tds_pct": 10,
+        # RCM fields (GSTRCM.md): admin-set checkbox + category
+        "rcm_applicable": False,
+        "rcm_category": "",
     },
 }
 
