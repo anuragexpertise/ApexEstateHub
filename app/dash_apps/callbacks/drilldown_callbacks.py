@@ -5327,13 +5327,15 @@ def _save_account(db, d, sid, is_edit, pk):
             ),
         )
 
-        # drcr_bf isn't editable via this form — carry forward the
-        # account's existing value for the brought_forward row.
+        # The brought-forward sign always mirrors the account's own
+        # nature (accounts.drcr_account is the single source of truth
+        # for Dr/Cr — there is no separate drcr_bf column to drift out
+        # of sync with it).
         acc_row = db._execute(
-            "SELECT drcr_bf FROM accounts WHERE id=%s AND society_id=%s",
+            "SELECT drcr_account FROM accounts WHERE id=%s AND society_id=%s",
             (pk, sid), fetch_one=True,
         ) or {}
-        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_bf") or "Dr", bf_val)
+        _upsert_brought_forward(db, sid, pk, acc_row.get("drcr_account") or "Dr", bf_val)
 
         return True, "Account updated", pk
 
@@ -5350,7 +5352,7 @@ def _save_account(db, d, sid, is_edit, pk):
     dep_pct   = float(d.get("depreciation_percent") or 100)
     is_dep_raw = d.get("is_depreciable", "false")
     is_dep = str(is_dep_raw).lower() == "true" if is_dep_raw is not None else False
-    drcr_bf = "Cr" if drcr == "Cr" else "Dr"
+    bf_side = "Cr" if drcr == "Cr" else "Dr"  # brought_forward.drcr_bf mirrors the account's own nature
 
     # ID: use next available integer (accounts.id is not serial in seeded DBs)
     max_r  = db._execute(
@@ -5362,15 +5364,14 @@ def _save_account(db, d, sid, is_edit, pk):
     db._execute(
         "INSERT INTO accounts("
         "id, society_id, name, tab_name, header, drcr_account, "
-        "has_bf, drcr_bf, depreciation_percent, is_depreciable, mutuality_nature, tds_section, parent_account_id"
-        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "has_bf, depreciation_percent, is_depreciable, mutuality_nature, tds_section, parent_account_id"
+        ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             next_id, sid, name,
             d.get("tab_name") or None,
             d.get("header")   or None,
             drcr,
             bf_amount != 0 or d.get("has_bf", False),
-            drcr_bf,                             # drcr_bf mirrors drcr_account
             dep_pct,
             is_dep,
             d.get("mutuality_nature") or "mutual",
@@ -5378,7 +5379,7 @@ def _save_account(db, d, sid, is_edit, pk):
             d.get("parent_account_id"),
         ),
     )
-    _upsert_brought_forward(db, sid, next_id, drcr_bf, bf_amount)
+    _upsert_brought_forward(db, sid, next_id, bf_side, bf_amount)
 
     return True, f"Account '{name}' created", next_id
 
