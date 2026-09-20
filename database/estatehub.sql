@@ -152,7 +152,6 @@ CREATE TABLE IF NOT EXISTS accounts (
         OR drcr_account IS NULL
     ),
     has_bf BOOLEAN DEFAULT FALSE,
-    drcr_bf VARCHAR(2) NOT NULL CHECK (drcr_bf IN ('Dr', 'Cr')),
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -9805,7 +9804,7 @@ BEGIN
         LOOP
             IF (v_item->>'bf_amount')::NUMERIC > 0 THEN
                 INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, is_auto_calculated)
-                SELECT p_society_id, p_bf_fy, (v_item->>'acc_id')::INT, a.drcr_bf, (v_item->>'bf_amount')::NUMERIC, v_item->>'remarks', FALSE
+                SELECT p_society_id, p_bf_fy, (v_item->>'acc_id')::INT, COALESCE(a.drcr_account, 'Dr'), (v_item->>'bf_amount')::NUMERIC, v_item->>'remarks', FALSE
                 FROM accounts a WHERE a.id = (v_item->>'acc_id')::INT AND a.society_id = p_society_id
                 ON CONFLICT (society_id, financial_year, acc_id)
                 DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount,

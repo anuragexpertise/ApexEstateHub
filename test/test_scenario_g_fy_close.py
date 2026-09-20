@@ -27,11 +27,11 @@ def _seed_financial_world(patched_db):
     })
     patched_db.tables.setdefault("accounts", []).extend([
         {"id": 633, "society_id": 1, "name": "Cash-in-hand", "tab_name": "CurAs",
-         "drcr_account": "Dr", "has_bf": True, "drcr_bf": "Dr"},
+         "drcr_account": "Dr", "has_bf": True},
         {"id": 6311, "society_id": 1, "name": "SBI A/c", "tab_name": "BkAc",
-         "drcr_account": "Dr", "has_bf": True, "drcr_bf": "Dr"},
+         "drcr_account": "Dr", "has_bf": True},
         {"id": 2, "society_id": 1, "name": "Capital Account", "tab_name": "CapAc",
-         "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "drcr_account": "Cr", "has_bf": True},
         {"id": 2311, "society_id": 1, "name": "Society Maintenance Charge",
          "tab_name": "IncExp", "drcr_account": "Cr", "has_bf": False},
     ])

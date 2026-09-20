@@ -164,78 +164,78 @@ def _one(cur, sql, params=None):
 # CHART OF ACCOUNTS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, drcr_bf, dep_pct)
+# (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, dep_pct)
 ACCOUNTS = [
-    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, "Cr", 100),
-    (2,     "Capital Account",            "CapAc",      "Capital Account",             1,  "Cr",  True,  "Cr", 100),
-    (21,    "Income Other Source",        "IncOther",   "Income other source",         2,  "Cr",  False,  "Cr", 100),
-    (211,   "Interest Income",            "IncInt",     "Interest Income",            21,  "Cr",  False,  "Cr", 100),
-    (2111,  "Bank Interest",              "IntBK",      "Bank Interest",             211,  "Cr",  False,  "Cr", 100),
-    (21111, "Saving Interest",            "IntSav",     "Saving Interest",          2111,  "Cr",  False,  "Cr", 100),
-    (2112,  "Exempt Income",              "IncExmpt",   "Exempt Income",             211,  "Cr",  False,  "Cr", 100),
-    (21112, "FD Interest",                "IntFD",      "FD Interest",              2111,  "Cr",  False,  "Cr", 100),
-    (21113, "Due Interest",               "IntDue",     "Maintenance Due Interest",  211,  "Cr",  False,  "Cr", 100),
-    (212,   "Selling Asset",              "SellAs",     "Selling Asset",              21,  "Cr",  False,  "Cr", 100),
-    (213,   "Property Income",            "PropInc",    "Property Income",            21,  "Cr",  False,  "Cr", 100),
-    (22,    "Gifts Received",             "Gifts",      "Gifts Received",              2,  "Cr",  True,  "Cr", 100),
-    (23,    "Income Expenditure A/c",     "InExp",      "Income Expenditure Account",  2,  "Cr",  False,  "Cr", 100),
-    (231,   "Depreciation",               "Dep",        "Depreciation Account",       23,  "Dr", False,  "Dr", 100),
-    (232,   "Rent Paid",                  "RentPaid",   "Rent Paid",                   23,  "Dr", False,  "Dr", 100),
-    (233,   "Miscellaneous",              "Misc",       "Miscellaneous",              23,  "Dr", False,  "Dr", 100),
-    (234,   "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",        23,  "Dr", False,  "Dr", 100),
-    (235,   "Salary",                     "Salary",     "Salary",                     23,  "Dr", False,  "Dr", 100),
-    (236,   "Phone Charges",              "PhoneChrg",  "Phone Charges",                23,  "Dr", False,  "Dr", 100),
-    (237,   "Electricity",                "Elec",       "Electricity",                23,  "Dr", False,  "Dr", 100),
-    (238,   "Water Tax",                  "WTax",       "Water Tax",                  23,  "Dr", False,  "Dr", 100),
-    (239,   "House Tax",                  "HTax",       "House Tax",                  23,  "Dr", False,  "Dr", 100),
-    (2310,  "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",     23,  "Dr", False,  "Dr", 100),
-    (2311,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 23,  "Cr",  False,  "Cr", 100),
-    (2312,  "Repair and Maintenance",     "RM",         "Repair and Maintenance",     23,  "Dr", False,  "Dr", 100),
-    (2313,  "Stationery",                 "Stationery", "Stationery",                 23,  "Dr", False,  "Dr", 100),
-    (2314,  "Generator Charges",          "GenChrg",    "Generator Charges",          23,  "Dr", False,  "Dr",  15),
-    (2315,  "Accountant Fee",             "AccountantF","Accountant Fee",             23,  "Dr", False,  "Dr", 100),
-    (2316,  "Audit Fee",                  "AuditF",     "Audit Fee",                  23,  "Dr", False,  "Dr", 100),
-    (2317,  "Society Fine",               "SocF",       "Society Fine Charge",        23,  "Cr",  False,  "Cr", 100),
-    (2318,  "Society Charge",             "SocC",       "Society Fees",               23,  "Cr",  False,  "Cr", 100),
-    (2319,  "Event Ticket",               "EventT",     "Event Ticket",               23,  "Cr",  False,  "Cr", 100),
-    (23191, "Holi Ticket",                "HoliT",      "Holi Ticket",                2319,  "Cr",  False,  "Cr", 100),
-    (23192, "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",              2319,  "Cr",  False,  "Cr", 100),
-    (2320,  "Lift AMC",                   "LiftAMC",    "Lift AMC",                   23,  "Dr", False,  "Dr", 100),
-    (2321,  "Intercom AMC",               "IntercomAMC", "Intercom AMC",              23,  "Dr", False,  "Dr", 100),
-    (2322,  "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                   23,  "Dr", False,  "Dr", 100),
-    (2323,  "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 23, "Dr", False, "Dr", 100),
-    (24,    "Duties Paid",                "DutyP",      "Duties Paid",                 2,  "Dr",  False,  "Dr", 100),
-    (25,    "Taxes Paid",                 "TaxP",       "Taxes Paid",                  2,  "Dr",  False,  "Dr", 100),
-    (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr",  True,  "Cr", 100),
-    (27,    "Gifts Given",                "GiftGiven",  "Gifts Given",                 2,  "Dr", True,  "Dr", 100),
-    (28,    "Income Tax",                 "ITax",       "Income Tax",                  2,  "Dr", False,  "Dr", 100),
-    (29,    "TDS to IT",                  "TDSIT",      "TDS Paid",                    2,  "Dr", False,  "Dr", 100),
-    (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  True,  "Cr", 100),
-    (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  False,  "Cr", 100),
-    (41,   "CGST Payable",               "CGST",       "CGST Payable",                4,  "Cr",  False,  "Cr", 100),
-    (42,   "SGST Payable",               "SGST",       "SGST Payable",                4,  "Cr",  False,  "Cr", 100),
-    (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True,  "Dr", 100),
-    (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", False,  "Dr", 100),
-    (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  "Dr",  10),
-    (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True,  "Dr", 100),
-    (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", False,  "Dr", 100),
-    (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", False,  "Dr", 100),
-    (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", True,  "Dr", 100),
-    (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", True,  "Dr", 100),
-    (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", True,  "Dr", 100),
-    (633,   "Cash-in-hand",               "CiH",        "Cash-in-hand",               63,  "Dr", True,  "Dr", 100),
-    (64,    "Instruments",                "Inst",       "Instruments & Tools",         6,  "Dr", True,  "Dr",  15),
-    (65,    "Machinery",                  "Mch",        "Machinery",                   6,  "Dr", True,  "Dr",  15),
-    (66,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  "Dr",  15),
-    (67,    "Computers",                  "Comp",       "Computers",                   6,  "Dr", True,  "Dr",  40),
-    (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True,  "Dr", 100),
-    (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", False,  "Dr", 100),
-    (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True,  "Dr", 100),
-    (82,    "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",       8,  "Dr", True,  "Dr", 100),
-    (9,     "Sundry Creditors",           "SCr",        "Sundry Creditors",            1,  "Cr",  True,  "Cr", 100),
-    (101,   "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",        1,  "Cr",  True,  "Cr", 100),
-    (102,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True,  "Cr", 100),
-    (103,   "Corpus Fund",                "CorpusFund", "Corpus Fund",                 1,  "Cr",  True,  "Cr", 100),
+    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, 100),
+    (2,     "Capital Account",            "CapAc",      "Capital Account",             1,  "Cr",  True, 100),
+    (21,    "Income Other Source",        "IncOther",   "Income other source",         2,  "Cr",  False, 100),
+    (211,   "Interest Income",            "IncInt",     "Interest Income",            21,  "Cr",  False, 100),
+    (2111,  "Bank Interest",              "IntBK",      "Bank Interest",             211,  "Cr",  False, 100),
+    (21111, "Saving Interest",            "IntSav",     "Saving Interest",          2111,  "Cr",  False, 100),
+    (2112,  "Exempt Income",              "IncExmpt",   "Exempt Income",             211,  "Cr",  False, 100),
+    (21112, "FD Interest",                "IntFD",      "FD Interest",              2111,  "Cr",  False, 100),
+    (21113, "Due Interest",               "IntDue",     "Maintenance Due Interest",  211,  "Cr",  False, 100),
+    (212,   "Selling Asset",              "SellAs",     "Selling Asset",              21,  "Cr",  False, 100),
+    (213,   "Property Income",            "PropInc",    "Property Income",            21,  "Cr",  False, 100),
+    (22,    "Gifts Received",             "Gifts",      "Gifts Received",              2,  "Cr",  True, 100),
+    (23,    "Income Expenditure A/c",     "InExp",      "Income Expenditure Account",  2,  "Cr",  False, 100),
+    (231,   "Depreciation",               "Dep",        "Depreciation Account",       23,  "Dr", False, 100),
+    (232,   "Rent Paid",                  "RentPaid",   "Rent Paid",                   23,  "Dr", False, 100),
+    (233,   "Miscellaneous",              "Misc",       "Miscellaneous",              23,  "Dr", False, 100),
+    (234,   "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",        23,  "Dr", False, 100),
+    (235,   "Salary",                     "Salary",     "Salary",                     23,  "Dr", False, 100),
+    (236,   "Phone Charges",              "PhoneChrg",  "Phone Charges",                23,  "Dr", False, 100),
+    (237,   "Electricity",                "Elec",       "Electricity",                23,  "Dr", False, 100),
+    (238,   "Water Tax",                  "WTax",       "Water Tax",                  23,  "Dr", False, 100),
+    (239,   "House Tax",                  "HTax",       "House Tax",                  23,  "Dr", False, 100),
+    (2310,  "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",     23,  "Dr", False, 100),
+    (2311,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 23,  "Cr",  False, 100),
+    (2312,  "Repair and Maintenance",     "RM",         "Repair and Maintenance",     23,  "Dr", False, 100),
+    (2313,  "Stationery",                 "Stationery", "Stationery",                 23,  "Dr", False, 100),
+    (2314,  "Generator Charges",          "GenChrg",    "Generator Charges",          23,  "Dr", False,  15),
+    (2315,  "Accountant Fee",             "AccountantF","Accountant Fee",             23,  "Dr", False, 100),
+    (2316,  "Audit Fee",                  "AuditF",     "Audit Fee",                  23,  "Dr", False, 100),
+    (2317,  "Society Fine",               "SocF",       "Society Fine Charge",        23,  "Cr",  False, 100),
+    (2318,  "Society Charge",             "SocC",       "Society Fees",               23,  "Cr",  False, 100),
+    (2319,  "Event Ticket",               "EventT",     "Event Ticket",               23,  "Cr",  False, 100),
+    (23191, "Holi Ticket",                "HoliT",      "Holi Ticket",                2319,  "Cr",  False, 100),
+    (23192, "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",              2319,  "Cr",  False, 100),
+    (2320,  "Lift AMC",                   "LiftAMC",    "Lift AMC",                   23,  "Dr", False, 100),
+    (2321,  "Intercom AMC",               "IntercomAMC", "Intercom AMC",              23,  "Dr", False, 100),
+    (2322,  "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                   23,  "Dr", False, 100),
+    (2323,  "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 23, "Dr", False, 100),
+    (24,    "Duties Paid",                "DutyP",      "Duties Paid",                 2,  "Dr",  False, 100),
+    (25,    "Taxes Paid",                 "TaxP",       "Taxes Paid",                  2,  "Dr",  False, 100),
+    (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr",  True, 100),
+    (27,    "Gifts Given",                "GiftGiven",  "Gifts Given",                 2,  "Dr", True, 100),
+    (28,    "Income Tax",                 "ITax",       "Income Tax",                  2,  "Dr", False, 100),
+    (29,    "TDS to IT",                  "TDSIT",      "TDS Paid",                    2,  "Dr", False, 100),
+    (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  True, 100),
+    (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  False, 100),
+    (41,   "CGST Payable",               "CGST",       "CGST Payable",                4,  "Cr",  False, 100),
+    (42,   "SGST Payable",               "SGST",       "SGST Payable",                4,  "Cr",  False, 100),
+    (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True, 100),
+    (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", False, 100),
+    (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  10),
+    (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True, 100),
+    (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", False, 100),
+    (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", False, 100),
+    (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", True, 100),
+    (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", True, 100),
+    (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", True, 100),
+    (633,   "Cash-in-hand",               "CiH",        "Cash-in-hand",               63,  "Dr", True, 100),
+    (64,    "Instruments",                "Inst",       "Instruments & Tools",         6,  "Dr", True,  15),
+    (65,    "Machinery",                  "Mch",        "Machinery",                   6,  "Dr", True,  15),
+    (66,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  15),
+    (67,    "Computers",                  "Comp",       "Computers",                   6,  "Dr", True,  40),
+    (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True, 100),
+    (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", False, 100),
+    (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True, 100),
+    (82,    "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",       8,  "Dr", True, 100),
+    (9,     "Sundry Creditors",           "SCr",        "Sundry Creditors",            1,  "Cr",  True, 100),
+    (101,   "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",        1,  "Cr",  True, 100),
+    (102,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True, 100),
+    (103,   "Corpus Fund",                "CorpusFund", "Corpus Fund",                 1,  "Cr",  True, 100),
 ]
 
 # Compliance tagging for existing accounts (Phase 1)
@@ -928,7 +928,7 @@ def seed_accounts(cur, conn, society_id: int) -> int:
 
     # 1st pass: insert with parent_account_id=NULL to avoid FK ordering
     # requirements entirely.
-    for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
+    for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
         try:
             cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
             if cur.fetchone():
@@ -936,11 +936,11 @@ def seed_accounts(cur, conn, society_id: int) -> int:
             cur.execute(
                 """INSERT INTO accounts
                    (id, society_id, name, tab_name, header, parent_account_id,
-                    drcr_account, has_bf, drcr_bf, depreciation_percent,
+                    drcr_account, has_bf, depreciation_percent,
                     is_depreciable, mutuality_nature, tds_section)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (aid, society_id, name, tab, header, None,
-                 drcr, has_bf, drcr_bf, dep, dep < 100,
+                 drcr, has_bf, dep, dep < 100,
                  MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
             )
             inserted_ids.add(aid)
@@ -952,7 +952,7 @@ def seed_accounts(cur, conn, society_id: int) -> int:
     # 2nd pass: backfill parent_account_id now that every row in this batch
     # exists (only for rows we just inserted — pre-existing rows keep
     # whatever parent they already had).
-    for (aid, name, tab, header, parent, drcr, has_bf, drcr_bf, dep) in ACCOUNTS:
+    for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
         if parent is not None and aid in inserted_ids:
             cur.execute(
                 "UPDATE accounts SET parent_account_id = %s WHERE id = %s AND society_id = %s",
@@ -1067,7 +1067,7 @@ def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
     above). Amounts come from BF_VALUES; any has_bf=TRUE account not
     listed there gets 0."""
     cur.execute(
-        """SELECT id, drcr_bf FROM accounts
+        """SELECT id, drcr_account FROM accounts
            WHERE society_id = %s AND has_bf = TRUE
            ORDER BY id""",
         (society_id,),
@@ -1076,7 +1076,7 @@ def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
 
     for row in bf_accounts:
         acc_id = row["id"]
-        drcr = row["drcr_bf"]
+        drcr = row["drcr_account"] or "Dr"
         amount = BF_VALUES.get(acc_id, 0.00)
 
         cur.execute(

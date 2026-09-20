@@ -423,8 +423,8 @@ def render_category_content(category, society_id=None):
         sorted_accounts = sorted(ACCOUNTS, key=lambda x: (x[4] if x[4] is not None else -1, x[0]))
 
         for acc in sorted_accounts:
-            # acc mapping: 0=id, 1=header, 2=tab, 3=name, 4=parent, 5=drcr, 6=has_bf, 7=drcr_bf, 8=depr_percent
-            is_depreciable = acc[8] < 100 if acc[8] is not None else False
+            # acc mapping: 0=id, 1=header, 2=tab, 3=name, 4=parent, 5=drcr, 6=has_bf, 7=depr_percent
+            is_depreciable = acc[7] < 100 if acc[7] is not None else False
             
             row = dbc.Row([
                 dbc.Col(html.Span(str(acc[0]), className="small text-muted"), width=1, className="d-flex align-items-center"),
@@ -433,7 +433,7 @@ def render_category_content(category, society_id=None):
                 dbc.Col(html.Span(str(acc[5] or ""), className="small text-muted"), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span("Yes" if acc[6] else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span("Yes" if is_depreciable else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(f"{acc[8]}%" if acc[8] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
+                dbc.Col(html.Span(f"{acc[7]}%" if acc[7] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
             ], className="mb-2")
             inputs.append(row)
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
@@ -443,7 +443,7 @@ def render_category_content(category, society_id=None):
             row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
             if row: s_fy = row.get("financial_year", 2024)
         from database.seed import ACCOUNTS
-        accounts = [{"id": acc[0], "tab_name": acc[2], "name": acc[3], "drcr_bf": acc[7]} for acc in ACCOUNTS if acc[6]]
+        accounts = [{"id": acc[0], "tab_name": acc[2], "name": acc[3], "drcr": acc[5]} for acc in ACCOUNTS if acc[6]]
         
         inputs = [
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. Values will be saved for the specified Financial Year."),
@@ -467,7 +467,7 @@ def render_category_content(category, society_id=None):
                 dbc.Col(html.Span(str(acc["id"]), className="small text-muted"), width=1, className="d-flex align-items-center"),
                 dbc.Col(html.Span(acc["tab_name"] or "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
                 dbc.Col(html.Span(acc["name"] or "", className="small fw-bold"), width=4, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc["drcr_bf"] or "", className="small text-muted"), width=1, className="d-flex align-items-center"),
+                dbc.Col(html.Span(acc["drcr"] or "", className="small text-muted"), width=1, className="d-flex align-items-center"),
                 dbc.Col(dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc["id"]}, type="number", value=0.0, step=0.01, min=0, size="sm"), width=2),
                 dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc["id"]}, type="text", placeholder="Remarks...", size="sm"), width=2),
             ], className="mb-2")

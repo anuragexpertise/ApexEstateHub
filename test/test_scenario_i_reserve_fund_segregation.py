@@ -28,21 +28,21 @@ def _seed(patched_db):
     })
     patched_db.tables.setdefault("accounts", []).extend([
         {"id": 1, "society_id": 1, "name": "Balance Sheet Root", "tab_name": "Bal",
-         "drcr_account": None, "has_bf": False, "drcr_bf": "Cr"},
+         "drcr_account": None, "has_bf": False},
         {"id": 2, "society_id": 1, "name": "Capital Account", "tab_name": "CapAc",
-         "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "drcr_account": "Cr", "has_bf": True},
         {"id": 211, "society_id": 1, "name": "Interest Income", "tab_name": "IncInt",
-         "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "drcr_account": "Cr", "has_bf": True},
         {"id": 2311, "society_id": 1, "name": "Society Maintenance Charge",
          "tab_name": "IncExp", "drcr_account": "Cr", "has_bf": False},
         {"id": 201, "society_id": 1, "name": "Sinking Fund Reserve",
-         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True},
         {"id": 202, "society_id": 1, "name": "Repair & Maintenance Fund Reserve",
-         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True},
         {"id": 203, "society_id": 1, "name": "Corpus Fund",
-         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True, "drcr_bf": "Cr"},
+         "tab_name": "Bal", "drcr_account": "Cr", "has_bf": True},
         {"id": 633, "society_id": 1, "name": "Cash-in-hand", "tab_name": "CiH",
-         "drcr_account": "Dr", "has_bf": True, "drcr_bf": "Dr"},
+         "drcr_account": "Dr", "has_bf": True},
     ])
     patched_db.tables.setdefault("transactions", []).extend([
         # Cr-side income this FY (Cr-positive movement that rolls up to root).
