@@ -602,6 +602,17 @@ KPI_CARDS = {
         "title": "FY Closing Report", "group": "Financials",
     },
 
+    # Nav tile for the Three-Statement Financial Report (P2 Item 1).
+    # Generates: Receipts & Payments (Cash), Income & Expenditure (Accrual),
+    # Balance Sheet (Position). Admin-only; same bypass-DRILLDOWN_MAP pattern
+    # as kpi_fy_closing_report — see drilldown_callbacks.py special case.
+    "kpi_financial_statements": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-file-invoice-dollar", "color": "#2c3e50",
+        "title": "Financial Statements", "group": "Financials",
+    },
+
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
@@ -1125,6 +1136,7 @@ DEFAULT_LAYOUTS = {
             "kpi_cashbook_open",
             "kpi_ledger_open",
             "kpi_fy_closing_report",
+            "kpi_financial_statements",
         ],
         "events": ["kpi_events_total", "kpi_events_tickets"],
         # Per the Concerns workflow spec: Admin/Concerns tab shows

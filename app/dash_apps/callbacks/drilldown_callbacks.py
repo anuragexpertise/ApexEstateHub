@@ -57,7 +57,7 @@ from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export, asset_export
+from database import cashbook_export, ledger_export, tds_export, gst_export, income_tax_export, asset_export, financial_statements_export
 from database import tds_compliance
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
@@ -650,6 +650,30 @@ def register_drilldown_callbacks(app):
                         fy_prefill["fy"] = int(fy_suffix)
                 store = nav_state.navigate_to(
                     store, "form_fy_closing_report", "FY Closing Report",
+                    prefill=fy_prefill,
+                )
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
+            # ── Financial Statements (Three-Statement Report) — custom card
+            # Same bypass-DRILLDOWN_MAP pattern as kpi_fy_closing_report;
+            # the in-card FY switcher pills reuse this same click pipeline
+            # with "kpi_financial_statements__<fy>" ids.
+            if card_id.startswith("kpi_financial_statements"):
+                if role != "admin":
+                    return no_update, no_update, no_update, no_update, {
+                        "_toast": {"type": "error", "message": "Admin only."}
+                    }
+                store = nav_state.initial_state(role, sid)
+                fy_prefill = {}
+                if "__" in card_id:
+                    fy_suffix = card_id.split("__", 1)[1]
+                    if fy_suffix.isdigit():
+                        fy_prefill["fy"] = int(fy_suffix)
+                store = nav_state.navigate_to(
+                    store, "form_financial_statements", "Financial Statements",
                     prefill=fy_prefill,
                 )
                 hide_kpis = True
@@ -2469,6 +2493,22 @@ def register_drilldown_callbacks(app):
             # browser download link could never actually satisfy.
             data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
             filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
+        elif entity == "financial_statements":
+            # Three-Statement Financial Report (P2 Item 1):
+            # 1. Receipts & Payments (Cash basis)
+            # 2. Income & Expenditure (Accrual basis)
+            # 3. Balance Sheet (Position statement)
+            data = financial_statements_export.export_all_three_statements(None, sid, fy)
+            filename = f"FinancialStatements_FY{fy}-{fy+1}.xlsx"
+        elif entity == "receipts_payments":
+            data = financial_statements_export.export_receipts_payments(None, sid, fy)
+            filename = f"ReceiptsPayments_FY{fy}-{fy+1}.xlsx"
+        elif entity == "income_expenditure":
+            data = financial_statements_export.export_income_expenditure(None, sid, fy)
+            filename = f"IncomeExpenditure_FY{fy}-{fy+1}.xlsx"
+        elif entity == "balance_sheet":
+            data = financial_statements_export.export_balance_sheet(None, sid, fy)
+            filename = f"BalanceSheet_FY{fy}-{fy+1}.xlsx"
         elif entity == "member_ledger":
             
             prefill = nav_state.get_prefill(store)
@@ -3003,6 +3043,34 @@ def _render_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
                 mutuality_summary=mutuality_summary,
+            )
+
+        # ── Financial Statements (Three-Statement Report) — custom card
+        # Same pattern as form_fy_closing_report — loads data from the three
+        # SQL functions and renders the preview + export buttons.
+        if card_id == "form_financial_statements":
+            if get_current_user_role() != "admin":
+                return html.Div("Admin only.", className="text-danger p-3")
+            sid_val = filters.get("society_id")
+            fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
+            selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
+            
+            rp_rows, rp_err = (loaders.get_receipts_payments_fy(sid_val, selected_fy)
+                               if sid_val and selected_fy else ([], "Society not resolved"))
+            ie_rows, ie_err = (loaders.get_income_expenditure_fy(sid_val, selected_fy)
+                               if sid_val and selected_fy else ([], "Society not resolved"))
+            bs_rows, bs_err = (loaders.get_balance_sheet_fy(sid_val, selected_fy)
+                               if sid_val and selected_fy else ([], "Society not resolved"))
+            
+            # Get society name for header
+            society_row = db._execute("SELECT name FROM societies WHERE id=%s", (sid_val,), fetch_one=True) if sid_val else None
+            society_name = society_row.get("name", "Society") if society_row else "Society"
+            
+            return renderers.render_financial_statements_card(
+                rp_rows=rp_rows, ie_rows=ie_rows, bs_rows=bs_rows,
+                error=rp_err or ie_err or bs_err,
+                fy_options=fy_options, selected_fy=selected_fy,
+                society_name=society_name,
             )
 
         # ── My Transactions — member's own Sundry Debtors passbook ───────────

@@ -3794,6 +3794,167 @@ def render_fy_closing_card(rows: list, error: str | None,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# FINANCIAL STATEMENTS CARD — Three-statement report (P2 Item 1)
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_financial_statements_card(
+    rp_rows: list, ie_rows: list, bs_rows: list,
+    error: str | None,
+    fy_options: list, selected_fy,
+    society_name: str = "Society"
+) -> html.Div:
+    """
+    Read-only Three-Statement Financial Report card with export buttons.
+    Shows:
+    - Receipts & Payments Account (Cash basis)
+    - Income & Expenditure Account (Accrual basis)
+    - Balance Sheet (Position statement)
+    
+    Uses the same FY pill pattern as render_fy_closing_card and the same
+    btn-fy-export/dcc.Download pattern for exports.
+    """
+    color = "#2c3e50"
+
+    def _fy_label(fy):
+        return f"{fy}-{str(fy + 1)[-2:]}"
+
+    pills = html.Div([
+        html.Div(
+            _fy_label(fy),
+            id={"type": "kpi-card-div", "card_id": f"kpi_financial_statements__{fy}"},
+            n_clicks=0,
+            style={
+                "padding": "6px 14px", "borderRadius": "20px", "fontSize": "12px",
+                "fontWeight": "700", "cursor": "pointer", "display": "inline-block",
+                "marginRight": "8px", "marginBottom": "8px",
+                "background": color if fy == selected_fy else "#fff",
+                "color": "#fff" if fy == selected_fy else "#555",
+                "border": f"1px solid {color}" if fy == selected_fy else "1px solid #e0e0e0",
+            },
+        )
+        for fy in fy_options
+    ], style={"marginBottom": "12px"})
+
+    header = html.Div([
+        html.Div([
+            html.Div(html.I(className="fas fa-file-invoice-dollar",
+                            style={"color": "#fff", "fontSize": "16px"}),
+                     style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                            "background": f"linear-gradient(135deg,{color},{color}aa)",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center", "marginRight": "12px"}),
+            html.Div([
+                html.Strong("Financial Statements", style={"fontSize": "14px"}),
+                html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
+                         style={"fontSize": "11px", "color": "#999"}),
+                html.Div(society_name, style={"fontSize": "10px", "color": "#888"}),
+            ]),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+        html.Div([
+            pills,
+            html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export All Three Statements"],
+                    id={"type": "btn-fy-export", "entity": "financial_statements"},
+                    size="sm", color="success", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "financial_statements"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Receipts & Payments"],
+                    id={"type": "btn-fy-export", "entity": "receipts_payments"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "receipts_payments"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Income & Expenditure"],
+                    id={"type": "btn-fy-export", "entity": "income_expenditure"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "income_expenditure"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Balance Sheet"],
+                    id={"type": "btn-fy-export", "entity": "balance_sheet"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "balance_sheet"}),
+            ]) if selected_fy else None,
+        ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start", "flexWrap": "wrap"}),
+    ], style={"padding": "12px 16px",
+              "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
+
+    if error:
+        return html.Div([
+            header,
+            html.Div(
+                dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error],
+                          color="warning", style={"borderRadius": "10px"}),
+                style={"padding": "16px"},
+            ),
+        ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+                  "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+    # Build preview tables for each statement
+    def _make_preview_table(rows, columns, title, max_rows=10):
+        if not rows:
+            return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
+        
+        head = html.Thead(html.Tr([
+            html.Th(col, style={"fontSize": "11px"}) for col in columns
+        ], style={"fontSize": "11px"}))
+        
+        display_rows = rows[:max_rows]
+        body_rows = []
+        for r in display_rows:
+            body_rows.append(html.Tr([
+                html.Td(str(r.get(col.lower().replace(" ", "_"), "")), 
+                        style={"fontSize": "12px", "padding": "6px 8px"})
+                for col in columns
+            ]))
+        
+        table = dbc.Table(
+            [head, html.Tbody(body_rows)],
+            bordered=False, hover=True, responsive=True, size="sm",
+            style={"marginTop": "4px", "marginBottom": "8px"}
+        )
+        
+        row_count = len(rows)
+        if row_count > max_rows:
+            note = html.Div(f"Showing {max_rows} of {row_count} rows...", 
+                           style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginBottom": "8px"})
+        else:
+            note = None
+            
+        return html.Div([
+            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
+            table,
+            note,
+        ])
+
+    if not rp_rows and not ie_rows and not bs_rows:
+        body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
+    else:
+        rp_preview = _make_preview_table(rp_rows, ["Line Type", "Account", "Dr Amount", "Cr Amount"], "1. Receipts & Payments Account (Cash Basis)")
+        ie_preview = _make_preview_table(ie_rows, ["Section", "Account", "Amount"], "2. Income & Expenditure Account (Accrual Basis)")
+        bs_preview = _make_preview_table(bs_rows, ["Section", "Account", "Amount"], "3. Balance Sheet (Position Statement)")
+        
+        body = html.Div([rp_preview, ie_preview, bs_preview], style={"padding": "16px"})
+
+    return html.Div([
+        header,
+        body,
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+              "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # MY TRANSACTIONS CARD — member-facing Sundry Debtors passbook
 # ════════════════════════════════════════════════════════════════════════════
 
