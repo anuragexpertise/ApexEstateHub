@@ -317,6 +317,7 @@ def register_setup_wizard_callbacks(app):
                 if idx < len(tds_rates):
                     tds_pairs.append({
                         "section": item[0],
+                        "discriminator": item[1],
                         "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
                         "rate": float(tds_rates[idx] or 0),
                         "rate_no_pan": float(tds_rates_no_pan[idx] or 0) if idx < len(tds_rates_no_pan) else 0.0,

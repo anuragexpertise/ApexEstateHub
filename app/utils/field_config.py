@@ -717,6 +717,13 @@ FIELD_CONFIG = {
             "validation": {},
             "tooltip": "TDS section code (e.g., 194C for contractors, 194J for professionals)",
         },
+        "payment_nature": {
+            "visible": ADMIN_MASTER,
+            "editable": ADMIN_ONLY,
+            "default": "",
+            "validation": {},
+            "tooltip": "Nature of payment for TDS: for 194-I (land_building/plant_machinery), for 194J (technical/professional)",
+        },
         "cheque_no": {
             "visible": ALL_ROLES,
             "editable": ADMIN_MASTER,
