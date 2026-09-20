@@ -2967,6 +2967,24 @@ BEGIN
         confirmed_at = NOW()
     WHERE id = p_expense_id;
 
+    -- RCM: self-invoiced GST liability on payments to unregistered parties.
+    -- Mirrors the immediate-confirm branch in fn_save_expense — expenses
+    -- submitted as 'pending' and confirmed here previously never triggered
+    -- this at all, silently skipping RCM liability for them.
+    IF v_rec.rcm_applicable THEN
+        DECLARE
+            v_rcm_cgst NUMERIC(15,2) := 0;
+            v_rcm_sgst NUMERIC(15,2) := 0;
+        BEGIN
+            SELECT COALESCE(rcm.cgst_amount, 0), COALESCE(rcm.sgst_amount, 0)
+              INTO v_rcm_cgst, v_rcm_sgst
+              FROM fn_compute_rcm_liability(v_rec.society_id, p_expense_id) AS rcm;
+            IF v_rcm_cgst > 0 OR v_rcm_sgst > 0 THEN
+                PERFORM fn_post_rcm_liability(v_rec.society_id, p_expense_id, v_rcm_cgst, v_rcm_sgst);
+            END IF;
+        END;
+    END IF;
+
     expense_id := p_expense_id;
     receipt_number := NULL;
     msg := 'Verified: transaction #' || v_trx_id::TEXT;
@@ -5167,6 +5185,14 @@ RETURNS TABLE (
     sgst_acc_id   INT
 )
 LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
+-- Fixed (2026-09, live-tested): RETURNS TABLE(cgst_acc_id, sgst_acc_id)
+-- declares implicit OUT-parameter variables in scope for the whole
+-- function body, which collide with fn_resolve_gst_accounts' identically
+-- named result columns in the SELECT ... INTO below ("column reference
+-- cgst_acc_id is ambiguous") — this function failed on every call. Same
+-- bug class already fixed once in fn_gst_summary_fy; the pragma makes
+-- plpgsql prefer the table column, which is what the query intends.
 DECLARE
     v_expense     expenses%ROWTYPE;
     v_vendor_rcm  VARCHAR(50);
@@ -5287,7 +5313,7 @@ BEGIN
         ) VALUES (
             p_society_id, 'Dr', v_expense.expense_date, v_exp_acc, v_vendor_id, v_expense.role,
             'RCM CGST — ' || v_expense.particulars,
-            p_cgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+            p_cgst, 'journal', 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
         );
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
@@ -5295,7 +5321,7 @@ BEGIN
         ) VALUES (
             p_society_id, 'Cr', v_expense.expense_date, v_cgst_acc, v_vendor_id, v_expense.role,
             'CGST Payable (RCM) — ' || v_expense.particulars,
-            p_cgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+            p_cgst, 'journal', 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
         );
     END IF;
 
@@ -5306,7 +5332,7 @@ BEGIN
         ) VALUES (
             p_society_id, 'Dr', v_expense.expense_date, v_exp_acc, v_vendor_id, v_expense.role,
             'RCM SGST — ' || v_expense.particulars,
-            p_sgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+            p_sgst, 'journal', 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
         );
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
@@ -5314,7 +5340,7 @@ BEGIN
         ) VALUES (
             p_society_id, 'Cr', v_expense.expense_date, v_sgst_acc, v_vendor_id, v_expense.role,
             'SGST Payable (RCM) — ' || v_expense.particulars,
-            p_sgst, v_expense.mode, 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
+            p_sgst, 'journal', 'paid', v_expense.user_id, NOW(), 'expenses', p_expense_id, v_journal_id
         );
     END IF;
 END;
