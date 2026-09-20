@@ -204,7 +204,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     -- updated_by kept: a vendor can self-edit their own profile too.
     updated_by INT REFERENCES users (id),
     pan_number VARCHAR(10),
-    gstin VARCHAR(15)
+    gstin VARCHAR(15),
+    payee_type VARCHAR(20) CHECK (payee_type IN ('individual', 'huf', 'company', 'firm', 'llp', 'other')) DEFAULT 'other'
 );
 
 CREATE TABLE IF NOT EXISTS security_staff (
@@ -1263,6 +1264,7 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     section VARCHAR(10) NOT NULL,
     nature_of_income VARCHAR(255),
+    discriminator VARCHAR(50),
     rate NUMERIC(5, 2) NOT NULL,
     rate_no_pan NUMERIC(5, 2),
     single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
@@ -1270,7 +1272,7 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
     effective_from DATE NOT NULL DEFAULT '2024-04-01',
     effective_to DATE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, effective_from)
+    CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, discriminator, effective_from)
 );
 
 -- Circular-reference FKs (societies <-> users)
@@ -1482,7 +1484,7 @@ CREATE INDEX IF NOT EXISTS idx_poll_votes_apartment ON poll_votes (apartment_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_apartment ON poll_votes (poll_id, apartment_id);
 
 CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup
-    ON tds_section_rates (society_id, section, effective_from);
+    ON tds_section_rates (society_id, section, discriminator, effective_from);
 
 -- SECTION 3: FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
@@ -2262,9 +2264,14 @@ DECLARE
     v_cgst_rate           NUMERIC(5,2);
     v_sgst_rate           NUMERIC(5,2);
     v_total_taxable       NUMERIC(10,2);
+    v_fund_gst_exempt     BOOLEAN;
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
+
+    -- Read fund_gst_exempt setting (default TRUE = exempt)
+    SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
+    v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, TRUE);
 
     -- Resolve fallback accounts once per society
     SELECT id INTO v_fallback_maint_acc FROM accounts
@@ -2395,7 +2402,13 @@ BEGIN
             END IF;
 
             -- Evaluate taxability on the common area maintenance components
-            v_total_taxable := v_base_maint + v_base_sinking + v_base_repair;
+            -- fund_gst_exempt = TRUE means sinking & repair funds are exempt from GST taxable base
+            -- (they are still tracked as receivables but not included in GST calculation)
+            IF v_fund_gst_exempt THEN
+                v_total_taxable := v_base_maint;
+            ELSE
+                v_total_taxable := v_base_maint + v_base_sinking + v_base_repair;
+            END IF;
 
             IF v_total_taxable > v_gst_threshold AND COALESCE(v_society_turnover, 0) > v_turnover_threshold THEN
                 v_gst_cgst := ROUND(v_total_taxable * (v_cgst_rate / 100.0), 2);
@@ -4745,7 +4758,7 @@ CREATE OR REPLACE FUNCTION fn_save_receipt(
     p_trx_id           VARCHAR DEFAULT NULL,
     p_source_reference VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
+RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT, status VARCHAR(20), cash_warning TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_receipt_id INT;
@@ -4755,10 +4768,23 @@ DECLARE
     v_drcr       VARCHAR(2);
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
+    v_cash_warning TEXT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
+
+    -- Cash transaction warnings (P1 Item 1)
+    -- Sec 40A(3): Cash expenses > 10,000 not deductible
+    -- Sec 269SS/269T: Cash loans/deposits/repayments > 20,000 attract penalty = amount
+    IF p_mode = 'cash' AND p_amount >= 10000 THEN
+        v_cash_warning := 'Cash receipt ≥ ₹10,000 — may attract Sec 40A(3) disallowance if treated as expense. ';
+        IF p_amount >= 20000 THEN
+            v_cash_warning := v_cash_warning || 'Cash receipt ≥ ₹20,000 — Sec 269SS/269T may apply for loan/deposit transactions (penalty = amount).';
+        END IF;
+    ELSE
+        v_cash_warning := NULL;
+    END IF;
 
     SELECT drcr_account INTO v_drcr FROM accounts WHERE id = p_acc_id AND society_id = p_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Account % not found for this society', p_acc_id; END IF;
@@ -4838,6 +4864,7 @@ BEGIN
     receipt_id := v_receipt_id;
     transaction_id := v_trx_id;
     journal_id := v_journal_id;
+    cash_warning := v_cash_warning;
 
     RETURN NEXT;
 END;
@@ -4862,7 +4889,7 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
     p_tds_pct          NUMERIC DEFAULT 10,
     p_tds_section      VARCHAR DEFAULT NULL
 )
-RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
+RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20), cash_warning TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_expense_id INT;
@@ -4875,12 +4902,25 @@ DECLARE
     v_drcr       VARCHAR(2);
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
+    v_cash_warning TEXT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
     IF p_tds_pct IS NOT NULL AND (p_tds_pct < 0 OR p_tds_pct > 100) THEN
         RAISE EXCEPTION 'TDS %% must be between 0 and 100';
+    END IF;
+
+    -- Cash transaction warnings (P1 Item 1)
+    -- Sec 40A(3): Cash expenses > 10,000 not deductible
+    -- Sec 269SS/269T: Cash loans/deposits/repayments > 20,000 attract penalty = amount
+    IF p_mode = 'cash' AND p_amount >= 10000 THEN
+        v_cash_warning := 'Cash expense ≥ ₹10,000 — Sec 40A(3) disallows as tax deduction. ';
+        IF p_amount >= 20000 THEN
+            v_cash_warning := v_cash_warning || 'Cash expense ≥ ₹20,000 — Sec 269SS/269T may apply for loan/deposit/repayment transactions (penalty = amount).';
+        END IF;
+    ELSE
+        v_cash_warning := NULL;
     END IF;
  
     SELECT drcr_account INTO v_drcr FROM accounts WHERE id = p_acc_id AND society_id = p_society_id;
@@ -4975,11 +5015,12 @@ BEGIN
         v_journal_id := NULL;
     END IF;
  
-    status := v_status;
+status := v_status;
     expense_id := v_expense_id;
     transaction_id := v_trx_id;
     journal_id := v_journal_id;
- 
+    cash_warning := v_cash_warning;
+
     RETURN NEXT;
 END;
 $$;
@@ -8485,11 +8526,12 @@ END;
 $$;
 
 -- ── Resolve the active rate row for a section as of a given date ──
-DROP FUNCTION IF EXISTS fn_tds_section_rate (INT, VARCHAR, DATE) CASCADE;
+DROP FUNCTION IF EXISTS fn_tds_section_rate (INT, VARCHAR, VARCHAR, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_tds_section_rate(
     p_society_id INT,
     p_section    VARCHAR,
+    p_discriminator VARCHAR DEFAULT NULL,
     p_as_of      DATE DEFAULT CURRENT_DATE
 )
 RETURNS TABLE (
@@ -8507,6 +8549,7 @@ BEGIN
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
+       AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
        AND r.effective_from <= p_as_of
        AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
      ORDER BY r.effective_from DESC
@@ -8559,12 +8602,13 @@ $$;
 -- Returns 0 (and applies=FALSE) otherwise, so callers pre-fill the form
 -- with 0 and don't split. no_pan_uplift applies the higher rate when the
 -- vendor has no PAN on file (the caller passes p_pan_captured).
-DROP FUNCTION IF EXISTS fn_compute_tds_pct (INT, INT, VARCHAR, VARCHAR, NUMERIC, BOOLEAN) CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_tds_pct (INT, INT, VARCHAR, VARCHAR, VARCHAR, NUMERIC, BOOLEAN) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_tds_pct(
     p_society_id      INT,
     p_vendor_id       INT,
     p_section         VARCHAR,
+    p_discriminator   VARCHAR,
     p_fy              VARCHAR,
     p_amount          NUMERIC,
     p_pan_captured    BOOLEAN DEFAULT TRUE
@@ -8592,6 +8636,7 @@ BEGIN
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
+       AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
        AND r.effective_from <= CURRENT_DATE
        AND (r.effective_to IS NULL OR r.effective_to >= CURRENT_DATE)
      ORDER BY r.effective_from DESC

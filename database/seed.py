@@ -300,12 +300,12 @@ USERS = [
      "mobile": "9822222222", "alt_mobile": "9822222223",
      "alt_address": "456, Secondary Road, Agra, UP - 282001",
      "apt_calc_start_date": "2026-06-01"},                 # fixed-amount history
-    {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
-     "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing",
-     "mobile": "9833333333", "service_description": "Best plumber in town", "pan_number": "ABCDE1234F"},
+{"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
+      "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing",
+      "mobile": "9833333333", "service_description": "Best plumber in town", "pan_number": "ABCDE1234F", "payee_type": "individual"},
     {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
-     "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening",
-     "mobile": "9844444444", "service_description": "Best Gardener", "pan_number": "FGHIJ5678K"},
+      "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening",
+      "mobile": "9844444444", "service_description": "Best Gardener", "pan_number": "FGHIJ5678K", "payee_type": "individual"},
     {"role": "security",  "email": "guard1@sunriseresidency.com",   "password": "Guard1@2024",
      "name": "Ramu Singh",  "shift": "morning", "salary": 120, "mobile": "9855555555"},
     {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
@@ -358,37 +358,37 @@ USERS = [
     {"role": "apartment", "email": "visitor2@sunriseresidency.com", "password": "Visitor2@2024",
      "name": "Sunita Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222232"},
 
-    # ── +10 vendors, each a distinct service type ──────────────────────
+# ── +10 vendors, each a distinct service type ──────────────────────
     {"role": "vendor",    "email": "vendor3@sunriseresidency.com",  "password": "Vendor3@2024",
-     "business_name": "Electrical Experts", "name": "Manoj Tiwari", "service_type": "Electrical",
-     "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out", "pan_number": "ELECP1234A"},
+      "business_name": "Electrical Experts", "name": "Manoj Tiwari", "service_type": "Electrical",
+      "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out", "pan_number": "ELECP1234A", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor4@sunriseresidency.com",  "password": "Vendor4@2024",
-     "business_name": "WoodCraft Carpentry", "name": "Suresh Thakur", "service_type": "Carpentry",
-     "mobile": "9877100002", "service_description": "Custom furniture repair and fittings", "pan_number": "WOODC5678B"},
+      "business_name": "WoodCraft Carpentry", "name": "Suresh Thakur", "service_type": "Carpentry",
+      "mobile": "9877100002", "service_description": "Custom furniture repair and fittings", "pan_number": "WOODC5678B", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor5@sunriseresidency.com",  "password": "Vendor5@2024",
-     "business_name": "ColorMax Painters", "name": "Anil Rawat", "service_type": "Painting",
-     "mobile": "9877100003", "service_description": "Interior and exterior painting specialists", "pan_number": "COLOR9012C"},
+      "business_name": "ColorMax Painters", "name": "Anil Rawat", "service_type": "Painting",
+      "mobile": "9877100003", "service_description": "Interior and exterior painting specialists", "pan_number": "COLOR9012C", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor6@sunriseresidency.com",  "password": "Vendor6@2024",
-     "business_name": "PestFree Solutions", "name": "Ravi Kumar", "service_type": "Pest Control",
-     "mobile": "9877100004", "service_description": "Odourless, eco-friendly pest control", "pan_number": "PESTF3456D"},
+      "business_name": "PestFree Solutions", "name": "Ravi Kumar", "service_type": "Pest Control",
+      "mobile": "9877100004", "service_description": "Odourless, eco-friendly pest control", "pan_number": "PESTF3456D", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor7@sunriseresidency.com",  "password": "Vendor7@2024",
-     "business_name": "SparkleClean Services", "name": "Geeta Devi", "service_type": "Housekeeping",
-     "mobile": "9877100005", "service_description": "Deep cleaning and daily housekeeping staff", "pan_number": "SPARK7890E"},
+      "business_name": "SparkleClean Services", "name": "Geeta Devi", "service_type": "Housekeeping",
+      "mobile": "9877100005", "service_description": "Deep cleaning and daily housekeeping staff", "pan_number": "SPARK7890E", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor8@sunriseresidency.com",  "password": "Vendor8@2024",
-     "business_name": "SecureTech Systems", "name": "Vikas Sharma", "service_type": "CCTV & Security",
-     "mobile": "9877100006", "service_description": "CCTV installation and access-control systems", "pan_number": "SECUR1234F"},
+      "business_name": "SecureTech Systems", "name": "Vikas Sharma", "service_type": "CCTV & Security",
+      "mobile": "9877100006", "service_description": "CCTV installation and access-control systems", "pan_number": "SECUR1234F", "payee_type": "company"},
     {"role": "vendor",    "email": "vendor9@sunriseresidency.com",  "password": "Vendor9@2024",
-     "business_name": "CoolAir HVAC", "name": "Rakesh Yadav", "service_type": "AC Repair",
-     "mobile": "9877100007", "service_description": "AC servicing, repair and installation"},
+      "business_name": "CoolAir HVAC", "name": "Rakesh Yadav", "service_type": "AC Repair",
+      "mobile": "9877100007", "service_description": "AC servicing, repair and installation", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor10@sunriseresidency.com", "password": "Vendor10@2024",
-     "business_name": "LiftCare Elevators", "name": "Prakash Jain", "service_type": "Elevator Maintenance",
-     "mobile": "9877100008", "service_description": "AMC and breakdown support for society lifts"},
+      "business_name": "LiftCare Elevators", "name": "Prakash Jain", "service_type": "Elevator Maintenance",
+      "mobile": "9877100008", "service_description": "AMC and breakdown support for society lifts", "payee_type": "company"},
     {"role": "vendor",    "email": "vendor11@sunriseresidency.com", "password": "Vendor11@2024",
-     "business_name": "Royal Caterers", "name": "Suman Bhatia", "service_type": "Catering",
-     "mobile": "9877100009", "service_description": "Event and festival catering services"},
+      "business_name": "Royal Caterers", "name": "Suman Bhatia", "service_type": "Catering",
+      "mobile": "9877100009", "service_description": "Event and festival catering services", "payee_type": "firm"},
     {"role": "vendor",    "email": "vendor12@sunriseresidency.com", "password": "Vendor12@2024",
-     "business_name": "GreenScape Landscaping", "name": "Vijay Rathi", "service_type": "Landscaping",
-     "mobile": "9877100010", "service_description": "Garden upkeep and landscaping design"},
+      "business_name": "GreenScape Landscaping", "name": "Vijay Rathi", "service_type": "Landscaping",
+      "mobile": "9877100010", "service_description": "Garden upkeep and landscaping design", "payee_type": "firm"},
 
     # ── +10 security guards, mixed shifts ───────────────────────────────
     {"role": "security",  "email": "guard3@sunriseresidency.com",   "password": "Guard3@2024",
@@ -989,71 +989,73 @@ def seed_admin_created_by(cur, conn, admin_uid: int):
 # applicable Finance Act before relying on these for a filing. Each
 # society gets the same set of rows (society_id-scoped table).
 #   194C: 1% (individual/HUF) / 2% (others); F30K single / F1L annual.
-#   194J: 10% professional/technical services, no threshold.
+#   194D: 2% (individual/HUF) / 10% (company); F20K single / F20K annual.
+#   194-I: 10% (land/building/furniture) / 2% (plant/machinery); F6L annual (F50K/month).
+#   194J: 2% (technical fees) / 10% (professional fees); F50K single / F50K annual.
 # rate_no_pan = Section 206AA higher rate when the vendor has no PAN.
+# discriminator: for 194C/194D it's payee_type (ind_huf/other/company), for 194-I it's
+# payment nature (land_building/plant_machinery), for 194J it's (technical/professional).
 TDS_SECTION_RATE_SEED = [
-    # (section, nature, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
-    ('192', 'Salary income', 0.00, 20.00, 0, 0),
-    ('192A', 'Premature EPF withdrawal', 10.00, 30.00, 50000, 50000),
-    ('193', 'Interest on securities', 10.00, 20.00, 10000, 10000),
-    ('194', 'Dividend on shares/mutual funds', 10.00, 20.00, 5000, 5000),
-    ('194A', 'Interest other than securities', 10.00, 20.00, 40000, 40000),
-    ('194B', 'Winnings from lottery, puzzles, crossword', 30.00, 30.00, 10000, 10000),
-    ('194BA', 'Net winnings from online games', 30.00, 30.00, 0, 0),
-    ('194BB', 'Winnings from horse races', 30.00, 30.00, 10000, 10000),
-    ('194C', 'Payments to contractors / subcontractors (Ind/HUF)', 1.00, 20.00, 30000, 100000),
-    ('194C', 'Payments to contractors / subcontractors (Others)', 2.00, 20.00, 30000, 100000),
-    ('194D', 'Insurance commission (Ind)', 5.00, 20.00, 15000, 15000),
-    ('194D', 'Insurance commission (Company)', 10.00, 20.00, 15000, 15000),
-    ('194DA', 'Maturity proceeds from life insurance policies', 5.00, 20.00, 100000, 100000),
-    ('194EE', 'Payments from National Savings Scheme (NSS)', 10.00, 20.00, 2500, 2500),
-    ('194F', 'Repurchase of units by Mutual Fund/UTI', 20.00, 20.00, 0, 0),
-    ('194G', 'Commission on sale of lottery tickets', 5.00, 20.00, 15000, 15000),
-    ('194H', 'Brokerage or commission', 2.00, 20.00, 15000, 15000),
-    ('194-I', 'Rent on land, building, or furniture', 10.00, 20.00, 240000, 240000),
-    ('194-I', 'Rent on plant, machinery, or equipment', 2.00, 20.00, 240000, 240000),
-    ('194-IB', 'Rent paid by Individual / HUF', 2.00, 20.00, 600000, 600000),
-    ('194-IA', 'Payment on transfer of immovable property', 1.00, 20.00, 5000000, 5000000),
-    ('194-IC', 'Monetary payment under Joint Development Agreement', 10.00, 20.00, 0, 0),
-    ('194J', 'Technical fees, royalty, call centre operator', 2.00, 20.00, 30000, 30000),
-    ('194J', 'Professional fees, director fees, non-compete', 10.00, 20.00, 30000, 30000),
-    ('194K', 'Income in respect of mutual fund units', 10.00, 20.00, 5000, 5000),
-    ('194M', 'Contract/professional fees paid by Individual/HUF', 2.00, 20.00, 5000000, 5000000),
-    ('194N', 'Cash withdrawals from banking company/co-op bank', 2.00, 20.00, 10000000, 10000000),
-    ('194-O', 'E-commerce operator on sale of goods/services', 0.10, 20.00, 500000, 500000),
-    ('194Q', 'Purchase of goods exceeding specified limit', 0.10, 20.00, 5000000, 5000000),
-    ('194R', 'Benefit or perquisite arising from business/profession', 10.00, 20.00, 20000, 20000),
-    ('194S', 'Transfer of Virtual Digital Assets (Crypto, NFT)', 1.00, 20.00, 10000, 10000),
-    ('195', 'Payments to Non-Resident / Foreign Company', 20.00, 20.00, 0, 0),
-    ('206AA', 'Higher rate for failure to furnish PAN', 20.00, 20.00, 0, 0),
-    ('206AB', 'Higher rate for non-filers of specified tax returns', 5.00, 20.00, 0, 0),
+    # (section, discriminator, nature, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
+    ('192', None, 'Salary income', 0.00, 20.00, 0, 0),
+    ('192A', None, 'Premature EPF withdrawal', 10.00, 30.00, 50000, 50000),
+    ('193', None, 'Interest on securities', 10.00, 20.00, 10000, 10000),
+    ('194', None, 'Dividend on shares/mutual funds', 10.00, 20.00, 5000, 5000),
+    ('194A', None, 'Interest other than securities', 10.00, 20.00, 40000, 40000),
+    ('194B', None, 'Winnings from lottery, puzzles, crossword', 30.00, 30.00, 10000, 10000),
+    ('194BA', None, 'Net winnings from online games', 30.00, 30.00, 0, 0),
+    ('194BB', None, 'Winnings from horse races', 30.00, 30.00, 10000, 10000),
+    ('194C', 'ind_huf', 'Payments to contractors / subcontractors (Ind/HUF)', 1.00, 20.00, 30000, 100000),
+    ('194C', 'other', 'Payments to contractors / subcontractors (Others)', 2.00, 20.00, 30000, 100000),
+    ('194D', 'ind_huf', 'Insurance commission (Ind/HUF)', 2.00, 20.00, 20000, 20000),
+    ('194D', 'company', 'Insurance commission (Company)', 10.00, 20.00, 20000, 20000),
+    ('194DA', None, 'Maturity proceeds from life insurance policies', 5.00, 20.00, 100000, 100000),
+    ('194EE', None, 'Payments from National Savings Scheme (NSS)', 10.00, 20.00, 2500, 2500),
+    ('194F', None, 'Repurchase of units by Mutual Fund/UTI', 20.00, 20.00, 0, 0),
+    ('194G', None, 'Commission on sale of lottery tickets', 5.00, 20.00, 15000, 15000),
+    ('194H', None, 'Brokerage or commission', 2.00, 20.00, 15000, 15000),
+    ('194-I', 'land_building', 'Rent on land, building, or furniture', 10.00, 20.00, 600000, 600000),
+    ('194-I', 'plant_machinery', 'Rent on plant, machinery, or equipment', 2.00, 20.00, 600000, 600000),
+    ('194-IB', None, 'Rent paid by Individual / HUF', 2.00, 20.00, 600000, 600000),
+    ('194-IA', None, 'Payment on transfer of immovable property', 1.00, 20.00, 5000000, 5000000),
+    ('194-IC', None, 'Monetary payment under Joint Development Agreement', 10.00, 20.00, 0, 0),
+    ('194J', 'technical', 'Technical fees, royalty, call centre operator', 2.00, 20.00, 50000, 50000),
+    ('194J', 'professional', 'Professional fees, director fees, non-compete', 10.00, 20.00, 50000, 50000),
+    ('194K', None, 'Income in respect of mutual fund units', 10.00, 20.00, 5000, 5000),
+    ('194M', None, 'Contract/professional fees paid by Individual/HUF', 2.00, 20.00, 5000000, 5000000),
+    ('194N', None, 'Cash withdrawals from banking company/co-op bank', 2.00, 20.00, 10000000, 10000000),
+    ('194-O', None, 'E-commerce operator on sale of goods/services', 0.10, 20.00, 500000, 500000),
+    ('194Q', None, 'Purchase of goods exceeding specified limit', 0.10, 20.00, 5000000, 5000000),
+    ('194R', None, 'Benefit or perquisite arising from business/profession', 10.00, 20.00, 20000, 20000),
+    ('194S', None, 'Transfer of Virtual Digital Assets (Crypto, NFT)', 1.00, 20.00, 10000, 10000),
+    ('195', None, 'Payments to Non-Resident / Foreign Company', 20.00, 20.00, 0, 0),
+    ('206AA', None, 'Higher rate for failure to furnish PAN', 20.00, 20.00, 0, 0),
+    ('206AB', None, 'Higher rate for non-filers of specified tax returns', 5.00, 20.00, 0, 0),
 ]
 
 
 def seed_tds_section_rates(cur, conn, society_id: int):
     inserted = 0
-    section_counts = {}
-    for section, nature, rate, rate_no_pan, single_thr, annual_thr in TDS_SECTION_RATE_SEED:
-        # Stagger effective_from only if there are multiple rates for the SAME section.
-        count = section_counts.get(section, 0)
-        eff_from = f"{2024 + count}-04-01"
-        section_counts[section] = count + 1
+    # All variants of the same section now share the same effective_from (2024-04-01),
+    # distinguished by the discriminator column instead of artificial year offsets.
+    for section, discriminator, nature, rate, rate_no_pan, single_thr, annual_thr in TDS_SECTION_RATE_SEED:
+        eff_from = '2024-04-01'
         
         row = _one(
             cur,
             "SELECT 1 FROM tds_section_rates "
-            "WHERE society_id=%s AND section=%s AND effective_from=%s",
-            (society_id, section, eff_from),
+            "WHERE society_id=%s AND section=%s AND discriminator IS NOT DISTINCT FROM %s AND effective_from=%s",
+            (society_id, section, discriminator, eff_from),
         )
         if row:
             continue
         cur.execute(
             """INSERT INTO tds_section_rates
-               (society_id, section, nature_of_income, rate, rate_no_pan,
+               (society_id, section, discriminator, nature_of_income, rate, rate_no_pan,
                 single_bill_threshold, annual_aggregate_threshold, effective_from)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT DO NOTHING""",
-            (society_id, section, nature, rate, rate_no_pan, single_thr, annual_thr, eff_from),
+            (society_id, section, discriminator, nature, rate, rate_no_pan, single_thr, annual_thr, eff_from),
         )
         conn.commit()
         inserted += 1

@@ -29,15 +29,47 @@ def _fy_from_date(d) -> str:
     return str(yr if mo >= 4 else yr - 1)
 
 
-def get_section_rate(db, society_id: int, section: str, as_of=None) -> dict | None:
+def _discriminator_from_vendor(payee_type: str | None, section: str) -> str | None:
+    """
+    Map vendor payee_type + section to the tds_section_rates.discriminator value.
+
+    Legal distinctions per section:
+      194C: Individual/HUF (1%) vs Others: company/firm/llp (2%)
+      194D: Individual/HUF (5% -> 2% from FY26) vs Company (10%)
+      194-I: Land/Building/Furniture (10%) vs Plant/Machinery (2%)
+      194J: Technical fees (2%) vs Professional fees (10%)
+
+    For 194-I and 194J the discriminator is about the NATURE OF PAYMENT,
+    not the payee type. These need to be passed explicitly from the form.
+    """
+    if not payee_type:
+        return None
+
+    pt = payee_type.lower()
+    if section == '194C':
+        if pt in ('individual', 'huf'):
+            return 'ind_huf'
+        return 'other'
+    elif section == '194D':
+        if pt in ('individual', 'huf'):
+            return 'ind_huf'
+        if pt == 'company':
+            return 'company'
+        return 'other'
+    # 194-I and 194J discriminators are payment-nature based, not payee-type based.
+    # They must be supplied explicitly by the caller (from form field).
+    return None
+
+
+def get_section_rate(db, society_id: int, section: str, discriminator: str | None = None, as_of=None) -> dict | None:
     """Resolve the active CBDT rate row for a TDS section, or None if the
     section isn't configured for this society. Returns
     {rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold}."""
     if not section:
         return None
     row = db._execute(
-        "SELECT * FROM fn_tds_section_rate(%s,%s,%s)",
-        (society_id, section, as_of), fetch_one=True,
+        "SELECT * FROM fn_tds_section_rate(%s,%s,%s,%s)",
+        (society_id, section, discriminator, as_of), fetch_one=True,
     )
     if not row or row.get("rate") is None:
         return None
@@ -60,7 +92,7 @@ def vendor_cumulative_tds(
 
 
 def compute_tds_pct(
-    db, society_id: int, vendor_id: int | None, section: str | None, fy: str,
+    db, society_id: int, vendor_id: int | None, section: str | None, discriminator: str | None, fy: str,
     amount: float, pan_captured: bool = True,
 ) -> dict:
     """Decide whether TDS applies to one bill and at what rate.
@@ -72,8 +104,8 @@ def compute_tds_pct(
     if not section or not amount:
         return {"tds_pct": 0.0, "applies": False, "basis": "no-section-or-zero-amount"}
     row = db._execute(
-        "SELECT * FROM fn_compute_tds_pct(%s,%s,%s,%s,%s,%s)",
-        (society_id, vendor_id, section, fy, amount, pan_captured), fetch_one=True,
+        "SELECT * FROM fn_compute_tds_pct(%s,%s,%s,%s,%s,%s,%s)",
+        (society_id, vendor_id, section, discriminator, fy, amount, pan_captured), fetch_one=True,
     ) or {}
     return {
         "tds_pct": float(row.get("tds_pct", 0) or 0),
@@ -137,6 +169,7 @@ def suggest_expense_tax_fields(
     db, society_id: int, acc_id: int | None, vendor_id: int | None,
     amount: float, expense_date=None, exclude_expense_id: int | None = None,
     override_section: str | None = None,
+    payment_nature: str | None = None,  # For 194-I (land_building/plant_machinery) and 194J (technical/professional)
 ) -> dict:
     """All-in-one helper for the expense form: given the chosen account,
     vendor, and amount, return the auto-suggested TDS %/section plus the
@@ -168,8 +201,25 @@ def suggest_expense_tax_fields(
         ) if acc_id else None
         section = (section_row or {}).get("tds_section") or None
 
+    # Get vendor payee_type for discriminator (194C, 194D)
+    vendor_payee_type = None
+    if vendor_id:
+        vendor_row = db._execute(
+            "SELECT payee_type FROM vendors WHERE id=%s AND society_id=%s",
+            (vendor_id, society_id), fetch_one=True,
+        )
+        vendor_payee_type = (vendor_row or {}).get("payee_type")
+
+    # Determine discriminator
+    discriminator = None
+    if section and vendor_payee_type:
+        discriminator = _discriminator_from_vendor(vendor_payee_type, section)
+    # For 194-I and 194J, payment_nature must be passed explicitly
+    if section in ('194-I', '194J') and payment_nature:
+        discriminator = payment_nature
+
     pan_captured = vendor_has_pan(db, vendor_id) if vendor_id else False
-    comp = compute_tds_pct(db, society_id, vendor_id, section, fy, amount, pan_captured)
+    comp = compute_tds_pct(db, society_id, vendor_id, section, discriminator, fy, amount, pan_captured)
 
     result = {
         "tds_pct": comp["tds_pct"],

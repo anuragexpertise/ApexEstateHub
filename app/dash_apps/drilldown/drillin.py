@@ -120,10 +120,10 @@ _TABLE_RULES = {
     },
     "tds_section_rates": {
         "label_fn": lambda r: f"{r.get('rate', '')}%",
-        "sub_fn": lambda r: f"{r.get('section', '')} - {r.get('nature_of_income', '')}",
+        "sub_fn": lambda r: f"{r.get('section', '')} - {r.get('discriminator', '')} - {r.get('nature_of_income', '')}",
         "icon": "fas fa-percent",
         "color": "#17976e",
-        "search_cols": ["section", "nature_of_income", "rate"],
+        "search_cols": ["section", "discriminator", "nature_of_income", "rate"],
         "group_fn": None,
         "group_label": None,
     },

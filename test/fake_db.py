@@ -1167,8 +1167,10 @@ class FakeDB:
     def _fn_tds_section_rate(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
         section = p.get("p1") or p.get("section")
+        discriminator = p.get("p2") or p.get("discriminator")
         rows = [r for r in self.tables.get("tds_section_rates", [])
-                if r.get("society_id") == sid and r.get("section") == section]
+                if r.get("society_id") == sid and r.get("section") == section
+                and (r.get("discriminator") == discriminator or (r.get("discriminator") is None and discriminator is None))]
         if not rows:
             return None
         rows.sort(key=lambda r: str(r.get("effective_from", "")), reverse=True)
@@ -1200,16 +1202,17 @@ class FakeDB:
         sid = p.get("p0") or p.get("society_id")
         vid = p.get("p1") or p.get("vendor_id")
         section = p.get("p2") or p.get("section")
-        fy = str(p.get("p3") or p.get("fy"))
-        amount = float(p.get("p4") or p.get("amount") or 0)
-        pan = p.get("p5", True)
+        discriminator = p.get("p3") or p.get("discriminator")
+        fy = str(p.get("p4") or p.get("fy"))
+        amount = float(p.get("p5") or p.get("amount") or 0)
+        pan = p.get("p6", True)
         if pan is None or pan == "True" or pan == "true":
             pan = True
         elif pan in ("False", "false"):
             pan = False
         if not section or amount <= 0:
             return {"tds_pct": 0, "applies": False, "basis": "no-section-or-zero-amount"}
-        rate_row = self._fn_tds_section_rate({"p0": sid, "p1": section}, True, False)
+        rate_row = self._fn_tds_section_rate({"p0": sid, "p1": section, "p2": discriminator}, True, False)
         if not rate_row or rate_row.get("rate") is None:
             return {"tds_pct": 0, "applies": False, "basis": "section-not-configured"}
         rate = float(rate_row.get("rate", 0))

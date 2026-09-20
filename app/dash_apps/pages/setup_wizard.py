@@ -258,23 +258,25 @@ def render_category_content(category, society_id=None):
         
         header = dbc.Row([
             dbc.Col(html.B("Section", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Nature of Income", className="small text-uppercase"), width=5),
+            dbc.Col(html.B("Discriminator", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Nature of Income", className="small text-uppercase"), width=4),
             dbc.Col(html.B("Rate (%)", className="small text-uppercase"), width=1),
             dbc.Col(html.B("No Pan (%)", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Single Bill (₹)", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Aggregate (₹)", className="small text-uppercase"), width=2),
+            dbc.Col(html.B("Single Bill (₹)", className="small text-uppercase"), width=1.5),
+            dbc.Col(html.B("Aggregate (₹)", className="small text-uppercase"), width=1.5),
         ], className="mb-2 border-bottom pb-2")
         inputs.append(header)
         
         for idx, item in enumerate(TDS_SECTION_RATE_SEED):
-            section, nature, rate, rate_no_pan, single_bill, agg_bill = item
+            section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item
             row = dbc.Row([
                 dbc.Col(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm"), width=1),
-                dbc.Col(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm"), width=5),
+                dbc.Col(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm"), width=2),
+                dbc.Col(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm"), width=4),
                 dbc.Col(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm"), width=1),
                 dbc.Col(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm"), width=1),
-                dbc.Col(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm"), width=2),
-                dbc.Col(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm"), width=2),
+                dbc.Col(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm"), width=1.5),
+                dbc.Col(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm"), width=1.5),
             ], className="mb-2")
             inputs.append(row)
             

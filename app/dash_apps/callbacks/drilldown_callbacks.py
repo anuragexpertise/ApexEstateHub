@@ -2280,12 +2280,13 @@ def register_drilldown_callbacks(app):
         Input({"type": "form-field", "entity": "expense", "field": "amount"}, "value"),
         Input({"type": "form-field", "entity": "expense", "field": "expense_date"}, "value"),
         Input({"type": "form-field", "entity": "expense", "field": "tds_section"}, "value"),
+        Input({"type": "form-field", "entity": "expense", "field": "payment_nature"}, "value"),
         State({"type": "form-field-hidden", "entity": "expense", "field": "role"}, "value"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, tds_section, entity_role, store):
+    def expense_tds_autofill(acc_id, entity_id, amount, expense_date, tds_section, payment_nature, entity_role, store):
         sid = get_current_society_id()
         if not sid:
             return no_update, no_update, no_update
@@ -2322,6 +2323,7 @@ def register_drilldown_callbacks(app):
 
         sug = tds_compliance.suggest_expense_tax_fields(
             db, sid, acc, vendor_id, amt, expense_date=expense_date, override_section=override_section,
+            payment_nature=payment_nature,
         )
 
         # If the user just manually picked a section, don't overwrite the dropdown with the exact same value 
@@ -3677,13 +3679,15 @@ def _save_receipt_v3(db, d, sid):
         )
         receipt_id = (r or {}).get("receipt_id")
         receipt_status = (r or {}).get("status", "unknown")
+        cash_warning = (r or {}).get("cash_warning")
         _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=(receipt_status == 'pending'))
         if receipt_status == 'confirmed':
             msg = f"Receipt of ₹{amt:,.2f} saved and confirmed [[receipt:{receipt_id}]]"
-            return True, msg, receipt_id
         else:
             msg = f"Receipt of ₹{amt:,.2f} saved — pending admin verification [[receipt:{receipt_id}]]"
-            return True, msg, receipt_id
+        if cash_warning:
+            msg += f" ⚠️ {cash_warning}"
+        return True, msg, receipt_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -3749,19 +3753,31 @@ def _save_expense_v3(db, d, sid):
         vendor_id = int(entity_id) if entity_id not in (None, "") else None
     except (TypeError, ValueError):
         vendor_id = None
+    payment_nature = d.get("payment_nature")
     tds_sug = tds_compliance.suggest_expense_tax_fields(
         db, sid, acc_id, vendor_id, amt, expense_date=d.get("expense_date"),
+        payment_nature=payment_nature,
     )
     if tds_sug["tds_applies"] and not tds_sug["pan_captured"] and tds_sug["pan_action"] == "block":
         return False, tds_sug["pan_warning"], None
-    # Honour an explicit form value if present & valid, else use the computed default.
+
+    # P0 Item 2: Enforce computed TDS % — require match unless admin explicitly
+    # overrides with a logged reason. For now we implement hard-lock: the form
+    # value must equal the computed value (within a tiny tolerance) when TDS applies.
+    # If user enters a different value, reject with a clear message.
+    computed_pct = tds_sug["tds_pct"] if tds_sug["tds_applies"] else 0
     if tds_pct_raw not in (None, ""):
-        pass  # keep the validated tds_pct from above
-    elif tds_sug["tds_applies"]:
-        tds_pct = tds_sug["tds_pct"]
-        tds_section = tds_sug["tds_section"] or tds_section
+        # User explicitly entered a TDS % — validate it matches computed
+        if abs(tds_pct - computed_pct) > 0.001:
+            return False, (
+                f"Entered TDS % ({tds_pct:.2f}%) does not match the computed rate "
+                f"({computed_pct:.2f}%) for section {tds_sug['tds_section']} "
+                f"(basis: {tds_sug['tds_basis']}). Correct the entry or contact admin "
+                f"to adjust the TDS section rate configuration."
+            ), None
     else:
-        tds_pct = 0
+        # No explicit form value — use computed default
+        tds_pct = computed_pct
         tds_section = tds_sug["tds_section"] or tds_section
 
     # Phase 5.2: a capital expense booked against a depreciable BS account
@@ -3810,10 +3826,14 @@ def _save_expense_v3(db, d, sid):
         )
         expense_id = (r or {}).get("expense_id")
         expense_status = (r or {}).get("status", "unknown")
+        cash_warning = (r or {}).get("cash_warning")
         if expense_status == 'confirmed':
-            return True, f"Expense of ₹{amt:,.2f} recorded and confirmed [[expense:{expense_id}]]", expense_id
+            msg = f"Expense of ₹{amt:,.2f} recorded and confirmed [[expense:{expense_id}]]"
         else:
-            return True, f"Expense of ₹{amt:,.2f} recorded — pending admin verification [[expense:{expense_id}]]", expense_id
+            msg = f"Expense of ₹{amt:,.2f} recorded — pending admin verification [[expense:{expense_id}]]"
+        if cash_warning:
+            msg += f" ⚠️ {cash_warning}"
+        return True, msg, expense_id
     except Exception as e:
         return False, _clean_pg_error(e), None
 
@@ -5263,6 +5283,7 @@ def _save_compliance_settings(db, d, sid, is_edit, pk):
 
 def _save_tds_rate(db, d, sid, is_edit, pk):
     section = (d.get("section") or "").strip()
+    discriminator = (d.get("discriminator") or "").strip() or None
     nature_of_income = (d.get("nature_of_income") or "").strip()
     rate = d.get("rate")
     rate_no_pan = d.get("rate_no_pan")
@@ -5279,18 +5300,18 @@ def _save_tds_rate(db, d, sid, is_edit, pk):
     try:
         if is_edit:
             db._execute(
-                "UPDATE tds_section_rates SET section=%s, nature_of_income=%s, rate=%s, rate_no_pan=%s, "
+                "UPDATE tds_section_rates SET section=%s, discriminator=%s, nature_of_income=%s, rate=%s, rate_no_pan=%s, "
                 "single_bill_threshold=%s, annual_aggregate_threshold=%s, effective_from=%s "
                 "WHERE id=%s AND society_id=%s",
-                (section, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from, pk, sid)
+                (section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from, pk, sid)
             )
             return True, "TDS rate updated.", None
         else:
             db._execute(
                 "INSERT INTO tds_section_rates "
-                "(society_id, section, nature_of_income, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold, effective_from) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (sid, section, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from)
+                "(society_id, section, discriminator, nature_of_income, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold, effective_from) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (sid, section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from)
             )
             return True, "TDS rate added.", None
     except Exception as e:
