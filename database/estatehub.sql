@@ -7326,6 +7326,12 @@ BEGIN
            OR (b.sort_path IS NOT NULL AND c.sort_path LIKE b.sort_path || '.%')
     ),
     receipts AS (
+        -- Fixed (2026-09, live-tested): previously required a.drcr_account
+        -- = 'Cr', which silently dropped any real-cash Cr-leg against a
+        -- Dr-natured account (e.g. a refund credited back reducing an
+        -- asset/expense account). Keying off "not the cash/bank leg
+        -- itself" instead of the account's fixed nature is the general,
+        -- correct condition for a cash-basis Receipts & Payments Account.
         SELECT 'Receipt'::VARCHAR AS line_type,
                t.acc_id::INT AS account_code,
                a.name::VARCHAR AS account_name,
@@ -7338,10 +7344,20 @@ BEGIN
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
           AND t.entry_side = 'Cr'
           AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
-          AND a.drcr_account = 'Cr'
+          AND t.acc_id NOT IN (SELECT account_id FROM cash_bank_accs)
         GROUP BY t.acc_id, a.name
     ),
     payments AS (
+        -- Fixed (2026-09, live-tested): previously required a.drcr_account
+        -- = 'Dr', which silently dropped any real-cash Dr-leg against a
+        -- Cr-natured account — e.g. fn_pay_rcm_liability's remittance,
+        -- which debits CGST/SGST/IGST Payable (RCM), all Cr-natured
+        -- liabilities, with real (non-journal) cash/bank mode. That whole
+        -- transaction pair vanished from this statement entirely (its
+        -- mirror cash/bank leg is excluded below by definition), silently
+        -- understating total cash payments — the same defect will hit any
+        -- future liability repayment (e.g. a loan principal repayment)
+        -- for the same reason. Same "not the cash/bank leg" fix as receipts.
         SELECT 'Payment'::VARCHAR AS line_type,
                t.acc_id::INT AS account_code,
                a.name::VARCHAR AS account_name,
@@ -7354,7 +7370,7 @@ BEGIN
           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
           AND t.entry_side = 'Dr'
           AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
-          AND a.drcr_account = 'Dr'
+          AND t.acc_id NOT IN (SELECT account_id FROM cash_bank_accs)
         GROUP BY t.acc_id, a.name
     )
     SELECT o.line_type, o.account_code, o.account_name, o.dr_amount, o.cr_amount
@@ -7436,6 +7452,14 @@ BEGIN
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
     pl_accs AS (
+        -- Fixed (2026-09, live-tested): every ancestor node's total_closing
+        -- already sums its entire subtree (see fn_fy_closing_report), so
+        -- including header/rollup rows (e.g. "Income Expenditure A/c")
+        -- alongside their own leaf children double- (or triple-, quadruple-)
+        -- counted every leaf balance once per level of ancestor header
+        -- above it. Restricting to leaf accounts (no children) fixes this;
+        -- this was silently inflating Surplus/Deficit and, via the
+        -- duplicated ie_surplus CTE, the Balance Sheet's Equity figure.
         SELECT c.*
         FROM closing c
         CROSS JOIN cap_ac ca
@@ -7443,6 +7467,10 @@ BEGIN
           AND c.sort_path LIKE ca.sort_path || '.%'
           AND c.total_closing IS NOT NULL
           AND c.total_closing != 0
+          AND NOT EXISTS (
+              SELECT 1 FROM accounts child
+              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
+          )
     ),
     income_accs AS (
         SELECT 'Income'::VARCHAR AS statement_section,
@@ -7516,12 +7544,26 @@ BEGIN
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
     bs_accs AS (
+        -- Fixed (2026-09, live-tested): same header/leaf double-counting
+        -- bug as pl_accs above, plus this exclusion only matched
+        -- descendants of the CapAc header (sort_path LIKE ca.sort_path||
+        -- '.%'), never the header's own exact sort_path — so "Capital
+        -- Account" itself passed through bs_accs, landing in Liabilities
+        -- (Cr-natured) in addition to its correct place in the Equity
+        -- section via cap_acc below. Balance sheet was verified live to
+        -- not balance (Assets != Liabilities + Equity) before this fix.
+        -- Restricting to leaf accounts fixes both issues at once: the
+        -- CapAc header has children, so it's excluded as a non-leaf too.
         SELECT c.*
         FROM closing c
         CROSS JOIN cap_ac ca
         WHERE c.total_closing IS NOT NULL
           AND c.total_closing != 0
           AND (ca.sort_path IS NULL OR c.sort_path NOT LIKE ca.sort_path || '.%')
+          AND NOT EXISTS (
+              SELECT 1 FROM accounts child
+              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
+          )
     ),
     asset_accs AS (
         SELECT 'Assets'::VARCHAR AS statement_section,
@@ -7550,6 +7592,9 @@ BEGIN
         WHERE c.tab_name = 'CapAc'
     ),
     ie_surplus AS (
+        -- Same leaf-only fix as pl_accs in fn_income_expenditure_fy — this
+        -- is a duplicated copy of that surplus calculation and had the
+        -- identical bug.
         SELECT COALESCE(SUM(CASE WHEN drcr_account='Cr' THEN ABS(total_closing) ELSE 0 END), 0) -
                COALESCE(SUM(CASE WHEN drcr_account='Dr' THEN ABS(total_closing) ELSE 0 END), 0) AS surplus
         FROM closing c
@@ -7558,6 +7603,10 @@ BEGIN
           AND c.sort_path LIKE ca.sort_path || '.%'
           AND c.total_closing IS NOT NULL
           AND c.total_closing != 0
+          AND NOT EXISTS (
+              SELECT 1 FROM accounts child
+              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
+          )
     )
     SELECT o.statement_section, o.account_code, o.account_name, o.amount
     FROM (
