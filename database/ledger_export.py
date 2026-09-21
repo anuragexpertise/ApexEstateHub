@@ -298,6 +298,139 @@ def _add_income_expenditure_footer(ws, ledger_rows: list[dict], next_row: int) -
         cell.font, cell.alignment, cell.number_format = _FONT_TOTAL, _ALIGN_R, "0.00%"
 
 
+def _write_balance_sheet_hierarchy(
+    ws,
+    root_children: list[dict],
+    children_by_parent: dict[int, list[dict]],
+    start_row: int,
+    fy: int,
+    society_name: str | None,
+    pan_number: str | None,
+) -> int:
+    """
+    Appends the user-friendly hierarchical Balance Sheet presentation — a
+    two-column Liabilities | Assets layout, one level of sub-account
+    indent — below the plain ledger section on the Bal sheet.
+
+    Mirrors the shape of the ld.xlsx reference block (fixed there at
+    A16:I35, under a "Dr. <name> / PAN No / ASST YEAR" header row and a
+    "Liabilities | Assets" banner). Here it's anchored `start_row` rows
+    below wherever the ledger section above it ends, since that row count
+    varies with the chart of accounts — a society with more top-level
+    accounts pushes this block further down than a fixed A16 would allow.
+
+    Liabilities = root's direct Cr-natured children (Capital Account,
+    Current Liabilities, Sundry Creditors, Loans/Advances Taken, ...),
+    tag in B / name in C / amount in D.
+    Assets = root's direct Dr-natured children (Immovable/Movable Assets,
+    Current Assets, Investments, Loans/Advances Given, Sundry Debtors,
+    ...), tag in F / name in G / amount in I — matching the ld.xlsx
+    Dp/BkAc/SiH/CiH/Shares/MFund indent pattern under Current
+    Assets/Investments.
+    A header account with children shows no amount of its own here (its
+    total is implied by the sum of its children, listed indented directly
+    below it, name in H / amount in I); a header account with no children
+    shows its own amount directly in D or I.
+    Totals are SUM() formulas over the exact written ranges, not
+    hardcoded, so the sheet still recalculates if closing figures change.
+    """
+    fy_end = date(fy + 1, 3, 31)
+
+    r = start_row
+    ws.cell(row=r, column=1, value=society_name or "").font = _FONT_HEADER
+    ws.cell(row=r, column=2, value="PAN No:").font = _FONT_HEADER
+    ws.cell(row=r, column=3, value=pan_number or "").font = _FONT_BODY
+    ws.cell(row=r, column=5, value=f"ASST YEAR {fy}-{fy + 1}").font = _FONT_HEADER
+    r += 1
+    ws.cell(row=r, column=2, value="BALANCE SHEET").font = _FONT_TITLE
+    r += 1
+    title_cell = ws.cell(row=r, column=3, value="Balance Sheet")
+    title_cell.font, title_cell.alignment = _FONT_TITLE, _ALIGN_C
+    r += 1
+    ws.cell(row=r, column=2, value="Liabilities").font = _FONT_HEADER
+    ws.cell(row=r, column=6, value="Assets").font = _FONT_HEADER
+    r += 2
+
+    block_start = r
+    liabilities = sorted(
+        (c for c in root_children if c.get("drcr_account") == "Cr"),
+        key=lambda x: x.get("sort_path") or "",
+    )
+    assets = sorted(
+        (c for c in root_children if c.get("drcr_account") == "Dr"),
+        key=lambda x: x.get("sort_path") or "",
+    )
+
+    def _indent(cell):
+        cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+
+    liab_row = block_start
+    for item in liabilities:
+        kids = sorted(children_by_parent.get(item["account_id"], []),
+                       key=lambda x: x.get("sort_path") or "")
+        amount = float(item.get("display_amount") or 0)
+
+        c1 = ws.cell(row=liab_row, column=1, value=fy_end)
+        c1.font, c1.number_format = _FONT_BODY, _FMT_DATE
+        ws.cell(row=liab_row, column=2, value=item.get("tab_name")).font = _FONT_BODY
+        ws.cell(row=liab_row, column=3, value=item.get("account_name")).font = _FONT_BODY
+        if not kids and amount:
+            c4 = ws.cell(row=liab_row, column=4, value=amount)
+            c4.font, c4.alignment, c4.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+        liab_row += 1
+
+        for kid in kids:
+            kamt = float(kid.get("display_amount") or 0)
+            if kamt == 0:
+                continue
+            c3 = ws.cell(row=liab_row, column=3, value=kid.get("account_name"))
+            c3.font = _FONT_BODY
+            _indent(c3)
+            c4 = ws.cell(row=liab_row, column=4, value=kamt)
+            c4.font, c4.number_format = _FONT_BODY, _FMT_AMT
+            _indent(c4)
+            c4.alignment = _ALIGN_R
+            liab_row += 1
+    liab_last_row = liab_row - 1
+
+    asset_row = block_start
+    for item in assets:
+        kids = sorted(children_by_parent.get(item["account_id"], []),
+                       key=lambda x: x.get("sort_path") or "")
+        amount = float(item.get("display_amount") or 0)
+
+        c1 = ws.cell(row=asset_row, column=1, value=fy_end)
+        c1.font, c1.number_format = _FONT_BODY, _FMT_DATE
+        ws.cell(row=asset_row, column=6, value=item.get("tab_name")).font = _FONT_BODY
+        ws.cell(row=asset_row, column=7, value=item.get("account_name")).font = _FONT_BODY
+        if not kids and amount:
+            c9 = ws.cell(row=asset_row, column=9, value=amount)
+            c9.font, c9.alignment, c9.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+        asset_row += 1
+
+        for kid in kids:
+            kamt = float(kid.get("display_amount") or 0)
+            if kamt == 0:
+                continue
+            ws.cell(row=asset_row, column=8, value=kid.get("account_name")).font = _FONT_BODY
+            c9 = ws.cell(row=asset_row, column=9, value=kamt)
+            c9.font, c9.alignment, c9.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+            asset_row += 1
+    asset_last_row = asset_row - 1
+
+    total_row = max(liab_last_row, asset_last_row) + 2
+    tc1 = ws.cell(row=total_row, column=3, value="Total")
+    tc1.font = _FONT_TOTAL
+    tc2 = ws.cell(row=total_row, column=4, value=f"=SUM(D{block_start}:D{liab_last_row})")
+    tc2.font, tc2.alignment, tc2.number_format = _FONT_TOTAL, _ALIGN_R, _FMT_AMT
+    tc3 = ws.cell(row=total_row, column=6, value="Total")
+    tc3.font = _FONT_TOTAL
+    tc4 = ws.cell(row=total_row, column=9, value=f"=SUM(I{block_start}:I{asset_last_row})")
+    tc4.font, tc4.alignment, tc4.number_format = _FONT_TOTAL, _ALIGN_R, _FMT_AMT
+
+    return total_row + 1
+
+
 def generate_ledger_excel(
     db,
     society_id: int,
@@ -453,9 +586,25 @@ def generate_ledger_index_excel(
     # ── Bal sheet (root's own direct children, same rollup logic) ──────
     bal_title = _unique_sheet_title(_ROOT_TAB_NAME, used_titles)
     bal_ws = wb.create_sheet(bal_title)
-    root_rows = _children_rollup_rows(children_by_parent.get((root or {}).get("id"), []), fy)
-    _write_ledger_sheet(bal_ws, {"name": (root or {}).get("name") or "Balance Sheet",
-                                  "tab_name": _ROOT_TAB_NAME}, root_rows, fy)
+    root_direct_children = children_by_parent.get((root or {}).get("id"), [])
+    root_rows = _children_rollup_rows(root_direct_children, fy)
+    bal_next_row = _write_ledger_sheet(
+        bal_ws, {"name": (root or {}).get("name") or "Balance Sheet",
+                 "tab_name": _ROOT_TAB_NAME}, root_rows, fy)
+
+    society = db._execute(
+        "SELECT name, PAN_number FROM societies WHERE id=%s",
+        (society_id,), fetch_one=True,
+    ) or {}
+    _write_balance_sheet_hierarchy(
+        bal_ws,
+        root_children=root_direct_children,
+        children_by_parent=children_by_parent,
+        start_row=bal_next_row + 3,
+        fy=fy,
+        society_name=society.get("name"),
+        pan_number=society.get("PAN_number"),
+    )
     entries.append((bal_title, (root or {}).get("name") or "Balance Sheet"))
 
     # ── Index sheet ──────────────────────────────────────────────────────
