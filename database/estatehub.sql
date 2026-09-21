@@ -725,6 +725,14 @@ CREATE TABLE IF NOT EXISTS rcm_liability (
     created_by INT REFERENCES users(id)
 );
 
+-- rcm_liability (2026-09, Phase 3): composite index for the fixed
+-- "current month RCM liability" lookup (society_id + liability_date range)
+-- used by the GSTR/RCM export and the RCM Liability Register card. Without
+-- it every such query scans the whole table; with it the range predicate
+-- is an index-only scan once the society is pinned.
+CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date
+    ON rcm_liability (society_id, liability_date);
+
 -- rcm_rates (2026-09, Phase 2): per-category RCM rate configuration,
 -- replacing the inline CASE WHEN v_rcm_cat ... 5.00/18.00 previously
 -- hardcoded in fn_compute_rcm_liability — the exact anti-pattern this
