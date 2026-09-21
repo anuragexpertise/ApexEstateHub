@@ -3071,6 +3071,7 @@ def _render_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
                 mutuality_summary=mutuality_summary,
+                society_id=sid_val,
             )
 
         # ── Financial Statements (Three-Statement Report) — custom card

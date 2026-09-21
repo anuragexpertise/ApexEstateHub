@@ -387,9 +387,9 @@ def _resolve_society_state(record_dict: dict, society_id: int | None) -> str:
     return "ALL"
 
 
-def _rcm_monthly_total(selected_fy: int | None, store: dict | None) -> float:
+def _rcm_monthly_total(selected_fy: int | None, society_id: int | None) -> float:
     """Current-month RCM liability total for the register card."""
-    if not selected_fy or not store:
+    if not selected_fy or not society_id:
         return 0.0
     fy = selected_fy
     from database.db_manager import db as _db
@@ -406,7 +406,7 @@ def _rcm_monthly_total(selected_fy: int | None, store: dict | None) -> float:
             "FROM rcm_liability "
             "WHERE society_id = %s "
             "AND liability_date >= %s AND liability_date < %s",
-            (store.get("society_id", store.get("sid", 0)),
+            (society_id,
              month_start.isoformat(),
              (month_start + datetime.timedelta(days=32)).replace(day=1).isoformat()),
             fetch_one=True,
@@ -3630,7 +3630,8 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
 
 def render_fy_closing_card(rows: list, error: str | None,
                             fy_options: list, selected_fy,
-                            mutuality_summary: dict | None = None) -> html.Div:
+                            mutuality_summary: dict | None = None,
+                            society_id: int | None = None) -> html.Div:
     """
     Read-only FY Closing Report — same account-by-account detail for every
     role that can reach it (Admin/Owner/Vendor/Security all confirmed the
@@ -3740,7 +3741,7 @@ def render_fy_closing_card(rows: list, error: str | None,
                     [
                         html.Strong("RCM Liability Register", style={"fontSize": "13px"}),
                         html.Div(
-                            f"Current month RCM liability: ₹{_rcm_monthly_total(selected_fy, store):,.2f}",
+                            f"Current month RCM liability: ₹{_rcm_monthly_total(selected_fy, society_id):,.2f}",
                             style={"fontSize": "11px", "color": "#555"},
                         ),
                     ],
@@ -3960,7 +3961,17 @@ def render_financial_statements_card(
         ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
                   "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
-    # Build preview tables for each statement
+    # Build preview tables for each statement.
+    # `columns` are the display labels; `field_map` translates each label to
+    # the actual key on the row dicts returned by the fn_*_fy SQL functions
+    # (e.g. "Account" -> "account_name", "Section" -> "statement_section") —
+    # a plain lower/underscore of the label doesn't match those column names,
+    # which was leaving the Account/Section cells blank.
+    _FIELD_MAP = {
+        "account": "account_name",
+        "section": "statement_section",
+    }
+
     def _make_preview_table(rows, columns, title, max_rows=10):
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
@@ -3973,7 +3984,9 @@ def render_financial_statements_card(
         body_rows = []
         for r in display_rows:
             body_rows.append(html.Tr([
-                html.Td(str(r.get(col.lower().replace(" ", "_"), "")), 
+                html.Td(str(r.get(
+                    _FIELD_MAP.get(col.lower().replace(" ", "_"), col.lower().replace(" ", "_")), ""
+                )),
                         style={"fontSize": "12px", "padding": "6px 8px"})
                 for col in columns
             ]))
