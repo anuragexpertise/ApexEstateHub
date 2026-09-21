@@ -312,6 +312,10 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
     """Build the three-sheet workbook."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
     if society_name is None:
         row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
         society_name = row.get("name", "Society") if row else "Society"
@@ -352,6 +356,10 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
 
 def export_receipts_payments(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
     """Generate Receipts & Payments Account export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
     row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
     society_name = row.get("name", "Society") if row else "Society"
 
@@ -373,6 +381,10 @@ def export_receipts_payments(db, society_id: int, fy: int, format: str = "xlsx")
 
 def export_income_expenditure(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
     """Generate Income & Expenditure Account export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
     row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
     society_name = row.get("name", "Society") if row else "Society"
 
@@ -394,6 +406,10 @@ def export_income_expenditure(db, society_id: int, fy: int, format: str = "xlsx"
 
 def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
     """Generate Balance Sheet export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
     row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
     society_name = row.get("name", "Society") if row else "Society"
 
