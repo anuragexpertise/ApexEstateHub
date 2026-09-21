@@ -7452,31 +7452,39 @@ BEGIN
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
     pl_accs AS (
-        -- Fixed (2026-09, live-tested): every ancestor node's total_closing
-        -- already sums its entire subtree (see fn_fy_closing_report), so
-        -- including header/rollup rows (e.g. "Income Expenditure A/c")
-        -- alongside their own leaf children double- (or triple-, quadruple-)
-        -- counted every leaf balance once per level of ancestor header
-        -- above it. Restricting to leaf accounts (no children) fixes this;
-        -- this was silently inflating Surplus/Deficit and, via the
-        -- duplicated ie_surplus CTE, the Balance Sheet's Equity figure.
+        -- Fixed (2026-09, live-tested, corrected after a follow-up
+        -- investigation): the previous fix here restricted to leaf
+        -- accounts to solve double-counting, but that broke a different
+        -- way — some accounts (e.g. "Income Expenditure A/c") are BOTH a
+        -- rollup header AND directly posted to themselves (a real
+        -- ₹1,650 depreciation-transfer entry landed there), so
+        -- leaf-restriction silently dropped their own balance entirely.
+        -- own_closing (this account's own movement only, never a subtree
+        -- rollup — see fn_fy_closing_report) is the right column: it
+        -- naturally avoids double-counting AND naturally includes
+        -- hybrid header+leaf accounts, with no leaf/header distinction
+        -- needed at all.
         SELECT c.*
         FROM closing c
         CROSS JOIN cap_ac ca
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path LIKE ca.sort_path || '.%'
-          AND c.total_closing IS NOT NULL
-          AND c.total_closing != 0
-          AND NOT EXISTS (
-              SELECT 1 FROM accounts child
-              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
-          )
+          AND c.own_closing IS NOT NULL
+          AND c.own_closing != 0
     ),
     income_accs AS (
+        -- Fixed alongside the above: ABS(total_closing) turned a
+        -- reversing/contra entry against a Cr-natured account (own_closing
+        -- negative — e.g. that same depreciation-transfer entry, a Dr
+        -- posting against the Cr-natured "Income Expenditure A/c") into
+        -- fake extra positive income instead of correctly reducing it.
+        -- own_closing's natural sign is honest here: a genuine reversal
+        -- shows as a negative income line rather than silently inflating
+        -- the total.
         SELECT 'Income'::VARCHAR AS statement_section,
                pa.account_id::INT AS account_code,
                pa.account_name::VARCHAR AS account_name,
-               ABS(pa.total_closing)::NUMERIC(15,2) AS amount
+               pa.own_closing::NUMERIC(15,2) AS amount
         FROM pl_accs pa
         WHERE pa.drcr_account = 'Cr'
     ),
@@ -7484,7 +7492,7 @@ BEGIN
         SELECT 'Expenditure'::VARCHAR AS statement_section,
                pa.account_id::INT AS account_code,
                pa.account_name::VARCHAR AS account_name,
-               ABS(pa.total_closing)::NUMERIC(15,2) AS amount
+               (-pa.own_closing)::NUMERIC(15,2) AS amount
         FROM pl_accs pa
         WHERE pa.drcr_account = 'Dr'
     ),
@@ -7544,33 +7552,36 @@ BEGIN
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
     bs_accs AS (
-        -- Fixed (2026-09, live-tested): same header/leaf double-counting
-        -- bug as pl_accs above, plus this exclusion only matched
-        -- descendants of the CapAc header (sort_path LIKE ca.sort_path||
-        -- '.%'), never the header's own exact sort_path — so "Capital
-        -- Account" itself passed through bs_accs, landing in Liabilities
-        -- (Cr-natured) in addition to its correct place in the Equity
-        -- section via cap_acc below. Balance sheet was verified live to
-        -- not balance (Assets != Liabilities + Equity) before this fix.
-        -- Restricting to leaf accounts fixes both issues at once: the
-        -- CapAc header has children, so it's excluded as a non-leaf too.
+        -- Fixed (2026-09, live-tested, corrected after a follow-up
+        -- investigation): same own_closing fix as pl_accs above — the
+        -- previous leaf-restriction here dropped "Sundry Debtors"'s own
+        -- ₹1,54,700 receivable balance entirely (it's a header with
+        -- children AND its own direct postings), which was the dominant
+        -- cause of the balance sheet still not balancing after the first
+        -- fix. own_closing needs no leaf/header distinction at all.
         SELECT c.*
         FROM closing c
         CROSS JOIN cap_ac ca
-        WHERE c.total_closing IS NOT NULL
-          AND c.total_closing != 0
+        WHERE c.own_closing IS NOT NULL
+          AND c.own_closing != 0
           AND (ca.sort_path IS NULL OR c.sort_path NOT LIKE ca.sort_path || '.%')
-          AND NOT EXISTS (
-              SELECT 1 FROM accounts child
-              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
-          )
     ),
     asset_accs AS (
+        -- Fixed alongside the above: the previous "ABS if negative, else
+        -- pass through" logic assumed a Dr-natured account can only ever
+        -- have a normal (negative-total_closing) balance. Cash-in-Hand
+        -- proved that wrong live: when cash-mode outflows exceed inflows
+        -- for the year, its own_closing goes positive (a genuine net cash
+        -- shortfall), and the old logic passed that through as a false
+        -- positive asset instead of the true negative position — silently
+        -- overstating Assets by double the shortfall. Unconditionally
+        -- negating own_closing is correct for both the normal and
+        -- shortfall cases, and shows a real deficit honestly as negative
+        -- rather than hiding it.
         SELECT 'Assets'::VARCHAR AS statement_section,
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
-               CASE WHEN ba.total_closing < 0 THEN ABS(ba.total_closing)
-                    ELSE ba.total_closing END::NUMERIC(15,2) AS amount
+               (-ba.own_closing)::NUMERIC(15,2) AS amount
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Dr'
     ),
@@ -7578,35 +7589,31 @@ BEGIN
         SELECT 'Liabilities'::VARCHAR AS statement_section,
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
-               CASE WHEN ba.total_closing >= 0 THEN ba.total_closing
-                    ELSE ABS(ba.total_closing) END::NUMERIC(15,2) AS amount
+               ba.own_closing::NUMERIC(15,2) AS amount
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Cr'
     ),
-    cap_acc AS (
-        SELECT 'Equity'::VARCHAR AS statement_section,
-               c.account_id::INT AS account_code,
-               c.account_name::VARCHAR AS account_name,
-               c.total_closing::NUMERIC(15,2) AS amount
-        FROM closing c
-        WHERE c.tab_name = 'CapAc'
-    ),
     ie_surplus AS (
-        -- Same leaf-only fix as pl_accs in fn_income_expenditure_fy — this
-        -- is a duplicated copy of that surplus calculation and had the
-        -- identical bug.
-        SELECT COALESCE(SUM(CASE WHEN drcr_account='Cr' THEN ABS(total_closing) ELSE 0 END), 0) -
-               COALESCE(SUM(CASE WHEN drcr_account='Dr' THEN ABS(total_closing) ELSE 0 END), 0) AS surplus
+        -- Fixed (2026-09, live-tested, corrected): same own_closing +
+        -- natural-sign fix as fn_income_expenditure_fy's income_accs/
+        -- expense_accs — this duplicated copy had the identical bugs.
+        -- Also confirmed live: this figure, computed correctly, is
+        -- numerically IDENTICAL to "Capital Account"'s own rolled-up
+        -- total_closing (unsurprising — this chart of accounts has no
+        -- separate historical reserve/fund sub-accounts under Capital
+        -- Account, so its entire subtree IS the P&L nominal ledger).
+        -- Showing both a "Capital Account" line AND this figure as two
+        -- separate Equity amounts was counting the same rupee twice —
+        -- confirmed live as the dominant cause of Assets != Liabilities +
+        -- Equity even after the own_closing fix above. Equity now shows
+        -- only this one, correctly-computed figure.
+        SELECT COALESCE(SUM(c.own_closing), 0) AS surplus
         FROM closing c
         CROSS JOIN cap_ac ca
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path LIKE ca.sort_path || '.%'
-          AND c.total_closing IS NOT NULL
-          AND c.total_closing != 0
-          AND NOT EXISTS (
-              SELECT 1 FROM accounts child
-              WHERE child.parent_account_id = c.account_id AND child.society_id = p_society_id
-          )
+          AND c.own_closing IS NOT NULL
+          AND c.own_closing != 0
     )
     SELECT o.statement_section, o.account_code, o.account_name, o.amount
     FROM (
@@ -7616,11 +7623,16 @@ BEGIN
         SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount
         FROM liability_accs l
         UNION ALL
-        SELECT 3, c.statement_section, c.account_code, c.account_name, c.amount
-        FROM cap_acc c
-        UNION ALL
-        SELECT 4, 'Equity'::VARCHAR, NULL::INT,
-               'Current Year Surplus/Deficit'::VARCHAR,
+        -- Fixed (2026-09): this used to be two lines — "Capital Account"
+        -- (the header's own rolled-up total_closing) plus this separately
+        -- computed surplus added on top — double-counting the same
+        -- figure (verified live: they're numerically identical, since
+        -- this chart of accounts has no separate historical reserve/fund
+        -- accounts under Capital Account). "Reserves & Surplus" is the
+        -- standard Indian financial-statement label for this combined
+        -- accumulated figure.
+        SELECT 3, 'Equity'::VARCHAR, NULL::INT,
+               'Reserves & Surplus'::VARCHAR,
                s.surplus::NUMERIC(15,2)
         FROM ie_surplus s
     ) o
