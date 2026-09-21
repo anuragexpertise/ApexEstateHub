@@ -4010,99 +4010,144 @@ def render_financial_statements_card(
             note,
         ])
 
-    def _make_balance_sheet_preview(rows, title):
+def _make_balance_sheet_preview(rows, title):
         """
-        Balance Sheet preview, grouped by statement_section (Assets /
-        Liabilities / Equity) with a subtotal per section and a grand
-        total — matching standard Balance Sheet presentation, rather than
-        the flat capped table _make_preview_table uses for the other two
-        statements. fn_balance_sheet_fy returns every account under the
-        Bal root at any depth (see estatehub.sql's bs_accs CTE, which no
-        longer excludes zero-balance accounts — own_closing IS NOT NULL
-        only, with no depth restriction and no != 0 filter) and
-        pre-sorted by section, so every row — including 0-balance
-        accounts — is rendered here with no row cap.
+        Balance Sheet preview in two-column format matching ld.xlsx 'Bal' sheet A16:I35:
+        Left column: Liabilities & Equity (with hierarchy)
+        Right column: Assets (with hierarchy)
+        All accounts including zero balances are displayed, no row cap.
         """
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
 
-        head = html.Thead(html.Tr([
-            html.Th(col, style={"fontSize": "11px"}) for col in ["Account", "Amount"]
-        ], style={"fontSize": "11px"}))
+        # Split rows by section
+        assets = [r for r in rows if r.get("statement_section") == "Assets"]
+        liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
+        equity = [r for r in rows if r.get("statement_section") == "Equity"]
 
-        body_rows = []
-        current_section = None
-        section_total = 0.0
-        grand_total_assets = 0.0
-        grand_total_liab_equity = 0.0
+        # Calculate totals
+        total_assets = sum(float(r.get("amount") or 0) for r in assets)
+        total_liabilities = sum(float(r.get("amount") or 0) for r in liabilities)
+        total_equity = sum(float(r.get("amount") or 0) for r in equity)
 
-        def _section_header(name):
-            return html.Tr(html.Td(name, colSpan=2, style={
-                "fontSize": "11px", "fontWeight": "700", "color": "#fff",
-                "background": color, "padding": "6px 8px",
-            }))
+        def _format_amount(amount):
+            return f"₹{amount:,.2f}"
 
-        def _subtotal_row(name, amount):
+        def _make_section_rows(section_rows, indent=False):
+            rows_html = []
+            for r in section_rows:
+                amount = float(r.get("amount") or 0)
+                name = r.get("account_name") or ""
+                style = {"fontSize": "12px", "padding": "6px 8px"}
+                if indent:
+                    style["paddingLeft"] = "20px"
+                rows_html.append(html.Tr([
+                    html.Td(name, style=style),
+                    html.Td(_format_amount(amount), style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"}),
+                ]))
+            return rows_html
+
+        def _make_subtotal_row(name, amount):
             return html.Tr([
-                html.Td(name, style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px",
-                                      "borderTop": "1px solid #ddd"}),
-                html.Td(f"₹{amount:,.2f}", style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px",
-                                                   "borderTop": "1px solid #ddd", "textAlign": "right"}),
+                html.Td(name, style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px", "borderTop": "1px solid #ddd"}),
+                html.Td(_format_amount(amount), style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px", "borderTop": "1px solid #ddd", "textAlign": "right"}),
             ], style={"background": "#f7f7f7"})
 
-        for r in rows:
-            section = r.get("statement_section") or ""
-            amount = float(r.get("amount") or 0)
-            if section != current_section:
-                if current_section is not None:
-                    body_rows.append(_subtotal_row(f"Total {current_section}", section_total))
-                    if current_section == "Assets":
-                        grand_total_assets += section_total
-                    else:
-                        grand_total_liab_equity += section_total
-                current_section = section
-                section_total = 0.0
-                body_rows.append(_section_header(section))
-            body_rows.append(html.Tr([
-                html.Td(r.get("account_name") or "", style={"fontSize": "12px", "padding": "6px 8px 6px 20px"}),
-                html.Td(f"₹{amount:,.2f}", style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"}),
-            ]))
-            section_total += amount
+        def _make_header_row(name):
+            return html.Tr(html.Td(name, colSpan=2, style={
+                "fontSize": "11px", "fontWeight": "700", "color": "#fff",
+                "background": "#2c3e50", "padding": "6px 8px",
+            }))
 
-        if current_section is not None:
-            body_rows.append(_subtotal_row(f"Total {current_section}", section_total))
-            if current_section == "Assets":
-                grand_total_assets += section_total
+        # Left column: Liabilities + Equity
+        left_rows = []
+        left_rows.append(_make_header_row("Liabilities & Equity"))
+        
+        if liabilities:
+            left_rows.extend(_make_section_rows(liabilities))
+            left_rows.append(_make_subtotal_row("Total Liabilities", total_liabilities))
+        
+        if equity:
+            left_rows.extend(_make_section_rows(equity))
+            left_rows.append(_make_subtotal_row("Total Equity", total_equity))
+
+        left_rows.append(html.Tr([
+            html.Td("Total Liabilities + Equity", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333"}),
+            html.Td(_format_amount(total_liabilities + total_equity), style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333", "textAlign": "right"}),
+        ]))
+
+        # Right column: Assets
+        right_rows = []
+        right_rows.append(_make_header_row("Assets"))
+        
+        if assets:
+            right_rows.extend(_make_section_rows(assets))
+            right_rows.append(_make_subtotal_row("Total Assets", total_assets))
+
+        right_rows.append(html.Tr([
+            html.Td("Total Assets", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333"}),
+            html.Td(_format_amount(total_assets), style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333", "textAlign": "right"}),
+        ]))
+
+        # Create two-column table
+        # We need to make rows aligned side by side
+        max_left = len(left_rows)
+        max_right = len(right_rows)
+        max_rows = max(max_left, max_right)
+
+        combined_rows = []
+        for i in range(max_rows):
+            left_cells = []
+            right_cells = []
+            
+            if i < len(left_rows):
+                left_cells = [left_rows[i].children[0], left_rows[i].children[1]] if hasattr(left_rows[i], 'children') else []
+                # Extract cells from the row
+                if hasattr(left_rows[i], 'props') and 'children' in left_rows[i].props:
+                    left_cells = left_rows[i].props['children']
             else:
-                grand_total_liab_equity += section_total
+                left_cells = [html.Td("", style={"fontSize": "12px", "padding": "6px 8px"}), html.Td("", style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"})]
+            
+            if i < len(right_rows):
+                if hasattr(right_rows[i], 'props') and 'children' in right_rows[i].props:
+                    right_cells = right_rows[i].props['children']
+            else:
+                right_cells = [html.Td("", style={"fontSize": "12px", "padding": "6px 8px"}), html.Td("", style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"})]
+            
+            combined_rows.append(html.Tr([
+                left_cells[0], left_cells[1],
+                html.Td("  ", style={"width": "20px"}),  # spacer
+                right_cells[0], right_cells[1],
+            ]))
 
-        diff = grand_total_assets - grand_total_liab_equity
-        body_rows.append(html.Tr([
-            html.Td("Total Assets", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px",
-                                            "borderTop": "2px solid #333"}),
-            html.Td(f"₹{grand_total_assets:,.2f}", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px",
-                                                           "borderTop": "2px solid #333", "textAlign": "right"}),
-        ]))
-        body_rows.append(html.Tr([
-            html.Td("Total Liabilities + Equity", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px"}),
-            html.Td(f"₹{grand_total_liab_equity:,.2f}", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px",
-                                                                "textAlign": "right"}),
-        ]))
-        if abs(diff) > 0.01:
-            body_rows.append(html.Tr(html.Td(
-                f"⚠ Out of balance by ₹{abs(diff):,.2f}", colSpan=2,
-                style={"fontSize": "11px", "color": "#c0392b", "fontStyle": "italic", "padding": "6px 8px"},
-            )))
+        # Headers for two-column table
+        head = html.Thead(html.Tr([
+            html.Th("Account", style={"fontSize": "11px"}),
+            html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
+            html.Th("", style={"width": "20px"}),
+            html.Th("Account", style={"fontSize": "11px"}),
+            html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
+        ], style={"fontSize": "11px"}))
 
         table = dbc.Table(
-            [head, html.Tbody(body_rows)],
+            [head, html.Tbody(combined_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
             style={"marginTop": "4px", "marginBottom": "8px"}
         )
 
+        # Check balance
+        diff = total_assets - (total_liabilities + total_equity)
+        balance_note = None
+        if abs(diff) > 0.01:
+            balance_note = html.Div(
+                f"⚠ Out of balance by ₹{abs(diff):,.2f}", 
+                style={"fontSize": "11px", "color": "#c0392b", "fontStyle": "italic", "marginTop": "8px"}
+            )
+
         return html.Div([
             html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
             table,
+            balance_note,
         ])
 
     if not rp_rows and not ie_rows and not bs_rows:
