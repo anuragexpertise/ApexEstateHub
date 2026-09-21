@@ -7571,7 +7571,9 @@ BEGIN
         FROM closing c
         CROSS JOIN cap_ac ca
         WHERE c.own_closing IS NOT NULL
-          AND c.own_closing != 0
+          -- Show ALL balance-sheet children of Bal (at any depth), including
+          -- zero-balance accounts — a 0 line is still a real chart-of-account
+          -- item that must render (per ld.xlsx 'Bal' reference format).
           AND (ca.sort_path IS NULL OR c.sort_path NOT LIKE ca.sort_path || '.%')
     ),
     asset_accs AS (

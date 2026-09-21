@@ -3972,15 +3972,15 @@ def render_financial_statements_card(
         "section": "statement_section",
     }
 
-    def _make_preview_table(rows, columns, title, max_rows=10):
+    def _make_preview_table(rows, columns, title, max_rows=None):
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
-        
+
         head = html.Thead(html.Tr([
             html.Th(col, style={"fontSize": "11px"}) for col in columns
         ], style={"fontSize": "11px"}))
-        
-        display_rows = rows[:max_rows]
+
+        display_rows = rows[:max_rows] if max_rows else rows
         body_rows = []
         for r in display_rows:
             body_rows.append(html.Tr([
@@ -3990,20 +3990,20 @@ def render_financial_statements_card(
                         style={"fontSize": "12px", "padding": "6px 8px"})
                 for col in columns
             ]))
-        
+
         table = dbc.Table(
             [head, html.Tbody(body_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
             style={"marginTop": "4px", "marginBottom": "8px"}
         )
-        
+
         row_count = len(rows)
-        if row_count > max_rows:
-            note = html.Div(f"Showing {max_rows} of {row_count} rows...", 
+        if max_rows and row_count > max_rows:
+            note = html.Div(f"Showing {max_rows} of {row_count} rows...",
                            style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginBottom": "8px"})
         else:
             note = None
-            
+
         return html.Div([
             html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
             table,
@@ -4016,11 +4016,12 @@ def render_financial_statements_card(
         Liabilities / Equity) with a subtotal per section and a grand
         total — matching standard Balance Sheet presentation, rather than
         the flat capped table _make_preview_table uses for the other two
-        statements. fn_balance_sheet_fy already returns every account
-        under the Bal root at any depth (not just direct top-level
-        children — see estatehub.sql's bs_accs CTE, which filters on
-        own_closing only, no depth restriction) and pre-sorted by
-        section, so every row is rendered here with no row cap.
+        statements. fn_balance_sheet_fy returns every account under the
+        Bal root at any depth (see estatehub.sql's bs_accs CTE, which no
+        longer excludes zero-balance accounts — own_closing IS NOT NULL
+        only, with no depth restriction and no != 0 filter) and
+        pre-sorted by section, so every row — including 0-balance
+        accounts — is rendered here with no row cap.
         """
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
