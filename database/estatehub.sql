@@ -7604,19 +7604,6 @@ BEGIN
         WHERE ba.drcr_account = 'Cr'
     ),
     ie_surplus AS (
-        -- Fixed (2026-09, live-tested, corrected): same own_closing +
-        -- natural-sign fix as fn_income_expenditure_fy's income_accs/
-        -- expense_accs — this duplicated copy had the identical bugs.
-        -- Also confirmed live: this figure, computed correctly, is
-        -- numerically IDENTICAL to "Capital Account"'s own rolled-up
-        -- total_closing (unsurprising — this chart of accounts has no
-        -- separate historical reserve/fund sub-accounts under Capital
-        -- Account, so its entire subtree IS the P&L nominal ledger).
-        -- Showing both a "Capital Account" line AND this figure as two
-        -- separate Equity amounts was counting the same rupee twice —
-        -- confirmed live as the dominant cause of Assets != Liabilities +
-        -- Equity even after the own_closing fix above. Equity now shows
-        -- only this one, correctly-computed figure.
         SELECT COALESCE(SUM(c.own_closing), 0) AS surplus
         FROM closing c
         CROSS JOIN cap_ac ca
@@ -7624,6 +7611,14 @@ BEGIN
           AND c.sort_path LIKE ca.sort_path || '.%'
           AND c.own_closing IS NOT NULL
           AND c.own_closing != 0
+    ),
+    cap_ac_own AS (
+        SELECT c.account_id, c.account_name, c.own_closing
+        FROM closing c
+        CROSS JOIN cap_ac ca
+        WHERE ca.sort_path IS NOT NULL
+          AND c.sort_path = ca.sort_path
+          AND c.own_closing IS NOT NULL
     )
     SELECT o.statement_section, o.account_code, o.account_name, o.amount
     FROM (
@@ -7633,14 +7628,11 @@ BEGIN
         SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount
         FROM liability_accs l
         UNION ALL
-        -- Fixed (2026-09): this used to be two lines — "Capital Account"
-        -- (the header's own rolled-up total_closing) plus this separately
-        -- computed surplus added on top — double-counting the same
-        -- figure (verified live: they're numerically identical, since
-        -- this chart of accounts has no separate historical reserve/fund
-        -- accounts under Capital Account). "Reserves & Surplus" is the
-        -- standard Indian financial-statement label for this combined
-        -- accumulated figure.
+        SELECT 3, 'Equity'::VARCHAR, c.account_id::INT,
+               c.account_name::VARCHAR,
+               c.own_closing::NUMERIC(15,2)
+        FROM cap_ac_own c
+        UNION ALL
         SELECT 3, 'Equity'::VARCHAR, NULL::INT,
                'Reserves & Surplus'::VARCHAR,
                s.surplus::NUMERIC(15,2)
