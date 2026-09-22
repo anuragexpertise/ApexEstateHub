@@ -7572,34 +7572,7 @@ BEGIN
     bs_accs AS (
         SELECT c.*, a.mutuality_nature
         FROM closing c
-        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = c.society_id
-        CROSS JOIN cap_ac ca
-        WHERE c.own_closing IS NOT NULL
-          -- Fixed (2026-09, live-tested, corrected after a follow-up
-        -- investigation): same own_closing fix as pl_accs above — the
-        -- previous leaf-restriction here dropped "Sundry Debtors"'s own
-        -- ₹1,54,700 receivable balance entirely (it's a header with
-        -- children AND its own direct postings), which was the dominant
-        -- cause of the balance sheet still not balancing after the first
-        -- fix. own_closing needs no leaf/header distinction at all.
-        --
-        -- Fixed again (2026-09, CA audit): the exclusion below only ever
-        -- matched DESCENDANTS of Capital Account (c.sort_path LIKE
-        -- ca.sort_path || '.%'). Capital Account's own row — c.sort_path
-        -- = ca.sort_path exactly — always survived that NOT LIKE test and
-        -- fell through into asset_accs/liability_accs like any ordinary
-        -- Cr-natured account, landing it under "Liabilities". Equity's
-        -- cap_ac_own CTE below then adds the very same own_closing figure
-        -- again under "Equity" — so Capital Account's balance was counted
-        -- twice (once mislabeled as a Liability, once correctly as
-        -- Equity), which is also why the balance sheet stopped balancing
-        -- (Assets != Liabilities + Equity by exactly that amount) whenever
-        -- Capital Account had any direct postings of its own. Explicitly
-        -- excluding the exact sort_path match, not just its children,
-        -- keeps Capital Account out of bs_accs entirely — it is shown
-        -- exactly once, under Equity, via cap_ac_own.
-        SELECT c.*
-        FROM closing c
+        LEFT JOIN accounts a ON a.id = c.account_id
         CROSS JOIN cap_ac ca
         WHERE c.own_closing IS NOT NULL
           -- Show ALL balance-sheet children of Bal (at any depth), including
@@ -7651,27 +7624,29 @@ BEGIN
         SELECT c.account_id, c.account_name, c.own_closing, a.mutuality_nature
         FROM closing c
         CROSS JOIN cap_ac ca
-        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = c.society_id
+        LEFT JOIN accounts a ON a.id = c.account_id
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path = ca.sort_path
           AND c.own_closing IS NOT NULL
     )
-    SELECT o.statement_section, o.account_code, o.account_name, o.amount
+    SELECT o.statement_section, o.account_code, o.account_name, o.amount, o.mutuality_nature
     FROM (
-        SELECT 1 AS sort_order, a.statement_section, a.account_code, a.account_name, a.amount
+        SELECT 1 AS sort_order, a.statement_section, a.account_code, a.account_name, a.amount, a.mutuality_nature
         FROM asset_accs a
         UNION ALL
-        SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount
+        SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount, l.mutuality_nature
         FROM liability_accs l
         UNION ALL
         SELECT 3, 'Equity'::VARCHAR, c.account_id::INT,
                c.account_name::VARCHAR,
-               c.own_closing::NUMERIC(15,2)
+               c.own_closing::NUMERIC(15,2),
+               c.mutuality_nature
         FROM cap_ac_own c
         UNION ALL
         SELECT 3, 'Equity'::VARCHAR, NULL::INT,
                'Reserves & Surplus'::VARCHAR,
-               s.surplus::NUMERIC(15,2)
+               s.surplus::NUMERIC(15,2),
+               NULL
         FROM ie_surplus s
     ) o
     ORDER BY o.sort_order, o.account_name;
