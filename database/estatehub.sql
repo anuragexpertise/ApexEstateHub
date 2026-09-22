@@ -7457,7 +7457,8 @@ RETURNS TABLE (
     statement_section VARCHAR,
     account_code      INT,
     account_name      VARCHAR,
-    amount            NUMERIC(15,2)
+    amount            NUMERIC(15,2),
+    mutuality_nature  VARCHAR(10)
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -7481,8 +7482,9 @@ BEGIN
         -- naturally avoids double-counting AND naturally includes
         -- hybrid header+leaf accounts, with no leaf/header distinction
         -- needed at all.
-        SELECT c.*
+        SELECT c.*, a.mutuality_nature
         FROM closing c
+        LEFT JOIN accounts a ON a.id = c.account_id
         CROSS JOIN cap_ac ca
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path LIKE ca.sort_path || '.%'
@@ -7501,7 +7503,8 @@ BEGIN
         SELECT 'Income'::VARCHAR AS statement_section,
                pa.account_id::INT AS account_code,
                pa.account_name::VARCHAR AS account_name,
-               pa.own_closing::NUMERIC(15,2) AS amount
+               pa.own_closing::NUMERIC(15,2) AS amount,
+               pa.mutuality_nature
         FROM pl_accs pa
         WHERE pa.drcr_account = 'Cr'
     ),
@@ -7509,7 +7512,8 @@ BEGIN
         SELECT 'Expenditure'::VARCHAR AS statement_section,
                pa.account_id::INT AS account_code,
                pa.account_name::VARCHAR AS account_name,
-               (-pa.own_closing)::NUMERIC(15,2) AS amount
+               (-pa.own_closing)::NUMERIC(15,2) AS amount,
+               pa.mutuality_nature
         FROM pl_accs pa
         WHERE pa.drcr_account = 'Dr'
     ),
@@ -7519,16 +7523,17 @@ BEGIN
     )
     SELECT o.statement_section, o.account_code, o.account_name, o.amount, o.mutuality_nature
     FROM (
-        SELECT 1 AS sort_order, i.statement_section, i.account_code, i.account_name, i.amount
+        SELECT 1 AS sort_order, i.statement_section, i.account_code, i.account_name, i.amount, i.mutuality_nature
         FROM income_accs i
         UNION ALL
-        SELECT 2, e.statement_section, e.account_code, e.account_name, e.amount
+        SELECT 2, e.statement_section, e.account_code, e.account_name, e.amount, e.mutuality_nature
         FROM expense_accs e
         UNION ALL
         SELECT 3, 'Surplus/Deficit'::VARCHAR, NULL::INT,
                CASE WHEN t.income_total >= (SELECT COALESCE(SUM(ea.amount),0) FROM expense_accs ea)
                     THEN 'Surplus' ELSE 'Deficit' END,
-               ABS(t.income_total - (SELECT COALESCE(SUM(ea.amount),0) FROM expense_accs ea))::NUMERIC(15,2)
+               ABS(t.income_total - (SELECT COALESCE(SUM(ea.amount),0) FROM expense_accs ea))::NUMERIC(15,2),
+               NULL::VARCHAR
         FROM totals t
     ) o
     ORDER BY o.sort_order, o.account_name;
