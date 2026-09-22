@@ -7567,6 +7567,22 @@ BEGIN
         -- children AND its own direct postings), which was the dominant
         -- cause of the balance sheet still not balancing after the first
         -- fix. own_closing needs no leaf/header distinction at all.
+        --
+        -- Fixed again (2026-09, CA audit): the exclusion below only ever
+        -- matched DESCENDANTS of Capital Account (c.sort_path LIKE
+        -- ca.sort_path || '.%'). Capital Account's own row — c.sort_path
+        -- = ca.sort_path exactly — always survived that NOT LIKE test and
+        -- fell through into asset_accs/liability_accs like any ordinary
+        -- Cr-natured account, landing it under "Liabilities". Equity's
+        -- cap_ac_own CTE below then adds the very same own_closing figure
+        -- again under "Equity" — so Capital Account's balance was counted
+        -- twice (once mislabeled as a Liability, once correctly as
+        -- Equity), which is also why the balance sheet stopped balancing
+        -- (Assets != Liabilities + Equity by exactly that amount) whenever
+        -- Capital Account had any direct postings of its own. Explicitly
+        -- excluding the exact sort_path match, not just its children,
+        -- keeps Capital Account out of bs_accs entirely — it is shown
+        -- exactly once, under Equity, via cap_ac_own.
         SELECT c.*
         FROM closing c
         CROSS JOIN cap_ac ca
@@ -7574,7 +7590,9 @@ BEGIN
           -- Show ALL balance-sheet children of Bal (at any depth), including
           -- zero-balance accounts — a 0 line is still a real chart-of-account
           -- item that must render (per ld.xlsx 'Bal' reference format).
-          AND (ca.sort_path IS NULL OR c.sort_path NOT LIKE ca.sort_path || '.%')
+          AND (ca.sort_path IS NULL
+               OR (c.sort_path NOT LIKE ca.sort_path || '.%'
+                   AND c.sort_path != ca.sort_path))
     ),
     asset_accs AS (
         -- Fixed alongside the above: the previous "ABS if negative, else
