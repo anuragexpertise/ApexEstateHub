@@ -14,6 +14,7 @@ Data source: rcm_liability table + expenses + vendors.
 
 from __future__ import annotations
 import io
+from datetime import date
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -244,8 +245,8 @@ def generate_rcm_excel(
     if db is None:
         db = _db
 
-    fy_start = MAKE_DATE(fy, 4, 1)
-    fy_end = MAKE_DATE(fy + 1, 3, 31)
+    fy_start = date(fy, 4, 1)
+    fy_end = date(fy + 1, 3, 31)
 
     # Sheet 1: RCM Register — all entries for the FY
     register_rows = db._execute(

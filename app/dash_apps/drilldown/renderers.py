@@ -1034,6 +1034,22 @@ def render_list_card(card_id: str, title: str, icon: str,
                 style={"fontSize": "11px", "borderRadius": "8px",
                        "fontWeight": "600"},
             ))
+            # Post Unmatched (Fixs 1-3) — admin only
+            if role in ("admin", "master"):
+                header_right.append(dbc.Button(
+                    [html.I(className="fas fa-arrow-down me-1"), "Post Unmatched"],
+                    id={"type": "btn-post-unmatched", "entity": entity},
+                    size="sm", color="success", outline=True,
+                    style={"fontSize": "11px", "borderRadius": "8px",
+                           "fontWeight": "600"},
+                ))
+                header_right.append(dbc.Button(
+                    [html.I(className="fas fa-trash me-1"), "Delete Unreconciled"],
+                    id={"type": "btn-delete-unreconciled", "entity": entity},
+                    size="sm", color="danger", outline=True,
+                    style={"fontSize": "11px", "borderRadius": "8px",
+                           "fontWeight": "600"},
+                ))
 
     # FY select + "Export" button for Cashbook / Ledger — these two are the
     # entities whose underlying query is itself FY-scoped (see

@@ -300,6 +300,100 @@ def _apply_reconcile(entity: str, pk: int, sid: int, actor_id: int,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# UNMATCHED LINE POSTING (Fixs 1-3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _resolve_account_id(sid, nature):
+    """Resolve a chart-of-accounts ID by nature for unmatched bank lines.
+    nature='expense' → find a Dr account (expenses), nature='income' → Cr account (income).
+    Falls back to the first matching account by name convention."""
+    if nature == 'expense':
+        name_pattern = '%Expense%'
+    else:
+        name_pattern = '%Income%'
+    row = db.execute(
+        """SELECT id FROM accounts
+           WHERE society_id=%s AND drcr_account=%s AND name ILIKE %s
+           ORDER BY id LIMIT 1""",
+        (sid, 'Dr' if nature == 'expense' else 'Cr', name_pattern),
+        fetch_one=True,
+    )
+    return row.get("id") if row else None
+
+
+def post_unmatched_bank_lines(sid, actor_id):
+    """Admin-only: post all unmatched bank_statement_lines (no match, not
+    yet reconciled) as transactions so they appear in the Balance Sheet.
+    Returns the count of transactions created."""
+    lines = db.execute(
+        """SELECT id, txn_date, description, debit, credit, reference_no,
+                  balance FROM bank_statement_lines
+           WHERE society_id=%s AND matched_id IS NULL AND reconciled=FALSE""",
+        (sid,), fetch_all=True,
+    ) or []
+    created = 0
+    for line in lines:
+        debit = line.get("debit")
+        credit = line.get("credit")
+        if debit is not None and debit > 0:
+            # Debit line = money out → expense account
+            acc_id = _resolve_account_id(sid, 'expense')
+            if acc_id is None:
+                continue
+            db.execute(
+                """INSERT INTO transactions
+                   (society_id, entry_side, trx_date, acc_id, entity_id, role,
+                    acc_particulars, amount, mode, status, created_by,
+                    bank_reconciled, bank_line_id, source_table, source_id)
+                   VALUES (%s,'Dr',%s,%s,NULL,'other',%s,%s,'bank','paid',%s,FALSE,%s,'bank_statement_lines',%s)""",
+                (sid, line["txn_date"], acc_id,
+                 line.get("description") or "Bank Charge", float(debit),
+                 actor_id, line["id"], line["id"]),
+                fetch_one=True,
+            )
+            created += 1
+        elif credit is not None and credit > 0:
+            # Credit line = money in → income account
+            acc_id = _resolve_account_id(sid, 'income')
+            if acc_id is None:
+                continue
+            db.execute(
+                """INSERT INTO transactions
+                   (society_id, entry_side, trx_date, acc_id, entity_id, role,
+                    acc_particulars, amount, mode, status, created_by,
+                    bank_reconciled, bank_line_id, source_table, source_id)
+                   VALUES (%s,'Cr',%s,%s,NULL,'other',%s,%s,'bank','paid',%s,FALSE,%s,'bank_statement_lines',%s)""",
+                (sid, line["txn_date"], acc_id,
+                 line.get("description") or "Bank Credit", float(credit),
+                 actor_id, line["id"], line["id"]),
+                fetch_one=True,
+            )
+            created += 1
+        # Mark line as reconciled (posted as transaction)
+        db.execute(
+            "UPDATE bank_statement_lines SET reconciled=TRUE WHERE id=%s",
+            (line["id"],),
+        )
+    return created
+
+
+def delete_unreconciled_bank_txns(sid, actor_id):
+    """Admin-only: delete all transactions that came from bank statements
+    but have NOT been reconciled (bank_reconciled=FALSE). Returns count."""
+    result = db.execute(
+        """DELETE FROM transactions
+           WHERE society_id=%s AND bank_reconciled=FALSE
+           AND source_table='bank_statement_lines'""",
+        (sid,),
+    )
+    db.execute(
+        "DELETE FROM bank_statement_lines WHERE society_id=%s AND matched_id IS NULL AND reconciled=FALSE",
+        (sid,),
+    )
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -601,3 +695,58 @@ def register_bank_reconcile_callbacks(app):
 
         toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
         return False, drill_store, content, breadcrumb, toast
+
+    # ── POST UNMATCHED LINES (Fixs 1-3, admin only) ──────────────
+
+    @app.callback(
+        Output("bank-reconcile-result", "children", allow_duplicate=True),
+        Input("btn-post-unmatched", "n_clicks"),
+        State("bank-reconcile-entity-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def post_unmatched(n_clicks, entity_store, auth):
+        if not n_clicks:
+            return no_update
+        if get_current_user_role() not in ("admin", "master"):
+            return html.Div("You don't have permission to do that.",
+                            style={"color": "#de5c52"})
+        sid = get_current_society_id()
+        if not sid:
+            return html.Div("Not authenticated.",
+                            style={"color": "#de5c52"})
+        actor_id = get_current_user_id()
+        created = post_unmatched_bank_lines(sid, actor_id)
+        invalidate_kpi_cache()
+        return html.Div(
+            f"Posted {created} unmatched bank line(s) as transactions.",
+            style={"color": "#17976e", "fontWeight": "600"},
+        )
+
+    # ── DELETE UNRECONCILED (Fix 3, admin only) ──────────────────
+
+    @app.callback(
+        Output("bank-reconcile-result", "children", allow_duplicate=True),
+        Input("btn-delete-unreconciled", "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def delete_unreconciled(n_clicks, auth):
+        if not n_clicks:
+            return no_update
+        if get_current_user_role() not in ("admin", "master"):
+            return html.Div("You don't have permission to do that.",
+                            style={"color": "#de5c52"})
+        sid = get_current_society_id()
+        if not sid:
+            return html.Div("Not authenticated.",
+                            style={"color": "#de5c52"})
+        actor_id = get_current_user_id()
+        deleted = delete_unreconciled_bank_txns(sid, actor_id)
+        invalidate_kpi_cache()
+        return html.Div(
+            f"Deleted {deleted} unreconciled transaction(s) and their bank lines.",
+            style={"color": "#de5c52", "fontWeight": "600"},
+        )

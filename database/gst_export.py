@@ -14,6 +14,7 @@ Data source: fn_gst_summary_fy(p_society_id, p_fy)
 
 from __future__ import annotations
 import io
+from datetime import date
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -232,7 +233,7 @@ def generate_rcm_summary_excel(
         "SELECT liability_date AS period_month, taxable_value, cgst_amount, sgst_amount, gstr_filed "
         "FROM rcm_liability WHERE society_id = %s AND liability_date >= %s AND liability_date <= %s "
         "ORDER BY liability_date",
-        (society_id, MAKE_DATE(fy, 4, 1), MAKE_DATE(fy + 1, 3, 31)), fetch_all=True,
+        (society_id, date(fy, 4, 1), date(fy + 1, 3, 31)), fetch_all=True,
     ) or []
 
     wb = Workbook()

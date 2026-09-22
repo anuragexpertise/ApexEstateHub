@@ -234,80 +234,113 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
 
 
 def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
-    """Write Balance Sheet sheet."""
+    """Write Balance Sheet sheet in 2-column Liabilities|Assets format
+    matching ld.xlsx 'Bal' sheet layout (A=Date, B-D=Liabilities, F-I=Assets)."""
     ws.cell(row=1, column=1, value=f"{society_name}")
     ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
 
     ws.cell(row=2, column=1, value=f"Balance Sheet as at 31 March {fy+1}")
     ws.cell(row=2, column=1).font = _FONT_TITLE
 
-    headers = ["Particulars", "Amount"]
-    for col, hdr in enumerate(headers, start=1):
-        cell = ws.cell(row=3, column=col, value=hdr)
+    fy_end = date(fy + 1, 3, 31)
+
+    _apply_header(ws, 3, {"A": 14, "B": 14, "C": 28, "D": 18,
+                           "F": 14, "G": 24, "H": 20, "I": 18})
+    ws.column_dimensions["E"].width = 3
+
+    ws.cell(row=4, column=2, value="Liabilities").font = _FONT_HEADER
+    ws.cell(row=4, column=6, value="Assets").font = _FONT_HEADER
+
+    headers = {
+        1: "Date", 2: "A/c", 3: "Account Name", 4: "Amount",
+        6: "A/c", 7: "Account Name", 8: "", 9: "Amount",
+    }
+    for col, hdr in headers.items():
+        cell = ws.cell(row=5, column=col, value=hdr)
         cell.font = _FONT_HEADER
         cell.fill = _FILL_HEADER
         cell.alignment = _ALIGN_C
         cell.border = _BORDER_ALL
 
-    r = 4
-    current_section = None
-    section_total = 0.0
-    assets_total = 0.0
-    liabilities_total = 0.0
-    equity_total = 0.0
+    liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
+    assets = [r for r in rows if r.get("statement_section") == "Assets"]
+    equity = [r for r in rows if r.get("statement_section") == "Equity"]
 
-    for row in rows:
-        section = row.get("statement_section", "")
-        account_name = row.get("account_name", "")
-        amount = float(row.get("amount", 0) or 0)
-
-        if section != current_section:
-            if current_section == "Assets" and section_total > 0:
-                _write_row(ws, r, ["Total Assets", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-                assets_total = section_total
-                r += 1
-            elif current_section == "Liabilities" and section_total > 0:
-                _write_row(ws, r, ["Total Liabilities", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-                liabilities_total = section_total
-                r += 1
-            elif current_section == "Equity" and section_total > 0:
-                _write_row(ws, r, ["Total Equity", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-                equity_total = section_total
-                r += 1
-            current_section = section
-            section_total = 0.0
-
-        _write_row(ws, r, [account_name, amount], _FONT_BODY, fmt=_FMT_AMT)
-        section_total += amount
+    r = 6
+    liab_start = r
+    for row in liabilities:
+        ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
+        ws.cell(row=r, column=2, value=row.get("account_code") or "")
+        ws.cell(row=r, column=3, value=row.get("account_name", ""))
+        ws.cell(row=r, column=4, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+        for col in (1, 2, 3, 4):
+            cell = ws.cell(row=r, column=col)
+            cell.font = _FONT_BODY
+            cell.border = _BORDER_ALL
+            cell.alignment = _ALIGN_R if col in (1, 4) else _ALIGN_L
         r += 1
+    liab_end = r - 1
 
-    if current_section == "Assets" and section_total > 0:
-        _write_row(ws, r, ["Total Assets", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-        assets_total = section_total
+    asset_start = r
+    for row in assets:
+        ws.cell(row=r, column=6, value=row.get("account_code") or "")
+        ws.cell(row=r, column=7, value=row.get("account_name", ""))
+        ws.cell(row=r, column=9, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+        for col in (6, 7, 9):
+            cell = ws.cell(row=r, column=col)
+            cell.font = _FONT_BODY
+            cell.border = _BORDER_ALL
+            cell.alignment = _ALIGN_R if col == 9 else _ALIGN_L
         r += 1
-    elif current_section == "Liabilities" and section_total > 0:
-        _write_row(ws, r, ["Total Liabilities", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-        liabilities_total = section_total
-        r += 1
-    elif current_section == "Equity" and section_total > 0:
-        _write_row(ws, r, ["Total Equity", section_total], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
-        equity_total = section_total
-        r += 1
+    asset_end = r - 1
 
-    r += 1
+    total_row = max(liab_end, asset_end) + 2
+    for col, val, fill in [
+        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{liab_start}:D{liab_end})", _FILL_SECTION),
+        (6, "Total", _FILL_SECTION), (9, f"=SUM(I{asset_start}:I{asset_end})", _FILL_SECTION),
+    ]:
+        cell = ws.cell(row=total_row, column=col, value=val)
+        cell.font = _FONT_TOTAL
+        if fill:
+            cell.fill = fill
+        cell.border = _BORDER_ALL
+        cell.alignment = _ALIGN_R if col in (4, 9) else _ALIGN_L
+        if col in (4, 9) and isinstance(val, str) and val.startswith("="):
+            pass
+        elif col in (4, 9):
+            cell.number_format = _FMT_AMT
+
+    equity_start = total_row + 2
+    ws.cell(row=equity_start, column=1, value="Equity & Surplus").font = _FONT_HEADER
+    r = equity_start + 1
+    for row in equity:
+        ws.cell(row=r, column=3, value=row.get("account_name", "")).font = _FONT_BODY
+        ws.cell(row=r, column=4, value=float(row.get("amount", 0) or 0)).font = _FONT_BODY
+        ws.cell(row=r, column=4).number_format = _FMT_AMT
+        ws.cell(row=r, column=4).border = _BORDER_ALL
+        ws.cell(row=r, column=3).border = _BORDER_ALL
+        r += 1
+    equity_total_row = r
+    ws.cell(row=r, column=3, value="Total Equity").font = _FONT_TOTAL
+    ws.cell(row=r, column=4, value=f"=SUM(D{equity_start+1}:D{r-1})").font = _FONT_TOTAL
+    ws.cell(row=r, column=4).number_format = _FMT_AMT
+    ws.cell(row=r, column=4).border = _BORDER_ALL
+    ws.cell(row=r, column=3).border = _BORDER_ALL
+
     note = ws.cell(
-        row=r, column=1,
+        row=equity_total_row + 2, column=1,
         value=(
             "Note: Balance Sheet is prepared from closing balances of the financial year. "
             "Assets = Dr-natured accounts (Cash, Bank, Debtors, Fixed Assets, Investments, Loans Given). "
             "Liabilities = Cr-natured accounts (Creditors, Funds, Loans Taken, Provisions). "
-            "Equity = Capital Account + Current Year Surplus/Deficit (from Income & Expenditure)."
+            "Equity = Capital Account + Current Year Surplus/Deficit (from Income & Expenditure). "
+            "Mutual income (exempt) and Non-mutual income (taxable) shown in Income Tax — Mutuality Summary."
         ),
     )
     note.font = Font(name="Arial", size=8, italic=True)
     note.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-    ws.row_dimensions[r].height = 45
+    ws.merge_cells(start_row=equity_total_row + 2, start_column=1, end_row=equity_total_row + 2, end_column=9)
+    ws.row_dimensions[equity_total_row + 2].height = 45
 
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
@@ -348,7 +381,6 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
 
     # Sheet 3: Balance Sheet
     ws3 = wb.create_sheet(title="Balance Sheet")
-    _apply_header(ws3, 3, _COL_WIDTHS_BS)
     _write_balance_sheet_sheet(ws3, bs_rows, society_name, fy)
 
     return wb
@@ -420,7 +452,6 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     wb = Workbook()
     wb.remove(wb.active)
     ws = wb.create_sheet(title="Balance Sheet")
-    _apply_header(ws, 3, _COL_WIDTHS_BS)
     _write_balance_sheet_sheet(ws, bs_rows, society_name, fy)
 
     buf = io.BytesIO()
