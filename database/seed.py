@@ -540,28 +540,34 @@ CONCERNS = [
 # Demo assets purchased via fn_buy_asset so their journal entries are
 # correct double-entry pairs under the current (2026-08) cash/non-cash
 # model — both mode='cash', so each posts a single Dr leg only.
+# "reference" matches the corresponding row's reference_no in
+# database/make_sbi_statement.py — fn_buy_asset has no cheque_no/trx_id
+# parameter, so it's backfilled onto the expenses row via UPDATE in
+# seed_simple_assets/seed_instruments_depreciation below (2026-09, CA
+# audit — previously always NULL, so these could only ever fuzzy-match).
 SIMPLE_ASSETS = [
     {"company_name": "Jackson","asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
-     "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314},
+     "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314, "reference": "RTGS0515GEN"},
     {"company_name": "Samsung","asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
-     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 64},
+     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 64,  "reference": "NEFT0620PROJ"},
     {"company_name": "Godrej","asset_name": "Office Desk & Chairs",       "asset_SNo": "GODREJ-F1",
-     "purchase_date": "2026-07-10", "purchase_value": 15000, "acc_id": 61},
+     "purchase_date": "2026-07-10", "purchase_value": 15000, "acc_id": 61,  "reference": "NEFT0710DESK"},
     {"company_name": "Kirloskar","asset_name": "Water Pump Motor",        "asset_SNo": "KIR-M12",
-     "purchase_date": "2026-08-05", "purchase_value": 25000, "acc_id": 65},
+     "purchase_date": "2026-08-05", "purchase_value": 25000, "acc_id": 65,  "reference": "NEFT0805PUMP"},
     {"company_name": "Tata","asset_name": "Society Patrol Vehicle",       "asset_SNo": "MH12AB1234",
-     "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 66},
+     "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 66, "reference": "NEFT0912VEH"},
     {"company_name": "Dell","asset_name": "Security Desktop PC",          "asset_SNo": "DELL-PC1",
-     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 67},
+     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 67,  "reference": "NEFT1015PC"},
 ]
 
 # Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').
 # One purchase before 1-Sep (full rate) and one after (half rate).
+# "reference" — see SIMPLE_ASSETS note above; same backfill pattern.
 INSTRUMENT_PURCHASES = [
     {"company_name": "LG","asset_name": "PA System (Community Hall)", "asset_SNo": "PA-2026-01",
-     "purchase_date": "2026-06-10", "purchase_value": 8000.00, "half_rate": False},
+     "purchase_date": "2026-06-10", "purchase_value": 8000.00, "half_rate": False, "reference": "NEFT0610PA"},
     {"company_name": "Huwaei","asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
-     "purchase_date": "2026-10-05", "purchase_value": 6000.00, "half_rate": True},
+     "purchase_date": "2026-10-05", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT1005CCTV"},
 ]
 INSTRUMENT_FULL_RATE = 15.0   # accounts.depreciation_percent for acc 64
 YEAR_END_DATE = "2027-03-31"
@@ -1528,11 +1534,19 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
                 (society_id, item["asset_name"])):
             print(f"  · Asset '{item['asset_name']}' already exists — skipped.")
             continue
-        cur.execute(
+        result = _one(
+            cur,
             "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, item["company_name"], item["asset_name"], item["asset_SNo"], item["purchase_value"],
              64, item["purchase_date"], item.get("installation_date"), "cash", admin_uid,
              f"Instrument purchase - {item['asset_name']}"),
+        )
+        # See SIMPLE_ASSETS note above — fn_buy_asset can't accept a
+        # reference, so it's backfilled here to match
+        # make_sbi_statement.py (2026-09, CA audit).
+        cur.execute(
+            "UPDATE expenses SET transaction_id=%s WHERE id=%s",
+            (item["reference"], result["expense_id"]),
         )
         conn.commit()
         print(f"  ✓ Instrument '{item['asset_name']}' purchased "
@@ -1643,11 +1657,19 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
         if _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
                 (society_id, asset["asset_name"])):
             continue
-        cur.execute(
+        result = _one(
+            cur,
             "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_value"],
              asset["acc_id"], asset["purchase_date"], asset.get("installation_date"), "cash", admin_uid,
              f"Asset purchase - {asset['asset_name']}"),
+        )
+        # fn_buy_asset has no cheque_no/trx_id parameter — backfill the
+        # expenses row directly so it exact-matches make_sbi_statement.py's
+        # reference (2026-09, CA audit — see SIMPLE_ASSETS note above).
+        cur.execute(
+            "UPDATE expenses SET transaction_id=%s WHERE id=%s",
+            (asset["reference"], result["expense_id"]),
         )
         conn.commit()
         print(f"  ✓ Asset    '{asset['asset_name']}' purchased on {asset['purchase_date']}")
@@ -1669,25 +1691,30 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
 #
 
 RECEIPT_TYPES = [
-    # (date, acc_id, particulars, amount, entity_key, role, mode)
+    # (date, acc_id, particulars, amount, entity_key, role, mode, reference)
+    # reference matches the corresponding row's reference_no in
+    # database/make_sbi_statement.py — cheque_no for mode='cheque',
+    # transaction_id (bank/UPI ref) for every other mode. Added 2026-09
+    # (CA audit): previously always NULL, so bank reconciliation could
+    # only ever fuzzy-match, never auto-confirm on an exact hit.
     ("2026-04-01", 2311,  "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
-     "owner2", "apartment", "cash"),
+     "owner2", "apartment", "cash", "NEFT20260401A201"),
     ("2026-04-02", 2311,  "Apartment Maintenance - Annual Bulk Payment A-102", 120000.00,
-     "owner4", "apartment", "cash"),
+     "owner4", "apartment", "cash", "NEFT20260402A102"),
     ("2026-04-08", 212,   "Old Furniture Sold (scrap dealer pickup)", 3500.00,
-     None, "other", "cash"),
+     None, "other", "cash", "IMPS0408SCRAP"),
     ("2026-04-22", 2318,  "NOC / Ownership Transfer Fee - A-102", 1000.00,
-     "owner4", "apartment", "cash"),
+     "owner4", "apartment", "cash", "NEFT0422NOC"),
     ("2026-05-03", 2317,  "Late Maintenance Payment Fine - A-201", 500.00,
-     "owner2", "apartment", "cash"),
+     "owner2", "apartment", "cash", "NEFT0503FINE"),
     ("2026-07-20", 21111, "Savings Bank Interest Credited (SBI)", 850.00,
-     None, "other", "bank"),
+     None, "other", "bank", "INT0720SBI"),
     ("2026-09-05", 23192, "Diwali Mela Stall Booking Fee", 4000.00,
-     "vendor1", "vendor", "cash"),
+     "vendor1", "vendor", "cash", "NEFT0905DIWALI"),
     ("2026-12-25", 22,    "Corporate Sponsorship Gift - Winter Fete", 2500.00,
-     "vendor2", "vendor", "cheque"),
+     "vendor2", "vendor", "cheque", "000512"),
     ("2027-02-14", 2318,  "Community Event Ticket Sales", 1200.00,
-     None, "other", "upi"),
+     None, "other", "upi", "UPI0214TICKET"),
 ]
 
 
@@ -1711,25 +1738,30 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
 
     # Admin-created, CONFIRMED receipt (e.g. hall booking fee). mode='cash'
     # -> fn_save_receipt posts a single Cr PropInc leg only.
+    # trx_id populated (2026-09, CA audit) to match make_sbi_statement.py's
+    # NEFT0710HALL reference, so bank reconciliation can exact-match this
+    # row instead of only fuzzy-matching it.
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Community Hall Booking Fee")):
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, 2318, "Community Hall Booking Fee", 2000.00,
-             apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, None, None),
+             apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, "NEFT0710HALL", None),
         )
         conn.commit()
         print("  ✓ Receipt (admin, CONFIRMED): Community Hall Booking Fee ₹2000")
 
     # Security-created, UNCONFIRMED (pending) receipt — awaiting admin
     # verify. Pending receipts don't post any transaction rows at all
-    # (fn_save_receipt only writes them once status='confirmed').
+    # (fn_save_receipt only writes them once status='confirmed'), but the
+    # receipts row itself (and its reference) is written immediately, so
+    # it can still surface in the reconciliation picker for review.
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Visitor Parking Fee (gate collection)")):
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, 213, "Visitor Parking Fee (gate collection)", 300.00,
-             None, "other", "cash", "2026-07-16", security_user_id, None, None, None),
+             None, "other", "cash", "2026-07-16", security_user_id, None, "NEFT0716PARK", None),
         )
         conn.commit()
         print("  ✓ Receipt (security, UNCONFIRMED/pending): Visitor Parking Fee ₹300")
@@ -1738,15 +1770,17 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     # event/stall booking, gift, ticket sales) — see RECEIPT_TYPES above.
     # All admin-created -> CONFIRMED immediately, same as the hall-booking
     # receipt above.
-    for date, acc_id, particulars, amount, entity_key, role, mode in RECEIPT_TYPES:
+    for date, acc_id, particulars, amount, entity_key, role, mode, reference in RECEIPT_TYPES:
         if _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, particulars)):
             continue
         entity_id = entity_lookup.get(entity_key) if entity_key else None
+        cheque_no = reference if mode == "cheque" else None
+        trx_id = reference if mode != "cheque" else None
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, acc_id, particulars, amount,
-             entity_id, role, mode, date, admin_uid, None, None, None),
+             entity_id, role, mode, date, admin_uid, cheque_no, trx_id, None),
         )
         conn.commit()
         print(f"  ✓ Receipt (admin, CONFIRMED, mode={mode}): {particulars} ₹{amount:g}")
@@ -1764,15 +1798,18 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     # b) One salary already PAID out-of-pocket by the admin, but recorded
     #    directly (not via fn_save_expense) so it lands as an UNCONFIRMED
     #    expense row awaiting the same admin-verification step receipts use.
+    #    transaction_id populated (2026-09, CA audit) to match
+    #    make_sbi_statement.py's NEFT0716SAL reference.
     if not _one(cur, """SELECT 1 FROM expenses WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Salary advance - Ramu Singh (paid, pending confirmation)")):
         cur.execute(
             """INSERT INTO expenses
                (society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
-                amount, mode, status, tds_pct, tds_section, created_at)
-               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,NOW())""",
+                amount, mode, status, tds_pct, tds_section, transaction_id, created_at)
+               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
             (society_id, security_user_id, None, "2026-07-16",
-             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00),
+             "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00,
+             "NEFT0716SAL"),
         )
         conn.commit()
         print("  ✓ Expense (salary paid, status=pending, needs admin confirmation): ₹12000")
