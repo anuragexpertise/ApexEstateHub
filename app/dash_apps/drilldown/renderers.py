@@ -4010,137 +4010,96 @@ def render_financial_statements_card(
             note,
         ])
 
-def _make_balance_sheet_preview(rows, title):
+    def _make_balance_sheet_preview(rows, title):
         """
-        Balance Sheet preview in two-column format matching ld.xlsx 'Bal' sheet A16:I35:
-        Left column: Liabilities & Equity (with hierarchy)
-        Right column: Assets (with hierarchy)
-        All accounts including zero balances are displayed, no row cap.
+        Balance Sheet preview in two-column format matching ld.xlsx 'Bal' sheet
+        A16:I35: Liabilities & Equity on the left, Assets on the right, each
+        account shown (including zero balances) with subtotals and a grand
+        total per side. No row cap - every account returned by
+        fn_balance_sheet_fy is rendered.
         """
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
 
-        # Split rows by section
         assets = [r for r in rows if r.get("statement_section") == "Assets"]
         liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
         equity = [r for r in rows if r.get("statement_section") == "Equity"]
 
-        # Calculate totals
         total_assets = sum(float(r.get("amount") or 0) for r in assets)
         total_liabilities = sum(float(r.get("amount") or 0) for r in liabilities)
         total_equity = sum(float(r.get("amount") or 0) for r in equity)
 
-        def _format_amount(amount):
+        def _fmt(amount):
             return f"₹{amount:,.2f}"
 
-        def _make_section_rows(section_rows, indent=False):
-            rows_html = []
-            for r in section_rows:
-                amount = float(r.get("amount") or 0)
-                name = r.get("account_name") or ""
-                style = {"fontSize": "12px", "padding": "6px 8px"}
-                if indent:
-                    style["paddingLeft"] = "20px"
-                rows_html.append(html.Tr([
-                    html.Td(name, style=style),
-                    html.Td(_format_amount(amount), style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"}),
-                ]))
-            return rows_html
-
-        def _make_subtotal_row(name, amount):
-            return html.Tr([
-                html.Td(name, style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px", "borderTop": "1px solid #ddd"}),
-                html.Td(_format_amount(amount), style={"fontSize": "12px", "fontWeight": "700", "padding": "6px 8px", "borderTop": "1px solid #ddd", "textAlign": "right"}),
-            ], style={"background": "#f7f7f7"})
-
-        def _make_header_row(name):
-            return html.Tr(html.Td(name, colSpan=2, style={
-                "fontSize": "11px", "fontWeight": "700", "color": "#fff",
-                "background": "#2c3e50", "padding": "6px 8px",
-            }))
-
-        # Left column: Liabilities + Equity
-        left_rows = []
-        left_rows.append(_make_header_row("Liabilities & Equity"))
-        
+        # Each side: flat list of (label, amount_str_or_None, kind).
+        # kind in {"header", "item", "subtotal", "total"}.
+        left_side = [("Liabilities & Equity", None, "header")]
+        for r in liabilities:
+            left_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
         if liabilities:
-            left_rows.extend(_make_section_rows(liabilities))
-            left_rows.append(_make_subtotal_row("Total Liabilities", total_liabilities))
-        
+            left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
+        for r in equity:
+            left_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
         if equity:
-            left_rows.extend(_make_section_rows(equity))
-            left_rows.append(_make_subtotal_row("Total Equity", total_equity))
+            left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
+        left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
 
-        left_rows.append(html.Tr([
-            html.Td("Total Liabilities + Equity", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333"}),
-            html.Td(_format_amount(total_liabilities + total_equity), style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333", "textAlign": "right"}),
-        ]))
+        right_side = [("Assets", None, "header")]
+        for r in assets:
+            right_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+        right_side.append(("Total Assets", _fmt(total_assets), "total"))
 
-        # Right column: Assets
-        right_rows = []
-        right_rows.append(_make_header_row("Assets"))
-        
-        if assets:
-            right_rows.extend(_make_section_rows(assets))
-            right_rows.append(_make_subtotal_row("Total Assets", total_assets))
+        def _style_for(kind, align_right=False):
+            base = {"fontSize": "12px", "padding": "6px 8px"}
+            if align_right:
+                base["textAlign"] = "right"
+            if kind == "header":
+                base.update({"fontSize": "11px", "fontWeight": "700", "color": "#fff", "background": "#2c3e50"})
+            elif kind == "subtotal":
+                base.update({"fontWeight": "700", "borderTop": "1px solid #ddd", "background": "#f7f7f7"})
+            elif kind == "total":
+                base.update({"fontWeight": "700", "borderTop": "2px solid #333"})
+            return base
 
-        right_rows.append(html.Tr([
-            html.Td("Total Assets", style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333"}),
-            html.Td(_format_amount(total_assets), style={"fontSize": "12px", "fontWeight": "700", "padding": "8px", "borderTop": "2px solid #333", "textAlign": "right"}),
-        ]))
+        def _cells(label, amount, kind):
+            if kind == "header":
+                return [html.Td(label, colSpan=2, style=_style_for("header"))]
+            return [
+                html.Td(label, style=_style_for(kind)),
+                html.Td(amount if amount is not None else "", style=_style_for(kind, align_right=True)),
+            ]
 
-        # Create two-column table
-        # We need to make rows aligned side by side
-        max_left = len(left_rows)
-        max_right = len(right_rows)
-        max_rows = max(max_left, max_right)
+        n_rows = max(len(left_side), len(right_side))
+        body_rows = []
+        for i in range(n_rows):
+            l_label, l_amount, l_kind = left_side[i] if i < len(left_side) else ("", None, "item")
+            r_label, r_amount, r_kind = right_side[i] if i < len(right_side) else ("", None, "item")
 
-        combined_rows = []
-        for i in range(max_rows):
-            left_cells = []
-            right_cells = []
-            
-            if i < len(left_rows):
-                left_cells = [left_rows[i].children[0], left_rows[i].children[1]] if hasattr(left_rows[i], 'children') else []
-                # Extract cells from the row
-                if hasattr(left_rows[i], 'props') and 'children' in left_rows[i].props:
-                    left_cells = left_rows[i].props['children']
-            else:
-                left_cells = [html.Td("", style={"fontSize": "12px", "padding": "6px 8px"}), html.Td("", style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"})]
-            
-            if i < len(right_rows):
-                if hasattr(right_rows[i], 'props') and 'children' in right_rows[i].props:
-                    right_cells = right_rows[i].props['children']
-            else:
-                right_cells = [html.Td("", style={"fontSize": "12px", "padding": "6px 8px"}), html.Td("", style={"fontSize": "12px", "padding": "6px 8px", "textAlign": "right"})]
-            
-            combined_rows.append(html.Tr([
-                left_cells[0], left_cells[1],
-                html.Td("  ", style={"width": "20px"}),  # spacer
-                right_cells[0], right_cells[1],
-            ]))
+            row_cells = _cells(l_label, l_amount, l_kind)
+            row_cells.append(html.Td("", style={"width": "16px", "padding": "0"}))
+            row_cells.extend(_cells(r_label, r_amount, r_kind))
+            body_rows.append(html.Tr(row_cells))
 
-        # Headers for two-column table
         head = html.Thead(html.Tr([
             html.Th("Account", style={"fontSize": "11px"}),
             html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
-            html.Th("", style={"width": "20px"}),
+            html.Th("", style={"width": "16px"}),
             html.Th("Account", style={"fontSize": "11px"}),
             html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
         ], style={"fontSize": "11px"}))
 
         table = dbc.Table(
-            [head, html.Tbody(combined_rows)],
+            [head, html.Tbody(body_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
             style={"marginTop": "4px", "marginBottom": "8px"}
         )
 
-        # Check balance
         diff = total_assets - (total_liabilities + total_equity)
         balance_note = None
         if abs(diff) > 0.01:
             balance_note = html.Div(
-                f"⚠ Out of balance by ₹{abs(diff):,.2f}", 
+                f"⚠ Out of balance by {_fmt(abs(diff))}",
                 style={"fontSize": "11px", "color": "#c0392b", "fontStyle": "italic", "marginTop": "8px"}
             )
 
