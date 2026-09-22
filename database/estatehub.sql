@@ -10574,14 +10574,13 @@ $$;
 -- fails the whole call with nothing written yet, rather than needing a
 -- rollback partway through.
 --
--- p_tds_rates is a JSON array of {"section":..., "rate":...} objects.
--- NOTE: TDS_SECTION_RATE_SEED (database/seed.py) has two rows sharing
--- section '194C' (Ind/HUF vs Others rates) but tds_section_rates is
--- unique on (society_id, section, effective_from) — only one rate per
--- section can be stored per society. The later row in JSON array order
--- wins (ON CONFLICT DO UPDATE). This is a pre-existing schema/seed
--- mismatch — flagged here, not fixed; a real fix needs a payee-type
--- column on tds_section_rates, out of scope for this patch.
+-- p_tds_rates is a JSON array of {"section":..., "discriminator":...,
+-- "rate":...} objects (see setup_wizard_callbacks.py, which already
+-- includes discriminator per row, and TDS_SECTION_RATE_SEED in
+-- database/seed.py, which already seeds separate Ind/HUF vs Others rows
+-- for 194C/194D via the discriminator column — the schema was never
+-- missing a payee-type column; see the fix note on the TDS section-rates
+-- write below for what was actually broken).
 -- p_signing_secret_enc is the Fernet ciphertext already encrypted in
 -- Python (secret_vault.encrypt_secret) before this call — this function
 -- never sees the plaintext SIGNING_SECRET and does no hashing/encryption
@@ -10678,31 +10677,64 @@ BEGIN
         primary_bank_account_id = COALESCE(primary_bank_account_id, 6311)
     WHERE id = p_society_id;
 
-    -- 2) TDS section rates (per-society; last value per section wins — see note above)
+    -- 2) TDS section rates (per-society; keyed by section+discriminator — see note above)
+    --
+    -- Fixed (2026-09, CA audit): this previously dropped `discriminator`
+    -- from the INSERT entirely (every wizard-submitted row silently became
+    -- discriminator=NULL) and its ON CONFLICT target
+    -- (society_id, section, effective_from) didn't match the table's real
+    -- unique constraint, uq_tds_section_rate
+    -- (society_id, section, discriminator, effective_from) — a 3-column
+    -- target can't resolve against a 4-column constraint, so Postgres
+    -- raised "there is no unique or exclusion constraint matching the ON
+    -- CONFLICT specification" on the very first call, for ANY society,
+    -- the moment p_tds_rates carried a row for a discriminated section
+    -- (194C/194D/194-I/194J all are, per TDS_SECTION_RATE_SEED) — which
+    -- setup_wizard_callbacks.py always sends. Setup Wizard completion was
+    -- broken end-to-end for every new society, not just a 194C rate
+    -- ambiguity.
+    --
+    -- discriminator is nullable (most sections have none), and Postgres
+    -- unique constraints never treat two NULLs as conflicting — so even
+    -- with the target column list corrected, ON CONFLICT would silently
+    -- never fire for those non-discriminated sections and a fresh
+    -- duplicate row would be inserted on every wizard re-save. Using an
+    -- explicit UPDATE-then-INSERT-if-not-found, with
+    -- `IS NOT DISTINCT FROM` for the discriminator comparison, sidesteps
+    -- that NULL-uniqueness pitfall entirely (the same pattern
+    -- seed_tds_section_rates() already uses in Python for this exact
+    -- reason) instead of relying on ON CONFLICT at all.
     IF p_tds_rates IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(p_tds_rates)
         LOOP
-            INSERT INTO tds_section_rates (
-                society_id, section, nature_of_income, rate, rate_no_pan, 
-                single_bill_threshold, annual_aggregate_threshold, effective_from
-            )
-            VALUES (
-                p_society_id, 
-                v_item->>'section', 
-                v_item->>'nature_of_income', 
-                (v_item->>'rate')::NUMERIC, 
-                (v_item->>'rate_no_pan')::NUMERIC,
-                (v_item->>'single_bill_threshold')::NUMERIC,
-                (v_item->>'annual_aggregate_threshold')::NUMERIC,
-                p_tds_effective_date
-            )
-            ON CONFLICT (society_id, section, effective_from)
-            DO UPDATE SET 
-                nature_of_income = EXCLUDED.nature_of_income,
-                rate = EXCLUDED.rate,
-                rate_no_pan = EXCLUDED.rate_no_pan,
-                single_bill_threshold = EXCLUDED.single_bill_threshold,
-                annual_aggregate_threshold = EXCLUDED.annual_aggregate_threshold;
+            UPDATE tds_section_rates SET
+                nature_of_income = v_item->>'nature_of_income',
+                rate = (v_item->>'rate')::NUMERIC,
+                rate_no_pan = (v_item->>'rate_no_pan')::NUMERIC,
+                single_bill_threshold = (v_item->>'single_bill_threshold')::NUMERIC,
+                annual_aggregate_threshold = (v_item->>'annual_aggregate_threshold')::NUMERIC
+            WHERE society_id = p_society_id
+              AND section = v_item->>'section'
+              AND discriminator IS NOT DISTINCT FROM (v_item->>'discriminator')
+              AND effective_from = p_tds_effective_date;
+
+            IF NOT FOUND THEN
+                INSERT INTO tds_section_rates (
+                    society_id, section, discriminator, nature_of_income, rate, rate_no_pan,
+                    single_bill_threshold, annual_aggregate_threshold, effective_from
+                )
+                VALUES (
+                    p_society_id,
+                    v_item->>'section',
+                    v_item->>'discriminator',
+                    v_item->>'nature_of_income',
+                    (v_item->>'rate')::NUMERIC,
+                    (v_item->>'rate_no_pan')::NUMERIC,
+                    (v_item->>'single_bill_threshold')::NUMERIC,
+                    (v_item->>'annual_aggregate_threshold')::NUMERIC,
+                    p_tds_effective_date
+                );
+            END IF;
         END LOOP;
     END IF;
 
