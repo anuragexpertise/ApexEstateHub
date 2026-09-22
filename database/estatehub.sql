@@ -507,6 +507,7 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
     match_confidence VARCHAR(10) CHECK (
         match_confidence IN ('exact', 'fuzzy', 'manual')
     ),
+    reconciled BOOLEAN NOT NULL DEFAULT FALSE,
     uploaded_by INT REFERENCES users (id),
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CHECK (num_nonnulls(debit, credit) = 1)
@@ -891,6 +892,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_by INTEGER REFERENCES users (id),
     journal_id INT,
     transaction_number VARCHAR(64) UNIQUE,
+    bank_reconciled BOOLEAN NOT NULL DEFAULT TRUE,
+    bank_line_id INT REFERENCES bank_statement_lines (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -1506,6 +1509,10 @@ CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (societ
 CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions (source_table, source_id);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_acc_date ON transactions (acc_id, trx_date);
+
+CREATE INDEX IF NOT EXISTS idx_txn_unreconciled_bank
+    ON transactions (society_id, acc_id, trx_date)
+    WHERE bank_reconciled = FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_transactions_entity_date ON transactions (entity_id, trx_date);
 
@@ -7206,7 +7213,7 @@ BEGIN
             a.has_bf,
             CASE WHEN a.has_bf THEN -fn_resolve_bf_amount_fy(p_society_id, a.id, p_fy) ELSE 0 END AS own_bf,
             CASE 
-                WHEN a.tab_name = 'CiH' THEN 
+                WHEN a.tab_name = 'CiH'                 THEN 
                     COALESCE((
                         SELECT SUM(
                             CASE WHEN t.entry_side = 'Dr' THEN t.amount
@@ -7215,6 +7222,7 @@ BEGIN
                         )
                         FROM transactions t
                         WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.mode = 'cash'
+                          AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
                           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
                     ), 0)
                 ELSE 
@@ -7225,6 +7233,7 @@ BEGIN
                         FROM transactions t
                         WHERE t.acc_id = a.id AND t.society_id = p_society_id
                           AND t.status = 'paid'
+                          AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
                           AND t.trx_date BETWEEN v_fy_start AND v_fy_end
                     ), 0)
             END
@@ -7508,7 +7517,7 @@ BEGIN
         SELECT COALESCE(SUM(ia.amount), 0) AS income_total
         FROM income_accs ia
     )
-    SELECT o.statement_section, o.account_code, o.account_name, o.amount
+    SELECT o.statement_section, o.account_code, o.account_name, o.amount, o.mutuality_nature
     FROM (
         SELECT 1 AS sort_order, i.statement_section, i.account_code, i.account_name, i.amount
         FROM income_accs i
@@ -7548,7 +7557,8 @@ RETURNS TABLE (
     statement_section VARCHAR,
     account_code      INT,
     account_name      VARCHAR,
-    amount            NUMERIC(15,2)
+    amount            NUMERIC(15,2),
+    mutuality_nature  VARCHAR(10)
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -7560,7 +7570,12 @@ BEGIN
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
     bs_accs AS (
-        -- Fixed (2026-09, live-tested, corrected after a follow-up
+        SELECT c.*, a.mutuality_nature
+        FROM closing c
+        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = c.society_id
+        CROSS JOIN cap_ac ca
+        WHERE c.own_closing IS NOT NULL
+          -- Fixed (2026-09, live-tested, corrected after a follow-up
         -- investigation): same own_closing fix as pl_accs above — the
         -- previous leaf-restriction here dropped "Sundry Debtors"'s own
         -- ₹1,54,700 receivable balance entirely (it's a header with
@@ -7609,7 +7624,8 @@ BEGIN
         SELECT 'Assets'::VARCHAR AS statement_section,
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
-               (-ba.own_closing)::NUMERIC(15,2) AS amount
+               (-ba.own_closing)::NUMERIC(15,2) AS amount,
+               ba.mutuality_nature
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Dr'
     ),
@@ -7617,7 +7633,8 @@ BEGIN
         SELECT 'Liabilities'::VARCHAR AS statement_section,
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
-               ba.own_closing::NUMERIC(15,2) AS amount
+               ba.own_closing::NUMERIC(15,2) AS amount,
+               ba.mutuality_nature
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Cr'
     ),
@@ -7631,9 +7648,10 @@ BEGIN
           AND c.own_closing != 0
     ),
     cap_ac_own AS (
-        SELECT c.account_id, c.account_name, c.own_closing
+        SELECT c.account_id, c.account_name, c.own_closing, a.mutuality_nature
         FROM closing c
         CROSS JOIN cap_ac ca
+        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = c.society_id
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path = ca.sort_path
           AND c.own_closing IS NOT NULL
@@ -10346,6 +10364,7 @@ BEGIN
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Cr'
       AND t.status = 'paid'
+      AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
     GROUP BY a.mutuality_nature
     
     UNION ALL
@@ -10360,6 +10379,7 @@ BEGIN
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Dr'
       AND t.status = 'paid'
+      AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
     GROUP BY a.mutuality_nature;
 END;
 $$;
