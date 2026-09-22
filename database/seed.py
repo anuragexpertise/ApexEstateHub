@@ -25,13 +25,14 @@ What it seeds (society_id = 1, "Sunrise Residency"):
     mode='cash', so this only matters if you go on to record a non-cash
     transaction through the app afterward, but it's set regardless so
     that path isn't broken out of the box.
-  * Opening (BF) balances — round numbers for easy inspection, per an
-    explicit request: CiH 100,000 Dr, CapAc 1,000,000 Cr, ICICI 50,000 Dr,
-    SBI 50,000 Dr, Furniture 10,000 Dr, Investments 10,000 Dr, Sundry
-    Creditors 0, Sundry Debtors 780,000 Dr (now on leaf account 81
-    "Sundry Debtors (Digital)", not header 8 — see BF_VALUES comment,
-    2026-08). NOW netted to zero (2026-08):
-    Sundry Debtors carries the balancing 780,000 Dr receivable so that
+  * Opening (BF) balances — round numbers for easy inspection, sized so
+    Cash-in-Hand and Capital Account are never negative (2026-09 CA-audit
+    fix; see BF_VALUES below for the full derivation):
+    CiH 300,000 Dr, SBI 300,000 Dr, ICICI 50,000 Dr, Furniture 10,000 Dr,
+    Investments 10,000 Dr, Sundry Creditors 0, Sundry Debtors 330,000 Dr
+    (on leaf account 81 "Sundry Debtors (Digital)", not header 8 — see
+    BF_VALUES comment), CapAc 1,000,000 Cr.
+    Sundry Debtors carries the balancing Dr receivable so that
     Assets (CiH+SBI+ICICI+Furniture+Investments+SDr = 1,000,000 Dr) equals
     Liabilities+Equity (CapAc = 1,000,000 Cr) exactly. Confirmed by
     summing fn_fy_closing_report's own_bf across every has_bf=TRUE
@@ -594,11 +595,45 @@ POLLS = [
     },
 ]
 
-# ── Opening (BF) balances (2026-08) — round numbers for easy inspection,
-# not a balanced trial (see module docstring). Keyed by acc_id, applied
-# for FY 2026.
+# ── Opening (BF) balances (2026-09, CA audit) — round numbers (multiples
+# of 100) for easy inspection, keyed by acc_id, applied for FY 2026.
+#
+# Fixed: BF_VALUES had been accidentally left as an empty dict — despite
+# the module docstring describing a full opening-balance scheme, every
+# has_bf=TRUE account was actually seeding at 0.00 (BF_VALUES.get(acc_id,
+# 0.00) below). Restored, and CiH/SBI raised to also fix a real issue
+# this exposed: every money-moving seed call uses mode='cash' (see
+# module docstring), so SIMPLE_ASSETS + INSTRUMENT_PURCHASES alone post
+# ~506,500 of cash-mode Dr capex across the FY (Society Patrol Vehicle
+# 350,000 on 2026-09-12 is the single biggest leg) against ~255,550 of
+# confirmed cash-mode Cr receipts — a net cash-mode outflow of roughly
+# -250,950 for the year, bottoming out around mid-October at roughly
+# -254,650 relative to a 0 BF. The original 100,000 CiH BF documented
+# above was never enough to cover that even before it was accidentally
+# zeroed; CiH would have gone negative starting September regardless.
+# 300,000 (rounded up from the ~254,650 trough with headroom) keeps the
+# running Cash-in-Hand balance positive throughout the FY, not just at
+# year-end. SBI raised the same way and for the same reason, to match
+# the (also corrected) opening balance in the companion
+# make_sbi_statement.py bank-statement fixture — see that file's own
+# note; it was drifting deep into an unrealistic overdraft narrative
+# (as low as -215,400) that has nothing to do with an actual SBI current
+# account without an OD facility.
+#
+# CapAc is held at a clean, round 1,000,000 Cr (unchanged) and Sundry
+# Debtors (81) is the balancing Dr plug, same convention as before — see
+# module docstring for the exact reconciliation.
 BF_FY = 2026
-BF_VALUES = {}
+BF_VALUES = {
+    2:    1_000_000.00,  # Capital Account (Cr) — never negative, round 100s
+    6311:   300_000.00,  # SBI A/c - Society (Dr) — see note above
+    6312:    50_000.00,  # ICICI A/c - Society (Dr)
+    61:      10_000.00,  # Furniture (Dr)
+    62:      10_000.00,  # Investments (Dr)
+    633:    300_000.00,  # Cash-in-hand (Dr) — never negative, round 100s
+    9:            0.00,  # Sundry Creditors (Cr)
+    81:     330_000.00,  # Sundry Debtors (Digital) (Dr) — balancing plug
+}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
