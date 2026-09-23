@@ -299,7 +299,7 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
             )
             
             for head_code, group_rows in sorted_groups:
-                if len(group_groups[head_code]) > 1:
+                if len(group_rows) > 1:
                     # Multiple accounts under this head - show as group header + items
                     head_label = group_rows[0].get("statutory_head_label") or head_code
                     ws.cell(row=r, column=col_name if is_liability else col_code, value=head_label).font = _FONT_HEADER
@@ -344,12 +344,14 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
         return r, r - 1
 
     r = 6
+    liab_start = r
     r, liab_end = _write_grouped_section(ws, liabilities, r, 1, 2, 3, 4, True, "Liabilities")
+    asset_start = r
     r, asset_end = _write_grouped_section(ws, assets, r, 1, 6, 7, 9, False, "Assets")
 
     total_row = max(liab_end, asset_end) + 2
     for col, val, fill in [
-        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{6}:D{liab_end})", _FILL_SECTION),
+        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{liab_start}:D{liab_end})", _FILL_SECTION),
         (7, "Total", _FILL_SECTION), (9, f"=SUM(I{asset_start}:I{asset_end})", _FILL_SECTION),
     ]:
         cell = ws.cell(row=total_row, column=col, value=val)
