@@ -276,6 +276,32 @@ def _fetch_balance_sheet_rows(db, society_id: int, fy: int) -> list[dict]:
     ) or []
 
 
+def _fetch_balance_sheet_hierarchy(db, society_id: int, fy: int) -> tuple[list[dict], dict[int, list[dict]], dict]:
+    """Fetch Balance Sheet data from fn_fy_closing_report with parent_account_id hierarchy.
+    
+    Returns:
+        - root_children: Direct children of the root account (tab_name='Bal')
+        - children_by_parent: Dict mapping parent_account_id to list of child accounts
+        - closing_by_id: Dict mapping account_id to its closing row data
+    """
+    closing_rows = db._execute(
+        "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
+        (society_id, fy), fetch_all=True,
+    ) or []
+    
+    closing_by_id = {r["account_id"]: r for r in closing_rows}
+    children_by_parent: dict[int, list[dict]] = {}
+    for r in closing_rows:
+        pid = r.get("parent_account_id")
+        if pid is not None:
+            children_by_parent.setdefault(pid, []).append(r)
+    
+    root = next((r for r in closing_rows if r.get("parent_account_id") is None), None)
+    root_children = children_by_parent.get((root or {}).get("id"), []) if root else []
+    
+    return root_children, children_by_parent, closing_by_id
+
+
 def _write_balance_sheet_metadata(ws, society_name: str, metadata: dict, fy: int) -> None:
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
     society_cell = ws.cell(row=1, column=1, value=society_name.upper())
@@ -533,6 +559,222 @@ def _write_balance_sheet_sheet(
     ws.row_dimensions[total_row + 2].height = 45
 
 
+def _write_balance_sheet_hierarchical(
+    ws,
+    root_children: list[dict],
+    children_by_parent: dict[int, list[dict]],
+    closing_by_id: dict,
+    society_name: str,
+    fy: int,
+    society_metadata: dict = None,
+) -> None:
+    """Write Balance Sheet using parent_account_id hierarchy from fn_fy_closing_report.
+    
+    2-column Liabilities|Assets format matching ld.xlsx 'Bal' sheet layout.
+    """
+    from collections import defaultdict
+
+    fy_end = date(fy + 1, 3, 31)
+
+    _apply_header(ws, 3, {"A": 14, "B": 20, "C": 28, "D": 18,
+                           "F": 20, "G": 24, "H": 20, "I": 18})
+    ws.column_dimensions["E"].width = 3
+
+    metadata = society_metadata or {}
+    _write_balance_sheet_metadata(ws, society_name, metadata, fy)
+
+    ws.merge_cells(start_row=5, start_column=1, end_row=5, end_column=9)
+    title_cell = ws.cell(
+        row=5,
+        column=1,
+        value=f"Balance Sheet as at 31 March {fy + 1}",
+    )
+    title_cell.font = Font(name="Arial", size=16, bold=True)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.cell(row=8, column=2, value="Liabilities").font = _FONT_HEADER
+    ws.cell(row=8, column=6, value="Assets").font = _FONT_HEADER
+
+    headers = {
+        1: "Date", 2: "A/c", 3: "Account Name", 4: "Amount",
+        6: "A/c", 7: "Account Name", 8: "", 9: "Amount",
+    }
+    for col, hdr in headers.items():
+        cell = ws.cell(row=7, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    def _account_tab_name(row: dict) -> str:
+        return row.get("tab_name") or row.get("account_name") or ""
+
+    def _indent(cell):
+        cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+
+    # Split root children into Liabilities (Cr) and Assets (Dr)
+    liabilities = sorted(
+        (c for c in root_children if c.get("drcr_account") == "Cr"),
+        key=lambda x: x.get("sort_path") or "",
+    )
+    assets = sorted(
+        (c for c in root_children if c.get("drcr_account") == "Dr"),
+        key=lambda x: x.get("sort_path") or "",
+    )
+
+    # Find Capital Account (Equity) - it's a root child but handled separately
+    cap_ac = next((c for c in root_children if c.get("tab_name") == "CapAc"), None)
+
+    # Write Liabilities section
+    r = 9
+    liab_start = r
+    for item in liabilities:
+        kids = sorted(children_by_parent.get(item["account_id"], []),
+                       key=lambda x: x.get("sort_path") or "")
+        amount = float(item.get("display_amount") or 0)
+
+        c1 = ws.cell(row=r, column=1, value=fy_end)
+        c1.font, c1.number_format = _FONT_BODY, "DD-MMM-YYYY"
+        ws.cell(row=r, column=2, value=_account_tab_name(item)).font = _FONT_BODY
+        ws.cell(row=r, column=3, value=item.get("account_name", "")).font = _FONT_BODY
+        if not kids and amount:
+            c4 = ws.cell(row=r, column=4, value=amount)
+            c4.font, c4.alignment, c4.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+        r += 1
+
+        for kid in kids:
+            kamt = float(kid.get("display_amount") or 0)
+            if kamt == 0:
+                continue
+            c3 = ws.cell(row=r, column=3, value=kid.get("account_name", ""))
+            c3.font = _FONT_BODY
+            _indent(c3)
+            c4 = ws.cell(row=r, column=4, value=kamt)
+            c4.font, c4.number_format = _FONT_BODY, _FMT_AMT
+            _indent(c4)
+            c4.alignment = _ALIGN_R
+            r += 1
+    liab_last_row = r - 1
+
+    # Write Assets section
+    r = 9
+    asset_start = r
+    for item in assets:
+        kids = sorted(children_by_parent.get(item["account_id"], []),
+                       key=lambda x: x.get("sort_path") or "")
+        amount = float(item.get("display_amount") or 0)
+
+        c1 = ws.cell(row=r, column=1, value=fy_end)
+        c1.font, c1.number_format = _FONT_BODY, "DD-MMM-YYYY"
+        ws.cell(row=r, column=6, value=_account_tab_name(item)).font = _FONT_BODY
+        ws.cell(row=r, column=7, value=item.get("account_name", "")).font = _FONT_BODY
+        if not kids and amount:
+            c9 = ws.cell(row=r, column=9, value=amount)
+            c9.font, c9.alignment, c9.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+        r += 1
+
+        for kid in kids:
+            kamt = float(kid.get("display_amount") or 0)
+            if kamt == 0:
+                continue
+            ws.cell(row=r, column=8, value=kid.get("account_name", "")).font = _FONT_BODY
+            c9 = ws.cell(row=r, column=9, value=kamt)
+            c9.font, c9.alignment, c9.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+            r += 1
+    asset_last_row = r - 1
+
+    # Write Equity section (Capital Account + Reserves & Surplus)
+    equity_start = liab_last_row + 1
+    ws.cell(row=equity_start, column=2, value="Equity & Surplus").font = _FONT_HEADER
+    r = equity_start + 1
+    
+    # Capital Account
+    if cap_ac:
+        cap_amount = float(cap_ac.get("own_closing") or 0)
+        ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
+        ws.cell(row=r, column=2, value=_account_tab_name(cap_ac)).font = _FONT_BODY
+        ws.cell(row=r, column=3, value=cap_ac.get("account_name", "")).font = _FONT_BODY
+        c4 = ws.cell(row=r, column=4, value=cap_amount)
+        c4.font, c4.alignment, c4.number_format = _FONT_BODY, _ALIGN_R, _FMT_AMT
+        r += 1
+        
+        # Capital Account children (Reserves, etc.)
+        cap_kids = sorted(children_by_parent.get(cap_ac["account_id"], []),
+                          key=lambda x: x.get("sort_path") or "")
+        for kid in cap_kids:
+            kamt = float(kid.get("display_amount") or 0)
+            if kamt == 0:
+                continue
+            c3 = ws.cell(row=r, column=3, value=kid.get("account_name", ""))
+            c3.font = _FONT_BODY
+            _indent(c3)
+            c4 = ws.cell(row=r, column=4, value=kamt)
+            c4.font, c4.number_format = _FONT_BODY, _FMT_AMT
+            _indent(c4)
+            c4.alignment = _ALIGN_R
+            r += 1
+
+    equity_end = r - 1 if r > equity_start + 1 else liab_last_row
+
+    # Totals
+    total_row = max(asset_last_row, equity_end) + 2
+    combined_end = max(liab_last_row, equity_end)
+    combined_formula = (
+        f"=SUM(D{liab_start}:D{combined_end})"
+        if combined_end >= liab_start
+        else "=0"
+    )
+    asset_formula = (
+        f"=SUM(I{asset_start}:I{asset_last_row})"
+        if asset_last_row >= asset_start
+        else "=0"
+    )
+
+    combined_label = ws.cell(
+        row=total_row,
+        column=2,
+        value="Total Liabilities + Equity & Surplus",
+    )
+    combined_label.font = _FONT_TOTAL
+    combined_label.border = _BORDER_ALL
+    combined_label.alignment = _ALIGN_L
+
+    combined_amount = ws.cell(row=total_row, column=4, value=combined_formula)
+    combined_amount.font = _FONT_TOTAL
+    combined_amount.border = _BORDER_ALL
+    combined_amount.alignment = _ALIGN_R
+    combined_amount.number_format = _FMT_AMT
+
+    asset_total_label = ws.cell(row=total_row, column=7, value="Total")
+    asset_total_label.font = _FONT_TOTAL
+    asset_total_label.fill = _FILL_SECTION
+    asset_total_label.border = _BORDER_ALL
+    asset_total_label.alignment = _ALIGN_L
+
+    asset_total_amount = ws.cell(row=total_row, column=9, value=asset_formula)
+    asset_total_amount.font = _FONT_TOTAL
+    asset_total_amount.fill = _FILL_SECTION
+    asset_total_amount.border = _BORDER_ALL
+    asset_total_amount.alignment = _ALIGN_R
+    asset_total_amount.number_format = _FMT_AMT
+
+    note = ws.cell(
+        row=total_row + 2, column=1,
+        value=(
+            "Note: Balance Sheet is prepared from closing balances of the financial year. "
+            "Assets = Dr-natured accounts (Cash, Bank, Debtors, Fixed Assets, Investments, Loans Given). "
+            "Liabilities = Cr-natured accounts (Creditors, Funds, Loans Taken, Provisions). "
+            "Equity = Capital Account + Current Year Surplus/Deficit (from Income & Expenditure). "
+            "Hierarchical presentation per parent_account_id from fn_fy_closing_report. "
+            "Statutory head grouping per UP Apartment Act 2010 / Model Bye-Laws where applicable."
+        ),
+    )
+    note.font = Font(name="Arial", size=8, italic=True)
+    note.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=total_row + 2, start_column=1, end_row=total_row + 2, end_column=9)
+    ws.row_dimensions[total_row + 2].height = 45
+
+
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
     """Build the three-sheet workbook."""
     from database.db_manager import db as _db
@@ -553,7 +795,8 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
         "SELECT * FROM fn_income_expenditure_fy(%s,%s)", (society_id, fy), fetch_all=True
     ) or []
 
-    bs_rows = _fetch_balance_sheet_rows(db, society_id, fy)
+    # Fetch hierarchical Balance Sheet data from fn_fy_closing_report
+    root_children, children_by_parent, closing_by_id = _fetch_balance_sheet_hierarchy(db, society_id, fy)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -568,9 +811,9 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
     _apply_header(ws2, 4, _COL_WIDTHS_IE)
     _write_income_expenditure_sheet(ws2, ie_rows, society_name, fy)
 
-    # Sheet 3: Balance Sheet
+    # Sheet 3: Balance Sheet (hierarchical)
     ws3 = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_sheet(ws3, bs_rows, society_name, fy, society_metadata)
+    _write_balance_sheet_hierarchical(ws3, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
 
     return wb
 
@@ -634,12 +877,12 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     society_metadata = _fetch_society_metadata(db, society_id, fy)
     society_name = society_metadata.get("name") or "Society"
 
-    bs_rows = _fetch_balance_sheet_rows(db, society_id, fy)
+    root_children, children_by_parent, closing_by_id = _fetch_balance_sheet_hierarchy(db, society_id, fy)
 
     wb = Workbook()
     wb.remove(wb.active)
     ws = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_sheet(ws, bs_rows, society_name, fy, society_metadata)
+    _write_balance_sheet_hierarchical(ws, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
 
     buf = io.BytesIO()
     wb.save(buf)
