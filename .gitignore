@@ -28,4 +28,10 @@ generate_button_manifest.py
 run.log
 run_button_audit.py
 targeted_audit.py
+
+# LibreOffice/OpenOffice lock files (e.g. ".~lock.SomeFile.xlsx#") — local,
+# machine-specific (embeds the OS username and a file:// path), and gets
+# created transiently just by having a spreadsheet open. One was
+# accidentally committed; never track these.
+.~lock.*#
 retest_click_failed.py

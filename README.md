@@ -438,6 +438,26 @@ Navigate to **Admin → Customize → KPI Audit** and click **Run Full Audit**:
 
 ## 9. Financial Module
 
+### EstateHub Compliance — Statutory Framework Coverage
+
+Mapped against the consolidated statutory framework for Indian RWAs/CHS/AOAs (`database/Statutory Compliance Framework for Indian RWAs.pdf`) — Income Tax Act, TDS, GST, and the earmarked-fund/bye-law regime. ✅ = implemented and live-verified. 🟡 = partially covered (see note). State Cooperative Societies Acts / Model Bye-laws vary by state — coverage below is UP AOA 2010–first, with a jurisdiction table so other states can be added without a schema change.
+
+| Regulatory Area / Statute | Governing Sections / Rules | Statutory Requirement & Scope | EstateHub Coverage |
+|---|---|---|---|
+| Income Tax Act, 1961 — Taxability & Mutuality | Sec. 2(31), Sec. 4, Doctrine of Mutuality | Member maintenance is exempt under Mutuality; non-mutual income (bank interest, rentals, cell towers) is taxable at AOP rates | ✅ `accounts.mutuality_nature` tags every income account mutual/non-mutual; `fn_income_tax_summary_fy` + Mutuality Summary export (`income_tax_export.py`) segregate the two automatically |
+| Income Tax Act, 1961 — Deductions | Sec. 80P(2)(c) / 80P(2)(d) | Deduction on interest from cooperative banks, claimed via annual return | 🟡 Not yet tracked — no 80P deduction computation; would sit alongside the mutuality report |
+| Income Tax Act, 1961 — Return of Income | Sec. 139(1), Sec. 44AB | Annual ITR-5 filing; tax audit if commercial turnover exceeds threshold | 🟡 Out of e-filing scope by design (EstateHub is a books-of-account system, not a TRACES/ITR e-filer); no Sec. 44AB turnover-threshold flag yet |
+| TDS (Income Tax Act, 1961) | Sec. 194A, 194C, 194H, 194-I, 194-IA/IB/IC, 194J | Deduct TDS on vendor payouts (contracts, professional fees, rent, brokerage, etc.), remit, file 26Q | ✅ `tds_compliance.py` — full section/rate/PAN-vs-no-PAN engine (`fn_compute_tds_pct`), single-bill & annual-aggregate threshold logic, no-PAN warn/block setting; `tds_export.py` produces a structured 26Q-shaped quarterly export (a CA transcribes it into the government portal — not a live TRACES integration) |
+| GST (CGST Act, 2017) | Sec. 22(1), Notification 12/2017-CT(R) Entry 77 | ≤ ₹7,500/month/member exempt; above that, 18% on the entire amount if society turnover > ₹20L (₹10L special-category states); RCM on unregistered vendors | ✅ `gst_rates` table (replacing hardcoded 18%), registration-threshold gate, segregated RCM CGST/SGST/IGST Payable + ITC-Receivable accounts, interstate/IGST determination via `societies.state`/`vendors.state`; `gst_export.py` produces a GSTR-1/3B-shaped summary |
+| Reserve Fund | Societies Registration Act / State Cooperative Societies Acts (e.g. MCS Act Sec. 66 / 154B-17) | Statutory reserve from net surplus + entrance/transfer fees, for long-term solvency | ✅ Mapped to the `RESERVE_FUND` statutory head (UP AOA regime); ledger-segregated from operating income, verified via reserve-fund-segregation test scenarios |
+| Sinking Fund | Model Bye-laws (13(c)/14(c)) / State Apartment Ownership Acts | Dedicated fund for structural overhauls, lifts, DG sets; ~0.25–0.33%/yr of construction cost | ✅ Dedicated `Sinking Fund Reserve` ledger account, per-society rate config (`sinking_fund_rate_basis`: per-sq-ft or construction-cost), state-specific statutory rate defaults (UP/MH) in `state_compliance_thresholds`, auto-billed monthly |
+| Repair & Maintenance Fund | Model Bye-laws (13(a)/14(b)) | Routine upkeep of common areas/plumbing/electricals; typically ≥ 0.75%/yr of construction cost | ✅ Dedicated `Repair & Maintenance Fund Reserve` ledger account, same rate-config/billing pipeline as Sinking Fund |
+| Corpus Fund | RERA Act, 2016 (Sec. 11(4)(g), Sec. 17) / State Apartment Ownership Acts | One-time builder-handover capital receipt; principal inviolable, only interest deployable | ✅ Dedicated `Corpus Fund` ledger account, mapped to its statutory head; balance sheet treats it as a capital reserve, not operating income (per the three-statement report's I&E vs. Balance Sheet split) |
+| 'Form N' Representation & Filing | State Co-operative Societies Rules (e.g. Rule 62 / Form N under MCS Rules, 1961) | Prescribed annual Balance Sheet / Statement of Accounts / Committee list format, filed with the Registrar | 🟡 The statutory-head-grouped Balance Sheet export (jurisdiction-aware `legal_regime_profiles`/`statutory_head_catalog`, UP AOA 2010 seeded) presents accounts under their statutory heads, but does not yet reproduce the literal Form N template or handle the Registrar filing itself |
+| Statutory Governance & Filings | Societies Registration Act, 1860 (Sec. 4) / State Ownership Acts | AGM, Managing Committee election, office-bearer list filed with Registrar | 🟡 AGM exists only as a seeded calendar event; no minutes/office-bearer-list generation or Registrar filing workflow yet |
+
+Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts, never commingled with operating income/expenditure) — not yet at the physical-bank-account level; the PDF's "Bank Account Separation" safeguard is a process control for the society's bank, outside what a books-of-account system can enforce.
+
 ### Table Roles
 
 | Table | Type | Who creates | Status flow | Posts to transactions |

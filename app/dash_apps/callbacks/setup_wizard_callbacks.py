@@ -167,6 +167,7 @@ def register_setup_wizard_callbacks(app):
         Input("sw-close-btn", "n_clicks"),
         State({"type": "form-field-hidden", "entity": "society", "field": "logo"}, "value"),
         State("sw-society-address", "value"),
+        State("sw-society-state", "value"),
         State("sw-society-email", "value"),
         State("sw-society-phone", "value"),
         State({"type": "form-field-hidden", "entity": "society", "field": "bg"}, "value"),
@@ -229,7 +230,7 @@ def register_setup_wizard_callbacks(app):
         prevent_initial_call=True
     )
     def submit_setup_wizard(n_submit, n_close, 
-                            logo_data, address, s_email, phone, bg_data, 
+                            logo_data, address, s_state, s_email, phone, bg_data, 
                             tan, gstin, reg_num, gate_logic, duty_hrs, pay_qr_data, calc_start, 
                             sec_name, sec_phone, sec_email, sec_sign_data, 
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
@@ -424,6 +425,18 @@ def register_setup_wizard_callbacks(app):
             outcome = (result or {}).get("result") or ""
             if outcome != "OK":
                 return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again.", no_update, no_update
+
+            # societies.state has no other write path anywhere in the app
+            # (see setup_wizard.py's "Society Details" State dropdown note)
+            # and fn_complete_society_setup's signature predates it, so it
+            # is written separately here rather than growing that
+            # already-large function's parameter list. A failure here must
+            # not undo the setup that already succeeded above.
+            try:
+                s_state_clean = (s_state or "").strip()[:50] or None
+                db._execute("UPDATE societies SET state = :state WHERE id = :id", {"state": s_state_clean, "id": society_id})
+            except Exception:
+                pass
 
             # Auto-show the society's Agreement right after onboarding
             # completes, and persist it (society_agreements) so it can be
