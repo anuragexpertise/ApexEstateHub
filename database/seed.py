@@ -1188,7 +1188,7 @@ def seed_account_statutory_mappings(cur, conn, society_id: int):
         print(f"  ✓ Account statutory mappings seeded ({inserted} new rows)")
 
 
-def seed_gst_rates(cur, conn):
+def seed_accounts(cur, conn, society_id: int):
     """
     Insert this society's chart of accounts using the literal seed-constant
     `aid` values as the real `accounts.id` (accounts.id is scoped per-society
