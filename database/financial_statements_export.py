@@ -233,7 +233,96 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
     ws.row_dimensions[r].height = 45
 
 
-def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
+def _fetch_society_metadata(db, society_id: int, fy: int) -> dict:
+    row = db._execute(
+        """
+        SELECT
+            s.name,
+            s.address,
+            s.PAN_number AS pan_number,
+            s.TAN_number AS tan_number,
+            s.gstin,
+            s.registration_number,
+            lrp.name AS legal_regime_name,
+            lrp.code AS legal_regime_code
+        FROM societies AS s
+        LEFT JOIN society_legal_regime AS slr
+            ON slr.society_id = s.id
+           AND slr.effective_from <= MAKE_DATE(%s + 1, 3, 31)
+           AND (slr.effective_to IS NULL OR slr.effective_to >= MAKE_DATE(%s, 4, 1))
+        LEFT JOIN legal_regime_profiles AS lrp
+            ON lrp.code = slr.regime_code
+        WHERE s.id = %s
+        """,
+        (fy, fy, society_id),
+        fetch_one=True,
+    )
+    return row or {}
+
+
+def _fetch_balance_sheet_rows(db, society_id: int, fy: int) -> list[dict]:
+    return db._execute(
+        """
+        SELECT
+            bs.*,
+            COALESCE(a.tab_name, bs.account_name, '') AS account_tab_name
+        FROM fn_balance_sheet_fy(%s, %s) AS bs
+        LEFT JOIN accounts AS a
+            ON a.society_id = %s
+           AND a.id = bs.account_code
+        """,
+        (society_id, fy, society_id),
+        fetch_all=True,
+    ) or []
+
+
+def _write_balance_sheet_metadata(ws, society_name: str, metadata: dict, fy: int) -> None:
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
+    society_cell = ws.cell(row=1, column=1, value=society_name)
+    society_cell.font = Font(name="Arial", size=12, bold=True)
+
+    ws.cell(row=1, column=4, value="Financial Year").font = _FONT_HEADER
+    ws.cell(row=1, column=5, value=f"{fy}-{fy + 1}").font = _FONT_BODY
+    ws.cell(row=1, column=6, value="Legal Regime").font = _FONT_HEADER
+    ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=9)
+    legal_regime = metadata.get("legal_regime_name") or metadata.get("legal_regime_code") or ""
+    ws.cell(row=1, column=7, value=legal_regime).font = _FONT_BODY
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=3)
+    ws.cell(
+        row=2,
+        column=1,
+        value=f"Balance Sheet as at 31 March {fy + 1}",
+    ).font = _FONT_TITLE
+
+    ws.cell(row=2, column=4, value="PAN").font = _FONT_HEADER
+    ws.cell(row=2, column=5, value=metadata.get("pan_number") or "").font = _FONT_BODY
+    ws.cell(row=2, column=6, value="TAN").font = _FONT_HEADER
+    ws.cell(row=2, column=7, value=metadata.get("tan_number") or "").font = _FONT_BODY
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=3)
+    address_cell = ws.cell(row=3, column=1, value=metadata.get("address") or "")
+    address_cell.font = _FONT_BODY
+    address_cell.alignment = Alignment(wrap_text=True, vertical="center")
+
+    ws.cell(row=3, column=4, value="GSTIN").font = _FONT_HEADER
+    ws.cell(row=3, column=5, value=metadata.get("gstin") or "").font = _FONT_BODY
+    ws.cell(row=3, column=6, value="Registration No.").font = _FONT_HEADER
+    ws.merge_cells(start_row=3, start_column=7, end_row=3, end_column=9)
+    ws.cell(row=3, column=7, value=metadata.get("registration_number") or "").font = _FONT_BODY
+
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 30
+
+
+def _write_balance_sheet_sheet(
+    ws,
+    rows: list[dict],
+    society_name: str,
+    fy: int,
+    society_metadata: dict = None,
+) -> None:
     """Write Balance Sheet sheet in 2-column Liabilities|Assets format
     matching ld.xlsx 'Bal' sheet layout (A=Date, B-D=Liabilities, F-I=Assets).
     
@@ -273,6 +362,11 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
     liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
     assets = [r for r in rows if r.get("statement_section") == "Assets"]
     equity = [r for r in rows if r.get("statement_section") == "Equity"]
+
+    def _account_tab_name(row: dict) -> str:
+        if "account_tab_name" in row:
+            return row.get("account_tab_name") or ""
+        return row.get("tab_name") or row.get("account_code") or ""
 
     def _write_grouped_section(ws, section_rows, start_row, col_date, col_code, col_name, col_amt, 
                                is_liability=True, section_title=None):
@@ -343,11 +437,11 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
                 r += 1
         return r, r - 1
 
-    r = 6
-    liab_start = r
-    r, liab_end = _write_grouped_section(ws, liabilities, r, 1, 2, 3, 4, True, "Liabilities")
-    asset_start = r
-    r, asset_end = _write_grouped_section(ws, assets, r, 1, 6, 7, 9, False, "Assets")
+    liab_start = 6
+    _, liab_end = _write_grouped_section(ws, liabilities, liab_start, 1, 2, 3, 4, True)
+
+    asset_start = 6
+    _, asset_end = _write_grouped_section(ws, assets, asset_start, 1, 6, 7, 9, False)
 
     total_row = max(liab_end, asset_end) + 2
     for col, val, fill in [
