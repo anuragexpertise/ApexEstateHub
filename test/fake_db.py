@@ -647,6 +647,11 @@ class FakeDB:
                 "display_amount": abs(own),
                 "depth": 0,
                 "sort_path": "",
+                # Statutory metadata (mocked for UP AOA demo society)
+                "statutory_head_code": self._get_mock_statutory_head(acc.get("id")),
+                "statutory_head_label": self._get_mock_statutory_label(acc.get("id")),
+                "statutory_statement_section": self._get_mock_statutory_section(acc.get("drcr_account")),
+                "statutory_display_order": self._get_mock_statutory_order(acc.get("id")),
             })
         if fetch_all:
             return rows
@@ -805,6 +810,133 @@ class FakeDB:
         return {"dr_side": dr_rows, "cr_side": cr_rows,
                 "total_dr": sum(r["amount"] for r in dr_rows),
                 "total_cr": sum(r["amount"] for r in cr_rows)}
+
+    # ── Statutory metadata helpers (mock for UP AOA demo) ─────────────────
+    def _get_mock_statutory_head(self, account_id):
+        """Mock UP AOA statutory head mapping for demo accounts."""
+        mapping = {
+            101: "IFMS_CORPUS",
+            102: "RESERVE_FUND",
+            103: "RESERVE_FUND",
+            41: "TAX_PAYABLE",
+            42: "TAX_PAYABLE",
+            43: "TAX_PAYABLE",
+            44: "TAX_PAYABLE",
+            45: "TAX_PAYABLE",
+            9: "SUNDRY_CREDITORS",
+            3: "LOANS_TAKEN",
+            26: "STAFF_BENEFITS_PAYABLE",
+            28: "TAX_PAYABLE",
+            2: "CAPITAL_ACCOUNT",
+            5: "FIXED_ASSETS",
+            6: "FIXED_ASSETS",
+            61: "FIXED_ASSETS",
+            62: "INVESTMENTS",
+            63: "CASH_BANK",
+            631: "CASH_BANK",
+            634: "OTHER_ASSETS",
+            6311: "CASH_BANK",
+            6312: "CASH_BANK",
+            632: "DEPOSITS_ASSETS",
+            633: "CASH_BANK",
+            64: "FIXED_ASSETS",
+            65: "FIXED_ASSETS",
+            66: "FIXED_ASSETS",
+            67: "FIXED_ASSETS",
+            7: "LOANS_GIVEN",
+            8: "SUNDRY_DEBTORS",
+            81: "SUNDRY_DEBTORS",
+            82: "SUNDRY_DEBTORS",
+            2311: "MAINTENANCE_INCOME",
+            211: "INTEREST_INCOME",
+            2111: "INTEREST_INCOME",
+            2112: "OTHER_INCOME",
+            213: "COMMON_PROFITS",
+            212: "OTHER_INCOME",
+            2312: "REPAIR_MAINTENANCE_EXP",
+            2313: "ADMIN_EXPENSES",
+            2314: "REPAIR_MAINTENANCE_EXP",
+            2315: "ADMIN_EXPENSES",
+            2316: "ADMIN_EXPENSES",
+            2320: "REPAIR_MAINTENANCE_EXP",
+            2321: "REPAIR_MAINTENANCE_EXP",
+            2322: "REPAIR_MAINTENANCE_EXP",
+            2323: "FINANCE_COSTS",
+            235: "STAFF_EXPENSES",
+            236: "ADMIN_EXPENSES",
+            237: "REPAIR_MAINTENANCE_EXP",
+            238: "REPAIR_MAINTENANCE_EXP",
+            239: "REPAIR_MAINTENANCE_EXP",
+            2310: "REPAIR_MAINTENANCE_EXP",
+            24: "OTHER_EXPENSES",
+            25: "OTHER_EXPENSES",
+            231: "DEPRECIATION_EXP",
+            2317: "OTHER_INCOME",
+            2318: "MAINTENANCE_INCOME",
+            2319: "OTHER_INCOME",
+            29: "FINANCE_COSTS",
+            # Test scenario G accounts
+            633: "CASH_BANK",
+            6311: "CASH_BANK",
+            2: "CAPITAL_ACCOUNT",
+            2311: "MAINTENANCE_INCOME",
+        }
+        return mapping.get(account_id, "UNMAPPED")
+
+    def _get_mock_statutory_label(self, account_id):
+        """Mock UP AOA statutory head label for demo accounts."""
+        head_labels = {
+            "IFMS_CORPUS": "Interest-Free Maintenance Security Corpus",
+            "RESERVE_FUND": "Reserve Fund (Common Profits Nucleus)",
+            "TAX_PAYABLE": "Taxes Payable (GST/TDS/Property Tax)",
+            "SUNDRY_CREDITORS": "Sundry Creditors",
+            "LOANS_TAKEN": "Loans & Advances Taken",
+            "STAFF_BENEFITS_PAYABLE": "Staff Benefits Payable (PF/Gratuity)",
+            "CAPITAL_ACCOUNT": "Capital Account / Share Capital",
+            "FIXED_ASSETS": "Fixed Assets (Immovable + Movable)",
+            "INVESTMENTS": "Investments",
+            "CASH_BANK": "Cash & Bank Balances",
+            "OTHER_ASSETS": "Other Assets",
+            "DEPOSITS_ASSETS": "Deposits (Asset Side)",
+            "SUNDRY_DEBTORS": "Sundry Debtors (Maintenance Receivable)",
+            "LOANS_GIVEN": "Loans & Advances Given",
+            "MAINTENANCE_INCOME": "Maintenance Charges / Assessments",
+            "INTEREST_INCOME": "Interest Income",
+            "OTHER_INCOME": "Other Income",
+            "COMMON_PROFITS": "Common Profits (Commercial/Common Area Income)",
+            "REPAIR_MAINTENANCE_EXP": "Repair & Maintenance Expenses",
+            "STAFF_EXPENSES": "Staff Salaries & Benefits",
+            "ADMIN_EXPENSES": "Administrative Expenses",
+            "FINANCE_COSTS": "Finance Costs / Interest",
+            "DEPRECIATION_EXP": "Depreciation",
+            "OTHER_EXPENSES": "Other Expenses",
+        }
+        head_code = self._get_mock_statutory_head(account_id)
+        return head_labels.get(head_code, head_code)
+
+    def _get_mock_statutory_section(self, drcr_account):
+        """Determine statement section from drcr_account."""
+        if drcr_account == "Dr":
+            return "Assets"
+        elif drcr_account == "Cr":
+            return "Liabilities"
+        return "Equity"
+
+    def _get_mock_statutory_order(self, account_id):
+        """Mock display order for statutory heads."""
+        order_map = {
+            "IFMS_CORPUS": 10, "RESERVE_FUND": 20, "COMMON_EXPENSES_PAYABLE": 30,
+            "SUNDRY_CREDITORS": 40, "LOANS_TAKEN": 50, "STAFF_BENEFITS_PAYABLE": 60,
+            "TAX_PAYABLE": 70, "OTHER_LIABILITIES": 80,
+            "CAPITAL_ACCOUNT": 10, "ACCUMULATED_SURPLUS": 20, "CURRENT_YEAR_SURPLUS": 30,
+            "FIXED_ASSETS": 10, "INVESTMENTS": 20, "CASH_BANK": 30,
+            "SUNDRY_DEBTORS": 40, "LOANS_GIVEN": 50, "DEPOSITS_ASSETS": 60, "OTHER_ASSETS": 70,
+            "MAINTENANCE_INCOME": 10, "COMMON_PROFITS": 20, "INTEREST_INCOME": 30, "OTHER_INCOME": 40,
+            "REPAIR_MAINTENANCE_EXP": 10, "STAFF_EXPENSES": 20, "ADMIN_EXPENSES": 30,
+            "FINANCE_COSTS": 40, "DEPRECIATION_EXP": 50, "OTHER_EXPENSES": 60,
+        }
+        head_code = self._get_mock_statutory_head(account_id)
+        return order_map.get(head_code, 999)
 
     def _fn_create_poll(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")

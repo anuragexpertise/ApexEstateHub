@@ -4033,10 +4033,16 @@ def render_financial_statements_card(
         account shown (including zero balances) with subtotals and a grand
         total per side. No row cap - every account returned by
         fn_balance_sheet_fy is rendered.
+        
+        If statutory metadata is present (statutory_head_code), groups accounts
+        by statutory head for jurisdiction-aware presentation (UP AOA, etc.).
         """
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
 
+        # Check if statutory metadata is available
+        has_statutory = any(r.get("statutory_head_code") for r in rows)
+        
         assets = [r for r in rows if r.get("statement_section") == "Assets"]
         liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
         equity = [r for r in rows if r.get("statement_section") == "Equity"]
@@ -4048,22 +4054,54 @@ def render_financial_statements_card(
         def _fmt(amount):
             return f"₹{amount:,.2f}"
 
-        # Each side: flat list of (label, amount_str_or_None, kind).
-        # kind in {"header", "item", "subtotal", "total"}.
-        left_side = [("Liabilities & Equity", None, "header")]
-        for r in liabilities:
-            left_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+        def _build_side(section_rows, section_title, is_assets=False):
+            """Build a side (Liabilities+Equity or Assets) with optional statutory grouping."""
+            if not section_rows:
+                return [(section_title, None, "header")]
+            
+            if has_statutory:
+                # Group by statutory head
+                from collections import defaultdict
+                head_groups = defaultdict(list)
+                for r in section_rows:
+                    head_code = r.get("statutory_head_code") or "UNMAPPED"
+                    head_groups[head_code].append(r)
+                
+                # Sort groups by display_order, then by head_code
+                sorted_groups = sorted(
+                    head_groups.items(),
+                    key=lambda x: (x[1][0].get("statutory_display_order") or 999, x[0])
+                )
+                
+                side = [(section_title, None, "header")]
+                for head_code, group_rows in sorted_groups:
+                    if len(group_rows) > 1:
+                        # Multiple accounts under this head - show as group header + items
+                        head_label = group_rows[0].get("statutory_head_label") or head_code
+                        side.append((head_label, None, "header"))
+                        for r in sorted(group_rows, key=lambda x: x.get("statutory_display_order") or 0):
+                            side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                    else:
+                        # Single account
+                        r = group_rows[0]
+                        side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                return side
+            else:
+                # Flat list (legacy behavior)
+                side = [(section_title, None, "header")]
+                for r in section_rows:
+                    side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                return side
+
+        left_side = _build_side(liabilities, "Liabilities")
         if liabilities:
             left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
-        for r in equity:
-            left_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+        left_side += _build_side(equity, "Equity")[1:]  # Skip duplicate header
         if equity:
             left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
         left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
 
-        right_side = [("Assets", None, "header")]
-        for r in assets:
-            right_side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+        right_side = _build_side(assets, "Assets")
         right_side.append(("Total Assets", _fmt(total_assets), "total"))
 
         def _style_for(kind, align_right=False):

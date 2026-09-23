@@ -235,7 +235,12 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
 
 def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
     """Write Balance Sheet sheet in 2-column Liabilities|Assets format
-    matching ld.xlsx 'Bal' sheet layout (A=Date, B-D=Liabilities, F-I=Assets)."""
+    matching ld.xlsx 'Bal' sheet layout (A=Date, B-D=Liabilities, F-I=Assets).
+    
+    If statutory metadata is present (statutory_head_code), groups accounts
+    by statutory head for jurisdiction-aware presentation (UP AOA, etc.)."""
+    from collections import defaultdict
+    
     ws.cell(row=1, column=1, value=f"{society_name}")
     ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
 
@@ -262,42 +267,90 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
         cell.alignment = _ALIGN_C
         cell.border = _BORDER_ALL
 
+    # Check for statutory metadata
+    has_statutory = any(r.get("statutory_head_code") for r in rows)
+
     liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
     assets = [r for r in rows if r.get("statement_section") == "Assets"]
     equity = [r for r in rows if r.get("statement_section") == "Equity"]
 
-    r = 6
-    liab_start = r
-    for row in liabilities:
-        ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
-        ws.cell(row=r, column=2, value=row.get("account_code") or "")
-        ws.cell(row=r, column=3, value=row.get("account_name", ""))
-        ws.cell(row=r, column=4, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
-        for col in (1, 2, 3, 4):
-            cell = ws.cell(row=r, column=col)
-            cell.font = _FONT_BODY
-            cell.border = _BORDER_ALL
-            cell.alignment = _ALIGN_R if col in (1, 4) else _ALIGN_L
-        r += 1
-    liab_end = r - 1
+    def _write_grouped_section(ws, section_rows, start_row, col_date, col_code, col_name, col_amt, 
+                               is_liability=True, section_title=None):
+        """Write a section (Liabilities or Assets) with optional statutory grouping."""
+        if not section_rows:
+            return start_row, start_row - 1
+        
+        r = start_row
+        if section_title:
+            ws.cell(row=r, column=col_name if is_liability else col_code, value=section_title).font = _FONT_HEADER
+            r += 1
+        
+        if has_statutory:
+            # Group by statutory head
+            head_groups = defaultdict(list)
+            for row in section_rows:
+                head_code = row.get("statutory_head_code") or "UNMAPPED"
+                head_groups[head_code].append(row)
+            
+            # Sort groups by display_order, then by head_code
+            sorted_groups = sorted(
+                head_groups.items(),
+                key=lambda x: (x[1][0].get("statutory_display_order") or 999, x[0])
+            )
+            
+            for head_code, group_rows in sorted_groups:
+                if len(group_groups[head_code]) > 1:
+                    # Multiple accounts under this head - show as group header + items
+                    head_label = group_rows[0].get("statutory_head_label") or head_code
+                    ws.cell(row=r, column=col_name if is_liability else col_code, value=head_label).font = _FONT_HEADER
+                    r += 1
+                    for row in sorted(group_rows, key=lambda x: x.get("statutory_display_order") or 0):
+                        ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
+                        ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                        ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
+                        ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                        for col in (col_date, col_code, col_name, col_amt):
+                            cell = ws.cell(row=r, column=col)
+                            cell.font = _FONT_BODY
+                            cell.border = _BORDER_ALL
+                            cell.alignment = _ALIGN_R if col in (col_date, col_amt) else _ALIGN_L
+                        r += 1
+                else:
+                    # Single account
+                    row = group_rows[0]
+                    ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
+                    ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                    ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
+                    ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                    for col in (col_date, col_code, col_name, col_amt):
+                        cell = ws.cell(row=r, column=col)
+                        cell.font = _FONT_BODY
+                        cell.border = _BORDER_ALL
+                        cell.alignment = _ALIGN_R if col in (col_date, col_amt) else _ALIGN_L
+                    r += 1
+        else:
+            # Flat list (legacy)
+            for row in section_rows:
+                ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
+                ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
+                ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                for col in (col_date, col_code, col_name, col_amt):
+                    cell = ws.cell(row=r, column=col)
+                    cell.font = _FONT_BODY
+                    cell.border = _BORDER_ALL
+                    cell.alignment = _ALIGN_R if col in (col_date, col_amt) else _ALIGN_L
+                r += 1
+        return r, r - 1
 
-    asset_start = r
-    for row in assets:
-        ws.cell(row=r, column=6, value=row.get("account_code") or "")
-        ws.cell(row=r, column=7, value=row.get("account_name", ""))
-        ws.cell(row=r, column=9, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
-        for col in (6, 7, 9):
-            cell = ws.cell(row=r, column=col)
-            cell.font = _FONT_BODY
-            cell.border = _BORDER_ALL
-            cell.alignment = _ALIGN_R if col == 9 else _ALIGN_L
-        r += 1
-    asset_end = r - 1
+    r = 6
+    r, liab_end = _write_grouped_section(ws, liabilities, r, 1, 2, 3, 4, True, "Liabilities")
+    r, asset_end = _write_grouped_section(ws, assets, r, 1, 6, 7, 9, False, "Assets")
 
     total_row = max(liab_end, asset_end) + 2
     for col, val, fill in [
-        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{liab_start}:D{liab_end})", _FILL_SECTION),
-        (6, "Total", _FILL_SECTION), (9, f"=SUM(I{asset_start}:I{asset_end})", _FILL_SECTION),
+        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{6}:D{liab_end})", _FILL_SECTION),
+        (7, "Total", _FILL_SECTION), (9, f"=SUM(I{asset_start}:I{asset_end})", _FILL_SECTION),
     ]:
         cell = ws.cell(row=total_row, column=col, value=val)
         cell.font = _FONT_TOTAL
@@ -334,7 +387,8 @@ def _write_balance_sheet_sheet(ws, rows: list[dict], society_name: str, fy: int)
             "Assets = Dr-natured accounts (Cash, Bank, Debtors, Fixed Assets, Investments, Loans Given). "
             "Liabilities = Cr-natured accounts (Creditors, Funds, Loans Taken, Provisions). "
             "Equity = Capital Account + Current Year Surplus/Deficit (from Income & Expenditure). "
-            "Mutual income (exempt) and Non-mutual income (taxable) shown in Income Tax — Mutuality Summary."
+            "Mutual income (exempt) and Non-mutual income (taxable) shown in Income Tax — Mutuality Summary. "
+            "Statutory head grouping per UP Apartment Act 2010 / Model Bye-Laws where applicable."
         ),
     )
     note.font = Font(name="Arial", size=8, italic=True)
