@@ -297,7 +297,7 @@ def _fetch_balance_sheet_hierarchy(db, society_id: int, fy: int) -> tuple[list[d
             children_by_parent.setdefault(pid, []).append(r)
     
     root = next((r for r in closing_rows if r.get("parent_account_id") is None), None)
-    root_children = children_by_parent.get((root or {}).get("id"), []) if root else []
+    root_children = children_by_parent.get((root or {}).get("account_id"), []) if root else []
     
     return root_children, children_by_parent, closing_by_id
 
@@ -612,18 +612,24 @@ def _write_balance_sheet_hierarchical(
     def _indent(cell):
         cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
 
-    # Split root children into Liabilities (Cr) and Assets (Dr)
+    # Find Capital Account (Equity) - it's a root child but handled separately
+    cap_ac = next((c for c in root_children if c.get("tab_name") == "CapAc"), None)
+
+    # Split root children into Liabilities (Cr) and Assets (Dr). Capital
+    # Account is excluded here even though it is Cr-natured: it is written
+    # separately under Equity below, and leaving it in this list double-lists
+    # it (once as a Liability, once as Equity) and double-counts it in the
+    # Liabilities+Equity total — the same class of bug previously fixed in
+    # fn_balance_sheet_fy/_write_balance_sheet_sheet (CapAc-subtree exclusion).
     liabilities = sorted(
-        (c for c in root_children if c.get("drcr_account") == "Cr"),
+        (c for c in root_children
+         if c.get("drcr_account") == "Cr" and c is not cap_ac),
         key=lambda x: x.get("sort_path") or "",
     )
     assets = sorted(
         (c for c in root_children if c.get("drcr_account") == "Dr"),
         key=lambda x: x.get("sort_path") or "",
     )
-
-    # Find Capital Account (Equity) - it's a root child but handled separately
-    cap_ac = next((c for c in root_children if c.get("tab_name") == "CapAc"), None)
 
     # Write Liabilities section
     r = 9
