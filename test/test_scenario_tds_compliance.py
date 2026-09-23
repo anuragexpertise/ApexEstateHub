@@ -61,12 +61,12 @@ class TestTdsSectionRateAndThreshold:
              "annual_aggregate_threshold": 100000, "effective_from": "2024-04-01"},
         ])
         # Below single-bill threshold, no prior cumulative -> no TDS.
-        low = tds_compliance.compute_tds_pct(db, 1, 5, "194C", "2026", 5000)
+        low = tds_compliance.compute_tds_pct(db, 1, 5, "194C", None, "2026", 5000)
         assert low["applies"] is False
         assert low["basis"] == "below-threshold"
 
         # At/above single-bill threshold -> applies at 2%.
-        high = tds_compliance.compute_tds_pct(db, 1, 5, "194C", "2026", 30000)
+        high = tds_compliance.compute_tds_pct(db, 1, 5, "194C", None, "2026", 30000)
         assert high["applies"] is True
         assert high["tds_pct"] == 2.0
         assert high["basis"] == "single-bill"
@@ -74,7 +74,7 @@ class TestTdsSectionRateAndThreshold:
     def test_unconfigured_section_returns_zero(self, patched_db):
         db = patched_db
         _seed_compliance(db, 1, tds_section_rates=[])
-        res = tds_compliance.compute_tds_pct(db, 1, 5, "194J", "2026", 100000)
+        res = tds_compliance.compute_tds_pct(db, 1, 5, "194J", None, "2026", 100000)
         assert res["applies"] is False
         assert res["basis"] == "section-not-configured"
 
