@@ -278,42 +278,43 @@ def _fetch_balance_sheet_rows(db, society_id: int, fy: int) -> list[dict]:
 
 def _write_balance_sheet_metadata(ws, society_name: str, metadata: dict, fy: int) -> None:
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
-    society_cell = ws.cell(row=1, column=1, value=society_name)
+    society_cell = ws.cell(row=1, column=1, value=society_name.upper())
     society_cell.font = Font(name="Arial", size=12, bold=True)
 
-    ws.cell(row=1, column=4, value="Financial Year").font = _FONT_HEADER
-    ws.cell(row=1, column=5, value=f"{fy}-{fy + 1}").font = _FONT_BODY
-    ws.cell(row=1, column=6, value="Legal Regime").font = _FONT_HEADER
-    ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=9)
-    legal_regime = metadata.get("legal_regime_name") or metadata.get("legal_regime_code") or ""
-    ws.cell(row=1, column=7, value=legal_regime).font = _FONT_BODY
+    ws.cell(row=1, column=8, value="Financial Year").font = _FONT_HEADER
+    ws.cell(row=1, column=9, value=f"{fy}-{fy + 1}").font = _FONT_BODY
 
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=3)
-    ws.cell(
+    address_cell = ws.cell(
         row=2,
         column=1,
-        value=f"Balance Sheet as at 31 March {fy + 1}",
-    ).font = _FONT_TITLE
-
-    ws.cell(row=2, column=4, value="PAN").font = _FONT_HEADER
-    ws.cell(row=2, column=5, value=metadata.get("pan_number") or "").font = _FONT_BODY
-    ws.cell(row=2, column=6, value="TAN").font = _FONT_HEADER
-    ws.cell(row=2, column=7, value=metadata.get("tan_number") or "").font = _FONT_BODY
-
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=3)
-    address_cell = ws.cell(row=3, column=1, value=metadata.get("address") or "")
+        value=metadata.get("address") or "",
+    )
     address_cell.font = _FONT_BODY
-    address_cell.alignment = Alignment(wrap_text=True, vertical="center")
+    address_cell.alignment = Alignment(horizontal="left", wrap_text=True, vertical="center")
 
-    ws.cell(row=3, column=4, value="GSTIN").font = _FONT_HEADER
-    ws.cell(row=3, column=5, value=metadata.get("gstin") or "").font = _FONT_BODY
-    ws.cell(row=3, column=6, value="Registration No.").font = _FONT_HEADER
-    ws.merge_cells(start_row=3, start_column=7, end_row=3, end_column=9)
-    ws.cell(row=3, column=7, value=metadata.get("registration_number") or "").font = _FONT_BODY
+    ws.cell(row=2, column=6, value="PAN").font = _FONT_HEADER
+    ws.cell(row=2, column=7, value=metadata.get("pan_number") or "").font = _FONT_BODY
+    ws.cell(row=2, column=8, value="TAN").font = _FONT_HEADER
+    ws.cell(row=2, column=9, value=metadata.get("tan_number") or "").font = _FONT_BODY
+
+    ws.cell(row=3, column=1, value="Legal Regime").font = _FONT_HEADER
+    ws.cell(
+        row=3,
+        column=2,
+        value=metadata.get("legal_regime_name") or metadata.get("legal_regime_code") or "",
+    ).font = _FONT_BODY
+
+    ws.cell(row=3, column=6, value="GSTIN").font = _FONT_HEADER
+    ws.cell(row=3, column=7, value=metadata.get("gstin") or "").font = _FONT_BODY
+    ws.cell(row=3, column=8, value="Registration No.").font = _FONT_HEADER
+    ws.cell(row=3, column=9, value=metadata.get("registration_number") or "").font = _FONT_BODY
 
     ws.row_dimensions[1].height = 22
-    ws.row_dimensions[2].height = 22
-    ws.row_dimensions[3].height = 30
+    ws.row_dimensions[2].height = 30
+    ws.row_dimensions[3].height = 22
+    ws.row_dimensions[4].height = 22
+    ws.row_dimensions[5].height = 22
 
 
 def _write_balance_sheet_sheet(
@@ -339,15 +340,24 @@ def _write_balance_sheet_sheet(
     metadata = society_metadata or {}
     _write_balance_sheet_metadata(ws, society_name, metadata, fy)
 
-    ws.cell(row=4, column=2, value="Liabilities").font = _FONT_HEADER
-    ws.cell(row=4, column=6, value="Assets").font = _FONT_HEADER
+    ws.merge_cells(start_row=5, start_column=1, end_row=5, end_column=9)
+    title_cell = ws.cell(
+        row=5,
+        column=1,
+        value=f"Balance Sheet as at 31 March {fy + 1}",
+    )
+    title_cell.font = Font(name="Arial", size=16, bold=True)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.cell(row=8, column=2, value="Liabilities").font = _FONT_HEADER
+    ws.cell(row=8, column=6, value="Assets").font = _FONT_HEADER
 
     headers = {
         1: "Date", 2: "A/c", 3: "Account Name", 4: "Amount",
         6: "A/c", 7: "Account Name", 8: "", 9: "Amount",
     }
     for col, hdr in headers.items():
-        cell = ws.cell(row=5, column=col, value=hdr)
+        cell = ws.cell(row=7, column=col, value=hdr)
         cell.font = _FONT_HEADER
         cell.fill = _FILL_HEADER
         cell.alignment = _ALIGN_C
@@ -364,6 +374,14 @@ def _write_balance_sheet_sheet(
         if "account_tab_name" in row:
             return row.get("account_tab_name") or ""
         return row.get("tab_name") or row.get("account_code") or ""
+
+    def _equity_tab_name(row: dict) -> str:
+        account_name = row.get("account_name", "")
+        if account_name == "Capital Account":
+            return row.get("account_tab_name") or row.get("tab_name") or "CapAc"
+        if account_name in {"Reserves & Surplus", "Reserve & Surplus", "Reserve &Surplus"}:
+            return row.get("account_tab_name") or row.get("tab_name") or "ResSur"
+        return ""
 
     def _write_grouped_section(ws, section_rows, start_row, col_date, col_code, col_name, col_amt, 
                                is_liability=True, section_title=None):
@@ -434,47 +452,72 @@ def _write_balance_sheet_sheet(
                 r += 1
         return r, r - 1
 
-    liab_start = 6
+    liab_start = 9
     _, liab_end = _write_grouped_section(ws, liabilities, liab_start, 1, 2, 3, 4, True)
 
-    asset_start = 6
+    asset_start = 9
     _, asset_end = _write_grouped_section(ws, assets, asset_start, 1, 6, 7, 9, False)
 
-    total_row = max(liab_end, asset_end) + 2
-    for col, val, fill in [
-        (3, "Total", _FILL_SECTION), (4, f"=SUM(D{liab_start}:D{liab_end})", _FILL_SECTION),
-        (7, "Total", _FILL_SECTION), (9, f"=SUM(I{asset_start}:I{asset_end})", _FILL_SECTION),
-    ]:
-        cell = ws.cell(row=total_row, column=col, value=val)
-        cell.font = _FONT_TOTAL
-        if fill:
-            cell.fill = fill
-        cell.border = _BORDER_ALL
-        cell.alignment = _ALIGN_R if col in (4, 9) else _ALIGN_L
-        if col in (4, 9) and isinstance(val, str) and val.startswith("="):
-            pass
-        elif col in (4, 9):
-            cell.number_format = _FMT_AMT
-
-    equity_start = total_row + 2
-    ws.cell(row=equity_start, column=1, value="Equity & Surplus").font = _FONT_HEADER
+    equity_start = liab_end + 1
+    ws.cell(row=equity_start, column=2, value="Equity & Surplus").font = _FONT_HEADER
     r = equity_start + 1
     for row in equity:
+        ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
+        ws.cell(row=r, column=2, value=_equity_tab_name(row)).font = _FONT_BODY
         ws.cell(row=r, column=3, value=row.get("account_name", "")).font = _FONT_BODY
         ws.cell(row=r, column=4, value=float(row.get("amount", 0) or 0)).font = _FONT_BODY
         ws.cell(row=r, column=4).number_format = _FMT_AMT
-        ws.cell(row=r, column=4).border = _BORDER_ALL
-        ws.cell(row=r, column=3).border = _BORDER_ALL
+        for col in (1, 2, 3, 4):
+            cell = ws.cell(row=r, column=col)
+            cell.font = _FONT_BODY
+            cell.border = _BORDER_ALL
+            cell.alignment = _ALIGN_R if col in (1, 4) else _ALIGN_L
         r += 1
-    equity_total_row = r
-    ws.cell(row=r, column=3, value="Total Equity").font = _FONT_TOTAL
-    ws.cell(row=r, column=4, value=f"=SUM(D{equity_start+1}:D{r-1})").font = _FONT_TOTAL
-    ws.cell(row=r, column=4).number_format = _FMT_AMT
-    ws.cell(row=r, column=4).border = _BORDER_ALL
-    ws.cell(row=r, column=3).border = _BORDER_ALL
+
+    equity_end = r - 1 if equity else liab_end
+    total_row = max(asset_end, equity_end) + 2
+    combined_end = max(liab_end, equity_end)
+    combined_formula = (
+        f"=SUM(D{liab_start}:D{combined_end})"
+        if combined_end >= liab_start
+        else "=0"
+    )
+    asset_formula = (
+        f"=SUM(I{asset_start}:I{asset_end})"
+        if asset_end >= asset_start
+        else "=0"
+    )
+
+    combined_label = ws.cell(
+        row=total_row,
+        column=2,
+        value="Total Liabilities + Equity & Surplus",
+    )
+    combined_label.font = _FONT_TOTAL
+    combined_label.border = _BORDER_ALL
+    combined_label.alignment = _ALIGN_L
+
+    combined_amount = ws.cell(row=total_row, column=4, value=combined_formula)
+    combined_amount.font = _FONT_TOTAL
+    combined_amount.border = _BORDER_ALL
+    combined_amount.alignment = _ALIGN_R
+    combined_amount.number_format = _FMT_AMT
+
+    asset_total_label = ws.cell(row=total_row, column=7, value="Total")
+    asset_total_label.font = _FONT_TOTAL
+    asset_total_label.fill = _FILL_SECTION
+    asset_total_label.border = _BORDER_ALL
+    asset_total_label.alignment = _ALIGN_L
+
+    asset_total_amount = ws.cell(row=total_row, column=9, value=asset_formula)
+    asset_total_amount.font = _FONT_TOTAL
+    asset_total_amount.fill = _FILL_SECTION
+    asset_total_amount.border = _BORDER_ALL
+    asset_total_amount.alignment = _ALIGN_R
+    asset_total_amount.number_format = _FMT_AMT
 
     note = ws.cell(
-        row=equity_total_row + 2, column=1,
+        row=total_row + 2, column=1,
         value=(
             "Note: Balance Sheet is prepared from closing balances of the financial year. "
             "Assets = Dr-natured accounts (Cash, Bank, Debtors, Fixed Assets, Investments, Loans Given). "
@@ -486,8 +529,8 @@ def _write_balance_sheet_sheet(
     )
     note.font = Font(name="Arial", size=8, italic=True)
     note.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.merge_cells(start_row=equity_total_row + 2, start_column=1, end_row=equity_total_row + 2, end_column=9)
-    ws.row_dimensions[equity_total_row + 2].height = 45
+    ws.merge_cells(start_row=total_row + 2, start_column=1, end_row=total_row + 2, end_column=9)
+    ws.row_dimensions[total_row + 2].height = 45
 
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
