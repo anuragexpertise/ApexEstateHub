@@ -161,11 +161,11 @@ def render_category_content(category, society_id=None):
     elements = []
     
     # Render conversational header if available
-    conv_info = next((item for item in CONVERSATION_DATA if item.get('Category') == category), None)
-    if conv_info and conv_info.get('Information'):
+    conv_info = next((item for item in CONVERSATION_DATA if item.get('Setup Wizard Category') == category), None)
+    if conv_info and conv_info.get('Recommendation from Master to Admin'):
         elements.append(
             dbc.Alert(
-                [html.I(className="fas fa-lightbulb me-2"), conv_info['Information']],
+                [html.I(className="fas fa-lightbulb me-2"), conv_info['Recommendation from Master to Admin']],
                 color="info",
                 className="mb-3",
                 style={"fontSize": "13px"}
@@ -183,9 +183,9 @@ def render_category_content(category, society_id=None):
         )
 
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs = "", "", "", "", "", "", "both", "8"
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state = "", "", "", "", "", "", "both", "8", ""
         if society_id:
-            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
@@ -195,6 +195,23 @@ def render_category_content(category, society_id=None):
                 s_reg = row.get("registration_number", "") or ""
                 s_gate_logic = row.get("gate_logic", "both") or "both"
                 s_duty_hrs = row.get("duty_hrs", "8") or "8"
+                s_state = row.get("state", "") or ""
+        from app.services.kpi_rule_links_service import get_states
+        # Jurisdiction-aware statutory rules (fn_balance_sheet_fy statutory
+        # head mapping, state_compliance_thresholds sinking/repair-fund
+        # rates) are fully seeded for UP only today; other states show
+        # generic/Union-law figures until their own regime is seeded — see
+        # legal_regime_profiles.status ('active' vs 'draft'). This dropdown
+        # is also the society's ONLY write path for `societies.state`,
+        # which GST RCM interstate/intrastate determination
+        # (fn_compute_rcm / vendor.state comparison) depends on entirely —
+        # previously state had no UI at all and every RCM check silently
+        # fell back to guessing the state from the free-text address.
+        _state_choices = get_states()
+        state_options = [{"label": "— Select State —", "value": ""}] + [
+            {"label": f"{name}{' (jurisdiction-aware rules active)' if code == 'UP' else ''}", "value": code}
+            for code, name in _state_choices.items() if code != "ALL"
+        ]
         return elements + [
             _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
             dbc.Label("Society Name"),
@@ -203,6 +220,13 @@ def render_category_content(category, society_id=None):
             _render_image_capture_control("society", "logo"),
             dbc.Label("Address"),
             dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
+            dbc.Label("State", html_for="sw-society-state"),
+            dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
+            html.P(
+                "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
+                "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
+                className="text-muted small mb-3",
+            ),
             dbc.Label("Email"),
             dbc.Input(id="sw-society-email", type="email", required=True, className="mb-3", value=s_email),
             dbc.Label("Phone Number"),
