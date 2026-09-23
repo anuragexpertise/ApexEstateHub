@@ -265,7 +265,7 @@ def _fetch_balance_sheet_rows(db, society_id: int, fy: int) -> list[dict]:
         """
         SELECT
             bs.*,
-            COALESCE(a.tab_name, bs.account_name, '') AS account_tab_name
+            COALESCE(NULLIF(a.tab_name, ''), bs.account_name, '') AS account_tab_name
         FROM fn_balance_sheet_fy(%s, %s) AS bs
         LEFT JOIN accounts AS a
             ON a.society_id = %s
@@ -329,18 +329,15 @@ def _write_balance_sheet_sheet(
     If statutory metadata is present (statutory_head_code), groups accounts
     by statutory head for jurisdiction-aware presentation (UP AOA, etc.)."""
     from collections import defaultdict
-    
-    ws.cell(row=1, column=1, value=f"{society_name}")
-    ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
-
-    ws.cell(row=2, column=1, value=f"Balance Sheet as at 31 March {fy+1}")
-    ws.cell(row=2, column=1).font = _FONT_TITLE
 
     fy_end = date(fy + 1, 3, 31)
 
-    _apply_header(ws, 3, {"A": 14, "B": 14, "C": 28, "D": 18,
-                           "F": 14, "G": 24, "H": 20, "I": 18})
+    _apply_header(ws, 3, {"A": 14, "B": 20, "C": 28, "D": 18,
+                           "F": 20, "G": 24, "H": 20, "I": 18})
     ws.column_dimensions["E"].width = 3
+
+    metadata = society_metadata or {}
+    _write_balance_sheet_metadata(ws, society_name, metadata, fy)
 
     ws.cell(row=4, column=2, value="Liabilities").font = _FONT_HEADER
     ws.cell(row=4, column=6, value="Assets").font = _FONT_HEADER
@@ -400,7 +397,7 @@ def _write_balance_sheet_sheet(
                     r += 1
                     for row in sorted(group_rows, key=lambda x: x.get("statutory_display_order") or 0):
                         ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
-                        ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                        ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                         ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
                         ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                         for col in (col_date, col_code, col_name, col_amt):
@@ -413,7 +410,7 @@ def _write_balance_sheet_sheet(
                     # Single account
                     row = group_rows[0]
                     ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
-                    ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                    ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                     ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
                     ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                     for col in (col_date, col_code, col_name, col_amt):
@@ -426,7 +423,7 @@ def _write_balance_sheet_sheet(
             # Flat list (legacy)
             for row in section_rows:
                 ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
-                ws.cell(row=r, column=col_code, value=row.get("account_code") or "")
+                ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                 ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
                 ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                 for col in (col_date, col_code, col_name, col_amt):
@@ -499,9 +496,10 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
     if db is None:
         db = _db
 
+    society_metadata = _fetch_society_metadata(db, society_id, fy)
+
     if society_name is None:
-        row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
-        society_name = row.get("name", "Society") if row else "Society"
+        society_name = society_metadata.get("name") or "Society"
 
     # Fetch data from SQL functions
     rp_rows = db._execute(
@@ -512,9 +510,7 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
         "SELECT * FROM fn_income_expenditure_fy(%s,%s)", (society_id, fy), fetch_all=True
     ) or []
 
-    bs_rows = db._execute(
-        "SELECT * FROM fn_balance_sheet_fy(%s,%s)", (society_id, fy), fetch_all=True
-    ) or []
+    bs_rows = _fetch_balance_sheet_rows(db, society_id, fy)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -531,7 +527,7 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
 
     # Sheet 3: Balance Sheet
     ws3 = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_sheet(ws3, bs_rows, society_name, fy)
+    _write_balance_sheet_sheet(ws3, bs_rows, society_name, fy, society_metadata)
 
     return wb
 
@@ -592,17 +588,15 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     if db is None:
         db = _db
 
-    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
-    society_name = row.get("name", "Society") if row else "Society"
+    society_metadata = _fetch_society_metadata(db, society_id, fy)
+    society_name = society_metadata.get("name") or "Society"
 
-    bs_rows = db._execute(
-        "SELECT * FROM fn_balance_sheet_fy(%s,%s)", (society_id, fy), fetch_all=True
-    ) or []
+    bs_rows = _fetch_balance_sheet_rows(db, society_id, fy)
 
     wb = Workbook()
     wb.remove(wb.active)
     ws = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_sheet(ws, bs_rows, society_name, fy)
+    _write_balance_sheet_sheet(ws, bs_rows, society_name, fy, society_metadata)
 
     buf = io.BytesIO()
     wb.save(buf)
