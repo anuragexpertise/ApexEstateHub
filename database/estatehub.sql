@@ -1152,6 +1152,86 @@ CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
     CONSTRAINT uq_state_threshold UNIQUE (state, threshold_key, effective_from)
 );
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- LEGAL REGIME PROFILES — jurisdiction-specific statutory frameworks
+-- (e.g., UP_AOA_2010 for Uttar Pradesh Apartment Act 2010, MH_COOP_1965 for
+-- Maharashtra Co-operative Societies Act). Each profile defines the legal
+-- basis, applicable acts/rules/bye-laws, and effective dates.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS legal_regime_profiles (
+    code VARCHAR(30) PRIMARY KEY,
+    state_code VARCHAR(2) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    primary_law VARCHAR(255) NOT NULL,
+    rules_version VARCHAR(100),
+    model_bye_laws_version VARCHAR(100),
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'draft')),
+    source_reference TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SOCIETY LEGAL REGIME ASSIGNMENT — each society is assigned one legal regime
+-- (e.g., UP_AOA_2010). This determines which statutory head catalog and
+-- compliance thresholds apply. Effective dates allow historical changes.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS society_legal_regime (
+    society_id INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code),
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    source_reference TEXT,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- STATUTORY HEAD CATALOG — statutory head definitions per legal regime.
+-- Each head maps to a statement section (Assets, Liabilities, Equity, Income, Expenditure)
+-- and defines display order. Parent heads allow hierarchical statutory grouping.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS statutory_head_catalog (
+    regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
+    head_code VARCHAR(50) NOT NULL,
+    parent_head_code VARCHAR(50),
+    statement_section VARCHAR(20) NOT NULL CHECK (statement_section IN ('Assets', 'Liabilities', 'Equity', 'Income', 'Expenditure')),
+    label VARCHAR(200) NOT NULL,
+    display_order INT NOT NULL,
+    is_statutory_required BOOLEAN NOT NULL DEFAULT FALSE,
+    source_reference TEXT,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (regime_code, head_code)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- ACCOUNT STATUTORY MAPPINGS — maps each society's chart of accounts to
+-- statutory heads. One account can map to one statutory head per regime.
+-- This is orthogonal to the parent_account_id hierarchy (which drives arithmetic).
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS account_statutory_mappings (
+    society_id INT NOT NULL,
+    account_id INT NOT NULL,
+    regime_code VARCHAR(30) NOT NULL,
+    head_code VARCHAR(50) NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    source_reference TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (society_id, account_id, regime_code, effective_from),
+    FOREIGN KEY (society_id, account_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (regime_code, head_code) REFERENCES statutory_head_catalog (regime_code, head_code) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_society ON account_statutory_mappings (society_id);
+CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_regime ON account_statutory_mappings (regime_code);
+CREATE INDEX IF NOT EXISTS idx_statutory_head_catalog_regime ON statutory_head_catalog (regime_code);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -7154,21 +7234,26 @@ CREATE OR REPLACE FUNCTION fn_fy_closing_report(
     p_fy                     INT
 )
  RETURNS TABLE (
-    account_id           INT,
-    account_name         TEXT,
-    tab_name             TEXT,
-    parent_account_id    INT,
-    drcr_account         TEXT,
-    has_bf               BOOLEAN,
-    own_bf               NUMERIC(15,2),   -- Cr-positive; 0 for has_bf=FALSE
-    own_movement         NUMERIC(15,2),   -- Cr-positive; this FY's direct transactions only
-    depreciation_charge  NUMERIC(15,2),   -- positive amount, added back to own_closing (a Dr-natured asset's Cr-positive value moves toward zero as it depreciates)
-    own_closing          NUMERIC(15,2),   -- own_bf + own_movement + depreciation_charge (this account alone, no descendants)
-    total_closing        NUMERIC(15,2),   -- own_closing summed across this account + its entire subtree
-    display_side         TEXT,            -- 'Dr' or 'Cr', sign of total_closing
-     display_amount       NUMERIC(15,2),   -- ABS(total_closing)
-     depth                INT,
-     sort_path            TEXT
+     account_id           INT,
+     account_name         TEXT,
+     tab_name             TEXT,
+     parent_account_id    INT,
+     drcr_account         TEXT,
+     has_bf               BOOLEAN,
+     own_bf               NUMERIC(15,2),   -- Cr-positive; 0 for has_bf=FALSE
+     own_movement         NUMERIC(15,2),   -- Cr-positive; this FY's direct transactions only
+     depreciation_charge  NUMERIC(15,2),   -- positive amount, added back to own_closing (a Dr-natured asset's Cr-positive value moves toward zero as it depreciates)
+     own_closing          NUMERIC(15,2),   -- own_bf + own_movement + depreciation_charge (this account alone, no descendants)
+     total_closing        NUMERIC(15,2),   -- own_closing summed across this account + its entire subtree
+     display_side         TEXT,            -- 'Dr' or 'Cr', sign of total_closing
+      display_amount       NUMERIC(15,2),   -- ABS(total_closing)
+      depth                INT,
+      sort_path            TEXT,
+      -- Jurisdiction-aware statutory metadata (added 2026-09)
+      statutory_head_code       VARCHAR(50),
+      statutory_head_label      VARCHAR(200),
+      statutory_statement_section VARCHAR(20),
+      statutory_display_order   INT
  )
  LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -7276,6 +7361,28 @@ BEGIN
         FROM ancestry anc
         JOIN leaf_final lf ON lf.id = anc.acc_id
         GROUP BY anc.ancestor_id
+    ),
+    -- Jurisdiction-aware statutory head resolution
+    regime AS (
+        SELECT slr.regime_code
+        FROM society_legal_regime slr
+        WHERE slr.society_id = p_society_id
+          AND slr.effective_from <= MAKE_DATE(p_fy + 1, 3, 31)
+          AND (slr.effective_to IS NULL OR slr.effective_to >= MAKE_DATE(p_fy, 4, 1))
+        ORDER BY slr.effective_from DESC
+        LIMIT 1
+    ),
+    statutory_map AS (
+        SELECT asm.account_id, shc.head_code, shc.label, shc.statement_section, shc.display_order
+        FROM account_statutory_mappings asm
+        JOIN statutory_head_catalog shc
+          ON shc.regime_code = asm.regime_code AND shc.head_code = asm.head_code
+        JOIN regime rg ON rg.regime_code = asm.regime_code
+        WHERE asm.society_id = p_society_id
+          AND asm.effective_from <= MAKE_DATE(p_fy + 1, 3, 31)
+          AND (asm.effective_to IS NULL OR asm.effective_to >= MAKE_DATE(p_fy, 4, 1))
+          AND shc.effective_from <= MAKE_DATE(p_fy + 1, 3, 31)
+          AND (shc.effective_to IS NULL OR shc.effective_to >= MAKE_DATE(p_fy, 4, 1))
     )
     SELECT
         lf.id, lf.name, lf.tab_name, lf.parent_account_id, lf.drcr_account, lf.has_bf,
@@ -7284,9 +7391,14 @@ BEGIN
         CASE WHEN r.total_closing >= 0 THEN 'Cr' ELSE 'Dr' END,
         ABS(r.total_closing),
         lf.depth,
-        lf.sort_path
+        lf.sort_path,
+        sm.head_code AS statutory_head_code,
+        sm.label AS statutory_head_label,
+        sm.statement_section AS statutory_statement_section,
+        sm.display_order AS statutory_display_order
     FROM leaf_final lf
     JOIN rollup r ON r.id = lf.id
+    LEFT JOIN statutory_map sm ON sm.account_id = lf.id
         ORDER BY lf.sort_path;
 END;
 $$;
@@ -7544,7 +7656,8 @@ $$;
 -- ===================
 -- Balance Sheet (Position Statement) for a given FY.
 -- Returns: statement_section ('Assets'|'Liabilities'|'Equity'),
--- account_code, account_name, amount
+-- account_code, account_name, amount, mutuality_nature,
+-- statutory_head_code, statutory_head_label, statutory_statement_section, statutory_display_order
 -- Logic:
 --   Uses fn_fy_closing_report closing balances.
 --   Assets: drcr_account='Dr' AND NOT under Capital Account
@@ -7559,11 +7672,15 @@ CREATE OR REPLACE FUNCTION fn_balance_sheet_fy(
     p_fy         INT
 )
 RETURNS TABLE (
-    statement_section VARCHAR,
-    account_code      INT,
-    account_name      VARCHAR,
-    amount            NUMERIC(15,2),
-    mutuality_nature  VARCHAR(10)
+    statement_section       VARCHAR,
+    account_code            INT,
+    account_name            VARCHAR,
+    amount                  NUMERIC(15,2),
+    mutuality_nature        VARCHAR(10),
+    statutory_head_code     VARCHAR(50),
+    statutory_head_label    VARCHAR(200),
+    statutory_statement_section VARCHAR(20),
+    statutory_display_order INT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -7603,7 +7720,11 @@ BEGIN
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
                (-ba.own_closing)::NUMERIC(15,2) AS amount,
-               ba.mutuality_nature
+               ba.mutuality_nature,
+               ba.statutory_head_code,
+               ba.statutory_head_label,
+               ba.statutory_statement_section,
+               ba.statutory_display_order
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Dr'
     ),
@@ -7612,7 +7733,11 @@ BEGIN
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
                ba.own_closing::NUMERIC(15,2) AS amount,
-               ba.mutuality_nature
+               ba.mutuality_nature,
+               ba.statutory_head_code,
+               ba.statutory_head_label,
+               ba.statutory_statement_section,
+               ba.statutory_display_order
         FROM bs_accs ba
         WHERE ba.drcr_account = 'Cr'
     ),
@@ -7626,7 +7751,9 @@ BEGIN
           AND c.own_closing != 0
     ),
     cap_ac_own AS (
-        SELECT c.account_id, c.account_name, c.own_closing, a.mutuality_nature
+        SELECT c.account_id, c.account_name, c.own_closing, a.mutuality_nature,
+               c.statutory_head_code, c.statutory_head_label,
+               c.statutory_statement_section, c.statutory_display_order
         FROM closing c
         CROSS JOIN cap_ac ca
         LEFT JOIN accounts a ON a.id = c.account_id
@@ -7634,27 +7761,35 @@ BEGIN
           AND c.sort_path = ca.sort_path
           AND c.own_closing IS NOT NULL
     )
-    SELECT o.statement_section, o.account_code, o.account_name, o.amount, o.mutuality_nature
+    SELECT o.statement_section, o.account_code, o.account_name, o.amount, o.mutuality_nature,
+           o.statutory_head_code, o.statutory_head_label, o.statutory_statement_section, o.statutory_display_order
     FROM (
-        SELECT 1 AS sort_order, a.statement_section, a.account_code, a.account_name, a.amount, a.mutuality_nature
+        SELECT 1 AS sort_order, a.statement_section, a.account_code, a.account_name, a.amount, a.mutuality_nature,
+               a.statutory_head_code, a.statutory_head_label, a.statutory_statement_section, a.statutory_display_order
         FROM asset_accs a
         UNION ALL
-        SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount, l.mutuality_nature
+        SELECT 2, l.statement_section, l.account_code, l.account_name, l.amount, l.mutuality_nature,
+               l.statutory_head_code, l.statutory_head_label, l.statutory_statement_section, l.statutory_display_order
         FROM liability_accs l
         UNION ALL
         SELECT 3, 'Equity'::VARCHAR, c.account_id::INT,
                c.account_name::VARCHAR,
                c.own_closing::NUMERIC(15,2),
-               c.mutuality_nature
+               c.mutuality_nature,
+               c.statutory_head_code, c.statutory_head_label, c.statutory_statement_section, c.statutory_display_order
         FROM cap_ac_own c
         UNION ALL
         SELECT 3, 'Equity'::VARCHAR, NULL::INT,
                'Reserves & Surplus'::VARCHAR,
                s.surplus::NUMERIC(15,2),
-               NULL
+               NULL,
+               'ACCUMULATED_SURPLUS'::VARCHAR,
+               'Accumulated Surplus / Deficit'::VARCHAR,
+               'Equity'::VARCHAR,
+               20
         FROM ie_surplus s
     ) o
-    ORDER BY o.sort_order, o.account_name;
+    ORDER BY o.sort_order, o.statutory_display_order NULLS LAST, o.account_name;
 END;
 $$;
 

@@ -955,7 +955,240 @@ def seed_state_compliance_thresholds(cur, conn):
         print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
 
 
-def seed_accounts(cur, conn, society_id: int) -> int:
+# ════════════════════════════════════════════════════════════════════════════════
+# LEGAL REGIME PROFILES — jurisdiction-specific statutory frameworks
+# ═══════════════════════════════════════════════════════════════════════════════
+
+LEGAL_REGIME_PROFILES = [
+    # UP Apartment Owners Association under UP Apartment Act 2010 + Rules 2011
+    ("UP_AOA_2010", "UP", "Uttar Pradesh Apartment Owners Association (AOA)",
+     "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
+     "Uttar Pradesh Apartment Rules, 2011",
+     "Model Bye-Laws under Section 14(6), notified 16 November 2011",
+     "2011-11-16", None, "active",
+     "UP Act 16 of 2010; Rules notified 16 Nov 2011; Model Bye-Laws under Sec 14(6)"),
+    # Maharashtra Co-operative Housing Society (future)
+    ("MH_COOP_1965", "MH", "Maharashtra Co-operative Housing Society",
+     "Maharashtra Co-operative Societies Act, 1960",
+     "Maharashtra Co-operative Societies Rules, 1961",
+     "Model Bye-Laws for Housing Societies",
+     "1962-01-26", None, "draft",
+     "MCS Act 1960; MCS Rules 1961; Model Bye-Laws"),
+]
+
+STATUTORY_HEADS_UP_AOA = [
+    # Liabilities
+    ("UP_AOA_2010", "IFMS_CORPUS", None, "Liabilities", "Interest-Free Maintenance Security Corpus", 10, True,
+     "UP Apartment Act 2010, Sec 14(5) proviso (2016 Amendment); Model Bye-Laws Ch.VII"),
+    ("UP_AOA_2010", "RESERVE_FUND", None, "Liabilities", "Reserve Fund (Common Profits Nucleus)", 20, True,
+     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 46(c) & 3(d)"),
+    ("UP_AOA_2010", "COMMON_EXPENSES_PAYABLE", None, "Liabilities", "Common Expenses Payable", 30, True,
+     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws Ch.VII"),
+    ("UP_AOA_2010", "SUNDRY_CREDITORS", None, "Liabilities", "Sundry Creditors", 40, False, ""),
+    ("UP_AOA_2010", "LOANS_TAKEN", None, "Liabilities", "Loans & Advances Taken", 50, False, ""),
+    ("UP_AOA_2010", "STAFF_BENEFITS_PAYABLE", None, "Liabilities", "Staff Benefits Payable (PF/Gratuity)", 60, True,
+     "UP Apartment Rules 2011, Model Bye-Laws Para 45(h)"),
+    ("UP_AOA_2010", "TAX_PAYABLE", None, "Liabilities", "Taxes Payable (GST/TDS/Property Tax)", 70, False, ""),
+    ("UP_AOA_2010", "OTHER_LIABILITIES", None, "Liabilities", "Other Liabilities", 80, False, ""),
+    # Equity
+    ("UP_AOA_2010", "CAPITAL_ACCOUNT", None, "Equity", "Capital Account / Share Capital", 10, True,
+     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 46(a)"),
+    ("UP_AOA_2010", "ACCUMULATED_SURPLUS", None, "Equity", "Accumulated Surplus / Deficit", 20, True, ""),
+    ("UP_AOA_2010", "CURRENT_YEAR_SURPLUS", None, "Equity", "Current Year Surplus / Deficit", 30, True, ""),
+    # Assets
+    ("UP_AOA_2010", "FIXED_ASSETS", None, "Assets", "Fixed Assets (Immovable + Movable)", 10, False, ""),
+    ("UP_AOA_2010", "INVESTMENTS", None, "Assets", "Investments", 20, False, ""),
+    ("UP_AOA_2010", "CASH_BANK", None, "Assets", "Cash & Bank Balances", 30, False, ""),
+    ("UP_AOA_2010", "SUNDRY_DEBTORS", None, "Assets", "Sundry Debtors (Maintenance Receivable)", 40, True,
+     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws Ch.VII"),
+    ("UP_AOA_2010", "LOANS_GIVEN", None, "Assets", "Loans & Advances Given", 50, False, ""),
+    ("UP_AOA_2010", "DEPOSITS_ASSETS", None, "Assets", "Deposits (Asset Side)", 60, False, ""),
+    ("UP_AOA_2010", "OTHER_ASSETS", None, "Assets", "Other Assets", 70, False, ""),
+    # Income
+    ("UP_AOA_2010", "MAINTENANCE_INCOME", None, "Income", "Maintenance Charges / Assessments", 10, True,
+     "UP Apartment Act 2010, Sec 18(1)"),
+    ("UP_AOA_2010", "COMMON_PROFITS", None, "Income", "Common Profits (Commercial/Common Area Income)", 20, True,
+     "UP Apartment Act 2010, Sec 3(k), 18(1); Model Bye-Laws Ch.VII, Para 3(d)"),
+    ("UP_AOA_2010", "INTEREST_INCOME", None, "Income", "Interest Income", 30, False, ""),
+    ("UP_AOA_2010", "OTHER_INCOME", None, "Income", "Other Income", 40, False, ""),
+    # Expenditure
+    ("UP_AOA_2010", "REPAIR_MAINTENANCE_EXP", None, "Expenditure", "Repair & Maintenance Expenses", 10, True,
+     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 3(c)"),
+    ("UP_AOA_2010", "STAFF_EXPENSES", None, "Expenditure", "Staff Salaries & Benefits", 20, False, ""),
+    ("UP_AOA_2010", "ADMIN_EXPENSES", None, "Expenditure", "Administrative Expenses", 30, False, ""),
+    ("UP_AOA_2010", "FINANCE_COSTS", None, "Expenditure", "Finance Costs / Interest", 40, False, ""),
+    ("UP_AOA_2010", "DEPRECIATION_EXP", None, "Expenditure", "Depreciation", 50, False, ""),
+    ("UP_AOA_2010", "OTHER_EXPENSES", None, "Expenditure", "Other Expenses", 60, False, ""),
+]
+
+
+def seed_legal_regime_profiles(cur, conn):
+    """Idempotent seed of legal regime profiles."""
+    inserted = 0
+    for (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
+         eff_from, eff_to, status, source_ref) in LEGAL_REGIME_PROFILES:
+        row = _one(cur, "SELECT 1 FROM legal_regime_profiles WHERE code=%s", (code,))
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO legal_regime_profiles
+               (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
+                effective_from, effective_to, status, source_reference)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
+             eff_from, eff_to, status, source_ref),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ Legal regime profiles seeded ({inserted} new rows)")
+
+
+def seed_statutory_head_catalog(cur, conn):
+    """Idempotent seed of statutory head catalog (UP AOA first)."""
+    inserted = 0
+    for (regime_code, head_code, parent_head_code, statement_section, label,
+         display_order, is_statutory_required, source_ref) in STATUTORY_HEADS_UP_AOA:
+        row = _one(cur,
+            "SELECT 1 FROM statutory_head_catalog WHERE regime_code=%s AND head_code=%s",
+            (regime_code, head_code))
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO statutory_head_catalog
+               (regime_code, head_code, parent_head_code, statement_section, label,
+                display_order, is_statutory_required, source_reference, effective_from)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (regime_code, head_code, parent_head_code, statement_section, label,
+             display_order, is_statutory_required, source_ref, '2011-11-16'),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ Statutory head catalog seeded ({inserted} new rows)")
+
+
+def seed_society_legal_regime(cur, conn, society_id: int):
+    """Assign UP_AOA_2010 regime to UP societies."""
+    row = _one(cur, "SELECT 1 FROM society_legal_regime WHERE society_id=%s", (society_id,))
+    if row:
+        return
+    # Determine state
+    soc = _one(cur, "SELECT state FROM societies WHERE id=%s", (society_id,))
+    if soc and soc.get("state") == "Uttar Pradesh":
+        cur.execute(
+            """INSERT INTO society_legal_regime
+               (society_id, regime_code, effective_from, source_reference)
+               VALUES (%s, %s, %s, %s)""",
+            (society_id, "UP_AOA_2010", '2011-11-16', "UP Apartment Act 2010; Society address in Uttar Pradesh"),
+        )
+        conn.commit()
+        print(f"  ✓ Society {society_id} assigned UP_AOA_2010 legal regime")
+
+
+# UP AOA statutory head mappings for the demo chart of accounts
+# Maps account_id -> (head_code, source_reference)
+UP_AOA_ACCOUNT_MAPPINGS = [
+    # Liabilities
+    (101, "IFMS_CORPUS", "Sinking Fund Reserve mapped to IFMS Corpus per UP Apt Act Sec 14(5)"),
+    (102, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
+    (103, "RESERVE_FUND", "Corpus Fund mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
+    (41, "TAX_PAYABLE", "CGST Payable"),
+    (42, "TAX_PAYABLE", "SGST Payable"),
+    (43, "TAX_PAYABLE", "CGST Payable (RCM)"),
+    (44, "TAX_PAYABLE", "SGST Payable (RCM)"),
+    (45, "TAX_PAYABLE", "IGST Payable (RCM)"),
+    (9, "SUNDRY_CREDITORS", "Sundry Creditors"),
+    (3, "LOANS_TAKEN", "Loans & Advances Taken"),
+    (26, "STAFF_BENEFITS_PAYABLE", "Provisions for staff benefits"),
+    (28, "TAX_PAYABLE", "Income Tax payable"),
+    # Equity
+    (2, "CAPITAL_ACCOUNT", "Capital Account"),
+    # Assets
+    (5, "FIXED_ASSETS", "Immovable Assets"),
+    (6, "FIXED_ASSETS", "Movable Assets"),
+    (61, "FIXED_ASSETS", "Furniture"),
+    (62, "INVESTMENTS", "Investments"),
+    (63, "CASH_BANK", "Bank Accounts parent"),
+    (631, "CASH_BANK", "Bank Accounts"),
+    (634, "OTHER_ASSETS", "Input Tax Credit (RCM) - recoverable"),
+    (6311, "CASH_BANK", "SBI A/c"),
+    (6312, "CASH_BANK", "ICICI A/c"),
+    (632, "DEPOSITS_ASSETS", "Deposits (Assets)"),
+    (633, "CASH_BANK", "Cash-in-hand"),
+    (64, "FIXED_ASSETS", "Instruments & Tools"),
+    (65, "FIXED_ASSETS", "Machinery"),
+    (66, "FIXED_ASSETS", "Car"),
+    (67, "FIXED_ASSETS", "Computers"),
+    (7, "LOANS_GIVEN", "Loans & Advances Given"),
+    (8, "SUNDRY_DEBTORS", "Sundry Debtors parent"),
+    (81, "SUNDRY_DEBTORS", "Sundry Debtors (Digital)"),
+    (82, "SUNDRY_DEBTORS", "Sundry Debtors (Cash)"),
+    # Income
+    (2311, "MAINTENANCE_INCOME", "Society Maintenance Charge"),
+    (211, "INTEREST_INCOME", "Interest Income"),
+    (2111, "INTEREST_INCOME", "Bank Interest"),
+    (2112, "OTHER_INCOME", "Exempt Income"),
+    (213, "COMMON_PROFITS", "Property Income (common area commercial)"),
+    (212, "OTHER_INCOME", "Selling Asset"),
+    # Expenditure
+    (2312, "REPAIR_MAINTENANCE_EXP", "Repair and Maintenance"),
+    (2313, "ADMIN_EXPENSES", "Stationery"),
+    (2314, "REPAIR_MAINTENANCE_EXP", "Generator Charges"),
+    (2315, "ADMIN_EXPENSES", "Accountant Fee"),
+    (2316, "ADMIN_EXPENSES", "Audit Fee"),
+    (2320, "REPAIR_MAINTENANCE_EXP", "Lift AMC"),
+    (2321, "REPAIR_MAINTENANCE_EXP", "Intercom AMC"),
+    (2322, "REPAIR_MAINTENANCE_EXP", "CCTV AMC"),
+    (2323, "FINANCE_COSTS", "GST on Asset Disposal"),
+    (235, "STAFF_EXPENSES", "Salary"),
+    (236, "ADMIN_EXPENSES", "Phone Charges"),
+    (237, "REPAIR_MAINTENANCE_EXP", "Electricity"),
+    (238, "REPAIR_MAINTENANCE_EXP", "Water Tax"),
+    (239, "REPAIR_MAINTENANCE_EXP", "House Tax"),
+    (2310, "REPAIR_MAINTENANCE_EXP", "Insurance Premium Paid"),
+    (24, "OTHER_EXPENSES", "Duties Paid"),
+    (25, "OTHER_EXPENSES", "Taxes Paid"),
+    (231, "DEPRECIATION_EXP", "Depreciation"),
+    (2317, "OTHER_INCOME", "Society Fine Charge"),
+    (2318, "MAINTENANCE_INCOME", "Society Fees"),
+    (2319, "OTHER_INCOME", "Event Ticket Income"),
+    (29, "FINANCE_COSTS", "TDS to IT"),
+]
+
+
+def seed_account_statutory_mappings(cur, conn, society_id: int):
+    """Seed UP AOA account -> statutory head mappings for demo society."""
+    # First ensure the society has a legal regime assigned
+    seed_society_legal_regime(cur, conn, society_id)
+
+    inserted = 0
+    for (account_id, head_code, source_ref) in UP_AOA_ACCOUNT_MAPPINGS:
+        # Check if account exists for this society
+        acc = _one(cur,
+            "SELECT 1 FROM accounts WHERE id=%s AND society_id=%s",
+            (account_id, society_id))
+        if not acc:
+            continue
+        row = _one(cur,
+            "SELECT 1 FROM account_statutory_mappings "
+            "WHERE society_id=%s AND account_id=%s AND regime_code=%s AND effective_from=%s",
+            (society_id, account_id, "UP_AOA_2010", '2011-11-16'))
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO account_statutory_mappings
+               (society_id, account_id, regime_code, head_code, effective_from, source_reference)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (society_id, account_id, "UP_AOA_2010", head_code, '2011-11-16', source_ref),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ Account statutory mappings seeded ({inserted} new rows)")
+
+
+def seed_gst_rates(cur, conn):
     """
     Insert this society's chart of accounts using the literal seed-constant
     `aid` values as the real `accounts.id` (accounts.id is scoped per-society
@@ -1951,6 +2184,9 @@ def run_seed(conn):
     seed_tds_section_rates(cur, conn, society_id)
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
+    seed_legal_regime_profiles(cur, conn)
+    seed_statutory_head_catalog(cur, conn)
+    seed_account_statutory_mappings(cur, conn, society_id)
     seed_gst_rates(cur, conn)
     seed_society_created_by(cur, conn, society_id, admin_uid)
     seed_admin_created_by(cur, conn, admin_uid)
