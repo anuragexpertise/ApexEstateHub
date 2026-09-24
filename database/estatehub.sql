@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS societies (
     plan_validity DATE NOT NULL DEFAULT CURRENT_DATE,
     calc_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     login_background VARCHAR(100),
-    gate_logic VARCHAR(10) DEFAULT 'both' CHECK (gate_logic IN ('entry', 'exit', 'both')),
+    gate_logic VARCHAR(10) DEFAULT 'both' CHECK (
+        gate_logic IN ('entry', 'exit', 'both')
+    ),
     duty_hrs VARCHAR(2) DEFAULT '8' CHECK (duty_hrs IN ('8', '12')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gstin VARCHAR(15),
@@ -169,9 +171,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- admin-only create+edit per _PORTAL_PERMS — no other role ever
     -- touches this table, so tracking WHICH admin added no value.
     CONSTRAINT uq_account_society_name UNIQUE (society_id, name),
-    CONSTRAINT fk_account_parent FOREIGN KEY (society_id, parent_account_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
-,
-    mutuality_nature VARCHAR(10) CHECK (mutuality_nature IN ('mutual','non_mutual')) DEFAULT 'mutual',
+    CONSTRAINT fk_account_parent FOREIGN KEY (society_id, parent_account_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+    mutuality_nature VARCHAR(10) CHECK (
+        mutuality_nature IN ('mutual', 'non_mutual')
+    ) DEFAULT 'mutual',
     tds_section VARCHAR(10)
 );
 
@@ -243,8 +246,6 @@ CREATE TABLE IF NOT EXISTS security_staff (
 -- comment block for why last_printed_at/last_emailed_at are being
 -- removed again in the same release they were added.
 
-
-
 CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -274,7 +275,6 @@ CREATE TABLE IF NOT EXISTS assets (
     qr_payload VARCHAR(255),
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
-
 
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
@@ -383,10 +383,21 @@ CREATE TABLE IF NOT EXISTS security_roster (
     security_id INT NOT NULL REFERENCES security_staff (id) ON DELETE CASCADE,
     roster_date DATE NOT NULL,
     shift_type VARCHAR(20) CHECK (
-        shift_type IN ('morning', 'evening', 'night', 'day')
+        shift_type IN (
+            'morning',
+            'evening',
+            'night',
+            'day'
+        )
     ),
     attendance_status VARCHAR(20) DEFAULT 'scheduled' CHECK (
-        attendance_status IN ('scheduled', 'present', 'absent', 'leave_paid', 'leave_unpaid')
+        attendance_status IN (
+            'scheduled',
+            'present',
+            'absent',
+            'leave_paid',
+            'leave_unpaid'
+        )
     ),
     assigned_by INT REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW(),
@@ -475,7 +486,7 @@ CREATE TABLE IF NOT EXISTS receivables (
     -- billing, penalties, advance-credit) or admin-confirmed
     -- (confirmed_by already covers that) — no INSERT path ever stamped it.
 ,
-    bill_group_id UUID DEFAULT gen_random_uuid(),
+    bill_group_id UUID DEFAULT gen_random_uuid (),
     reported_amount NUMERIC(10, 2),
     reported_mode VARCHAR(20),
     reported_reference VARCHAR(255),
@@ -502,7 +513,9 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
     reference_no VARCHAR(100),
     balance NUMERIC(12, 2),
     batch_id UUID NOT NULL,
-    matched_entity VARCHAR(10) CHECK (matched_entity IN ('receipt', 'expense')),
+    matched_entity VARCHAR(10) CHECK (
+        matched_entity IN ('receipt', 'expense')
+    ),
     matched_id INT,
     match_confidence VARCHAR(10) CHECK (
         match_confidence IN ('exact', 'fuzzy', 'manual')
@@ -510,7 +523,9 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
     reconciled BOOLEAN NOT NULL DEFAULT FALSE,
     uploaded_by INT REFERENCES users (id),
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (num_nonnulls(debit, credit) = 1)
+    CHECK (
+        num_nonnulls (debit, credit) = 1
+    )
 );
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
@@ -694,18 +709,18 @@ CREATE TABLE IF NOT EXISTS expenses (
 
 CREATE TABLE IF NOT EXISTS rcm_liability (
     id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-    expense_id INT REFERENCES expenses(id) ON DELETE SET NULL,
-    vendor_id INT REFERENCES vendors(id) ON DELETE SET NULL,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    expense_id INT REFERENCES expenses (id) ON DELETE SET NULL,
+    vendor_id INT REFERENCES vendors (id) ON DELETE SET NULL,
     rcm_category VARCHAR(50) NOT NULL,
-    taxable_value NUMERIC(12,2) NOT NULL,
-    cgst_amount NUMERIC(12,2) NOT NULL,
-    sgst_amount NUMERIC(12,2) NOT NULL,
+    taxable_value NUMERIC(12, 2) NOT NULL,
+    cgst_amount NUMERIC(12, 2) NOT NULL,
+    sgst_amount NUMERIC(12, 2) NOT NULL,
     -- igst_amount (2026-09, Phase 3): set instead of cgst/sgst when the
     -- vendor's state differs from the society's state (inter-state RCM
     -- supply) — previously unmodeled, every RCM entry was assumed
     -- intra-state.
-    igst_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+    igst_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
     -- itc_eligible (2026-09, Phase 3): whether this liability's GST was
     -- booked to the Input Tax Credit (RCM) asset account (recoverable)
     -- vs. expensed outright (non-recoverable, e.g. society below the
@@ -720,10 +735,10 @@ CREATE TABLE IF NOT EXISTS rcm_liability (
     -- government is posted — distinct from gstr_filed, which previously
     -- had no linked real-money leg at all.
     paid_at TIMESTAMP,
-    paid_transaction_id INT,  -- references transactions(id), not a formal FK: the
-                              -- transactions table is created later in this schema file
+    paid_transaction_id INT, -- references transactions(id), not a formal FK: the
+    -- transactions table is created later in this schema file
     created_at TIMESTAMP DEFAULT NOW(),
-    created_by INT REFERENCES users(id)
+    created_by INT REFERENCES users (id)
 );
 
 -- rcm_liability (2026-09, Phase 3): composite index for the fixed
@@ -731,8 +746,7 @@ CREATE TABLE IF NOT EXISTS rcm_liability (
 -- used by the GSTR/RCM export and the RCM Liability Register card. Without
 -- it every such query scans the whole table; with it the range predicate
 -- is an index-only scan once the society is pinned.
-CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date
-    ON rcm_liability (society_id, liability_date);
+CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date ON rcm_liability (society_id, liability_date);
 
 -- rcm_rates (2026-09, Phase 2): per-category RCM rate configuration,
 -- replacing the inline CASE WHEN v_rcm_cat ... 5.00/18.00 previously
@@ -743,39 +757,47 @@ CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date
 -- own override; society_id-scoped rows take priority when present.
 CREATE TABLE IF NOT EXISTS rcm_rates (
     id SERIAL PRIMARY KEY,
-    society_id INT REFERENCES societies(id) ON DELETE CASCADE,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
     rcm_category VARCHAR(50) NOT NULL,
-    rate_pct NUMERIC(5,2) NOT NULL,
+    rate_pct NUMERIC(5, 2) NOT NULL,
     effective_from DATE NOT NULL,
     effective_to DATE,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
 CREATE INDEX IF NOT EXISTS idx_rcm_rates_lookup ON rcm_rates (rcm_category, effective_from);
 
 -- Statutory default rates (society_id NULL = global fallback), seeded
 -- once at schema load. A society can override any of these by inserting
 -- its own society_id-scoped row with a later effective_from.
-INSERT INTO rcm_rates (society_id, rcm_category, rate_pct, effective_from)
+INSERT INTO
+    rcm_rates (
+        society_id,
+        rcm_category,
+        rate_pct,
+        effective_from
+    )
 SELECT NULL, cat, rate, DATE '2017-07-01'
-FROM (VALUES
-    ('gta', 5.00), ('advocate', 18.00), ('arbitration', 18.00),
-    ('sponsorship', 18.00), ('government', 18.00), ('director', 18.00),
-    ('insurance', 18.00), ('recovery', 18.00), ('other', 18.00)
-) AS defaults(cat, rate)
-WHERE NOT EXISTS (
-    SELECT 1 FROM rcm_rates WHERE society_id IS NULL AND rcm_category = defaults.cat
-);
+FROM (
+        VALUES ('gta', 5.00), ('advocate', 18.00), ('arbitration', 18.00), ('sponsorship', 18.00), ('government', 18.00), ('director', 18.00), ('insurance', 18.00), ('recovery', 18.00), ('other', 18.00)
+    ) AS defaults (cat, rate)
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM rcm_rates
+        WHERE
+            society_id IS NULL
+            AND rcm_category = defaults.cat
+    );
 
+COMMENT ON
+TABLE bank_statement_lines IS 'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates.';
 
-COMMENT ON TABLE bank_statement_lines IS
-    'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates.';
+CREATE INDEX IF NOT EXISTS idx_bank_lines_society_unmatched ON bank_statement_lines (society_id, matched_id)
+WHERE
+    matched_id IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_bank_lines_society_unmatched
-    ON bank_statement_lines (society_id, matched_id)
-    WHERE matched_id IS NULL;
-
-CREATE INDEX IF NOT EXISTS idx_bank_lines_batch
-    ON bank_statement_lines (batch_id);
+CREATE INDEX IF NOT EXISTS idx_bank_lines_batch ON bank_statement_lines (batch_id);
 
 -- Reconciliation state lives on the transaction side (receipts/expenses),
 -- mirroring how status/confirmed_by/confirmed_at already work there.
@@ -783,12 +805,9 @@ CREATE INDEX IF NOT EXISTS idx_bank_lines_batch
 -- bank line found/uploaded yet) stamps reconciled_at/reconciled_by with
 -- no line reference.
 
+CREATE INDEX IF NOT EXISTS idx_receipts_reconciled ON receipts (society_id, reconciled_at);
 
-CREATE INDEX IF NOT EXISTS idx_receipts_reconciled
-    ON receipts (society_id, reconciled_at);
-
-CREATE INDEX IF NOT EXISTS idx_expenses_reconciled
-    ON expenses (society_id, reconciled_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_reconciled ON expenses (society_id, reconciled_at);
 
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
@@ -959,8 +978,8 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     updated_at TIMESTAMP,
     -- created_by/updated_by removed: apt charge/fine basis is an
     -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
-    apt_sinking_fund_rate NUMERIC(10,2) DEFAULT 0,
-    apt_repair_fund_rate NUMERIC(10,2) DEFAULT 0,
+    apt_sinking_fund_rate NUMERIC(10, 2) DEFAULT 0,
+    apt_repair_fund_rate NUMERIC(10, 2) DEFAULT 0,
     charges_interest BOOLEAN DEFAULT TRUE
 );
 
@@ -1049,15 +1068,35 @@ CREATE TABLE IF NOT EXISTS Dashboard_settings (
 CREATE TABLE IF NOT EXISTS society_compliance_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    sinking_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (sinking_fund_rate_basis IN ('per_sq_ft', 'construction_cost')),
-    repair_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (repair_fund_rate_basis IN ('per_sq_ft', 'construction_cost')),
+    sinking_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (
+        sinking_fund_rate_basis IN (
+            'per_sq_ft',
+            'construction_cost'
+        )
+    ),
+    repair_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (
+        repair_fund_rate_basis IN (
+            'per_sq_ft',
+            'construction_cost'
+        )
+    ),
     fund_gst_exempt BOOLEAN DEFAULT TRUE,
     fund_charges_interest BOOLEAN DEFAULT TRUE,
-    gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (gst_filing_cadence IN ('monthly', 'qrmp')),
+    gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (
+        gst_filing_cadence IN ('monthly', 'qrmp')
+    ),
     gst_registered BOOLEAN DEFAULT FALSE,
     gstin VARCHAR(15),
-    tds_no_pan_action VARCHAR(10) DEFAULT 'warn' CHECK (tds_no_pan_action IN ('warn', 'block')),
-    default_export_format VARCHAR(20) DEFAULT 'structured' CHECK (default_export_format IN ('structured', 'gstn_offline', 'traces_26q')),
+    tds_no_pan_action VARCHAR(10) DEFAULT 'warn' CHECK (
+        tds_no_pan_action IN ('warn', 'block')
+    ),
+    default_export_format VARCHAR(20) DEFAULT 'structured' CHECK (
+        default_export_format IN (
+            'structured',
+            'gstn_offline',
+            'traces_26q'
+        )
+    ),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_society_compliance_settings UNIQUE (society_id)
@@ -1087,13 +1126,41 @@ CREATE TABLE IF NOT EXISTS gst_rates (
 -- ════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS kpi_rule_links (
     id SERIAL PRIMARY KEY,
-    category VARCHAR(50) NOT NULL CHECK (category IN (
-        'sinking_fund', 'repair_fund', 'fund_gst', 'fund_interest',
-        'gst_registered', 'tds_no_pan', 'rera', 'apartment_act',
-        'cooperative_act', 'income_tax_mutuality', 'other'
-    )),
-    state VARCHAR(10) NOT NULL DEFAULT 'ALL'
-        CHECK (state IN ('ALL','UP','MH','KA','TN','DL','RJ','MP','WB','GJ','TS','AP','BR','HR','PB','KL')),
+    category VARCHAR(50) NOT NULL CHECK (
+        category IN (
+            'sinking_fund',
+            'repair_fund',
+            'fund_gst',
+            'fund_interest',
+            'gst_registered',
+            'tds_no_pan',
+            'rera',
+            'apartment_act',
+            'cooperative_act',
+            'income_tax_mutuality',
+            'other'
+        )
+    ),
+    state VARCHAR(10) NOT NULL DEFAULT 'ALL' CHECK (
+        state IN (
+            'ALL',
+            'UP',
+            'MH',
+            'KA',
+            'TN',
+            'DL',
+            'RJ',
+            'MP',
+            'WB',
+            'GJ',
+            'TS',
+            'AP',
+            'BR',
+            'HR',
+            'PB',
+            'KL'
+        )
+    ),
     label VARCHAR(200) NOT NULL,
     url TEXT NOT NULL,
     description TEXT,
@@ -1116,31 +1183,51 @@ CREATE TABLE IF NOT EXISTS kpi_rule_links (
 -- ════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
     id SERIAL PRIMARY KEY,
-    state VARCHAR(10) NOT NULL
-        CHECK (state IN ('ALL','UP','MH','KA','TN','DL','RJ','MP','WB','GJ','TS','AP','BR','HR','PB','KL')),
-    threshold_key VARCHAR(60) NOT NULL CHECK (threshold_key IN (
-        'sinking_fund_pct_construction_cost',
-        'repair_fund_pct_construction_cost',
-        'sinking_fund_pct_sqft',
-        'repair_fund_pct_sqft',
-        'gst_turnover_lakh',
-        'gst_per_member_monthly',
-        'gst_rwa_collective_monthly',
-        'tds_194c_single_bill',
-        'tds_194c_annual_aggregate',
-        'tds_194j_annual_aggregate',
-        'tds_no_pan_rate',
-        'income_tax_basic_exemption_new_regime',
-        'income_tax_basic_exemption_old_regime',
-        'income_tax_surcharge_limit',
-        'rera_carpet_area_sqft',
-        'rera_project_units',
-        'rera_project_area_sqft',
-        'apartment_act_min_units',
-        'apartment_act_quorum_pct',
-        'apartment_act_competent_authority'
-    )),
-    value NUMERIC(12,4),
+    state VARCHAR(10) NOT NULL CHECK (
+        state IN (
+            'ALL',
+            'UP',
+            'MH',
+            'KA',
+            'TN',
+            'DL',
+            'RJ',
+            'MP',
+            'WB',
+            'GJ',
+            'TS',
+            'AP',
+            'BR',
+            'HR',
+            'PB',
+            'KL'
+        )
+    ),
+    threshold_key VARCHAR(60) NOT NULL CHECK (
+        threshold_key IN (
+            'sinking_fund_pct_construction_cost',
+            'repair_fund_pct_construction_cost',
+            'sinking_fund_pct_sqft',
+            'repair_fund_pct_sqft',
+            'gst_turnover_lakh',
+            'gst_per_member_monthly',
+            'gst_rwa_collective_monthly',
+            'tds_194c_single_bill',
+            'tds_194c_annual_aggregate',
+            'tds_194j_annual_aggregate',
+            'tds_no_pan_rate',
+            'income_tax_basic_exemption_new_regime',
+            'income_tax_basic_exemption_old_regime',
+            'income_tax_surcharge_limit',
+            'rera_carpet_area_sqft',
+            'rera_project_units',
+            'rera_project_area_sqft',
+            'apartment_act_min_units',
+            'apartment_act_quorum_pct',
+            'apartment_act_competent_authority'
+        )
+    ),
+    value NUMERIC(12, 4),
     value_text TEXT,
     unit VARCHAR(20),
     effective_from DATE,
@@ -1149,7 +1236,11 @@ CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_state_threshold UNIQUE (state, threshold_key, effective_from)
+    CONSTRAINT uq_state_threshold UNIQUE (
+        state,
+        threshold_key,
+        effective_from
+    )
 );
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1167,7 +1258,9 @@ CREATE TABLE IF NOT EXISTS legal_regime_profiles (
     model_bye_laws_version VARCHAR(100),
     effective_from DATE NOT NULL,
     effective_to DATE,
-    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'draft')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN ('active', 'retired', 'draft')
+    ),
     source_reference TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -1196,7 +1289,15 @@ CREATE TABLE IF NOT EXISTS statutory_head_catalog (
     regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
     head_code VARCHAR(50) NOT NULL,
     parent_head_code VARCHAR(50),
-    statement_section VARCHAR(20) NOT NULL CHECK (statement_section IN ('Assets', 'Liabilities', 'Equity', 'Income', 'Expenditure')),
+    statement_section VARCHAR(20) NOT NULL CHECK (
+        statement_section IN (
+            'Assets',
+            'Liabilities',
+            'Equity',
+            'Income',
+            'Expenditure'
+        )
+    ),
     label VARCHAR(200) NOT NULL,
     display_order INT NOT NULL,
     is_statutory_required BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1223,13 +1324,20 @@ CREATE TABLE IF NOT EXISTS account_statutory_mappings (
     source_reference TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (society_id, account_id, regime_code, effective_from),
+    PRIMARY KEY (
+        society_id,
+        account_id,
+        regime_code,
+        effective_from
+    ),
     FOREIGN KEY (society_id, account_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE,
     FOREIGN KEY (regime_code, head_code) REFERENCES statutory_head_catalog (regime_code, head_code) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_society ON account_statutory_mappings (society_id);
+
 CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_regime ON account_statutory_mappings (regime_code);
+
 CREATE INDEX IF NOT EXISTS idx_statutory_head_catalog_regime ON statutory_head_catalog (regime_code);
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -1442,12 +1550,15 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
     effective_from DATE NOT NULL DEFAULT '2024-04-01',
     effective_to DATE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_tds_section_rate UNIQUE (society_id, section, discriminator, effective_from)
+    CONSTRAINT uq_tds_section_rate UNIQUE (
+        society_id,
+        section,
+        discriminator,
+        effective_from
+    )
 );
 
 -- Circular-reference FKs (societies <-> users)
-
-
 
 -- societies.primary_bank_account_id (2026-08)
 -- ==============================================
@@ -1465,8 +1576,11 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 -- header account. Per-mode bank routing (UPI -> ICICI, Cheque -> SBI,
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
-ALTER TABLE societies DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
-ALTER TABLE societies ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
+ALTER TABLE societies
+DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
+
+ALTER TABLE societies
+ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
 
 -- societies.signing_secret_enc / secretary_email (2026-09) — clean cutover,
 -- no signed QR codes or society rows existed in production yet, so this is
@@ -1590,9 +1704,9 @@ CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions (source_table
 
 CREATE INDEX IF NOT EXISTS idx_transactions_acc_date ON transactions (acc_id, trx_date);
 
-CREATE INDEX IF NOT EXISTS idx_txn_unreconciled_bank
-    ON transactions (society_id, acc_id, trx_date)
-    WHERE bank_reconciled = FALSE;
+CREATE INDEX IF NOT EXISTS idx_txn_unreconciled_bank ON transactions (society_id, acc_id, trx_date)
+WHERE
+    bank_reconciled = FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_transactions_entity_date ON transactions (entity_id, trx_date);
 
@@ -1654,11 +1768,17 @@ CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
 CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
 
 CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
+
 CREATE INDEX IF NOT EXISTS idx_poll_votes_apartment ON poll_votes (apartment_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_apartment ON poll_votes (poll_id, apartment_id);
 
-CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup
-    ON tds_section_rates (society_id, section, discriminator, effective_from);
+CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup ON tds_section_rates (
+    society_id,
+    section,
+    discriminator,
+    effective_from
+);
 
 -- SECTION 3: FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
@@ -1698,7 +1818,21 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 
 -- ── Chain hash helpers ─────────────────────────────────────────
-DROP FUNCTION IF EXISTS fn_compute_receipt_hash(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_receipt_hash (
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_receipt_hash(
     p_society_id       TEXT,
@@ -2072,20 +2206,25 @@ $$;
 CREATE TABLE IF NOT EXISTS qr_reissue_log (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    role_code VARCHAR(5) NOT NULL,       -- APT / VND / SEC / ADM / PTL
-    entity_id INT NOT NULL,              -- role_code's own table.id (ADM = users.id, per the same convention _current_qr_version already uses)
-    entity_label VARCHAR(150),           -- human label captured at reissue time (flat number, vendor name, etc.) so the log stays readable if the entity is later renamed/removed
+    role_code VARCHAR(5) NOT NULL, -- APT / VND / SEC / ADM / PTL
+    entity_id INT NOT NULL, -- role_code's own table.id (ADM = users.id, per the same convention _current_qr_version already uses)
+    entity_label VARCHAR(150), -- human label captured at reissue time (flat number, vendor name, etc.) so the log stays readable if the entity is later renamed/removed
     old_nonce VARCHAR(4),
     new_nonce VARCHAR(4) NOT NULL,
     reason VARCHAR(20) NOT NULL CHECK (
-        reason IN ('lost', 'theft', 'mutilated', 'request', 'other')
+        reason IN (
+            'lost',
+            'theft',
+            'mutilated',
+            'request',
+            'other'
+        )
     ),
     actor_user_id INT NOT NULL REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_qr_reissue_log_society
-    ON qr_reissue_log (society_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_qr_reissue_log_society ON qr_reissue_log (society_id, created_at DESC);
 
 -- ════════════════════════════════════════════════════════════════
 -- QR PAYLOAD AUTO-GENERATION TRIGGERS
@@ -2353,7 +2492,15 @@ DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 -- first, mirroring how the fund/GST account resolution in
 -- fn_auto_generate_receivables already tolerates "not configured".
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_post_receivable_accrual (INT, INT, INT, VARCHAR, INT, NUMERIC, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS fn_post_receivable_accrual (
+    INT,
+    INT,
+    INT,
+    VARCHAR,
+    INT,
+    NUMERIC,
+    TEXT
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_post_receivable_accrual(
     p_society_id     INT,
@@ -3579,7 +3726,13 @@ $$;
 -- Thin wrapper over fn_apply_apartment_dues_fifo_core — behavior/signature
 -- unchanged from before the core was extracted (2026-08); source_table stays
 -- 'receivables' with no source_id override, matching the original.
-DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo(INT, NUMERIC, VARCHAR, INT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo (
+    INT,
+    NUMERIC,
+    VARCHAR,
+    INT,
+    TEXT
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
     p_apartment_id INT,
@@ -3962,7 +4115,7 @@ DECLARE
     v_desc       TEXT;
 BEGIN
     SELECT id INTO v_acc_id FROM accounts
-    WHERE society_id = p_society_id AND name ILIKE '%Salary%' AND drcr_account = 'Dr'
+    WHERE society_id = p_society_id AND tab_name = 'Salary'
     LIMIT 1;
 
     FOR rec IN
@@ -4058,6 +4211,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS payable_update_amount ON payables;
+
 CREATE TRIGGER payable_update_amount BEFORE UPDATE ON payables
 FOR EACH ROW EXECUTE FUNCTION trg_payable_update_amount();
 
@@ -4247,7 +4401,7 @@ BEGIN
     v_acc_id := p_acc_id;
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = v_society_id AND name ILIKE '%Society Charge%' AND drcr_account = 'Cr'
+        WHERE society_id = v_society_id AND tab_name = 'SocC'
         LIMIT 1;
     END IF;
 
@@ -4418,8 +4572,10 @@ BEGIN
         RAISE EXCEPTION 'This event has no ticket account set — tickets cannot be sold for it';
     END IF;
 
-    SELECT (a.id = 2319 OR a.parent_account_id = 2319) INTO v_is_ticket_ac
-    FROM accounts a WHERE a.id = v_acc_id AND a.society_id = v_society_id;
+    SELECT (a.tab_name = 'EventT' OR p.tab_name = 'EventT') INTO v_is_ticket_ac
+    FROM accounts a
+    LEFT JOIN accounts p ON p.society_id = a.society_id AND p.id = a.parent_account_id
+    WHERE a.id = v_acc_id AND a.society_id = v_society_id;
     IF v_is_ticket_ac IS NOT TRUE THEN
         RAISE EXCEPTION 'Event''s account is not an Event Ticket (2319) account — tickets cannot be sold for it';
     END IF;
@@ -4681,6 +4837,7 @@ DROP FUNCTION IF EXISTS fn_dispose_asset CASCADE;
 -- Quarter count: (days elapsed + 1) / 91, rounded up — any part-quarter
 -- counts as a full quarter per the statute's "or part thereof" wording.
 DROP FUNCTION IF EXISTS fn_asset_gst_disposal_liability (INT, NUMERIC, DATE) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_asset_gst_disposal_liability(
     p_asset_id   INT,
     p_sale_value NUMERIC,
@@ -4773,7 +4930,7 @@ BEGIN
     v_acc_id := COALESCE(p_acc_id, v_asset.sale_acc_id);
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id FROM accounts
-        WHERE society_id = v_asset.society_id AND name ILIKE '%Selling Asset%' AND drcr_account = 'Cr'
+        WHERE society_id = v_asset.society_id AND tab_name = 'SellAs'
         LIMIT 1;
     END IF;
 
@@ -4798,7 +4955,7 @@ BEGIN
     -- Dr: TDS Receivable
     IF COALESCE(p_tds_amount, 0) > 0 THEN
         SELECT id INTO v_tds_rec_acc FROM accounts
-        WHERE society_id = v_asset.society_id AND name ILIKE '%TDS Receivable%' AND drcr_account = 'Dr'
+        WHERE society_id = v_asset.society_id AND tab_name = 'TDSRec' -- returns null
         LIMIT 1;
 
         IF v_tds_rec_acc IS NULL THEN
@@ -4865,13 +5022,13 @@ BEGIN
     SELECT * INTO v_gst FROM fn_asset_gst_disposal_liability(p_asset_id, p_sale_value, p_sale_date);
     IF v_gst.liability > 0 THEN
         SELECT id INTO v_gst_exp_acc FROM accounts
-        WHERE society_id = v_asset.society_id AND name ILIKE '%GST on Asset Disposal%' AND drcr_account = 'Dr'
+        WHERE society_id = v_asset.society_id AND tab_name = 'GSTDisp'
         LIMIT 1;
         SELECT id INTO v_cgst_acc FROM accounts
-        WHERE society_id = v_asset.society_id AND name ILIKE '%CGST Payable%' AND drcr_account = 'Cr'
+        WHERE society_id = v_asset.society_id AND tab_name = 'CGST'
         LIMIT 1;
         SELECT id INTO v_sgst_acc FROM accounts
-        WHERE society_id = v_asset.society_id AND name ILIKE '%SGST Payable%' AND drcr_account = 'Cr'
+        WHERE society_id = v_asset.society_id AND tab_name = 'SGST'
         LIMIT 1;
 
         IF v_gst_exp_acc IS NOT NULL THEN
@@ -5665,7 +5822,13 @@ $$;
 -- filed. Per Sec. 49(4)/Rule 85, RCM liability must be discharged in
 -- cash — this function has no ITC-ledger offset path by design.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_pay_rcm_liability (INT, DATE, VARCHAR, VARCHAR, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_pay_rcm_liability (
+    INT,
+    DATE,
+    VARCHAR,
+    VARCHAR,
+    INT
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_rcm_liability(
     p_society_id INT,
@@ -6189,12 +6352,14 @@ $$;
 --      the STCG figure itself is surfaced by fn_fixed_asset_register_fy
 --      (this function's contract is just the P&L depreciation figure).
 DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, SMALLINT) CASCADE;
+
 DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, INT) CASCADE;
 
 -- fn_asset_gets_full_year_dep: TRUE if an asset put to use on p_purchase_date
 -- has been used for 180 days or more by p_fy_end (statutory test for full
 -- vs. half depreciation), FALSE otherwise.
 DROP FUNCTION IF EXISTS fn_asset_gets_full_year_dep (DATE, DATE) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_asset_gets_full_year_dep(
     p_purchase_date DATE,
     p_fy_end        DATE
@@ -6209,7 +6374,13 @@ $$;
 -- WDV + pre-cutoff additions), any excess against the half-rate base
 -- (post-cutoff additions), and any further excess is sec. 50(1) STCG with
 -- both bases floored at 0.
-DROP FUNCTION IF EXISTS fn_block_dep_base (NUMERIC, NUMERIC, NUMERIC, NUMERIC) CASCADE;
+DROP FUNCTION IF EXISTS fn_block_dep_base (
+    NUMERIC,
+    NUMERIC,
+    NUMERIC,
+    NUMERIC
+) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_block_dep_base(
     p_opening_wdv NUMERIC,
     p_add_full    NUMERIC,
@@ -6940,7 +7111,13 @@ $$;
 -- instead of an empty result set, so the card always has something to
 -- render B/F and C/F from.
 DROP FUNCTION IF EXISTS fn_cashbook_month_page (
-    INT, INT, INT, INT, TEXT, INT, INT
+    INT,
+    INT,
+    INT,
+    INT,
+    TEXT,
+    INT,
+    INT
 ) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_cashbook_month_page(
@@ -9046,7 +9223,19 @@ $$;
 -- fn_create_poll: Admin creates a new poll.
 -- No p_created_by param: poll creation is admin-only (save_poll requires
 -- role=="admin"), so a creator column/param adds no value.
-DROP FUNCTION IF EXISTS fn_create_poll (INT, VARCHAR, TEXT, SMALLINT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, VARCHAR);
+DROP FUNCTION IF EXISTS fn_create_poll (
+    INT,
+    VARCHAR,
+    TEXT,
+    SMALLINT,
+    VARCHAR,
+    VARCHAR,
+    VARCHAR,
+    VARCHAR,
+    VARCHAR,
+    TIMESTAMP,
+    VARCHAR
+);
 
 CREATE OR REPLACE FUNCTION fn_create_poll(
     p_society_id   INT,
@@ -9477,7 +9666,7 @@ END;
 $$;
 
 -- fn_declare_expired_polls: Auto-declare results for polls that have passed their end time
-DROP FUNCTION IF EXISTS fn_declare_expired_polls();
+DROP FUNCTION IF EXISTS fn_declare_expired_polls ();
 
 CREATE OR REPLACE FUNCTION fn_declare_expired_polls(p_society_id INT DEFAULT NULL)
 RETURNS TABLE (id INT, society_id INT, title VARCHAR(200)) LANGUAGE plpgsql AS $$
@@ -9635,7 +9824,13 @@ $$;
 -- the FY, excluding the row being edited (so a re-save doesn't double
 -- count itself). Drives the "has this vendor crossed the F1,00,000 annual
 -- aggregate" check. Threshold 0 in the rate row means "no aggregate test".
-DROP FUNCTION IF EXISTS fn_vendor_tds_cumulative_fy (INT, INT, VARCHAR, VARCHAR, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_vendor_tds_cumulative_fy (
+    INT,
+    INT,
+    VARCHAR,
+    VARCHAR,
+    INT
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendor_tds_cumulative_fy(
     p_society_id INT,
@@ -9675,7 +9870,15 @@ $$;
 -- Returns 0 (and applies=FALSE) otherwise, so callers pre-fill the form
 -- with 0 and don't split. no_pan_uplift applies the higher rate when the
 -- vendor has no PAN on file (the caller passes p_pan_captured).
-DROP FUNCTION IF EXISTS fn_compute_tds_pct (INT, INT, VARCHAR, VARCHAR, VARCHAR, NUMERIC, BOOLEAN) CASCADE;
+DROP FUNCTION IF EXISTS fn_compute_tds_pct (
+    INT,
+    INT,
+    VARCHAR,
+    VARCHAR,
+    VARCHAR,
+    NUMERIC,
+    BOOLEAN
+) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_tds_pct(
     p_society_id      INT,
@@ -10517,7 +10720,8 @@ $$;
 --     Both are separate from ordinary P&L depreciation/income and need
 --     their own line in the tax computation — this register surfaces
 --     them, it does not post them anywhere.
-DROP FUNCTION IF EXISTS fn_fixed_asset_register_fy(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_fixed_asset_register_fy (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_fixed_asset_register_fy(
     p_society_id INT,
     p_fy         INT
@@ -10629,7 +10833,8 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_fixed_assets_list_fy(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_fixed_assets_list_fy (INT, INT) CASCADE;
+
 CREATE OR REPLACE FUNCTION fn_fixed_assets_list_fy(
     p_society_id INT,
     p_fy         INT
@@ -10809,7 +11014,11 @@ BEGIN
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
         gate_logic = COALESCE(p_gate_logic, gate_logic),
         duty_hrs = COALESCE(p_duty_hrs, duty_hrs),
-        primary_bank_account_id = COALESCE(primary_bank_account_id, 6311)
+        primary_bank_account_id = COALESCE(primary_bank_account_id,
+            (SELECT id FROM accounts
+              WHERE society_id = p_society_id AND tab_name = 'SBI'
+              LIMIT 1)
+        )
     WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; keyed by section+discriminator — see note above)
@@ -10971,7 +11180,7 @@ END;
 $$;
 
 CREATE OR REPLACE VIEW vw_apartment_users AS
-SELECT 
+SELECT
     id,
     society_id,
     name,
@@ -10980,4 +11189,5 @@ SELECT
     created_at,
     linked_id AS apartment_id
 FROM users
-WHERE role = 'apartment';
+WHERE
+    role = 'apartment';

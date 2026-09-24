@@ -3,83 +3,71 @@
 """
 ApexEstateHub — comprehensive demo/seed data.
 
-Restores the full demo dataset (2026-08) after a brief detour through a
-minimal accounts+BF-only version — owners, vendors, security guards,
-events, concerns, assets, apartment/vendor charge histories, security
-roster + attendance, the depreciable-instruments ledger, receipts,
-salary/payables, receivables, advance credit, and (new) polls. Fully
-idempotent: safe to run repeatedly against the same database without
-duplicating rows or erroring out.
+⚠️  BLOCK-COA MIGRATION (2026-09) — ORDERING RULE
+================================================
+This seed has been renumbered to the block chart-of-accounts scheme
+(1000=Assets, 2000=Liabilities, 3000=Equity, 4000=Income, 5000=Expenses).
+Every acc_id in ACCOUNTS, BF_VALUES, MUTUALITY_NATURE_MAP, TDS_SECTION_MAP,
+SIMPLE_ASSETS, INSTRUMENT_PURCHASES, FULLY_DEPRECIATED_ASSET, EVENTS,
+RECEIPT_TYPES, and UP_AOA_ACCOUNT_MAPPINGS reflects the new IDs.
+
+Do NOT run this seed against a database that has NOT had
+migrations/001_block_coa_renumber.sql applied — the idempotency guard in
+seed_accounts() (SELECT 1 FROM accounts WHERE id = %s AND society_id = %s)
+will skip old-ID rows it thinks don't exist and INSERT duplicates.
+
+Do NOT run this seed against the migrated DB before
+migrations/002_block_coa_function_patch.sql is applied — every fn_* in
+estatehub.sql that resolves accounts via ILIKE-name or hardcoded literal
+(fn_resolve_gst_accounts, fn_resolve_sdr_leg, fn_resolve_depreciation_account,
+fn_sell_event_ticket, fn_complete_society_setup, ...) will fail to find the
+renumbered accounts and either silently no-op or raise. Apply 002 first.
+
+Restores the full demo dataset (2026-08) after the block-COA migration:
+owners, vendors, security guards, events, concerns, assets, apartment/
+vendor charge histories, security roster + attendance, the depreciable-
+instruments ledger, receipts, salary/payables, receivables, advance
+credit, and polls. Fully idempotent: safe to run repeatedly.
 
 What it seeds (society_id = 1, "Sunrise Residency"):
 
   * Society (id=1) + master admin + admin/13 apartment owners/12 vendors/
     12 security guards (from USERS below).
-  * 50 chart-of-accounts rows, has_bf/drcr_bf already flagged inline —
-    no separate has_bf-flagging step needed (see note on
-    set_opening_balances below).
-  * societies.primary_bank_account_id -> SBI. Required since 2026-08:
-    fn_resolve_bank_leg RAISES if it's unset and any non-cash transaction
-    is attempted (see estatehub.sql) — every fn_save_receipt/
-    fn_buy_asset/fn_pay_apartment_dues_fifo/etc. call below uses
-    mode='cash', so this only matters if you go on to record a non-cash
-    transaction through the app afterward, but it's set regardless so
-    that path isn't broken out of the box.
+  * 82 chart-of-accounts rows (block scheme), has_bf/drcr_bf already
+    flagged inline.
+  * societies.primary_bank_account_id -> SBI (id 1311 under BkAc 1310).
   * Opening (BF) balances — round numbers for easy inspection, sized so
     Cash-in-Hand and Capital Account are never negative (2026-09 CA-audit
     fix; see BF_VALUES below for the full derivation):
     CiH 300,000 Dr, SBI 300,000 Dr, ICICI 50,000 Dr, Furniture 10,000 Dr,
     Investments 10,000 Dr, Sundry Creditors 0, Sundry Debtors 330,000 Dr
-    (on leaf account 81 "Sundry Debtors (Digital)", not header 8 — see
-    BF_VALUES comment), CapAc 1,000,000 Cr.
+    (on leaf 1510 "Sundry Debtors (Digital)"), CapAc 1,000,000 Cr.
     Sundry Debtors carries the balancing Dr receivable so that
     Assets (CiH+SBI+ICICI+Furniture+Investments+SDr = 1,000,000 Dr) equals
-    Liabilities+Equity (CapAc = 1,000,000 Cr) exactly. Confirmed by
-    summing fn_fy_closing_report's own_bf across every has_bf=TRUE
-    account: 0.00. If you edit any BF_VALUES entry, recompute Sundry
-    Debtors' figure so the books keep tying out.
+    Liabilities+Equity (CapAc = 1,000,000 Cr) exactly.
   * Two distinct apartment maintenance-charge histories:
         - A-101: society-default rate-based (apartment_size * rate)
-        - B-202: apartment-specific FIXED apt_maintenance_amount,
-          effective from a later apt_calc_start_date
-  * Depreciable-asset ledger for the Instruments account, mirroring
+        - B-202: apartment-specific FIXED apt_maintenance_amount
+  * Depreciable-asset ledger for the Instruments account (1130), mirroring
     ld.xlsx sheets 'Inst' -> 'Dep' -> 'InExp':
         - BF instruments value implied by BF_VALUES (Investments, not
           Instruments, carries the BF here — Instruments' own BF is 0
-          under the round-number scheme, so full/half-rate depreciation
-          below is computed purely off the current-year purchases)
+          under the round-number scheme)
         - one purchase before 1-Sep  -> full-rate depreciation
         - one purchase after  1-Sep  -> HALF-rate depreciation
         - one old instrument fully written down (book_value = 0) but
           still in use (disposed = FALSE)
-        - year-end journal: Dr Depreciation / Cr Instruments
-        - transfer journal: Dr Income & Expenditure / Cr Depreciation
-  * Security roster + gate_access role='SEC' attendance rows, producing
-    a mix of on-duty (time_out IS NULL) / off-duty (time_out set) rows.
+        - year-end journal: Dr Depreciation (5110) / Cr Instruments (1130)
+        - transfer journal: Dr InExp (5100) / Cr Depreciation (5110)
+  * Security roster + gate_access role='SEC' attendance rows.
   * Receipts: one admin-created CONFIRMED receipt, one security-created
     UNCONFIRMED (pending) receipt.
   * Salary: roster-driven auto-generated PENDING payables, plus one
-    salary paid straight to `expenses` as PENDING (awaiting admin
-    confirmation) — exercises both the payables and expenses paths.
+    salary paid straight to `expenses` as PENDING.
   * Receivables: auto-generated from apt_charges_fines_basis via
     fn_auto_generate_receivables, then one deliberate apartment
-    overpayment (B-202) to exercise fn_apply_advance_credit's FIFO
-    drawdown against the newest receivable.
-  * Polls: one active poll (open for voting, a few votes already cast)
-    and one closed poll with results declared and a full vote spread.
-
-set_opening_balances() from the earlier comprehensive version is NOT
-restored — it only re-flagged has_bf/drcr_bf on 5 accounts (633, 6311,
-61, 64, 2), all of which the ACCOUNTS table below already flags inline
-in its own has_bf/drcr_bf columns. Re-running the same UPDATE a second
-time via a dedicated function added nothing; it's dead code once you
-check the ACCOUNTS rows directly, not a feature this version dropped.
-
-All money-writing calls below use mode='cash', so they exercise the
-2026-08 cash/non-cash split correctly out of the box: a cash-mode
-transaction posts exactly one leg (or two for a TDS split) straight to
-the real account, never a completing CiH leg — see fn_resolve_bank_leg
-and each function's own header comment in estatehub.sql.
+    overpayment (B-202) to exercise fn_apply_advance_credit's FIFO drawdown.
+  * Polls: one active poll, one closed poll with results declared.
 
 Usage
 -----
@@ -109,7 +97,7 @@ from werkzeug.security import generate_password_hash
 def _seed_signing_secret(plaintext: str):
     """Encrypt the demo society's SIGNING_SECRET for seeding, gracefully
     returning None (unsigned QR fallback) if SECRET_VAULT_KEY isn't
-    configured in this environment — see the SOCIETY dict comment."""
+    configured in this environment."""
     try:
         from app.services.secret_vault import encrypt_secret
         return encrypt_secret(plaintext)
@@ -122,7 +110,7 @@ log = logging.getLogger(__name__)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CONNECTION  (standalone — no import from migrate.py, avoids circularity)
+# CONNECTION
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _dsn() -> str:
@@ -162,104 +150,135 @@ def _one(cur, sql, params=None):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CHART OF ACCOUNTS
+# CHART OF ACCOUNTS — block scheme
 # ═════════════════════════════════════════════════════════════════════════════
-
+#
+# Block layout:
+#   1000  Assets                (root for all Dr-natured holding accounts)
+#   2000  Liabilities           (root for all Cr-natured obligations)
+#   3000  Equity / Reserves     (Capital Account + specific reserves)
+#   4000  Income                (mutual + non-mutual)
+#   5000  Expenses              (P&L — Income Expenditure A/c + leaves)
+#
 # (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, dep_pct)
+
 ACCOUNTS = [
+    # ── Root ─────────────────────────────────────────────────────────────
     (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, 100),
-    (2,     "Capital Account",            "CapAc",      "Capital Account",             1,  "Cr",  True, 100),
-    (21,    "Income Other Source",        "IncOther",   "Income other source",         2,  "Cr",  False, 100),
-    (211,   "Interest Income",            "IncInt",     "Interest Income",            21,  "Cr",  False, 100),
-    (2111,  "Bank Interest",              "IntBK",      "Bank Interest",             211,  "Cr",  False, 100),
-    (21111, "Saving Interest",            "IntSav",     "Saving Interest",          2111,  "Cr",  False, 100),
-    (2112,  "Exempt Income",              "IncExmpt",   "Exempt Income",             211,  "Cr",  False, 100),
-    (21112, "FD Interest",                "IntFD",      "FD Interest",              2111,  "Cr",  False, 100),
-    (21113, "Due Interest",               "IntDue",     "Maintenance Due Interest",  211,  "Cr",  False, 100),
-    (212,   "Selling Asset",              "SellAs",     "Selling Asset",              21,  "Cr",  False, 100),
-    (213,   "Property Income",            "PropInc",    "Property Income",            21,  "Cr",  False, 100),
-    (22,    "Gifts Received",             "Gifts",      "Gifts Received",              2,  "Cr",  True, 100),
-    (23,    "Income Expenditure A/c",     "InExp",      "Income Expenditure Account",  2,  "Cr",  False, 100),
-    (231,   "Depreciation",               "Dep",        "Depreciation Account",       23,  "Dr", False, 100),
-    (232,   "Rent Paid",                  "RentPaid",   "Rent Paid",                   23,  "Dr", False, 100),
-    (233,   "Miscellaneous",              "Misc",       "Miscellaneous",              23,  "Dr", False, 100),
-    (234,   "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",        23,  "Dr", False, 100),
-    (235,   "Salary",                     "Salary",     "Salary",                     23,  "Dr", False, 100),
-    (236,   "Phone Charges",              "PhoneChrg",  "Phone Charges",                23,  "Dr", False, 100),
-    (237,   "Electricity",                "Elec",       "Electricity",                23,  "Dr", False, 100),
-    (238,   "Water Tax",                  "WTax",       "Water Tax",                  23,  "Dr", False, 100),
-    (239,   "House Tax",                  "HTax",       "House Tax",                  23,  "Dr", False, 100),
-    (2310,  "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",     23,  "Dr", False, 100),
-    (2311,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 23,  "Cr",  False, 100),
-    (2312,  "Repair and Maintenance",     "RM",         "Repair and Maintenance",     23,  "Dr", False, 100),
-    (2313,  "Stationery",                 "Stationery", "Stationery",                 23,  "Dr", False, 100),
-    (2314,  "Generator Charges",          "GenChrg",    "Generator Charges",          23,  "Dr", False,  15),
-    (2315,  "Accountant Fee",             "AccountantF","Accountant Fee",             23,  "Dr", False, 100),
-    (2316,  "Audit Fee",                  "AuditF",     "Audit Fee",                  23,  "Dr", False, 100),
-    (2317,  "Society Fine",               "SocF",       "Society Fine Charge",        23,  "Cr",  False, 100),
-    (2318,  "Society Charge",             "SocC",       "Society Fees",               23,  "Cr",  False, 100),
-    (2319,  "Event Ticket",               "EventT",     "Event Ticket",               23,  "Cr",  False, 100),
-    (23191, "Holi Ticket",                "HoliT",      "Holi Ticket",                2319,  "Cr",  False, 100),
-    (23192, "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",              2319,  "Cr",  False, 100),
-    (2320,  "Lift AMC",                   "LiftAMC",    "Lift AMC",                   23,  "Dr", False, 100),
-    (2321,  "Intercom AMC",               "IntercomAMC", "Intercom AMC",              23,  "Dr", False, 100),
-    (2322,  "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                   23,  "Dr", False, 100),
-    (2323,  "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 23, "Dr", False, 100),
-    (24,    "Duties Paid",                "DutyP",      "Duties Paid",                 2,  "Dr",  False, 100),
-    (25,    "Taxes Paid",                 "TaxP",       "Taxes Paid",                  2,  "Dr",  False, 100),
-    (26,    "Provisions",                 "Prov",       "Provisions",                  2,  "Cr",  True, 100),
-    (27,    "Gifts Given",                "GiftGiven",  "Gifts Given",                 2,  "Dr", True, 100),
-    (28,    "Income Tax",                 "ITax",       "Income Tax",                  2,  "Dr", False, 100),
-    (29,    "TDS to IT",                  "TDSIT",      "TDS Paid",                    2,  "Dr", False, 100),
-    (3,     "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken",    1,  "Cr",  True, 100),
-    (4,     "Current Liabilities",        "CurLb",      "Current Liabilities",         1,  "Cr",  False, 100),
-    (41,   "CGST Payable",               "CGST",       "CGST Payable",                4,  "Cr",  False, 100),
-    (42,   "SGST Payable",               "SGST",       "SGST Payable",                4,  "Cr",  False, 100),
-    # RCM (2026-09, Phase 2): segregated from the CGST/SGST Payable accounts
-    # above so GSTR-3B Table 3.1(d) (RCM) reconciles independently of
-    # Table 3.1(a) (outward supply) — previously RCM posted to acc 41/42.
-    (43,   "CGST Payable (RCM)",         "CGSTRCM",    "CGST Payable (Reverse Charge)", 4,  "Cr",  False, 100),
-    (44,   "SGST Payable (RCM)",         "SGSTRCM",    "SGST Payable (Reverse Charge)", 4,  "Cr",  False, 100),
-    (45,   "IGST Payable (RCM)",         "IGSTRCM",    "IGST Payable (Reverse Charge, inter-state RCM)", 4, "Cr", False, 100),
-    (5,     "Immovable Assets",           "ImAs",       "Immovable Assets",            1,  "Dr", True, 100),
-    (6,     "Movable Assets",             "MAs",        "Movable Assets",              1,  "Dr", False, 100),
-    (61,    "Furniture",                  "Fur",        "Furniture",                   6,  "Dr", True,  10),
-    (62,    "Investments",                "Inv",        "Investments",                 6,  "Dr", True, 100),
-    (63,    "Current Assets",             "CurAs",      "Current Assets",              6,  "Dr", False, 100),
-    (631,   "Bank Accounts",              "BkAc",       "Bank Accounts",              63,  "Dr", False, 100),
-    (634,   "Input Tax Credit (RCM)",     "ITCRCM",     "Input Tax Credit — RCM (recoverable)", 63, "Dr", False, 100),
-    (6311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",         631,  "Dr", True, 100),
-    (6312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",       631,  "Dr", True, 100),
-    (632,   "Deposits (Assets)",          "Dp",         "Deposits (Assets)",          63,  "Dr", True, 100),
-    (633,   "Cash-in-hand",               "CiH",        "Cash-in-hand",               63,  "Dr", True, 100),
-    (64,    "Instruments",                "Inst",       "Instruments & Tools",         6,  "Dr", True,  15),
-    (65,    "Machinery",                  "Mch",        "Machinery",                   6,  "Dr", True,  15),
-    (66,    "Car",                        "Car",        "Car",                         6,  "Dr", True,  15),
-    (67,    "Computers",                  "Comp",       "Computers",                   6,  "Dr", True,  40),
-    (7,     "Loans & Advances Given",     "LAG",        "Loans & Advances Given",      1,  "Dr", True, 100),
-    (8,     "Sundry Debtors",             "SDr",        "Sundry Debtors",              1,  "Dr", False, 100),
-    (81,    "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)",    8,  "Dr", True, 100),
-    (82,    "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",       8,  "Dr", True, 100),
-    (9,     "Sundry Creditors",           "SCr",        "Sundry Creditors",            1,  "Cr",  True, 100),
-    (101,   "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",        1,  "Cr",  True, 100),
-    (102,   "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",     1,  "Cr",  True, 100),
-    (103,   "Corpus Fund",                "CorpusFund", "Corpus Fund",                 1,  "Cr",  True, 100),
+
+    # ── 1000 Assets ──────────────────────────────────────────────────────
+    (1000,  "Assets",                     "As",         "Assets",                      1, "Dr", False, 100),
+    (1100,  "Fixed Assets",               "FA",         "Fixed Assets",             1000, "Dr", False, 100),
+    (1110,  "Immovable Assets",           "ImAs",       "Immovable Assets",         1100, "Dr", True,  100),
+    (1120,  "Furniture",                  "Fur",        "Furniture",                1100, "Dr", True,   10),
+    (1130,  "Instruments",                "Inst",       "Instruments & Tools",      1100, "Dr", True,   15),
+    (1140,  "Machinery",                  "Mch",        "Machinery",                1100, "Dr", True,   15),
+    (1150,  "Car",                        "Car",        "Car",                      1100, "Dr", True,   15),
+    (1160,  "Computers",                  "Comp",       "Computers",                1100, "Dr", True,   40),
+    (1170, "Generator",                   "Gen",        "Generator",                1100, "Dr", False,  15),
+    (1200,  "Investments",                "Inv",        "Investments",              1000, "Dr", True,  100),
+    (1300,  "Current Assets",             "CA",         "Current Assets",           1000, "Dr", False, 100),
+    (1310,  "Bank Accounts",              "BkAc",       "Bank Accounts",            1300, "Dr", False, 100),
+    (1311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",        1310, "Dr", True,  100),
+    (1312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",      1310, "Dr", True,  100),
+    (1320,  "Deposits (Assets)",          "Dp",         "Deposits (Assets)",        1300, "Dr", True,  100),
+    (1330,  "Cash-in-hand",               "CiH",        "Cash-in-hand",             1300, "Dr", True,  100),
+    (1340,  "Input Tax Credit (RCM)",     "ITCRCM",     "Input Tax Credit — RCM (recoverable)", 1300, "Dr", False, 100),
+    (1400,  "Loans & Advances Given",     "LAG",        "Loans & Advances Given",   1000, "Dr", True,  100),
+    (1500,  "Sundry Debtors",             "SDr",        "Sundry Debtors",           1000, "Dr", False, 100),
+    (1510,  "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)", 1500, "Dr", True,  100),
+    (1520,  "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",    1500, "Dr", True,  100),
+
+    # ── 2000 Liabilities ─────────────────────────────────────────────────
+    (2000,  "Liabilities",                "Lb",         "Liabilities",                 1, "Cr", False, 100),
+    (2100,  "Non-Current Liabilities",    "NCL",        "Non-Current Liabilities",  2000, "Cr", False, 100),
+    (2110,  "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken", 2100, "Cr", True,  100),
+    (2200,  "Current Liabilities",        "CL",         "Current Liabilities",      2000, "Cr", False, 100),
+    (2210,  "CGST Payable",               "CGST",       "CGST Payable",             2200, "Cr", False, 100),
+    (2220,  "SGST Payable",               "SGST",       "SGST Payable",             2200, "Cr", False, 100),
+    (2230,  "CGST Payable (RCM)",         "CGSTRCM",    "CGST Payable (Reverse Charge)",        2200, "Cr", False, 100),
+    (2231,  "SGST Payable (RCM)",         "SGSTRCM",    "SGST Payable (Reverse Charge)",        2200, "Cr", False, 100),
+    (2232,  "IGST Payable (RCM)",         "IGSTRCM",    "IGST Payable (Reverse Charge, inter-state RCM)", 2200, "Cr", False, 100),
+    (2240,  "Sundry Creditors",           "SCr",        "Sundry Creditors",         2200, "Cr", True,  100),
+    (2290,  "TDS to IT",                  "TDSIT",      "TDS Paid",                 2200, "Dr", False, 100),
+
+    # ── 3000 Equity / Reserves & Funds ───────────────────────────────────
+    (3000,  "Equity / Reserves & Funds",  "Eq",         "Equity",                      1, "Cr", False, 100),
+    (3100,  "Capital Account",            "CapAc",      "Capital Account",          3000, "Cr", True,  100),
+    (3200,  "Reserves & Funds",           "Res",        "Reserves & Funds",         3000, "Cr", False, 100),
+    (3210,  "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",     3200, "Cr", True,  100),
+    (3220,  "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",   3200, "Cr", True,  100),
+    (3230,  "Corpus Fund",                "CorpusFund", "Corpus Fund",              3200, "Cr", True,  100),
+    (3240,  "Gifts Received",             "Gifts",      "Gifts Received",           3000, "Cr", True,  100),
+    (3250,  "Provisions",                 "Prov",       "Provisions",               3000, "Cr", True,  100),
+    (3260,  "Gifts Given",                "GiftGiven",  "Gifts Given",              3000, "Dr", True,  100),
+
+    # ── 4000 Income ──────────────────────────────────────────────────────
+    (4000,  "Income",                     "Inc",        "Income",                      1, "Cr", False, 100),
+    (4100,  "Income Other Source",        "IncOther",   "Income other source",      4000, "Cr", False, 100),
+    (4110,  "Interest Income",            "IncInt",     "Interest Income",          4100, "Cr", False, 100),
+    (4111,  "Bank Interest",              "IntBK",      "Bank Interest",            4110, "Cr", False, 100),
+    (4112,  "Saving Interest",            "IntSav",     "Saving Interest",          4110, "Cr", False, 100),
+    (4113,  "FD Interest",                "IntFD",      "FD Interest",              4110, "Cr", False, 100),
+    (4114,  "Exempt Income",              "IncExmpt",   "Exempt Income",            4110, "Cr", False, 100),
+    (4115,  "Due Interest",               "IntDue",     "Maintenance Due Interest", 4110, "Cr", False, 100),
+    (4120,  "Selling Asset",              "SellAs",     "Selling Asset",            4100, "Cr", False, 100),
+    (4130,  "Property Income",            "PropInc",    "Property Income",          4100, "Cr", False, 100),
+    (4200,  "Member Contributions",       "MemCon",     "Member Contributions",     4000, "Cr", False, 100),
+    (4210,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 4200, "Cr", False, 100),
+    (4220,  "Society Fine",               "SocF",       "Society Fine Charge",      4200, "Cr", False, 100),
+    (4230,  "Society Charge",             "SocC",       "Society Fees",             4200, "Cr", False, 100),
+    (4240,  "Event Ticket",               "EventT",     "Event Ticket",             4200, "Cr", False, 100),
+    (4241,  "Holi Ticket",                "HoliT",      "Holi Ticket",              4240, "Cr", False, 100),
+    (4242,  "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",            4240, "Cr", False, 100),
+
+    # ── 5000 Expenses ────────────────────────────────────────────────────
+    (5000,  "Expenses",                   "Exp",        "Expenses",                    1, "Dr", False, 100),
+    (5100,  "Income Expenditure A/c",     "InExp",      "Income Expenditure Account", 5000, "Cr", False, 100),
+    (5110,  "Depreciation",               "Dep",        "Depreciation Account",     5100, "Dr", False, 100),
+    (5120,  "Rent Paid",                  "RentPaid",   "Rent Paid",                5100, "Dr", False, 100),
+    (5130,  "Miscellaneous",              "Misc",       "Miscellaneous",            5100, "Dr", False, 100),
+    (5140,  "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",      5100, "Dr", False, 100),
+    (5150,  "Salary",                     "Salary",     "Salary",                   5100, "Dr", False, 100),
+    (5160,  "Phone Charges",              "PhoneChrg",  "Phone Charges",            5100, "Dr", False, 100),
+    (5170,  "Electricity",                "Elec",       "Electricity",              5100, "Dr", False, 100),
+    (5180,  "Water Tax",                  "WTax",       "Water Tax",                5100, "Dr", False, 100),
+    (5190,  "House Tax",                  "HTax",       "House Tax",                5100, "Dr", False, 100),
+    (51100, "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",   5100, "Dr", False, 100),
+    (51110, "Repair and Maintenance",     "RM",         "Repair and Maintenance",   5100, "Dr", False, 100),
+    (51120, "Stationery",                 "Stationery", "Stationery",               5100, "Dr", False, 100),
+    (51130, "Generator Charges",          "GenChrg",    "Generator Charges",        5100, "Dr", False,  15),
+    (51140, "Accountant Fee",             "AccountantF","Accountant Fee",           5100, "Dr", False, 100),
+    (51150, "Audit Fee",                  "AuditF",     "Audit Fee",                5100, "Dr", False, 100),
+    (51160, "Lift AMC",                   "LiftAMC",    "Lift AMC",                 5100, "Dr", False, 100),
+    (51170, "Intercom AMC",               "IntercomAMC","Intercom AMC",             5100, "Dr", False, 100),
+    (51180, "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                 5100, "Dr", False, 100),
+    (51190, "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 5100, "Dr", False, 100),
+    (5200,  "Duties Paid",                "DutyP",      "Duties Paid",              5000, "Dr", False, 100),
+    (5210,  "Taxes Paid",                 "TaxP",       "Taxes Paid",               5000, "Dr", False, 100),
+    (5220,  "Income Tax",                 "ITax",       "Income Tax",               5000, "Dr", False, 100),
 ]
 
-# Compliance tagging for existing accounts (Phase 1)
+# Compliance tagging for existing accounts (Phase 1) — rekeyed to block IDs.
 MUTUALITY_NATURE_MAP = {
-    2311: 'mutual', 2317: 'mutual', 2318: 'mutual', 2319: 'mutual',
-    23191: 'mutual', 23192: 'mutual', 21113: 'mutual',
-    2111: 'non_mutual', 21111: 'non_mutual', 21112: 'non_mutual',
-    212: 'non_mutual', 213: 'non_mutual',
+    # Income — mutual (member-sourced)
+    4210: 'mutual', 4220: 'mutual', 4230: 'mutual', 4240: 'mutual',
+    4241: 'mutual', 4242: 'mutual', 4115: 'mutual',
+    # Income — non-mutual (interest, non-member)
+    4111: 'non_mutual', 4112: 'non_mutual', 4113: 'non_mutual',
+    4120: 'non_mutual', 4130: 'non_mutual',
 }
 
 TDS_SECTION_MAP = {
-    2312: '194C', 2320: '194C', 2321: '194C', 2322: '194C',
-    2315: '194J', 2316: '194J',
+    51110: '194C',   # Repair and Maintenance
+    51160: '194C',   # Lift AMC
+    51170: '194C',   # Intercom AMC
+    51180: '194C',   # CCTV AMC
+    51140: '194J',   # Accountant Fee
+    51150: '194J',   # Audit Fee
 }
 
-SOCIETY_ID = 1  # fixed identity, independent of migrate.py's demo path
+SOCIETY_ID = 1
 
 SOCIETY = {
     "name":             "Sunrise Residency",
@@ -280,12 +299,6 @@ SOCIETY = {
     "payment_qr":       "sunrise_qr.png",
     "logo":             "sunrise_logo.png",
     "login_background": "sunrise_bg.png",
-    # signing_secret_enc must be reversible ciphertext (this society's real
-    # QR HMAC key), not a hash — see app/services/secret_vault.py. Requires
-    # SECRET_VAULT_KEY to be set even for local/demo seeding; if it isn't,
-    # this stays NULL and the demo society's QR codes are simply unsigned
-    # (same graceful degrade as a society that hasn't run the Setup Wizard
-    # yet), rather than seed.py hard-failing over a demo-only secret.
     "signing_secret_enc": _seed_signing_secret("Setup@2024"),
 }
 
@@ -298,7 +311,7 @@ USERS = [
      "name": "Rajesh Sharma",   "flat_number": "A-101", "apartment_size": 1200,
      "mobile": "9811111111", "alt_mobile": "9811111112",
      "alt_address": "123, Main Street, Agra, UP - 282001",
-     "apt_calc_start_date": "2026-04-01"},                 # rate-based history
+     "apt_calc_start_date": "2026-04-01"},
     {"role": "apartment", "email": "owner2@sunriseresidency.com",   "password": "Owner2@2024",
      "name": "Rahul Dev",   "flat_number": "A-201", "apartment_size": 1200,
      "mobile": "9821111111", "alt_mobile": "9821111112",
@@ -308,8 +321,8 @@ USERS = [
      "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,
      "mobile": "9822222222", "alt_mobile": "9822222223",
      "alt_address": "456, Secondary Road, Agra, UP - 282001",
-     "apt_calc_start_date": "2026-06-01"},                 # fixed-amount history
-{"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
+     "apt_calc_start_date": "2026-06-01"},
+    {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
       "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing",
       "mobile": "9833333333", "service_description": "Best plumber in town", "pan_number": "ABCDE1234F", "payee_type": "individual"},
     {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
@@ -319,8 +332,6 @@ USERS = [
      "name": "Ramu Singh",  "shift": "morning", "salary": 120, "mobile": "9855555555"},
     {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
      "name": "Shyam Yadav", "shift": "night",   "salary": 130, "mobile": "9866666666"},
-
-    # ── +10 apartment owners (bulk demo data) ──────────────────────────
     {"role": "apartment", "email": "owner4@sunriseresidency.com",   "password": "Owner4@2024",
      "name": "Anjali Verma",     "flat_number": "A-102", "apartment_size": 1100,
      "mobile": "9877000001", "alt_mobile": "9877000002",
@@ -351,23 +362,18 @@ USERS = [
      "mobile": "9877000011", "alt_mobile": "9877000012",
      "alt_address": "44, Sanjay Place, Agra, UP - 282002",
      "apt_calc_start_date": "2026-06-01"},
-    # ── +2 family (in A-101), +2 tenants (in A-201), +2 visitors (in B-202) ──
     {"role": "apartment", "email": "family1@sunriseresidency.com", "password": "Family1@2024",
      "name": "Arnav Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111121"},
     {"role": "apartment", "email": "family2@sunriseresidency.com", "password": "Family2@2024",
      "name": "Riya Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111122"},
-
     {"role": "apartment", "email": "tenant1@sunriseresidency.com", "password": "Tenant1@2024",
      "name": "Mohit Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111121"},
     {"role": "apartment", "email": "tenant2@sunriseresidency.com", "password": "Tenant2@2024",
      "name": "Pooja Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111122"},
-
     {"role": "apartment", "email": "visitor1@sunriseresidency.com", "password": "Visitor1@2024",
      "name": "Ajay Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222231"},
     {"role": "apartment", "email": "visitor2@sunriseresidency.com", "password": "Visitor2@2024",
      "name": "Sunita Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222232"},
-
-# ── +10 vendors, each a distinct service type ──────────────────────
     {"role": "vendor",    "email": "vendor3@sunriseresidency.com",  "password": "Vendor3@2024",
       "business_name": "Electrical Experts", "name": "Manoj Tiwari", "service_type": "Electrical",
       "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out", "pan_number": "ELECP1234A", "payee_type": "firm"},
@@ -398,8 +404,6 @@ USERS = [
     {"role": "vendor",    "email": "vendor12@sunriseresidency.com", "password": "Vendor12@2024",
       "business_name": "GreenScape Landscaping", "name": "Vijay Rathi", "service_type": "Landscaping",
       "mobile": "9877100010", "service_description": "Garden upkeep and landscaping design", "payee_type": "firm"},
-
-    # ── +10 security guards, mixed shifts ───────────────────────────────
     {"role": "security",  "email": "guard3@sunriseresidency.com",   "password": "Guard3@2024",
      "name": "Mahesh Chand",  "shift": "evening", "salary": 125, "mobile": "9877200001"},
     {"role": "security",  "email": "guard4@sunriseresidency.com",   "password": "Guard4@2024",
@@ -422,76 +426,77 @@ USERS = [
      "name": "Om Prakash",    "shift": "evening", "salary": 124, "mobile": "9877200010"},
 ]
 
+# Event account_ids rekeyed to block IDs (SocC=4230, EventT=4240, HoliT=4241, DiwaliT=4242).
 EVENTS = [
     {"title": "Annual General Meeting", "date": "2026-07-15",
      "time": "11:00:00", "venue": "Community Hall", "open_to": "all",
-     "account_id": 2318,
+     "account_id": 4230,
      "ticket_name": "Adult", "ticket_price": 0,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Yearly AGM for all residents to review society accounts and elect committee."},
     {"title": "Ganesh Chaturthi Celebration", "date": "2026-08-27",
      "time": "18:00:00", "venue": "Garden Area", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 100,
      "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Society-wide celebration with puja, prasad and cultural programme."},
     {"title": "Independence Day Flag Hoisting", "date": "2026-08-15",
      "time": "08:00:00", "venue": "Main Gate", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 0,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Flag hoisting ceremony followed by sweets distribution for all residents."},
     {"title": "Fire Safety Awareness Workshop", "date": "2026-08-05",
      "time": "15:00:00", "venue": "Community Hall", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 0,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Fire drill demonstration and extinguisher-usage training by local fire department."},
     {"title": "Yoga & Wellness Camp", "date": "2026-09-20",
      "time": "06:30:00", "venue": "Garden Area", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 50,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Morning yoga and meditation session led by a certified wellness instructor."},
     {"title": "Blood Donation Drive", "date": "2026-10-02",
      "time": "10:00:00", "venue": "Community Hall", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 0,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Voluntary blood donation camp organised with a local hospital, open to all residents."},
     {"title": "Children's Day Fun Fair", "date": "2026-11-14",
      "time": "16:00:00", "venue": "Garden Area", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 200,
      "ticket_name2": "Child", "ticket_price2": 100,
      "description": "Games, face painting and prizes for the society's children."},
     {"title": "Diwali Mela", "date": "2026-11-08",
      "time": "17:00:00", "venue": "Garden Area", "open_to": "all",
-     "account_id": 23192,
+     "account_id": 4242,
      "ticket_name": "Adult", "ticket_price": 150,
      "ticket_name2": "Child", "ticket_price2": 75,
      "description": "Diwali-themed stalls, rangoli competition and fireworks display."},
     {"title": "Society Cricket Tournament", "date": "2026-12-05",
      "time": "07:00:00", "venue": "Society Ground", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 100,
      "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Inter-block cricket tournament with trophies for the winning team."},
     {"title": "New Year's Eve Party", "date": "2026-12-31",
      "time": "20:00:00", "venue": "Community Hall", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 500,
      "ticket_name2": "Child", "ticket_price2": 250,
      "description": "Live music, dinner and countdown celebration to welcome the new year."},
     {"title": "Republic Day Celebration", "date": "2027-01-26",
      "time": "09:00:00", "venue": "Main Gate", "open_to": "all",
-     "account_id": 2319,
+     "account_id": 4240,
      "ticket_name": "Adult", "ticket_price": 0,
      "ticket_name2": "Child", "ticket_price2": 0,
      "description": "Flag hoisting followed by a cultural programme by resident children."},
     {"title": "Holi Celebration", "date": "2027-03-10",
      "time": "10:00:00", "venue": "Garden Area", "open_to": "all",
-     "account_id": 23191,
+     "account_id": 4241,
      "ticket_name": "Adult", "ticket_price": 100,
      "ticket_name2": "Child", "ticket_price2": 50,
      "description": "Colour-play, music and traditional snacks for all residents."},
@@ -537,46 +542,42 @@ CONCERNS = [
      "desc": "Garbage bin near the C-block entrance has not been cleared for two days."},
 ]
 
-# Demo assets purchased via fn_buy_asset so their journal entries are
-# correct double-entry pairs under the current (2026-08) cash/non-cash
-# model — both mode='cash', so each posts a single Dr leg only.
-# "reference" matches the corresponding row's reference_no in
-# database/make_sbi_statement.py — fn_buy_asset has no cheque_no/trx_id
-# parameter, so it's backfilled onto the expenses row via UPDATE in
-# seed_simple_assets/seed_instruments_depreciation below (2026-09, CA
-# audit — previously always NULL, so these could only ever fuzzy-match).
+# Asset class acc_ids rekeyed to block IDs:
+#   Generator -> 51130 (GenChrg expense, for demo flow)
+#   Projector -> 1130 (Instruments)
+#   Office Desk -> 1120 (Furniture)
+#   Water Pump  -> 1140 (Machinery)
+#   Patrol Veh  -> 1150 (Car)
+#   Security PC -> 1160 (Computers)
 SIMPLE_ASSETS = [
-    {"company_name": "Jackson","asset_name": "Society Generator",         "asset_SNo": "JACKSON1234",
-     "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 2314, "reference": "RTGS0515GEN"},
+    {"company_name": "Jackson","asset_name": "Society Generator", "asset_SNo": "JACKSON1234",
+     "purchase_date": "2026-05-15", "purchase_value": 50000, "acc_id": 1170, "reference": "RTGS0515GEN"},
     {"company_name": "Samsung","asset_name": "Community Hall Projector",  "asset_SNo": "S234574",
-     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 64,  "reference": "NEFT0620PROJ"},
+     "purchase_date": "2026-06-20", "purchase_value": 7500,  "acc_id": 1130, "reference": "NEFT0620PROJ"},
     {"company_name": "Godrej","asset_name": "Office Desk & Chairs",       "asset_SNo": "GODREJ-F1",
-     "purchase_date": "2026-07-10", "purchase_value": 15000, "acc_id": 61,  "reference": "NEFT0710DESK"},
+     "purchase_date": "2026-07-10", "purchase_value": 15000, "acc_id": 1120, "reference": "NEFT0710DESK"},
     {"company_name": "Kirloskar","asset_name": "Water Pump Motor",        "asset_SNo": "KIR-M12",
-     "purchase_date": "2026-08-05", "purchase_value": 25000, "acc_id": 65,  "reference": "NEFT0805PUMP"},
+     "purchase_date": "2026-08-05", "purchase_value": 25000, "acc_id": 1140, "reference": "NEFT0805PUMP"},
     {"company_name": "Tata","asset_name": "Society Patrol Vehicle",       "asset_SNo": "MH12AB1234",
-     "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 66, "reference": "NEFT0912VEH"},
+     "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 1150, "reference": "NEFT0912VEH"},
     {"company_name": "Dell","asset_name": "Security Desktop PC",          "asset_SNo": "DELL-PC1",
-     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 67,  "reference": "NEFT1015PC"},
+     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 1160, "reference": "NEFT1015PC"},
 ]
 
-# Depreciable instruments ledger (ld.xlsx 'Inst' -> 'Dep' -> 'InExp').
-# One purchase before 1-Sep (full rate) and one after (half rate).
-# "reference" — see SIMPLE_ASSETS note above; same backfill pattern.
+# Instruments purchases — acc_id is now 1130 (block).
 INSTRUMENT_PURCHASES = [
     {"company_name": "LG","asset_name": "PA System (Community Hall)", "asset_SNo": "PA-2026-01",
      "purchase_date": "2026-06-10", "purchase_value": 8000.00, "half_rate": False, "reference": "NEFT0610PA"},
     {"company_name": "Huwaei","asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
      "purchase_date": "2026-10-05", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT1005CCTV"},
 ]
-INSTRUMENT_FULL_RATE = 15.0   # accounts.depreciation_percent for acc 64
+INSTRUMENT_FULL_RATE = 15.0
 YEAR_END_DATE = "2027-03-31"
 
-# An old instrument, fully written down but still in active use.
 FULLY_DEPRECIATED_ASSET = {
     "company_name": "Godrej", "asset_name": "Old Intercom Panel", "asset_SNo": "INTERCOM-2019",
     "purchase_date": "2019-04-01", "purchase_value": 5000.00,
-    "acc_id": 64, "depreciation_rate": 100.0, "last_depreciation_date": "2024-03-31",
+    "acc_id": 1130, "depreciation_rate": 100.0, "last_depreciation_date": "2024-03-31",
 }
 
 POLLS = [
@@ -601,44 +602,25 @@ POLLS = [
     },
 ]
 
-# ── Opening (BF) balances (2026-09, CA audit) — round numbers (multiples
-# of 100) for easy inspection, keyed by acc_id, applied for FY 2026.
-#
-# Fixed: BF_VALUES had been accidentally left as an empty dict — despite
-# the module docstring describing a full opening-balance scheme, every
-# has_bf=TRUE account was actually seeding at 0.00 (BF_VALUES.get(acc_id,
-# 0.00) below). Restored, and CiH/SBI raised to also fix a real issue
-# this exposed: every money-moving seed call uses mode='cash' (see
-# module docstring), so SIMPLE_ASSETS + INSTRUMENT_PURCHASES alone post
-# ~506,500 of cash-mode Dr capex across the FY (Society Patrol Vehicle
-# 350,000 on 2026-09-12 is the single biggest leg) against ~255,550 of
-# confirmed cash-mode Cr receipts — a net cash-mode outflow of roughly
-# -250,950 for the year, bottoming out around mid-October at roughly
-# -254,650 relative to a 0 BF. The original 100,000 CiH BF documented
-# above was never enough to cover that even before it was accidentally
-# zeroed; CiH would have gone negative starting September regardless.
-# 300,000 (rounded up from the ~254,650 trough with headroom) keeps the
-# running Cash-in-Hand balance positive throughout the FY, not just at
-# year-end. SBI raised the same way and for the same reason, to match
-# the (also corrected) opening balance in the companion
-# make_sbi_statement.py bank-statement fixture — see that file's own
-# note; it was drifting deep into an unrealistic overdraft narrative
-# (as low as -215,400) that has nothing to do with an actual SBI current
-# account without an OD facility.
-#
-# CapAc is held at a clean, round 1,000,000 Cr (unchanged) and Sundry
-# Debtors (81) is the balancing Dr plug, same convention as before — see
-# module docstring for the exact reconciliation.
+# Opening (BF) balances — rekeyed to block IDs:
+#   CapAc 2      -> 3100
+#   SBI   6311   -> 1311
+#   ICICI 6312   -> 1312
+#   Furn  61     -> 1120
+#   Inv   62     -> 1200
+#   CiH   633    -> 1330
+#   SCr   9      -> 2240
+#   SDr   81     -> 1510
 BF_FY = 2026
 BF_VALUES = {
-    2:    1_000_000.00,  # Capital Account (Cr) — never negative, round 100s
-    6311:   300_000.00,  # SBI A/c - Society (Dr) — see note above
-    6312:    50_000.00,  # ICICI A/c - Society (Dr)
-    61:      10_000.00,  # Furniture (Dr)
-    62:      10_000.00,  # Investments (Dr)
-    633:    300_000.00,  # Cash-in-hand (Dr) — never negative, round 100s
-    9:            0.00,  # Sundry Creditors (Cr)
-    81:     330_000.00,  # Sundry Debtors (Digital) (Dr) — balancing plug
+    3100:  1_000_000.00,  # Capital Account (Cr)
+    1311:    300_000.00,  # SBI A/c - Society (Dr)
+    1312:     50_000.00,  # ICICI A/c - Society (Dr)
+    1120:     10_000.00,  # Furniture (Dr)
+    1200:     10_000.00,  # Investments (Dr)
+    1330:    300_000.00,  # Cash-in-hand (Dr)
+    2240:          0.00,  # Sundry Creditors (Cr)
+    1510:    330_000.00,  # Sundry Debtors (Digital) (Dr) — balancing plug
 }
 
 
@@ -695,16 +677,7 @@ def seed_compliance_settings(cur, conn, society_id: int):
     print("  ✓ Compliance settings seeded")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# KPI RULE LINKS — external "Rules & Regulations" links surfaced in the
-# compliance-settings banner. Stored in kpi_rule_links so they can be
-# managed without a code deploy. Seeded here with the canonical Union-law
-# links (CBIC, Income Tax) plus UP-specific statutes (the dominant state
-# for this install's demo data).
-# ════════════════════════════════════════════════════════════════════════════
-
 KPI_RULE_LINKS = [
-    # ── Sinking / Repair Fund ────────────────────────────────────────────
     ("sinking_fund", "ALL", "Maharashtra Model Bye-Laws (official PDF)",
      "https://sahakarayukta.maharashtra.gov.in/site/upload/documents/Model_ByeLaws_of_Housing_Cooperative_societies.pdf",
      "Maharashtra Co-operative Commissioner — Model Bye-Laws for housing CHS (statutory minimums: 0.25% sinking, 0.75% repair).",
@@ -717,8 +690,6 @@ KPI_RULE_LINKS = [
      "https://www.indiacode.nic.in/handle/123456789/1962",
      "Chapter VII of the UP Apartment Rules — provides that Association funds may be raised through shares, contributions, donations, common profits (nucleus of reserve fund), and loans. No fixed statutory percentage.",
      30),
-
-    # ── Fund GST ────────────────────────────────────────────────────────
     ("fund_gst", "ALL", "CBIC Circular 109/28/2019-GST",
      "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf",
      "CBIC circular on GST treatment of maintenance charges and sinking fund collections by RWAs/CHS.",
@@ -727,8 +698,6 @@ KPI_RULE_LINKS = [
      "https://gstcouncil.gov.in/sites/default/files/e-version-gst-flyers/GST_ON_Co-operative_housing_Societies0509.pdf",
      "GST Council explanatory flyer on when GST applies to housing societies.",
      20),
-
-    # ── GST Registered / Filing ─────────────────────────────────────────
     ("gst_registered", "ALL", "CBIC GST circular (maintenance threshold)",
      "https://www.cbic.gov.in/resources/htdocs-cbec/gst/circular-cgst-109.pdf",
      "Clarifies the ₹7,500/member/month threshold and the entire-amount-vs-excess-only question.",
@@ -737,8 +706,6 @@ KPI_RULE_LINKS = [
      "https://www.gst.gov.in/",
      "Official GST portal for registration, return filing (monthly/QRMP), and compliance.",
      20),
-
-    # ── TDS No-PAN ─────────────────────────────────────────────────────
     ("tds_no_pan", "ALL", "Income Tax Dept — Section 194C (contractors)",
      "https://www.incometaxindia.gov.in/w/section-194c",
      "Thresholds: ₹30,000/single bill or ₹1,00,000/year aggregate.",
@@ -751,8 +718,6 @@ KPI_RULE_LINKS = [
      "https://www.incometaxindia.gov.in/w/section-206aa",
      "Higher TDS rate when payee has no PAN — typically 20%.",
      30),
-
-    # ── RERA ────────────────────────────────────────────────────────────
     ("rera", "ALL", "RERA — Real Estate (Regulation and Development) Act 2016",
      "https://rera.gov.in/",
      "Central Act — state RERA authorities handle builder complaints.",
@@ -761,8 +726,6 @@ KPI_RULE_LINKS = [
      "https://www.up-rera.in/",
      "UP-specific RERA portal for homebuilder complaints and project registration.",
      20),
-
-    # ── Apartment Act / AOAs ────────────────────────────────────────────
     ("apartment_act", "UP", "UP Apartment Act 2010 — full text",
      "https://www.indiacode.nic.in/handle/123456789/1962",
      "Regulates construction, ownership, and maintenance of apartment buildings with 4+ units in UP.",
@@ -771,8 +734,6 @@ KPI_RULE_LINKS = [
      "https://indiankanoon.org/doc/1987654321/",
      "Establishes that Registrar of Societies registers an AOA as a society; the Competent Authority under the Apartment Act handles Deed of Declaration matters.",
      20),
-
-    # ── Cooperative Societies Act ────────────────────────────────────────
     ("cooperative_act", "UP", "UP Co-operative Societies Act 1965",
      "https://www.indiacode.nic.in/handle/123456789/1963",
      "The older, parallel route for cooperative housing societies in UP.",
@@ -781,8 +742,6 @@ KPI_RULE_LINKS = [
      "https://sahakarayukta.maharashtra.gov.in/",
      "Governs CHS registration and operation in Maharashtra.",
      20),
-
-    # ── Income Tax — Mutuality ─────────────────────────────────────────
     ("income_tax_mutuality", "ALL", "CBDT — Principle of Mutuality (vs. business income)",
      "https://www.incometaxindia.gov.in/Pages/about-us/circulars.aspx",
      "Judicially-developed doctrine determining what member-sourced income is taxable at all.",
@@ -791,7 +750,6 @@ KPI_RULE_LINKS = [
 
 
 def seed_kpi_rule_links(cur, conn):
-    """Idempotent seed of KPI rule links."""
     inserted = 0
     for category, state, label, url, description, sort_order in KPI_RULE_LINKS:
         row = _one(
@@ -814,99 +772,57 @@ def seed_kpi_rule_links(cur, conn):
         print(f"  ✓ KPI rule links seeded ({inserted} new links)")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# STATE COMPLIANCE THRESHOLDS — statutory rates/thresholds by state.
-# Seeded for UP (the demo society's state) plus ALL-India Union thresholds.
-# NULL value means "no statutory floor" — the banner and validator treat that
-# as "check your own AOA bye-laws" rather than "here's a minimum".
-# ════════════════════════════════════════════════════════════════════════════
-#
-# Key differences captured here:
-#   - UP sinking/repair fund: NO fixed statutory percentage (UP Apartment
-#     Rules 2011 Ch.VII leaves it to the AOA bye-laws / General Body).
-#   - Maharashtra: 0.25% sinking, 0.75% repair (of construction cost/year).
-#   - GST: Union-law thresholds (₹20L turnover + ₹7,500/member/month).
-#   - TDS: 194C (₹30K/₹1L), 194J (₹50K), 206AA (20% no-PAN rate).
-#   - RERA: varies by state on project registration thresholds.
-#   - Apartment Act: UP mandates AOA formation at 4+ units, 30% quorum.
-
 NULL_NO_FLOOR = None
 
 STATE_COMPLIANCE_THRESHOLDS = [
-    # ── Sinking Fund % (of construction cost / year) ─────────────────────
-    # UP has NO statutory floor — the rate comes from AOA bye-laws / buyer agreement
     ("UP",  "sinking_fund_pct_construction_cost", None, NULL_NO_FLOOR,
      "percent", "2026-04-01", None,
      "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws or builder agreement (commonly 0.5% of flat price/year in practice)."),
     ("MH",  "sinking_fund_pct_construction_cost", 0.25, None,
      "percent", "2018-01-01", None,
      "Maharashtra Model Bye-Laws — statutory minimum 0.25% of construction cost/year."),
-
-    # ── Repair Fund % (of construction cost / year) ──────────────────────
     ("UP",  "repair_fund_pct_construction_cost", None, NULL_NO_FLOOR,
      "percent", "2026-04-01", None,
      "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws / General Body."),
     ("MH",  "repair_fund_pct_construction_cost", 0.75, None,
      "percent", "2018-01-01", None,
      "Maharashtra Model Bye-Laws — statutory minimum 0.75% of construction cost/year."),
-
-    # ── GST: society turnover threshold (₹ lakh/year) ───────────────────
     ("ALL", "gst_turnover_lakh", 20.00, None,
      "lakh", "2017-07-01", None,
      "GST registration mandatory only when aggregate turnover exceeds ₹20 lakh/year (₹10 lakh for special-category states — not applicable to most housing societies)."),
-
-    # ── GST: per-member monthly maintenance threshold ────────────────────
     ("ALL", "gst_per_member_monthly", 7500.00, None,
      "rupees", "2017-07-01", None,
      "GST applies to maintenance charges ONLY when a single member's monthly contribution exceeds ₹7,500 (CBIC Circular 109/28/2019-GST). Once crossed, GST applies to ENTIRE amount, not just excess (Madras HC ruling contested)."),
-
-    # ── GST: collective RWA maintenance threshold ────────────────────────
     ("ALL", "gst_rwa_collective_monthly", 7500.00, None,
      "rupees", "2017-07-01", None,
      "When aggregate maintenance collected from all members exceeds ₹7,500/month AND individual member exceeds ₹7,500, GST applies to that member's share."),
-
-    # ── TDS: Section 194C (contractors) ─────────────────────────────────
     ("ALL", "tds_194c_single_bill", 30000.00, None,
      "rupees", "2017-04-01", None,
      "TDS 194C triggered on a single bill exceeding ₹30,000 (Finance Act 2025 raised from ₹30K; previously ₹15K/₹30K for equipment/others)."),
     ("ALL", "tds_194c_annual_aggregate", 100000.00, None,
      "rupees", "2017-04-01", None,
      "TDS 194C triggered when annual aggregate payments to a contractor exceed ₹1,00,000."),
-
-    # ── TDS: Section 194J (professionals/technical services) ────────────
     ("ALL", "tds_194j_annual_aggregate", 50000.00, None,
      "rupees", "2025-04-01", None,
      "TDS 194J threshold raised from ₹30,000 to ₹50,000/year by Finance Act 2025."),
-
-    # ── TDS: Section 206AA (no-PAN rate) ────────────────────────────────
     ("ALL", "tds_no_pan_rate", 20.00, None,
      "percent", "2010-04-01", None,
      "When payee has no PAN, TDS deducted at higher of 20% or the applicable section rate (Section 206AA, ITA)."),
-
-    # ── Income Tax: basic exemption (new regime — default from FY25) ────
     ("ALL", "income_tax_basic_exemption_new_regime", 300000.00, None,
      "rupees", "2023-04-01", None,
      "FY 2025-26 (new tax regime): basic exemption ₹3 lakh. No tax on income up to ₹7 lakh due to rebate u/s 87A."),
-
-    # ── Income Tax: basic exemption (old regime) ────────────────────────
     ("ALL", "income_tax_basic_exemption_old_regime", 250000.00, None,
      "rupees", "2023-04-01", None,
      "FY 2025-26 (old tax regime): basic exemption ₹2.5 lakh (₹3 lakh for senior citizens, ₹5 lakh for super-senior)."),
-
-    # ── Income Tax: surcharge threshold ─────────────────────────────────
     ("ALL", "income_tax_surcharge_limit", 5000000.00, None,
      "rupees", "2023-04-01", None,
      "Surcharge applies when total income exceeds ₹50 lakh (10% up to ₹1Cr, 15% up to ₹2Cr, 25% above ₹2Cr — new regime rates)."),
-
-    # ── RERA: project registration threshold (UP) ───────────────────────
     ("UP",  "rera_project_units", 8.00, None,
      "units", "2016-11-01", None,
      "UP RERA: mandatory registration for projects with 8+ apartments OR area > 500 sq m (whichever is lower). Smaller projects exempt."),
     ("UP",  "rera_project_area_sqft", 5382.00, None,
      "sqft", "2016-11-01", None,
      "UP RERA: mandatory registration when project area exceeds 500 sq m (~5,382 sq ft)."),
-
-    # ── Apartment Act: UP-specific formation rules ──────────────────────
     ("UP",  "apartment_act_min_units", 4.00, None,
      "units", "2010-07-22", None,
      "UP Apartment Act 2010 applies only to apartment buildings with 4 or more units. Smaller buildings (1-3 flats) fall outside this Act."),
@@ -929,8 +845,8 @@ def seed_gst_rates(cur, conn):
         )
         conn.commit()
 
+
 def seed_state_compliance_thresholds(cur, conn):
-    """Idempotent seed of state-specific compliance thresholds."""
     inserted = 0
     for (state, key, val, val_text, unit, eff_from, eff_to, notes) in STATE_COMPLIANCE_THRESHOLDS:
         row = _one(
@@ -955,19 +871,13 @@ def seed_state_compliance_thresholds(cur, conn):
         print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-# LEGAL REGIME PROFILES — jurisdiction-specific statutory frameworks
-# ═══════════════════════════════════════════════════════════════════════════════
-
 LEGAL_REGIME_PROFILES = [
-    # UP Apartment Owners Association under UP Apartment Act 2010 + Rules 2011
     ("UP_AOA_2010", "UP", "Uttar Pradesh Apartment Owners Association (AOA)",
      "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
      "Uttar Pradesh Apartment Rules, 2011",
      "Model Bye-Laws under Section 14(6), notified 16 November 2011",
      "2011-11-16", None, "active",
      "UP Act 16 of 2010; Rules notified 16 Nov 2011; Model Bye-Laws under Sec 14(6)"),
-    # Maharashtra Co-operative Housing Society (future)
     ("MH_COOP_1965", "MH", "Maharashtra Co-operative Housing Society",
      "Maharashtra Co-operative Societies Act, 1960",
      "Maharashtra Co-operative Societies Rules, 1961",
@@ -977,7 +887,6 @@ LEGAL_REGIME_PROFILES = [
 ]
 
 STATUTORY_HEADS_UP_AOA = [
-    # Liabilities
     ("UP_AOA_2010", "IFMS_CORPUS", None, "Liabilities", "Interest-Free Maintenance Security Corpus", 10, True,
      "UP Apartment Act 2010, Sec 14(5) proviso (2016 Amendment); Model Bye-Laws Ch.VII"),
     ("UP_AOA_2010", "RESERVE_FUND", None, "Liabilities", "Reserve Fund (Common Profits Nucleus)", 20, True,
@@ -990,12 +899,10 @@ STATUTORY_HEADS_UP_AOA = [
      "UP Apartment Rules 2011, Model Bye-Laws Para 45(h)"),
     ("UP_AOA_2010", "TAX_PAYABLE", None, "Liabilities", "Taxes Payable (GST/TDS/Property Tax)", 70, False, ""),
     ("UP_AOA_2010", "OTHER_LIABILITIES", None, "Liabilities", "Other Liabilities", 80, False, ""),
-    # Equity
     ("UP_AOA_2010", "CAPITAL_ACCOUNT", None, "Equity", "Capital Account / Share Capital", 10, True,
      "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 46(a)"),
     ("UP_AOA_2010", "ACCUMULATED_SURPLUS", None, "Equity", "Accumulated Surplus / Deficit", 20, True, ""),
     ("UP_AOA_2010", "CURRENT_YEAR_SURPLUS", None, "Equity", "Current Year Surplus / Deficit", 30, True, ""),
-    # Assets
     ("UP_AOA_2010", "FIXED_ASSETS", None, "Assets", "Fixed Assets (Immovable + Movable)", 10, False, ""),
     ("UP_AOA_2010", "INVESTMENTS", None, "Assets", "Investments", 20, False, ""),
     ("UP_AOA_2010", "CASH_BANK", None, "Assets", "Cash & Bank Balances", 30, False, ""),
@@ -1004,14 +911,12 @@ STATUTORY_HEADS_UP_AOA = [
     ("UP_AOA_2010", "LOANS_GIVEN", None, "Assets", "Loans & Advances Given", 50, False, ""),
     ("UP_AOA_2010", "DEPOSITS_ASSETS", None, "Assets", "Deposits (Asset Side)", 60, False, ""),
     ("UP_AOA_2010", "OTHER_ASSETS", None, "Assets", "Other Assets", 70, False, ""),
-    # Income
     ("UP_AOA_2010", "MAINTENANCE_INCOME", None, "Income", "Maintenance Charges / Assessments", 10, True,
      "UP Apartment Act 2010, Sec 18(1)"),
     ("UP_AOA_2010", "COMMON_PROFITS", None, "Income", "Common Profits (Commercial/Common Area Income)", 20, True,
      "UP Apartment Act 2010, Sec 3(k), 18(1); Model Bye-Laws Ch.VII, Para 3(d)"),
     ("UP_AOA_2010", "INTEREST_INCOME", None, "Income", "Interest Income", 30, False, ""),
     ("UP_AOA_2010", "OTHER_INCOME", None, "Income", "Other Income", 40, False, ""),
-    # Expenditure
     ("UP_AOA_2010", "REPAIR_MAINTENANCE_EXP", None, "Expenditure", "Repair & Maintenance Expenses", 10, True,
      "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 3(c)"),
     ("UP_AOA_2010", "STAFF_EXPENSES", None, "Expenditure", "Staff Salaries & Benefits", 20, False, ""),
@@ -1023,7 +928,6 @@ STATUTORY_HEADS_UP_AOA = [
 
 
 def seed_legal_regime_profiles(cur, conn):
-    """Idempotent seed of legal regime profiles."""
     inserted = 0
     for (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
          eff_from, eff_to, status, source_ref) in LEGAL_REGIME_PROFILES:
@@ -1045,7 +949,6 @@ def seed_legal_regime_profiles(cur, conn):
 
 
 def seed_statutory_head_catalog(cur, conn):
-    """Idempotent seed of statutory head catalog (UP AOA first)."""
     inserted = 0
     for (regime_code, head_code, parent_head_code, statement_section, label,
          display_order, is_statutory_required, source_ref) in STATUTORY_HEADS_UP_AOA:
@@ -1069,11 +972,9 @@ def seed_statutory_head_catalog(cur, conn):
 
 
 def seed_society_legal_regime(cur, conn, society_id: int):
-    """Assign UP_AOA_2010 regime to UP societies."""
     row = _one(cur, "SELECT 1 FROM society_legal_regime WHERE society_id=%s", (society_id,))
     if row:
         return
-    # Determine state
     soc = _one(cur, "SELECT state FROM societies WHERE id=%s", (society_id,))
     if soc and soc.get("state") == "Uttar Pradesh":
         cur.execute(
@@ -1086,85 +987,81 @@ def seed_society_legal_regime(cur, conn, society_id: int):
         print(f"  ✓ Society {society_id} assigned UP_AOA_2010 legal regime")
 
 
-# UP AOA statutory head mappings for the demo chart of accounts
-# Maps account_id -> (head_code, source_reference)
+# UP AOA statutory head mappings — rekeyed to block account IDs.
 UP_AOA_ACCOUNT_MAPPINGS = [
     # Liabilities
-    (101, "IFMS_CORPUS", "Sinking Fund Reserve mapped to IFMS Corpus per UP Apt Act Sec 14(5)"),
-    (102, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
-    (103, "RESERVE_FUND", "Corpus Fund mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
-    (41, "TAX_PAYABLE", "CGST Payable"),
-    (42, "TAX_PAYABLE", "SGST Payable"),
-    (43, "TAX_PAYABLE", "CGST Payable (RCM)"),
-    (44, "TAX_PAYABLE", "SGST Payable (RCM)"),
-    (45, "TAX_PAYABLE", "IGST Payable (RCM)"),
-    (9, "SUNDRY_CREDITORS", "Sundry Creditors"),
-    (3, "LOANS_TAKEN", "Loans & Advances Taken"),
-    (26, "STAFF_BENEFITS_PAYABLE", "Provisions for staff benefits"),
-    (28, "TAX_PAYABLE", "Income Tax payable"),
+    (3210, "IFMS_CORPUS", "Sinking Fund Reserve mapped to IFMS Corpus per UP Apt Act Sec 14(5)"),
+    (3220, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
+    (3230, "RESERVE_FUND", "Corpus Fund mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
+    (2210, "TAX_PAYABLE", "CGST Payable"),
+    (2220, "TAX_PAYABLE", "SGST Payable"),
+    (2230, "TAX_PAYABLE", "CGST Payable (RCM)"),
+    (2231, "TAX_PAYABLE", "SGST Payable (RCM)"),
+    (2232, "TAX_PAYABLE", "IGST Payable (RCM)"),
+    (2240, "SUNDRY_CREDITORS", "Sundry Creditors"),
+    (2110, "LOANS_TAKEN", "Loans & Advances Taken"),
+    (3250, "STAFF_BENEFITS_PAYABLE", "Provisions for staff benefits"),
+    (5220, "TAX_PAYABLE", "Income Tax payable"),
     # Equity
-    (2, "CAPITAL_ACCOUNT", "Capital Account"),
+    (3100, "CAPITAL_ACCOUNT", "Capital Account"),
     # Assets
-    (5, "FIXED_ASSETS", "Immovable Assets"),
-    (6, "FIXED_ASSETS", "Movable Assets"),
-    (61, "FIXED_ASSETS", "Furniture"),
-    (62, "INVESTMENTS", "Investments"),
-    (63, "CASH_BANK", "Bank Accounts parent"),
-    (631, "CASH_BANK", "Bank Accounts"),
-    (634, "OTHER_ASSETS", "Input Tax Credit (RCM) - recoverable"),
-    (6311, "CASH_BANK", "SBI A/c"),
-    (6312, "CASH_BANK", "ICICI A/c"),
-    (632, "DEPOSITS_ASSETS", "Deposits (Assets)"),
-    (633, "CASH_BANK", "Cash-in-hand"),
-    (64, "FIXED_ASSETS", "Instruments & Tools"),
-    (65, "FIXED_ASSETS", "Machinery"),
-    (66, "FIXED_ASSETS", "Car"),
-    (67, "FIXED_ASSETS", "Computers"),
-    (7, "LOANS_GIVEN", "Loans & Advances Given"),
-    (8, "SUNDRY_DEBTORS", "Sundry Debtors parent"),
-    (81, "SUNDRY_DEBTORS", "Sundry Debtors (Digital)"),
-    (82, "SUNDRY_DEBTORS", "Sundry Debtors (Cash)"),
+    (1110, "FIXED_ASSETS", "Immovable Assets"),
+    (1100, "FIXED_ASSETS", "Fixed Assets"),
+    (1120, "FIXED_ASSETS", "Furniture"),
+    (1200, "INVESTMENTS", "Investments"),
+    (1300, "CASH_BANK", "Current Assets parent"),
+    (1310, "CASH_BANK", "Bank Accounts"),
+    (1340, "OTHER_ASSETS", "Input Tax Credit (RCM) - recoverable"),
+    (1311, "CASH_BANK", "SBI A/c"),
+    (1312, "CASH_BANK", "ICICI A/c"),
+    (1320, "DEPOSITS_ASSETS", "Deposits (Assets)"),
+    (1330, "CASH_BANK", "Cash-in-hand"),
+    (1130, "FIXED_ASSETS", "Instruments & Tools"),
+    (1140, "FIXED_ASSETS", "Machinery"),
+    (1150, "FIXED_ASSETS", "Car"),
+    (1160, "FIXED_ASSETS", "Computers"),
+    (1400, "LOANS_GIVEN", "Loans & Advances Given"),
+    (1500, "SUNDRY_DEBTORS", "Sundry Debtors parent"),
+    (1510, "SUNDRY_DEBTORS", "Sundry Debtors (Digital)"),
+    (1520, "SUNDRY_DEBTORS", "Sundry Debtors (Cash)"),
     # Income
-    (2311, "MAINTENANCE_INCOME", "Society Maintenance Charge"),
-    (211, "INTEREST_INCOME", "Interest Income"),
-    (2111, "INTEREST_INCOME", "Bank Interest"),
-    (2112, "OTHER_INCOME", "Exempt Income"),
-    (213, "COMMON_PROFITS", "Property Income (common area commercial)"),
-    (212, "OTHER_INCOME", "Selling Asset"),
+    (4210, "MAINTENANCE_INCOME", "Society Maintenance Charge"),
+    (4110, "INTEREST_INCOME", "Interest Income"),
+    (4111, "INTEREST_INCOME", "Bank Interest"),
+    (4114, "OTHER_INCOME", "Exempt Income"),
+    (4130, "COMMON_PROFITS", "Property Income (common area commercial)"),
+    (4120, "OTHER_INCOME", "Selling Asset"),
     # Expenditure
-    (2312, "REPAIR_MAINTENANCE_EXP", "Repair and Maintenance"),
-    (2313, "ADMIN_EXPENSES", "Stationery"),
-    (2314, "REPAIR_MAINTENANCE_EXP", "Generator Charges"),
-    (2315, "ADMIN_EXPENSES", "Accountant Fee"),
-    (2316, "ADMIN_EXPENSES", "Audit Fee"),
-    (2320, "REPAIR_MAINTENANCE_EXP", "Lift AMC"),
-    (2321, "REPAIR_MAINTENANCE_EXP", "Intercom AMC"),
-    (2322, "REPAIR_MAINTENANCE_EXP", "CCTV AMC"),
-    (2323, "FINANCE_COSTS", "GST on Asset Disposal"),
-    (235, "STAFF_EXPENSES", "Salary"),
-    (236, "ADMIN_EXPENSES", "Phone Charges"),
-    (237, "REPAIR_MAINTENANCE_EXP", "Electricity"),
-    (238, "REPAIR_MAINTENANCE_EXP", "Water Tax"),
-    (239, "REPAIR_MAINTENANCE_EXP", "House Tax"),
-    (2310, "REPAIR_MAINTENANCE_EXP", "Insurance Premium Paid"),
-    (24, "OTHER_EXPENSES", "Duties Paid"),
-    (25, "OTHER_EXPENSES", "Taxes Paid"),
-    (231, "DEPRECIATION_EXP", "Depreciation"),
-    (2317, "OTHER_INCOME", "Society Fine Charge"),
-    (2318, "MAINTENANCE_INCOME", "Society Fees"),
-    (2319, "OTHER_INCOME", "Event Ticket Income"),
-    (29, "FINANCE_COSTS", "TDS to IT"),
+    (51110, "REPAIR_MAINTENANCE_EXP", "Repair and Maintenance"),
+    (51120, "ADMIN_EXPENSES", "Stationery"),
+    (51130, "REPAIR_MAINTENANCE_EXP", "Generator Charges"),
+    (51140, "ADMIN_EXPENSES", "Accountant Fee"),
+    (51150, "ADMIN_EXPENSES", "Audit Fee"),
+    (51160, "REPAIR_MAINTENANCE_EXP", "Lift AMC"),
+    (51170, "REPAIR_MAINTENANCE_EXP", "Intercom AMC"),
+    (51180, "REPAIR_MAINTENANCE_EXP", "CCTV AMC"),
+    (51190, "FINANCE_COSTS", "GST on Asset Disposal"),
+    (5150, "STAFF_EXPENSES", "Salary"),
+    (5160, "ADMIN_EXPENSES", "Phone Charges"),
+    (5170, "REPAIR_MAINTENANCE_EXP", "Electricity"),
+    (5180, "REPAIR_MAINTENANCE_EXP", "Water Tax"),
+    (5190, "REPAIR_MAINTENANCE_EXP", "House Tax"),
+    (51100, "REPAIR_MAINTENANCE_EXP", "Insurance Premium Paid"),
+    (5200, "OTHER_EXPENSES", "Duties Paid"),
+    (5210, "OTHER_EXPENSES", "Taxes Paid"),
+    (5110, "DEPRECIATION_EXP", "Depreciation"),
+    (4220, "OTHER_INCOME", "Society Fine Charge"),
+    (4230, "MAINTENANCE_INCOME", "Society Fees"),
+    (4240, "OTHER_INCOME", "Event Ticket Income"),
+    (2290, "FINANCE_COSTS", "TDS to IT"),
 ]
 
 
 def seed_account_statutory_mappings(cur, conn, society_id: int):
-    """Seed UP AOA account -> statutory head mappings for demo society."""
-    # First ensure the society has a legal regime assigned
     seed_society_legal_regime(cur, conn, society_id)
 
     inserted = 0
     for (account_id, head_code, source_ref) in UP_AOA_ACCOUNT_MAPPINGS:
-        # Check if account exists for this society
         acc = _one(cur,
             "SELECT 1 FROM accounts WHERE id=%s AND society_id=%s",
             (account_id, society_id))
@@ -1191,25 +1088,13 @@ def seed_account_statutory_mappings(cur, conn, society_id: int):
 def seed_accounts(cur, conn, society_id: int):
     """
     Insert this society's chart of accounts using the literal seed-constant
-    `aid` values as the real `accounts.id` (accounts.id is scoped per-society
-    since the composite PK migration, so the same small id can safely repeat
-    across societies).
-
-    IMPORTANT — insert order: `fk_account_parent` is DEFERRABLE INITIALLY
-    DEFERRED, but we still insert with parent_account_id=NULL on the first
-    pass and backfill parents in a second pass, committing once at the end.
-    This makes seeding order-independent: ACCOUNTS can be edited or appended
-    to without every parent having to appear before its children, and a
-    single failed row can't leave a partially-seeded, silently-incomplete
-    chart of accounts behind (the previous single-pass/per-row-commit version
-    relied on list order and swallowed ordering failures as a per-row
-    "skip" warning).
+    `aid` values as the real `accounts.id` (accounts.id is scoped per-society).
+    Two-pass insert (parent first N/A, then backfill) to avoid FK ordering
+    issues — same convention as before, ids now on the block scheme.
     """
     created = 0
     inserted_ids = set()
 
-    # 1st pass: insert with parent_account_id=NULL to avoid FK ordering
-    # requirements entirely.
     for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
         try:
             cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
@@ -1231,9 +1116,6 @@ def seed_accounts(cur, conn, society_id: int):
             conn.rollback()
             log.warning("Account %s skip: %s", aid, exc)
 
-    # 2nd pass: backfill parent_account_id now that every row in this batch
-    # exists (only for rows we just inserted — pre-existing rows keep
-    # whatever parent they already had).
     for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
         if parent is not None and aid in inserted_ids:
             cur.execute(
@@ -1253,12 +1135,10 @@ def seed_accounts(cur, conn, society_id: int):
 
 
 def seed_society_created_by(cur, conn, society_id: int, admin_uid: int):
-    """Backfill created_by on society seeded before admin user existed."""
     pass
 
 
 def seed_admin_created_by(cur, conn, admin_uid: int):
-    """Backfill created_by on the admin user (who created themselves)."""
     cur.execute(
         "UPDATE users SET created_by = %s WHERE id = %s AND created_by IS NULL",
         (admin_uid, admin_uid),
@@ -1267,18 +1147,7 @@ def seed_admin_created_by(cur, conn, admin_uid: int):
 
 
 # ══ Indian CHS/RWA compliance: CBDT TDS section → rate + thresholds ══
-# Best-guess seed (FLAG — PROFESSIONAL REVIEW): confirm against the
-# applicable Finance Act before relying on these for a filing. Each
-# society gets the same set of rows (society_id-scoped table).
-#   194C: 1% (individual/HUF) / 2% (others); F30K single / F1L annual.
-#   194D: 2% (individual/HUF) / 10% (company); F20K single / F20K annual.
-#   194-I: 10% (land/building/furniture) / 2% (plant/machinery); F6L annual (F50K/month).
-#   194J: 2% (technical fees) / 10% (professional fees); F50K single / F50K annual.
-# rate_no_pan = Section 206AA higher rate when the vendor has no PAN.
-# discriminator: for 194C/194D it's payee_type (ind_huf/other/company), for 194-I it's
-# payment nature (land_building/plant_machinery), for 194J it's (technical/professional).
 TDS_SECTION_RATE_SEED = [
-    # (section, discriminator, nature, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold)
     ('192', None, 'Salary income', 0.00, 20.00, 0, 0),
     ('192A', None, 'Premature EPF withdrawal', 10.00, 30.00, 50000, 50000),
     ('193', None, 'Interest on securities', 10.00, 20.00, 10000, 10000),
@@ -1318,11 +1187,8 @@ TDS_SECTION_RATE_SEED = [
 
 def seed_tds_section_rates(cur, conn, society_id: int):
     inserted = 0
-    # All variants of the same section now share the same effective_from (2024-04-01),
-    # distinguished by the discriminator column instead of artificial year offsets.
     for section, discriminator, nature, rate, rate_no_pan, single_thr, annual_thr in TDS_SECTION_RATE_SEED:
         eff_from = '2024-04-01'
-        
         row = _one(
             cur,
             "SELECT 1 FROM tds_section_rates "
@@ -1346,10 +1212,6 @@ def seed_tds_section_rates(cur, conn, society_id: int):
 
 
 def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
-    """Seed FY-scoped opening balances into brought_forward for every
-    account where has_bf = TRUE (already flagged inline in ACCOUNTS
-    above). Amounts come from BF_VALUES; any has_bf=TRUE account not
-    listed there gets 0."""
     cur.execute(
         """SELECT id, drcr_account FROM accounts
            WHERE society_id = %s AND has_bf = TRUE
@@ -1382,14 +1244,11 @@ def seed_brought_forward(cur, conn, society_id: int, admin_uid: int):
 
 
 def seed_primary_bank_account(cur, conn, society_id: int):
-    """Points societies.primary_bank_account_id at SBI (tab 'SBI') — the
-    single bank leg fn_resolve_bank_leg resolves to for every non-cash
-    transaction (cheque/upi/card/bank/crypto). Every money-writing call in
-    this seed uses mode='cash', so nothing here actually needs it, but a
-    fresh install is otherwise one exception away from failing the moment
-    someone records a non-cash transaction through the app."""
+    """Points societies.primary_bank_account_id at SBI (tab 'SBI' under
+    BkAc 1310). Under the block scheme the account id is 1311."""
     cur.execute(
-        """SELECT a.id FROM accounts a JOIN accounts p ON p.id = a.parent_account_id
+        """SELECT a.id FROM accounts a JOIN accounts p
+                  ON p.id = a.parent_account_id AND p.society_id = a.society_id
            WHERE a.society_id = %s AND a.tab_name = 'SBI' AND p.tab_name = 'BkAc'""",
         (society_id,),
     )
@@ -1570,10 +1429,6 @@ def seed_users(cur, conn, society_id: int):
     return result
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# EVENTS / CONCERNS
-# ═════════════════════════════════════════════════════════════════════════════
-
 def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None):
     for ev in EVENTS:
         if _one(cur, "SELECT id FROM events WHERE society_id=%s AND title=%s", (society_id, ev["title"])):
@@ -1598,15 +1453,6 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
         if existing:
             continue
         preferred_time = con.get("preferred_time", "00:00:00")
-        # qr_payload deliberately NOT set here — fn_trg_concerns_qr (BEFORE
-        # INSERT trigger) fills it in as the canonical "<society_id>-CON-<id>"
-        # format automatically once NEW.id is known. Explicitly passing a
-        # value (the old "con:{society_id}:{flat_number}:{type}" string)
-        # skipped the trigger's IS NULL guard and left a payload seed data
-        # couldn't match what qr_service.generate_qr_code/parse_qr_payload
-        # actually produce/expect (wrong delimiter, wrong role token, keyed
-        # on flat_number instead of the concern's own id) — same pattern
-        # receipts/expenses/events already followed correctly below.
         row = _one(
             cur,
             """INSERT INTO concerns (society_id,apartment_id,concern_type,description,
@@ -1648,13 +1494,8 @@ def seed_events_and_concerns(cur, conn, society_id: int, created_by: int = None)
                 print(f"    ↳ Assigned to {assign_role} '{assign_name}'")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# APARTMENT / VENDOR CHARGE HISTORIES
-# ═════════════════════════════════════════════════════════════════════════════
-
 def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: dict,
                                  admin_uid: int = None):
-    # Society default: rate-based (apartment_size * apt_maintenance_rate)
     if not _one(cur, """SELECT 1 FROM apt_charges_fines_basis
                          WHERE society_id=%s AND apt_id IS NULL AND end_date IS NULL""",
                 (society_id,)):
@@ -1669,10 +1510,6 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
 
-    # A-101 (Rajesh Sharma) deliberately uses the default rate-based row.
-
-    # B-202 (Priya Gupta) — apartment-specific FIXED amount, effective from
-    # her later apt_calc_start_date.
     b202 = apartments_by_flat.get("B-202")
     if b202:
         if not _one(cur, """SELECT 1 FROM apt_charges_fines_basis
@@ -1689,7 +1526,6 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
 
-    # Vendor charge basis
     if not _one(cur, """SELECT 1 FROM ven_charges_fines_basis
                          WHERE society_id=%s AND ven_id IS NULL AND end_date IS NULL""",
                 (society_id,)):
@@ -1704,13 +1540,8 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         print("  ✓ Vendor charge basis added")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# SECURITY ROSTER + ATTENDANCE
-# ═════════════════════════════════════════════════════════════════════════════
-
 def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list,
                                           admin_uid: int = None):
-    """guards: list of dicts {user_id, linked_id (security_staff.id), shift}"""
     roster_dates = [date(2026, 7, d) for d in (14, 15, 16, 17)]
 
     for g in guards:
@@ -1725,11 +1556,6 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
             )
             conn.commit()
 
-            # gate_access role='SEC' — closed (off-duty) shift for all but
-            # the most recent day, which is left open (on-duty).
-            # entity_id must be security_staff.id (sec_id), matching
-            # fn_evaluate_gate_pass('security', ...) and every other reader
-            # of gate_access role='SEC' — not users.id.
             is_latest = (i == len(roster_dates) - 1)
             if not _one(cur, """SELECT 1 FROM gate_access
                                  WHERE society_id=%s AND entity_id=%s AND role='SEC'
@@ -1754,14 +1580,9 @@ def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list
               f"({len(roster_dates)} shifts, latest left {status})")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# DEPRECIABLE INSTRUMENTS LEDGER (ld.xlsx Inst -> Dep -> InExp)
-# ═════════════════════════════════════════════════════════════════════════════
-
 def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
-    # 1) The two current-year instrument purchases via fn_buy_asset —
-    #    mode='cash' means each posts a single Dr Instruments leg only
-    #    (see fn_resolve_bank_leg).
+    """Instrument class is acc_id 1130 under the block scheme; the
+    depreciation expense account is 5110 and the P&L root is 5100."""
     for item in INSTRUMENT_PURCHASES:
         if _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
                 (society_id, item["asset_name"])):
@@ -1771,12 +1592,9 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
             cur,
             "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, item["company_name"], item["asset_name"], item["asset_SNo"], item["purchase_value"],
-             64, item["purchase_date"], item.get("installation_date"), "cash", admin_uid,
+             1130, item["purchase_date"], item.get("installation_date"), "cash", admin_uid,
              f"Instrument purchase - {item['asset_name']}"),
         )
-        # See SIMPLE_ASSETS note above — fn_buy_asset can't accept a
-        # reference, so it's backfilled here to match
-        # make_sbi_statement.py (2026-09, CA audit).
         cur.execute(
             "UPDATE expenses SET transaction_id=%s WHERE id=%s",
             (item["reference"], result["expense_id"]),
@@ -1786,16 +1604,9 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
               f"{'(half-rate, post 1-Sep)' if item['half_rate'] else '(full-rate)'} "
               f"on {item['purchase_date']}")
 
-    # 2) The old, fully written-down instrument still in use.
     if not _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
                 (society_id, FULLY_DEPRECIATED_ASSET["asset_name"])):
         a = FULLY_DEPRECIATED_ASSET
-        # qr_payload deliberately NOT set — same bug/fix as the concerns
-        # insert above: fn_trg_assets_qr auto-fills the canonical
-        # "<society_id>-AST-<id>" format on insert, but only when the
-        # column arrives NULL. The old "ast:{society_id}:{asset_SNo}"
-        # value here was non-null so it skipped the trigger and stuck,
-        # never matching what qr_service actually generates/expects.
         cur.execute(
             """INSERT INTO assets
                (society_id,company_name,asset_name,asset_SNo,purchase_date,purchase_value,
@@ -1808,11 +1619,6 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
         conn.commit()
         print(f"  ✓ Asset    '{a['asset_name']}' — book_value=0, disposed=FALSE (still in use)")
 
-    # 3) Year-end depreciation journal (mirrors ld.xlsx 'Inst' sheet rows):
-    #    full-rate base = pre-1-Sep purchases; half-rate base = post-1-Sep.
-    #    (Instruments' own BF is 0 under the round-number BF_VALUES scheme
-    #    — see module docstring — so the base here is purely this year's
-    #    purchases, not BF + purchases.)
     full_base = sum(i["purchase_value"] for i in INSTRUMENT_PURCHASES if not i["half_rate"])
     half_base = sum(i["purchase_value"] for i in INSTRUMENT_PURCHASES if i["half_rate"])
 
@@ -1826,7 +1632,7 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     already = _one(
         cur,
         """SELECT 1 FROM transactions
-           WHERE society_id=%s AND acc_id=64 AND trx_date=%s
+           WHERE society_id=%s AND acc_id=1130 AND trx_date=%s
              AND acc_particulars LIKE 'Depreciation on Instruments%%'""",
         (society_id, YEAR_END_DATE),
     )
@@ -1838,51 +1644,43 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     desc = (f"Depreciation on Instruments @ {INSTRUMENT_FULL_RATE}% "
             f"(full ₹{dep_full} + half-year ₹{dep_half} on post-1-Sep additions)")
 
-    # Dr Depreciation A/c (231) / Cr Instruments A/c (64) — a pure book
-    # entry, no cash or bank movement at all, so mode='journal' (not
-    # 'cash'). Fixed (2026-08): this used to be posted as mode='cash',
-    # which doesn't corrupt fn_cih_balance_asof's actual figure (a
-    # balanced Dr/Cr pair nets to zero regardless of mode), but
-    # fn_cashbook_paired_v3 read mode='cash' as "physical rupees" and
-    # displayed this journal as a phantom cash transaction in the
-    # Cashbook — it belongs only on the Instruments/Dep ledger sheets.
+    # Dr Depreciation A/c (5110) / Cr Instruments (1130)
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Dr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Dr',%s,5110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Cr',%s,64,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Cr',%s,1130,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc, total_dep, admin_uid, journal_id),
     )
     conn.commit()
     print(f"  ✓ Depreciation journal posted: Dr Dep A/c ₹{total_dep} / Cr Instruments ₹{total_dep}")
 
-    # 4) Transfer total depreciation to Income & Expenditure A/c (23).
-    # Also mode='journal' — see note above.
     journal_id2 = _one(cur, "SELECT NEXTVAL('seq_transaction_number') AS n")["n"]
     desc2 = "Depreciation transferred to Income & Expenditure A/c"
+    # Dr InExp A/c (5100) / Cr Dep A/c (5110)
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Dr',%s,23,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Dr',%s,5100,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Cr',%s,231,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Cr',%s,5110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
-    print(f"  ✓ Depreciation transfer posted: Dr Income&Exp A/c ₹{total_dep} / Cr Dep A/c ₹{total_dep}")
+    print(f"  ✓ Depreciation transfer posted: Dr InExp A/c ₹{total_dep} / Cr Dep A/c ₹{total_dep}")
 
 
 def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
@@ -1897,9 +1695,6 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
              asset["acc_id"], asset["purchase_date"], asset.get("installation_date"), "cash", admin_uid,
              f"Asset purchase - {asset['asset_name']}"),
         )
-        # fn_buy_asset has no cheque_no/trx_id parameter — backfill the
-        # expenses row directly so it exact-matches make_sbi_statement.py's
-        # reference (2026-09, CA audit — see SIMPLE_ASSETS note above).
         cur.execute(
             "UPDATE expenses SET transaction_id=%s WHERE id=%s",
             (asset["reference"], result["expense_id"]),
@@ -1908,45 +1703,32 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
         print(f"  ✓ Asset    '{asset['asset_name']}' purchased on {asset['purchase_date']}")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# RECEIPTS / SALARY (payables + expenses) / RECEIVABLES / ADVANCE CREDIT
-# ═════════════════════════════════════════════════════════════════════════════
-
-# Varied receipt types spread across the FY to build a cash cushion before
-# the big May/Jun/Oct asset purchases (see seed_instruments_depreciation /
-# seed_simple_assets) and to demo the range of Cr-natured income accounts.
-# Only mode='cash' rows move the Running CiH figure (fn_cih_balance_asof
-# sums Cr(+)/Dr(-) across mode='cash' transactions only); 'bank'/'upi'/
-# 'cheque' rows are here purely for account/mode variety in the Ledger and
-# don't touch CiH. Ordered by receipt_date — keep it that way; the running
-# balance was hand-verified against seed_instruments_depreciation's and
-# seed_simple_assets' purchase dates to never go negative (see table below).
-#
-
+# Receipt types rekeyed:
+#   2311 -> 4210 (SocM)
+#   212  -> 4120 (SellAs)
+#   2318 -> 4230 (SocC)
+#   2317 -> 4220 (SocF)
+#   21111 -> 4112 (IntSav)
+#   23192 -> 4242 (DiwaliT)
+#   22   -> 3240 (Gifts)
 RECEIPT_TYPES = [
-    # (date, acc_id, particulars, amount, entity_key, role, mode, reference)
-    # reference matches the corresponding row's reference_no in
-    # database/make_sbi_statement.py — cheque_no for mode='cheque',
-    # transaction_id (bank/UPI ref) for every other mode. Added 2026-09
-    # (CA audit): previously always NULL, so bank reconciliation could
-    # only ever fuzzy-match, never auto-confirm on an exact hit.
-    ("2026-04-01", 2311,  "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
+    ("2026-04-01", 4210, "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
      "owner2", "apartment", "cash", "NEFT20260401A201"),
-    ("2026-04-02", 2311,  "Apartment Maintenance - Annual Bulk Payment A-102", 120000.00,
+    ("2026-04-02", 4210, "Apartment Maintenance - Annual Bulk Payment A-102", 120000.00,
      "owner4", "apartment", "cash", "NEFT20260402A102"),
-    ("2026-04-08", 212,   "Old Furniture Sold (scrap dealer pickup)", 3500.00,
+    ("2026-04-08", 4120, "Old Furniture Sold (scrap dealer pickup)", 3500.00,
      None, "other", "cash", "IMPS0408SCRAP"),
-    ("2026-04-22", 2318,  "NOC / Ownership Transfer Fee - A-102", 1000.00,
+    ("2026-04-22", 4230, "NOC / Ownership Transfer Fee - A-102", 1000.00,
      "owner4", "apartment", "cash", "NEFT0422NOC"),
-    ("2026-05-03", 2317,  "Late Maintenance Payment Fine - A-201", 500.00,
+    ("2026-05-03", 4220, "Late Maintenance Payment Fine - A-201", 500.00,
      "owner2", "apartment", "cash", "NEFT0503FINE"),
-    ("2026-07-20", 21111, "Savings Bank Interest Credited (SBI)", 850.00,
+    ("2026-07-20", 4112, "Savings Bank Interest Credited (SBI)", 850.00,
      None, "other", "bank", "INT0720SBI"),
-    ("2026-09-05", 23192, "Diwali Mela Stall Booking Fee", 4000.00,
+    ("2026-09-05", 4242, "Diwali Mela Stall Booking Fee", 4000.00,
      "vendor1", "vendor", "cash", "NEFT0905DIWALI"),
-    ("2026-12-25", 22,    "Corporate Sponsorship Gift - Winter Fete", 2500.00,
+    ("2026-12-25", 3240, "Corporate Sponsorship Gift - Winter Fete", 2500.00,
      "vendor2", "vendor", "cheque", "000512"),
-    ("2027-02-14", 2318,  "Community Event Ticket Sales", 1200.00,
+    ("2027-02-14", 4230, "Community Event Ticket Sales", 1200.00,
      None, "other", "upi", "UPI0214TICKET"),
 ]
 
@@ -1969,41 +1751,28 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
         "vendor2": _linked("vendor2"),
     }
 
-    # Admin-created, CONFIRMED receipt (e.g. hall booking fee). mode='cash'
-    # -> fn_save_receipt posts a single Cr PropInc leg only.
-    # trx_id populated (2026-09, CA audit) to match make_sbi_statement.py's
-    # NEFT0710HALL reference, so bank reconciliation can exact-match this
-    # row instead of only fuzzy-matching it.
+    # acc_ids rekeyed: 2318 -> 4230 (SocC); 213 -> 4130 (PropInc)
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Community Hall Booking Fee")):
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (society_id, 2318, "Community Hall Booking Fee", 2000.00,
+            (society_id, 4230, "Community Hall Booking Fee", 2000.00,
              apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, "NEFT0710HALL", None),
         )
         conn.commit()
         print("  ✓ Receipt (admin, CONFIRMED): Community Hall Booking Fee ₹2000")
 
-    # Security-created, UNCONFIRMED (pending) receipt — awaiting admin
-    # verify. Pending receipts don't post any transaction rows at all
-    # (fn_save_receipt only writes them once status='confirmed'), but the
-    # receipts row itself (and its reference) is written immediately, so
-    # it can still surface in the reconciliation picker for review.
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Visitor Parking Fee (gate collection)")):
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (society_id, 213, "Visitor Parking Fee (gate collection)", 300.00,
+            (society_id, 4130, "Visitor Parking Fee (gate collection)", 300.00,
              None, "other", "cash", "2026-07-16", security_user_id, None, "NEFT0716PARK", None),
         )
         conn.commit()
         print("  ✓ Receipt (security, UNCONFIRMED/pending): Visitor Parking Fee ₹300")
 
-    # Varied receipt types (scrap sale, NOC fee, late fine, bank interest,
-    # event/stall booking, gift, ticket sales) — see RECEIPT_TYPES above.
-    # All admin-created -> CONFIRMED immediately, same as the hall-booking
-    # receipt above.
-    for date, acc_id, particulars, amount, entity_key, role, mode, reference in RECEIPT_TYPES:
+    for date_, acc_id, particulars, amount, entity_key, role, mode, reference in RECEIPT_TYPES:
         if _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, particulars)):
             continue
@@ -2013,14 +1782,11 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
         cur.execute(
             "SELECT * FROM fn_save_receipt(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, acc_id, particulars, amount,
-             entity_id, role, mode, date, admin_uid, cheque_no, trx_id, None),
+             entity_id, role, mode, date_, admin_uid, cheque_no, trx_id, None),
         )
         conn.commit()
         print(f"  ✓ Receipt (admin, CONFIRMED, mode={mode}): {particulars} ₹{amount:g}")
 
-    # Salary handling:
-    # a) Roster-driven auto-generator: creates PENDING payables for
-    #    completed (closed) shifts that haven't been billed yet.
     cur.execute("SELECT fn_auto_generate_payables(%s)", (society_id,))
     conn.commit()
     cur.execute("SELECT COUNT(*) AS c FROM payables WHERE society_id=%s AND status='pending'",
@@ -2028,18 +1794,14 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     pending_count = cur.fetchone()["c"]
     print(f"  ✓ Salary payables auto-generated — {pending_count} pending (not yet paid)")
 
-    # b) One salary already PAID out-of-pocket by the admin, but recorded
-    #    directly (not via fn_save_expense) so it lands as an UNCONFIRMED
-    #    expense row awaiting the same admin-verification step receipts use.
-    #    transaction_id populated (2026-09, CA audit) to match
-    #    make_sbi_statement.py's NEFT0716SAL reference.
+    # Salary 235 -> 5150
     if not _one(cur, """SELECT 1 FROM expenses WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Salary advance - Ramu Singh (paid, pending confirmation)")):
         cur.execute(
             """INSERT INTO expenses
                (society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
                 amount, mode, status, tds_pct, tds_section, transaction_id, created_at)
-               VALUES (%s,%s,%s,'security',%s,235,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
+               VALUES (%s,%s,%s,'security',%s,5150,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
             (society_id, security_user_id, None, "2026-07-16",
              "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00,
              "NEFT0716SAL"),
@@ -2049,8 +1811,6 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
 
 
 def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid: int):
-    """Deliberately overpay one apartment's dues to exercise
-    fn_apply_advance_credit's FIFO drawdown against the newest receivable."""
     cur.execute("SELECT fn_auto_generate_receivables(%s)", (society_id,))
     conn.commit()
 
@@ -2076,7 +1836,7 @@ def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid
         print("  · Advance-credit overpayment already seeded — skipped.")
         return
 
-    overpay = round(float(outstanding) + 500.00, 2)  # pay 500 more than owed
+    overpay = round(float(outstanding) + 500.00, 2)
     cur.execute(
         "SELECT * FROM fn_pay_apartment_dues_fifo(%s,%s,%s,%s,%s)",
         (apt2_id, overpay, "cash", admin_uid, "Advance overpayment - B-202"),
@@ -2086,22 +1846,7 @@ def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid
           f"— generates an advance-credit row via fn_apply_advance_credit")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# POLLS
-# ═════════════════════════════════════════════════════════════════════════════
-
 def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
-    """One active poll (a few votes already cast, still open) and one
-    closed poll with a full vote spread and results declared. Votes are
-    cast through fn_cast_vote (not inserted directly into poll_votes) so
-    each poll's own vote-count bookkeeping stays consistent with however
-    that function tallies — same reason the money-writing seed steps go
-    through their own fn_* functions rather than raw INSERTs.
-
-    Votes must be cast BEFORE a poll's status flips away from 'active' —
-    fn_cast_vote itself refuses non-active polls — so the closed poll's
-    votes are cast first, then its status/results_announced_at are set
-    directly afterward."""
     for p in POLLS:
         row = _one(cur, "SELECT id, status FROM polls WHERE society_id=%s AND title=%s",
                    (society_id, p["title"]))
@@ -2114,7 +1859,6 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
         for i in range(len(choices), 5):
             choice_cols[f"choice_{i+1}"] = None
 
-        # Active polls end 30 days from creation; closed/results_declared polls ended in the past
         if p["status"] == "active":
             ends_at = "NOW() + INTERVAL '30 days'"
         else:
@@ -2161,6 +1905,7 @@ def run_seed(conn):
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
     print("  │        Seeding ApexEstateHub demo data (seed.py)         │")
+    print("  │        ⚠  BLOCK-COA — requires migration 001 + 002       │")
     print("  └─────────────────────────────────────────────────────────┘")
 
     society_id = seed_society(cur, conn)
@@ -2171,8 +1916,8 @@ def run_seed(conn):
     users = seed_users(cur, conn, society_id)
 
     admin_uid = users["admin@sunriseresidency.com"]["user_id"]
-    apt1_id = users["owner1@sunriseresidency.com"]["linked_id"]   # A-101
-    apt2_id = users["owner3@sunriseresidency.com"]["linked_id"]   # B-202
+    apt1_id = users["owner1@sunriseresidency.com"]["linked_id"]
+    apt2_id = users["owner3@sunriseresidency.com"]["linked_id"]
     security_uid_1 = users["guard1@sunriseresidency.com"]["user_id"]
     security_lid_1 = users["guard1@sunriseresidency.com"]["linked_id"]
     security_uid_2 = users["guard2@sunriseresidency.com"]["user_id"]
