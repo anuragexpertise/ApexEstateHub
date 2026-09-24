@@ -220,7 +220,7 @@ RECEIPT_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Vendor Pass (1day) — {r.get('name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Society Charge',               # acc 2318
+        'account_hint': 'Society Charge',               # acc 4230
         'role': 'vendor',
     },
     'vendor_pass_7day': {
@@ -228,7 +228,7 @@ RECEIPT_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Vendor Pass (7day) — {r.get('name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Society Charge',               # acc 2318
+        'account_hint': 'Society Charge',               # acc 4230
         'role': 'vendor',
     },
     'vendor_pass_1mth': {
@@ -236,7 +236,7 @@ RECEIPT_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Vendor Pass (1mth) — {r.get('name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Society Charge',               # acc 2318
+        'account_hint': 'Society Charge',               # acc 4230
         'role': 'vendor',
     },
     'donation': {
@@ -250,7 +250,7 @@ RECEIPT_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Event Income — {r.get('title', _dd_mon_yyyy(d))}"
         ),
-        'account_hint': 'Society Charge',               # acc 2318 (or event-specific)
+        'account_hint': 'Society Charge',               # acc 4230 (or event-specific)
         'role': 'other',
     },
     'asset_sale': {
