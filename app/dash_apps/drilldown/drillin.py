@@ -197,7 +197,7 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "mode": "single",
         "table": "accounts",
         "label": "Ticket Income Account",
-        "filter": "parent_account_id=2319",
+        "filter": "parent_account_id=4240",# not robust
     },
     ("event_tickets", "acc_id"): {
         "mode": "single",

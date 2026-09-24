@@ -2886,16 +2886,16 @@ def render_form_card(card_id: str, title: str, icon: str,
                 ),
             ]
         elif ftype == "account_dropdown_event_ticket":
-            # Only NULL, or the "Event Ticket" (2319) header itself, or one
-            # of its direct children (e.g. "Holi" = 23191) — an event isn't
+            # Only NULL, or the "Event Ticket" (4240) header itself, or one
+            # of its direct children (e.g. "Holi" = 4241) — an event isn't
             # allowed to post to an unrelated account.
             _acc_opts = [{"label": "— None —", "value": ""}]
             if society_id:
                 try:
                     _rows = db._execute(
                         "SELECT id, name FROM accounts "
-                        "WHERE society_id=%s AND (id=2319 OR parent_account_id=2319) "
-                        "ORDER BY (id=2319) DESC, name",
+                        "WHERE society_id=%s AND (id=4240 OR parent_account_id=4240) " # not robust
+                        "ORDER BY (id=4240) DESC, name", # not robust
                         (society_id,),
                         fetch_all=True,
                     ) or []
@@ -5033,7 +5033,7 @@ def render_vendor_pass_card(
             ),
             dcc.Input(
                 id={"type": "form-field-hidden", "entity": entity_name, "field": "acc_id"},
-                type="hidden", value="2318",
+                type="hidden", value="4230", #SocC
             ),
             dbc.Row([
                 dbc.Col(dbc.Label("Income Account *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4, style={"paddingTop": "6px"}),
