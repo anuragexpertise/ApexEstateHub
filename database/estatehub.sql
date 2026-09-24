@@ -2623,14 +2623,12 @@ BEGIN
 
     SELECT id INTO v_cgst_acc_id FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%CGST Payable%'
-      AND drcr_account = 'Cr'
+      AND tab_name = 'CGST'
     LIMIT 1;
 
     SELECT id INTO v_sgst_acc_id FROM accounts
     WHERE society_id = p_society_id
-      AND name ILIKE '%SGST Payable%'
-      AND drcr_account = 'Cr'
+      AND tab_name = 'SGST'
     LIMIT 1;
 
     FOR apt IN
@@ -5462,13 +5460,11 @@ DECLARE
     v_sgst INT;
 BEGIN
     SELECT id INTO v_cgst FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr'
-      AND name ILIKE '%CGST Payable%'
+    WHERE society_id = p_society_id AND tab_name = 'CGST'
     LIMIT 1;
 
     SELECT id INTO v_sgst FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr'
-      AND name ILIKE '%SGST Payable%'
+    WHERE society_id = p_society_id AND tab_name = 'SGST'
     LIMIT 1;
 
     RETURN QUERY SELECT v_cgst, v_sgst;  -- NULLs if not found — caller treats that as "GST not configured"
@@ -5493,13 +5489,13 @@ DECLARE
     v_cgst INT; v_sgst INT; v_igst INT; v_itc INT;
 BEGIN
     SELECT id INTO v_cgst FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr' AND name ILIKE '%CGST Payable (RCM)%' LIMIT 1;
+    WHERE society_id = p_society_id AND tab_name = 'CGSTRCM' LIMIT 1;
     SELECT id INTO v_sgst FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr' AND name ILIKE '%SGST Payable (RCM)%' LIMIT 1;
+    WHERE society_id = p_society_id AND tab_name = 'SGSTRCM' LIMIT 1;
     SELECT id INTO v_igst FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr' AND name ILIKE '%IGST Payable (RCM)%' LIMIT 1;
+    WHERE society_id = p_society_id AND tab_name = 'IGSTRCM' LIMIT 1;
     SELECT id INTO v_itc FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Dr' AND name ILIKE '%Input Tax Credit%' LIMIT 1;
+    WHERE society_id = p_society_id AND tab_name = 'ITCRCM' LIMIT 1;
 
     RETURN QUERY SELECT v_cgst, v_sgst, v_igst, v_itc;  -- NULLs if not configured — caller warns and falls back
 END;
@@ -7755,30 +7751,25 @@ BEGIN
     WITH closing AS (
         SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
     ),
-    cap_ac AS (
-        SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
+    pl_roots AS (
+        SELECT sort_path, tab_name
+        FROM closing
+        WHERE tab_name IN ('Inc', 'Exp')
     ),
     pl_accs AS (
-        -- Fixed (2026-09, live-tested, corrected after a follow-up
-        -- investigation): the previous fix here restricted to leaf
-        -- accounts to solve double-counting, but that broke a different
-        -- way — some accounts (e.g. "Income Expenditure A/c") are BOTH a
-        -- rollup header AND directly posted to themselves (a real
-        -- ₹1,650 depreciation-transfer entry landed there), so
-        -- leaf-restriction silently dropped their own balance entirely.
-        -- own_closing (this account's own movement only, never a subtree
-        -- rollup — see fn_fy_closing_report) is the right column: it
-        -- naturally avoids double-counting AND naturally includes
-        -- hybrid header+leaf accounts, with no leaf/header distinction
-        -- needed at all.
-        SELECT c.*, a.mutuality_nature
+        SELECT c.*, a.mutuality_nature,
+               (SELECT pr.tab_name FROM pl_roots pr
+                 WHERE c.sort_path LIKE pr.sort_path || '.%'
+                 ORDER BY pr.sort_path
+                 LIMIT 1) AS block_tab
         FROM closing c
         LEFT JOIN accounts a ON a.id = c.account_id
-        CROSS JOIN cap_ac ca
-        WHERE ca.sort_path IS NOT NULL
-          AND c.sort_path LIKE ca.sort_path || '.%'
-          AND c.own_closing IS NOT NULL
+        WHERE c.own_closing IS NOT NULL
           AND c.own_closing != 0
+          AND EXISTS (
+              SELECT 1 FROM pl_roots pr
+              WHERE c.sort_path LIKE pr.sort_path || '.%'
+          )
     ),
     income_accs AS (
         -- Fixed alongside the above: ABS(total_closing) turned a
@@ -7795,7 +7786,7 @@ BEGIN
                pa.own_closing::NUMERIC(15,2) AS amount,
                pa.mutuality_nature
         FROM pl_accs pa
-        WHERE pa.drcr_account = 'Cr'
+        WHERE pa.block_tab = 'Inc'
     ),
     expense_accs AS (
         SELECT 'Expenditure'::VARCHAR AS statement_section,
@@ -7804,7 +7795,7 @@ BEGIN
                (-pa.own_closing)::NUMERIC(15,2) AS amount,
                pa.mutuality_nature
         FROM pl_accs pa
-        WHERE pa.drcr_account = 'Dr'
+        WHERE pa.block_tab = 'Exp'
     ),
     totals AS (
         SELECT COALESCE(SUM(ia.amount), 0) AS income_total
@@ -7868,18 +7859,23 @@ BEGIN
     cap_ac AS (
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
+    pl_roots AS (
+        SELECT sort_path FROM closing WHERE tab_name IN ('Inc', 'Exp')
+    ),
     bs_accs AS (
         SELECT c.*, a.mutuality_nature
         FROM closing c
         LEFT JOIN accounts a ON a.id = c.account_id
         CROSS JOIN cap_ac ca
         WHERE c.own_closing IS NOT NULL
-          -- Show ALL balance-sheet children of Bal (at any depth), including
-          -- zero-balance accounts — a 0 line is still a real chart-of-account
-          -- item that must render (per ld.xlsx 'Bal' reference format).
           AND (ca.sort_path IS NULL
                OR (c.sort_path NOT LIKE ca.sort_path || '.%'
                    AND c.sort_path != ca.sort_path))
+          AND NOT EXISTS (
+              SELECT 1 FROM pl_roots pr
+              WHERE c.sort_path = pr.sort_path
+                 OR c.sort_path LIKE pr.sort_path || '.%'
+          )
     ),
     asset_accs AS (
         -- Fixed alongside the above: the previous "ABS if negative, else
@@ -7921,11 +7917,12 @@ BEGIN
     ie_surplus AS (
         SELECT COALESCE(SUM(c.own_closing), 0) AS surplus
         FROM closing c
-        CROSS JOIN cap_ac ca
-        WHERE ca.sort_path IS NOT NULL
-          AND c.sort_path LIKE ca.sort_path || '.%'
-          AND c.own_closing IS NOT NULL
+        WHERE c.own_closing IS NOT NULL
           AND c.own_closing != 0
+          AND EXISTS (
+              SELECT 1 FROM pl_roots pr
+              WHERE c.sort_path LIKE pr.sort_path || '.%'
+          )
     ),
     cap_ac_own AS (
         SELECT c.account_id, c.account_name, c.own_closing, a.mutuality_nature,
@@ -10041,13 +10038,11 @@ DECLARE
     v_sgst_acc INT;
 BEGIN
     SELECT id INTO v_cgst_acc FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr'
-      AND name ILIKE '%CGST Payable%'
+    WHERE society_id = p_society_id AND tab_name = 'CGST'
     LIMIT 1;
 
     SELECT id INTO v_sgst_acc FROM accounts
-    WHERE society_id = p_society_id AND drcr_account = 'Cr'
-      AND name ILIKE '%SGST Payable%'
+    WHERE society_id = p_society_id AND tab_name = 'SGST'
     LIMIT 1;
 
     RETURN QUERY

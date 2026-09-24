@@ -4370,7 +4370,7 @@ def _save_vendor_pass(db, d, sid):
     if pass_type != "free_1mth" and mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payables", None
 
-    acc_id = 4230
+    acc_id = 4230 # SocC
 
     particulars = (d.get("particulars") or "").strip()
     if not particulars:
