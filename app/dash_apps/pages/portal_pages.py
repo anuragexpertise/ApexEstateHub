@@ -235,14 +235,17 @@ def _drill_panel() -> html.Div:
     return html.Div(
         [
             html.Div(id="drill-breadcrumb"),
-            html.Div(
-                id="drill-content",
-                children=html.Div([
-                    html.I(className="fas fa-hand-pointer fa-2x mb-3",
-                           style={"color": "rgba(29,116,216,0.18)"}),
-                    html.P("Click any KPI card above to explore →",
-                           className="text-muted", style={"fontSize": "13px"}),
-                ], className="text-center", style={"padding": "6px 2px"}),
+            dcc.Loading(
+                html.Div(
+                    id="drill-content",
+                    children=html.Div([
+                        html.I(className="fas fa-hand-pointer fa-2x mb-3",
+                               style={"color": "rgba(29,116,216,0.18)"}),
+                        html.P("Click any KPI card above to explore →",
+                               className="text-muted", style={"fontSize": "13px"}),
+                    ], className="text-center", style={"padding": "6px 2px"}),
+                ),
+                type="circle", color="#1d74d8",
             ),
         ],
         style={

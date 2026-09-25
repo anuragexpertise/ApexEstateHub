@@ -829,13 +829,25 @@ def render_list_card(card_id: str, title: str, icon: str,
                 ))
 
             if "delete" in row_actions_allowed:
-                action_btns.append(dbc.Button(
-                    html.I(className="fas fa-trash-alt"),
+                _delete_label = to_singular(entity).replace("_", " ")
+                # NOTE: dcc.ConfirmDialogProvider's popup silently fails to
+                # appear when wrapping a dbc.Button (open dash-bootstrap-
+                # components bug — the click sinks straight to n_clicks
+                # instead of surfacing the browser confirm). We use a plain
+                # html.Button styled with the equivalent Bootstrap utility
+                # classes ("btn btn-sm btn-outline-danger") so it looks and
+                # behaves identically to the dbc.Button used elsewhere in
+                # this row, while remaining compatible with ConfirmDialogProvider.
+                action_btns.append(dcc.ConfirmDialogProvider(
+                    children=html.Button(
+                        html.I(className="fas fa-trash-alt"),
+                        className="btn btn-sm btn-outline-danger",
+                        title="Delete record",
+                        style={"fontSize": "11px", "padding": "3px 7px",
+                               "borderRadius": "7px"},
+                    ),
                     id={"type": "list-delete", "entity": entity, "pk": pk_val},
-                    size="sm", color="danger", outline=True,
-                    title="Delete record",
-                    style={"fontSize": "11px", "padding": "3px 7px",
-                           "borderRadius": "7px"},
+                    message=f"Delete this {_delete_label}? This cannot be undone.",
                 ))
 
             if entity == "receipts" and role == "admin" and row_dict.get("status") == "pending":

@@ -519,7 +519,12 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-view", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-row", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-edit", "entity": ALL, "pk": ALL}, "n_clicks"),
-        Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "n_clicks"),
+        # NOTE: "submit_n_clicks", not "n_clicks" — the list-delete id now
+        # lives on a dcc.ConfirmDialogProvider (native browser Yes/No gate)
+        # wrapping the delete button; submit_n_clicks only increments when
+        # the user confirms, so a Cancel click never reaches this callback.
+        # See the ConfirmDialogProvider wiring in drilldown/renderers.py.
+        Input({"type": "list-delete", "entity": ALL, "pk": ALL}, "submit_n_clicks"),
         Input({"type": "list-confirm", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-confirm-bill-group", "entity": ALL, "pk": ALL}, "n_clicks"),
         Input({"type": "list-reject-bill-group", "entity": ALL, "pk": ALL}, "n_clicks"),
