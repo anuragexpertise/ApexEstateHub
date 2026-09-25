@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 
-import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, clientside_callback, dcc, html, no_update
+from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.loaders import _is_db_error
 from app.dash_apps.pages.card_catalogue import (
@@ -51,6 +51,13 @@ def _layout_key(portal: str | None, tab: str | None) -> str:
     p = portal or "all"
     t = tab    or "all"
     return f"dashboard_layout_{p}_{t}"
+
+
+def _card_group(card_id: str) -> str:
+    """Group shown on the palette card — make_kpi_card renders KPI_CARDS' own
+    group as the card subtitle, so filtering must key on the same value or the
+    dropdown offers groups the user cannot see on any card."""
+    return KPI_CARDS.get(card_id, {}).get("group") or "Other"
  
  
 _SORTABLE_JS = """
@@ -204,53 +211,23 @@ def register_customize_callbacks(app):
         Output("active-count-badge", "children"),
         Output("dnd-init-dummy",     "children"),
         Output("layout-group-filter", "options"),
-        Output("layout-group-filter", "value", allow_duplicate=True),
         Input("portal-content",      "children"),      # fires when Customize page renders
         Input("layout-portal-select","value"),
         Input("layout-tab-select",   "value"),
-        Input("layout-palette-search", "value"),
-        Input("layout-group-filter",  "value"),
         State("auth-store",          "data"),
         prevent_initial_call="initial_duplicate",
     )
     @require_session
-    def load_layout(_dummy_id, portal, tab, palette_search, group_filter, auth_data):
+    def load_layout(_dummy_id, portal, tab, auth_data):
         society_id = get_current_society_id()
         role       = get_current_user_role() or 'admin'
- 
+
         # ── Palette: all KPIs for this portal+tab ─────────────────────────
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
-        group_by_card = {}
-        try:
-            from app.dash_apps.callbacks.customize_kpi_callbacks import _KPI_PORTAL_ENTRIES
-            group_by_card = {
-                cid: group for cid, entry_portal, entry_tab, group in _KPI_PORTAL_ENTRIES
-                if entry_portal == portal and entry_tab == tab
-            }
-        except Exception:
-            group_by_card = {}
-        groups = sorted({
-            (group_by_card.get(cid) or KPI_CARDS.get(cid, {}).get("group") or "Other")
-            for cid in palette_ids
-        })
-        group_options = [{"label": group, "value": group} for group in groups]
-        needle = (palette_search or "").strip().lower()
-        selected_group = group_filter or ""
+        group_options = [{"label": g, "value": g} for g in sorted({
+            _card_group(cid) for cid in palette_ids
+        })]
 
-        def _matches(cid):
-            if selected_group and (group_by_card.get(cid) or KPI_CARDS.get(cid, {}).get("group") or "Other") != selected_group:
-                return False
-            if not needle:
-                return True
-            cfg = KPI_CARDS.get(cid, {})
-            haystack = " ".join(str(part) for part in (
-                cid, cfg.get("title", ""), cfg.get("group", ""),
-                group_by_card.get(cid, ""), tab or "",
-            )).lower()
-            return needle in haystack
-
-        available_ids = [cid for cid in palette_ids if _matches(cid)]
- 
         # ── Active zone: load saved layout for this portal+tab ────────────
         # Default active KPIs for this portal+tab come from DEFAULT_LAYOUTS
         # — the same single source of truth the live dashboards render from,
@@ -258,7 +235,7 @@ def register_customize_callbacks(app):
         default_active = list(
             DEFAULT_LAYOUTS.get(portal or role, {}).get(tab, [])
         ) or palette_ids[:4]
- 
+
         saved_active: list[str] = []
         if society_id and portal and tab:
             key = _layout_key(portal, tab)
@@ -275,22 +252,23 @@ def register_customize_callbacks(app):
                                     if c in KPI_CARDS]
             except Exception as e:
                 print(f"load_layout DB error: {e}")
- 
+
         active_ids    = saved_active if saved_active else default_active
         active_ids    = active_ids[:12]
-        # Palette shows the filtered KPI set (the active zone is independent)
- 
-        values    = _fetch_kpi_values(society_id, set(active_ids) | set(available_ids))
-        layout    = {"active": active_ids, "available": available_ids}
+        # The store keeps the FULL palette: it is what save_layout persists,
+        # so a filtered/searched palette must never shrink the saved record.
+
+        values    = _fetch_kpi_values(society_id, set(active_ids) | set(palette_ids))
+        layout    = {"active": active_ids, "available": list(palette_ids)}
         badge_txt = f"{len(active_ids)} / 12 active"
         signal    = (f"loaded-{len(active_ids)}-"
                      f"{portal or 'all'}-{tab or 'all'}")
- 
+
         active_cards = [make_kpi_card(c, values.get(c, "—"))
                         for c in active_ids]
         palette_cards = [make_kpi_card(c, values.get(c, "—"))
-                         for c in available_ids]
- 
+                         for c in palette_ids]
+
         if not active_cards:
             active_cards = [html.Div(
                 [html.I(className="fas fa-arrow-down me-2"),
@@ -304,11 +282,63 @@ def register_customize_callbacks(app):
                 style={"color": "#aaa", "fontSize": "12px",
                        "textAlign": "center", "padding": "20px"},
             )]
- 
-        triggered_id = dash.callback_context.triggered_id
-        next_group = None if triggered_id in ("layout-portal-select", "layout-tab-select") else group_filter
-        return (active_cards, palette_cards, layout, badge_txt, signal, group_options, next_group)
- 
+
+        return (active_cards, palette_cards, layout, badge_txt, signal, group_options)
+
+    # ── Palette search / group filter: renders the palette only ──────────────
+    # Kept out of load_layout so typing never re-runs the saved-layout DB read
+    # or rebuilds the active zone.
+    @app.callback(
+        Output("dnd-palette-zone", "children", allow_duplicate=True),
+        Input("layout-portal-select", "value"),
+        Input("layout-tab-select",    "value"),
+        Input("layout-palette-search","value"),
+        Input("layout-group-filter",  "value"),
+        State("auth-store",           "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def filter_palette(portal, tab, palette_search, group_filter, auth_data):
+        if not portal or not tab:
+            raise PreventUpdate
+        palette_ids = _kpi_ids_for_portal_tab(portal, tab)
+        needle      = (palette_search or "").strip().lower()
+        selected    = group_filter or ""
+
+        matches = [
+            cid for cid in palette_ids
+            if (not selected or _card_group(cid) == selected)
+            and (not needle or needle in " ".join(str(part) for part in (
+                cid, KPI_CARDS.get(cid, {}).get("title", ""),
+                KPI_CARDS.get(cid, {}).get("group", ""), tab,
+            )).lower())
+        ]
+
+        if not matches:
+            message = ("No cards match your search or filter" if (needle or selected)
+                       else "All KPIs are already in the active zone")
+            return html.Div(
+                message,
+                style={"color": "#aaa", "fontSize": "12px",
+                       "textAlign": "center", "padding": "20px"},
+            )
+
+        values = _fetch_kpi_values(
+            get_current_society_id(), set(matches),
+        )
+        return [make_kpi_card(c, values.get(c, "—")) for c in matches]
+
+    # ── Reset the group filter whenever the portal/tab context changes ───────
+    @app.callback(
+        Output("layout-group-filter", "value", allow_duplicate=True),
+        Input("layout-portal-select", "value"),
+        Input("layout-tab-select",    "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def reset_group_filter(portal, tab):
+        return None
+
     # ── Save layout per portal+tab ────────────────────────────────────────────
     @app.callback(
         Output("layout-status-msg", "children"),

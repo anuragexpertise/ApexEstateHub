@@ -36,6 +36,7 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
+from app.security.guards import require_session
 from app.utils.ux_toasts import error_toast
 
 
@@ -55,26 +56,30 @@ def _db_ok() -> bool:
         return False
 
 
+# Canonical tab → pathname map, one entry per page _portal_content() can
+# actually render for that role. A tab missing here has no reachable URL
+# (e.g. security "cashbook"/"charges"/"payables" are page branches with no
+# pathname behind them), so cards declared only under such tabs are not
+# searchable — pointing them at some other page would land the user on a
+# screen that does not show the card they searched for.
 _SEARCH_TAB_ROUTES = {
     "admin": {
         "dashboard": "/dashboard/admin-portal",
         "financials": "/dashboard/financials",
-        "cashbook": "/dashboard/financials",
-        "receipts": "/dashboard/financials",
-        "expenses": "/dashboard/financials",
+        "cashbook": "/dashboard/cashbook",
+        "receipts": "/dashboard/receipts",
+        "expenses": "/dashboard/expenses",
         "enrolled": "/dashboard/enrolled",
         "events": "/dashboard/events",
         "concerns": "/dashboard/concerns",
         "polls": "/dashboard/polls",
-        "channels": "/dashboard/channels",
         "settings": "/dashboard/settings",
     },
     "apartment": {
         "dashboard": "/dashboard/owner-portal",
-        "cashbook": "/dashboard/owner-financials",
-        "payables": "/dashboard/owner-financials",
-        "charges": "/dashboard/owner-financials",
-        "financials": "/dashboard/owner-financials",
+        "cashbook": "/dashboard/owner-cashbook",
+        "charges": "/dashboard/owner-charges",
+        "payables": "/dashboard/owner-receivables",
         "events": "/dashboard/owner-events",
         "concerns": "/dashboard/owner-concerns",
         "polls": "/dashboard/owner-polls",
@@ -82,31 +87,24 @@ _SEARCH_TAB_ROUTES = {
     },
     "vendor": {
         "dashboard": "/dashboard/vendor-portal",
-        "cashbook": "/dashboard/vendor-financials",
-        "charges": "/dashboard/vendor-financials",
-        "financials": "/dashboard/vendor-financials",
+        "cashbook": "/dashboard/vendor-cashbook",
+        "charges": "/dashboard/vendor-charges",
         "events": "/dashboard/vendor-events",
         "concerns": "/dashboard/vendor-concerns",
-        "passes": "/dashboard/vendor-passes",
         "settings": "/dashboard/vendor-settings",
     },
     "security": {
         "dashboard": "/dashboard/security-users",
         "pass_evaluation": "/dashboard/pass-evaluation",
         "security_channels": "/dashboard/security-channels",
-        "channels": "/dashboard/security-channels",
-        "cashbook": "/dashboard/security-receipts",
-        "receipt": "/dashboard/security-receipts",
-        "events": "/dashboard/security-events",
         "security_concerns": "/dashboard/security-concerns",
-        "concerns": "/dashboard/security-concerns",
-        "charges": "/dashboard/security-receipts",
-        "payables": "/dashboard/security-receipts",
+        "receipt": "/dashboard/security-receipt",
+        "security_receipts": "/dashboard/security-receipts",
+        "events": "/dashboard/security-events",
         "settings": "/dashboard/security-settings",
     },
     "master": {
         "dashboard": "/dashboard/master-societies",
-        "settings": "/dashboard/master-settings",
     },
 }
 
@@ -126,25 +124,32 @@ _SEARCH_SYNONYMS = {
 
 def _search_route(portal: str, tab: str) -> str:
     routes = _SEARCH_TAB_ROUTES.get(portal, {})
-    return routes.get(tab, _SEARCH_TAB_ROUTES.get(portal, {}).get("dashboard", "/dashboard/"))
+    return routes.get(tab) or routes.get("dashboard", "/dashboard/")
 
 
 def _search_index(role: str) -> list[dict]:
     from app.dash_apps.pages.card_catalogue import KPI_CARDS
     from app.dash_apps.callbacks.customize_kpi_callbacks import _KPI_PORTAL_ENTRIES
 
-    seen = set()
+    routes = _SEARCH_TAB_ROUTES.get(role, {})
+    indexed: set = set()
+    # Cards first declared under a tab with no reachable page, so a later
+    # declaration under a routable tab can still claim them.
+    unroutable: set = set()
     index = []
     for card_id, portal, tab, group in _KPI_PORTAL_ENTRIES:
-        if portal != role or card_id in seen or card_id not in KPI_CARDS:
+        if portal != role or card_id in indexed or card_id not in KPI_CARDS:
             continue
-        seen.add(card_id)
+        if tab not in routes:
+            unroutable.add(card_id)
+            continue
+        unroutable.discard(card_id)
+        indexed.add(card_id)
         cfg = KPI_CARDS.get(card_id, {})
         title = cfg.get("title", card_id)
         terms = " ".join(
             str(part) for part in (
                 card_id, title, group, portal, tab.replace("_", " "),
-                _SEARCH_SYNONYMS.get(title.lower(), ""),
             )
         ).lower()
         index.append({
@@ -585,6 +590,7 @@ def register_shell_callbacks(app):
         Input("global-card-search-btn", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def open_global_card_search(n):
         if not n:
             raise PreventUpdate
@@ -593,10 +599,10 @@ def register_shell_callbacks(app):
     @app.callback(
         Output("global-card-search-results", "children"),
         Input("global-card-search-input", "value"),
-        State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def update_global_card_search(query, auth):
+    @require_session
+    def update_global_card_search(query):
         return _search_results(query or "", get_current_user_role())
 
     @app.callback(
@@ -604,10 +610,10 @@ def register_shell_callbacks(app):
         Output("global-card-search-modal", "is_open", allow_duplicate=True),
         Input({"type": "global-card-search-result", "index": ALL}, "n_clicks"),
         State("global-card-search-input", "value"),
-        State("auth-store", "data"),
         prevent_initial_call=True,
     )
-    def navigate_global_card_search(clicks, query, auth):
+    @require_session
+    def navigate_global_card_search(clicks, query):
         role = get_current_user_role()
         if not role or not query:
             raise PreventUpdate
@@ -849,8 +855,8 @@ def register_shell_callbacks(app):
         user_id    = server_user_id
         email      = auth.get("email", "")
         db = _db()
-        role_key = "master" if role == "master" else role
-        role_label = ROLE_CONFIG.get(role_key, ROLE_CONFIG["admin"])["label"]
+        role_cfg  = ROLE_CONFIG.get(role, ROLE_CONFIG["admin"])
+        role_label = role_cfg["label"]
 
         # Hardened copy of auth-store's dict — same shape everything
         # downstream already expects, but role/society_id/linked_id (and
@@ -933,12 +939,9 @@ def register_shell_callbacks(app):
         if society_bg_url:
             app_root_style["--portal-bg"] = f"url({society_bg_url})"
 
-        is_master = role == "master"
-        key = "master" if is_master else (role or "admin")
-        cfg = ROLE_CONFIG.get(key, ROLE_CONFIG["admin"])
         portal_style = {
             "fontWeight": "700", "fontSize": "20px",
-            "color": cfg["color"], "minWidth": "160px", "textAlign": "center",
+            "color": role_cfg["color"], "minWidth": "160px", "textAlign": "center",
         }
         avatar = (user_name or "?")[0].upper()
 
@@ -947,7 +950,7 @@ def register_shell_callbacks(app):
             {"rendered": True, "ts": time.time()},
             _make_nav_items(role, society_id, pathname, verified_auth.get("user_type")),
             _breadcrumb(pathname),
-            cfg["label"], portal_style,
+            role_label, portal_style,
             user_name, role_label, avatar,
             user_name, avatar,
             society_name, society_logo,
