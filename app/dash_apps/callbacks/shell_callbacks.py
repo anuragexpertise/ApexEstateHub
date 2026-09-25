@@ -55,7 +55,162 @@ def _db_ok() -> bool:
         return False
 
 
-# ── Navigation helpers ────────────────────────────────────────────────────────
+_SEARCH_TAB_ROUTES = {
+    "admin": {
+        "dashboard": "/dashboard/admin-portal",
+        "financials": "/dashboard/financials",
+        "cashbook": "/dashboard/financials",
+        "receipts": "/dashboard/financials",
+        "expenses": "/dashboard/financials",
+        "enrolled": "/dashboard/enrolled",
+        "events": "/dashboard/events",
+        "concerns": "/dashboard/concerns",
+        "polls": "/dashboard/polls",
+        "channels": "/dashboard/channels",
+        "settings": "/dashboard/settings",
+    },
+    "apartment": {
+        "dashboard": "/dashboard/owner-portal",
+        "cashbook": "/dashboard/owner-financials",
+        "payables": "/dashboard/owner-financials",
+        "charges": "/dashboard/owner-financials",
+        "financials": "/dashboard/owner-financials",
+        "events": "/dashboard/owner-events",
+        "concerns": "/dashboard/owner-concerns",
+        "polls": "/dashboard/owner-polls",
+        "settings": "/dashboard/owner-settings",
+    },
+    "vendor": {
+        "dashboard": "/dashboard/vendor-portal",
+        "cashbook": "/dashboard/vendor-financials",
+        "charges": "/dashboard/vendor-financials",
+        "financials": "/dashboard/vendor-financials",
+        "events": "/dashboard/vendor-events",
+        "concerns": "/dashboard/vendor-concerns",
+        "passes": "/dashboard/vendor-passes",
+        "settings": "/dashboard/vendor-settings",
+    },
+    "security": {
+        "dashboard": "/dashboard/security-users",
+        "pass_evaluation": "/dashboard/pass-evaluation",
+        "security_channels": "/dashboard/security-channels",
+        "channels": "/dashboard/security-channels",
+        "cashbook": "/dashboard/security-receipts",
+        "receipt": "/dashboard/security-receipts",
+        "events": "/dashboard/security-events",
+        "security_concerns": "/dashboard/security-concerns",
+        "concerns": "/dashboard/security-concerns",
+        "charges": "/dashboard/security-receipts",
+        "payables": "/dashboard/security-receipts",
+        "settings": "/dashboard/security-settings",
+    },
+    "master": {
+        "dashboard": "/dashboard/master-societies",
+        "settings": "/dashboard/master-settings",
+    },
+}
+
+_SEARCH_SYNONYMS = {
+    "dues": "receivables receivables_overdue maintenance payables amount",
+    "complaint": "concerns concern issue",
+    "money": "cashbook receipts expenses ledger bank cash",
+    "income": "receipts revenue",
+    "gate": "gate security channels attendance pass",
+    "member": "apartments apartment residents",
+    "staff": "security security_staff guards",
+    "supplier": "vendors vendor payables",
+    "compliance": "gst tds settings compliance",
+    "tax": "tds gst tax",
+}
+
+
+def _search_route(portal: str, tab: str) -> str:
+    routes = _SEARCH_TAB_ROUTES.get(portal, {})
+    return routes.get(tab, _SEARCH_TAB_ROUTES.get(portal, {}).get("dashboard", "/dashboard/"))
+
+
+def _search_index(role: str) -> list[dict]:
+    from app.dash_apps.pages.card_catalogue import KPI_CARDS
+    from app.dash_apps.callbacks.customize_kpi_callbacks import _KPI_PORTAL_ENTRIES
+
+    seen = set()
+    index = []
+    for card_id, portal, tab, group in _KPI_PORTAL_ENTRIES:
+        if portal != role or card_id in seen or card_id not in KPI_CARDS:
+            continue
+        seen.add(card_id)
+        cfg = KPI_CARDS.get(card_id, {})
+        title = cfg.get("title", card_id)
+        terms = " ".join(
+            str(part) for part in (
+                card_id, title, group, portal, tab.replace("_", " "),
+                _SEARCH_SYNONYMS.get(title.lower(), ""),
+            )
+        ).lower()
+        index.append({
+            "card_id": card_id,
+            "title": title,
+            "group": group or cfg.get("group", ""),
+            "portal": portal,
+            "tab": tab,
+            "terms": terms,
+        })
+    return index
+
+
+def _search_matches(items: list[dict], query: str) -> list[dict]:
+    words = set((query or "").strip().lower().split())
+    terms = set(words)
+    for word in words:
+        terms.update(_SEARCH_SYNONYMS.get(word, "").split())
+    if not terms:
+        return []
+    return [item for item in items if any(term in item["terms"] for term in terms)]
+
+
+def _search_results(query: str, role: str):
+    from dash import html as _html
+    from dash import dbc as _dbc
+
+    if not query:
+        return _html.Div(
+            [_html.I(className="fas fa-compass me-2"),
+             "Search by card name, group, or what you want to do."],
+            className="text-muted",
+            style={"fontSize": "13px", "padding": "18px 6px"},
+        )
+    if not role:
+        return _html.Div("Sign in to search dashboard cards.",
+                         className="text-muted", style={"fontSize": "13px", "padding": "18px 6px"})
+    needle = query.strip().lower()
+    matches = _search_matches(_search_index(role), needle)
+    matches.sort(key=lambda item: (0 if needle in item["title"].lower() else 1, item["title"]))
+    if not matches:
+        return _html.Div(
+            [_html.I(className="fas fa-search me-2"), f"No cards match “{query.strip()}”."],
+            className="text-muted",
+            style={"fontSize": "13px", "padding": "18px 6px"},
+        )
+    return [
+        _dbc.Button(
+            [
+                _html.Span(_html.I(className="fas fa-chart-bar"), className="global-card-search-result-icon"),
+                _html.Span(
+                    [
+                        _html.Div(item["title"], style={"fontWeight": "600", "fontSize": "13px"}),
+                        _html.Div(f"{item['group'] or 'Dashboard'} · {item['tab'].replace('_', ' ').title()}",
+                                  className="global-card-search-result-meta"),
+                    ],
+                ),
+                _html.I(className="fas fa-chevron-right ms-auto", style={"color": "#c2cdda", "fontSize": "11px"}),
+            ],
+            id={"type": "global-card-search-result", "index": index},
+            n_clicks=0,
+            className="global-card-search-result",
+            color="light",
+        )
+        for index, item in enumerate(matches[:25])
+    ]
 
 def _make_nav_items(role, society_id, pathname, user_type=None):
     """
@@ -424,7 +579,53 @@ def register_shell_callbacks(app):
         print(f"✅ {len(options)} societies loaded: {[r['name'] for r in rows]}")
         return options, False, "", {"display": "none"}
 
-    # ── 1. LOGIN MODAL GUARD ──────────────────────────────────────────────────
+    @app.callback(
+        Output("global-card-search-modal", "is_open"),
+        Output("global-card-search-input", "value"),
+        Input("global-card-search-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_global_card_search(n):
+        if not n:
+            raise PreventUpdate
+        return True, ""
+
+    @app.callback(
+        Output("global-card-search-results", "children"),
+        Input("global-card-search-input", "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def update_global_card_search(query, auth):
+        return _search_results(query or "", get_current_user_role())
+
+    @app.callback(
+        Output("url", "href", allow_duplicate=True),
+        Output("global-card-search-modal", "is_open", allow_duplicate=True),
+        Input({"type": "global-card-search-result", "index": ALL}, "n_clicks"),
+        State("global-card-search-input", "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    def navigate_global_card_search(clicks, query, auth):
+        role = get_current_user_role()
+        if not role or not query:
+            raise PreventUpdate
+        triggered = dash.callback_context.triggered
+        if not triggered or not triggered[0].get("value"):
+            raise PreventUpdate
+        result_id = dash.callback_context.triggered_id
+        if not isinstance(result_id, dict) or result_id.get("type") != "global-card-search-result":
+            raise PreventUpdate
+        matches = _search_matches(_search_index(role), query)
+        matches.sort(key=lambda item: (0 if query.strip().lower() in item["title"].lower() else 1, item["title"]))
+        index = result_id.get("index")
+        if index is None or index >= len(matches):
+            raise PreventUpdate
+        item = matches[index]
+        return _search_route(item["portal"], item["tab"]), False
+
+    # ── 1. LOGIN MODAL GUARD ─────────────────────────────────────────────────
     # 'initial_duplicate': fires on load AND on subsequent auth-store changes.
     # Closes modal instantly when auth-store shows authenticated=True.
     # allow_duplicate=True required because logout also writes login-modal.is_open.
@@ -648,6 +849,8 @@ def register_shell_callbacks(app):
         user_id    = server_user_id
         email      = auth.get("email", "")
         db = _db()
+        role_key = "master" if role == "master" else role
+        role_label = ROLE_CONFIG.get(role_key, ROLE_CONFIG["admin"])["label"]
 
         # Hardened copy of auth-store's dict — same shape everything
         # downstream already expects, but role/society_id/linked_id (and
@@ -690,7 +893,7 @@ def register_shell_callbacks(app):
                 _breadcrumb(pathname),
                 "", {},
                 email.split("@")[0].title() if email else "User",
-                role.title(), "?",
+                role_label, "?",
                 "EstateHub", "?",
                 "EstateHub", "/static/assets/EH_logo.png",
                 {},
@@ -745,7 +948,7 @@ def register_shell_callbacks(app):
             _make_nav_items(role, society_id, pathname, verified_auth.get("user_type")),
             _breadcrumb(pathname),
             cfg["label"], portal_style,
-            user_name, role.title(), avatar,
+            user_name, role_label, avatar,
             user_name, avatar,
             society_name, society_logo,
             app_root_style,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, clientside_callback, dcc, html, no_update
 
@@ -202,19 +203,53 @@ def register_customize_callbacks(app):
         Output("dnd-layout-store",   "data",       allow_duplicate=True),
         Output("active-count-badge", "children"),
         Output("dnd-init-dummy",     "children"),
+        Output("layout-group-filter", "options"),
+        Output("layout-group-filter", "value", allow_duplicate=True),
         Input("portal-content",      "children"),      # fires when Customize page renders
         Input("layout-portal-select","value"),
         Input("layout-tab-select",   "value"),
+        Input("layout-palette-search", "value"),
+        Input("layout-group-filter",  "value"),
         State("auth-store",          "data"),
         prevent_initial_call="initial_duplicate",
     )
     @require_session
-    def load_layout(_dummy_id, portal, tab, auth_data):
+    def load_layout(_dummy_id, portal, tab, palette_search, group_filter, auth_data):
         society_id = get_current_society_id()
         role       = get_current_user_role() or 'admin'
  
         # ── Palette: all KPIs for this portal+tab ─────────────────────────
         palette_ids = _kpi_ids_for_portal_tab(portal, tab)
+        group_by_card = {}
+        try:
+            from app.dash_apps.callbacks.customize_kpi_callbacks import _KPI_PORTAL_ENTRIES
+            group_by_card = {
+                cid: group for cid, entry_portal, entry_tab, group in _KPI_PORTAL_ENTRIES
+                if entry_portal == portal and entry_tab == tab
+            }
+        except Exception:
+            group_by_card = {}
+        groups = sorted({
+            (group_by_card.get(cid) or KPI_CARDS.get(cid, {}).get("group") or "Other")
+            for cid in palette_ids
+        })
+        group_options = [{"label": group, "value": group} for group in groups]
+        needle = (palette_search or "").strip().lower()
+        selected_group = group_filter or ""
+
+        def _matches(cid):
+            if selected_group and (group_by_card.get(cid) or KPI_CARDS.get(cid, {}).get("group") or "Other") != selected_group:
+                return False
+            if not needle:
+                return True
+            cfg = KPI_CARDS.get(cid, {})
+            haystack = " ".join(str(part) for part in (
+                cid, cfg.get("title", ""), cfg.get("group", ""),
+                group_by_card.get(cid, ""), tab or "",
+            )).lower()
+            return needle in haystack
+
+        available_ids = [cid for cid in palette_ids if _matches(cid)]
  
         # ── Active zone: load saved layout for this portal+tab ────────────
         # Default active KPIs for this portal+tab come from DEFAULT_LAYOUTS
@@ -243,10 +278,7 @@ def register_customize_callbacks(app):
  
         active_ids    = saved_active if saved_active else default_active
         active_ids    = active_ids[:12]
-        # Palette shows ALL tab KPIs (so every KPI is draggable into the
-        # Active Dashboard). SortableJS moves items between the two zones,
-        # so a KPI appearing in both is fine — dragging it relocates it.
-        available_ids = list(palette_ids)
+        # Palette shows the filtered KPI set (the active zone is independent)
  
         values    = _fetch_kpi_values(society_id, set(active_ids) | set(available_ids))
         layout    = {"active": active_ids, "available": available_ids}
@@ -273,7 +305,9 @@ def register_customize_callbacks(app):
                        "textAlign": "center", "padding": "20px"},
             )]
  
-        return (active_cards, palette_cards, layout, badge_txt, signal)
+        triggered_id = dash.callback_context.triggered_id
+        next_group = None if triggered_id in ("layout-portal-select", "layout-tab-select") else group_filter
+        return (active_cards, palette_cards, layout, badge_txt, signal, group_options, next_group)
  
     # ── Save layout per portal+tab ────────────────────────────────────────────
     @app.callback(

@@ -349,8 +349,10 @@ def forgot_password_modal() -> dbc.Modal:
             dbc.ModalHeader(dbc.ModalTitle("Reset Password"), close_button=True),
             dbc.ModalBody(
                 [
-                    html.P("Enter your email and we'll send a reset token.",
+                    html.P("Enter your email and we'll send instructions if an account exists.",
                            style={"fontSize": "13px", "color": "#7d8ea3"}),
+                    dbc.Label("Email address", html_for="reset-email-input",
+                              style={"fontSize": "12px", "fontWeight": "600"}),
                     dbc.Input(
                         id="reset-email-input",
                         type="email",
@@ -381,13 +383,19 @@ def reset_password_modal() -> dbc.Modal:
             dbc.ModalHeader(dbc.ModalTitle("Enter New Password"), close_button=True),
             dbc.ModalBody(
                 [
-                    dbc.Input(id="reset-token-input", placeholder="6-digit token",
-                              style={"fontSize": "13px", "marginBottom": "8px"}),
+                    dbc.Label("Reset token", html_for="reset-token-input",
+                              style={"fontSize": "12px", "fontWeight": "600"}),
+                    dbc.Input(id="reset-token-input", placeholder="Token from your email",
+                              style={"fontSize": "13px", "marginBottom": "10px"}),
+                    dbc.Label("New password", html_for="new-password-input",
+                              style={"fontSize": "12px", "fontWeight": "600"}),
                     dbc.Input(id="new-password-input", type="password",
-                              placeholder="New password",
-                              style={"fontSize": "13px", "marginBottom": "8px"}),
+                              placeholder="At least 8 characters",
+                              style={"fontSize": "13px", "marginBottom": "10px"}),
+                    dbc.Label("Confirm new password", html_for="confirm-password-input",
+                              style={"fontSize": "12px", "fontWeight": "600"}),
                     dbc.Input(id="confirm-password-input", type="password",
-                              placeholder="Confirm new password",
+                              placeholder="Repeat the new password",
                               style={"fontSize": "13px"}),
                 ]
             ),

@@ -543,6 +543,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "list-sort", "entity": ALL, "column": ALL}, "n_clicks"),
         Input({"type": "list-filter", "entity": ALL, "column": ALL}, "value"),
         Input({"type": "list-clear-filters", "entity": ALL}, "n_clicks"),
+        Input({"type": "empty-action", "entity": ALL, "action": ALL}, "n_clicks"),
         Input({"type": "btn-new", "entity": ALL}, "n_clicks"),
         Input({"type": "btn-new-sidebar", "entity": ALL}, "n_clicks"),
         State("drilldown-store", "data"),
@@ -612,6 +613,17 @@ def register_drilldown_callbacks(app):
         # ── Clear all column filters for this entity ───────────────────────
         if trig_type == "list-clear-filters":
             entity = id_dict.get("entity")
+            (store.get("list_filter") or {}).pop(entity, None)
+            store.setdefault("list_pages", {})[entity] = 1
+            hide_kpis = True
+            content, bc, db_err = _render_current(store, auth)
+            kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+            toast_data = {"_toast": {"type": "error", "message": db_err}} if db_err else no_update
+            return store, content, bc, kpi_style, toast_data
+
+        if trig_type == "empty-action" and id_dict.get("action") == "clear":
+            entity = id_dict.get("entity")
+            store.setdefault("list_search", {})[entity] = ""
             (store.get("list_filter") or {}).pop(entity, None)
             store.setdefault("list_pages", {})[entity] = 1
             hide_kpis = True
@@ -1610,7 +1622,7 @@ def register_drilldown_callbacks(app):
             hide_kpis = True
 
         # ── New button ────────────────────────────────────────────────────
-        elif trig_type in ("btn-new", "btn-new-sidebar"):
+        elif trig_type in ("btn-new", "btn-new-sidebar", "empty-action"):
             entity = id_dict.get("entity")
             _new_map = {
                 "receipts": "form_receipt_new",
@@ -2981,6 +2993,7 @@ def _render_card(
             selected_month=selected_month,
             account_options=account_options,
             selected_account_id=selected_account_id,
+            search=search,
         )
 
     # ── profile ───────────────────────────────────────────────────────────────
