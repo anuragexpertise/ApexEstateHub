@@ -423,6 +423,9 @@ def register_login_callbacks(app):
         """
         function(n) {
             if (!n) return window.dash_clientside.no_update;
+            var email = document.getElementById('login-email');
+            var pass = document.getElementById('login-password');
+            if (!email || !pass || !email.value.trim() || !pass.value) return window.dash_clientside.no_update;
             var btn = document.getElementById('login-btn');
             if (btn) {
                 btn.disabled = true;
@@ -441,6 +444,9 @@ def register_login_callbacks(app):
         """
         function(n) {
             if (!n) return window.dash_clientside.no_update;
+            var email = document.getElementById('login-email-pin');
+            var pin = document.getElementById('login-pin');
+            if (!email || !pin || !email.value.trim() || !pin.value) return window.dash_clientside.no_update;
             var btn = document.getElementById('login-pin-btn');
             if (btn) {
                 btn.disabled = true;
@@ -459,6 +465,9 @@ def register_login_callbacks(app):
         """
         function(n) {
             if (!n) return window.dash_clientside.no_update;
+            var email = document.getElementById('login-email-pattern');
+            var pattern = document.getElementById('login-pattern');
+            if (!email || !pattern || !email.value.trim() || !pattern.value) return window.dash_clientside.no_update;
             var btn = document.getElementById('login-pattern-btn');
             if (btn) {
                 btn.disabled = true;

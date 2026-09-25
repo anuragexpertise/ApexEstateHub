@@ -304,6 +304,20 @@ def _header() -> html.Header:
             html.Div(
                 [
                     html.Button(
+                        [html.I(className="fas fa-search"), html.Span("Search", className="header-search-label")],
+                        id="global-card-search-btn",
+                        n_clicks=0,
+                        title="Search dashboard cards",
+                        **{"aria-label": "Search dashboard cards"},
+                        className="header-search-btn",
+                        style={
+                            "background": "none", "border": "1px solid #d8e1ec", "color": "#526579",
+                            "fontSize": "12px", "cursor": "pointer", "marginRight": "10px",
+                            "padding": "6px 10px", "borderRadius": "8px",
+                            "display": "flex", "alignItems": "center", "gap": "6px",
+                        },
+                    ),
+                    html.Button(
                         html.I(className="fas fa-rotate", id="hdr-refresh-kpi-icon"),
                         id="hdr-refresh-kpi-btn",
                         n_clicks=0,
@@ -944,6 +958,44 @@ def _qr_modal() -> dbc.Modal:
     )
 
 
+
+
+def _global_card_search_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                [
+                    html.I(className="fas fa-search me-2"),
+                    html.Span("Search dashboard cards"),
+                ],
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                [
+                    dcc.Input(
+                        id="global-card-search-input",
+                        type="search",
+                        placeholder="Search dues, receipts, concerns, gates…",
+                        autoFocus=True,
+                        debounce=True,
+                        className="form-control",
+                        style={"fontSize": "13px"},
+                    ),
+                    html.Div(
+                        id="global-card-search-results",
+                        className="global-card-search-results",
+                        style={"marginTop": "14px"},
+                    ),
+                ]
+            ),
+        ],
+        id="global-card-search-modal",
+        is_open=False,
+        centered=True,
+        size="lg",
+    )
+
+
 # ── Full shell layout ─────────────────────────────────────────────────────────
 
 def shell_layout() -> html.Div:
@@ -1083,6 +1135,7 @@ def shell_layout() -> html.Div:
 
             # ── Login modals ───────────────────────────────────────────────────
             _login_modal(),
+            _global_card_search_modal(),
 
             # ── App shell ──────────────────────────────────────────────────────
             html.Div(

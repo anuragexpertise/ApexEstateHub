@@ -227,6 +227,10 @@ def request_password_reset(email: str,
 def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
     """Match plain_token (sha256 hex) against stored hashes, then update password."""
     import hashlib
+    if not plain_token or not new_password:
+        return False, "Please fill in all fields."
+    if len(new_password) < 8:
+        return False, "New password must be at least 8 characters."
     try:
         token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
         row = db._execute(

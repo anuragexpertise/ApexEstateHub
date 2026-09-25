@@ -1252,6 +1252,111 @@ a {
     }
 }
 
+
+.header-search-btn {
+    white-space: nowrap;
+}
+
+.global-card-search-results {
+    max-height: 52vh;
+    overflow-y: auto;
+}
+
+.global-card-search-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border: 1px solid #e5eaf0;
+    border-radius: 9px;
+    background: #fff;
+    color: #15304f;
+    text-align: left;
+    cursor: pointer;
+}
+
+.global-card-search-result:hover,
+.global-card-search-result:focus {
+    border-color: #667eea;
+    background: #f7f8ff;
+    outline: none;
+}
+
+.global-card-search-result-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: #eef1ff;
+    color: #667eea;
+    flex-shrink: 0;
+}
+
+.global-card-search-result-meta {
+    font-size: 11px;
+    color: #8a99ab;
+}
+
+@media (max-width: 575px) {
+    .header-search-label {
+        display: none;
+    }
+
+    .header-search-btn {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        justify-content: center;
+    }
+}
+
+@media print {
+    body {
+        background: #fff !important;
+    }
+
+    .app-sidebar,
+    .glass-header,
+    .glass-breadcrumb,
+    .sidebar-overlay,
+    .toast-container,
+    #drill-back-btn,
+    .modal,
+    .no-print,
+    .btn,
+    .dnd-handle {
+        display: none !important;
+    }
+
+    .app-shell,
+    .page-wrapper,
+    #main-content,
+    .portal-page {
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: 0 !important;
+        background: #fff !important;
+    }
+
+    .kpi-row {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    .kpi-card {
+        break-inside: avoid;
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+    }
+
+    a[href]::after {
+        content: none !important;
+    }
+}
+
 @media (max-width: 380px) {
     .kpi-row {
         grid-template-columns: 1fr;

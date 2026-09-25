@@ -1263,7 +1263,32 @@ def _customize_page(c: str) -> html.Div:
                                         ], style={"display": "flex", "gap": "6px", "marginTop": "4px"}),
                                     ], width=4),
                                 ]),
-                                html.Div(id="layout-status-msg", className="mt-2"),
+                                 html.Div(id="layout-status-msg", className="mt-2"),
+                                 dbc.Row([
+                                     dbc.Col([
+                                         dbc.Label("Find a card", html_for="layout-palette-search",
+                                                   style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Input(
+                                             id="layout-palette-search",
+                                             type="search",
+                                             placeholder="Search the KPI palette…",
+                                             debounce=True,
+                                             style={"fontSize": "13px"},
+                                         ),
+                                     ], width=6),
+                                     dbc.Col([
+                                         dbc.Label("Filter by group", html_for="layout-group-filter",
+                                                   style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Dropdown(
+                                             id="layout-group-filter",
+                                             options=[],
+                                             value=None,
+                                             placeholder="All groups",
+                                             clearable=True,
+                                             style={"fontSize": "13px"},
+                                         ),
+                                     ], width=6),
+                                 ], className="mt-3", style={"padding": "0 2px"}),
                             ], style={"padding": "12px 14px"}),
                         ], className="mb-3"),
                         html.Div([

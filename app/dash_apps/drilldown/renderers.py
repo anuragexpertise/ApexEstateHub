@@ -655,7 +655,8 @@ def render_list_card(card_id: str, title: str, icon: str,
                       month_options: list[dict] | None = None,
                       selected_month: int | None = None,
                       account_options: list[dict] | None = None,
-                      selected_account_id: int | None = None) -> html.Div:
+                      selected_account_id: int | None = None,
+                      search: str | None = None) -> html.Div:
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
@@ -977,13 +978,39 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     if not body_rows:
         span = len(columns) + (1 if row_actions_allowed else 0)
+        has_active_filters = bool((search or "").strip() or col_filters)
+        if has_active_filters:
+            empty_message = "No records match your search or filters"
+            empty_action = dbc.Button(
+                "Clear search and filters",
+                id={"type": "empty-action", "entity": entity, "action": "clear"},
+                n_clicks=0,
+                size="sm",
+                color="secondary",
+                outline=True,
+                className="mt-2",
+            )
+        elif "new" in allowed:
+            empty_message = f"No {title.lower()} recorded yet"
+            empty_action = dbc.Button(
+                [html.I(className="fas fa-plus me-1"), "Create the first record"],
+                id={"type": "empty-action", "entity": entity, "action": "new"},
+                n_clicks=0,
+                size="sm",
+                color="primary",
+                className="mt-2",
+            )
+        else:
+            empty_message = "No records are available"
+            empty_action = None
         body_rows = [html.Tr(html.Td(
             html.Div([
                 html.I(className="fas fa-inbox me-2",
                        style={"color": "#ccc", "fontSize": "20px"}),
-                html.Div("No records found",
+                html.Div(empty_message,
                          style={"color": "#aaa", "fontSize": "13px",
                                 "marginTop": "4px"}),
+                empty_action,
             ], className="text-center", style={"padding": "28px 0"}),
             colSpan=span,
         ))]
@@ -3230,15 +3257,18 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
 
     links_by_cat = get_links_for_categories(cat_keys, state=society_state)
 
-    def _tooltip_icon(term: str, definition: str) -> html.Span:
+    def _tooltip_icon(term: str, definition: str, cat_key: str = "general") -> html.Span:
         """Small tooltip icon with definition for a term."""
-        import uuid
-        tip_id = f"tooltip-{uuid.uuid4().hex[:8]}"
+        safe_key = "".join(ch if ch.isalnum() else "-" for ch in str(cat_key).lower())
+        tip_id = f"tooltip-{safe_key}-{term.lower().replace(' ', '-')}"
         return html.Span(
             [
                 html.I(
                     className="fas fa-info-circle ms-1",
                     id=tip_id,
+                    role="button",
+                    tabIndex=0,
+                    **{"aria-label": f"Help: {term}"},
                     style={"cursor": "help", "fontSize": "11px", "color": "#999", "verticalAlign": "middle"},
                 ),
                 dbc.Tooltip(
@@ -3262,15 +3292,15 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         display_title = title
         tooltip_span = None
         if "TDS" in title.upper() and "no-pan" not in cat_key.lower():
-            tooltip_span = _tooltip_icon("TDS", "Tax Deducted at Source — income tax deducted by the payer at prescribed rates before paying the vendor.")
+            tooltip_span = _tooltip_icon("TDS", "Tax Deducted at Source — income tax deducted by the payer at prescribed rates before paying the vendor.", cat_key)
         elif "RCM" in title.upper():
-            tooltip_span = _tooltip_icon("RCM", "Reverse Charge Mechanism — the recipient of goods/services pays GST directly to government instead of the supplier.")
+            tooltip_span = _tooltip_icon("RCM", "Reverse Charge Mechanism — the recipient of goods/services pays GST directly to government instead of the supplier.", cat_key)
         elif "GST" in title.upper() and "fund" not in cat_key.lower():
-            tooltip_span = _tooltip_icon("GST", "Goods and Services Tax — unified indirect tax on supply of goods/services in India.")
+            tooltip_span = _tooltip_icon("GST", "Goods and Services Tax — unified indirect tax on supply of goods/services in India.", cat_key)
         elif "ITC" in title.upper():
-            tooltip_span = _tooltip_icon("ITC", "Input Tax Credit — GST paid on purchases that can be offset against GST liability on sales.")
+            tooltip_span = _tooltip_icon("ITC", "Input Tax Credit — GST paid on purchases that can be offset against GST liability on sales.", cat_key)
         elif "MUTUALITY" in title.upper() or "mutuality" in cat_key.lower():
-            tooltip_span = _tooltip_icon("Mutuality", "Mutuality Principle — income from members for common purposes may be exempt from income tax under certain conditions.")
+            tooltip_span = _tooltip_icon("Mutuality", "Mutuality Principle — income from members for common purposes may be exempt from income tax under certain conditions.", cat_key)
 
         title_content = html.Span([display_title, tooltip_span]) if tooltip_span else display_title
 
