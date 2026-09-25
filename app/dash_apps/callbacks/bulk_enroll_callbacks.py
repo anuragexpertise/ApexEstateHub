@@ -610,6 +610,19 @@ def register_bulk_enroll_callbacks(app):
             output.getvalue(), filename=f"{entity}_bulk_enroll_template.xlsx"
         )
 
+    @app.callback(
+        Output("bulk-enroll-file-feedback", "children"),
+        Input("bulk-enroll-upload", "contents"),
+        State("bulk-enroll-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    def validate_bulk_enroll_file(contents, filename):
+        if not contents:
+            return ""
+        if not str(filename or "").lower().endswith((".xlsx", ".xls")):
+            return "Choose an Excel .xlsx or .xls file."
+        return ""
+
     # ── 4. Process Excel upload → bulk insert → refresh list ────────────────────────
     @app.callback(
         Output("bulk-enroll-result",        "children",   allow_duplicate=True),

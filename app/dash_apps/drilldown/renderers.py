@@ -4764,6 +4764,7 @@ def render_pay_dues_card(
                         html.I(className="fas fa-chevron-right", style={"color": "#c2cdda", "fontSize": "11px"}),
                     ], id={"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"},
                        n_clicks=0,
+                       className="form-select-trigger",
                        style={
                            "display": "flex", "alignItems": "center",
                            "padding": "10px 12px", "borderRadius": "10px",
@@ -4772,6 +4773,11 @@ def render_pay_dues_card(
                        }),
                 ], width=8)
             ], className="mb-2"),
+            html.Small(
+                id={"type": "form-feedback", "entity": "pay_due_bg", "field": "bill_group_id"},
+                className="invalid-feedback d-block",
+                style={"fontSize": "11px", "marginBottom": "8px"},
+            ),
             dbc.Row([
                 dbc.Col(dbc.Label("Amount (₹) *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
                 dbc.Col(dbc.Input(
@@ -4779,6 +4785,11 @@ def render_pay_dues_card(
                     type="number", min=1, step=0.01, style={"fontSize": "13px", "borderRadius": "10px"},
                 ), width=8)
             ], className="mb-2"),
+            html.Small(
+                id={"type": "form-feedback", "entity": "pay_due_bg", "field": "amount"},
+                className="invalid-feedback d-block",
+                style={"fontSize": "11px", "marginBottom": "8px"},
+            ),
             dbc.Row([
                 dbc.Col(dbc.Label("Mode *", style={"fontSize": "12px", "fontWeight": "500", "color": "#555"}), width=4),
                 dbc.Col(dcc.Dropdown(
