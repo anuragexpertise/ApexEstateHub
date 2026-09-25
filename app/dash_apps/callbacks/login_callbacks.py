@@ -126,13 +126,28 @@ def register_login_callbacks(app):
         Output("toast-store",  "data",    allow_duplicate=True),
         Output("login-modal",  "is_open", allow_duplicate=True),
         Input("login-btn",     "n_clicks"),
+        Input("login-email",   "n_submit"),
+        Input("login-password", "n_submit"),
         State("login-email",    "value"),
         State("login-password", "value"),
         State("auth-store",     "data"),
         prevent_initial_call=True,
     )
-    def handle_password_login(n, email, password, auth):
-        if not n or not email or not password:
+    def handle_password_login(login_clicks, email_submit, password_submit, email, password, auth):
+        # Check which input triggered the callback
+        ctx_local = dash.callback_context
+        if not ctx_local.triggered:
+            raise PreventUpdate
+        trigger = ctx_local.triggered[0]["prop_id"].split(".")[0]
+
+        # Only proceed if triggered by button click or form submit with both fields filled
+        if trigger == "login-btn":
+            if not login_clicks or not email or not password:
+                raise PreventUpdate
+        elif trigger in ("login-email", "login-password"):
+            if not email or not password:
+                raise PreventUpdate
+        else:
             raise PreventUpdate
 
         print(f"\n🔐 Password login: {email}")
@@ -155,13 +170,28 @@ def register_login_callbacks(app):
         Output("toast-store",  "data",    allow_duplicate=True),
         Output("login-modal",  "is_open", allow_duplicate=True),
         Input("login-pin-btn", "n_clicks"),
+        Input("login-email-pin", "n_submit"),
+        Input("login-pin",       "n_submit"),
         State("login-email-pin", "value"),
         State("login-pin",       "value"),
         State("auth-store",      "data"),
         prevent_initial_call=True,
     )
-    def handle_pin_login(n, email, pin, auth):
-        if not n or not email or not pin:
+    def handle_pin_login(pin_clicks, email_submit, pin_submit, email, pin, auth):
+        # Check which input triggered the callback
+        ctx_local = dash.callback_context
+        if not ctx_local.triggered:
+            raise PreventUpdate
+        trigger = ctx_local.triggered[0]["prop_id"].split(".")[0]
+
+        # Only proceed if triggered by button click or form submit with both fields filled
+        if trigger == "login-pin-btn":
+            if not pin_clicks or not email or not pin:
+                raise PreventUpdate
+        elif trigger in ("login-email-pin", "login-pin"):
+            if not email or not pin:
+                raise PreventUpdate
+        else:
             raise PreventUpdate
 
         print(f"\n🔢 PIN login: {email}")
@@ -206,33 +236,6 @@ def register_login_callbacks(app):
             print(f"❌ Pattern login failed: {email}")
             return _login_error("Pattern not recognised — please try again")
         print(f"✅ Pattern login success: {email}")
-        return _login_response(user)
-
-    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
-    @app.callback(
-        Output("auth-store",    "data",    allow_duplicate=True),
-        Output("url",           "pathname",allow_duplicate=True),
-        Output("toast-store",   "data",    allow_duplicate=True),
-        Output("login-modal",   "is_open", allow_duplicate=True),
-        Input("master-admin-login-btn", "n_clicks"),
-        State("master-admin-email",    "value"),
-        State("master-admin-password", "value"),
-        prevent_initial_call=True,
-    )
-    def handle_master_login(n, email, password):
-        if not n or not email or not password:
-            raise PreventUpdate
-
-        print(f"\n👑 Master admin login: {email}")
-        try:
-            user = authenticate_user(email.strip(), password, society_id=None)
-        except Exception:
-            print(f"❌ Database connection error during master admin login")
-            return _login_error("No Database connection")
-        if not user or user.get("role") != "master":
-            return _login_error("Invalid master admin credentials")
-
-        print(f"✅ Master admin login success: {email}")
         return _login_response(user)
 
     # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────
@@ -333,6 +336,141 @@ def register_login_callbacks(app):
         """,
         Output("login-pattern",    "value",  allow_duplicate=True),
         Input("pattern-clear-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 10. SHOW/HIDE PASSWORD TOGGLE ────────────────────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var inp = document.getElementById('login-password');
+            var btn = document.getElementById('toggle-login-password');
+            if (inp && btn) {
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    btn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+                    btn.setAttribute('aria-label', 'Hide password');
+                } else {
+                    inp.type = 'password';
+                    btn.innerHTML = '<i class="fas fa-eye"></i>';
+                    btn.setAttribute('aria-label', 'Show password');
+                }
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("toggle-login-password", "n_clicks"),
+        Input("toggle-login-password", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 11. SHOW/HIDE PIN TOGGLE ─────────────────────────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var inp = document.getElementById('login-pin');
+            var btn = document.getElementById('toggle-login-pin');
+            if (inp && btn) {
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    btn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+                    btn.setAttribute('aria-label', 'Hide PIN');
+                } else {
+                    inp.type = 'password';
+                    btn.innerHTML = '<i class="fas fa-eye"></i>';
+                    btn.setAttribute('aria-label', 'Show PIN');
+                }
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("toggle-login-pin", "n_clicks"),
+        Input("toggle-login-pin", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 12. DOUBLE-SUBMIT PROTECTION: PASSWORD LOGIN ──────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var btn = document.getElementById('login-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Signing in...';
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("login-btn", "disabled"),
+        Input("login-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 13. DOUBLE-SUBMIT PROTECTION: PIN LOGIN ───────────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var btn = document.getElementById('login-pin-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Signing in...';
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("login-pin-btn", "disabled"),
+        Input("login-pin-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 14. DOUBLE-SUBMIT PROTECTION: PATTERN LOGIN ───────────────────
+    app.clientside_callback(
+        """
+        function(n) {
+            if (!n) return window.dash_clientside.no_update;
+            var btn = document.getElementById('login-pattern-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Signing in...';
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("login-pattern-btn", "disabled"),
+        Input("login-pattern-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # ── 15. RE-ENABLE LOGIN BUTTONS ON TOAST (login success/error) ──────
+    app.clientside_callback(
+        """
+        function(toast) {
+            if (!toast) return window.dash_clientside.no_update;
+            // Re-enable all login buttons when a toast appears (login attempt completed)
+            var buttons = ['login-btn', 'login-pin-btn', 'login-pattern-btn'];
+            buttons.forEach(function(id) {
+                var btn = document.getElementById(id);
+                if (btn) {
+                    btn.disabled = false;
+                    // Restore original text
+                    if (id === 'login-btn') {
+                        btn.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login';
+                    } else if (id === 'login-pin-btn') {
+                        btn.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login with PIN';
+                    } else if (id === 'login-pattern-btn') {
+                        btn.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login with Pattern';
+                    }
+                }
+            });
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("login-btn", "disabled", allow_duplicate=True),
+        Input("toast-store", "data"),
         prevent_initial_call=True,
     )
 

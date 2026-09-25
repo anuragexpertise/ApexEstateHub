@@ -3468,15 +3468,45 @@ def _render_card(
     return _empty_state(f"No content for: {card_id}")
 
 
-def _empty_state(msg: str) -> html.Div:
+def _empty_state(msg: str, action: dict | None = None) -> html.Div:
+    """
+    Create an empty state component with optional CTA action.
+
+    Args:
+        msg: Message to display
+        action: Optional dict with keys 'label' and 'href' or 'id' (for callback)
+    """
+    children = [
+        html.I(
+            className="fas fa-compass fa-3x mb-3",
+            style={"color": "rgba(29,116,216,0.2)"},
+        ),
+        html.P(msg, className="text-muted", style={"fontSize": "13px"}),
+    ]
+
+    if action:
+        if action.get("href"):
+            children.append(
+                html.A(
+                    action["label"],
+                    href=action["href"],
+                    className="btn btn-primary btn-sm mt-2",
+                    style={"textDecoration": "none"},
+                )
+            )
+        elif action.get("id"):
+            children.append(
+                dbc.Button(
+                    action["label"],
+                    id=action["id"],
+                    color="primary",
+                    size="sm",
+                    className="mt-2",
+                )
+            )
+
     return html.Div(
-        [
-            html.I(
-                className="fas fa-compass fa-3x mb-3",
-                style={"color": "rgba(29,116,216,0.2)"},
-            ),
-            html.P(msg, className="text-muted", style={"fontSize": "13px"}),
-        ],
+        children,
         className="text-center",
         style={"padding": "60px 20px"},
     )

@@ -3230,6 +3230,26 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
 
     links_by_cat = get_links_for_categories(cat_keys, state=society_state)
 
+    def _tooltip_icon(term: str, definition: str) -> html.Span:
+        """Small tooltip icon with definition for a term."""
+        import uuid
+        tip_id = f"tooltip-{uuid.uuid4().hex[:8]}"
+        return html.Span(
+            [
+                html.I(
+                    className="fas fa-info-circle ms-1",
+                    id=tip_id,
+                    style={"cursor": "help", "fontSize": "11px", "color": "#999", "verticalAlign": "middle"},
+                ),
+                dbc.Tooltip(
+                    definition,
+                    target=tip_id,
+                    placement="top",
+                ),
+            ],
+            style={"display": "inline-flex", "alignItems": "center"},
+        )
+
     def _rule_block(title: str, body: list, cat_key: str) -> html.Div:
         links = links_by_cat.get(cat_key, [])
         link_elements = [
@@ -3238,9 +3258,25 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
                           "color": COLORS["info"], "textDecoration": "none"})
             for label, url in [(lk.label, lk.url) for lk in links]
         ]
+        # Add tooltip icons for known terms in title
+        display_title = title
+        tooltip_span = None
+        if "TDS" in title.upper() and "no-pan" not in cat_key.lower():
+            tooltip_span = _tooltip_icon("TDS", "Tax Deducted at Source — income tax deducted by the payer at prescribed rates before paying the vendor.")
+        elif "RCM" in title.upper():
+            tooltip_span = _tooltip_icon("RCM", "Reverse Charge Mechanism — the recipient of goods/services pays GST directly to government instead of the supplier.")
+        elif "GST" in title.upper() and "fund" not in cat_key.lower():
+            tooltip_span = _tooltip_icon("GST", "Goods and Services Tax — unified indirect tax on supply of goods/services in India.")
+        elif "ITC" in title.upper():
+            tooltip_span = _tooltip_icon("ITC", "Input Tax Credit — GST paid on purchases that can be offset against GST liability on sales.")
+        elif "MUTUALITY" in title.upper() or "mutuality" in cat_key.lower():
+            tooltip_span = _tooltip_icon("Mutuality", "Mutuality Principle — income from members for common purposes may be exempt from income tax under certain conditions.")
+
+        title_content = html.Span([display_title, tooltip_span]) if tooltip_span else display_title
+
         return html.Div([
-            html.Div(title, style={"fontWeight": "700", "fontSize": "12.5px",
-                                    "color": COLORS["primary"], "marginBottom": "3px"}),
+            html.Div(title_content, style={"fontWeight": "700", "fontSize": "12.5px",
+                                            "color": COLORS["primary"], "marginBottom": "3px"}),
             html.Div(body, style={"fontSize": "12px", "color": "#3a4a5c",
                                    "lineHeight": "1.5", "marginBottom": "4px"}),
             html.Div(link_elements) if link_elements else None,
