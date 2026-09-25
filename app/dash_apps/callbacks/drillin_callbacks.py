@@ -536,7 +536,30 @@ def register_pay_dues_bill_callbacks(app):
             raise PreventUpdate
         return False
 
-    # ── 3. Populate bill list (on open + search) ──────────────────────────
+    @app.callback(
+        Output({"type": "form-feedback", "entity": "pay_due_bg", "field": "bill_group_id"}, "children"),
+        Output({"type": "drillin-trigger", "entity": "pay_due_bg", "field": "bill_group_id"}, "className"),
+        Output({"type": "form-feedback", "entity": "pay_due_bg", "field": "amount"}, "children"),
+        Output({"type": "form-field", "entity": "pay_due_bg", "field": "amount"}, "className"),
+        Input({"type": "form-field-hidden", "entity": "pay_due_bg", "field": "bill_group_id"}, "value"),
+        Input({"type": "form-field", "entity": "pay_due_bg", "field": "amount"}, "value"),
+        prevent_initial_call=True,
+    )
+    def validate_pay_dues_bill_group(bill_group_id, amount):
+        bill_error = "" if bill_group_id else "Select an unpaid bill before submitting."
+        amount_error = ""
+        try:
+            if amount in (None, "") or float(amount) <= 0:
+                amount_error = "Enter an amount greater than zero."
+        except (TypeError, ValueError):
+            amount_error = "Enter a valid amount."
+        return (
+            bill_error,
+            "form-select-trigger is-invalid" if bill_error else "form-select-trigger is-valid",
+            amount_error,
+            "is-invalid" if amount_error else "",
+        )
+
     @app.callback(
         Output("pay-dues-bill-list", "children", allow_duplicate=True),
         Input("pay-dues-bill-modal", "is_open"),

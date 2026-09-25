@@ -415,6 +415,11 @@ def _bulk_enroll_modal() -> dbc.Modal:
                         },
                         multiple=False, accept=".xlsx,.xls",
                     ),
+                    html.Small(
+                        id="bulk-enroll-file-feedback",
+                        className="invalid-feedback d-block",
+                        style={"fontSize": "11px", "marginTop": "6px"},
+                    ),
                     dcc.Loading(
                         html.Div(id="bulk-enroll-result", className="mt-3"),
                         type="dot",

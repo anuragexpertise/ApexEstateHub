@@ -1,4 +1,5 @@
 import json
+import re
 from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
@@ -6,7 +7,80 @@ from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS
 from app.utils.ux_toasts import error_toast
 
+
+def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
+    value = str(value or "").strip()
+    if not value:
+        return f"is-invalid {base_class}".strip(), f"{label} is required."
+    if kind == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+        return f"is-invalid {base_class}".strip(), "Enter a valid email address."
+    if kind == "phone" and not re.fullmatch(r"[0-9+()\-\s]{7,20}", value):
+        return f"is-invalid {base_class}".strip(), "Enter a valid phone number."
+    if kind == "secret" and (
+        len(value) < 8
+        or not re.search(r"[A-Z]", value)
+        or not re.search(r"[a-z]", value)
+        or not re.search(r"[^a-zA-Z0-9]", value)
+    ):
+        return f"is-invalid {base_class}".strip(), "Use at least 8 characters with upper, lower, and special characters."
+    return base_class, ""
+
+
 def register_setup_wizard_callbacks(app):
+
+    @app.callback(
+        Output("sw-society-address", "className"),
+        Output("sw-society-address-feedback", "children"),
+        Output("sw-society-email", "className"),
+        Output("sw-society-email-feedback", "children"),
+        Output("sw-society-phone", "className"),
+        Output("sw-society-phone-feedback", "children"),
+        Output("sw-society-reg", "className"),
+        Output("sw-society-reg-feedback", "children"),
+        Output("sw-qr-secret", "className"),
+        Output("sw-qr-secret-feedback", "children"),
+        Output("sw-qr-secret-confirm", "className"),
+        Output("sw-qr-secret-confirm-feedback", "children"),
+        Output("sw-i-agree", "className"),
+        Output("sw-i-agree-feedback", "children"),
+        Output("sw-admin-password", "className"),
+        Output("sw-admin-password-feedback", "children"),
+        Output("sw-qr-confirm-final", "className"),
+        Output("sw-qr-confirm-final-feedback", "children"),
+        Input("sw-society-address", "value"),
+        Input("sw-society-email", "value"),
+        Input("sw-society-phone", "value"),
+        Input("sw-society-reg", "value"),
+        Input("sw-qr-secret", "value"),
+        Input("sw-qr-secret-confirm", "value"),
+        Input("sw-i-agree", "value"),
+        Input("sw-admin-password", "value"),
+        Input("sw-qr-confirm-final", "value"),
+        prevent_initial_call=True,
+    )
+    def validate_setup_fields(address, email, phone, registration, secret, secret_confirm, agreement, password, secret_final):
+        address_result = _setup_validation_result(address, "Address", "mb-3")
+        email_result = _setup_validation_result(email, "Email", "mb-3", "email")
+        phone_result = _setup_validation_result(phone, "Phone number", "mb-3", "phone")
+        registration_result = _setup_validation_result(registration, "Registration number", "mb-3")
+        secret_result = _setup_validation_result(secret, "Signing secret", "mb-3", "secret")
+        secret_confirm_result = _setup_validation_result(secret_confirm, "Signing secret confirmation", "mb-3", "secret")
+        final_result = _setup_validation_result(secret_final, "Signing secret confirmation", "mb-3", "secret")
+        if secret and secret != secret_confirm:
+            secret_confirm_result = ("is-invalid mb-3", "Signing secrets must match.")
+        if secret and secret != secret_final:
+            final_result = ("is-invalid mb-3", "Signing secret must match the original value.")
+        agreement_result = (
+            ("is-invalid mb-4", "Type I AGREE to proceed.")
+            if str(agreement or "").strip() != "I AGREE"
+            else ("mb-4", "")
+        )
+        password_result = _setup_validation_result(password, "Admin password", "mb-3")
+        return (
+            *address_result, *email_result, *phone_result, *registration_result,
+            *secret_result, *secret_confirm_result, *agreement_result,
+            *password_result, *final_result,
+        )
 
 
     @app.callback(

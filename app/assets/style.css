@@ -1186,3 +1186,84 @@ a {
         font-size: 12px;
     }
 }
+
+@media (max-width: 575px) {
+    .portal-page {
+        padding-inline: 8px;
+    }
+
+    .portal-page .card,
+    .portal-page .form-card,
+    .dnd-card {
+        border-radius: 12px;
+    }
+
+    .portal-page .card-header,
+    .portal-page .card-body {
+        padding: 10px;
+    }
+
+    .portal-page .table-responsive,
+    .dnd-card .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .portal-page .table,
+    .dnd-card .table {
+        min-width: 620px;
+    }
+
+    .portal-page .table thead th,
+    .dnd-card .table thead th {
+        white-space: nowrap;
+        font-size: 11px;
+    }
+
+    .portal-page .btn,
+    .dnd-card .btn,
+    .portal-page .nav-link,
+    .portal-page .dropdown-item {
+        min-height: 44px;
+        padding-inline: 10px;
+        touch-action: manipulation;
+    }
+
+    .portal-page .row,
+    .dnd-card .row {
+        --bs-gutter-x: 0.5rem;
+        --bs-gutter-y: 0.5rem;
+    }
+
+    .form-select-trigger {
+        min-height: 44px;
+    }
+
+    .invalid-feedback {
+        display: block !important;
+    }
+
+    .modal-dialog {
+        margin: 0.5rem;
+    }
+
+    .modal-body {
+        padding: 0.75rem;
+    }
+}
+
+@media (max-width: 380px) {
+    .kpi-row {
+        grid-template-columns: 1fr;
+    }
+
+    .kpi-card {
+        height: auto;
+        min-height: 104px;
+    }
+
+    .portal-page .btn,
+    .dnd-card .btn {
+        width: 100%;
+    }
+}

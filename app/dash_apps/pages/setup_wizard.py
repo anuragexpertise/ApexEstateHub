@@ -3,6 +3,14 @@ import os
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 import dash_bootstrap_components as dbc
 from database.db_manager import db
+
+
+def _field_feedback(field_id):
+    return html.Small(
+        id=field_id,
+        className="invalid-feedback d-block",
+        style={"fontSize": "11px", "marginTop": "4px"},
+    )
 def load_conversation_data():
     data = []
     here = os.path.dirname(os.path.abspath(__file__))
@@ -220,6 +228,7 @@ def render_category_content(category, society_id=None):
             _render_image_capture_control("society", "logo"),
             dbc.Label("Address"),
             dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
+            _field_feedback("sw-society-address-feedback"),
             dbc.Label("State", html_for="sw-society-state"),
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
             html.P(
@@ -229,12 +238,15 @@ def render_category_content(category, society_id=None):
             ),
             dbc.Label("Email"),
             dbc.Input(id="sw-society-email", type="email", required=True, className="mb-3", value=s_email),
+            _field_feedback("sw-society-email-feedback"),
             dbc.Label("Phone Number"),
             dbc.Input(id="sw-society-phone", type="tel", required=True, className="mb-3", value=s_phone),
+            _field_feedback("sw-society-phone-feedback"),
             dbc.Label("PAN Number"),
             dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             dbc.Label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
+            _field_feedback("sw-society-reg-feedback"),
             dbc.Label("Gate Pass Enforcement"),
             dbc.Select(
                 id="sw-gate-logic",
@@ -530,8 +542,10 @@ def render_category_content(category, society_id=None):
             ),
             dbc.Label("SIGNING_SECRET (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
+            _field_feedback("sw-qr-secret-feedback"),
             dbc.Label("Confirm SIGNING_SECRET"),
             dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
+            _field_feedback("sw-qr-secret-confirm-feedback"),
         ]
     elif category == "Instructions":
         here = os.path.dirname(os.path.abspath(__file__))
@@ -581,16 +595,19 @@ def render_category_content(category, society_id=None):
             ),
             dbc.Label("Type 'I AGREE' below to proceed"),
             dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),
+            _field_feedback("sw-i-agree-feedback"),
             html.Hr(),
             html.P("Authorization required to submit setup.", className="fw-bold"),
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Admin Password"),
-                    dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3")
+                    dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3"),
+                    _field_feedback("sw-admin-password-feedback")
                 ], width=6),
                 dbc.Col([
                     dbc.Label("SIGNING_SECRET"),
-                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the SIGNING_SECRET created in the Administrator tab...", className="mb-3")
+                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the SIGNING_SECRET created in the Administrator tab...", className="mb-3"),
+                    _field_feedback("sw-qr-confirm-final-feedback")
                 ], width=6)
             ])
         ]
