@@ -175,7 +175,6 @@ def _search_matches(items: list[dict], query: str) -> list[dict]:
 
 def _search_results(query: str, role: str):
     from dash import html as _html
-    from dash import dbc as _dbc
 
     if not query:
         return _html.Div(
@@ -197,7 +196,7 @@ def _search_results(query: str, role: str):
             style={"fontSize": "13px", "padding": "18px 6px"},
         )
     return [
-        _dbc.Button(
+        dbc.Button(
             [
                 _html.Span(_html.I(className="fas fa-chart-bar"), className="global-card-search-result-icon"),
                 _html.Span(
