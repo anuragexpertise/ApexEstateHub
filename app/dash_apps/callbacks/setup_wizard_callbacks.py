@@ -4,6 +4,7 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS
+from app.utils.ux_toasts import error_toast
 
 def register_setup_wizard_callbacks(app):
 
@@ -306,7 +307,7 @@ def register_setup_wizard_callbacks(app):
                 from app.services.secret_vault import encrypt_secret
                 secret_enc = encrypt_secret(qr_secret)
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, f"Could not secure the SIGNING_SECRET: {str(e)[:150]}", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to secure the signing secret. Check the server configuration and try again.")["message"], no_update, no_update
 
             # Zip edited rates back onto their seed sections. See the note
             # on fn_complete_society_setup: TDS_SECTION_RATE_SEED has two
@@ -367,7 +368,7 @@ def register_setup_wizard_callbacks(app):
                     with conn.cursor() as cur:
                         seed_accounts(cur, conn, society_id)
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, f"Could not seed accounts: {str(e)[:150]}", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to seed the default accounts. Please try again.")["message"], no_update, no_update
 
             try:
                 result = db._execute(
@@ -420,7 +421,7 @@ def register_setup_wizard_callbacks(app):
                     fetch_one=True,
                 )
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, f"Error saving setup: {str(e)[:150]}", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to save the society setup. Please try again.")["message"], no_update, no_update
 
             outcome = (result or {}).get("result") or ""
             if outcome != "OK":

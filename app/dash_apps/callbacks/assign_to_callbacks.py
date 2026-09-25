@@ -32,6 +32,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
 )
+from app.utils.ux_toasts import error_toast
 
 PORTAL_ROLE_LABEL = {
     "ADM": "Admin",
@@ -553,6 +554,6 @@ def register_assign_to_callbacks(app):
                 breadcrumb,
             )
         except Exception as e:
-            return False, {"type": "error", "message": str(e)}, no_update, no_update, no_update
+            return False, error_toast(e, "Unable to update assignments. Please try again."), no_update, no_update, no_update
 
     print("  ✓ Assign-to callbacks registered")

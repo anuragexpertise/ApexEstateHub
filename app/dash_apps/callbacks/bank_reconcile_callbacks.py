@@ -62,6 +62,7 @@ from app.security.audit_context import (
     get_current_society_id,
 )
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+from app.utils.ux_toasts import error_toast
 
 # Defense-in-depth cap — same reasoning as bulk_enroll_callbacks.py's
 # MAX_BULK_ROWS: a huge statement file shouldn't trigger unbounded inserts.
@@ -495,7 +496,7 @@ def register_bank_reconcile_callbacks(app):
             df = _parse_statement(contents, filename or "statement.xlsx")
         except Exception as e:
             return (
-                html.Div(f"Could not read file: {e}", style={"color": "#de5c52"}),
+                html.Div(error_toast(e, "Unable to read this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 
@@ -519,7 +520,7 @@ def register_bank_reconcile_callbacks(app):
             results = _match_and_insert(df, entity, sid, actor_id)
         except Exception as e:
             return (
-                html.Div(f"Reconciliation failed: {e}", style={"color": "#de5c52"}),
+                html.Div(error_toast(e, "Unable to reconcile this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 

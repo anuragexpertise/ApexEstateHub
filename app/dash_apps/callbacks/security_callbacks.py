@@ -15,6 +15,7 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
+from app.utils.ux_toasts import error_toast
 import logging
 
 logger = logging.getLogger(__name__)
@@ -413,7 +414,7 @@ def register_security_callbacks(app):
             return {"type": "error", "message": msg}, no_update
         except Exception as e:
             logger.error(f"trigger_gate_alert error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
     # ── 2. Escalate to Call (second press while pending) ────────────────────
     @app.callback(
@@ -459,7 +460,7 @@ def register_security_callbacks(app):
             )
         except Exception as e:
             logger.error(f"escalate_to_call error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
     # ── 3. Trigger Presumed Visitor Alert ──────────────────────────────────
     @app.callback(
@@ -496,7 +497,7 @@ def register_security_callbacks(app):
             return {"type": "error", "message": msg}, no_update
         except Exception as e:
             logger.error(f"notify_presumed_visitor error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
     # ── 4. Escalate Presumed Visitor to Call ───────────────────────────────
     @app.callback(
@@ -543,7 +544,7 @@ def register_security_callbacks(app):
             )
         except Exception as e:
             logger.error(f"call_presumed_visitor error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
     # ── 5. Create Walk-in Visitor ──────────────────────────────────────────
     @app.callback(
@@ -611,7 +612,7 @@ def register_security_callbacks(app):
             return {"type": "error", "message": f"Visitor created but alert failed: {alert_msg}"}, no_update
         except Exception as e:
             logger.error(f"create_walk_in_visitor_handler error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to register this visitor. Please try again."), no_update
 
     # ── 6. QR Scan Result (shared with admin) ──────────────────────────────
     @app.callback(
@@ -765,6 +766,6 @@ def register_security_callbacks(app):
             return toast, render_gate_alerts_section(society_id)
         except Exception as e:
             logger.error(f"owner_respond_to_alert error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
     print("  ✓ Security callbacks registered")

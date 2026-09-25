@@ -12,6 +12,7 @@ import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import KPI_CARDS
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 from app.security.guards import require_session
+from app.utils.ux_toasts import error_toast
 # ════════════════════════════════════════════════════════════════
 # KPI METADATA — list-of-tuples so duplicate card_ids are preserved
 # Each entry: (card_id, portal, tab, group)
@@ -421,9 +422,10 @@ def register_customize_kpi_callbacks(app):
             elapsed = (time.perf_counter() - t0) * 1000
             return dbc.Alert(
                 [
-                    html.Strong("ERROR: "),
+                    html.Strong("Unable to run this query. "),
                     html.Code(
-                        str(e), style={"fontSize": "11px", "whiteSpace": "pre-wrap"}
+                        error_toast(e, "Please check the query and try again.")["message"],
+                        style={"fontSize": "11px", "whiteSpace": "pre-wrap"},
                     ),
                     html.Br(),
                     html.Small(f"({elapsed:.1f} ms)", style={"color": "#888"}),

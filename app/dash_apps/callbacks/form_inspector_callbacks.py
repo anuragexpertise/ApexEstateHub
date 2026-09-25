@@ -11,6 +11,7 @@ from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 from app.dash_apps.drilldown import renderers
 from app.security.guards import require_session
 from app.security.audit_context import get_current_user_role
+from app.utils.ux_toasts import error_toast
 
 
 def register_form_inspector_callbacks(app):
@@ -117,7 +118,7 @@ def register_form_inspector_callbacks(app):
                 role=get_current_user_role()
             )
         except Exception as e:
-            preview = dbc.Alert(f"Failed to render form: {e}", color="danger", style={"fontSize": "12px"})
+            preview = dbc.Alert(error_toast(e, "Unable to render this form.")["message"], color="danger", style={"fontSize": "12px"})
 
         return details, preview
 
@@ -160,7 +161,7 @@ def register_form_inspector_callbacks(app):
                     prefill={}, color="#000", society_id=None, role="admin"
                 )
             except Exception as e:
-                err_msg = str(e)
+                err_msg = error_toast(e, "Unable to render this form.")["message"]
 
             ms = int((time.perf_counter() - t0) * 1000)
 

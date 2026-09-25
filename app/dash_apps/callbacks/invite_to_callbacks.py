@@ -34,6 +34,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
 )
+from app.utils.ux_toasts import error_toast
 
 
 PORTAL_ROLE_LABEL = {
@@ -520,6 +521,6 @@ def register_invite_to_callbacks(app):
                 breadcrumb,
             )
         except Exception as e:
-            return False, {"type": "error", "message": str(e)}, no_update, no_update, no_update
+            return False, error_toast(e, "Unable to send invitations. Please try again."), no_update, no_update, no_update
 
     print("  ✓ Invite-to callbacks registered")

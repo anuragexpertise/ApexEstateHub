@@ -19,6 +19,7 @@ from app.security.audit_context import (
     get_current_society_id,
     get_current_linked_id,
 )
+from app.utils.ux_toasts import error_toast
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def register_channel_callbacks(app):
             return True, render_channel_subscriber_profiles(channel_name, subscribers)
         except Exception as e:
             logger.error(f"open_subscribers_modal error: {e}")
-            return False, html.Div(f"Error loading subscribers: {e}", style={"color": "#de5c52"})
+            return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})
 
     # ── 2. Close Channel Subscribers modal ───────────────────────────────────
     @app.callback(
@@ -159,7 +160,7 @@ def register_channel_callbacks(app):
             return toast, store
         except Exception as e:
             logger.error(f"approve_channel_alert error: {e}")
-            return {"type": "error", "message": str(e)}, no_update
+            return error_toast(e, "Unable to approve this alert. Please try again."), no_update
 
     # ── 4. Subscribe / Unsubscribe channel from alert card ──────────────────
     @app.callback(
@@ -197,7 +198,7 @@ def register_channel_callbacks(app):
             return {"type": "success" if ok else "error", "message": msg or "Action failed"}
         except Exception as e:
             logger.error(f"toggle_channel_subscription error: {e}")
-            return {"type": "error", "message": str(e)}
+            return error_toast(e, "Unable to update your subscription. Please try again.")
 
     # ── 5. View Subscribers from alert card ──────────────────────────────
     @app.callback(
@@ -230,4 +231,4 @@ def register_channel_callbacks(app):
             return True, render_channel_subscriber_profiles(channel_name, subscribers)
         except Exception as e:
             logger.error(f"open_subscribers_from_alert error: {e}")
-            return False, html.Div(f"Error loading subscribers: {e}", style={"color": "#de5c52"})
+            return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})

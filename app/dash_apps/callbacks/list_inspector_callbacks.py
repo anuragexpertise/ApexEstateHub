@@ -38,6 +38,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
 )
+from app.utils.ux_toasts import error_toast
 
 # ════════════════════════════════════════════════════════════════════════════
 # DERIVE LIST → KPI MAP
@@ -330,8 +331,11 @@ def register_list_inspector_callbacks(app):
             elapsed = (time.perf_counter() - t0) * 1000
             result_alert = dbc.Alert(
                 [
-                    html.Strong("ERROR: "),
-                    html.Code(str(e), style={"fontSize": "11px", "whiteSpace": "pre-wrap"}),
+                    html.Strong("Unable to run this query. "),
+                    html.Code(
+                        error_toast(e, "Please check the query and try again.")["message"],
+                        style={"fontSize": "11px", "whiteSpace": "pre-wrap"},
+                    ),
                     html.Br(),
                     html.Small("(%0.1f ms)" % elapsed, style={"color": "#888"}),
                 ],

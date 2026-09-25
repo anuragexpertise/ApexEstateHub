@@ -28,6 +28,7 @@ produced it.
 from dash import Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+from app.utils.ux_toasts import error_toast
 
 from app.security.guards import require_session
 from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
@@ -164,7 +165,7 @@ def register_qr_reissue_callbacks(app):
                 reason, actor_user_id, resolved.get("label"),
             )
         except (ValueError, RuntimeError) as e:
-            return dbc.Alert(str(e), color="danger"), no_update, ""
+            return dbc.Alert(error_toast(e, "Unable to re-issue this code. Please try again.")["message"], color="danger"), no_update, ""
 
         if not src:
             return dbc.Alert(f"Re-issue failed: {payload}", color="danger"), no_update, ""
