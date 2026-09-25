@@ -36,6 +36,7 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
+from app.utils.ux_toasts import error_toast
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -401,7 +402,7 @@ def register_shell_callbacks(app):
                 [], True,
                 html.Div(
                     [html.I(className="fas fa-database me-2"),
-                     f"Database error: {str(exc)[:120]}"],
+                     error_toast(exc, "Unable to load societies right now. Please try again.")["message"]],
                     style={"color": "#dc3545", "fontSize": "12px", "textAlign": "center"},
                 ),
                 {**_ERR, "background": "#f8d7da"},

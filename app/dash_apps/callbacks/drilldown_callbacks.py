@@ -75,6 +75,7 @@ from app.security.audit_context import (
     get_current_society_id,
     get_current_linked_id,
 )
+from app.utils.ux_toasts import error_toast
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
     today = dt_date.today()
@@ -215,14 +216,14 @@ def _handle_list_delete(entity, pk, sid, store, auth):
     try:
         ok, msg = loaders.delete_entity(entity, pk, sid)
     except Exception as e:
-        ok, msg = False, f"Delete error: {e}"
+        ok, msg = False, error_toast(e, "Unable to delete this record.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
     except Exception as e:
-        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+        content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
     if db_err:
@@ -259,14 +260,14 @@ def _handle_list_confirm(entity, pk, sid, store, auth):
         user_id = get_current_user_id() or (auth or {}).get("user_id")
         ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
     except Exception as e:
-        ok, msg = False, f"Confirm error: {e}"
+        ok, msg = False, error_toast(e, "Unable to confirm this record.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
     except Exception as e:
-        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+        content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
     if db_err:
@@ -302,14 +303,14 @@ def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
         user_id = get_current_user_id() or (auth or {}).get("user_id")
         ok, msg, receipt_id = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
     except Exception as e:
-        ok, msg, receipt_id = False, f"Confirm error: {e}", None
+        ok, msg, receipt_id = False, error_toast(e, "Unable to confirm this bill group.")["message"], None
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
     except Exception as e:
-        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+        content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
     if db_err:
@@ -348,14 +349,14 @@ def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
         user_id = get_current_user_id() or (auth or {}).get("user_id")
         ok, msg = loaders.reject_receivable_bill_group(str(bg_id), confirmed_by=user_id)
     except Exception as e:
-        ok, msg = False, f"Reject error: {e}"
+        ok, msg = False, error_toast(e, "Unable to reject this bill group.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
     except Exception as e:
-        content, bc, db_err = _empty_state(f"Render error: {e}"), [], str(e)
+        content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
     if db_err:
@@ -466,7 +467,7 @@ def register_drilldown_callbacks(app):
                 return preview, no_update
             return preview, safe_filename
         except Exception as e:
-            return html.Small(f"✗ {e}", style={"color": "red"}), no_update
+            return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
 
     # ── 0b. Camera capture (device Snap button) ─────────────────────────────────
     # camera_callbacks.py's clientside snapCamCapture() writes the captured
@@ -505,7 +506,7 @@ def register_drilldown_callbacks(app):
                 return preview, no_update
             return preview, safe_filename
         except Exception as e:
-            return html.Small(f"✗ {e}", style={"color": "red"}), no_update
+            return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
     # ── 1. MAIN ROUTER ────────────────────────────────────────────────────────
     @app.callback(
         Output("drilldown-store", "data"),
@@ -1514,7 +1515,7 @@ def register_drilldown_callbacks(app):
                     kpi_style = {"display": "none"}
                     return store, content, bc, kpi_style, toast
                 except Exception as e:
-                    toast = {"_toast": {"type": "error", "message": str(e)}}
+                    toast = {"_toast": error_toast(e, "Unable to trigger this alert.")}
                     return store, content, bc, {"display": "none"}, toast
 
             # ── Create Channel (admin only) ─────────────────────────────────────
@@ -2034,8 +2035,8 @@ def register_drilldown_callbacks(app):
                     kpi_style,
                 )
             except Exception as e:
-                return (store, no_update, no_update, 
-                        {"type": "error", "message": f"Error: {str(e)[:120]}"}, 
+                return (store, no_update, no_update,
+                        error_toast(e, "Unable to create the society. Please try again."),
                         no_update)
                         
         if entity_singular == "societies" and "edit" in card_id:
@@ -2731,9 +2732,10 @@ def _render_current(store: dict, auth: dict) -> tuple:
         return content, breadcrumb, None
     except Exception as e:
         error_str = str(e).lower()
+        friendly = error_toast(e, "Unable to load this view.")["message"]
         if any(kw in error_str for kw in DB_ERROR_KEYWORDS):
-            return _empty_state("Database connection error"), [], str(e)
-        return _empty_state(f"Error: {str(e)[:100]}"), [], None
+            return _empty_state("Database connection error"), [], friendly
+        return _empty_state(friendly), [], None
 
 
 def _sort_key(row, col):
@@ -4070,7 +4072,7 @@ def _save_pay_dues(db, d, sid):
                 msg = f"{msg} [[receipt:{receipt_id}]]"
             return ok, msg, None
         except Exception as e:
-            return False, str(e), None
+            return False, error_toast(e, "Unable to record this payment. Please try again.")["message"], None
 
     ok, msg, result = loaders.pay_apartment_dues_fifo(
         apartment_id=apt_id, amount=amt, mode=mode,
@@ -4143,7 +4145,7 @@ def _save_pay_due_bg(db, d, sid):
             return True, msg, None
         return False, msg, None
     except Exception as e:
-        return False, f"Database error: {e}", None
+        return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 def _save_pay_due_selective(db, d, sid):
     apt_id = d.get("entity_id")
@@ -4192,7 +4194,7 @@ def _save_pay_due_selective(db, d, sid):
             )
             return True, f"Success: Selective payment posted — transaction #{res['transaction_id']}", res['transaction_id']
         except Exception as e:
-            return False, f"Database error: {e}", None
+            return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
     # Owner self-reporting
     try:
@@ -4202,7 +4204,7 @@ def _save_pay_due_selective(db, d, sid):
         )
         return True, f"Success: Payment reported (pending confirmation) [[receipt:{res['receipt_id']}]]", None
     except Exception as e:
-        return False, f"Database error: {e}", None
+        return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 def _save_verify_receivable_amt(db, d, sid):
     """
@@ -4269,7 +4271,7 @@ def _save_reject_receivable_amt(db, d, sid):
         if msg.startswith("Success"): return True, msg, None
         return False, msg, None
     except Exception as e:
-        return False, f"Database error: {e}", None
+        return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -5757,7 +5759,7 @@ def _validate_transaction_account(db, acc_id, society_id, transaction_type):
             return False, f"Cannot use Income account '{name}' for expenses."
         return True, ""
     except Exception as e:
-        return False, f"Validation error: {e}"
+        return False, error_toast(e, "Unable to validate this account.")["message"]
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -18,6 +18,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
 )
+from app.utils.ux_toasts import error_toast
 
 def _kpi_ids_for_portal_tab(portal, tab):
     """Duplicate-safe KPI list for a given portal+tab."""
@@ -398,8 +399,9 @@ def register_customize_callbacks(app):
         except Exception as e:
             elapsed = (time.perf_counter() - t0) * 1000
             return dbc.Alert(
-                [html.Strong("DB ERROR: "),
-                 html.Code(str(e),
+                [html.I(className="fas fa-times-circle me-2"),
+                 html.Strong("Unable to run this query. "),
+                 html.Code(error_toast(e, "Please check the query and try again.")["message"],
                            style={"fontSize": "11px",
                                   "whiteSpace": "pre-wrap"}),
                  html.Br(),

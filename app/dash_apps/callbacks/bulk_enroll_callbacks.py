@@ -54,6 +54,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
 )
+from app.utils.ux_toasts import error_toast
 
 # Defense-in-depth cap: a huge Excel file (accidental or malicious) would otherwise
 # trigger unbounded serial INSERTs with no upper bound.
@@ -659,7 +660,7 @@ def register_bulk_enroll_callbacks(app):
             rows = _parse_upload(contents, filename)
         except Exception as e:
             return (
-                html.Div(f"Could not read upload: {e}", style={"color": "#de5c52"}),
+                html.Div(error_toast(e, "Unable to read this file. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
             )
 

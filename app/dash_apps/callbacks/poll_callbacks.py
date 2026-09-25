@@ -3,6 +3,7 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 import app.services.push_service as PushService
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+from app.utils.ux_toasts import error_toast
 import logging
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ def register_poll_callbacks(app):
             ], className="alert alert-success mt-2")
         except Exception as e:
             logger.error(f"Error saving poll (edit={is_edit}): {e}")
-            return html.Div(f"Error saving poll: {e}", className="alert alert-danger mt-2")
+            return html.Div(error_toast(e, "Unable to save this poll. Please try again.")["message"], className="alert alert-danger mt-2")
 
     app.clientside_callback(
         """

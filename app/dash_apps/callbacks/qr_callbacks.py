@@ -11,6 +11,7 @@ from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
 )
+from app.utils.ux_toasts import error_toast
 
 
 def render_concern_lookup_result(concern_id, society_id: int, auth_data: dict) -> html.Div:
@@ -1331,7 +1332,7 @@ def register_qr_callbacks(app):
             )
             return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
         except Exception as e:
-            return {"type": "error", "message": f"Failed to trigger emergency: {str(e)}"}
+            return error_toast(e, "Unable to trigger the emergency alert. Please contact support if this continues.")
 
 
     # ── 5f. Read NFC (Web NFC API) + Geolocation Fallback ──────────
@@ -1495,6 +1496,6 @@ def register_qr_callbacks(app):
             return True, "No admin contact found"
             
         except Exception as e:
-            return True, f"Error: {str(e)}"
+            return True, error_toast(e, "Unable to load the admin contact. Please try again.")["message"]
 
     print("✓ QR callbacks registered (static QR + camera + emergency)")
