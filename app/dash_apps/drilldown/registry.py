@@ -95,6 +95,13 @@ ENTITY_MAP: dict = {
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
 
+# Override: both "assets" and "active_assets" map to singular "asset" in
+# ENTITY_MAP, so the reverse comprehension above keeps only "active_assets"
+# (last wins). "assets" is the canonical plural entity key used by
+# PROFILE_ACTIONS, _HIDDEN_ON_FORM, _NEW_FORM_DEFAULTS, etc., so to_plural()
+# must return "assets" for singular "asset".
+ENTITY_MAP_REV["asset"] = "assets"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ROLE FILTERS

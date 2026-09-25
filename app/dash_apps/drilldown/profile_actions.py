@@ -336,8 +336,18 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "icon": "fa-sign-out-alt",
             "color": "danger",
             "roles": ["admin"],
+            "condition": {"field": "disposed", "equals": False},
         },
     ],
+    # "active_assets" maps to the same singular "asset" as "assets" (see
+    # ENTITY_MAP_REGISTRY), so it needs the same profile actions — the
+    # quick-action buttons on the list card (render_list_card) look up
+    # PROFILE_ACTIONS by the list entity key, which is "active_assets" for
+    # the KPI-driven asset list.
+    "active_assets": [{"label": "Sell / Dispose", "action_id": "dispose_asset",
+                       "target_card": "form_asset_dispose_new", "icon": "fa-sign-out-alt",
+                       "color": "danger", "roles": ["admin"],
+                       "condition": {"field": "disposed", "equals": False}}],
 
     # ── POLLS ──────────────────────────────────────────────────────────
     "polls": [

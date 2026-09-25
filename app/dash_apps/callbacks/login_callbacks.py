@@ -238,6 +238,33 @@ def register_login_callbacks(app):
         print(f"✅ Pattern login success: {email}")
         return _login_response(user)
 
+    # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
+    @app.callback(
+        Output("auth-store",    "data",    allow_duplicate=True),
+        Output("url",           "pathname",allow_duplicate=True),
+        Output("toast-store",   "data",    allow_duplicate=True),
+        Output("login-modal",   "is_open", allow_duplicate=True),
+        Input("master-admin-login-btn", "n_clicks"),
+        State("master-admin-email",    "value"),
+        State("master-admin-password", "value"),
+        prevent_initial_call=True,
+    )
+    def handle_master_login(n, email, password):
+        if not n or not email or not password:
+            raise PreventUpdate
+
+        print(f"\n👑 Master admin login: {email}")
+        try:
+            user = authenticate_user(email.strip(), password, society_id=None)
+        except Exception:
+            print(f"❌ Database connection error during master admin login")
+            return _login_error("No Database connection")
+        if not user or user.get("role") != "master":
+            return _login_error("Invalid master admin credentials")
+
+        print(f"✅ Master admin login success: {email}")
+        return _login_response(user)
+
     # ── 5. FORGOT PASSWORD — OPEN MODAL ──────────────────────────
     @app.callback(
         Output("forgot-password-modal", "is_open"),
