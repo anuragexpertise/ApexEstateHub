@@ -63,6 +63,19 @@ def _register_error_handlers(app: Flask) -> None:
             message="That page doesn't exist or may have moved.",
         ), 404
 
+    @app.errorhandler(403)
+    def _forbidden(exc):
+        log.warning("Access denied on %s %s", request.method, request.path)
+        if _wants_json():
+            return jsonify({
+                "success": False,
+                "message": "You don't have permission to access this resource.",
+            }), 403
+        return _ERROR_PAGE.format(
+            title="Access Denied",
+            message="You don't have permission to view this page. Contact your administrator if you believe this is an error.",
+        ), 403
+
     @app.errorhandler(500)
     def _server_error(exc):
         log.exception("Unhandled server error on %s %s", request.method, request.path)

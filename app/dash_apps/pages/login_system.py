@@ -65,44 +65,14 @@ def society_select_layout() -> list:
 
                 html.Div(
                     [
-                        html.Button(
+                        html.A(
                             [html.I(className="fas fa-crown me-2"), "Master Admin Login"],
-                            id="toggle-master-btn",
-                            n_clicks=0,
+                            href="/master-login",
                             style={
-                                "background": "none", "border": "1px solid #e0e0e0",
-                                "borderRadius": "8px", "padding": "7px 14px",
-                                "fontSize": "12px", "color": "#7d8ea3",
-                                "cursor": "pointer", "width": "100%",
+                                "display": "block", "textAlign": "center",
+                                "color": "#c96a19", "fontWeight": "600",
+                                "textDecoration": "none", "fontSize": "13px",
                             },
-                        ),
-                        html.Div(
-                            id="master-login-collapse",
-                            style={"display": "none"},
-                            children=[
-                                html.Div(style={"height": "12px"}),
-                                dbc.Input(
-                                    id="master-admin-email",
-                                    type="email",
-                                    placeholder="Admin email",
-                                    style={"fontSize": "13px", "marginBottom": "8px"},
-                                ),
-                                dbc.Input(
-                                    id="master-admin-password",
-                                    type="password",
-                                    placeholder="Admin password",
-                                    style={"fontSize": "13px", "marginBottom": "10px"},
-                                ),
-                                dbc.Button(
-                                    [html.I(className="fas fa-sign-in-alt me-2"), "Login as Master Admin"],
-                                    id="master-admin-login-btn",
-                                    color="danger",
-                                    size="sm",
-                                    className="w-100",
-                                    n_clicks=0,
-                                    style={"borderRadius": "8px"},
-                                ),
-                            ],
                         ),
                     ]
                 ),
@@ -124,6 +94,7 @@ def login_layout(society_name: str = "Society") -> list:
                             html.I(className="fas fa-arrow-left"),
                             id="back-to-stage1-btn",
                             n_clicks=0,
+                            aria_label="Back to society selection",
                             style={
                                 "background": "none", "border": "none",
                                 "color": "#667eea", "cursor": "pointer",
@@ -151,18 +122,36 @@ def login_layout(society_name: str = "Society") -> list:
                             tab_id="tab-password",
                             children=html.Div(
                                 [
+                                    dbc.Label("Email address", html_for="login-email", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
                                     dbc.Input(
                                         id="login-email",
                                         type="email",
-                                        placeholder="Email address",
-                                        style={"fontSize": "13px", "marginBottom": "10px",
-                                               "marginTop": "14px"},
+                                        placeholder="Enter your email",
+                                        n_submit=0,
+                                        style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
                                     ),
-                                    dbc.Input(
-                                        id="login-password",
-                                        type="password",
-                                        placeholder="Password",
-                                        style={"fontSize": "13px", "marginBottom": "6px"},
+                                    dbc.Label("Password", html_for="login-password", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
+                                    html.Div(
+                                        [
+                                            dbc.Input(
+                                                id="login-password",
+                                                type="password",
+                                                placeholder="Enter your password",
+                                                n_submit=0,
+                                                style={"fontSize": "13px", "marginBottom": "6px", "flex": "1"},
+                                            ),
+                                            html.Button(
+                                                html.I(className="fas fa-eye"),
+                                                id="toggle-login-password",
+                                                type="button",
+                                                aria_label="Show password",
+                                                style={
+                                                    "position": "absolute", "right": "12px", "top": "50%", "transform": "translateY(-50%)",
+                                                    "background": "none", "border": "none", "color": "#999", "cursor": "pointer", "padding": "4px",
+                                                },
+                                            ),
+                                        ],
+                                        style={"position": "relative"},
                                     ),
                                     html.Div(
                                         html.A(
@@ -192,20 +181,35 @@ def login_layout(society_name: str = "Society") -> list:
                             tab_id="tab-pin",
                             children=html.Div(
                                 [
+                                    dbc.Label("Email address", html_for="login-email-pin", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
                                     dbc.Input(
                                         id="login-email-pin",
                                         type="email",
-                                        placeholder="Email address",
-                                        style={"fontSize": "13px", "marginBottom": "10px",
-                                               "marginTop": "14px"},
+                                        placeholder="Enter your email",
+                                        style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
                                     ),
-                                    dbc.Input(
-                                        id="login-pin",
-                                        type="password",
-                                        placeholder="4-6 digit PIN",
-                                        maxLength=6,
-                                        style={"fontSize": "18px", "letterSpacing": "8px",
-                                               "textAlign": "center", "marginBottom": "14px"},
+                                    dbc.Label("PIN", html_for="login-pin", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
+                                    html.Div(
+                                        [
+                                            dbc.Input(
+                                                id="login-pin",
+                                                type="password",
+                                                placeholder="4-6 digit PIN",
+                                                maxLength=6,
+                                                style={"fontSize": "18px", "letterSpacing": "8px", "textAlign": "center", "marginBottom": "14px", "flex": "1"},
+                                            ),
+                                            html.Button(
+                                                html.I(className="fas fa-eye"),
+                                                id="toggle-login-pin",
+                                                type="button",
+                                                aria_label="Show PIN",
+                                                style={
+                                                    "position": "absolute", "right": "12px", "top": "50%", "transform": "translateY(-50%)",
+                                                    "background": "none", "border": "none", "color": "#999", "cursor": "pointer", "padding": "4px",
+                                                },
+                                            ),
+                                        ],
+                                        style={"position": "relative"},
                                     ),
                                     dbc.Button(
                                         [html.I(className="fas fa-sign-in-alt me-2"), "Login with PIN"],
@@ -225,12 +229,16 @@ def login_layout(society_name: str = "Society") -> list:
                             tab_id="tab-pattern",
                             children=html.Div(
                                 [
+                                    dbc.Label("Email address", html_for="login-email-pattern", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
                                     dbc.Input(
                                         id="login-email-pattern",
                                         type="email",
-                                        placeholder="Email address",
-                                        style={"fontSize": "13px", "marginBottom": "12px",
-                                               "marginTop": "14px"},
+                                        placeholder="Enter your email",
+                                        style={"fontSize": "13px", "marginBottom": "12px", "marginTop": "14px"},
+                                    ),
+                                    html.P(
+                                        "Draw your pattern to sign in",
+                                        style={"fontSize": "12px", "color": "#7d8ea3", "textAlign": "center", "marginBottom": "8px"},
                                     ),
                                     html.Div(
                                         id="pattern-grid",
@@ -245,6 +253,8 @@ def login_layout(society_name: str = "Society") -> list:
                                             "borderRadius": "12px",
                                             "userSelect": "none",
                                         },
+                                        role="grid",
+                                        aria_label="Pattern lock grid",
                                         children=[
                                             html.Div(
                                                 style={
@@ -254,6 +264,9 @@ def login_layout(society_name: str = "Society") -> list:
                                                     "cursor": "pointer",
                                                     "border": "2px solid #adb5bd",
                                                 },
+                                                role="button",
+                                                tabIndex=0,
+                                                aria_label=f"Pattern point {i}",
                                                 **{"data-pos": str(i)},
                                             )
                                             for i in range(1, 10)
