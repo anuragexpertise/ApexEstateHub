@@ -978,7 +978,13 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     if not body_rows:
         span = len(columns) + (1 if row_actions_allowed else 0)
-        has_active_filters = bool((search or "").strip() or col_filters)
+        # FY / month / account selections are filters too — they are stored
+        # outside col_filters and read into the loader query, so a list
+        # emptied by one of them must not claim "nothing recorded yet".
+        has_active_filters = bool(
+            (search or "").strip() or col_filters
+            or selected_fy or selected_month or selected_account_id
+        )
         if has_active_filters:
             empty_message = "No records match your search or filters"
             empty_action = dbc.Button(

@@ -625,6 +625,11 @@ def register_drilldown_callbacks(app):
             entity = id_dict.get("entity")
             store.setdefault("list_search", {})[entity] = ""
             (store.get("list_filter") or {}).pop(entity, None)
+            # FY / month / account live outside list_filter and feed the
+            # loader query directly — leaving them set would keep the list
+            # empty after a click labelled "Clear search and filters".
+            for _key in ("list_fy", "list_month", "list_account"):
+                (store.get(_key) or {}).pop(entity, None)
             store.setdefault("list_pages", {})[entity] = 1
             hide_kpis = True
             content, bc, db_err = _render_current(store, auth)
