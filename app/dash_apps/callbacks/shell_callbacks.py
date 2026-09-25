@@ -1197,5 +1197,5 @@ def register_shell_callbacks(app):
             content, bc, db_err = html.Div("Error loading page."), [], "Error"
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         return new_store, content, bc, kpi_style
-    
+
     print("  ✓ Shell callbacks registered")

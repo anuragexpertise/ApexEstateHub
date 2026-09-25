@@ -17,7 +17,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 def _redirect_url(role, society_id):
     if role == 'master':
-        return '/dashboard/master'
+        return '/dashboard/master-societies'
     if role == 'admin':
         return '/dashboard/admin-portal'
     if role == 'apartment':
