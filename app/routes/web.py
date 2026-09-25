@@ -55,7 +55,6 @@ _MASTER_LOGIN_HTML = """
         </div>
         <form method="POST" action="/auth/login" id="master-login-form">
             <input type="hidden" name="method" value="password">
-            <input type="hidden" name="society_id" value="">
             <div class="mb-3">
                 <label class="form-label" for="email">Email Address</label>
                 <input type="email" class="form-control" id="email" name="email" placeholder="admin@estatehub.com" required autocomplete="email">
