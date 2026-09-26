@@ -276,6 +276,32 @@ CREATE TABLE IF NOT EXISTS assets (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
+-- deposits (2026-09): intangible investment register — FDs, bonds, mutual
+-- fund units, etc — the "ALL Deposits" counterpart to `assets` above (which
+-- covers tangible fixed assets only). Mirrors `assets`' shape (purchase/
+-- disposal pair + acc_id/sale_acc_id posting accounts) so fn_deposit_holdings_fy
+-- and future ledger-posting functions can follow the exact same pattern as
+-- fn_buy_asset/fn_dispose_asset. No admin create/dispose UI wired up yet —
+-- see fn_deposit_holdings_fy's comment.
+CREATE TABLE IF NOT EXISTS deposits (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    deposit_name VARCHAR(100) NOT NULL,  -- e.g. "SBI FD 40021", "HDFC Liquid Fund"
+    isin VARCHAR(20),                     -- ISIN, or the bank's FD/account reference if no ISIN applies
+    purchase_date DATE,
+    purchase_value NUMERIC(12, 2),
+    acc_id INT,
+    FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id), -- Investments asset account
+    disposed BOOLEAN NOT NULL DEFAULT FALSE,
+    sale_date DATE,
+    sale_value NUMERIC(12, 2),
+    sale_acc_id INT,
+    FOREIGN KEY (society_id, sale_acc_id) REFERENCES accounts (society_id, id), -- Cash/Bank account credited on maturity/sale
+    disposed_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -5565,6 +5591,95 @@ BEGIN
 END;
 $$;
 
+-- fn_funds_account_fy (2026-09): the 5th/1st Financial Statement — "Funds
+-- Account" schedule (Opening B/F, Additions, Deductions, Closing C/F) for
+-- every statutory fund/equity account, alongside the existing 4 Statements
+-- (Depreciation, Income & Expenditure, Capital Account & Equity, Balance
+-- Sheet). Mirrors the Depreciation Account schedule's B/F-Additions-
+-- Deductions-C/F shape, but for Capital/Reserves/Sinking/Repair/Corpus.
+--
+-- Funds are resolved dynamically by walking the subtree of whichever
+-- account is named ILIKE '%Equity%' (== "Equity / Reserves & Funds" in the
+-- seeded chart of accounts), the same approach now used by
+-- loaders.get_fund_balances/get_expense_bank_accounts for the Fund
+-- Management card — NOT hardcoded account ids, since a jurisdiction/legal
+-- regime with a different chart-of-accounts numbering (see
+-- legal_regime_profiles) would silently break a fixed-id list. This also
+-- naturally excludes the "Equity / Reserves & Funds" header itself (its own
+-- name matches '%Equity%' so it's the recursion ROOT, never a row in the
+-- tree) and any Dr-natured child (e.g. "Gifts Given") that isn't itself a
+-- fund/equity balance.
+DROP FUNCTION IF EXISTS fn_funds_account_fy(INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_funds_account_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    account_id   INT,
+    account_name TEXT,
+    own_bf       NUMERIC(15,2),  -- named to match cap_rows/fn_fy_closing_report's own_bf convention, not opening_bf
+    additions    NUMERIC(15,2),
+    deductions   NUMERIC(15,2),
+    own_closing  NUMERIC(15,2)   -- named to match own_closing convention, not closing_cf
+)
+LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
+-- Same RETURNS TABLE(...) implicit-variable-collision class of bug already
+-- hit twice in this codebase (fn_gst_summary_fy, fn_compute_rcm_liability)
+-- — own_bf/additions/deductions/own_closing are OUT parameters AND the
+-- top-level SELECT list below, so the pragma is added defensively up front
+-- rather than waiting to rediscover the same failure a third time.
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+BEGIN
+    RETURN QUERY
+    WITH RECURSIVE equity_root AS (
+        SELECT a.id FROM accounts a
+        WHERE a.society_id = p_society_id AND a.name ILIKE '%Equity%'
+    ),
+    fund_tree AS (
+        SELECT a.id, a.name::TEXT AS acc_name
+        FROM accounts a
+        JOIN equity_root er ON a.parent_account_id = er.id
+        WHERE a.society_id = p_society_id AND a.drcr_account = 'Cr'
+        UNION ALL
+        SELECT a.id, a.name::TEXT AS acc_name
+        FROM accounts a
+        JOIN fund_tree ft ON a.parent_account_id = ft.id
+        WHERE a.society_id = p_society_id AND a.drcr_account = 'Cr'
+    )
+    SELECT
+        ft.id,
+        ft.acc_name,
+        (-fn_resolve_bf_amount_fy(p_society_id, ft.id, p_fy)) AS own_bf,
+        COALESCE((
+            SELECT SUM(t.amount) FROM transactions t
+            WHERE t.society_id = p_society_id AND t.acc_id = ft.id
+              AND t.entry_side = 'Cr' AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+        ), 0) AS additions,
+        COALESCE((
+            SELECT SUM(t.amount) FROM transactions t
+            WHERE t.society_id = p_society_id AND t.acc_id = ft.id
+              AND t.entry_side = 'Dr' AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+        ), 0) AS deductions,
+        (-fn_resolve_bf_amount_fy(p_society_id, ft.id, p_fy))
+            + COALESCE((
+                SELECT SUM(t.amount) FROM transactions t
+                WHERE t.society_id = p_society_id AND t.acc_id = ft.id
+                  AND t.entry_side = 'Cr' AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+              ), 0)
+            - COALESCE((
+                SELECT SUM(t.amount) FROM transactions t
+                WHERE t.society_id = p_society_id AND t.acc_id = ft.id
+                  AND t.entry_side = 'Dr' AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+              ), 0) AS own_closing
+    FROM fund_tree ft
+    ORDER BY ft.id;
+END;
+$$;
+
 --   1. fn_save_expense still had ZERO entry_side references in the repo
 --      as of this session — the earlier entry_side migration draft
 --      covering the 11 writer functions was never actually merged in.
@@ -8695,6 +8810,115 @@ BEGIN
       AND ar.disposed = COALESCE(p_disposed, FALSE)
       AND (p_search IS NULL OR ar.asset_name ILIKE '%'||p_search||'%')
     ORDER BY ar.purchase_date DESC;
+END;
+$$;
+
+-- fn_asset_holdings_fy (2026-09): "ALL Holdings" Financial Statement —
+-- the complete tangible fixed-asset register (both still-active and
+-- already-disposed rows together), each with a per-asset STCG/LTCG split
+-- by the standard 36-month holding-period test (sec 2(42A), movable
+-- property other than listed securities).
+--
+-- IMPORTANT caveat this statement does NOT override: for depreciable
+-- business assets forming part of a block, sec 50 of the Income Tax Act
+-- deems ANY gain on disposal to be SHORT-TERM regardless of holding
+-- period — that block-of-assets STCG/STCL treatment is what
+-- fn_fixed_asset_register_fy / asset_export.py already compute and is
+-- what actually gets filed. This per-asset 36-month STCG/LTCG split is a
+-- supplementary informational view for the "ALL Holdings" register
+-- (matches how this statement's sibling "ALL Deposits" is computed), not
+-- a second, conflicting tax position — say so wherever both are shown
+-- together (e.g. an export workbook) so a reader doesn't mistake one for
+-- overriding the other. p_fy is accepted for interface symmetry with the
+-- other statements but unused: this is an all-time register, not FY-scoped.
+DROP FUNCTION IF EXISTS fn_asset_holdings_fy(INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_asset_holdings_fy(
+    p_society_id INT,
+    p_fy         INT DEFAULT NULL
+)
+RETURNS TABLE (
+    name           TEXT,
+    ref_no         TEXT,
+    purchase_date  DATE,
+    exit_date      DATE,
+    purchase_value NUMERIC(12,2),
+    sale_value     NUMERIC(12,2),
+    stcg           NUMERIC(12,2),
+    ltcg           NUMERIC(12,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.asset_name::TEXT,
+        a.asset_sno::TEXT,
+        a.purchase_date,
+        a.disposed_at,
+        a.purchase_value,
+        a.sale_value,
+        CASE WHEN a.disposed AND a.sale_value IS NOT NULL
+                  AND a.disposed_at <= a.purchase_date + INTERVAL '3 years'
+             THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END,
+        CASE WHEN a.disposed AND a.sale_value IS NOT NULL
+                  AND a.disposed_at > a.purchase_date + INTERVAL '3 years'
+             THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END
+    FROM assets a
+    WHERE a.society_id = p_society_id
+    ORDER BY a.disposed ASC, a.purchase_date DESC;
+END;
+$$;
+
+-- fn_deposit_holdings_fy (2026-09): "ALL Deposits" Financial Statement —
+-- the intangible investment register (FDs, bonds, mutual fund units, etc,
+-- tracked in the new `deposits` table below), same shape and same
+-- 36-month STCG/LTCG convention as fn_asset_holdings_fy above (see its
+-- caveat comment — this split is informational, and for a plain bank FD
+-- the maturity gain is actually "Income from Other Sources" under the
+-- Income Tax Act, not a capital gain at all; a society's CA should confirm
+-- the correct head per instrument type before filing).
+--
+-- NOTE: the `deposits` table has no data-entry UI yet (no create/dispose
+-- form or admin card wired up) — this function and the "ALL Deposits"
+-- statement row will correctly show empty until that admin UI is built
+-- (tracked as a follow-up; see the patch notes).
+DROP FUNCTION IF EXISTS fn_deposit_holdings_fy(INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_deposit_holdings_fy(
+    p_society_id INT,
+    p_fy         INT DEFAULT NULL
+)
+RETURNS TABLE (
+    name           TEXT,
+    ref_no         TEXT,
+    purchase_date  DATE,
+    exit_date      DATE,
+    purchase_value NUMERIC(12,2),
+    sale_value     NUMERIC(12,2),
+    stcg           NUMERIC(12,2),
+    ltcg           NUMERIC(12,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
+BEGIN
+    RETURN QUERY
+    SELECT
+        d.deposit_name::TEXT,
+        d.isin::TEXT,
+        d.purchase_date,
+        d.sale_date,
+        d.purchase_value,
+        d.sale_value,
+        CASE WHEN d.disposed AND d.sale_value IS NOT NULL
+                  AND d.sale_date <= d.purchase_date + INTERVAL '3 years'
+             THEN ROUND(d.sale_value - d.purchase_value, 2) ELSE 0 END,
+        CASE WHEN d.disposed AND d.sale_value IS NOT NULL
+                  AND d.sale_date > d.purchase_date + INTERVAL '3 years'
+             THEN ROUND(d.sale_value - d.purchase_value, 2) ELSE 0 END
+    FROM deposits d
+    WHERE d.society_id = p_society_id
+    ORDER BY d.disposed ASC, d.purchase_date DESC;
 END;
 $$;
 

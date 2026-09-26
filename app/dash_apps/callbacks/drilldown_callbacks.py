@@ -2532,17 +2532,27 @@ def register_drilldown_callbacks(app):
             # browser download link could never actually satisfy.
             data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
             filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
-        elif entity in ("financial_statements", "4_statements"):
-            # 4 Statements Financial Report:
-            # 1. Depreciation Account (Fixed Assets WDV schedule)
-            # 2. Income & Expenditure (Accrual basis)
-            # 3. Capital Account (Equity & Reserves schedule)
-            # 4. Balance Sheet (2-column format with parent_account_id hierarchy)
-            data = financial_statements_export.export_all_four_statements(None, sid, fy)
-            filename = f"4Statements_FY{fy}-{fy+1}.xlsx"
+        elif entity in ("financial_statements", "4_statements", "5_statements"):
+            # 5 Statements Financial Report:
+            # 1. ALL Holdings (Active Assets)
+            # 2. ALL Deposits (Active Deposits)
+            # 3. Depreciation Account (Fixed Assets WDV schedule)
+            # 4. ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
+            # 5. Balance Sheet (2-column format with parent_account_id hierarchy)
+            data = financial_statements_export.export_all_five_statements(None, sid, fy)
+            filename = f"5Statements_FY{fy}-{fy+1}.xlsx"
+        elif entity == "asset_holdings":
+            data = financial_statements_export.export_asset_holdings(None, sid, fy)
+            filename = f"AllHoldings_FY{fy}-{fy+1}.xlsx"
+        elif entity == "deposit_holdings":
+            data = financial_statements_export.export_deposit_holdings(None, sid, fy)
+            filename = f"AllDeposits_FY{fy}-{fy+1}.xlsx"
         elif entity == "depreciation_account":
             data = financial_statements_export.export_depreciation_account(None, sid, fy)
             filename = f"DepreciationAccount_FY{fy}-{fy+1}.xlsx"
+        elif entity == "funds_account":
+            data = financial_statements_export.export_funds_account(None, sid, fy)
+            filename = f"AllEquity_FY{fy}-{fy+1}.xlsx"
         elif entity == "capital_account":
             data = financial_statements_export.export_capital_account(None, sid, fy)
             filename = f"CapitalAccount_FY{fy}-{fy+1}.xlsx"
@@ -3119,31 +3129,39 @@ def _render_card(
                 society_id=sid_val,
             )
 
-        # ── 4 Statements Financial Report — custom card
-        # Loads data for the 4 statements: Dep, InExp, CapAc, Bal (2-column parent_account hierarchy)
+        # ── 5 Statements Financial Report — custom card
+        # Loads data for the 5 statements: Holdings, Deposits, Dep, Equity
+        # (Funds Account), Bal (2-column parent_account hierarchy).
+        # Income & Expenditure and the old standalone Capital Account &
+        # Equity Schedule are no longer part of this card (see
+        # render_financial_statements_card's docstring) — their loaders are
+        # left untouched for other callers.
         if card_id in ("form_financial_statements", "form_4_statements"):
             if get_current_user_role() != "admin":
                 return html.Div("Admin only.", className="text-danger p-3")
             sid_val = filters.get("society_id")
             fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
             selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
-            
+
+            holdings_rows, holdings_err = (loaders.get_asset_holdings_fy(sid_val, selected_fy)
+                                           if sid_val else ([], "Society not resolved"))
+            deposits_rows, deposits_err = (loaders.get_deposit_holdings_fy(sid_val, selected_fy)
+                                           if sid_val else ([], "Society not resolved"))
             dep_rows, dep_err = (loaders.get_depreciation_account_fy(sid_val, selected_fy)
                                  if sid_val and selected_fy else ([], "Society not resolved"))
-            ie_rows, ie_err = (loaders.get_income_expenditure_fy(sid_val, selected_fy)
-                               if sid_val and selected_fy else ([], "Society not resolved"))
-            cap_rows, cap_err = (loaders.get_capital_account_fy(sid_val, selected_fy)
-                                 if sid_val and selected_fy else ([], "Society not resolved"))
+            funds_rows, funds_err = (loaders.get_funds_account_fy(sid_val, selected_fy)
+                                     if sid_val and selected_fy else ([], "Society not resolved"))
             bs_rows, bs_err = (loaders.get_balance_sheet_fy(sid_val, selected_fy)
                                if sid_val and selected_fy else ([], "Society not resolved"))
-            
+
             # Get society name for header
             society_row = db._execute("SELECT name FROM societies WHERE id=%s", (sid_val,), fetch_one=True) if sid_val else None
             society_name = society_row.get("name", "Society") if society_row else "Society"
-            
+
             return renderers.render_financial_statements_card(
-                dep_rows=dep_rows, ie_rows=ie_rows, cap_rows=cap_rows, bs_rows=bs_rows,
-                error=dep_err or ie_err or cap_err or bs_err,
+                holdings_rows=holdings_rows, deposits_rows=deposits_rows,
+                dep_rows=dep_rows, funds_rows=funds_rows, bs_rows=bs_rows,
+                error=dep_err or funds_err or bs_err,
                 fy_options=fy_options, selected_fy=selected_fy,
                 society_name=society_name, society_id=sid_val,
             )

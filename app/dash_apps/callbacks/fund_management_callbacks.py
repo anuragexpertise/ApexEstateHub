@@ -8,7 +8,35 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from app.dash_apps.drilldown import loaders
 from database.db_manager import db
-from app.security.audit_context import get_current_user_role, get_current_user_id
+from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
+
+
+# Fund accounts are resolved dynamically by name (see loaders.get_fund_balances'
+# docstring) rather than by a hardcoded account-id list, since a different
+# jurisdiction/legal regime can number the chart of accounts differently.
+# This mirrors that by matching on the account NAME (ILIKE-style substring,
+# checked in Python since the row is already fetched) instead of an id-keyed
+# dict, so a fund keeps its correct approval/purpose labeling however its id
+# is numbered for a given society.
+FUND_TYPE_PATTERNS = [
+    ("capital account", {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"}),
+    ("sinking",         {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"}),
+    ("repair",          {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"}),
+    ("corpus",          {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"}),
+    ("reserve",         {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"}),
+]
+
+
+def resolve_fund_type_info(name: str) -> dict:
+    """Match a fund's real account name (ILIKE-style substring) to its
+    approval/purpose metadata. Falls back to the account's own name when no
+    pattern matches, so an unrecognized fund (e.g. "Gifts Received") still
+    displays sensibly instead of "Unknown Fund"."""
+    n = (name or "").lower()
+    for pattern, info in FUND_TYPE_PATTERNS:
+        if pattern in n:
+            return info
+    return {"label": name or "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"}
 
 
 def register_fund_management_callbacks(app):
@@ -32,7 +60,13 @@ def register_fund_management_callbacks(app):
         if role != "admin":
             return no_update, no_update, no_update, no_update, dbc.Alert("Admin only.", color="danger", style={"borderRadius": "8px"})
 
-        sid = 1  # TODO: get from session/auth
+        # Resolved from the authenticated Flask-Login session, never a
+        # hardcoded tenant id — this was previously `sid = 1`, which meant
+        # Reload Data/Submit always operated on society 1's accounts
+        # regardless of which society the logged-in admin actually belongs
+        # to (the initial render got this right via the drilldown filters,
+        # so the bug only showed up after the first refresh/submit click).
+        sid = get_current_society_id()
         if not sid:
             return no_update, no_update, no_update, no_update, dbc.Alert("Society not resolved.", color="danger", style={"borderRadius": "8px"})
 
@@ -40,21 +74,16 @@ def register_fund_management_callbacks(app):
             # Get fund balances
             fund_balances = loaders.get_fund_balances(sid)
 
-            # Get fund options for dropdown
+            # Get fund options for dropdown — label comes straight from the
+            # account's real name (already fetched dynamically by name, see
+            # loaders.get_fund_balances), no id-keyed lookup table needed.
             fund_options = []
             for fb in fund_balances:
                 acc_id = fb.get("acc_id")
                 balance = float(fb.get("balance") or 0)
                 if balance > 0:
-                    label_map = {
-                        3000: "Capital Account",
-                        3200: "Reserve Fund",
-                        3210: "Sinking Fund",
-                        3220: "Repair & Maintenance Fund",
-                        3230: "Corpus Fund",
-                    }
                     fund_options.append({
-                        "label": f"{label_map.get(acc_id, f'Fund {acc_id}')} (₹{balance:,.2f})",
+                        "label": f"{fb.get('name')} (₹{balance:,.2f})",
                         "value": str(acc_id)
                     })
 
@@ -108,7 +137,9 @@ def register_fund_management_callbacks(app):
             return dbc.Alert("Admin only.", color="danger", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
         user_id = get_current_user_id()
-        sid = 1  # TODO: get from session
+        sid = get_current_society_id()  # never hardcode — see refresh callback's comment above
+        if not sid:
+            return dbc.Alert("Society not resolved.", color="danger", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
         if not fund_acc_id or not expense_acc_id or not amount or not approval_ref or not approval_date or not particulars:
             return dbc.Alert("All required fields must be filled.", color="warning", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
@@ -136,15 +167,15 @@ def register_fund_management_callbacks(app):
             else:
                 toast = dbc.Alert("Unexpected result.", color="warning", style={"borderRadius": "8px"})
 
-            # Reload data
+            # Reload data — label comes straight from the account's real
+            # name (see refresh callback's comment above), no id-keyed map.
             fund_balances = loaders.get_fund_balances(sid)
             fund_options = []
             for fb in fund_balances:
                 acc_id = fb.get("acc_id")
                 balance = float(fb.get("balance") or 0)
                 if balance > 0:
-                    label_map = {3000: "Capital Account", 3200: "Reserve Fund", 3210: "Sinking Fund", 3220: "Repair & Maintenance Fund", 3230: "Corpus Fund"}
-                    fund_options.append({"label": f"{label_map.get(acc_id, f'Fund {acc_id}')} (₹{balance:,.2f})", "value": str(acc_id)})
+                    fund_options.append({"label": f"{fb.get('name')} (₹{balance:,.2f})", "value": str(acc_id)})
 
             expense_accounts = loaders.get_expense_bank_accounts(sid)
             expense_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in expense_accounts]
@@ -163,18 +194,10 @@ def register_fund_management_callbacks(app):
 def build_balances_table(fund_balances):
     """Build the fund balances table."""
     color = "#15304f"
-    FUND_TYPE_INFO = {
-        3000: {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"},
-        3200: {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"},
-        3210: {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"},
-        3220: {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"},
-        3230: {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"},
-    }
 
     balance_rows = []
     for fb in fund_balances:
-        acc_id = fb.get("acc_id")
-        info = FUND_TYPE_INFO.get(acc_id, {"label": "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"})
+        info = resolve_fund_type_info(fb.get("name"))
         balance = float(fb.get("balance") or 0)
         balance_rows.append(html.Tr([
             html.Td(html.Div([
@@ -200,13 +223,6 @@ def build_balances_table(fund_balances):
 def build_log_table(utilization_log):
     """Build the utilization log table."""
     color = "#15304f"
-    FUND_TYPE_INFO = {
-        3000: {"label": "Capital Account"},
-        3200: {"label": "Reserve Fund"},
-        3210: {"label": "Sinking Fund"},
-        3220: {"label": "Repair & Maintenance Fund"},
-        3230: {"label": "Corpus Fund"},
-    }
 
     if not utilization_log:
         return dbc.Alert("No fund utilizations yet.", color="secondary", style={"borderRadius": "10px"})
@@ -216,7 +232,7 @@ def build_log_table(utilization_log):
         status_color = {"confirmed": "#1e7e34", "pending": "#e67e22", "cancelled": "#c0392b"}.get(u.get("status", ""), "#666")
         log_rows.append(html.Tr([
             html.Td(u.get("created_at", "")[:10] if u.get("created_at") else "—", style={"fontSize": "11px"}),
-            html.Td(FUND_TYPE_INFO.get(u.get("fund_acc_id"), {}).get("label", f"Fund {u.get('fund_acc_id')}"), style={"fontSize": "11px", "fontWeight": "600"}),
+            html.Td(u.get("fund_name") or f"Fund {u.get('fund_acc_id')}", style={"fontSize": "11px", "fontWeight": "600"}),
             html.Td(f"₹{float(u.get('amount') or 0):,.2f}", style={"fontSize": "11px", "textAlign": "right"}),
             html.Td(u.get("particulars", "")[:50], style={"fontSize": "11px", "color": "#555"}),
             html.Td(u.get("approval_ref", "—"), style={"fontSize": "11px", "color": "#666"}),
