@@ -706,7 +706,45 @@ CREATE TABLE IF NOT EXISTS expenses (
     bank_statement_line_id INT REFERENCES bank_statement_lines (id),
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
-
+ 
+-- ── FUND UTILIZATIONS — admin-only withdrawals from Capital/Reserve/Sinking/Repair/Corpus funds ─────────
+CREATE TABLE IF NOT EXISTS fund_utilizations (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id), -- admin who initiated
+    fund_acc_id INT NOT NULL, -- fund ledger account (3000, 3200, 3210, 3220, 3230)
+    FOREIGN KEY (society_id, fund_acc_id) REFERENCES accounts (society_id, id),
+    expense_acc_id INT NOT NULL, -- expense/payment account to debit (bank, creditor, etc.)
+    FOREIGN KEY (society_id, expense_acc_id) REFERENCES accounts (society_id, id),
+    particulars TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    mode VARCHAR(20) DEFAULT 'bank' CHECK (
+        mode IN (
+            'cash',
+            'cheque',
+            'upi',
+            'card',
+            'bank',
+            'transfer'
+        )
+    ),
+    cheque_no VARCHAR(50),
+    transaction_id VARCHAR(255),
+    approval_ref VARCHAR(255), -- General Body / Managing Committee resolution reference
+    approval_date DATE, -- date of the resolution
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',    -- awaiting admin confirmation
+            'confirmed',  -- posted to ledger
+            'cancelled'   -- voided before posting
+        )
+    ),
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    previous_hash VARCHAR(64), -- for audit trail linking
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+ 
 CREATE TABLE IF NOT EXISTS rcm_liability (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -5393,6 +5431,135 @@ status := v_status;
     transaction_id := v_trx_id;
     journal_id := v_journal_id;
     cash_warning := v_cash_warning;
+
+    RETURN NEXT;
+END;
+$$;
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- FUND UTILIZATION — admin-only withdrawal from Capital/Reserve/Sinking/Repair/Corpus funds
+-- Per UP AOA 2010 / Model Bye-Laws:
+--   - Capital Account (3000): Share subscriptions, entrance fees → Capital expenditure, loan repayment (General Body)
+--   - Reserve Fund (3200): 25% surplus, entrance fees, common profits → Unforeseen expenses (General Body)
+--   - Sinking Fund (3210): Member contributions → Major structural repairs, lift/DG replacement (General Body)
+--   - Repair & Maintenance Fund (3220): Member contributions → Routine common area maintenance (Managing Committee)
+--   - Corpus Fund (3230): Builder handover (RERA) → ONLY INTEREST usable, principal inviolable (General Body)
+-- ═════════════════════════════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS fn_process_fund_utilization CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_process_fund_utilization(
+    p_society_id       INT,
+    p_fund_acc_id      INT,      -- fund ledger account (3000, 3200, 3210, 3220, 3230)
+    p_expense_acc_id   INT,      -- expense/bank account to debit
+    p_particulars      TEXT,
+    p_amount           NUMERIC,
+    p_mode             VARCHAR  DEFAULT 'bank',
+    p_created_by       INT      DEFAULT NULL,
+    p_cheque_no        VARCHAR  DEFAULT NULL,
+    p_trx_id           VARCHAR  DEFAULT NULL,
+    p_approval_ref     VARCHAR  DEFAULT NULL, -- GB/MC resolution reference
+    p_approval_date    DATE     DEFAULT NULL
+)
+RETURNS TABLE(utilization_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_utilization_id INT;
+    v_trx_id         INT;
+    v_journal_id     INT;
+    v_drcr_fund      VARCHAR(2);
+    v_drcr_expense   VARCHAR(2);
+    v_fund_name      TEXT;
+    v_expense_name   TEXT;
+    v_is_admin       BOOLEAN;
+    v_status         VARCHAR(20);
+    v_prev_hash      VARCHAR(64);
+BEGIN
+    -- Validate amount
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+    IF p_fund_acc_id IS NULL THEN RAISE EXCEPTION 'Fund account (fund_acc_id) is required'; END IF;
+    IF p_expense_acc_id IS NULL THEN RAISE EXCEPTION 'Expense account (expense_acc_id) is required'; END IF;
+    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'Particulars is required'; END IF;
+
+    -- Validate fund account exists and is a Cr (liability/equity) account
+    SELECT drcr_account, name INTO v_drcr_fund, v_fund_name
+    FROM accounts WHERE id = p_fund_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund account % not found for this society', p_fund_acc_id; END IF;
+    IF v_drcr_fund != 'Cr' THEN
+        RAISE EXCEPTION 'Fund account % (%) must be a Cr (liability/equity) account', p_fund_acc_id, v_fund_name;
+    END IF;
+
+    -- Validate expense account exists and is a Dr (expense/asset) account
+    SELECT drcr_account, name INTO v_drcr_expense, v_expense_name
+    FROM accounts WHERE id = p_expense_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Expense account % not found for this society', p_expense_acc_id; END IF;
+    IF v_drcr_expense != 'Dr' THEN
+        RAISE EXCEPTION 'Expense account % (%) must be a Dr (expense/asset) account', p_expense_acc_id, v_expense_name;
+    END IF;
+
+    -- Check fund balance (Cr normal = positive balance = credit balance)
+    -- Fund accounts are Cr-normal, so positive balance = credit balance = available funds
+    DECLARE
+        v_fund_balance NUMERIC(15,2);
+    BEGIN
+        SELECT COALESCE(SUM(
+            CASE WHEN entry_side = 'Cr' THEN amount ELSE -amount END
+        ), 0) INTO v_fund_balance
+        FROM transactions
+        WHERE society_id = p_society_id AND acc_id = p_fund_acc_id;
+
+        IF v_fund_balance < p_amount THEN
+            RAISE EXCEPTION 'Insufficient balance in fund % (%). Available: ₹%, Requested: ₹%', 
+                v_fund_name, p_fund_acc_id, v_fund_balance, p_amount;
+        END IF;
+    END;
+
+    -- Only admins can confirm immediately; others go to pending
+    SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
+    FROM users WHERE id = p_created_by;
+
+    IF v_is_admin THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
+    -- Get previous hash for audit trail
+    SELECT previous_hash INTO v_prev_hash
+    FROM fund_utilizations
+    WHERE society_id = p_society_id
+    ORDER BY created_at DESC LIMIT 1;
+
+    -- Insert fund_utilization record
+    INSERT INTO fund_utilizations (
+        society_id, user_id, fund_acc_id, expense_acc_id, particulars,
+        amount, mode, cheque_no, transaction_id, approval_ref, approval_date,
+        status, confirmed_by, confirmed_at, previous_hash, created_at
+    ) VALUES (
+        p_society_id, p_created_by, p_fund_acc_id, p_expense_acc_id, p_particulars,
+        p_amount, p_mode, p_cheque_no, p_trx_id, p_approval_ref, p_approval_date,
+        v_status,
+        CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+        CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+        v_prev_hash, NOW()
+    ) RETURNING id INTO v_utilization_id;
+
+    IF v_status = 'confirmed' THEN
+        v_journal_id := NEXTVAL('seq_transaction_number');
+
+        -- Post journal entries:
+        -- 1. Dr Fund Account (reduce fund balance - Cr account, so Dr reduces it)
+        INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, amount, particulars, entity_type, entity_id, created_at, created_by)
+        VALUES (p_society_id, v_journal_id, p_fund_acc_id, 'Dr', p_amount, p_particulars, 'fund_utilization', v_utilization_id, NOW(), p_created_by);
+
+        -- 2. Cr Expense/Bank Account (increase expense or reduce bank)
+        INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, amount, particulars, entity_type, entity_id, created_at, created_by)
+        VALUES (p_society_id, v_journal_id, p_expense_acc_id, 'Cr', p_amount, p_particulars, 'fund_utilization', v_utilization_id, NOW(), p_created_by);
+    END IF;
+
+    utilization_id := v_utilization_id;
+    transaction_id := v_trx_id;
+    journal_id := v_journal_id;
+    status := v_status;
 
     RETURN NEXT;
 END;

@@ -3957,23 +3957,50 @@ def render_fy_closing_card(rows: list, error: str | None,
 # FINANCIAL STATEMENTS CARD — Three-statement report (P2 Item 1)
 # ════════════════════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════════════════════
+# 4 STATEMENTS CARD — Depreciation, Income & Expenditure, Capital Account, Balance Sheet
+# ════════════════════════════════════════════════════════════════════════════
+
 def render_financial_statements_card(
-    rp_rows: list, ie_rows: list, bs_rows: list,
-    error: str | None,
-    fy_options: list, selected_fy,
-    society_name: str = "Society"
+    *args,
+    error: str | None = None,
+    fy_options: list = None, selected_fy = None,
+    society_name: str = "Society",
+    society_id: int = None,
+    **kwargs
 ) -> html.Div:
     """
-    Read-only Three-Statement Financial Report card with export buttons.
-    Shows:
-    - Receipts & Payments Account (Cash basis)
-    - Income & Expenditure Account (Accrual basis)
-    - Balance Sheet (Position statement)
-    
-    Uses the same FY pill pattern as render_fy_closing_card and the same
-    btn-fy-export/dcc.Download pattern for exports.
+    Read-only 4 Statements Financial Report card with export buttons.
+    Displays:
+    1. Depreciation Account (Fixed Assets WDV Schedule)
+    2. Income & Expenditure Account (Accrual basis)
+    3. Capital Account (Equity & Reserves Schedule)
+    4. Balance Sheet (Position Statement - 2 column format with nodes grouped by parent_account hierarchy)
+
+    Coloring is uniform with NOC / Receipt / Agreement cards: #15304f
+    (the letterhead header navy). Previously #2c3e50 which clashed with the
+    rest of the portal palette.
     """
-    color = "#2c3e50"
+    color = "#15304f"
+
+    # Extract datasets flexibly for 3-arg or 4-arg calls
+    dep_rows = kwargs.get("dep_rows")
+    ie_rows = kwargs.get("ie_rows")
+    cap_rows = kwargs.get("cap_rows")
+    bs_rows = kwargs.get("bs_rows")
+    rp_rows = kwargs.get("rp_rows")
+
+    if dep_rows is None and len(args) >= 4:
+        dep_rows, ie_rows, cap_rows, bs_rows = args[0], args[1], args[2], args[3]
+    elif dep_rows is None and len(args) == 3:
+        rp_rows, ie_rows, bs_rows = args[0], args[1], args[2]
+
+    if dep_rows is None:
+        dep_rows = rp_rows or []
+    if cap_rows is None:
+        cap_rows = []
+
+    fy_options = fy_options or []
 
     def _fy_label(fy):
         return f"{fy}-{str(fy + 1)[-2:]}"
@@ -4004,7 +4031,7 @@ def render_financial_statements_card(
                             "display": "flex", "alignItems": "center",
                             "justifyContent": "center", "marginRight": "12px"}),
             html.Div([
-                html.Strong("Financial Statements", style={"fontSize": "14px"}),
+                html.Strong("4 Statements", style={"fontSize": "14px"}),
                 html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
                          style={"fontSize": "11px", "color": "#999"}),
                 html.Div(society_name, style={"fontSize": "10px", "color": "#888"}),
@@ -4014,7 +4041,7 @@ def render_financial_statements_card(
             pills,
             html.Div([
                 dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export All Three Statements"],
+                    [html.I(className="fas fa-file-excel me-2"), "Export All 4 Statements"],
                     id={"type": "btn-fy-export", "entity": "financial_statements"},
                     size="sm", color="success", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
@@ -4022,13 +4049,13 @@ def render_financial_statements_card(
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "financial_statements"}),
                 dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export Receipts & Payments"],
-                    id={"type": "btn-fy-export", "entity": "receipts_payments"},
+                    [html.I(className="fas fa-file-excel me-2"), "Export Depreciation Account"],
+                    id={"type": "btn-fy-export", "entity": "depreciation_account"},
                     size="sm", color="info", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
                            "marginBottom": "12px", "marginRight": "8px"},
                 ),
-                dcc.Download(id={"type": "fy-export-trigger", "entity": "receipts_payments"}),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "depreciation_account"}),
                 dbc.Button(
                     [html.I(className="fas fa-file-excel me-2"), "Export Income & Expenditure"],
                     id={"type": "btn-fy-export", "entity": "income_expenditure"},
@@ -4038,6 +4065,14 @@ def render_financial_statements_card(
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "income_expenditure"}),
                 dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Capital Account"],
+                    id={"type": "btn-fy-export", "entity": "capital_account"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "capital_account"}),
+                dbc.Button(
                     [html.I(className="fas fa-file-excel me-2"), "Export Balance Sheet"],
                     id={"type": "btn-fy-export", "entity": "balance_sheet"},
                     size="sm", color="info", outline=True,
@@ -4045,6 +4080,44 @@ def render_financial_statements_card(
                            "marginBottom": "12px"},
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "balance_sheet"}),
+                # ── Print / Password-Protected PDF / Email (2026-09) ──
+                # Reuses the shared letterhead (print_letterhead.py) so the
+                # printed 4 Statements carry the same society logo, watermark
+                # background, secretary signature and verification QR as every
+                # other document. The optional password field locks the PDF
+                # via pdf-lib.js — no server-side PDF library required.
+                html.Div([
+                    dbc.Input(
+                        id="fin-stmt-password",
+                        type="password",
+                        placeholder="PDF password (optional)",
+                        size="sm",
+                        style={"width": "150px", "fontSize": "11px", "borderRadius": "8px",
+                               "marginRight": "6px"},
+                    ),
+                ], style={"display": "inline-flex", "alignItems": "center",
+                          "marginRight": "8px", "marginBottom": "12px"}),
+                dbc.Button(
+                    [html.I(className="fas fa-print me-2"), "Print"],
+                    id="fin-stmt-btn-print",
+                    size="sm", color="secondary", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-lock me-2"), "Save as PDF"],
+                    id="fin-stmt-btn-pdf",
+                    size="sm", color="danger", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-envelope me-2"), "Email"],
+                    id="fin-stmt-btn-email",
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px"},
+                ),
             ]) if selected_fy else None,
         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start", "flexWrap": "wrap"}),
     ], style={"padding": "12px 16px",
@@ -4061,15 +4134,26 @@ def render_financial_statements_card(
         ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
                   "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
-    # Build preview tables for each statement.
-    # `columns` are the display labels; `field_map` translates each label to
-    # the actual key on the row dicts returned by the fn_*_fy SQL functions
-    # (e.g. "Account" -> "account_name", "Section" -> "statement_section") —
-    # a plain lower/underscore of the label doesn't match those column names,
-    # which was leaving the Account/Section cells blank.
     _FIELD_MAP = {
         "account": "account_name",
         "section": "statement_section",
+        "account_code": "account_code",
+        "mutuality": "mutuality_nature",
+        "mutual/non-mutual": "mutuality_nature",
+        "opening_wdv": "opening_wdv",
+        "additions_(1st_half)": "additions_first_half",
+        "additions_(2nd_half)": "additions_second_half",
+        "deductions": "deductions",
+        "rate_%": "depreciation_percent",
+        "rate_(%)": "depreciation_percent",
+        "rate": "depreciation_percent",
+        "depreciation": "depreciation_charge",
+        "closing_wdv": "closing_wdv",
+        "opening_b/f": "own_bf",
+        "movement": "own_movement",
+        "additions": "additions",
+        "closing_c/f": "own_closing",
+        "closing_balance": "own_closing",
     }
 
     def _make_preview_table(rows, columns, title, max_rows=None):
@@ -4083,13 +4167,45 @@ def render_financial_statements_card(
         display_rows = rows[:max_rows] if max_rows else rows
         body_rows = []
         for r in display_rows:
-            body_rows.append(html.Tr([
-                html.Td(str(r.get(
-                    _FIELD_MAP.get(col.lower().replace(" ", "_"), col.lower().replace(" ", "_")), ""
-                )),
-                        style={"fontSize": "12px", "padding": "6px 8px"})
-                for col in columns
-            ]))
+            row_cells = []
+            for col in columns:
+                key = col.lower().replace(" ", "_")
+                val = r.get(_FIELD_MAP.get(key, key))
+                if val is None and key == "account":
+                    val = r.get("name") or r.get("account_name")
+                elif val is None and key in ("rate_%", "rate", "rate_(%)"):
+                    val = r.get("depreciation_percent") or r.get("depreciation_rate") or r.get("dep_rate") or r.get("rate")
+
+                style_cell = {"fontSize": "12px", "padding": "6px 8px"}
+                if key in ("rate_%", "rate", "rate_(%)"):
+                    if val is not None and str(val) != "":
+                        val_str = f"{float(val):g}%"
+                    else:
+                        val_str = "—"
+                    style_cell["color"] = "#15304f"
+                    style_cell["fontWeight"] = "600"
+                elif isinstance(val, (int, float)):
+                    fval = float(val)
+                    if fval < 0:
+                        val_str = f"-₹{abs(fval):,.2f}"
+                        style_cell["color"] = "#c0392b"
+                        style_cell["fontWeight"] = "600"
+                    elif fval > 0:
+                        val_str = f"₹{fval:,.2f}"
+                        style_cell["color"] = "#1e7e34"
+                    else:
+                        val_str = "₹0.00"
+                        style_cell["color"] = "#888888"
+                else:
+                    val_str = str(val or "")
+                    if val_str in ("Surplus", "Income"):
+                        style_cell["color"] = "#1e7e34"
+                        style_cell["fontWeight"] = "700"
+                    elif val_str in ("Deficit", "Expenditure"):
+                        style_cell["color"] = "#c0392b"
+                        style_cell["fontWeight"] = "700"
+                row_cells.append(html.Td(val_str, style=style_cell))
+            body_rows.append(html.Tr(row_cells))
 
         table = dbc.Table(
             [head, html.Tbody(body_rows)],
@@ -4098,11 +4214,7 @@ def render_financial_statements_card(
         )
 
         row_count = len(rows)
-        if max_rows and row_count > max_rows:
-            note = html.Div(f"Showing {max_rows} of {row_count} rows...",
-                           style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginBottom": "8px"})
-        else:
-            note = None
+        note = html.Div(f"Showing {max_rows} of {row_count} rows...", style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginBottom": "8px"}) if max_rows and row_count > max_rows else None
 
         return html.Div([
             html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
@@ -4112,88 +4224,122 @@ def render_financial_statements_card(
 
     def _make_balance_sheet_preview(rows, title):
         """
-        Balance Sheet preview in two-column format matching ld.xlsx 'Bal' sheet
-        A16:I35: Liabilities & Equity on the left, Assets on the right, each
-        account shown (including zero balances) with subtotals and a grand
-        total per side. No row cap - every account returned by
-        fn_balance_sheet_fy is rendered.
-        
-        If statutory metadata is present (statutory_head_code), groups accounts
-        by statutory head for jurisdiction-aware presentation (UP AOA, etc.).
+        Balance Sheet preview in two-column format with level 2 depth hierarchy (L1 Category -> L2 Child Group -> L3 Grandchild Leaf).
         """
         if not rows:
             return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
 
-        # Check if statutory metadata is available
-        has_statutory = any(r.get("statutory_head_code") for r in rows)
+        has_hierarchy = any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
         
-        assets = [r for r in rows if r.get("statement_section") == "Assets"]
-        liabilities = [r for r in rows if r.get("statement_section") == "Liabilities"]
-        equity = [r for r in rows if r.get("statement_section") == "Equity"]
+        if has_hierarchy:
+            # Group by parent_account_id hierarchy
+            by_id = {r.get("account_id") or r.get("id"): r for r in rows if r.get("account_id") or r.get("id")}
+            children_by_parent = {}
+            for r in rows:
+                pid = r.get("parent_account_id")
+                if pid is not None:
+                    children_by_parent.setdefault(pid, []).append(r)
 
-        total_assets = sum(float(r.get("amount") or 0) for r in assets)
-        total_liabilities = sum(float(r.get("amount") or 0) for r in liabilities)
-        total_equity = sum(float(r.get("amount") or 0) for r in equity)
+            root = next((r for r in rows if r.get("parent_account_id") is None), None)
+            root_id = root.get("account_id") if root else None
+            root_children = children_by_parent.get(root_id, []) if root_id else [r for r in rows if r.get("parent_account_id") is None or r.get("depth") == 1]
 
-        def _fmt(amount):
-            return f"₹{amount:,.2f}"
+            if not root_children:
+                root_children = [r for r in rows if not r.get("parent_account_id")]
 
-        def _build_side(section_rows, section_title, is_assets=False):
-            """Build a side (Liabilities+Equity or Assets) with optional statutory grouping."""
-            if not section_rows:
-                return [(section_title, None, "header")]
-            
-            if has_statutory:
-                # Group by statutory head
-                from collections import defaultdict
-                head_groups = defaultdict(list)
-                for r in section_rows:
-                    head_code = r.get("statutory_head_code") or "UNMAPPED"
-                    head_groups[head_code].append(r)
-                
-                # Sort groups by display_order, then by head_code
-                sorted_groups = sorted(
-                    head_groups.items(),
-                    key=lambda x: (x[1][0].get("statutory_display_order") or 999, x[0])
-                )
-                
+            cap_ac = next((c for c in root_children if c.get("tab_name") == "CapAc"), None)
+
+            liabilities_nodes = [c for c in root_children if c.get("drcr_account") == "Cr" and c is not cap_ac]
+            assets_nodes = [c for c in root_children if c.get("drcr_account") == "Dr"]
+            equity_nodes = [cap_ac] if cap_ac else [c for c in root_children if c.get("tab_name") == "CapAc" or "capital" in (c.get("account_name") or "").lower()]
+
+            if not liabilities_nodes and not assets_nodes:
+                assets_nodes = [r for r in rows if r.get("statement_section") == "Assets" or r.get("drcr_account") == "Dr"]
+                liabilities_nodes = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
+                equity_nodes = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
+
+            total_assets = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in assets_nodes)
+            total_liabilities = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in liabilities_nodes)
+            total_equity = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in equity_nodes)
+
+            def _fmt(amount):
+                return f"₹{float(amount):,.2f}"
+
+            def _build_hierarchical_side(nodes, section_title):
                 side = [(section_title, None, "header")]
-                for head_code, group_rows in sorted_groups:
-                    if len(group_rows) > 1:
-                        # Multiple accounts under this head - show as group header + items
-                        head_label = group_rows[0].get("statutory_head_label") or head_code
-                        side.append((head_label, None, "header"))
-                        for r in sorted(group_rows, key=lambda x: x.get("statutory_display_order") or 0):
-                            side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                for n in nodes:
+                    n_name = n.get("account_name") or n.get("name") or ""
+                    n_amt = float(n.get("display_amount") or n.get("amount") or n.get("total_closing") or 0)
+                    kids = children_by_parent.get(n.get("account_id") or n.get("id"), [])
+                    if kids:
+                        side.append((n_name, _fmt(n_amt) if n_amt else None, "parent_node"))
+                        for k in kids:
+                            k_name = k.get("account_name") or k.get("name") or ""
+                            k_amt = float(k.get("display_amount") or k.get("amount") or k.get("total_closing") or k.get("own_closing") or 0)
+                            grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
+                            if grandkids:
+                                side.append((f"   ↳ {k_name}", _fmt(k_amt) if k_amt else None, "child_node"))
+                                for gk in grandkids:
+                                    gk_name = gk.get("account_name") or gk.get("name") or ""
+                                    gk_amt = float(gk.get("display_amount") or gk.get("amount") or gk.get("own_closing") or 0)
+                                    side.append((f"      • {gk_name}", _fmt(gk_amt), "grandchild_node"))
+                            else:
+                                side.append((f"   ↳ {k_name}", _fmt(k_amt), "child_node"))
                     else:
-                        # Single account
-                        r = group_rows[0]
-                        side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                        side.append((n_name, _fmt(n_amt), "item"))
                 return side
-            else:
-                # Flat list (legacy behavior)
+
+            left_side = _build_hierarchical_side(liabilities_nodes, "Liabilities")
+            if liabilities_nodes:
+                left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
+            if equity_nodes:
+                left_side += _build_hierarchical_side(equity_nodes, "Equity")
+                left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
+            left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
+
+            right_side = _build_hierarchical_side(assets_nodes, "Assets")
+            right_side.append(("Total Assets", _fmt(total_assets), "total"))
+        else:
+            assets = [r for r in rows if r.get("statement_section") == "Assets" or r.get("drcr_account") == "Dr"]
+            liabilities = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
+            equity = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
+
+            total_assets = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in assets)
+            total_liabilities = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in liabilities)
+            total_equity = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in equity)
+
+            def _fmt(amount):
+                return f"₹{float(amount):,.2f}"
+
+            def _build_side(section_rows, section_title):
                 side = [(section_title, None, "header")]
                 for r in section_rows:
-                    side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or 0)), "item"))
+                    side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or r.get("display_amount") or 0)), "item"))
                 return side
 
-        left_side = _build_side(liabilities, "Liabilities")
-        if liabilities:
-            left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
-        left_side += _build_side(equity, "Equity")[1:]  # Skip duplicate header
-        if equity:
-            left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
-        left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
+            left_side = _build_side(liabilities, "Liabilities")
+            if liabilities:
+                left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
+            left_side += _build_side(equity, "Equity")
+            if equity:
+                left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
+            left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
 
-        right_side = _build_side(assets, "Assets")
-        right_side.append(("Total Assets", _fmt(total_assets), "total"))
+            right_side = _build_side(assets, "Assets")
+            right_side.append(("Total Assets", _fmt(total_assets), "total"))
 
         def _style_for(kind, align_right=False):
             base = {"fontSize": "12px", "padding": "6px 8px"}
             if align_right:
                 base["textAlign"] = "right"
             if kind == "header":
-                base.update({"fontSize": "11px", "fontWeight": "700", "color": "#fff", "background": "#2c3e50"})
+                base.update({"fontSize": "11px", "fontWeight": "700", "color": "#fff", "background": "#15304f"})
+            elif kind == "parent_node":
+                base.update({"fontWeight": "700", "background": "#f0f4f8"})
+            elif kind == "child_node":
+                base.update({"fontWeight": "600", "color": "#15304f", "background": "#f8fafd"})
+            elif kind == "grandchild_node":
+                base.update({"fontWeight": "400", "color": "#444444"})
             elif kind == "subtotal":
                 base.update({"fontWeight": "700", "borderTop": "1px solid #ddd", "background": "#f7f7f7"})
             elif kind == "total":
@@ -4220,10 +4366,10 @@ def render_financial_statements_card(
             body_rows.append(html.Tr(row_cells))
 
         head = html.Thead(html.Tr([
-            html.Th("Account", style={"fontSize": "11px"}),
+            html.Th("Liabilities & Equity Node", style={"fontSize": "11px"}),
             html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
             html.Th("", style={"width": "16px"}),
-            html.Th("Account", style={"fontSize": "11px"}),
+            html.Th("Assets Node", style={"fontSize": "11px"}),
             html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
         ], style={"fontSize": "11px"}))
 
@@ -4247,14 +4393,413 @@ def render_financial_statements_card(
             balance_note,
         ])
 
-    if not rp_rows and not ie_rows and not bs_rows:
+    def _make_ie_preview(rows, title):
+        """Income & Expenditure Account preview matching exported spreadsheet format:
+        Section header rows, individual account rows (with Mutual/Non-Mutual indicator),
+        section sub-totals, and a final Surplus/Deficit row."""
+        if not rows:
+            return dbc.Alert(f"No data for {title}.", color="secondary",
+                             style={"borderRadius": "10px", "marginTop": "8px"})
+
+        def _fmt_amt(v):
+            fval = float(v or 0)
+            if fval < 0:
+                return (f"-₹{abs(fval):,.2f}", "#c0392b", "600")
+            elif fval > 0:
+                return (f"₹{fval:,.2f}", "#1e7e34", "400")
+            return ("₹0.00", "#888888", "400")
+
+        def _mutuality_badge(nature):
+            """Return a small styled span for Mutual / Non-Mutual."""
+            if not nature:
+                return html.Span("—", style={"color": "#bbb", "fontSize": "10px"})
+            if "non" in str(nature).lower():
+                label, bg = "Non-Mutual", "#c0392b"
+            else:
+                label, bg = "Mutual", "#1e7e34"
+            return html.Span(label, style={
+                "fontSize": "9px", "fontWeight": "600", "color": "#fff",
+                "background": bg, "borderRadius": "4px",
+                "padding": "1px 5px", "whiteSpace": "nowrap",
+            })
+
+        # Separate rows into Income / Expenditure / Surplus-Deficit
+        income_rows = [r for r in rows if r.get("statement_section") == "Income"]
+        expense_rows = [r for r in rows if r.get("statement_section") == "Expenditure"]
+        sd_rows = [r for r in rows if r.get("statement_section") == "Surplus/Deficit"]
+
+        income_total = sum(float(r.get("amount") or 0) for r in income_rows)
+        expense_total = sum(float(r.get("amount") or 0) for r in expense_rows)
+        surplus = income_total - expense_total
+        sd_label = "Surplus" if surplus >= 0 else "Deficit"
+
+        body_rows = []
+
+        def _section_header(label, bg="#15304f"):
+            return html.Tr([
+                html.Td(label, colSpan=4, style={
+                    "fontSize": "11px", "fontWeight": "700", "color": "#fff",
+                    "background": bg, "padding": "5px 8px",
+                }),
+            ])
+
+        def _section_subtotal(label, val):
+            v_str, v_col, v_fw = _fmt_amt(val)
+            return html.Tr([
+                html.Td("", style={"width": "40px"}),
+                html.Td(label, colSpan=2, style={
+                    "fontWeight": "700", "fontSize": "12px",
+                    "background": "#f0f4f8", "padding": "5px 8px",
+                    "borderTop": "1px solid #ccc",
+                }),
+                html.Td(v_str, style={
+                    "textAlign": "right", "fontWeight": "700", "color": v_col,
+                    "background": "#f0f4f8", "padding": "5px 8px",
+                    "borderTop": "1px solid #ccc",
+                }),
+            ])
+
+        def _account_row(r):
+            code = r.get("account_code")
+            name = r.get("account_name") or ""
+            v_str, v_col, v_fw = _fmt_amt(r.get("amount"))
+            nature = r.get("mutuality_nature")
+            return html.Tr([
+                html.Td(str(code) if code else "",
+                        style={"fontSize": "10px", "color": "#aaa", "width": "40px", "padding": "4px 8px"}),
+                html.Td(name, style={"fontSize": "12px", "padding": "4px 8px"}),
+                html.Td(_mutuality_badge(nature),
+                        style={"textAlign": "center", "padding": "4px 6px", "width": "90px"}),
+                html.Td(v_str, style={
+                    "textAlign": "right", "fontSize": "12px",
+                    "color": v_col, "fontWeight": v_fw, "padding": "4px 8px",
+                }),
+            ])
+
+        # Income section
+        if income_rows:
+            body_rows.append(_section_header("Income", "#1a5276"))
+            for r in income_rows:
+                body_rows.append(_account_row(r))
+            body_rows.append(_section_subtotal("Total Income", income_total))
+
+        # Expenditure section
+        if expense_rows:
+            body_rows.append(_section_header("Expenditure", "#922b21"))
+            for r in expense_rows:
+                body_rows.append(_account_row(r))
+            body_rows.append(_section_subtotal("Total Expenditure", expense_total))
+
+        # Surplus / Deficit
+        sd_str, sd_col, _ = _fmt_amt(abs(surplus))
+        body_rows.append(html.Tr([
+            html.Td(""),
+            html.Td(f"Excess of Income over Expenditure ({sd_label})", colSpan=2,
+                    style={"fontWeight": "700", "fontSize": "12px",
+                           "borderTop": "2px solid #333", "padding": "6px 8px"}),
+            html.Td(sd_str, style={
+                "textAlign": "right", "fontWeight": "700",
+                "color": "#1e7e34" if surplus >= 0 else "#c0392b",
+                "borderTop": "2px solid #333", "padding": "6px 8px",
+            }),
+        ]))
+
+        head = html.Thead(html.Tr([
+            html.Th("Code", style={"fontSize": "11px", "width": "40px"}),
+            html.Th("Particulars", style={"fontSize": "11px"}),
+            html.Th("Mutual/Non-Mutual", style={"fontSize": "11px", "textAlign": "center", "width": "90px"}),
+            html.Th("Amount (₹)", style={"fontSize": "11px", "textAlign": "right"}),
+        ]))
+
+        table = dbc.Table(
+            [head, html.Tbody(body_rows)],
+            bordered=False, hover=True, responsive=True, size="sm",
+            style={"marginTop": "4px", "marginBottom": "8px"}
+        )
+
+        note = html.Div(
+            "Note: Prepared on accrual basis. Mutual income = exempt from tax; Non-Mutual = taxable. "
+            "Surplus/Deficit = Total Income − Total Expenditure.",
+            style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginTop": "4px"}
+        )
+
+        return html.Div([
+            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444",
+                                   "marginBottom": "6px", "marginTop": "12px"}),
+            table,
+            note,
+        ])
+
+    if not dep_rows and not ie_rows and not cap_rows and not bs_rows:
         body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
     else:
-        rp_preview = _make_preview_table(rp_rows, ["Line Type", "Account", "Dr Amount", "Cr Amount"], "1. Receipts & Payments Account (Cash Basis)")
-        ie_preview = _make_preview_table(ie_rows, ["Section", "Account", "Amount"], "2. Income & Expenditure Account (Accrual Basis)")
-        bs_preview = _make_balance_sheet_preview(bs_rows, "3. Balance Sheet (Position Statement)")
+        dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "1. Depreciation Account (Fixed Assets WDV Schedule)")
+        ie_preview = _make_ie_preview(ie_rows, "2. Income & Expenditure Account (Accrual Basis)")
+        cap_preview = _make_preview_table(cap_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "3. Capital Account & Equity Schedule")
+        bs_preview = _make_balance_sheet_preview(bs_rows, "4. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
         
-        body = html.Div([rp_preview, ie_preview, bs_preview], style={"padding": "16px"})
+        # Verification QR code stamp & Authorised Signatory Footer
+        qr_img = None
+        qr_payload_text = ""
+        try:
+            from app.services.qr_service import generate_qr_code
+            qr_img, qr_payload_text = generate_qr_code(1, "FIN", selected_fy or 2026)
+        except Exception:
+            pass
+
+        import hashlib
+        payload_hash = hashlib.sha256(f"FIN-CERT-{selected_fy or 2026}-{society_name}".encode("utf-8")).hexdigest()[:16].upper()
+
+        # ── Letterhead data for Print / Password-Protected PDF / Email ──
+        # Reuses the shared letterhead (print_letterhead.py) so the printed
+        # 4 Statements carry the same society logo, watermark background,
+        # secretary signature and verification QR as every other document.
+        # The optional password field on the card locks the PDF via
+        # pdf-lib.js — no server-side PDF library required.
+        from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+        try:
+            from database.db_manager import db as _db
+            _society_row = _db._execute(
+                "SELECT * FROM societies WHERE id=%s", (society_id,), fetch_one=True
+            ) if society_id else None
+        except Exception:
+            _society_row = None
+        _society_row = _society_row or {"name": society_name, "address": ""}
+        _letterhead = get_letterhead_assets(_society_row, society_id)
+        _fin_qr_url = ""
+        try:
+            if society_id:
+                from app.services.qr_service import generate_qr_code
+                _qr_img, _ = generate_qr_code(society_id, "FIN", selected_fy or 2026)
+                _fin_qr_url = _qr_img or ""
+        except Exception:
+            pass
+
+        # ──────────────────────────────────────────────────────────────────
+        # Build printable HTML body from the 4 statements data
+        # ──────────────────────────────────────────────────────────────────
+        def _build_fin_stmts_body_html():
+            """Build HTML string of the 4 statements for print/PDF/email."""
+            parts = []
+            color = "#15304f"
+
+            def _fmt(v):
+                if v is None:
+                    return "—"
+                try:
+                    f = float(v)
+                    if f == 0:
+                        return "₹0.00"
+                    return f"₹{f:,.2f}"
+                except Exception:
+                    return str(v)
+
+            def _fmt_pct(v):
+                if v is None:
+                    return "—"
+                try:
+                    return f"{float(v):g}%"
+                except Exception:
+                    return str(v)
+
+            def _table(title, rows, columns, field_map=None):
+                if not rows:
+                    return f'<h4 style="color:{color};margin:20px 0 8px">{title}</h4><p style="color:#888">No data</p>'
+                field_map = field_map or {}
+                head = ''.join(f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:12px">{c}</th>' for c in columns)
+                body_rows = []
+                for r in rows:
+                    cells = []
+                    for c in columns:
+                        key = c.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("%", "pct").replace("#", "num")
+                        fld = field_map.get(key, key)
+                        val = r.get(fld)
+                        if val is None:
+                            for k, v in r.items():
+                                if k.lower() == key:
+                                    val = v
+                                    break
+                        cells.append(f'<td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{_fmt(val) if "amount" in key.lower() or "wdv" in key.lower() or "depreciation" in key.lower() or "opening" in key.lower() or "closing" in key.lower() or "addition" in key.lower() or "deduction" in key.lower() or "b/f" in key.lower() or "c/f" in key.lower() else (_fmt_pct(val) if "rate" in key.lower() or "pct" in key.lower() else (val or "—"))}</td>')
+                    body_rows.append('<tr>' + ''.join(cells) + '</tr>')
+                return (
+                    f'<h4 style="color:{color};margin:20px 0 8px">{title}</h4>'
+                    f'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-family:Arial,sans-serif">'
+                    f'<thead><tr>{head}</tr></thead>'
+                    f'<tbody>{"".join(body_rows)}</tbody></table>'
+                )
+
+            # 1. Depreciation Account
+            dep_cols = ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"]
+            dep_map = {
+                "account": "account_name", "opening_wdv": "opening_wdv",
+                "additions_(1st_half)": "additions_first_half", "additions_(2nd_half)": "additions_second_half",
+                "deductions": "deductions", "rate_%": "depreciation_percent",
+                "depreciation": "depreciation_charge", "closing_wdv": "closing_wdv",
+            }
+            parts.append(_table("1. Depreciation Account (Fixed Assets WDV Schedule)", dep_rows, dep_cols, dep_map))
+
+            # 2. Income & Expenditure
+            ie_cols = ["Account", "Section", "Mutual/Non-Mutual", "Amount"]
+            ie_map = {"account": "account_name", "section": "statement_section", "mutual/non-mutual": "mutuality_nature", "amount": "amount"}
+            if ie_rows:
+                parts.append(_table("2. Income & Expenditure Account (Accrual Basis)", ie_rows, ie_cols, ie_map))
+
+            # 3. Capital Account
+            cap_cols = ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
+            cap_map = {"account": "account_name", "opening_b/f": "own_bf", "additions": "additions", "deductions": "deductions", "closing_c/f": "own_closing"}
+            if cap_rows:
+                parts.append(_table("3. Capital Account & Equity Schedule", cap_rows, cap_cols, cap_map))
+
+            # 4. Balance Sheet (two-column format)
+            if bs_rows:
+                parts.append(_build_bs_html(bs_rows, color))
+
+            # Footer
+            parts.append(
+                f'<div style="margin-top:30px;padding-top:12px;border-top:1px solid #e0e0e0;font-size:11px;color:#555">'
+                f'<div style="display:flex;justify-content:space-between">'
+                f'<div><strong>VERIFIED FINANCIAL STATEMENT</strong><br>For {society_name}</div>'
+                f'<div style="text-align:right">Authorised Signatory / Hon. Treasurer<br>Apex Estate Hub System Generated</div>'
+                f'</div></div>'
+            )
+
+            return ''.join(parts)
+
+        def _build_bs_html(rows, color):
+            """Build Balance Sheet HTML in two-column format."""
+            has_hierarchy = any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
+            by_id = {r.get("account_id") or r.get("id"): r for r in rows if r.get("account_id") or r.get("id")}
+            children_by_parent = {}
+            for r in rows:
+                pid = r.get("parent_account_id")
+                if pid is not None:
+                    children_by_parent.setdefault(pid, []).append(r)
+
+            root = next((r for r in rows if r.get("parent_account_id") is None), None)
+            root_id = root.get("account_id") if root else None
+            root_children = children_by_parent.get(root_id, []) if root_id else [r for r in rows if r.get("parent_account_id") is None or r.get("depth") == 1]
+
+            if not root_children:
+                root_children = [r for r in rows if not r.get("parent_account_id")]
+
+            cap_ac = next((c for c in root_children if c.get("tab_name") == "CapAc"), None)
+
+            liabilities_nodes = [c for c in root_children if c.get("drcr_account") == "Cr" and c is not cap_ac]
+            assets_nodes = [c for c in root_children if c.get("drcr_account") == "Dr"]
+            equity_nodes = [cap_ac] if cap_ac else [c for c in root_children if c.get("tab_name") == "CapAc" or "capital" in (c.get("account_name") or "").lower()]
+
+            if not liabilities_nodes and not assets_nodes:
+                assets_nodes = [r for r in rows if r.get("statement_section") == "Assets" or r.get("drcr_account") == "Dr"]
+                liabilities_nodes = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
+                equity_nodes = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
+
+            def _fmt_amt(v):
+                try:
+                    f = float(v or 0)
+                    return f"₹{f:,.2f}"
+                except Exception:
+                    return "₹0.00"
+
+            def _build_side(nodes, section_title):
+                html_rows = [f'<tr><th colspan="2" style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">{section_title}</th></tr>']
+                for n in nodes:
+                    n_name = n.get("account_name") or n.get("name") or ""
+                    n_amt = float(n.get("display_amount") or n.get("amount") or n.get("total_closing") or 0)
+                    kids = children_by_parent.get(n.get("account_id") or n.get("id"), [])
+                    if kids:
+                        html_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;font-weight:700;background:#f0f4f8;font-size:12px">{n_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:700;background:#f0f4f8;font-size:12px">{_fmt_amt(n_amt)}</td></tr>')
+                        for k in kids:
+                            k_name = k.get("account_name") or k.get("name") or ""
+                            k_amt = float(k.get("display_amount") or k.get("amount") or k.get("total_closing") or k.get("own_closing") or 0)
+                            grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
+                            if grandkids:
+                                html_rows.append(f'<tr><td style="padding:6px 8px 6px 24px;border:1px solid #ddd;font-weight:600;color:#15304f;background:#f8fafd;font-size:12px">↳ {k_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:600;color:#15304f;background:#f8fafd;font-size:12px">{_fmt_amt(k_amt)}</td></tr>')
+                                for gk in grandkids:
+                                    gk_name = gk.get("account_name") or gk.get("name") or ""
+                                    gk_amt = float(gk.get("display_amount") or gk.get("amount") or gk.get("own_closing") or 0)
+                                    html_rows.append(f'<tr><td style="padding:6px 8px 6px 40px;border:1px solid #ddd;font-size:12px">• {gk_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-size:12px">{_fmt_amt(gk_amt)}</td></tr>')
+                            else:
+                                html_rows.append(f'<tr><td style="padding:6px 8px 6px 24px;border:1px solid #ddd;font-weight:600;font-size:12px">↳ {k_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:600;font-size:12px">{_fmt_amt(k_amt)}</td></tr>')
+                    else:
+                        html_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{n_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-size:12px">{_fmt_amt(n_amt)}</td></tr>')
+                return html_rows
+
+            total_assets = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in assets_nodes)
+            total_liabilities = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in liabilities_nodes)
+            total_equity = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in equity_nodes)
+
+            left_rows = _build_side(liabilities_nodes, "Liabilities")
+            if liabilities_nodes:
+                left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;font-weight:700;font-size:12px">Total Liabilities</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_liabilities)}</td></tr>')
+            left_rows += _build_side(equity_nodes, "Equity")
+            left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;font-weight:700;font-size:12px">Total Equity</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_equity)}</td></tr>')
+            left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;font-weight:700;font-size:12px">Total Liabilities + Equity</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_liabilities + total_equity)}</td></tr>')
+
+            right_rows = _build_side(assets_nodes, "Assets")
+            right_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;font-weight:700;font-size:12px">Total Assets</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_assets)}</td></tr>')
+
+            n = max(len(left_rows), len(right_rows))
+            while len(left_rows) < n:
+                left_rows.append('<tr><td style="padding:6px 8px;border:1px solid #ddd"></td><td style="padding:6px 8px;border:1px solid #ddd"></td></tr>')
+            while len(right_rows) < n:
+                right_rows.append('<tr><td style="padding:6px 8px;border:1px solid #ddd"></td><td style="padding:6px 8px;border:1px solid #ddd"></td></tr>')
+
+            combined = []
+            for i in range(n):
+                combined.append('<tr>' + left_rows[i].replace('</tr>', '') + right_rows[i].replace('<tr>', '').replace('</tr>', '') + '</tr>')
+
+            return (
+                f'<h4 style="color:{color};margin:20px 0 8px">4. Balance Sheet (2 Column Format - Parent Account Hierarchy)</h4>'
+                f'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-family:Arial,sans-serif">'
+                f'<thead><tr>'
+                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">Liabilities & Equity</th>'
+                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px;text-align:right">Amount</th>'
+                f'<th style="width:16px;padding:0;border:none"></th>'
+                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">Assets</th>'
+                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px;text-align:right">Amount</th>'
+                f'</tr></thead>'
+                f'<tbody>{"".join(combined)}</tbody></table>'
+            )
+
+        fin_letterhead_data = {
+            "society_name": society_name,
+            "society_address": _society_row.get("address", ""),
+            "logo_url": _letterhead["logo_url"],
+            "background_url": _letterhead["background_url"],
+            "signature_url": _letterhead["signature_url"],
+            "secretary_name": _letterhead["secretary_name"],
+            "qr_url": _fin_qr_url,
+            "qr_caption": QR_CAPTION,
+            "fy": selected_fy,
+            "filename": f"4Statements_FY{selected_fy}-{(selected_fy or 2026)+1}",
+            "bodyHtml": _build_fin_stmts_body_html(),
+        }
+
+        auth_block = html.Div([
+            html.Div([
+                html.Div([
+                    html.Img(src=qr_img, style={"width": "64px", "height": "64px", "borderRadius": "6px", "border": "1px solid #ddd"}) if qr_img else html.Div([
+                        html.I(className="fas fa-qrcode", style={"fontSize": "28px", "color": "#15304f"}),
+                    ], style={"width": "64px", "height": "64px", "display": "flex", "alignItems": "center", "justifyContent": "center", "background": "#f8f9fa", "borderRadius": "6px", "border": "1px solid #ddd"}),
+                    html.Div([
+                        html.Div("VERIFIED FINANCIAL STATEMENT", style={"fontSize": "10px", "fontWeight": "700", "color": "#1e7e34"}),
+                        html.Div(f"QR Payload: {qr_payload_text or f'1-FIN-{selected_fy or 2026}'}", style={"fontSize": "9px", "color": "#666"}),
+                        html.Div(f"SHA-256 Stamp: FIN-CERT-{selected_fy or 2026}-{payload_hash}", style={"fontSize": "9px", "color": "#888", "fontFamily": "monospace"}),
+                    ], style={"marginLeft": "12px"}),
+                ], style={"display": "flex", "alignItems": "center"}),
+                html.Div([
+                    html.Div("For " + society_name, style={"fontSize": "11px", "fontWeight": "700", "color": "#15304f"}),
+                    html.Div(style={"height": "28px", "borderBottom": "1px dashed #aaa", "margin": "6px 0 4px 0", "width": "180px"}),
+                    html.Div("Authorised Signatory / Hon. Treasurer", style={"fontSize": "10px", "fontWeight": "600", "color": "#555"}),
+                    html.Div("Apex Estate Hub System Generated", style={"fontSize": "9px", "color": "#999", "fontStyle": "italic"}),
+                ], style={"textAlign": "right"}),
+            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginTop": "20px", "paddingTop": "12px", "borderTop": "1px solid #e0e0e0"}),
+        ])
+
+        body = html.Div([
+            dep_preview, ie_preview, cap_preview, bs_preview, auth_block,
+            dcc.Store(id="fin-stmt-letterhead-data", data=fin_letterhead_data, storage_type="memory"),
+        ], style={"padding": "16px"})
 
     return html.Div([
         header,
@@ -6805,3 +7350,206 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
             ]),
         ]),
     ], className="mb-4", style={"borderRadius": "12px", "boxShadow": "0 2px 8px rgba(0,0,0,0.05)"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FUND MANAGEMENT CARD — Admin-only Capital/Reserve/Sinking/Repair/Corpus fund utilization
+# Per UP AOA 2010 / Model Bye-Laws:
+#   - Capital Account (3000): Share subscriptions, entrance fees → Capital expenditure, loan repayment (General Body)
+#   - Reserve Fund (3200): 25% surplus, entrance fees, common profits → Unforeseen expenses (General Body)
+#   - Sinking Fund (3210): Member contributions → Major structural repairs, lift/DG replacement (General Body)
+#   - Repair & Maintenance Fund (3220): Member contributions → Routine common area maintenance (Managing Committee)
+#   - Corpus Fund (3230): Builder handover (RERA) → ONLY INTEREST usable, principal inviolable (General Body)
+# ════════════════════════════════════════════════════════════════════════════
+
+def render_fund_management_card(
+    fund_balances: list, utilization_log: list, error: str | None = None,
+    society_name: str = "Society",
+) -> html.Div:
+    """
+    Admin-only card for viewing fund balances and utilizing funds.
+    fund_balances: list of dicts with {acc_id, name, balance, fund_type}
+    utilization_log: list of fund_utilizations records
+    """
+    color = "#15304f"
+
+    FUND_TYPE_INFO = {
+        3000: {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"},
+        3200: {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"},
+        3210: {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"},
+        3220: {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"},
+        3230: {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"},
+    }
+
+    header = html.Div([
+        html.Div(html.I(className="fas fa-coins", style={"color": "#fff", "fontSize": "16px"}),
+                 style={"width": "38px", "height": "38px", "borderRadius": "10px",
+                        "background": f"linear-gradient(135deg,{color},{color}aa)",
+                        "display": "flex", "alignItems": "center", "justifyContent": "center", "marginRight": "12px"}),
+        html.Div([
+            html.Strong("Fund Management", style={"fontSize": "14px"}),
+            html.Div("Admin only — Utilize Capital/Reserve/Sinking/Repair/Corpus funds", style={"fontSize": "11px", "color": "#999"}),
+        ]),
+    ], style={"padding": "12px 16px", "display": "flex", "alignItems": "center",
+              "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
+
+    if error:
+        return html.Div([
+            header,
+            html.Div(dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error], color="warning", style={"borderRadius": "10px"}), style={"padding": "16px"}),
+        ], style={"borderRadius": "16px", "border": f"1px solid {color}22", "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+    # Fund balances table
+    balance_rows = []
+    for fb in fund_balances:
+        acc_id = fb.get("acc_id")
+        info = FUND_TYPE_INFO.get(acc_id, {"label": "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"})
+        balance = float(fb.get("balance") or 0)
+        balance_rows.append(html.Tr([
+            html.Td(html.Div([
+                html.I(className=info["icon"], style={"marginRight": "8px", "color": color}),
+                html.Strong(info["label"])
+            ]), style={"fontSize": "12px", "fontWeight": "600"}),
+            html.Td(f"₹{balance:,.2f}", style={"fontSize": "13px", "fontWeight": "700", "color": "#1e7e34" if balance >= 0 else "#c0392b", "textAlign": "right"}),
+            html.Td(info["approval"], style={"fontSize": "11px", "color": "#666", "textAlign": "center"}),
+            html.Td(info["purpose"], style={"fontSize": "11px", "color": "#888"}),
+        ]))
+
+    balances_table = dbc.Table([
+        html.Thead(html.Tr([
+            html.Th("Fund", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+            html.Th("Available Balance", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
+            html.Th("Approval Required", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
+            html.Th("Permitted Purpose (per UP AOA / Bye-Laws)", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+        ])),
+        html.Tbody(balance_rows),
+    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"})
+
+    # Utilization form
+    fund_options = [{"label": FUND_TYPE_INFO.get(fb.get("acc_id"), {}).get("label", f"Fund {fb.get('acc_id')}"), "value": str(fb.get("acc_id"))} for fb in fund_balances if float(fb.get("balance") or 0) > 0]
+
+    # Expense/Bank account options (Dr accounts)
+    # These would be fetched from accounts table - for now we'll use a dropdown that gets populated
+    expense_account_options = []  # populated via callback
+
+    form = html.Div([
+        html.Hr(style={"margin": "16px 0"}),
+        html.H6("Utilize Fund (Admin Only)", style={"fontWeight": "700", "marginBottom": "12px", "color": color}),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Select Fund *"),
+                dcc.Dropdown(
+                    id="fund-mgmt-fund-select",
+                    options=fund_options,
+                    placeholder="Select fund to utilize...",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ),
+            ], width=4),
+            dbc.Col([
+                dbc.Label("Expense / Bank Account *"),
+                dcc.Dropdown(
+                    id="fund-mgmt-expense-select",
+                    options=expense_account_options,
+                    placeholder="Select expense/bank account...",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ),
+            ], width=4),
+            dbc.Col([
+                dbc.Label("Mode"),
+                dcc.Dropdown(
+                    id="fund-mgmt-mode-select",
+                    options=[{"label": m.capitalize(), "value": m} for m in ["bank", "cheque", "upi", "transfer", "cash"]],
+                    value="bank",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ),
+            ], width=4),
+        ], className="g-2 mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Amount *"),
+                dbc.Input(id="fund-mgmt-amount-input", type="number", step="0.01", min="0.01", placeholder="₹", style={"fontSize": "13px"}),
+            ], width=3),
+            dbc.Col([
+                dbc.Label("Cheque/Ref No (if applicable)"),
+                dbc.Input(id="fund-mgmt-cheque-input", type="text", placeholder="Cheque/Ref #", style={"fontSize": "13px"}),
+            ], width=4),
+            dbc.Col([
+                dbc.Label("Transaction ID (optional)"),
+                dbc.Input(id="fund-mgmt-trx-input", type="text", placeholder="Bank ref / UPI ref", style={"fontSize": "13px"}),
+            ], width=5),
+        ], className="g-2 mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Approval Reference *"),
+                dbc.Input(id="fund-mgmt-approval-ref", type="text", placeholder="GB/MC Resolution #", style={"fontSize": "13px"}),
+            ], width=6),
+            dbc.Col([
+                dbc.Label("Approval Date *"),
+                dcc.DatePickerSingle(
+                    id="fund-mgmt-approval-date",
+                    display_format="YYYY-MM-DD",
+                    style={"width": "100%", "fontSize": "13px"},
+                ),
+            ], width=6),
+        ], className="g-2 mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Particulars *"),
+                dbc.Textarea(
+                    id="fund-mgmt-particulars",
+                    placeholder="Description of fund usage (e.g., Lift replacement, Common area painting, Legal fees)...",
+                    style={"minHeight": "80px", "fontSize": "13px", "fontFamily": "inherit"},
+                ),
+            ], width=12),
+        ], className="mb-3"),
+        dbc.Button(
+            [html.I(className="fas fa-arrow-right me-2"), "Utilize Fund"],
+            id="fund-mgmt-btn-submit",
+            n_clicks=0,
+            color="primary",
+            style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "13px"},
+        ),
+        html.Div(id="fund-mgmt-toast", style={"marginTop": "12px"}),
+    ], style={"padding": "16px", "background": "#fafbfc", "borderRadius": "10px", "marginTop": "16px"})
+
+    # Utilization log
+    log_rows = []
+    for u in utilization_log[:20]:  # show last 20
+        status_color = {"confirmed": "#1e7e34", "pending": "#e67e22", "cancelled": "#c0392b"}.get(u.get("status", ""), "#666")
+        log_rows.append(html.Tr([
+            html.Td(u.get("created_at", "")[:10] if u.get("created_at") else "—", style={"fontSize": "11px"}),
+            html.Td(FUND_TYPE_INFO.get(u.get("fund_acc_id"), {}).get("label", f"Fund {u.get('fund_acc_id')}"), style={"fontSize": "11px", "fontWeight": "600"}),
+            html.Td(f"₹{float(u.get('amount') or 0):,.2f}", style={"fontSize": "11px", "textAlign": "right"}),
+            html.Td(u.get("particulars", "")[:50], style={"fontSize": "11px", "color": "#555"}),
+            html.Td(u.get("approval_ref", "—"), style={"fontSize": "11px", "color": "#666"}),
+            html.Td(html.Span(u.get("status", "—").title(), style={"color": status_color, "fontWeight": "600", "fontSize": "11px"}), style={"textAlign": "center"}),
+        ]))
+
+    log_table = dbc.Table([
+        html.Thead(html.Tr([
+            html.Th("Date", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+            html.Th("Fund", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+            html.Th("Amount", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
+            html.Th("Particulars", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+            html.Th("Approval Ref", style={"fontSize": "11px", "background": color, "color": "#fff"}),
+            html.Th("Status", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
+        ])),
+        html.Tbody(log_rows),
+    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}) if log_rows else dbc.Alert("No fund utilizations yet.", color="secondary", style={"borderRadius": "10px"})
+
+    body = html.Div([
+        html.H6("Fund Balances", style={"fontWeight": "700", "marginBottom": "8px", "color": color, "marginTop": "8px"}),
+        balances_table,
+        form,
+        html.Hr(style={"margin": "16px 0"}),
+        html.H6("Recent Utilizations (Last 20)", style={"fontWeight": "700", "marginBottom": "8px", "color": color}),
+        log_table,
+    ], style={"padding": "16px"})
+
+    return html.Div([
+        header,
+        body,
+    ], style={"borderRadius": "16px", "border": f"1px solid {color}22", "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})

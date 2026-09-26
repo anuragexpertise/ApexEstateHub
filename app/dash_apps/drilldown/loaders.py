@@ -3119,8 +3119,26 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# FINANCIAL STATEMENTS LOADERS (P2 Item 1)
+# FINANCIAL STATEMENTS LOADERS (4 Statements: Dep, InExp, CapAc, Bal)
 # ════════════════════════════════════════════════════════════════════════════
+
+def get_depreciation_account(society_id: int, fy: int) -> list[dict]:
+    """Load Depreciation Account data for a given FY."""
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_fixed_asset_register_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        if not rows:
+            rows = db._execute(
+                "SELECT * FROM fn_fy_closing_report(%s,%s) WHERE depreciation_charge > 0 OR is_depreciable = TRUE",
+                (society_id, fy), fetch_all=True,
+            ) or []
+        return rows
+    except Exception as e:
+        print(f"❌ get_depreciation_account: {e}")
+        return []
+
 
 def get_receipts_payments(society_id: int, fy: int) -> list[dict]:
     """Load Receipts & Payments Account data for a given FY."""
@@ -3146,16 +3164,129 @@ def get_income_expenditure(society_id: int, fy: int) -> list[dict]:
         return []
 
 
-def get_balance_sheet(society_id: int, fy: int) -> list[dict]:
-    """Load Balance Sheet data for a given FY."""
+def get_capital_account(society_id: int, fy: int) -> list[dict]:
+    """Load Capital Account data for a given FY."""
     try:
+        rows = db._execute(
+            "SELECT * FROM fn_fy_closing_report(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+        cap_ac = next((r for r in rows if r.get("tab_name") == "CapAc"), None)
+        if cap_ac:
+            sp = cap_ac.get("sort_path") or ""
+            return [r for r in rows if r.get("sort_path") == sp or (sp and r.get("sort_path", "").startswith(sp + "."))]
+        return [r for r in rows if r.get("drcr_account") == "Cr" and "capital" in (r.get("account_name") or "").lower()]
+    except Exception as e:
+        print(f"❌ get_capital_account: {e}")
+        return []
+
+
+def get_balance_sheet(society_id: int, fy: int) -> list[dict]:
+    """Load Balance Sheet data with parent_account_id hierarchy for a given FY."""
+    try:
+        # Returns fn_fy_closing_report rows ordered by sort_path for full parent_account_id hierarchy
         return db._execute(
-            "SELECT * FROM fn_balance_sheet_fy(%s,%s)",
+            "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
             (society_id, fy), fetch_all=True,
         ) or []
     except Exception as e:
         print(f"❌ get_balance_sheet: {e}")
         return []
+
+
+def get_depreciation_account_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_depreciation_account(society_id, fy)
+    return rows, None if rows else f"No depreciation data for FY {fy}"
+
+def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_receipts_payments(society_id, fy)
+    return rows, None if rows else f"No R&P data for FY {fy}"
+
+def get_income_expenditure_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_income_expenditure(society_id, fy)
+    return rows, None if rows else f"No I&E data for FY {fy}"
+
+def get_capital_account_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_capital_account(society_id, fy)
+    return rows, None if rows else f"No Capital Account data for FY {fy}"
+
+def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_balance_sheet(society_id, fy)
+    return rows, None if rows else f"No Balance Sheet data for FY {fy}"
+
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FUND MANAGEMENT LOADERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_fund_balances(society_id: int) -> list[dict]:
+    """
+    Get current balances for all statutory funds (Capital, Reserve, Sinking, Repair, Corpus).
+    Returns list of dicts with {acc_id, name, balance, fund_type}
+    """
+    try:
+        # Fund accounts: 3000=Capital, 3200=Reserve, 3210=Sinking, 3220=Repair, 3230=Corpus
+        fund_acc_ids = [3000, 3200, 3210, 3220, 3230]
+        placeholders = ",".join(["%s"] * len(fund_acc_ids))
+        query = f"""
+            SELECT a.id as acc_id, a.name, a.account_code, a.tab_name,
+                   COALESCE(SUM(
+                       CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
+                   ), 0) as balance
+            FROM accounts a
+            LEFT JOIN transactions t ON t.acc_id = a.id AND t.society_id = a.society_id
+            WHERE a.society_id = %s AND a.id IN ({placeholders})
+            GROUP BY a.id, a.name, a.account_code, a.tab_name
+            ORDER BY a.id
+        """
+        params = [society_id] + fund_acc_ids
+        return db._execute(query, tuple(params), fetch_all=True) or []
+    except Exception as e:
+        print(f"❌ get_fund_balances: {e}")
+        return []
+
+
+def get_expense_bank_accounts(society_id: int) -> list[dict]:
+    """
+    Get Dr-normal accounts suitable for fund utilization expense/bank leg.
+    Includes bank accounts, expense accounts, and sundry creditors.
+    """
+    try:
+        return db._execute(
+            """
+            SELECT id, name, account_code, tab_name
+            FROM accounts
+            WHERE society_id = %s AND drcr_account = 'Dr'
+              AND tab_name IN ('Bank', 'Expenses', 'Creditors', 'Assets', 'Other')
+            ORDER BY tab_name, account_code
+            """,
+            (society_id,), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_expense_bank_accounts: {e}")
+        return []
+
+
+def get_fund_utilization_log(society_id: int, limit: int = 20) -> list[dict]:
+    """Get recent fund utilization records."""
+    try:
+        return db._execute(
+            """
+            SELECT fu.*, u.name as created_by_name
+            FROM fund_utilizations fu
+            LEFT JOIN users u ON u.id = fu.user_id
+            WHERE fu.society_id = %s
+            ORDER BY fu.created_at DESC
+            LIMIT %s
+            """,
+            (society_id, limit), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_fund_utilization_log: {e}")
+        return []
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════

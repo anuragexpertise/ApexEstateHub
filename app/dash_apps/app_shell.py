@@ -1090,6 +1090,14 @@ def shell_layout() -> html.Div:
             dcc.Store(id="expense-action-store-print", storage_type="memory"),
             dcc.Store(id="expense-action-store-pdf",   storage_type="memory"),
             dcc.Store(id="expense-action-store-email", storage_type="memory"),
+            # fin-stmt-action-store*: dummy Output anchors for
+            # financial_statements_callbacks.py's clientside Print/PDF/Email
+            # callbacks (new 2026-09 — 4 Statements previously had no
+            # print/download flow at all).
+            dcc.Store(id="fin-stmt-action-store",       storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-print", storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-email", storage_type="memory"),
             # session stores — survive page refresh but reset on tab close
             dcc.Store(id="drilldown-store",         storage_type="session", 
                        data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),

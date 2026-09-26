@@ -46,6 +46,8 @@ def register_callbacks(app):
         "event_ticket_callbacks",     # 13b. Event Ticket buttons
         "vendor_pass_callbacks",      # 13c. Vendor Pass buttons
         "expense_callbacks",          # 13d. Expense buttons
+        "financial_statements_callbacks",  # 13e. 4 Statements buttons
+        "fund_management_callbacks",     # 13f. Fund Management (admin only)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
         "assign_to_callbacks",        # 14b. Assign-To

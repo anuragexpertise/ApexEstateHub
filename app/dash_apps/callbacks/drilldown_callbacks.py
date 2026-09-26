@@ -680,11 +680,11 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, no_update
 
-            # ── Financial Statements (Three-Statement Report) — custom card
+            # ── 4 Statements Report — custom card
             # Same bypass-DRILLDOWN_MAP pattern as kpi_fy_closing_report;
             # the in-card FY switcher pills reuse this same click pipeline
             # with "kpi_financial_statements__<fy>" ids.
-            if card_id.startswith("kpi_financial_statements"):
+            if card_id.startswith(("kpi_financial_statements", "kpi_4_statements")):
                 if role != "admin":
                     return no_update, no_update, no_update, no_update, {
                         "_toast": {"type": "error", "message": "Admin only."}
@@ -696,9 +696,22 @@ def register_drilldown_callbacks(app):
                     if fy_suffix.isdigit():
                         fy_prefill["fy"] = int(fy_suffix)
                 store = nav_state.navigate_to(
-                    store, "form_financial_statements", "Financial Statements",
+                    store, "form_financial_statements", "4 Statements",
                     prefill=fy_prefill,
                 )
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
+            # ── Fund Management — custom card (Admin only)
+            if card_id == "kpi_fund_management":
+                if role != "admin":
+                    return no_update, no_update, no_update, no_update, {
+                        "_toast": {"type": "error", "message": "Admin only."}
+                    }
+                store = nav_state.initial_state(role, sid)
+                store = nav_state.navigate_to(store, "form_fund_management", "Fund Management")
                 hide_kpis = True
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"}
@@ -2519,13 +2532,20 @@ def register_drilldown_callbacks(app):
             # browser download link could never actually satisfy.
             data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
             filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
-        elif entity == "financial_statements":
-            # Three-Statement Financial Report (P2 Item 1):
-            # 1. Receipts & Payments (Cash basis)
+        elif entity in ("financial_statements", "4_statements"):
+            # 4 Statements Financial Report:
+            # 1. Depreciation Account (Fixed Assets WDV schedule)
             # 2. Income & Expenditure (Accrual basis)
-            # 3. Balance Sheet (Position statement)
-            data = financial_statements_export.export_all_three_statements(None, sid, fy)
-            filename = f"FinancialStatements_FY{fy}-{fy+1}.xlsx"
+            # 3. Capital Account (Equity & Reserves schedule)
+            # 4. Balance Sheet (2-column format with parent_account_id hierarchy)
+            data = financial_statements_export.export_all_four_statements(None, sid, fy)
+            filename = f"4Statements_FY{fy}-{fy+1}.xlsx"
+        elif entity == "depreciation_account":
+            data = financial_statements_export.export_depreciation_account(None, sid, fy)
+            filename = f"DepreciationAccount_FY{fy}-{fy+1}.xlsx"
+        elif entity == "capital_account":
+            data = financial_statements_export.export_capital_account(None, sid, fy)
+            filename = f"CapitalAccount_FY{fy}-{fy+1}.xlsx"
         elif entity == "receipts_payments":
             data = financial_statements_export.export_receipts_payments(None, sid, fy)
             filename = f"ReceiptsPayments_FY{fy}-{fy+1}.xlsx"
@@ -3099,20 +3119,21 @@ def _render_card(
                 society_id=sid_val,
             )
 
-        # ── Financial Statements (Three-Statement Report) — custom card
-        # Same pattern as form_fy_closing_report — loads data from the three
-        # SQL functions and renders the preview + export buttons.
-        if card_id == "form_financial_statements":
+        # ── 4 Statements Financial Report — custom card
+        # Loads data for the 4 statements: Dep, InExp, CapAc, Bal (2-column parent_account hierarchy)
+        if card_id in ("form_financial_statements", "form_4_statements"):
             if get_current_user_role() != "admin":
                 return html.Div("Admin only.", className="text-danger p-3")
             sid_val = filters.get("society_id")
             fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
             selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
             
-            rp_rows, rp_err = (loaders.get_receipts_payments_fy(sid_val, selected_fy)
-                               if sid_val and selected_fy else ([], "Society not resolved"))
+            dep_rows, dep_err = (loaders.get_depreciation_account_fy(sid_val, selected_fy)
+                                 if sid_val and selected_fy else ([], "Society not resolved"))
             ie_rows, ie_err = (loaders.get_income_expenditure_fy(sid_val, selected_fy)
                                if sid_val and selected_fy else ([], "Society not resolved"))
+            cap_rows, cap_err = (loaders.get_capital_account_fy(sid_val, selected_fy)
+                                 if sid_val and selected_fy else ([], "Society not resolved"))
             bs_rows, bs_err = (loaders.get_balance_sheet_fy(sid_val, selected_fy)
                                if sid_val and selected_fy else ([], "Society not resolved"))
             
@@ -3121,9 +3142,31 @@ def _render_card(
             society_name = society_row.get("name", "Society") if society_row else "Society"
             
             return renderers.render_financial_statements_card(
-                rp_rows=rp_rows, ie_rows=ie_rows, bs_rows=bs_rows,
-                error=rp_err or ie_err or bs_err,
+                dep_rows=dep_rows, ie_rows=ie_rows, cap_rows=cap_rows, bs_rows=bs_rows,
+                error=dep_err or ie_err or cap_err or bs_err,
                 fy_options=fy_options, selected_fy=selected_fy,
+                society_name=society_name, society_id=sid_val,
+            )
+
+        # ── Fund Management — custom card (Admin only)
+        if card_id == "form_fund_management":
+            if get_current_user_role() != "admin":
+                return html.Div("Admin only.", className="text-danger p-3")
+            sid_val = filters.get("society_id")
+            
+            # Get fund balances
+            fund_balances = loaders.get_fund_balances(sid_val) if sid_val else []
+            
+            # Get utilization log
+            utilization_log = loaders.get_fund_utilization_log(sid_val, limit=20) if sid_val else []
+            
+            # Get society name for header
+            society_row = db._execute("SELECT name FROM societies WHERE id=%s", (sid_val,), fetch_one=True) if sid_val else None
+            society_name = society_row.get("name", "Society") if society_row else "Society"
+            
+            return renderers.render_fund_management_card(
+                fund_balances=fund_balances,
+                utilization_log=utilization_log,
                 society_name=society_name,
             )
 

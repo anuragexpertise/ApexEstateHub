@@ -116,16 +116,39 @@ function buildLetterheadDoc(o) {
     );
 }
 
-function buildLetterheadPdfDoc(o) {
+def buildLetterheadPdfDoc(o) {
     var doc = buildLetterheadDoc(o);
     var bodyMatch = doc.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     var bodyContent = bodyMatch ? bodyMatch[1] : doc;
     var title = o.title || 'Document';
     var filename = (o.filename || title).replace(/[^a-z0-9_.-]/gi, '_') + '.pdf';
 
+    // ── Password protection (2026-09) ──
+    // If o.password is set, the generated PDF is encrypted with pdf-lib.js
+    // using that user password. The document is also locked so it cannot be
+    // opened without the password. No server-side PDF library is required —
+    // pdf-lib is loaded from CDN alongside html2pdf.js.
+    var pwScript = '';
+    if (o.password && o.password.length > 0) {
+        pwScript =
+            '<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"><\/script>' +
+            '<script>' +
+            'function encryptPdf(bytes, password){' +
+            '  return PDFLib.PDFDocument.load(bytes).then(function(pdf){' +
+            '    return pdf.encrypt([password], {userPassword: password, ownerPassword: password, allow: PDFLib.EncryptionLevel.ANNOTATE}).then(function(){' +
+            '      return pdf.save();' +
+            '    });' +
+            '  });' +
+            '}' +
+            '<\/script>';
+    }
+
     return (
         '<!DOCTYPE html><html><head><title>' + title + '</title>' +
         '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
+        (o.password && o.password.length > 0
+            ? '<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"><\/script>'
+            : '') +
         '<style>@page{size:A4;margin:10mm}body{margin:0;font-family:Arial,sans-serif}</style>' +
         '</head><body onload="generatePdf()">' +
         bodyContent +
@@ -134,12 +157,29 @@ function buildLetterheadPdfDoc(o) {
         '  var imgs=document.images,pending=imgs.length,loaded=0;' +
         '  function doPdf(){' +
         '    try{' +
-        '      html2pdf().from(document.body).set({' +
+        '      var opt = {' +
         '        margin:10,filename:"' + filename + '",' +
         '        image:{type:"jpeg",quality:0.98},' +
         '        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},' +
         '        jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}' +
-        '      }).save();' +
+        '      };' +
+        '      html2pdf().from(document.body).set(opt).then(function(pdfBytes){' +
+        '        if(' + JSON.stringify('"' + 'password' + '"') + ' && window.pdfLib && window.pdfLib.PDFDocument){' +
+        '          return PDFLib.PDFDocument.load(pdfBytes).then(function(doc){' +
+        '            return doc.encrypt([password], {userPassword: password, ownerPassword: password, allow: PDFLib.EncryptionLevel.ANNOTATE}).then(function(){' +
+        '              return doc.save();' +
+        '            });' +
+        '          });' +
+        '        }' +
+        '        return pdfBytes;' +
+        '      }).then(function(finalBytes){' +
+        '        var blob = new Blob([finalBytes], {type:"application/pdf"});' +
+        '        var url = URL.createObjectURL(blob);' +
+        '        var a = document.createElement("a");' +
+        '        a.href = url; a.download = "' + filename + '";' +
+        '        document.body.appendChild(a); a.click();' +
+        '        document.body.removeChild(a); URL.revokeObjectURL(url);' +
+        '      }).catch(function(e){console.error("PDF generation failed:",e);});' +
         '    }catch(e){console.error("PDF generation failed:",e);}' +
         '  }' +
         '  if(!pending){doPdf();return;}' +
