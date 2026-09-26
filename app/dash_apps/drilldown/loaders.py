@@ -3222,26 +3222,58 @@ def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | No
 
 def get_fund_balances(society_id: int) -> list[dict]:
     """
-    Get current balances for all statutory funds (Capital, Reserve, Sinking, Repair, Corpus).
-    Returns list of dicts with {acc_id, name, balance, fund_type}
+    Get current balances for every statutory fund/equity account (Capital
+    Account, Reserves & Funds, Sinking Fund Reserve, Repair & Maintenance
+    Fund Reserve, Corpus Fund, and any other Cr-natured account under the
+    same group — Gifts Received, Provisions, etc).
+
+    Resolved dynamically as any account descending from whichever account
+    is named ILIKE '%Equity%' ("Equity / Reserves & Funds" in the seeded
+    chart of accounts) — NOT a hardcoded id list. The previous version used
+    fixed ids (3000=Capital, 3200=Reserve, ...) that didn't even match the
+    real seeded chart (3000 is the "Equity / Reserves & Funds" rollup
+    header itself, not Capital Account — the real Capital Account is 3100),
+    AND selected a. account_code, a column that doesn't exist on `accounts`
+    at all — every call raised, was swallowed by the except below, and
+    silently returned [] every single time, which is why "Select Fund" was
+    always empty regardless of which society/jurisdiction was logged in.
+    Name-based lookup also means this keeps working if a different
+    jurisdiction's chart of accounts (see legal_regime_profiles) numbers
+    these accounts differently.
+
+    Returns list of dicts with {acc_id, name, tab_name, account_code, balance}.
+    (account_code here is an alias for tab_name — the short per-account code
+    the UI already expects, e.g. 'CapAc'/'SinkFund' — accounts has no
+    separate account_code column.)
     """
     try:
-        # Fund accounts: 3000=Capital, 3200=Reserve, 3210=Sinking, 3220=Repair, 3230=Corpus
-        fund_acc_ids = [3000, 3200, 3210, 3220, 3230]
-        placeholders = ",".join(["%s"] * len(fund_acc_ids))
-        query = f"""
-            SELECT a.id as acc_id, a.name, a.account_code, a.tab_name,
+        query = """
+            WITH RECURSIVE equity_root AS (
+                SELECT id FROM accounts
+                WHERE society_id = %s AND name ILIKE %s
+            ),
+            fund_tree AS (
+                SELECT a.id, a.name, a.tab_name
+                FROM accounts a
+                JOIN equity_root er ON a.parent_account_id = er.id
+                WHERE a.society_id = %s AND a.drcr_account = 'Cr'
+                UNION ALL
+                SELECT a.id, a.name, a.tab_name
+                FROM accounts a
+                JOIN fund_tree ft ON a.parent_account_id = ft.id
+                WHERE a.society_id = %s AND a.drcr_account = 'Cr'
+            )
+            SELECT ft.id AS acc_id, ft.name, ft.tab_name, ft.tab_name AS account_code,
                    COALESCE(SUM(
                        CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
-                   ), 0) as balance
-            FROM accounts a
-            LEFT JOIN transactions t ON t.acc_id = a.id AND t.society_id = a.society_id
-            WHERE a.society_id = %s AND a.id IN ({placeholders})
-            GROUP BY a.id, a.name, a.account_code, a.tab_name
-            ORDER BY a.id
+                   ), 0) AS balance
+            FROM fund_tree ft
+            LEFT JOIN transactions t ON t.acc_id = ft.id AND t.society_id = %s
+            GROUP BY ft.id, ft.name, ft.tab_name
+            ORDER BY ft.id
         """
-        params = [society_id] + fund_acc_ids
-        return db._execute(query, tuple(params), fetch_all=True) or []
+        params = (society_id, "%Equity%", society_id, society_id, society_id)
+        return db._execute(query, params, fetch_all=True) or []
     except Exception as e:
         print(f"❌ get_fund_balances: {e}")
         return []
@@ -3249,19 +3281,32 @@ def get_fund_balances(society_id: int) -> list[dict]:
 
 def get_expense_bank_accounts(society_id: int) -> list[dict]:
     """
-    Get Dr-normal accounts suitable for fund utilization expense/bank leg.
-    Includes bank accounts, expense accounts, and sundry creditors.
+    Get Dr-normal bank accounts suitable for the fund-utilization
+    expense/bank leg — any account whose parent is named ILIKE
+    '%Bank Accounts%' (e.g. "SBI A/c - Society", "ICICI A/c - Society"
+    under the "Bank Accounts" group), resolved dynamically instead of a
+    hardcoded id/tab_name list for the same jurisdiction-robustness reason
+    as get_fund_balances above.
+
+    The previous version filtered tab_name IN ('Bank','Expenses',
+    'Creditors','Assets','Other') and selected a nonexistent account_code
+    column — tab_name here is always a short per-account code (e.g. 'SBI',
+    'RentPaid'), never one of those group labels (the real group tab_names
+    are 'BkAc'/'Exp'/'SCr'/'As'), so that filter matched nothing even before
+    the account_code error was reached; the dropdown was always empty.
     """
     try:
         return db._execute(
             """
-            SELECT id, name, account_code, tab_name
-            FROM accounts
-            WHERE society_id = %s AND drcr_account = 'Dr'
-              AND tab_name IN ('Bank', 'Expenses', 'Creditors', 'Assets', 'Other')
-            ORDER BY tab_name, account_code
+            SELECT a.id, a.name, a.tab_name, a.tab_name AS account_code
+            FROM accounts a
+            JOIN accounts p ON p.id = a.parent_account_id AND p.society_id = a.society_id
+            WHERE a.society_id = %s
+              AND p.name ILIKE %s
+              AND a.drcr_account = 'Dr'
+            ORDER BY a.tab_name, a.name
             """,
-            (society_id,), fetch_all=True,
+            (society_id, "%Bank Accounts%"), fetch_all=True,
         ) or []
     except Exception as e:
         print(f"❌ get_expense_bank_accounts: {e}")
@@ -3269,13 +3314,18 @@ def get_expense_bank_accounts(society_id: int) -> list[dict]:
 
 
 def get_fund_utilization_log(society_id: int, limit: int = 20) -> list[dict]:
-    """Get recent fund utilization records."""
+    """
+    Get recent fund utilization records, with the fund account's real name
+    joined in directly (fund_name) so callers don't need a separate
+    id-keyed lookup table to label each row.
+    """
     try:
         return db._execute(
             """
-            SELECT fu.*, u.name as created_by_name
+            SELECT fu.*, u.name as created_by_name, fa.name as fund_name
             FROM fund_utilizations fu
             LEFT JOIN users u ON u.id = fu.user_id
+            LEFT JOIN accounts fa ON fa.id = fu.fund_acc_id AND fa.society_id = fu.society_id
             WHERE fu.society_id = %s
             ORDER BY fu.created_at DESC
             LIMIT %s
@@ -3285,6 +3335,72 @@ def get_fund_utilization_log(society_id: int, limit: int = 20) -> list[dict]:
     except Exception as e:
         print(f"❌ get_fund_utilization_log: {e}")
         return []
+
+
+def get_funds_account(society_id: int, fy: int) -> list[dict]:
+    """
+    Load the "Funds Account" schedule (Opening B/F, Additions, Deductions,
+    Closing C/F) for the new 1st Financial Statement — every statutory
+    fund/equity account, via fn_funds_account_fy (same dynamic ILIKE
+    '%Equity%' subtree resolution as get_fund_balances, at the database
+    layer since the export/report path calls the SQL function directly
+    rather than going through this loader in every caller).
+    """
+    try:
+        return db._execute(
+            "SELECT * FROM fn_funds_account_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_funds_account: {e}")
+        return []
+
+
+def get_funds_account_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+    rows = get_funds_account(society_id, fy)
+    return rows, None if rows else f"No Funds Account data for FY {fy}"
+
+
+def get_asset_holdings(society_id: int, fy: int | None = None) -> list[dict]:
+    """
+    "ALL Holdings" statement — the full tangible fixed-asset register
+    (active + disposed) with per-asset STCG/LTCG, via fn_asset_holdings_fy.
+    """
+    try:
+        return db._execute(
+            "SELECT * FROM fn_asset_holdings_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_asset_holdings: {e}")
+        return []
+
+
+def get_asset_holdings_fy(society_id: int, fy: int | None = None) -> tuple[list[dict], str | None]:
+    rows = get_asset_holdings(society_id, fy)
+    return rows, None if rows else "No asset holdings recorded yet"
+
+
+def get_deposit_holdings(society_id: int, fy: int | None = None) -> list[dict]:
+    """
+    "ALL Deposits" statement — the intangible investment register (FDs,
+    bonds, mutual fund units) with per-deposit STCG/LTCG, via
+    fn_deposit_holdings_fy. Returns [] until deposits are actually entered
+    — there is no admin create/dispose UI for the `deposits` table yet.
+    """
+    try:
+        return db._execute(
+            "SELECT * FROM fn_deposit_holdings_fy(%s,%s)",
+            (society_id, fy), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_deposit_holdings: {e}")
+        return []
+
+
+def get_deposit_holdings_fy(society_id: int, fy: int | None = None) -> tuple[list[dict], str | None]:
+    rows = get_deposit_holdings(society_id, fy)
+    return rows, None if rows else "No deposits recorded yet"
 
 
 

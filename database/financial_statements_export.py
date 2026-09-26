@@ -294,12 +294,22 @@ def _write_authorisation_footer(ws, society_name: str, fy: int, secretary_name: 
     ws.cell(row=r+3, column=1, value=f"Verification Stamp: FIN-CERT-{fy}-{digest} | Digitally Verified Audit Document").font = Font(name="Arial", size=8, italic=True, color="555555")
 
 
-def _write_capital_account_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
-    """Write Capital Account sheet with detailed individual Funds: Opening B/F, Additions, Deductions, Closing C/F."""
+def _write_capital_account_sheet(
+    ws, rows: list[dict], society_name: str, fy: int,
+    title: str = "Capital Account & Equity Schedule",
+    total_label: str = "Total Capital & Equity Funds",
+) -> None:
+    """
+    Write a B/F-Additions-Deductions-C/F fund schedule sheet. Originally
+    written just for the Capital Account subtree (cap_rows); title/
+    total_label are now parameterized so the same writer also serves the
+    "ALL Equity" statement (funds_rows, covering Corpus/Capital/Sinking/
+    Repair together via fn_funds_account_fy) without duplicating this logic.
+    """
     ws.cell(row=1, column=1, value=f"{society_name}")
     ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
 
-    ws.cell(row=2, column=1, value=f"Capital Account & Equity Schedule for FY {fy}-{fy+1}")
+    ws.cell(row=2, column=1, value=f"{title} for FY {fy}-{fy+1}")
     ws.cell(row=2, column=1).font = _FONT_TITLE
 
     ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}")
@@ -333,7 +343,70 @@ def _write_capital_account_sheet(ws, rows: list[dict], society_name: str, fy: in
         _write_row(ws, r, [acc, bf, add, ded, cl], _FONT_BODY, fmt=_FMT_AMT)
         r += 1
 
-    _write_row(ws, r, ["Total Capital & Equity Funds", tot_bf, tot_add, tot_ded, tot_cl], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
+    _write_row(ws, r, [total_label, tot_bf, tot_add, tot_ded, tot_cl], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
+    _write_authorisation_footer(ws, society_name, fy)
+
+
+def _write_holdings_style_sheet(
+    ws, rows: list[dict], society_name: str, fy: int,
+    title: str, ref_label: str, exit_label: str,
+) -> None:
+    """
+    Shared writer for the "ALL Holdings" and "ALL Deposits" statements —
+    same row shape from fn_asset_holdings_fy/fn_deposit_holdings_fy (name,
+    ref_no, purchase_date, exit_date, purchase_value, sale_value, stcg,
+    ltcg); only the sheet title and the SN#/ISIN# and Disposed/Sell Date
+    column labels differ between the two.
+    """
+    ws.cell(row=1, column=1, value=f"{society_name}")
+    ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
+
+    ws.cell(row=2, column=1, value=f"{title} for FY {fy}-{fy+1}")
+    ws.cell(row=2, column=1).font = _FONT_TITLE
+
+    ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}")
+    ws.cell(row=3, column=1).font = Font(name="Arial", size=9, italic=True)
+
+    headers = ["Name", ref_label, "Purchase Date", exit_label, "Purchase Price", "Sell Price", "STCG", "LTCG"]
+    widths = {"A": 32, "B": 18, "C": 16, "D": 16, "E": 18, "F": 18, "G": 16, "H": 16}
+    _apply_header(ws, 4, widths)
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    r = 5
+    tot_purchase, tot_sale, tot_stcg, tot_ltcg = 0.0, 0.0, 0.0, 0.0
+    for row in rows:
+        name = row.get("name") or "—"
+        ref_no = row.get("ref_no") or "—"
+        pdate = row.get("purchase_date")
+        edate = row.get("exit_date")
+        pval = float(row.get("purchase_value") or 0)
+        sval = float(row.get("sale_value") or 0)
+        stcg = float(row.get("stcg") or 0)
+        ltcg = float(row.get("ltcg") or 0)
+
+        tot_purchase += pval
+        tot_sale += sval
+        tot_stcg += stcg
+        tot_ltcg += ltcg
+
+        _write_row(ws, r, [name, ref_no, str(pdate) if pdate else "—", str(edate) if edate else "—",
+                           pval, sval, stcg, ltcg], _FONT_BODY, fmt=None)
+        # Amount columns (E-H) get the currency format explicitly since
+        # this row mixes text and numeric columns (_write_row's single
+        # `fmt` applies to every cell otherwise).
+        for col in (5, 6, 7, 8):
+            ws.cell(row=r, column=col).number_format = _FMT_AMT
+        r += 1
+
+    total_row = ["Total", "", "", "", tot_purchase, tot_sale, tot_stcg, tot_ltcg]
+    _write_row(ws, r, total_row, _FONT_TOTAL, _FILL_TOTAL, fmt=None)
+    for col in (5, 6, 7, 8):
+        ws.cell(row=r, column=col).number_format = _FMT_AMT
     _write_authorisation_footer(ws, society_name, fy)
 
 
@@ -886,7 +959,15 @@ def _write_balance_sheet_hierarchical(
 
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
-    """Build the four-statement workbook."""
+    """
+    Build the five-statement workbook: ALL Holdings, ALL Deposits,
+    Depreciation Account, ALL Equity (Funds Account), Balance Sheet.
+    Income & Expenditure and the old standalone Capital Account sheet are
+    no longer part of this workbook (see render_financial_statements_card's
+    docstring in app/dash_apps/drilldown/renderers.py) — export_income_expenditure
+    and export_capital_account below still work standalone for anyone who
+    wants those sheets individually.
+    """
     from database.db_manager import db as _db
     if db is None:
         db = _db
@@ -897,6 +978,20 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
         society_name = society_metadata.get("name") or "Society"
 
     # Fetch data from SQL functions
+    try:
+        holdings_rows = db._execute(
+            "SELECT * FROM fn_asset_holdings_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        holdings_rows = []
+
+    try:
+        deposits_rows = db._execute(
+            "SELECT * FROM fn_deposit_holdings_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        deposits_rows = []
+
     try:
         dep_rows = db._execute(
             "SELECT * FROM fn_fixed_asset_register_fy(%s,%s)", (society_id, fy), fetch_all=True
@@ -913,20 +1008,12 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
         except Exception:
             dep_rows = []
 
-    ie_rows = db._execute(
-        "SELECT * FROM fn_income_expenditure_fy(%s,%s)", (society_id, fy), fetch_all=True
-    ) or []
-
     try:
-        closing_all = db._execute("SELECT * FROM fn_fy_closing_report(%s,%s)", (society_id, fy), fetch_all=True) or []
-        cap_ac = next((r for r in closing_all if r.get("tab_name") == "CapAc"), None)
-        if cap_ac:
-            sp = cap_ac.get("sort_path") or ""
-            cap_rows = [r for r in closing_all if r.get("sort_path") == sp or (sp and r.get("sort_path", "").startswith(sp + "."))]
-        else:
-            cap_rows = [r for r in closing_all if r.get("drcr_account") == "Cr" and "capital" in (r.get("account_name") or "").lower()]
+        funds_rows = db._execute(
+            "SELECT * FROM fn_funds_account_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
     except Exception:
-        cap_rows = []
+        funds_rows = []
 
     # Fetch hierarchical Balance Sheet data from fn_fy_closing_report
     root_children, children_by_parent, closing_by_id = _fetch_balance_sheet_hierarchy(db, society_id, fy)
@@ -934,22 +1021,29 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
     wb = Workbook()
     wb.remove(wb.active)
 
-    # Sheet 1: Depreciation Account
-    ws1 = wb.create_sheet(title="Depreciation Account")
-    _write_depreciation_account_sheet(ws1, dep_rows, society_name, fy)
+    # Sheet 1: ALL Holdings (Active Assets)
+    ws1 = wb.create_sheet(title="ALL Holdings")
+    _write_holdings_style_sheet(ws1, holdings_rows, society_name, fy,
+                                 title="ALL Holdings (Active Assets)", ref_label="SN#", exit_label="Disposed Date")
 
-    # Sheet 2: Income & Expenditure
-    ws2 = wb.create_sheet(title="Income & Expenditure")
-    _apply_header(ws2, 4, _COL_WIDTHS_IE)
-    _write_income_expenditure_sheet(ws2, ie_rows, society_name, fy)
+    # Sheet 2: ALL Deposits (Active Deposits)
+    ws2 = wb.create_sheet(title="ALL Deposits")
+    _write_holdings_style_sheet(ws2, deposits_rows, society_name, fy,
+                                 title="ALL Deposits (Active Deposits)", ref_label="ISIN#", exit_label="Sell Date")
 
-    # Sheet 3: Capital Account
-    ws3 = wb.create_sheet(title="Capital Account")
-    _write_capital_account_sheet(ws3, cap_rows, society_name, fy)
+    # Sheet 3: Depreciation Account
+    ws3 = wb.create_sheet(title="Depreciation Account")
+    _write_depreciation_account_sheet(ws3, dep_rows, society_name, fy)
 
-    # Sheet 4: Balance Sheet (hierarchical)
-    ws4 = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_hierarchical(ws4, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
+    # Sheet 4: ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
+    ws4 = wb.create_sheet(title="ALL Equity")
+    _write_capital_account_sheet(ws4, funds_rows, society_name, fy,
+                                  title="ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)",
+                                  total_label="Total Equity & Funds")
+
+    # Sheet 5: Balance Sheet (hierarchical)
+    ws5 = wb.create_sheet(title="Balance Sheet")
+    _write_balance_sheet_hierarchical(ws5, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
 
     return wb
 
@@ -1093,8 +1187,87 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     return buf.getvalue()
 
 
-def export_all_four_statements(db, society_id: int, fy: int) -> bytes:
-    """Generate combined workbook with four statement sheets."""
+def export_asset_holdings(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate ALL Holdings (Active Assets) export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        rows = db._execute("SELECT * FROM fn_asset_holdings_fy(%s,%s)", (society_id, fy), fetch_all=True) or []
+    except Exception:
+        rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="ALL Holdings")
+    _write_holdings_style_sheet(ws, rows, society_name, fy,
+                                 title="ALL Holdings (Active Assets)", ref_label="SN#", exit_label="Disposed Date")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def export_deposit_holdings(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate ALL Deposits (Active Deposits) export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        rows = db._execute("SELECT * FROM fn_deposit_holdings_fy(%s,%s)", (society_id, fy), fetch_all=True) or []
+    except Exception:
+        rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="ALL Deposits")
+    _write_holdings_style_sheet(ws, rows, society_name, fy,
+                                 title="ALL Deposits (Active Deposits)", ref_label="ISIN#", exit_label="Sell Date")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def export_funds_account(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate ALL Equity (Funds Account: Corpus/Capital/Sinking/Repair) export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        rows = db._execute("SELECT * FROM fn_funds_account_fy(%s,%s)", (society_id, fy), fetch_all=True) or []
+    except Exception:
+        rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="ALL Equity")
+    _write_capital_account_sheet(ws, rows, society_name, fy,
+                                  title="ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)",
+                                  total_label="Total Equity & Funds")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def export_all_five_statements(db, society_id: int, fy: int) -> bytes:
+    """Generate combined workbook with all five statement sheets."""
     wb = _build_workbook(society_id, fy, db)
 
     buf = io.BytesIO()
@@ -1103,6 +1276,13 @@ def export_all_four_statements(db, society_id: int, fy: int) -> bytes:
     return buf.getvalue()
 
 
+def export_all_four_statements(db, society_id: int, fy: int) -> bytes:
+    """Alias for export_all_five_statements (backwards compatibility — the
+    workbook now has five sheets, not four; kept so any old caller using
+    this name still works)."""
+    return export_all_five_statements(db, society_id, fy)
+
+
 def export_all_three_statements(db, society_id: int, fy: int) -> bytes:
-    """Alias for export_all_four_statements (backwards compatibility)."""
-    return export_all_four_statements(db, society_id, fy)
+    """Alias for export_all_five_statements (backwards compatibility)."""
+    return export_all_five_statements(db, society_id, fy)

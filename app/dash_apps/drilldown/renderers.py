@@ -3970,12 +3970,23 @@ def render_financial_statements_card(
     **kwargs
 ) -> html.Div:
     """
-    Read-only 4 Statements Financial Report card with export buttons.
+    Read-only 5 Statements Financial Report card with export buttons.
     Displays:
-    1. Depreciation Account (Fixed Assets WDV Schedule)
-    2. Income & Expenditure Account (Accrual basis)
-    3. Capital Account (Equity & Reserves Schedule)
-    4. Balance Sheet (Position Statement - 2 column format with nodes grouped by parent_account hierarchy)
+    1. ALL Holdings (Active Assets) — tangible fixed-asset register: Name, SN#,
+       Purchase Date, Disposed Date, Purchase Price, Sell Price, STCG, LTCG
+    2. ALL Deposits (Active Deposits, intangible) — investment register: Name,
+       ISIN#, Purchase Date, Sell Date, Purchase Price, Sell Price, STCG, LTCG
+    3. Depreciation Account (Fixed Assets WDV Schedule)
+    4. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair &
+       Maintenance: Opening B/F, Additions, Deductions, Closing C/F
+    5. Balance Sheet (Position Statement - 2 column format with nodes grouped by parent_account hierarchy)
+
+    Income & Expenditure and the standalone Capital Account & Equity
+    Schedule (fka statements 2/3 of the earlier "4 Statements" card) are no
+    longer shown here — ALL Equity above supersedes the equity schedule for
+    this card's purposes, and Income & Expenditure remains available via
+    loaders.get_income_expenditure_fy / financial_statements_export.py for
+    other callers even though this card doesn't render it.
 
     Coloring is uniform with NOC / Receipt / Agreement cards: #15304f
     (the letterhead header navy). Previously #2c3e50 which clashed with the
@@ -3984,21 +3995,24 @@ def render_financial_statements_card(
     color = "#15304f"
 
     # Extract datasets flexibly for 3-arg or 4-arg calls
+    holdings_rows = kwargs.get("holdings_rows") or []
+    deposits_rows = kwargs.get("deposits_rows") or []
+    funds_rows = kwargs.get("funds_rows") or []
     dep_rows = kwargs.get("dep_rows")
-    ie_rows = kwargs.get("ie_rows")
-    cap_rows = kwargs.get("cap_rows")
     bs_rows = kwargs.get("bs_rows")
     rp_rows = kwargs.get("rp_rows")
 
+    # Legacy positional-arg call shapes: the old signature was
+    # (dep_rows, ie_rows, cap_rows, bs_rows) — ie_rows/cap_rows are accepted
+    # here for backward compatibility with any old caller but are no longer
+    # rendered (see docstring above), so they're just discarded once parsed.
     if dep_rows is None and len(args) >= 4:
-        dep_rows, ie_rows, cap_rows, bs_rows = args[0], args[1], args[2], args[3]
+        dep_rows, _legacy_ie_rows, _legacy_cap_rows, bs_rows = args[0], args[1], args[2], args[3]
     elif dep_rows is None and len(args) == 3:
-        rp_rows, ie_rows, bs_rows = args[0], args[1], args[2]
+        rp_rows, _legacy_ie_rows, bs_rows = args[0], args[1], args[2]
 
     if dep_rows is None:
         dep_rows = rp_rows or []
-    if cap_rows is None:
-        cap_rows = []
 
     fy_options = fy_options or []
 
@@ -4031,7 +4045,7 @@ def render_financial_statements_card(
                             "display": "flex", "alignItems": "center",
                             "justifyContent": "center", "marginRight": "12px"}),
             html.Div([
-                html.Strong("4 Statements", style={"fontSize": "14px"}),
+                html.Strong("5 Statements", style={"fontSize": "14px"}),
                 html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
                          style={"fontSize": "11px", "color": "#999"}),
                 html.Div(society_name, style={"fontSize": "10px", "color": "#888"}),
@@ -4041,13 +4055,29 @@ def render_financial_statements_card(
             pills,
             html.Div([
                 dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export All 4 Statements"],
+                    [html.I(className="fas fa-file-excel me-2"), "Export All 5 Statements"],
                     id={"type": "btn-fy-export", "entity": "financial_statements"},
                     size="sm", color="success", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
                            "marginBottom": "12px", "marginRight": "8px"},
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "financial_statements"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Holdings"],
+                    id={"type": "btn-fy-export", "entity": "asset_holdings"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "asset_holdings"}),
+                dbc.Button(
+                    [html.I(className="fas fa-file-excel me-2"), "Export Deposits"],
+                    id={"type": "btn-fy-export", "entity": "deposit_holdings"},
+                    size="sm", color="info", outline=True,
+                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
+                           "marginBottom": "12px", "marginRight": "8px"},
+                ),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "deposit_holdings"}),
                 dbc.Button(
                     [html.I(className="fas fa-file-excel me-2"), "Export Depreciation Account"],
                     id={"type": "btn-fy-export", "entity": "depreciation_account"},
@@ -4057,21 +4087,13 @@ def render_financial_statements_card(
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "depreciation_account"}),
                 dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export Income & Expenditure"],
-                    id={"type": "btn-fy-export", "entity": "income_expenditure"},
+                    [html.I(className="fas fa-file-excel me-2"), "Export Equity (Funds Account)"],
+                    id={"type": "btn-fy-export", "entity": "funds_account"},
                     size="sm", color="info", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
                            "marginBottom": "12px", "marginRight": "8px"},
                 ),
-                dcc.Download(id={"type": "fy-export-trigger", "entity": "income_expenditure"}),
-                dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export Capital Account"],
-                    id={"type": "btn-fy-export", "entity": "capital_account"},
-                    size="sm", color="info", outline=True,
-                    style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
-                           "marginBottom": "12px", "marginRight": "8px"},
-                ),
-                dcc.Download(id={"type": "fy-export-trigger", "entity": "capital_account"}),
+                dcc.Download(id={"type": "fy-export-trigger", "entity": "funds_account"}),
                 dbc.Button(
                     [html.I(className="fas fa-file-excel me-2"), "Export Balance Sheet"],
                     id={"type": "btn-fy-export", "entity": "balance_sheet"},
@@ -4530,13 +4552,14 @@ def render_financial_statements_card(
             note,
         ])
 
-    if not dep_rows and not ie_rows and not cap_rows and not bs_rows:
+    if not holdings_rows and not deposits_rows and not dep_rows and not funds_rows and not bs_rows:
         body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
     else:
-        dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "1. Depreciation Account (Fixed Assets WDV Schedule)")
-        ie_preview = _make_ie_preview(ie_rows, "2. Income & Expenditure Account (Accrual Basis)")
-        cap_preview = _make_preview_table(cap_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "3. Capital Account & Equity Schedule")
-        bs_preview = _make_balance_sheet_preview(bs_rows, "4. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
+        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings (Active Assets)")
+        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits (Active Deposits)")
+        dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "3. Depreciation Account (Fixed Assets WDV Schedule)")
+        funds_preview = _make_preview_table(funds_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "4. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)")
+        bs_preview = _make_balance_sheet_preview(bs_rows, "5. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
         
         # Verification QR code stamp & Authorised Signatory Footer
         qr_img = None
@@ -4619,7 +4642,11 @@ def render_financial_statements_card(
                                 if k.lower() == key:
                                     val = v
                                     break
-                        cells.append(f'<td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{_fmt(val) if "amount" in key.lower() or "wdv" in key.lower() or "depreciation" in key.lower() or "opening" in key.lower() or "closing" in key.lower() or "addition" in key.lower() or "deduction" in key.lower() or "b/f" in key.lower() or "c/f" in key.lower() else (_fmt_pct(val) if "rate" in key.lower() or "pct" in key.lower() else (val or "—"))}</td>')
+                        _is_currency = any(t in key.lower() for t in (
+                            "amount", "wdv", "depreciation", "opening", "closing", "addition",
+                            "deduction", "b/f", "c/f", "price", "stcg", "ltcg",
+                        ))
+                        cells.append(f'<td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{_fmt(val) if _is_currency else (_fmt_pct(val) if "rate" in key.lower() or "pct" in key.lower() else (val or "—"))}</td>')
                     body_rows.append('<tr>' + ''.join(cells) + '</tr>')
                 return (
                     f'<h4 style="color:{color};margin:20px 0 8px">{title}</h4>'
@@ -4628,7 +4655,23 @@ def render_financial_statements_card(
                     f'<tbody>{"".join(body_rows)}</tbody></table>'
                 )
 
-            # 1. Depreciation Account
+            # 1. ALL Holdings (Active Assets) — tangible fixed-asset register
+            holdings_cols = ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
+            holdings_map = {
+                "snnum": "ref_no", "disposed_date": "exit_date",
+                "purchase_price": "purchase_value", "sell_price": "sale_value",
+            }
+            parts.append(_table("1. ALL Holdings (Active Assets)", holdings_rows, holdings_cols, holdings_map))
+
+            # 2. ALL Deposits (Active Deposits, intangible) — investment register
+            deposits_cols = ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
+            deposits_map = {
+                "isinnum": "ref_no", "sell_date": "exit_date",
+                "purchase_price": "purchase_value", "sell_price": "sale_value",
+            }
+            parts.append(_table("2. ALL Deposits (Active Deposits)", deposits_rows, deposits_cols, deposits_map))
+
+            # 3. Depreciation Account
             dep_cols = ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"]
             dep_map = {
                 "account": "account_name", "opening_wdv": "opening_wdv",
@@ -4636,21 +4679,15 @@ def render_financial_statements_card(
                 "deductions": "deductions", "rate_%": "depreciation_percent",
                 "depreciation": "depreciation_charge", "closing_wdv": "closing_wdv",
             }
-            parts.append(_table("1. Depreciation Account (Fixed Assets WDV Schedule)", dep_rows, dep_cols, dep_map))
+            parts.append(_table("3. Depreciation Account (Fixed Assets WDV Schedule)", dep_rows, dep_cols, dep_map))
 
-            # 2. Income & Expenditure
-            ie_cols = ["Account", "Section", "Mutual/Non-Mutual", "Amount"]
-            ie_map = {"account": "account_name", "section": "statement_section", "mutual/non-mutual": "mutuality_nature", "amount": "amount"}
-            if ie_rows:
-                parts.append(_table("2. Income & Expenditure Account (Accrual Basis)", ie_rows, ie_cols, ie_map))
+            # 4. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance
+            funds_cols = ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
+            funds_map = {"account": "account_name", "opening_b/f": "own_bf", "additions": "additions", "deductions": "deductions", "closing_c/f": "own_closing"}
+            if funds_rows:
+                parts.append(_table("4. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)", funds_rows, funds_cols, funds_map))
 
-            # 3. Capital Account
-            cap_cols = ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
-            cap_map = {"account": "account_name", "opening_b/f": "own_bf", "additions": "additions", "deductions": "deductions", "closing_c/f": "own_closing"}
-            if cap_rows:
-                parts.append(_table("3. Capital Account & Equity Schedule", cap_rows, cap_cols, cap_map))
-
-            # 4. Balance Sheet (two-column format)
+            # 5. Balance Sheet (two-column format)
             if bs_rows:
                 parts.append(_build_bs_html(bs_rows, color))
 
@@ -4797,7 +4834,7 @@ def render_financial_statements_card(
         ])
 
         body = html.Div([
-            dep_preview, ie_preview, cap_preview, bs_preview, auth_block,
+            holdings_preview, deposits_preview, dep_preview, funds_preview, bs_preview, auth_block,
             dcc.Store(id="fin-stmt-letterhead-data", data=fin_letterhead_data, storage_type="memory"),
         ], style={"padding": "16px"})
 
@@ -7374,13 +7411,27 @@ def render_fund_management_card(
     """
     color = "#15304f"
 
-    FUND_TYPE_INFO = {
-        3000: {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"},
-        3200: {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"},
-        3210: {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"},
-        3220: {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"},
-        3230: {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"},
-    }
+    # Funds are resolved dynamically by name in loaders.get_fund_balances
+    # (ILIKE '%Equity%' subtree walk) rather than a hardcoded account-id
+    # list, so approval/purpose metadata is looked up the same way — by
+    # matching the account's real name — instead of an id-keyed dict, which
+    # broke the moment the real chart of accounts didn't match the
+    # hardcoded ids (see fund_management_callbacks.py's resolve_fund_type_info
+    # docstring for the full history).
+    FUND_TYPE_PATTERNS = [
+        ("capital account", {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"}),
+        ("sinking",         {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"}),
+        ("repair",          {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"}),
+        ("corpus",          {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"}),
+        ("reserve",         {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"}),
+    ]
+
+    def _fund_type_info(name):
+        n = (name or "").lower()
+        for pattern, info in FUND_TYPE_PATTERNS:
+            if pattern in n:
+                return info
+        return {"label": name or "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"}
 
     header = html.Div([
         html.Div(html.I(className="fas fa-coins", style={"color": "#fff", "fontSize": "16px"}),
@@ -7404,7 +7455,7 @@ def render_fund_management_card(
     balance_rows = []
     for fb in fund_balances:
         acc_id = fb.get("acc_id")
-        info = FUND_TYPE_INFO.get(acc_id, {"label": "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"})
+        info = _fund_type_info(fb.get("name"))
         balance = float(fb.get("balance") or 0)
         balance_rows.append(html.Tr([
             html.Td(html.Div([
@@ -7426,8 +7477,9 @@ def render_fund_management_card(
         html.Tbody(balance_rows),
     ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}, id="fund-mgmt-balances-table")
 
-    # Utilization form
-    fund_options = [{"label": FUND_TYPE_INFO.get(fb.get("acc_id"), {}).get("label", f"Fund {fb.get('acc_id')}"), "value": str(fb.get("acc_id"))} for fb in fund_balances if float(fb.get("balance") or 0) > 0]
+    # Utilization form — label comes straight from the account's real name
+    # (already fetched dynamically by name), no id-keyed lookup needed.
+    fund_options = [{"label": f"{fb.get('name')}", "value": str(fb.get("acc_id"))} for fb in fund_balances if float(fb.get("balance") or 0) > 0]
 
     # Expense/Bank account options (Dr accounts) - pre-populated from drilldown callback
     expense_account_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in (expense_accounts or [])]
@@ -7530,7 +7582,7 @@ def render_fund_management_card(
         status_color = {"confirmed": "#1e7e34", "pending": "#e67e22", "cancelled": "#c0392b"}.get(u.get("status", ""), "#666")
         log_rows.append(html.Tr([
             html.Td(u.get("created_at", "")[:10] if u.get("created_at") else "—", style={"fontSize": "11px"}),
-            html.Td(FUND_TYPE_INFO.get(u.get("fund_acc_id"), {}).get("label", f"Fund {u.get('fund_acc_id')}"), style={"fontSize": "11px", "fontWeight": "600"}),
+            html.Td(u.get("fund_name") or f"Fund {u.get('fund_acc_id')}", style={"fontSize": "11px", "fontWeight": "600"}),
             html.Td(f"₹{float(u.get('amount') or 0):,.2f}", style={"fontSize": "11px", "textAlign": "right"}),
             html.Td(u.get("particulars", "")[:50], style={"fontSize": "11px", "color": "#555"}),
             html.Td(u.get("approval_ref", "—"), style={"fontSize": "11px", "color": "#666"}),
