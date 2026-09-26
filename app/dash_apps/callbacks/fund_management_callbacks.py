@@ -20,14 +20,12 @@ def register_fund_management_callbacks(app):
         Output("fund-mgmt-balances-table", "children", allow_duplicate=True),
         Output("fund-mgmt-log-table", "children", allow_duplicate=True),
         Output("fund-mgmt-toast", "children", allow_duplicate=True),
-        Input({"type": "kpi-card-div", "card_id": "kpi_fund_management"}, "n_clicks"),
         Input("fund-mgmt-refresh-btn", "n_clicks"),
-        Input("url", "pathname"),
         prevent_initial_call=True,
     )
-    def load_fund_management_data(kpi_clicks, refresh_clicks, pathname):
-        """Load fund balances and utilization log when card is opened."""
-        if not ctx.triggered:
+    def refresh_fund_management_data(refresh_clicks):
+        """Reload fund balances and utilization log when refresh button is clicked."""
+        if not refresh_clicks:
             raise PreventUpdate
 
         role = get_current_user_role()

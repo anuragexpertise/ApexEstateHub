@@ -3164,9 +3164,13 @@ def _render_card(
             society_row = db._execute("SELECT name FROM societies WHERE id=%s", (sid_val,), fetch_one=True) if sid_val else None
             society_name = society_row.get("name", "Society") if society_row else "Society"
             
+            # Get expense/bank accounts for dropdown
+            expense_accounts = loaders.get_expense_bank_accounts(sid_val) if sid_val else []
+            
             return renderers.render_fund_management_card(
                 fund_balances=fund_balances,
                 utilization_log=utilization_log,
+                expense_accounts=expense_accounts,
                 society_name=society_name,
             )
 

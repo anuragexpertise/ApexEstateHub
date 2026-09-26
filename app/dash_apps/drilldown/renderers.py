@@ -7364,12 +7364,13 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
 
 def render_fund_management_card(
     fund_balances: list, utilization_log: list, error: str | None = None,
-    society_name: str = "Society",
+    expense_accounts: list = None, society_name: str = "Society",
 ) -> html.Div:
     """
     Admin-only card for viewing fund balances and utilizing funds.
     fund_balances: list of dicts with {acc_id, name, balance, fund_type}
     utilization_log: list of fund_utilizations records
+    expense_accounts: list of Dr accounts for expense/bank dropdown
     """
     color = "#15304f"
 
@@ -7423,14 +7424,13 @@ def render_fund_management_card(
             html.Th("Permitted Purpose (per UP AOA / Bye-Laws)", style={"fontSize": "11px", "background": color, "color": "#fff"}),
         ])),
         html.Tbody(balance_rows),
-    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"})
+    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}, id="fund-mgmt-balances-table")
 
     # Utilization form
     fund_options = [{"label": FUND_TYPE_INFO.get(fb.get("acc_id"), {}).get("label", f"Fund {fb.get('acc_id')}"), "value": str(fb.get("acc_id"))} for fb in fund_balances if float(fb.get("balance") or 0) > 0]
 
-    # Expense/Bank account options (Dr accounts)
-    # These would be fetched from accounts table - for now we'll use a dropdown that gets populated
-    expense_account_options = []  # populated via callback
+    # Expense/Bank account options (Dr accounts) - pre-populated from drilldown callback
+    expense_account_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in (expense_accounts or [])]
 
     form = html.Div([
         html.Hr(style={"margin": "16px 0"}),
@@ -7485,6 +7485,7 @@ def render_fund_management_card(
             dbc.Col([
                 dbc.Label("Approval Reference *"),
                 dbc.Input(id="fund-mgmt-approval-ref", type="text", placeholder="GB/MC Resolution #", style={"fontSize": "13px"}),
+                html.Small("Admin can create a Poll for General Body approval", className="form-text text-muted", style={"fontSize": "11px", "marginTop": "4px"}),
             ], width=6),
             dbc.Col([
                 dbc.Label("Approval Date *"),
@@ -7512,6 +7513,14 @@ def render_fund_management_card(
             color="primary",
             style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "13px"},
         ),
+        dbc.Button(
+            [html.I(className="fas fa-sync me-2"), "Reload Data"],
+            id="fund-mgmt-refresh-btn",
+            n_clicks=0,
+            color="secondary",
+            outline=True,
+            style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "12px", "marginLeft": "8px"},
+        ),
         html.Div(id="fund-mgmt-toast", style={"marginTop": "12px"}),
     ], style={"padding": "16px", "background": "#fafbfc", "borderRadius": "10px", "marginTop": "16px"})
 
@@ -7538,7 +7547,7 @@ def render_fund_management_card(
             html.Th("Status", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
         ])),
         html.Tbody(log_rows),
-    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}) if log_rows else dbc.Alert("No fund utilizations yet.", color="secondary", style={"borderRadius": "10px"})
+    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}, id="fund-mgmt-log-table") if log_rows else dbc.Alert("No fund utilizations yet.", color="secondary", style={"borderRadius": "10px"})
 
     body = html.Div([
         html.H6("Fund Balances", style={"fontWeight": "700", "marginBottom": "8px", "color": color, "marginTop": "8px"}),
