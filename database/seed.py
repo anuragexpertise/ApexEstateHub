@@ -247,7 +247,7 @@ ACCOUNTS = [
     (51100, "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",   5100, "Dr", False, 100),
     (51110, "Repair and Maintenance",     "RM",         "Repair and Maintenance",   5100, "Dr", False, 100),
     (51120, "Stationery",                 "Stationery", "Stationery",               5100, "Dr", False, 100),
-    (51130, "Generator Charges",          "GenChrg",    "Generator Charges",        5100, "Dr", False,  15),
+    (51130, "Generator Charges",          "GenChrg",    "Generator Charges",        5100, "Dr", False,  100),
     (51140, "Accountant Fee",             "AccountantF","Accountant Fee",           5100, "Dr", False, 100),
     (51150, "Audit Fee",                  "AuditF",     "Audit Fee",                5100, "Dr", False, 100),
     (51160, "Lift AMC",                   "LiftAMC",    "Lift AMC",                 5100, "Dr", False, 100),

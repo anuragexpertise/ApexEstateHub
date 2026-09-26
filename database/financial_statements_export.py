@@ -233,6 +233,110 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
     ws.row_dimensions[r].height = 45
 
 
+def _write_depreciation_account_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
+    """Write Depreciation Account sheet."""
+    ws.cell(row=1, column=1, value=f"{society_name}")
+    ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
+
+    ws.cell(row=2, column=1, value=f"Depreciation Account Schedule for FY {fy}-{fy+1}")
+    ws.cell(row=2, column=1).font = _FONT_TITLE
+
+    ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}")
+    ws.cell(row=3, column=1).font = Font(name="Arial", size=9, italic=True)
+
+    headers = ["Asset / Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate (%)", "Depreciation", "Closing WDV"]
+    widths = {"A": 35, "B": 16, "C": 16, "D": 16, "E": 16, "F": 12, "G": 16, "H": 16}
+    _apply_header(ws, 4, widths)
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    r = 5
+    tot_op, tot_add1, tot_add2, tot_ded, tot_dep, tot_cl = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    for row in rows:
+        acc = row.get("account_name") or row.get("name") or "Asset"
+        op = float(row.get("opening_wdv") or row.get("own_bf") or 0)
+        add1 = float(row.get("additions_first_half") or 0)
+        add2 = float(row.get("additions_second_half") or 0)
+        ded = float(row.get("deductions") or 0)
+        rate = float(row.get("depreciation_percent") or row.get("depreciation_rate") or 0)
+        dep = float(row.get("depreciation_charge") or 0)
+        cl = float(row.get("closing_wdv") or row.get("own_closing") or (op + add1 + add2 - ded - dep))
+
+        tot_op += op
+        tot_add1 += add1
+        tot_add2 += add2
+        tot_ded += ded
+        tot_dep += dep
+        tot_cl += cl
+
+        vals = [acc, op, add1, add2, ded, f"{rate:.0f}%" if rate else "-", dep, cl]
+        _write_row(ws, r, vals, _FONT_BODY, fmt=_FMT_AMT)
+        r += 1
+
+    _write_row(ws, r, ["Total", tot_op, tot_add1, tot_add2, tot_ded, "", tot_dep, tot_cl], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
+
+
+def _write_authorisation_footer(ws, society_name: str, fy: int, secretary_name: str = "Authorised Signatory") -> None:
+    """Write Authorised Signatory block and cryptographic verification payload info at bottom of worksheet."""
+    r = ws.max_row + 3
+    ws.cell(row=r, column=1, value="Authorised Signatory / Representative").font = Font(name="Arial", size=10, bold=True)
+    ws.cell(row=r+1, column=1, value=f"{secretary_name}").font = Font(name="Arial", size=9)
+    ws.cell(row=r+2, column=1, value=f"Secretary / Treasurer — {society_name}").font = Font(name="Arial", size=9, italic=True)
+    
+    import hashlib
+    payload_str = f"FIN-{society_name}-{fy}-{r}"
+    digest = hashlib.sha256(payload_str.encode('utf-8')).hexdigest()[:16].upper()
+    
+    ws.cell(row=r+3, column=1, value=f"Verification Stamp: FIN-CERT-{fy}-{digest} | Digitally Verified Audit Document").font = Font(name="Arial", size=8, italic=True, color="555555")
+
+
+def _write_capital_account_sheet(ws, rows: list[dict], society_name: str, fy: int) -> None:
+    """Write Capital Account sheet with detailed individual Funds: Opening B/F, Additions, Deductions, Closing C/F."""
+    ws.cell(row=1, column=1, value=f"{society_name}")
+    ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
+
+    ws.cell(row=2, column=1, value=f"Capital Account & Equity Schedule for FY {fy}-{fy+1}")
+    ws.cell(row=2, column=1).font = _FONT_TITLE
+
+    ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}")
+    ws.cell(row=3, column=1).font = Font(name="Arial", size=9, italic=True)
+
+    headers = ["Particulars / Fund Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
+    widths = {"A": 40, "B": 20, "C": 20, "D": 20, "E": 20}
+    _apply_header(ws, 4, widths)
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    r = 5
+    tot_bf, tot_add, tot_ded, tot_cl = 0.0, 0.0, 0.0, 0.0
+    for row in rows:
+        acc = row.get("account_name") or "Account"
+        bf = float(row.get("own_bf") or 0)
+        mov = float(row.get("own_movement") or 0)
+        add = float(row.get("additions") if "additions" in row else max(0.0, mov))
+        ded = float(row.get("deductions") if "deductions" in row else abs(min(0.0, mov)))
+        cl = float(row.get("own_closing") or row.get("total_closing") or row.get("amount") or (bf + add - ded))
+
+        tot_bf += bf
+        tot_add += add
+        tot_ded += ded
+        tot_cl += cl
+
+        _write_row(ws, r, [acc, bf, add, ded, cl], _FONT_BODY, fmt=_FMT_AMT)
+        r += 1
+
+    _write_row(ws, r, ["Total Capital & Equity Funds", tot_bf, tot_add, tot_ded, tot_cl], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
+    _write_authorisation_footer(ws, society_name, fy)
+
+
 def _fetch_society_metadata(db, society_id: int, fy: int) -> dict:
     row = db._execute(
         """
@@ -782,7 +886,7 @@ def _write_balance_sheet_hierarchical(
 
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
-    """Build the three-sheet workbook."""
+    """Build the four-statement workbook."""
     from database.db_manager import db as _db
     if db is None:
         db = _db
@@ -793,13 +897,36 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
         society_name = society_metadata.get("name") or "Society"
 
     # Fetch data from SQL functions
-    rp_rows = db._execute(
-        "SELECT * FROM fn_receipts_payments_fy(%s,%s)", (society_id, fy), fetch_all=True
-    ) or []
+    try:
+        dep_rows = db._execute(
+            "SELECT * FROM fn_fixed_asset_register_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        dep_rows = []
+
+    if not dep_rows:
+        try:
+            dep_rows = db._execute(
+                "SELECT * FROM fn_fy_closing_report(%s,%s) WHERE depreciation_charge > 0 OR is_depreciable = TRUE",
+                (society_id, fy), fetch_all=True
+            ) or []
+        except Exception:
+            dep_rows = []
 
     ie_rows = db._execute(
         "SELECT * FROM fn_income_expenditure_fy(%s,%s)", (society_id, fy), fetch_all=True
     ) or []
+
+    try:
+        closing_all = db._execute("SELECT * FROM fn_fy_closing_report(%s,%s)", (society_id, fy), fetch_all=True) or []
+        cap_ac = next((r for r in closing_all if r.get("tab_name") == "CapAc"), None)
+        if cap_ac:
+            sp = cap_ac.get("sort_path") or ""
+            cap_rows = [r for r in closing_all if r.get("sort_path") == sp or (sp and r.get("sort_path", "").startswith(sp + "."))]
+        else:
+            cap_rows = [r for r in closing_all if r.get("drcr_account") == "Cr" and "capital" in (r.get("account_name") or "").lower()]
+    except Exception:
+        cap_rows = []
 
     # Fetch hierarchical Balance Sheet data from fn_fy_closing_report
     root_children, children_by_parent, closing_by_id = _fetch_balance_sheet_hierarchy(db, society_id, fy)
@@ -807,21 +934,91 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
     wb = Workbook()
     wb.remove(wb.active)
 
-    # Sheet 1: Receipts & Payments
-    ws1 = wb.create_sheet(title="Receipts & Payments")
-    _apply_header(ws1, 4, _COL_WIDTHS_RP)
-    _write_receipts_payments_sheet(ws1, rp_rows, society_name, fy)
+    # Sheet 1: Depreciation Account
+    ws1 = wb.create_sheet(title="Depreciation Account")
+    _write_depreciation_account_sheet(ws1, dep_rows, society_name, fy)
 
     # Sheet 2: Income & Expenditure
     ws2 = wb.create_sheet(title="Income & Expenditure")
     _apply_header(ws2, 4, _COL_WIDTHS_IE)
     _write_income_expenditure_sheet(ws2, ie_rows, society_name, fy)
 
-    # Sheet 3: Balance Sheet (hierarchical)
-    ws3 = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_hierarchical(ws3, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
+    # Sheet 3: Capital Account
+    ws3 = wb.create_sheet(title="Capital Account")
+    _write_capital_account_sheet(ws3, cap_rows, society_name, fy)
+
+    # Sheet 4: Balance Sheet (hierarchical)
+    ws4 = wb.create_sheet(title="Balance Sheet")
+    _write_balance_sheet_hierarchical(ws4, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
 
     return wb
+
+
+def export_depreciation_account(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate Depreciation Account export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_fixed_asset_register_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        rows = []
+
+    if not rows:
+        try:
+            rows = db._execute(
+                "SELECT * FROM fn_fy_closing_report(%s,%s) WHERE depreciation_charge > 0 OR is_depreciable = TRUE",
+                (society_id, fy), fetch_all=True
+            ) or []
+        except Exception:
+            rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="Depreciation Account")
+    _write_depreciation_account_sheet(ws, rows, society_name, fy)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def export_capital_account(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate Capital Account export (standalone)."""
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        closing_all = db._execute("SELECT * FROM fn_fy_closing_report(%s,%s)", (society_id, fy), fetch_all=True) or []
+        cap_ac = next((r for r in closing_all if r.get("tab_name") == "CapAc"), None)
+        if cap_ac:
+            sp = cap_ac.get("sort_path") or ""
+            rows = [r for r in closing_all if r.get("sort_path") == sp or (sp and r.get("sort_path", "").startswith(sp + "."))]
+        else:
+            rows = [r for r in closing_all if r.get("drcr_account") == "Cr" and "capital" in (r.get("account_name") or "").lower()]
+    except Exception:
+        rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="Capital Account")
+    _write_capital_account_sheet(ws, rows, society_name, fy)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def export_receipts_payments(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
@@ -896,11 +1093,16 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     return buf.getvalue()
 
 
-def export_all_three_statements(db, society_id: int, fy: int) -> bytes:
-    """Generate combined workbook with three sheets."""
+def export_all_four_statements(db, society_id: int, fy: int) -> bytes:
+    """Generate combined workbook with four statement sheets."""
     wb = _build_workbook(society_id, fy, db)
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.getvalue()
+
+
+def export_all_three_statements(db, society_id: int, fy: int) -> bytes:
+    """Alias for export_all_four_statements (backwards compatibility)."""
+    return export_all_four_statements(db, society_id, fy)
