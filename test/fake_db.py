@@ -101,6 +101,7 @@ class FakeDB:
             "brought_forward": [],
             "security_roster": [],
             "tds_section_rates": [],
+            "fy_closures": [],
         }
         self._seq = {t: 1 for t in self.tables}
 
@@ -243,8 +244,13 @@ class FakeDB:
             col = m.group(1)
             val = self._resolve_param(col, part, p)
             if isinstance(val, (list, tuple)):
-                if row.get(col) not in [str(x) for x in val]:
+                # Compare by value, not by type: Postgres id columns come back
+                # as int while a caller may pass a list of str (or Decimal),
+                # and Postgres coerces. Stringifying only the right-hand side
+                # made every int row miss, silently returning no rows.
+                if str(row.get(col)) not in [str(x) for x in val]:
                     return False, pctr
+                return True, pctr + part.count("%s")
             return True, pctr + part.count("%s")
         return True, pctr + part.count("%s")
 
@@ -657,6 +663,222 @@ class FakeDB:
             return rows
         return rows[0] if rows else None
 
+    # ── Statutory reserve appropriation (FY close) ───────────────────────
+    # The fake mirrors the real functions' CONTRACT — the same output columns,
+    # the same blocker/note split, the same idempotency on a second call —
+    # so a test written against the fake is testing the behaviour the card and
+    # the SQL agree on, not a convenient stub. It is not a re-implementation of
+    # the ledger math: the surplus comes from _fn_fy_closing_report, which is
+    # already the fake's single source of truth for FY figures.
+
+    def _resolve_reserve_account(self, society_id):
+        """Mirror fn_resolve_reserve_account: the RESERVE_FUND-mapped Cr account
+        that is not a statutorily-locked / corpus / sinking fund, lowest id
+        first; fall back to a name match on '%reserve fund%'."""
+        def _rank(rows):
+            return sorted(rows, key=lambda a: (
+                bool(float(a.get("statutory_lock_pct") or 0) > 0),
+                "corpus" in (a.get("name") or "").lower(),
+                "sinking" in (a.get("name") or "").lower(),
+                a.get("id") or 0,
+            ))
+        cr_accounts = [
+            a for a in self.tables.get("accounts", [])
+            if a.get("society_id") == society_id and a.get("drcr_account") == "Cr"
+        ]
+        mapped = [a for a in cr_accounts
+                  if self._get_mock_statutory_head(a.get("id")) == "RESERVE_FUND"]
+        if mapped:
+            return _rank(mapped)[0]
+        fallback = [a for a in cr_accounts
+                    if "reserve fund" in (a.get("name") or "").lower()]
+        return _rank(fallback)[0] if fallback else None
+
+    def _resolve_inexp_appropriation_account(self, society_id):
+        """Mirror fn_resolve_inexp_appropriation_account: the tab_name='InExp'
+        account the appropriation is debited against."""
+        for a in self.tables.get("accounts", []):
+            if a.get("society_id") == society_id and a.get("tab_name") == "InExp":
+                return a
+        return None
+
+    def _fy_close_figures(self, society_id, fy):
+        """(surplus, books_balanced) for an FY, from _fn_fy_closing_report.
+
+        Surplus is the Cr-positive net of every account on a P&L tab, which is
+        what the real fn_fy_close_preview sums. The real function matches P&L
+        *descendants* of the Inc/Exp tabs via sort_path; the fake's accounts are
+        flat, so it matches on the tab itself. 'IncExp' is included because
+        that is the P&L accumulator tab in the real chart of accounts, and the
+        appropriation's debit leg lives there too.
+
+        Balance is the double-entry identity — total Dr postings must equal
+        total Cr postings for the year — checked on the transactions
+        themselves, because an account's drcr_account is its normal nature,
+        not a per-posting side (a Dr-natured Cash account is very often the Cr
+        side of a receipt).
+        """
+        rows = self._fn_fy_closing_report(
+            {"p0": society_id, "p1": fy}, fetch_one=False, fetch_all=True) or []
+        inexp_ids = {r["account_id"] for r in rows
+                     if r.get("tab_name") in ("Inc", "Exp", "IncExp")}
+        surplus = sum(float(r.get("own_closing") or 0)
+                      for r in rows if r.get("account_id") in inexp_ids)
+
+        fy_start = f"{int(fy)}-04-01"
+        fy_end = f"{int(fy) + 1}-03-31"
+        dr_total = cr_total = 0.0
+        for t in self.tables.get("transactions", []):
+            if (t.get("society_id") != society_id or t.get("status") != "paid"
+                    or not (fy_start <= (t.get("trx_date") or "") <= fy_end)):
+                continue
+            amt = float(t.get("amount") or 0)
+            if t.get("entry_side") == "Dr":
+                dr_total += amt
+            elif t.get("entry_side") == "Cr":
+                cr_total += amt
+        return surplus, abs(dr_total - cr_total) <= 0.01
+
+    def _fn_fy_close_preview(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        fy = p.get("p1") or p.get("fy")
+        try:
+            pct = min(max(float(p.get("p2") or p.get("reserve_pct") or 25.0), 0), 100)
+        except (TypeError, ValueError):
+            pct = 25.0
+
+        surplus, balanced = self._fy_close_figures(sid, int(fy))
+        transfer = round(max(surplus, 0.0) * pct / 100, 2)
+        reserve = self._resolve_reserve_account(sid)
+        contra = self._resolve_inexp_appropriation_account(sid)
+
+        closure = next(
+            (c for c in self.tables.get("fy_closures", [])
+             if c.get("society_id") == sid and c.get("financial_year") == int(fy)),
+            None)
+        already = closure is not None and closure.get("status") != "reversed"
+
+        blockers, notes = "", ""
+        if not balanced:
+            blockers += "Books do not balance. Fix the ledger before closing. "
+        if already:
+            blockers += f"FY {fy} is already closed ({closure.get('status')}). "
+        if surplus <= 0 and not closure:
+            notes += (f"FY {fy} has no net surplus (₹{surplus:,.2f}), so there is "
+                      "nothing to appropriate. ")
+        if transfer > 0 and reserve is None:
+            blockers += "No Reserve Fund account could be resolved. "
+        if transfer > 0 and contra is None:
+            blockers += "No Income Expenditure A/c (tab_name 'InExp') found. "
+
+        return {
+            "fy": int(fy),
+            "already_closed": already,
+            "closure_status": (closure or {}).get("status"),
+            "closure_date": (closure or {}).get("closed_at"),
+            "books_balanced": balanced,
+            "imbalance_amount": 0.0 if balanced else 1.0,
+            "surplus": round(surplus, 2),
+            "reserve_pct": pct,
+            "proposed_transfer": transfer,
+            "reserve_acc_id": (reserve or {}).get("id"),
+            "reserve_acc_name": (reserve or {}).get("name"),
+            "contra_acc_id": (contra or {}).get("id"),
+            # A deficit year is still closeable: the close posts no journal
+            # and records status 'no_surplus'. Gating on the transfer amount
+            # would mean such a year could never be closed at all.
+            "can_close": (blockers == ""),
+            "blockers": blockers or None,
+            "notes": notes or None,
+        }
+
+    def _fn_fy_close_reserve_appropriation(self, p, fetch_one, fetch_all):
+        sid = p.get("p0") or p.get("society_id")
+        fy = int(p.get("p1") or p.get("fy"))
+        try:
+            pct = min(max(float(p.get("p2") or p.get("reserve_pct") or 25.0), 0), 100)
+        except (TypeError, ValueError):
+            pct = 25.0
+        created_by = p.get("p3") or p.get("created_by")
+
+        existing = next(
+            (c for c in self.tables.get("fy_closures", [])
+             if c.get("society_id") == sid and c.get("financial_year") == fy
+             and c.get("status") != "reversed"),
+            None)
+        if existing:
+            return {
+                "status": "already_closed",
+                "financial_year": fy,
+                "surplus": existing.get("surplus", 0.0),
+                "reserve_pct": existing.get("reserve_pct", pct),
+                "reserve_transferred": existing.get("reserve_transferred", 0.0),
+                "reserve_acc_id": existing.get("reserve_acc_id"),
+                "reserve_acc_name": existing.get("reserve_acc_name"),
+                "journal_id": existing.get("journal_id"),
+            }
+
+        surplus, balanced = self._fy_close_figures(sid, fy)
+        if not balanced:
+            return {
+                "status": "blocked_unbalanced",
+                "financial_year": fy, "surplus": round(surplus, 2),
+                "reserve_pct": pct, "reserve_transferred": 0,
+                "reserve_acc_id": None, "reserve_acc_name": None,
+                "journal_id": None,
+            }
+
+        transfer = round(max(surplus, 0.0) * pct / 100, 2)
+        reserve = self._resolve_reserve_account(sid)
+        contra = self._resolve_inexp_appropriation_account(sid)
+        if transfer > 0 and (reserve is None or contra is None):
+            return {
+                "status": "blocked_no_accounts",
+                "financial_year": fy, "surplus": round(surplus, 2),
+                "reserve_pct": pct, "reserve_transferred": 0,
+                "reserve_acc_id": (reserve or {}).get("id"),
+                "reserve_acc_name": (reserve or {}).get("name"),
+                "journal_id": None,
+            }
+
+        journal_id = None
+        if transfer > 0:
+            journal_id = self._next_id("transactions")
+            for acc_id, side, particulars in (
+                (contra["id"], "Dr",
+                 f"Statutory reserve appropriation: {pct:.2f}% of FY {fy} net surplus"),
+                (reserve["id"], "Cr",
+                 f"Transfer from Income & Expenditure A/c — statutory reserve appropriation (FY {fy})"),
+            ):
+                self.tables["transactions"].append({
+                    "id": self._next_id("transactions"), "society_id": sid,
+                    "journal_id": journal_id, "acc_id": acc_id, "entry_side": side,
+                    "trx_date": f"{fy + 1}-03-31", "amount": transfer,
+                    "acc_particulars": particulars, "mode": "journal",
+                    "status": "paid", "source_table": "fy_close", "source_id": None,
+                    "created_by": created_by,
+                })
+
+        self.tables["fy_closures"].append({
+            "id": self._next_id("fy_closures"), "society_id": sid,
+            "financial_year": fy, "surplus": round(surplus, 2),
+            "reserve_pct": pct, "reserve_transferred": transfer,
+            "reserve_acc_id": (reserve or {}).get("id"),
+            "reserve_acc_name": (reserve or {}).get("name"),
+            "contra_acc_id": (contra or {}).get("id"),
+            "journal_id": journal_id,
+            "status": "closed" if transfer > 0 else "no_surplus",
+            "closed_by": created_by, "closed_at": "2026-04-01",
+        })
+        return {
+            "status": "closed" if transfer > 0 else "no_surplus",
+            "financial_year": fy, "surplus": round(surplus, 2),
+            "reserve_pct": pct, "reserve_transferred": transfer,
+            "reserve_acc_id": (reserve or {}).get("id"),
+            "reserve_acc_name": (reserve or {}).get("name"),
+            "journal_id": journal_id,
+        }
+
     def _fn_gst_summary_fy(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
         fy = p.get("p1") or p.get("fy")
@@ -880,6 +1102,17 @@ class FakeDB:
             6311: "CASH_BANK",
             2: "CAPITAL_ACCOUNT",
             2311: "MAINTENANCE_INCOME",
+            # Seeded equity/fund accounts (real UP_AOA_2010 ids, see
+            # database/seed.py). 3220 and 3230 deliberately share the
+            # RESERVE_FUND head — resolving between them is the job of
+            # accounts.statutory_lock_pct, not of the head mapping.
+            3210: "IFMS_CORPUS",
+            3220: "RESERVE_FUND",
+            3230: "RESERVE_FUND",
+            # Scenario I fund ids
+            201: "RESERVE_FUND",
+            202: "RESERVE_FUND",
+            203: "IFMS_CORPUS",
         }
         return mapping.get(account_id, "UNMAPPED")
 

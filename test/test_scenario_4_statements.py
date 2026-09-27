@@ -1,6 +1,7 @@
 # test/test_scenario_4_statements.py
 import pytest
 import io
+import re
 import openpyxl
 
 from test.fake_db import FakeDB
@@ -35,22 +36,31 @@ def test_4_statements_loading_rendering_and_export():
     # Check card title in layout
     rendered_str = str(card)
     assert "6 Statements" in rendered_str
-    assert "1. Depreciation Account" in rendered_str
-    assert "2. Income & Expenditure Account" in rendered_str
-    assert "3. Capital Account" in rendered_str
-    assert "4. Balance Sheet" in rendered_str
+    # The card is a SIX-section report. Holdings and Deposits were prepended
+    # (sections 1 and 2) and ALL Equity replaced the standalone Capital
+    # Account schedule (section 5), so the old 1..4 numbering no longer
+    # matches what the card renders.
+    for title in ("ALL Holdings", "ALL Deposits", "Depreciation Account",
+                  "Income & Expenditure Account", "ALL Equity", "Balance Sheet"):
+        assert title in rendered_str, f"missing section: {title}"
 
-    # 3. Verify Excel export produces 4 sheets
+    # Each section's number is a separate numbered badge Span, not a prefix on
+    # the title, so assert the badge sequence independently of the titles.
+    badges = re.findall(r"Span\(children='(\d)', style=\{'display': 'inline-flex'", rendered_str)
+    assert badges == ["1", "2", "3", "4", "5", "6"]
+
+    # 3. Verify Excel export produces all 6 sheets
     excel_bytes = financial_statements_export.export_all_four_statements(db, society_id, fy)
     assert len(excel_bytes) > 0
 
     wb = openpyxl.load_workbook(io.BytesIO(excel_bytes))
     sheet_names = wb.sheetnames
-    assert "Depreciation Account" in sheet_names
-    assert "Income & Expenditure" in sheet_names
-    assert "Capital Account" in sheet_names
-    assert "Balance Sheet" in sheet_names
-    assert len(sheet_names) == 4
+    # The workbook mirrors the card: Holdings and Deposits registers plus ALL
+    # Equity in place of the old standalone Capital Account schedule. The
+    # function kept its original name for backward compatibility with the
+    # download route, so do not read the count off the name.
+    assert sheet_names == ["ALL Holdings", "ALL Deposits", "Depreciation Account",
+                           "Income & Expenditure", "ALL Equity", "Balance Sheet"]
 
     # Verify Balance Sheet sheet has 2-column headers (Liabilities & Assets)
     bs_ws = wb["Balance Sheet"]
