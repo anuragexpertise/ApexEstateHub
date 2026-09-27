@@ -8814,10 +8814,12 @@ END;
 $$;
 
 -- fn_asset_holdings_fy (2026-09): "ALL Holdings" Financial Statement —
--- the complete tangible fixed-asset register (both still-active and
--- already-disposed rows together), each with a per-asset STCG/LTCG split
--- by the standard 36-month holding-period test (sec 2(42A), movable
--- property other than listed securities).
+-- the complete tangible fixed-asset register: every asset ever purchased,
+-- active or already disposed, NOT filtered down to active-only, sorted by
+-- sell/disposal date (still-active assets, which have no disposed_at,
+-- sort last). Each row has a per-asset STCG/LTCG split by the standard
+-- 36-month holding-period test (sec 2(42A), movable property other than
+-- listed securities).
 --
 -- IMPORTANT caveat this statement does NOT override: for depreciable
 -- business assets forming part of a block, sec 50 of the Income Tax Act
@@ -8866,7 +8868,7 @@ BEGIN
              THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END
     FROM assets a
     WHERE a.society_id = p_society_id
-    ORDER BY a.disposed ASC, a.purchase_date DESC;
+    ORDER BY a.disposed_at ASC NULLS LAST, a.purchase_date DESC;
 END;
 $$;
 
