@@ -545,6 +545,215 @@ def _fmt_account_amount(v) -> str:
     return f"{sign}₹{abs(v):,.2f}"
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# FINANCIAL STATEMENTS — shared presentation vocabulary
+# ════════════════════════════════════════════════════════════════════════════
+# The 6-Statements card renders six very different row shapes (asset register,
+# investment register, WDV schedule, income/expenditure, equity funds, balance
+# sheet) through three separate preview builders plus a fourth HTML string
+# builder for print/PDF/email. Every one of them used to invent its own
+# number, date and colour rules, which is why the six sections of a single
+# report ended up looking like six different reports. The helpers below are the
+# one place those rules live, so all seven builders agree by construction.
+#
+#   dates     — dd/mm/yyyy everywhere (app-wide convention, see
+#               _format_date_entry), no time component, "—" when absent
+#   currency  — ₹ with thousands separators and 2 decimals, "₹0.00" for a true
+#               zero, "—" for a missing value
+#   nature    — Dr-natured values red, Cr-natured values green, following the
+#               long-standing Indian chart-of-accounts convention of printing
+#               debit balances in red ink and credit balances in black/green
+#   mutuality — plain coloured text (no badges), so the column reads as data
+#               rather than as a status pill
+
+_FIN_NAVY = "#15304f"
+_FIN_DR = "#c0392b"          # Dr-natured (debit) balances
+_FIN_CR = "#1e7e34"          # Cr-natured (credit) balances
+_FIN_NIL = "#8a8f98"         # nil / not-applicable values
+_FIN_TEXT = "#33383f"        # ordinary label text
+_FIN_ZEBRA = "#fafbfd"       # alternating row tint
+_FIN_RULE = "#e3e8ef"        # hairline borders
+
+_FIN_CELL_BASE = {
+    "fontSize": "12px",
+    "padding": "6px 10px",
+    "verticalAlign": "middle",
+    # tabular figures keep the decimal points lined up down a column, which
+    # is what makes a wide currency table look like a statement instead of
+    # a grid of unrelated numbers
+    "fontVariantNumeric": "tabular-nums",
+    "fontFeatureSettings": "'tnum' 1",
+    "whiteSpace": "nowrap",
+    "border": "none",
+}
+
+_FIN_TH_STYLE = {
+    "fontSize": "10px",
+    "fontWeight": "700",
+    "color": "#ffffff",
+    "background": _FIN_NAVY,
+    "textTransform": "uppercase",
+    "letterSpacing": "0.5px",
+    "padding": "8px 10px",
+    "verticalAlign": "middle",
+    "whiteSpace": "nowrap",
+    "border": "none",
+}
+
+
+def _fin_cell(align="left", color=None, weight=None, background=None,
+              indent=0, pad=None):
+    """Build the single body-cell style every 6-Statements table shares."""
+    st = dict(_FIN_CELL_BASE)
+    st["textAlign"] = align
+    if color:
+        st["color"] = color
+    if weight:
+        st["fontWeight"] = weight
+    if background:
+        st["background"] = background
+    if indent:
+        st["paddingLeft"] = f"{10 + indent * 14}px"
+    if pad:
+        st["padding"] = pad
+    return st
+
+
+def _fin_th(label, align="left", width=None):
+    st = dict(_FIN_TH_STYLE)
+    st["textAlign"] = align
+    if width:
+        st["width"] = width
+    return html.Th(label, style=st)
+
+
+def _fin_money(v):
+    """Currency cell text: '-₹1,234.56' / '₹1,234.56' / '₹0.00' / '—'."""
+    if v is None or v == "":
+        return "—"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    sign = "-" if f < 0 else ""
+    return f"{sign}₹{abs(f):,.2f}"
+
+
+def _fin_date(v):
+    """Date cell text in dd/mm/yyyy; '—' when absent."""
+    if v is None or v == "":
+        return "—"
+    return _format_date_entry(v)
+
+
+def _fin_pct(v):
+    if v is None or v == "":
+        return "—"
+    try:
+        return f"{float(v):g}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fin_nature_color(nature):
+    """Colour for an account's value by Dr/Cr nature (green = Cr, red = Dr)."""
+    if not nature:
+        return None
+    return _FIN_CR if str(nature).strip().lower().startswith("cr") else _FIN_DR
+
+
+def _fin_nature_of(row: dict, fallback_section_map=None):
+    """
+    Best-effort Dr/Cr nature of a row's account.
+
+    Resolution order:
+      1. an explicit drcr_account / drcr / nature column (balance sheet rows
+         come straight off fn_fy_closing_report, which carries it)
+      2. statement_section, mapped through the statutory presentation
+         (Income and Liabilities/Equity are Cr; Expenditure and Assets are Dr)
+      3. an explicit fallback the caller supplies for a column whose nature is
+         fixed by construction even though the row itself carries no marker
+    Returns "Dr", "Cr" or None when the nature is genuinely unknown.
+    """
+    for key in ("drcr_account", "drcr", "dr_cr", "nature"):
+        val = (row or {}).get(key)
+        if val:
+            return "Cr" if str(val).strip().lower().startswith("cr") else "Dr"
+
+    section = str((row or {}).get("statement_section") or "").strip().lower()
+    if section:
+        if fallback_section_map and section in fallback_section_map:
+            return fallback_section_map[section]
+        if section in ("income", "liability", "liabilities", "equity",
+                       "capital", "surplus", "surplus/deficit"):
+            return "Cr"
+        if section in ("expenditure", "expense", "asset", "assets"):
+            return "Dr"
+    return None
+
+
+def _fin_value_color(v, nature):
+    """Colour a currency cell: nature first, nil value muted, else inherit."""
+    if v is None or v == "":
+        return _FIN_NIL
+    try:
+        if float(v) == 0:
+            return _FIN_NIL
+    except (TypeError, ValueError):
+        return _FIN_NIL
+    return _fin_nature_color(nature) or _FIN_TEXT
+
+
+def _fin_mutuality_cell(nature):
+    """
+    Mutuality as coloured text, not a badge — Mutual green, Non-Mutual red,
+    unknown muted. Same meaning as the old badge, but it sits in the row like
+    any other value instead of interrupting the numeric rhythm.
+    """
+    if not nature:
+        return html.Span("—", style={"color": _FIN_NIL, "fontSize": "11px"})
+    if "non" in str(nature).lower():
+        return html.Span(
+            "Non-Mutual",
+            style={"fontSize": "11px", "fontWeight": "600",
+                   "color": _FIN_DR, "whiteSpace": "nowrap"})
+    return html.Span(
+        "Mutual",
+        style={"fontSize": "11px", "fontWeight": "600",
+               "color": _FIN_CR, "whiteSpace": "nowrap"})
+
+
+def _fin_section_title(num, title, note=None):
+    """Numbered section heading shared by all six statements."""
+    kids = [
+        html.Span(f"{num}", style={
+            "display": "inline-flex", "alignItems": "center",
+            "justifyContent": "center", "minWidth": "20px", "height": "20px",
+            "padding": "0 5px", "borderRadius": "5px",
+            "background": _FIN_NAVY, "color": "#fff",
+            "fontSize": "10px", "fontWeight": "700", "marginRight": "8px",
+        }),
+        html.Span(title, style={"fontSize": "12.5px", "fontWeight": "700",
+                                "color": _FIN_NAVY, "letterSpacing": "0.2px"}),
+    ]
+    if note:
+        kids.append(html.Span(note, style={
+            "fontSize": "10px", "color": _FIN_NIL, "fontStyle": "italic",
+            "marginLeft": "10px"}))
+    return html.Div(kids, style={
+        "display": "flex", "alignItems": "center", "flexWrap": "wrap",
+        "marginTop": "22px", "marginBottom": "8px", "paddingBottom": "6px",
+        "borderBottom": f"2px solid {_FIN_NAVY}22",
+    })
+
+
+def _fin_footnote(text):
+    return html.Div(text, style={
+        "fontSize": "10px", "color": _FIN_NIL, "fontStyle": "italic",
+        "marginTop": "4px", "marginBottom": "10px", "lineHeight": "1.5",
+    })
+
+
 def _render_account_tree_node(node: dict, entity: str) -> html.Details:
     """One <details>/<summary> tree node, recursing into node['children'].
     Reuses the same {"type": "list-row", "entity": entity, "pk": ...}
@@ -4205,84 +4414,157 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
         "ltcg": "ltcg",
     }
 
-    def _make_preview_table(rows, columns, title, max_rows=None):
-        if not rows:
-            return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
+    def _resolve_cell(row, spec):
+        """Pull the raw value for one column spec out of a loader row."""
+        key = spec.get("key") or spec["label"].lower().replace(" ", "_")
+        field = spec.get("field") or _FIELD_MAP.get(key, key)
+        val = row.get(field)
+        if val is None:
+            for alt in spec.get("alt_fields", ()):
+                val = row.get(alt)
+                if val is not None:
+                    break
+        if val is None and spec.get("kind") == "text":
+            val = row.get(spec.get("label", "").lower().replace(" ", "_"))
+        return val
 
-        head = html.Thead(html.Tr([
-            html.Th(col, style={"fontSize": "11px"}) for col in columns
-        ], style={"fontSize": "11px"}))
+    def _render_cell(val, spec, row, align=None):
+        """
+        Render one value under the uniform 6-Statements rules.
+
+        kind: text | currency | date | pct | mutuality
+        nature: fixed "Dr"/"Cr" for a column whose nature is fixed by
+                construction (an asset register's cost column is always a
+                debit balance; a disposal gain is always a credit one),
+                otherwise resolved per row from the row itself.
+        """
+        kind = spec.get("kind", "text")
+
+        if kind == "mutuality":
+            return html.Td(_fin_mutuality_cell(val),
+                          style=_fin_cell(align="center"))
+
+        if kind == "date":
+            return html.Td(_fin_date(val),
+                          style=_fin_cell(align="center", color=_FIN_TEXT))
+
+        if kind == "pct":
+            return html.Td(_fin_pct(val), style=_fin_cell(
+                align="right", color=_FIN_TEXT, weight="600"))
+
+        if kind == "currency":
+            nature = spec.get("nature") or _fin_nature_of(row)
+            color = _fin_value_color(val, nature)
+            weight = "600" if spec.get("emphasis") else None
+            return html.Td(_fin_money(val), style=_fin_cell(
+                align=align or "right", color=color, weight=weight))
+
+        # plain text
+        text = "" if val is None else str(val)
+        color = _FIN_TEXT
+        weight = None
+        if text in ("Surplus", "Income", "Cr", "Credit"):
+            color, weight = _FIN_CR, "700"
+        elif text in ("Deficit", "Expenditure", "Dr", "Debit"):
+            color, weight = _FIN_DR, "700"
+        elif not text:
+            color = _FIN_NIL
+        return html.Td(text, style={
+            # account / asset names are the one column that genuinely runs
+            # long, so let labels wrap instead of forcing a nowrap that would
+            # blow the table out sideways
+            **_fin_cell(align=align or "left", color=color, weight=weight),
+            "whiteSpace": "normal",
+        })
+
+    def _make_preview_table(rows, columns, title, max_rows=None, note=None):
+        """
+        Uniform preview table used by statements 1, 2, 3 and 5.
+
+        `columns` is a list of specs:
+            {"label": "Closing WDV", "kind": "currency", "nature": "Dr"}
+        Keeping the type and nature on the column spec — instead of inferring
+        them from the column's text at render time — is what makes all six
+        statements agree on dates, currency and Dr/Cr colouring.
+        """
+        if not rows:
+            heading = _fin_section_title(*title) if isinstance(title, tuple) else title
+            return html.Div([
+                heading,
+                dbc.Alert("No data for this financial year.", color="secondary",
+                          style={"borderRadius": "8px", "marginTop": "0",
+                                 "fontSize": "11px"}),
+            ])
+
+        def _align_of(spec):
+            if spec.get("align"):
+                return spec["align"]
+            return "right" if spec.get("kind") in ("currency", "pct") else "left"
+
+        head = html.Thead(html.Tr(
+            [_fin_th(c["label"], align=_align_of(c), width=c.get("width"))
+             for c in columns]))
 
         display_rows = rows[:max_rows] if max_rows else rows
         body_rows = []
-        for r in display_rows:
-            row_cells = []
-            for col in columns:
-                key = col.lower().replace(" ", "_")
-                val = r.get(_FIELD_MAP.get(key, key))
-                if val is None and key == "account":
-                    val = r.get("name") or r.get("account_name")
-                elif val is None and key in ("rate_%", "rate", "rate_(%)"):
-                    val = r.get("depreciation_percent") or r.get("depreciation_rate") or r.get("dep_rate") or r.get("rate")
-
-                style_cell = {"fontSize": "12px", "padding": "6px 8px"}
-                if key in ("rate_%", "rate", "rate_(%)"):
-                    if val is not None and str(val) != "":
-                        val_str = f"{float(val):g}%"
-                    else:
-                        val_str = "—"
-                    style_cell["color"] = "#15304f"
-                    style_cell["fontWeight"] = "600"
-                elif isinstance(val, (int, float)):
-                    fval = float(val)
-                    if fval < 0:
-                        val_str = f"-₹{abs(fval):,.2f}"
-                        style_cell["color"] = "#c0392b"
-                        style_cell["fontWeight"] = "600"
-                    elif fval > 0:
-                        val_str = f"₹{fval:,.2f}"
-                        style_cell["color"] = "#1e7e34"
-                    else:
-                        val_str = "₹0.00"
-                        style_cell["color"] = "#888888"
-                else:
-                    val_str = str(val or "")
-                    if val_str in ("Surplus", "Income"):
-                        style_cell["color"] = "#1e7e34"
-                        style_cell["fontWeight"] = "700"
-                    elif val_str in ("Deficit", "Expenditure"):
-                        style_cell["color"] = "#c0392b"
-                        style_cell["fontWeight"] = "700"
-                row_cells.append(html.Td(val_str, style=style_cell))
-            body_rows.append(html.Tr(row_cells))
+        for idx, r in enumerate(display_rows):
+            zebra = _FIN_ZEBRA if idx % 2 else None
+            cells = []
+            for c in columns:
+                td = _render_cell(_resolve_cell(r, c), c, r, align=_align_of(c))
+                if zebra:
+                    td.style = dict(td.style, background=zebra)
+                cells.append(td)
+            body_rows.append(html.Tr(cells))
 
         table = dbc.Table(
             [head, html.Tbody(body_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
-            style={"marginTop": "4px", "marginBottom": "8px"}
+            striped=False,
+            style={"marginTop": "0", "marginBottom": "6px",
+                   "border": f"1px solid {_FIN_RULE}",
+                   "borderRadius": "8px", "overflow": "hidden",
+                   "fontVariantNumeric": "tabular-nums"},
         )
 
         row_count = len(rows)
-        note = html.Div(f"Showing {max_rows} of {row_count} rows...", style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginBottom": "8px"}) if max_rows and row_count > max_rows else None
+        cap_note = None
+        if max_rows and row_count > max_rows:
+            cap_note = html.Div(
+                f"Showing {max_rows} of {row_count:,} rows — "
+                f"export for the complete register.",
+                style={"fontSize": "10px", "color": _FIN_NIL,
+                       "fontStyle": "italic", "marginBottom": "8px"})
 
         return html.Div([
-            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
+            _fin_section_title(*title) if isinstance(title, tuple) else title,
             table,
             note,
+            cap_note,
         ])
 
     def _make_balance_sheet_preview(rows, title):
         """
-        Balance Sheet preview in two-column format with level 2 depth hierarchy (L1 Category -> L2 Child Group -> L3 Grandchild Leaf).
+        Balance Sheet preview in two-column format with level 2 depth
+        hierarchy (L1 Category -> L2 Child Group -> L3 Grandchild Leaf).
+
+        Every side entry carries the Dr/Cr nature of the account it came
+        from (taken from fn_fy_closing_report's drcr_account) so that
+        asset-side values print in red and liability/equity-side values in
+        green, exactly like the other five statements.
         """
         if not rows:
-            return dbc.Alert(f"No data for {title}.", color="secondary", style={"borderRadius": "10px", "marginTop": "8px"})
+            heading = _fin_section_title(*title) if isinstance(title, tuple) else title
+            return html.Div([
+                heading,
+                dbc.Alert("No data for this financial year.", color="secondary",
+                          style={"borderRadius": "8px", "marginTop": "0",
+                                 "fontSize": "11px"}),
+            ])
 
         has_hierarchy = any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
-        
+
         if has_hierarchy:
-            # Group by parent_account_id hierarchy
-            by_id = {r.get("account_id") or r.get("id"): r for r in rows if r.get("account_id") or r.get("id")}
             children_by_parent = {}
             for r in rows:
                 pid = r.get("parent_account_id")
@@ -4307,175 +4589,192 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                 liabilities_nodes = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
                 equity_nodes = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
 
-            total_assets = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in assets_nodes)
-            total_liabilities = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in liabilities_nodes)
-            total_equity = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in equity_nodes)
+            def _amt(node):
+                return float(node.get("display_amount") or node.get("amount")
+                             or node.get("total_closing") or 0)
 
-            def _fmt(amount):
-                return f"₹{float(amount):,.2f}"
+            total_assets = sum(_amt(r) for r in assets_nodes)
+            total_liabilities = sum(_amt(r) for r in liabilities_nodes)
+            total_equity = sum(_amt(r) for r in equity_nodes)
 
-            def _build_hierarchical_side(nodes, section_title):
-                side = [(section_title, None, "header")]
+            def _build_hierarchical_side(nodes, section_title, default_nature):
+                # (label, raw_amount_or_None, kind, indent, nature)
+                side = [(section_title, None, "header", 0, None)]
                 for n in nodes:
                     n_name = n.get("account_name") or n.get("name") or ""
-                    n_amt = float(n.get("display_amount") or n.get("amount") or n.get("total_closing") or 0)
+                    n_amt = _amt(n)
+                    n_nature = _fin_nature_of(n) or default_nature
                     kids = children_by_parent.get(n.get("account_id") or n.get("id"), [])
                     if kids:
-                        side.append((n_name, _fmt(n_amt) if n_amt else None, "parent_node"))
+                        side.append((n_name, n_amt, "parent_node", 0, n_nature))
                         for k in kids:
                             k_name = k.get("account_name") or k.get("name") or ""
-                            k_amt = float(k.get("display_amount") or k.get("amount") or k.get("total_closing") or k.get("own_closing") or 0)
+                            k_amt = float(k.get("display_amount") or k.get("amount")
+                                          or k.get("total_closing") or k.get("own_closing") or 0)
+                            k_nature = _fin_nature_of(k) or n_nature
                             grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
                             if grandkids:
-                                side.append((f"   ↳ {k_name}", _fmt(k_amt) if k_amt else None, "child_node"))
+                                side.append((k_name, k_amt, "child_node", 1, k_nature))
                                 for gk in grandkids:
                                     gk_name = gk.get("account_name") or gk.get("name") or ""
-                                    gk_amt = float(gk.get("display_amount") or gk.get("amount") or gk.get("own_closing") or 0)
-                                    side.append((f"      • {gk_name}", _fmt(gk_amt), "grandchild_node"))
+                                    gk_amt = float(gk.get("display_amount") or gk.get("amount")
+                                                   or gk.get("own_closing") or 0)
+                                    side.append((gk_name, gk_amt, "grandchild_node", 2,
+                                                 _fin_nature_of(gk) or k_nature))
                             else:
-                                side.append((f"   ↳ {k_name}", _fmt(k_amt), "child_node"))
+                                side.append((k_name, k_amt, "child_node", 1, k_nature))
                     else:
-                        side.append((n_name, _fmt(n_amt), "item"))
+                        side.append((n_name, n_amt, "item", 0, n_nature))
                 return side
 
-            left_side = _build_hierarchical_side(liabilities_nodes, "Liabilities")
+            left_side = _build_hierarchical_side(liabilities_nodes, "Liabilities", "Cr")
             if liabilities_nodes:
-                left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
+                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr"))
             if equity_nodes:
-                left_side += _build_hierarchical_side(equity_nodes, "Equity")
-                left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
-            left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
+                left_side += _build_hierarchical_side(equity_nodes, "Equity", "Cr")
+                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr"))
+            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr"))
 
-            right_side = _build_hierarchical_side(assets_nodes, "Assets")
-            right_side.append(("Total Assets", _fmt(total_assets), "total"))
+            right_side = _build_hierarchical_side(assets_nodes, "Assets", "Dr")
+            right_side.append(("Total Assets", total_assets, "total", 0, "Dr"))
         else:
             assets = [r for r in rows if r.get("statement_section") == "Assets" or r.get("drcr_account") == "Dr"]
             liabilities = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
             equity = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
 
-            total_assets = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in assets)
-            total_liabilities = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in liabilities)
-            total_equity = sum(float(r.get("amount") or r.get("display_amount") or 0) for r in equity)
+            def _amt(r):
+                return float(r.get("amount") or r.get("display_amount") or 0)
 
-            def _fmt(amount):
-                return f"₹{float(amount):,.2f}"
+            total_assets = sum(_amt(r) for r in assets)
+            total_liabilities = sum(_amt(r) for r in liabilities)
+            total_equity = sum(_amt(r) for r in equity)
 
-            def _build_side(section_rows, section_title):
-                side = [(section_title, None, "header")]
+            def _build_side(section_rows, section_title, default_nature):
+                side = [(section_title, None, "header", 0, None)]
                 for r in section_rows:
-                    side.append((r.get("account_name") or "", _fmt(float(r.get("amount") or r.get("display_amount") or 0)), "item"))
+                    side.append((r.get("account_name") or "", _amt(r), "item", 0,
+                                 _fin_nature_of(r) or default_nature))
                 return side
 
-            left_side = _build_side(liabilities, "Liabilities")
+            left_side = _build_side(liabilities, "Liabilities", "Cr")
             if liabilities:
-                left_side.append(("Total Liabilities", _fmt(total_liabilities), "subtotal"))
-            left_side += _build_side(equity, "Equity")
+                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr"))
+            left_side += _build_side(equity, "Equity", "Cr")
             if equity:
-                left_side.append(("Total Equity", _fmt(total_equity), "subtotal"))
-            left_side.append(("Total Liabilities + Equity", _fmt(total_liabilities + total_equity), "total"))
+                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr"))
+            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr"))
 
-            right_side = _build_side(assets, "Assets")
-            right_side.append(("Total Assets", _fmt(total_assets), "total"))
+            right_side = _build_side(assets, "Assets", "Dr")
+            right_side.append(("Total Assets", total_assets, "total", 0, "Dr"))
 
-        def _style_for(kind, align_right=False):
-            base = {"fontSize": "12px", "padding": "6px 8px"}
-            if align_right:
-                base["textAlign"] = "right"
+        def _style_for(kind, align_right=False, indent=0):
+            st = _fin_cell(align="right" if align_right else "left",
+                           color=_FIN_TEXT, indent=indent)
             if kind == "header":
-                base.update({"fontSize": "11px", "fontWeight": "700", "color": "#fff", "background": "#15304f"})
+                st.update({"fontSize": "10px", "fontWeight": "700",
+                           "color": "#ffffff", "background": _FIN_NAVY,
+                           "textTransform": "uppercase", "letterSpacing": "0.5px",
+                           "padding": "8px 10px", "whiteSpace": "normal",
+                           "textAlign": "left"})
             elif kind == "parent_node":
-                base.update({"fontWeight": "700", "background": "#f0f4f8"})
+                st.update({"fontWeight": "700", "color": _FIN_NAVY,
+                           "background": "#eef2f7", "whiteSpace": "normal"})
             elif kind == "child_node":
-                base.update({"fontWeight": "600", "color": "#15304f", "background": "#f8fafd"})
+                st.update({"fontWeight": "600", "background": "#f6f9fc",
+                           "whiteSpace": "normal"})
             elif kind == "grandchild_node":
-                base.update({"fontWeight": "400", "color": "#444444"})
+                st.update({"fontWeight": "400", "color": "#4a505a",
+                           "whiteSpace": "normal"})
             elif kind == "subtotal":
-                base.update({"fontWeight": "700", "borderTop": "1px solid #ddd", "background": "#f7f7f7"})
+                st.update({"fontWeight": "700", "background": "#eef2f7",
+                           "borderTop": f"1px solid {_FIN_NAVY}33"})
             elif kind == "total":
-                base.update({"fontWeight": "700", "borderTop": "2px solid #333"})
-            return base
+                st.update({"fontWeight": "700", "background": "#e4ebf3",
+                           "borderTop": f"2px solid {_FIN_NAVY}"})
+            return st
 
-        def _cells(label, amount, kind):
+        def _cells(label, amount, kind, indent, nature):
             if kind == "header":
                 return [html.Td(label, colSpan=2, style=_style_for("header"))]
             return [
-                html.Td(label, style=_style_for(kind)),
-                html.Td(amount if amount is not None else "", style=_style_for(kind, align_right=True)),
+                html.Td(label, style=_style_for(kind, indent=indent)),
+                html.Td(_fin_money(amount), style={
+                    **_style_for(kind, align_right=True),
+                    "color": _fin_value_color(amount, nature),
+                    "fontWeight": "700" if kind in ("parent_node", "subtotal", "total") else None,
+                }),
             ]
 
         n_rows = max(len(left_side), len(right_side))
         body_rows = []
         for i in range(n_rows):
-            l_label, l_amount, l_kind = left_side[i] if i < len(left_side) else ("", None, "item")
-            r_label, r_amount, r_kind = right_side[i] if i < len(right_side) else ("", None, "item")
+            l = left_side[i] if i < len(left_side) else ("", None, "item", 0, "Cr")
+            r = right_side[i] if i < len(right_side) else ("", None, "item", 0, "Dr")
 
-            row_cells = _cells(l_label, l_amount, l_kind)
-            row_cells.append(html.Td("", style={"width": "16px", "padding": "0"}))
-            row_cells.extend(_cells(r_label, r_amount, r_kind))
+            row_cells = _cells(*l)
+            row_cells.append(html.Td("", style={"width": "18px", "padding": "0",
+                                                "background": "transparent"}))
+            row_cells.extend(_cells(*r))
             body_rows.append(html.Tr(row_cells))
 
         head = html.Thead(html.Tr([
-            html.Th("Liabilities & Equity Node", style={"fontSize": "11px"}),
-            html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
-            html.Th("", style={"width": "16px"}),
-            html.Th("Assets Node", style={"fontSize": "11px"}),
-            html.Th("Amount", style={"fontSize": "11px", "textAlign": "right"}),
-        ], style={"fontSize": "11px"}))
+            _fin_th("Liabilities & Equity", width="30%"),
+            _fin_th("Amount (₹)", align="right", width="20%"),
+            html.Th("", style={"width": "18px", "padding": "0", "border": "none"}),
+            _fin_th("Assets", width="26%"),
+            _fin_th("Amount (₹)", align="right", width="20%"),
+        ]))
 
         table = dbc.Table(
             [head, html.Tbody(body_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
-            style={"marginTop": "4px", "marginBottom": "8px"}
+            striped=False,
+            style={"marginTop": "0", "marginBottom": "6px",
+                   "border": f"1px solid {_FIN_RULE}",
+                   "borderRadius": "8px", "overflow": "hidden",
+                   "fontVariantNumeric": "tabular-nums"},
         )
 
         diff = total_assets - (total_liabilities + total_equity)
         balance_note = None
         if abs(diff) > 0.01:
             balance_note = html.Div(
-                f"⚠ Out of balance by {_fmt(abs(diff))}",
-                style={"fontSize": "11px", "color": "#c0392b", "fontStyle": "italic", "marginTop": "8px"}
-            )
+                "\u26a0 Out of balance by " + _fin_money(abs(diff)),
+                style={"fontSize": "11px", "color": _FIN_DR,
+                       "fontWeight": "600", "fontStyle": "italic",
+                       "marginTop": "8px"})
+        else:
+            balance_note = _fin_footnote(
+                "Balance sheet agrees: Total Assets = Total Liabilities + "
+                "Total Equity.  Cr-natured balances print in green, "
+                "Dr-natured balances in red.")
 
         return html.Div([
-            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444", "marginBottom": "6px", "marginTop": "12px"}),
+            _fin_section_title(*title) if isinstance(title, tuple) else title,
             table,
             balance_note,
         ])
 
     def _make_ie_preview(rows, title):
-        """Income & Expenditure Account preview matching exported spreadsheet format:
-        Section header rows, individual account rows (with Mutual/Non-Mutual indicator),
-        section sub-totals, and a final Surplus/Deficit row."""
+        """
+        Income & Expenditure Account (accrual basis): section header rows,
+        individual account rows with a plain-text Mutual / Non-Mutual
+        indicator, section sub-totals and a final Surplus/Deficit row.
+
+        Income is Cr-natured and prints green, Expenditure is Dr-natured and
+        prints red — the same rule the other five statements follow.
+        """
         if not rows:
-            return dbc.Alert(f"No data for {title}.", color="secondary",
-                             style={"borderRadius": "10px", "marginTop": "8px"})
+            heading = _fin_section_title(*title) if isinstance(title, tuple) else title
+            return html.Div([
+                heading,
+                dbc.Alert("No data for this financial year.", color="secondary",
+                          style={"borderRadius": "8px", "marginTop": "0",
+                                 "fontSize": "11px"}),
+            ])
 
-        def _fmt_amt(v):
-            fval = float(v or 0)
-            if fval < 0:
-                return (f"-₹{abs(fval):,.2f}", "#c0392b", "600")
-            elif fval > 0:
-                return (f"₹{fval:,.2f}", "#1e7e34", "400")
-            return ("₹0.00", "#888888", "400")
-
-        def _mutuality_badge(nature):
-            """Return a small styled span for Mutual / Non-Mutual."""
-            if not nature:
-                return html.Span("—", style={"color": "#bbb", "fontSize": "10px"})
-            if "non" in str(nature).lower():
-                label, bg = "Non-Mutual", "#c0392b"
-            else:
-                label, bg = "Mutual", "#1e7e34"
-            return html.Span(label, style={
-                "fontSize": "9px", "fontWeight": "600", "color": "#fff",
-                "background": bg, "borderRadius": "4px",
-                "padding": "1px 5px", "whiteSpace": "nowrap",
-            })
-
-        # Separate rows into Income / Expenditure / Surplus-Deficit
         income_rows = [r for r in rows if r.get("statement_section") == "Income"]
         expense_rows = [r for r in rows if r.get("statement_section") == "Expenditure"]
-        sd_rows = [r for r in rows if r.get("statement_section") == "Surplus/Deficit"]
 
         income_total = sum(float(r.get("amount") or 0) for r in income_rows)
         expense_total = sum(float(r.get("amount") or 0) for r in expense_rows)
@@ -4484,110 +4783,207 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
 
         body_rows = []
 
-        def _section_header(label, bg="#15304f"):
+        def _section_header(label):
             return html.Tr([
                 html.Td(label, colSpan=4, style={
-                    "fontSize": "11px", "fontWeight": "700", "color": "#fff",
-                    "background": bg, "padding": "5px 8px",
+                    **_fin_cell(),
+                    "fontSize": "10px", "fontWeight": "700", "color": "#ffffff",
+                    "background": _FIN_NAVY, "textTransform": "uppercase",
+                    "letterSpacing": "0.5px", "padding": "8px 10px",
                 }),
             ])
 
-        def _section_subtotal(label, val):
-            v_str, v_col, v_fw = _fmt_amt(val)
+        def _section_subtotal(label, val, nature):
             return html.Tr([
-                html.Td("", style={"width": "40px"}),
+                html.Td("", style={"width": "1%", "border": "none"}),
                 html.Td(label, colSpan=2, style={
-                    "fontWeight": "700", "fontSize": "12px",
-                    "background": "#f0f4f8", "padding": "5px 8px",
-                    "borderTop": "1px solid #ccc",
+                    **_fin_cell(color=_FIN_NAVY, weight="700"),
+                    "background": "#eef2f7",
+                    "borderTop": f"1px solid {_FIN_NAVY}33",
                 }),
-                html.Td(v_str, style={
-                    "textAlign": "right", "fontWeight": "700", "color": v_col,
-                    "background": "#f0f4f8", "padding": "5px 8px",
-                    "borderTop": "1px solid #ccc",
+                html.Td(_fin_money(val), style={
+                    **_fin_cell(align="right", color=_fin_value_color(val, nature),
+                                weight="700"),
+                    "background": "#eef2f7",
+                    "borderTop": f"1px solid {_FIN_NAVY}33",
                 }),
             ])
 
-        def _account_row(r):
+        def _account_row(r, nature, zebra):
             code = r.get("account_code")
             name = r.get("account_name") or ""
-            v_str, v_col, v_fw = _fmt_amt(r.get("amount"))
-            nature = r.get("mutuality_nature")
+            amount = r.get("amount")
             return html.Tr([
                 html.Td(str(code) if code else "",
-                        style={"fontSize": "10px", "color": "#aaa", "width": "40px", "padding": "4px 8px"}),
-                html.Td(name, style={"fontSize": "12px", "padding": "4px 8px"}),
-                html.Td(_mutuality_badge(nature),
-                        style={"textAlign": "center", "padding": "4px 6px", "width": "90px"}),
-                html.Td(v_str, style={
-                    "textAlign": "right", "fontSize": "12px",
-                    "color": v_col, "fontWeight": v_fw, "padding": "4px 8px",
+                        style=_fin_cell(color=_FIN_NIL, weight="500", background=zebra)),
+                html.Td(name, style=_fin_cell(color=_FIN_TEXT, background=zebra)),
+                html.Td(_fin_mutuality_cell(r.get("mutuality_nature")),
+                        style=_fin_cell(align="center", background=zebra)),
+                html.Td(_fin_money(amount), style={
+                    **_fin_cell(align="right",
+                                color=_fin_value_color(amount, nature),
+                                weight="600", background=zebra),
                 }),
             ])
 
-        # Income section
+        def _section_block(label, section_rows, nature, total_label, total):
+            out = [_section_header(label)]
+            for i, r in enumerate(section_rows):
+                out.append(_account_row(r, nature, _FIN_ZEBRA if i % 2 else None))
+            out.append(_section_subtotal(total_label, total, nature))
+            return out
+
         if income_rows:
-            body_rows.append(_section_header("Income", "#1a5276"))
-            for r in income_rows:
-                body_rows.append(_account_row(r))
-            body_rows.append(_section_subtotal("Total Income", income_total))
-
-        # Expenditure section
+            body_rows += _section_block("Income", income_rows, "Cr",
+                                        "Total Income", income_total)
         if expense_rows:
-            body_rows.append(_section_header("Expenditure", "#922b21"))
-            for r in expense_rows:
-                body_rows.append(_account_row(r))
-            body_rows.append(_section_subtotal("Total Expenditure", expense_total))
+            body_rows += _section_block("Expenditure", expense_rows, "Dr",
+                                        "Total Expenditure", expense_total)
 
-        # Surplus / Deficit
-        sd_str, sd_col, _ = _fmt_amt(abs(surplus))
+        # Surplus / Deficit — the result line, not a nature-coloured balance
         body_rows.append(html.Tr([
-            html.Td(""),
-            html.Td(f"Excess of Income over Expenditure ({sd_label})", colSpan=2,
-                    style={"fontWeight": "700", "fontSize": "12px",
-                           "borderTop": "2px solid #333", "padding": "6px 8px"}),
-            html.Td(sd_str, style={
-                "textAlign": "right", "fontWeight": "700",
-                "color": "#1e7e34" if surplus >= 0 else "#c0392b",
-                "borderTop": "2px solid #333", "padding": "6px 8px",
+            html.Td("", style={"border": "none"}),
+            html.Td(f"Excess of Income over Expenditure ({sd_label})", colSpan=2, style={
+                **_fin_cell(color=_FIN_NAVY, weight="700"),
+                "background": "#e4ebf3",
+                "borderTop": f"2px solid {_FIN_NAVY}",
+            }),
+            html.Td(_fin_money(abs(surplus)), style={
+                **_fin_cell(align="right", weight="700",
+                            color=_FIN_CR if surplus >= 0 else _FIN_DR),
+                "background": "#e4ebf3",
+                "borderTop": f"2px solid {_FIN_NAVY}",
             }),
         ]))
 
         head = html.Thead(html.Tr([
-            html.Th("Code", style={"fontSize": "11px", "width": "40px"}),
-            html.Th("Particulars", style={"fontSize": "11px"}),
-            html.Th("Mutual/Non-Mutual", style={"fontSize": "11px", "textAlign": "center", "width": "90px"}),
-            html.Th("Amount (₹)", style={"fontSize": "11px", "textAlign": "right"}),
+            _fin_th("Code", width="8%"),
+            _fin_th("Particulars"),
+            _fin_th("Mutual / Non-Mutual", align="center", width="18%"),
+            _fin_th("Amount (₹)", align="right", width="22%"),
         ]))
 
         table = dbc.Table(
             [head, html.Tbody(body_rows)],
             bordered=False, hover=True, responsive=True, size="sm",
-            style={"marginTop": "4px", "marginBottom": "8px"}
-        )
-
-        note = html.Div(
-            "Note: Prepared on accrual basis. Mutual income = exempt from tax; Non-Mutual = taxable. "
-            "Surplus/Deficit = Total Income − Total Expenditure.",
-            style={"fontSize": "10px", "color": "#888", "fontStyle": "italic", "marginTop": "4px"}
+            striped=False,
+            style={"marginTop": "0", "marginBottom": "6px",
+                   "border": f"1px solid {_FIN_RULE}",
+                   "borderRadius": "8px", "overflow": "hidden",
+                   "fontVariantNumeric": "tabular-nums"},
         )
 
         return html.Div([
-            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": "#444",
-                                   "marginBottom": "6px", "marginTop": "12px"}),
+            _fin_section_title(*title) if isinstance(title, tuple) else title,
             table,
-            note,
+            _fin_footnote(
+                "Prepared on accrual basis. Income accounts are Cr-natured "
+                "(green) and expenditure accounts Dr-natured (red). "
+                "Mutual income is exempt from tax; Non-Mutual is taxable. "
+                "Surplus / Deficit = Total Income \u2212 Total Expenditure."),
         ])
 
     if not holdings_rows and not deposits_rows and not dep_rows and not ie_rows and not funds_rows and not bs_rows:
         body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
     else:
-        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings")
-        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits")
-        dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "3. Depreciation Account (Fixed Assets WDV Schedule)")
-        ie_preview = _make_ie_preview(ie_rows, "4. Income & Expenditure Account (Accrual Basis)")
-        funds_preview = _make_preview_table(funds_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "5. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)")
-        bs_preview = _make_balance_sheet_preview(bs_rows, "6. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
+        # ── Uniform column specs for every statement ─────────────────────────
+        # Each spec carries its own value kind (text / currency / date / pct)
+        # and, for currency columns, the Dr/Cr nature of the balance — so the
+        # on-screen tables and the printed/PDF/emailed tables (which reuse
+        # these very same specs below) cannot drift apart in how they format
+        # a value.
+        #
+        # Register statements (1 & 2) have no drcr_account column, but their
+        # nature is fixed by construction: an asset/deposit carried at cost
+        # or written-down value is a Dr balance, while the disposal proceeds
+        # and the capital gain recognised on disposal are Cr balances.
+        _REGISTER_NAME = [{"label": "Name", "kind": "text"}]
+        _REGISTER_MONEY = [
+            {"label": "Purchase Price", "kind": "currency", "nature": "Dr",
+             "field": "purchase_value"},
+            {"label": "Closing WDV", "kind": "currency", "nature": "Dr",
+             "field": "closing_wdv", "emphasis": True},
+            {"label": "Sell Price", "kind": "currency", "nature": "Cr",
+             "field": "sale_value"},
+            {"label": "STCG", "kind": "currency", "nature": "Cr", "field": "stcg"},
+            {"label": "LTCG", "kind": "currency", "nature": "Cr", "field": "ltcg"},
+        ]
+
+        def _register_cols(ref_label, ref_field, exit_label):
+            return (_REGISTER_NAME
+                    + [{"label": ref_label, "kind": "text", "field": ref_field}]
+                    + [{"label": "Purchase Date", "kind": "date", "field": "purchase_date"},
+                       {"label": exit_label, "kind": "date", "field": "exit_date"}]
+                    + _REGISTER_MONEY)
+
+        HOLDINGS_COLS = _register_cols("SN#", "ref_no", "Disposed Date")
+        DEPOSITS_COLS = _register_cols("ISIN#", "ref_no", "Sell Date")
+
+        # Section 3 is a written-down-value schedule over depreciable asset
+        # blocks, so every money column there is a Dr balance.
+        DEP_COLS = (
+            [{"label": "Account", "kind": "text", "field": "account_name"}]
+            + [{"label": lab, "kind": "currency", "nature": "Dr", "field": fld,
+                "emphasis": fld == "closing_wdv"}
+               for lab, fld in (
+                   ("Opening WDV", "opening_wdv"),
+                   ("Additions (1st Half)", "additions_first_half"),
+                   ("Additions (2nd Half)", "additions_second_half"),
+                   ("Deductions", "deductions"),
+               )]
+            + [{"label": "Rate %", "kind": "pct", "field": "depreciation_percent",
+                "alt_fields": ("depreciation_rate", "dep_rate", "rate")}]
+            + [{"label": lab, "kind": "currency", "nature": "Dr", "field": fld,
+                "emphasis": fld == "closing_wdv"}
+               for lab, fld in (
+                   ("Depreciation", "depreciation_charge"),
+                   ("Closing WDV", "closing_wdv"),
+               )]
+        )
+
+        # Section 5 covers Corpus Fund / Capital Account / Sinking Fund /
+        # Repair & Maintenance — all of them Cr-natured fund balances.
+        FUNDS_COLS = (
+            [{"label": "Account", "kind": "text", "field": "account_name"}]
+            + [{"label": lab, "kind": "currency", "nature": "Cr", "field": fld,
+                "emphasis": fld == "own_closing"}
+               for lab, fld in (
+                   ("Opening B/F", "own_bf"),
+                   ("Additions", "additions"),
+                   ("Deductions", "deductions"),
+                   ("Closing C/F", "own_closing"),
+               )]
+        )
+
+        holdings_preview = _make_preview_table(
+            holdings_rows, HOLDINGS_COLS,
+            (1, "ALL Holdings",
+             "Tangible fixed assets — complete register (active and disposed)"),
+        )
+        deposits_preview = _make_preview_table(
+            deposits_rows, DEPOSITS_COLS,
+            (2, "ALL Deposits",
+             "Intangible investments — complete register"),
+        )
+        dep_preview = _make_preview_table(
+            dep_rows, DEP_COLS,
+            (3, "Depreciation Account",
+             "Fixed assets — written-down value schedule (WDV method)"),
+        )
+        ie_preview = _make_ie_preview(
+            ie_rows,
+            (4, "Income & Expenditure Account", "Accrual basis"),
+        )
+        funds_preview = _make_preview_table(
+            funds_rows, FUNDS_COLS,
+            (5, "ALL Equity",
+             "Corpus Fund · Capital Account · Sinking Fund · Repair & Maintenance"),
+        )
+        bs_preview = _make_balance_sheet_preview(
+            bs_rows,
+            (6, "Balance Sheet",
+             "Two-column format — parent account hierarchy"),
+        )
         
         # Verification QR code stamp & Authorised Signatory Footer
         qr_img = None
@@ -4629,103 +5025,212 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
         # ──────────────────────────────────────────────────────────────────
         # Build printable HTML body from the 6 Statements data
         # ──────────────────────────────────────────────────────────────────
+        # The print / password-protected-PDF / email path renders plain HTML
+        # strings, so it cannot share the dash components above — but it DOES
+        # share their column specs (HOLDINGS_COLS … FUNDS_COLS) and the same
+        # _fin_* value formatters, so dd/mm/yyyy dates, ₹ currency, green Cr
+        # / red Dr values and the plain-text mutuality indicator all come out
+        # identical on screen and on paper.
+        def _html_th(label, align="left"):
+            return (f'<th style="padding:7px 8px;background:{_FIN_NAVY};'
+                    f'color:#fff;font-size:9.5px;font-weight:700;'
+                    f'text-transform:uppercase;letter-spacing:0.5px;'
+                    f'text-align:{align};white-space:nowrap;'
+                    f'border:1px solid {_FIN_NAVY}">{label}</th>')
+
+        def _html_td(text, align="left", color=_FIN_TEXT, weight=None,
+                     bg=None, indent=0, border_top=None):
+            style = (f'padding:5px 8px;font-size:11px;text-align:{align};'
+                     f'color:{color};white-space:nowrap;'
+                     f'font-variant-numeric:tabular-nums;'
+                     f'border:1px solid #e3e8ef;')
+            if weight:
+                style += f'font-weight:{weight};'
+            if bg:
+                style += f'background:{bg};'
+            if indent:
+                style += f'padding-left:{8 + indent * 14}px;'
+            if border_top:
+                style += border_top
+            return f'<td style="{style}">{text}</td>'
+
+        def _fin_mutuality_html(nature):
+            if not nature:
+                return "—"
+            if "non" in str(nature).lower():
+                return f'<span style="color:{_FIN_DR};font-weight:600">Non-Mutual</span>'
+            return f'<span style="color:{_FIN_CR};font-weight:600">Mutual</span>'
+
+        def _html_section(num, title, note=None):
+            note_html = (f'<span style="font-size:10px;color:{_FIN_NIL};'
+                         f'font-style:italic;margin-left:8px">{note}</span>'
+                         ) if note else ""
+            return (
+                f'<div style="margin:22px 0 8px;padding-bottom:5px;'
+                f'border-bottom:2px solid {_FIN_NAVY}22">'
+                f'<span style="display:inline-block;background:{_FIN_NAVY};'
+                f'color:#fff;border-radius:4px;padding:1px 6px;'
+                f'font-size:9.5px;font-weight:700;margin-right:8px">{num}</span>'
+                f'<span style="font-size:12.5px;font-weight:700;'
+                f'color:{_FIN_NAVY}">{title}</span>{note_html}</div>'
+            )
+
+        def _html_table(num, title, rows, columns, note=None, subtitle=None):
+            if not rows:
+                return (_html_section(num, title, subtitle)
+                        + f'<p style="font-size:10px;color:{_FIN_NIL};'
+                          f'font-style:italic;margin:0 0 14px">No data for this '
+                          f'financial year.</p>')
+            head = "".join(
+                _html_th(c["label"],
+                         "right" if c.get("kind") in ("currency", "pct")
+                         else ("center" if c.get("kind") == "date" else "left"))
+                for c in columns)
+            body_rows = []
+            for idx, r in enumerate(rows):
+                bg = _FIN_ZEBRA if idx % 2 else None
+                cells = []
+                for c in columns:
+                    val = _resolve_cell(r, c)
+                    kind = c.get("kind", "text")
+                    if kind == "date":
+                        cells.append(_html_td(_fin_date(val), "center", bg=bg))
+                    elif kind == "pct":
+                        cells.append(_html_td(_fin_pct(val), "right", weight="600", bg=bg))
+                    elif kind == "currency":
+                        nature = c.get("nature") or _fin_nature_of(r)
+                        cells.append(_html_td(
+                            _fin_money(val), "right",
+                            color=_fin_value_color(val, nature),
+                            weight="600" if c.get("emphasis") else None, bg=bg))
+                    elif kind == "mutuality":
+                        cells.append(_html_td(
+                            _fin_mutuality_html(
+                                val.get("mutuality_nature")
+                                if isinstance(val, dict) else val),
+                            "center", bg=bg))
+                    else:
+                        text = "" if val is None else str(val)
+                        cells.append(_html_td(
+                            text, "left",
+                            color=_FIN_NIL if not text else _FIN_TEXT, bg=bg))
+                body_rows.append("<tr>" + "".join(cells) + "</tr>")
+            foot = (f'<div style="font-size:9.5px;color:{_FIN_NIL};'
+                    f'font-style:italic;margin-top:4px">{note}</div>') if note else ""
+            return (
+                _html_section(num, title, subtitle)
+                + f'<table style="width:100%;border-collapse:collapse;'
+                  f'margin-bottom:14px;font-family:Arial,Helvetica,sans-serif">'
+                  f'<thead><tr>{head}</tr></thead>'
+                  f'<tbody>{"".join(body_rows)}</tbody></table>{foot}'
+            )
+
+        def _build_ie_html():
+            income_rows = [r for r in ie_rows if r.get("statement_section") == "Income"]
+            expense_rows = [r for r in ie_rows if r.get("statement_section") == "Expenditure"]
+            income_total = sum(float(r.get("amount") or 0) for r in income_rows)
+            expense_total = sum(float(r.get("amount") or 0) for r in expense_rows)
+            surplus = income_total - expense_total
+            sd_label = "Surplus" if surplus >= 0 else "Deficit"
+
+            head = (_html_th("Code", "left") + _html_th("Particulars", "left")
+                    + _html_th("Mutual / Non-Mutual", "center")
+                    + _html_th("Amount (₹)", "right"))
+
+            def _band(label):
+                return (f'<tr><td colspan="4" style="padding:7px 8px;'
+                        f'background:{_FIN_NAVY};color:#fff;font-size:9.5px;'
+                        f'font-weight:700;text-transform:uppercase;'
+                        f'letter-spacing:0.5px">{label}</td></tr>')
+
+            def _block(label, section_rows, nature, total_label, total):
+                out = [_band(label)]
+                for idx, r in enumerate(section_rows):
+                    bg = _FIN_ZEBRA if idx % 2 else None
+                    amt = r.get("amount")
+                    out.append("<tr>"
+                               + _html_td(r.get("account_code") or "", "left",
+                                          color=_FIN_NIL, bg=bg)
+                               + _html_td(r.get("account_name") or "", "left", bg=bg)
+                               + _html_td(_fin_mutuality_html(r.get("mutuality_nature")),
+                                          "center", bg=bg)
+                               + _html_td(_fin_money(amt), "right",
+                                          color=_fin_value_color(amt, nature),
+                                          weight="600", bg=bg)
+                               + "</tr>")
+                out.append(
+                    "<tr>"
+                    + _html_td("", "left", bg="#eef2f7")
+                    + _html_td(total_label, "left", color=_FIN_NAVY,
+                               weight="700", bg="#eef2f7")
+                    + _html_td("", "left", bg="#eef2f7")
+                    + _html_td(_fin_money(total), "right",
+                               color=_fin_value_color(total, nature),
+                               weight="700", bg="#eef2f7")
+                    + "</tr>")
+                return "".join(out)
+
+            body = ""
+            if income_rows:
+                body += _block("Income", income_rows, "Cr",
+                               "Total Income", income_total)
+            if expense_rows:
+                body += _block("Expenditure", expense_rows, "Dr",
+                               "Total Expenditure", expense_total)
+            body += (
+                "<tr>"
+                + _html_td("", "left", bg="#e4ebf3")
+                + _html_td(f"Excess of Income over Expenditure ({sd_label})",
+                           "left", color=_FIN_NAVY, weight="700", bg="#e4ebf3")
+                + _html_td("", "left", bg="#e4ebf3")
+                + _html_td(_fin_money(abs(surplus)), "right", weight="700",
+                           color=_FIN_CR if surplus >= 0 else _FIN_DR,
+                           bg="#e4ebf3")
+                + "</tr>"
+            )
+
+            return (
+                _html_section(4, "Income & Expenditure Account", "Accrual basis")
+                + f'<table style="width:100%;border-collapse:collapse;'
+                  f'margin-bottom:14px;font-family:Arial,Helvetica,sans-serif">'
+                  f'<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+                + f'<div style="font-size:9.5px;color:{_FIN_NIL};'
+                  f'font-style:italic;margin-top:4px">Prepared on accrual basis. '
+                  f'Income accounts are Cr-natured (green) and expenditure accounts '
+                  f'Dr-natured (red). Mutual income is exempt from tax; Non-Mutual '
+                  f'is taxable. Surplus / Deficit = Total Income &#8722; Total '
+                  f'Expenditure.</div>'
+            )
+
         def _build_fin_stmts_body_html():
             """Build HTML string of the 6 Statements for print/PDF/email."""
-            parts = []
-            color = "#15304f"
-
-            def _fmt(v):
-                if v is None:
-                    return "—"
-                try:
-                    f = float(v)
-                    if f == 0:
-                        return "₹0.00"
-                    return f"₹{f:,.2f}"
-                except Exception:
-                    return str(v)
-
-            def _fmt_pct(v):
-                if v is None:
-                    return "—"
-                try:
-                    return f"{float(v):g}%"
-                except Exception:
-                    return str(v)
-
-            def _table(title, rows, columns, field_map=None):
-                if not rows:
-                    return f'<h4 style="color:{color};margin:20px 0 8px">{title}</h4><p style="color:#888">No data</p>'
-                field_map = field_map or {}
-                head = ''.join(f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:12px">{c}</th>' for c in columns)
-                body_rows = []
-                for r in rows:
-                    cells = []
-                    for c in columns:
-                        key = c.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("%", "pct").replace("#", "num")
-                        fld = field_map.get(key, key)
-                        val = r.get(fld)
-                        if val is None:
-                            for k, v in r.items():
-                                if k.lower() == key:
-                                    val = v
-                                    break
-                        _is_currency = any(t in key.lower() for t in (
-                            "amount", "wdv", "depreciation", "opening", "closing", "addition",
-                            "deduction", "b/f", "c/f", "price", "stcg", "ltcg",
-                        ))
-                        cells.append(f'<td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{_fmt(val) if _is_currency else (_fmt_pct(val) if "rate" in key.lower() or "pct" in key.lower() else (val or "—"))}</td>')
-                    body_rows.append('<tr>' + ''.join(cells) + '</tr>')
-                return (
-                    f'<h4 style="color:{color};margin:20px 0 8px">{title}</h4>'
-                    f'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-family:Arial,sans-serif">'
-                    f'<thead><tr>{head}</tr></thead>'
-                    f'<tbody>{"".join(body_rows)}</tbody></table>'
-                )
-
-            # 1. ALL Holdings — complete tangible fixed-asset register (active + disposed)
-            holdings_cols = ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"]
-            holdings_map = {
-                "snnum": "ref_no", "disposed_date": "exit_date",
-                "purchase_price": "purchase_value", "closing_wdv": "closing_wdv",
-                "sell_price": "sale_value",
-            }
-            parts.append(_table("1. ALL Holdings", holdings_rows, holdings_cols, holdings_map))
-
-            # 2. ALL Deposits (intangible) — investment register
-            deposits_cols = ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"]
-            deposits_map = {
-                "isinnum": "ref_no", "sell_date": "exit_date",
-                "purchase_price": "purchase_value", "closing_wdv": "closing_wdv",
-                "sell_price": "sale_value",
-            }
-            parts.append(_table("2. ALL Deposits", deposits_rows, deposits_cols, deposits_map))
-
-            # 3. Depreciation Account
-            dep_cols = ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"]
-            dep_map = {
-                "account": "account_name", "opening_wdv": "opening_wdv",
-                "additions_(1st_half)": "additions_first_half", "additions_(2nd_half)": "additions_second_half",
-                "deductions": "deductions", "rate_%": "depreciation_percent",
-                "depreciation": "depreciation_charge", "closing_wdv": "closing_wdv",
-            }
-            parts.append(_table("3. Depreciation Account (Fixed Assets WDV Schedule)", dep_rows, dep_cols, dep_map))
-
-            # 4. Income & Expenditure
-            ie_cols = ["Account", "Section", "Mutual/Non-Mutual", "Amount"]
-            ie_map = {"account": "account_name", "section": "statement_section", "mutual/non-mutual": "mutuality_nature", "amount": "amount"}
+            parts = [
+                _html_table(
+                    1, "ALL Holdings", holdings_rows, HOLDINGS_COLS,
+                    note="Dates shown dd/mm/yyyy. Cost and written-down value are "
+                         "Dr-natured (red); disposal proceeds and capital gains are "
+                         "Cr-natured (green).",
+                    subtitle="Tangible fixed assets — complete register "
+                             "(active and disposed)"),
+                _html_table(
+                    2, "ALL Deposits", deposits_rows, DEPOSITS_COLS,
+                    note="Dates shown dd/mm/yyyy. Carrying value is Dr-natured "
+                         "(red); sale proceeds and capital gains are Cr-natured "
+                         "(green).",
+                    subtitle="Intangible investments — complete register"),
+                _html_table(
+                    3, "Depreciation Account", dep_rows, DEP_COLS,
+                    subtitle="Fixed assets — written-down value schedule (WDV method)"),
+            ]
             if ie_rows:
-                parts.append(_table("4. Income & Expenditure Account (Accrual Basis)", ie_rows, ie_cols, ie_map))
-
-            # 5. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance
-            funds_cols = ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
-            funds_map = {"account": "account_name", "opening_b/f": "own_bf", "additions": "additions", "deductions": "deductions", "closing_c/f": "own_closing"}
+                parts.append(_build_ie_html())
             if funds_rows:
-                parts.append(_table("5. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)", funds_rows, funds_cols, funds_map))
-
-            # 6. Balance Sheet (two-column format)
+                parts.append(_html_table(
+                    5, "ALL Equity", funds_rows, FUNDS_COLS,
+                    subtitle="Corpus Fund · Capital Account · Sinking Fund · "
+                             "Repair & Maintenance"))
             if bs_rows:
-                parts.append(_build_bs_html(bs_rows, color))
+                parts.append(_build_bs_html(bs_rows))
 
             # Footer
             parts.append(
@@ -4738,10 +5243,10 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
 
             return ''.join(parts)
 
-        def _build_bs_html(rows, color):
-            """Build Balance Sheet HTML in two-column format."""
+        def _build_bs_html(rows):
+            """Balance Sheet HTML, two-column format, Dr/Cr coloured by nature."""
+            color = _FIN_NAVY
             has_hierarchy = any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
-            by_id = {r.get("account_id") or r.get("id"): r for r in rows if r.get("account_id") or r.get("id")}
             children_by_parent = {}
             for r in rows:
                 pid = r.get("parent_account_id")
@@ -4766,72 +5271,127 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                 liabilities_nodes = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
                 equity_nodes = [r for r in rows if r.get("statement_section") == "Equity" or r.get("tab_name") == "CapAc"]
 
-            def _fmt_amt(v):
-                try:
-                    f = float(v or 0)
-                    return f"₹{f:,.2f}"
-                except Exception:
-                    return "₹0.00"
+            def _amt(node):
+                return float(node.get("display_amount") or node.get("amount")
+                             or node.get("total_closing") or 0)
 
-            def _build_side(nodes, section_title):
-                html_rows = [f'<tr><th colspan="2" style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">{section_title}</th></tr>']
+            def _build_side(nodes, section_title, default_nature):
+                out = [f'<tr><th colspan="2" style="padding:7px 8px;background:{color};'
+                       f'color:#fff;font-size:9.5px;font-weight:700;'
+                       f'text-transform:uppercase;letter-spacing:0.5px;'
+                       f'border:1px solid {color}">{section_title}</th></tr>']
                 for n in nodes:
                     n_name = n.get("account_name") or n.get("name") or ""
-                    n_amt = float(n.get("display_amount") or n.get("amount") or n.get("total_closing") or 0)
+                    n_amt = _amt(n)
+                    n_nature = _fin_nature_of(n) or default_nature
                     kids = children_by_parent.get(n.get("account_id") or n.get("id"), [])
                     if kids:
-                        html_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;font-weight:700;background:#f0f4f8;font-size:12px">{n_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:700;background:#f0f4f8;font-size:12px">{_fmt_amt(n_amt)}</td></tr>')
+                        out.append(
+                            "<tr>"
+                            + _html_td(n_name, "left", color=color, weight="700",
+                                       bg="#eef2f7")
+                            + _html_td(_fin_money(n_amt), "right",
+                                       color=_fin_value_color(n_amt, n_nature),
+                                       weight="700", bg="#eef2f7")
+                            + "</tr>")
                         for k in kids:
                             k_name = k.get("account_name") or k.get("name") or ""
-                            k_amt = float(k.get("display_amount") or k.get("amount") or k.get("total_closing") or k.get("own_closing") or 0)
+                            k_amt = float(k.get("display_amount") or k.get("amount")
+                                          or k.get("total_closing") or k.get("own_closing") or 0)
+                            k_nature = _fin_nature_of(k) or n_nature
                             grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
                             if grandkids:
-                                html_rows.append(f'<tr><td style="padding:6px 8px 6px 24px;border:1px solid #ddd;font-weight:600;color:#15304f;background:#f8fafd;font-size:12px">↳ {k_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:600;color:#15304f;background:#f8fafd;font-size:12px">{_fmt_amt(k_amt)}</td></tr>')
+                                out.append("<tr>" + _html_td("↳ " + k_name, "left",
+                                                            weight="600", indent=1, bg="#f6f9fc")
+                                           + _html_td(_fin_money(k_amt), "right",
+                                                      color=_fin_value_color(k_amt, k_nature),
+                                                      weight="600", bg="#f6f9fc") + "</tr>")
                                 for gk in grandkids:
                                     gk_name = gk.get("account_name") or gk.get("name") or ""
-                                    gk_amt = float(gk.get("display_amount") or gk.get("amount") or gk.get("own_closing") or 0)
-                                    html_rows.append(f'<tr><td style="padding:6px 8px 6px 40px;border:1px solid #ddd;font-size:12px">• {gk_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-size:12px">{_fmt_amt(gk_amt)}</td></tr>')
+                                    gk_amt = float(gk.get("display_amount") or gk.get("amount")
+                                                   or gk.get("own_closing") or 0)
+                                    gk_nature = _fin_nature_of(gk) or k_nature
+                                    out.append("<tr>" + _html_td("• " + gk_name, "left",
+                                                                color="#4a505a", indent=2)
+                                               + _html_td(_fin_money(gk_amt), "right",
+                                                          color=_fin_value_color(gk_amt, gk_nature)) + "</tr>")
                             else:
-                                html_rows.append(f'<tr><td style="padding:6px 8px 6px 24px;border:1px solid #ddd;font-weight:600;font-size:12px">↳ {k_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:600;font-size:12px">{_fmt_amt(k_amt)}</td></tr>')
+                                out.append("<tr>" + _html_td("↳ " + k_name, "left", weight="600", indent=1)
+                                           + _html_td(_fin_money(k_amt), "right",
+                                                      color=_fin_value_color(k_amt, k_nature),
+                                                      weight="600") + "</tr>")
                     else:
-                        html_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;font-size:12px">{n_name}</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-size:12px">{_fmt_amt(n_amt)}</td></tr>')
-                return html_rows
+                        out.append("<tr>" + _html_td(n_name, "left")
+                                   + _html_td(_fin_money(n_amt), "right",
+                                              color=_fin_value_color(n_amt, n_nature)) + "</tr>")
+                return out
 
-            total_assets = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in assets_nodes)
-            total_liabilities = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in liabilities_nodes)
-            total_equity = sum(float(r.get("display_amount") or r.get("amount") or 0) for r in equity_nodes)
+            total_assets = sum(_amt(r) for r in assets_nodes)
+            total_liabilities = sum(_amt(r) for r in liabilities_nodes)
+            total_equity = sum(_amt(r) for r in equity_nodes)
 
-            left_rows = _build_side(liabilities_nodes, "Liabilities")
+            def _total_row(label, value, nature, heavy):
+                rule = (f'border-top:3px solid {color};' if heavy
+                        else f'border-top:2px solid {color};')
+                return ("<tr>"
+                        + _html_td(label, "left", color=color, weight="700",
+                                   bg="#e4ebf3", border_top=rule)
+                        + _html_td(_fin_money(value), "right",
+                                   color=_fin_value_color(value, nature),
+                                   weight="700", bg="#e4ebf3", border_top=rule)
+                        + "</tr>")
+
+            left_rows = _build_side(liabilities_nodes, "Liabilities", "Cr")
             if liabilities_nodes:
-                left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;font-weight:700;font-size:12px">Total Liabilities</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_liabilities)}</td></tr>')
-            left_rows += _build_side(equity_nodes, "Equity")
-            left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;font-weight:700;font-size:12px">Total Equity</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:2px solid #333;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_equity)}</td></tr>')
-            left_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;font-weight:700;font-size:12px">Total Liabilities + Equity</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_liabilities + total_equity)}</td></tr>')
+                left_rows.append(_total_row("Total Liabilities", total_liabilities, "Cr", False))
+            left_rows += _build_side(equity_nodes, "Equity", "Cr")
+            if equity_nodes:
+                left_rows.append(_total_row("Total Equity", total_equity, "Cr", False))
+            left_rows.append(_total_row("Total Liabilities + Equity",
+                                        total_liabilities + total_equity, "Cr", True))
 
-            right_rows = _build_side(assets_nodes, "Assets")
-            right_rows.append(f'<tr><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;font-weight:700;font-size:12px">Total Assets</td><td style="padding:6px 8px;border:1px solid #ddd;border-top:3px solid #15304f;text-align:right;font-weight:700;font-size:12px">{_fmt_amt(total_assets)}</td></tr>')
+            right_rows = _build_side(assets_nodes, "Assets", "Dr")
+            right_rows.append(_total_row("Total Assets", total_assets, "Dr", True))
 
             n = max(len(left_rows), len(right_rows))
+            blank = '<tr><td style="padding:5px 8px;border:1px solid #e3e8ef"></td><td style="padding:5px 8px;border:1px solid #e3e8ef"></td></tr>'
             while len(left_rows) < n:
-                left_rows.append('<tr><td style="padding:6px 8px;border:1px solid #ddd"></td><td style="padding:6px 8px;border:1px solid #ddd"></td></tr>')
+                left_rows.append(blank)
             while len(right_rows) < n:
-                right_rows.append('<tr><td style="padding:6px 8px;border:1px solid #ddd"></td><td style="padding:6px 8px;border:1px solid #ddd"></td></tr>')
+                right_rows.append(blank)
 
             combined = []
             for i in range(n):
-                combined.append('<tr>' + left_rows[i].replace('</tr>', '') + right_rows[i].replace('<tr>', '').replace('</tr>', '') + '</tr>')
+                combined.append('<tr>' + left_rows[i].replace('</tr>', '')
+                                + right_rows[i].replace('<tr>', '').replace('</tr>', '')
+                                + '</tr>')
+
+            diff = total_assets - (total_liabilities + total_equity)
+            if abs(diff) > 0.01:
+                balance_note = (f'<div style="font-size:10px;color:{_FIN_DR};'
+                                f'font-weight:600;font-style:italic;margin-top:6px">'
+                                f'&#9888; Out of balance by {_fin_money(abs(diff))}</div>')
+            else:
+                balance_note = (f'<div style="font-size:9.5px;color:{_FIN_NIL};'
+                                f'font-style:italic;margin-top:6px">'
+                                f'Balance sheet agrees: Total Assets = Total '
+                                f'Liabilities + Total Equity. Cr-natured balances '
+                                f'print in green, Dr-natured balances in red.</div>')
 
             return (
-                f'<h4 style="color:{color};margin:20px 0 8px">4. Balance Sheet (2 Column Format - Parent Account Hierarchy)</h4>'
-                f'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-family:Arial,sans-serif">'
-                f'<thead><tr>'
-                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">Liabilities & Equity</th>'
-                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px;text-align:right">Amount</th>'
-                f'<th style="width:16px;padding:0;border:none"></th>'
-                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px">Assets</th>'
-                f'<th style="padding:6px 8px;border:1px solid #ddd;background:{color};color:#fff;font-size:11px;text-align:right">Amount</th>'
-                f'</tr></thead>'
-                f'<tbody>{"".join(combined)}</tbody></table>'
+                _html_section(6, "Balance Sheet",
+                              "Two-column format — parent account hierarchy")
+                + f'<table style="width:100%;border-collapse:collapse;'
+                  f'margin-bottom:14px;font-family:Arial,Helvetica,sans-serif">'
+                  f'<thead><tr>'
+                  f'{_html_th("Liabilities & Equity", "left")}'
+                  f'{_html_th("Amount (₹)", "right")}'
+                  f'<th style="width:16px;padding:0;border:none"></th>'
+                  f'{_html_th("Assets", "left")}'
+                  f'{_html_th("Amount (₹)", "right")}'
+                  f'</tr></thead>'
+                  f'<tbody>{"".join(combined)}</tbody></table>'
+                f'{balance_note}'
             )
 
         fin_letterhead_data = {
