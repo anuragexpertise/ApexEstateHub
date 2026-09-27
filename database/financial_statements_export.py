@@ -355,8 +355,11 @@ def _write_holdings_style_sheet(
     Shared writer for the "ALL Holdings" and "ALL Deposits" statements —
     same row shape from fn_asset_holdings_fy/fn_deposit_holdings_fy (name,
     ref_no, purchase_date, exit_date, purchase_value, sale_value, stcg,
-    ltcg); only the sheet title and the SN#/ISIN# and Disposed/Sell Date
-    column labels differ between the two.
+    ltcg, closing_wdv); only the sheet title and the SN#/ISIN# and
+    Disposed/Sell Date column labels differ between the two. Closing WDV is
+    inserted between Purchase Price and Sell Price per the 2026-09 card
+    request — it's the per-asset written-down value computed by the SQL
+    function (see fn_asset_holdings_fy's closing_wdv note).
     """
     ws.cell(row=1, column=1, value=f"{society_name}")
     ws.cell(row=1, column=1).font = Font(name="Arial", size=12, bold=True)
@@ -367,8 +370,8 @@ def _write_holdings_style_sheet(
     ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}")
     ws.cell(row=3, column=1).font = Font(name="Arial", size=9, italic=True)
 
-    headers = ["Name", ref_label, "Purchase Date", exit_label, "Purchase Price", "Sell Price", "STCG", "LTCG"]
-    widths = {"A": 32, "B": 18, "C": 16, "D": 16, "E": 18, "F": 18, "G": 16, "H": 16}
+    headers = ["Name", ref_label, "Purchase Date", exit_label, "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"]
+    widths = {"A": 32, "B": 18, "C": 16, "D": 16, "E": 18, "F": 18, "G": 18, "H": 16, "I": 16}
     _apply_header(ws, 4, widths)
     for col, hdr in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=col, value=hdr)
@@ -378,34 +381,36 @@ def _write_holdings_style_sheet(
         cell.border = _BORDER_ALL
 
     r = 5
-    tot_purchase, tot_sale, tot_stcg, tot_ltcg = 0.0, 0.0, 0.0, 0.0
+    tot_purchase, tot_wdv, tot_sale, tot_stcg, tot_ltcg = 0.0, 0.0, 0.0, 0.0, 0.0
     for row in rows:
         name = row.get("name") or "—"
         ref_no = row.get("ref_no") or "—"
         pdate = row.get("purchase_date")
         edate = row.get("exit_date")
         pval = float(row.get("purchase_value") or 0)
+        wdv = float(row.get("closing_wdv") or 0)
         sval = float(row.get("sale_value") or 0)
         stcg = float(row.get("stcg") or 0)
         ltcg = float(row.get("ltcg") or 0)
 
         tot_purchase += pval
+        tot_wdv += wdv
         tot_sale += sval
         tot_stcg += stcg
         tot_ltcg += ltcg
 
         _write_row(ws, r, [name, ref_no, str(pdate) if pdate else "—", str(edate) if edate else "—",
-                           pval, sval, stcg, ltcg], _FONT_BODY, fmt=None)
-        # Amount columns (E-H) get the currency format explicitly since
+                           pval, wdv, sval, stcg, ltcg], _FONT_BODY, fmt=None)
+        # Amount columns (E-I) get the currency format explicitly since
         # this row mixes text and numeric columns (_write_row's single
         # `fmt` applies to every cell otherwise).
-        for col in (5, 6, 7, 8):
+        for col in (5, 6, 7, 8, 9):
             ws.cell(row=r, column=col).number_format = _FMT_AMT
         r += 1
 
-    total_row = ["Total", "", "", "", tot_purchase, tot_sale, tot_stcg, tot_ltcg]
+    total_row = ["Total", "", "", "", tot_purchase, tot_wdv, tot_sale, tot_stcg, tot_ltcg]
     _write_row(ws, r, total_row, _FONT_TOTAL, _FILL_TOTAL, fmt=None)
-    for col in (5, 6, 7, 8):
+    for col in (5, 6, 7, 8, 9):
         ws.cell(row=r, column=col).number_format = _FMT_AMT
     _write_authorisation_footer(ws, society_name, fy)
 
