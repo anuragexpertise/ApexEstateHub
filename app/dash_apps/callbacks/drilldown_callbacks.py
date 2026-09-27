@@ -680,7 +680,7 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, no_update
 
-            # ── 4 Statements Report — custom card
+            # ── 6 Statements Report — custom card
             # Same bypass-DRILLDOWN_MAP pattern as kpi_fy_closing_report;
             # the in-card FY switcher pills reuse this same click pipeline
             # with "kpi_financial_statements__<fy>" ids.
@@ -696,7 +696,7 @@ def register_drilldown_callbacks(app):
                     if fy_suffix.isdigit():
                         fy_prefill["fy"] = int(fy_suffix)
                 store = nav_state.navigate_to(
-                    store, "form_financial_statements", "4 Statements",
+                    store, "form_financial_statements", "6 Statements",
                     prefill=fy_prefill,
                 )
                 hide_kpis = True

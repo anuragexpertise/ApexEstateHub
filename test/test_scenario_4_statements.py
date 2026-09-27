@@ -13,13 +13,13 @@ def test_4_statements_loading_rendering_and_export():
     society_id = 1
     fy = 2026
 
-    # 1. Verify loaders return data for all 4 statements
+    # 1. Verify loaders return data for all 6 Statements
     dep_rows = loaders.get_depreciation_account(society_id, fy)
     ie_rows = loaders.get_income_expenditure(society_id, fy)
     cap_rows = loaders.get_capital_account(society_id, fy)
     bs_rows = loaders.get_balance_sheet(society_id, fy)
 
-    # 2. Verify render_financial_statements_card renders 4 statements UI
+    # 2. Verify render_financial_statements_card renders 6 Statements UI
     card = renderers.render_financial_statements_card(
         dep_rows=dep_rows,
         ie_rows=ie_rows,
@@ -34,7 +34,7 @@ def test_4_statements_loading_rendering_and_export():
 
     # Check card title in layout
     rendered_str = str(card)
-    assert "4 Statements" in rendered_str
+    assert "6 Statements" in rendered_str
     assert "1. Depreciation Account" in rendered_str
     assert "2. Income & Expenditure Account" in rendered_str
     assert "3. Capital Account" in rendered_str

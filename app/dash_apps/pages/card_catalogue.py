@@ -602,18 +602,18 @@ KPI_CARDS = {
         "title": "FY Closing Report", "group": "Financials",
     },
 
-    # Nav tile for the 4 Statements Financial Report (Dep, InExp, CapAc, Bal).
+    # Nav tile for the 6 Statements Financial Report (Dep, InExp, CapAc, Bal).
     "kpi_financial_statements": {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-file-invoice-dollar", "color": "#2c3e50",
-        "title": "4 Statements", "group": "Financials",
+        "title": "6 Statements", "group": "Financials",
     },
     "kpi_4_statements": {
         "query": "SELECT 'View' AS v",
         "params": 0, "format": "text",
         "icon": "fa-file-invoice-dollar", "color": "#2c3e50",
-        "title": "4 Statements", "group": "Financials",
+        "title": "6 Statements", "group": "Financials",
     },
 
     # Nav tile for Fund Management (Admin only) — Capital/Reserve/Sinking/Repair/Corpus

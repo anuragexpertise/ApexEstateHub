@@ -1,8 +1,8 @@
 # app/dash_apps/callbacks/financial_statements_callbacks.py
 """
-4 Statements Financial Report Print / Save as PDF / Email — clientside callbacks.
+6 Statements Financial Report Print / Save as PDF / Email — clientside callbacks.
 
-Mirrors receipt_callbacks.py / noc_callbacks.py pattern. The 4 Statements card
+Mirrors receipt_callbacks.py / noc_callbacks.py pattern. The 6 Statements card
 (body built from dep/ie/cap/bs tables) ships its letterhead + body HTML in
 dcc.Store(id="fin-stmt-letterhead-data") — the JS here only hands it to
 buildLetterheadDoc()/buildLetterheadPdfDoc().
@@ -36,7 +36,7 @@ function printFinStmt(n_clicks, lh, password) {
     if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return window.dash_clientside.no_update; }
 
     var doc = buildLetterheadDoc({
-        title: '4 Statements — FY ' + (lh.fy || ''),
+        title: '6 Statements — FY ' + (lh.fy || ''),
         societyName: lh.society_name, societyAddress: lh.society_address,
         logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
         signatureUrl: lh.signature_url, secretaryName: lh.secretary_name,
@@ -65,7 +65,7 @@ function downloadFinStmtPdf(n_clicks, lh, password) {
     if (!lh.bodyHtml) return window.dash_clientside.no_update;
 
     var html = buildLetterheadPdfDoc({
-        title: '4 Statements — FY ' + (lh.fy || ''),
+        title: '6 Statements — FY ' + (lh.fy || ''),
         filename: '4Statements_FY' + (lh.fy || ''),
         societyName: lh.society_name, societyAddress: lh.society_address,
         logoUrl: lh.logo_url, backgroundUrl: lh.background_url,
@@ -93,7 +93,7 @@ function emailFinStmt(n_clicks, lh) {
 
     lh = lh || {};
     var body = (
-        '4 Statements Financial Report — FY ' + (lh.fy || '') + '\n' +
+        '6 Statements Financial Report — FY ' + (lh.fy || '') + '\n' +
         lh.society_name + '\n' +
         (lh.society_address ? lh.society_address + '\n' : '') +
         '\n' +
@@ -102,7 +102,7 @@ function emailFinStmt(n_clicks, lh) {
 
     var _a = document.createElement('a');
     _a.href = (
-        'mailto:?subject=' + encodeURIComponent('4 Statements — FY ' + (lh.fy || '')) +
+        'mailto:?subject=' + encodeURIComponent('6 Statements — FY ' + (lh.fy || '')) +
         '&body=' + encodeURIComponent(body)
     );
     _a.click();
@@ -116,7 +116,7 @@ function emailFinStmt(n_clicks, lh) {
 
 def register_financial_statements_callbacks(app):
     """
-    Register three clientside callbacks for the 4 Statements card buttons.
+    Register three clientside callbacks for the 6 Statements card buttons.
     Output targets are dummy dcc.Store anchors in the permanent shell layout.
     """
 

@@ -3119,7 +3119,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# FINANCIAL STATEMENTS LOADERS (4 Statements: Dep, InExp, CapAc, Bal)
+# FINANCIAL STATEMENTS LOADERS (6 Statements: Dep, InExp, CapAc, Bal)
 # ════════════════════════════════════════════════════════════════════════════
 
 def get_depreciation_account(society_id: int, fy: int) -> list[dict]:
