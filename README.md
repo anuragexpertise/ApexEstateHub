@@ -452,13 +452,38 @@ Mapped against the consolidated statutory framework for Indian RWAs/CHS/AOAs (`d
 | Reserve Fund | Societies Registration Act / State Cooperative Societies Acts (e.g. MCS Act Sec. 66 / 154B-17) | Statutory reserve from net surplus + entrance/transfer fees, for long-term solvency | ✅ Mapped to the `RESERVE_FUND` statutory head (UP AOA regime); ledger-segregated from operating income, verified via reserve-fund-segregation test scenarios |
 | Sinking Fund | Model Bye-laws (13(c)/14(c)) / State Apartment Ownership Acts | Dedicated fund for structural overhauls, lifts, DG sets; ~0.25–0.33%/yr of construction cost | ✅ Dedicated `Sinking Fund Reserve` ledger account, per-society rate config (`sinking_fund_rate_basis`: per-sq-ft or construction-cost), state-specific statutory rate defaults (UP/MH) in `state_compliance_thresholds`, auto-billed monthly |
 | Repair & Maintenance Fund | Model Bye-laws (13(a)/14(b)) | Routine upkeep of common areas/plumbing/electricals; typically ≥ 0.75%/yr of construction cost | ✅ Dedicated `Repair & Maintenance Fund Reserve` ledger account, same rate-config/billing pipeline as Sinking Fund |
-| Corpus Fund | RERA Act, 2016 (Sec. 11(4)(g), Sec. 17) / State Apartment Ownership Acts | One-time builder-handover capital receipt; principal inviolable, only interest deployable | ✅ Dedicated `Corpus Fund` ledger account, mapped to its statutory head; balance sheet treats it as a capital reserve, not operating income (per the three-statement report's I&E vs. Balance Sheet split) |
-| 'Form N' Representation & Filing | State Co-operative Societies Rules (e.g. Rule 62 / Form N under MCS Rules, 1961) | Prescribed annual Balance Sheet / Statement of Accounts / Committee list format, filed with the Registrar | 🟡 The statutory-head-grouped Balance Sheet export (jurisdiction-aware `legal_regime_profiles`/`statutory_head_catalog`, UP AOA 2010 seeded) presents accounts under their statutory heads, but does not yet reproduce the literal Form N template or handle the Registrar filing itself |
-| Statutory Governance & Filings | Societies Registration Act, 1860 (Sec. 4) / State Ownership Acts | AGM, Managing Committee election, office-bearer list filed with Registrar | 🟡 AGM exists only as a seeded calendar event; no minutes/office-bearer-list generation or Registrar filing workflow yet |
+| | Corpus Fund | RERA Act, 2016 (Sec. 11(4)(g), Sec. 17) / State Apartment Ownership Acts | One-time builder-handover capital receipt; principal inviolable, only interest deployable | ✅ Dedicated `Corpus Fund` ledger account, mapped to its statutory head; balance sheet treats it as a capital reserve, not operating income (per the three-statement report's I&E vs. Balance Sheet split) |
 
-Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts, never commingled with operating income/expenditure) — not yet at the physical-bank-account level; the PDF's "Bank Account Separation" safeguard is a process control for the society's bank, outside what a books-of-account system can enforce.
+### Capital Account vs Corpus Fund — Key Distinction under RWA Laws
 
-### Table Roles
+| Aspect | **Capital Account (3100)** | **Corpus Fund (3230)** |
+|---|---|---|
+| **Legal Source** | UP Apartment Act 2010, Sec 14(5); Model Bye-Laws Ch.VII | RERA 2016, Sec 11(4)(g), 17; State Apartment Acts |
+| **Origin** | Member contributions: share subscriptions, entrance fees, transfer fees, common profits (nucleus of reserve fund) | **Builder handover** — one-time payment from developer at society formation (RERA mandatory) |
+| **Nature** | Society's **owned equity** — grows/shrinks with member admissions/exits | **Capital reserve** — principal **inviolable** (cannot be spent) |
+| **Usage (Principal)** | Capital expenditure, loan repayment, asset acquisition — **General Body approval** | **Never** — only **interest income** deployable |
+| **Usage (Interest/Returns)** | Entire surplus available for society purposes | Only **interest earnings** usable (for maintenance/capex) |
+| **Accounting** | Cr-normal equity account; balance = members' paid-up capital | Cr-normal reserve; balance = builder corpus + accrued interest (segregated) |
+| **Governance** | General Body resolution | General Body (but stricter — RERA-mandated protection) |
+| **Tax Treatment** | Not income; capital receipt | Principal = capital receipt (exempt); interest = taxable income |
+
+**In short:** Capital Account = *Members' money* (society owns it, can deploy for capex with GB approval). Corpus Fund = *Builder's money* (society is trustee; principal locked forever, only interest usable).
+
+---
+
+### How Money Enters Each Fund (Current Implementation)
+
+| Fund | Source | Automation | Key Code |
+|------|--------|------------|----------|
+| **Sinking Fund (3210)** | Monthly member contribution (per sq ft rate) | ✅ **Auto** — `sp_generate_monthly_bills()` creates receivable, `fn_post_receivable_accrual()` credits on payment | `estatehub.sql:2760-2853` |
+| **Repair & Maintenance Fund (3220)** | Monthly member contribution (per sq ft rate) | ✅ **Auto** — same pipeline as Sinking Fund | `estatehub.sql:2760-2853` |
+| **Reserve Fund (3200)** | 25% net surplus + entrance/transfer fees + common profits | ❌ **Manual** — year-end closing / admin journal entry | Not yet implemented |
+| **Capital Account (3100)** | Share subscriptions + entrance/transfer fees | ❌ **Manual** — onboarding/transfer events | Admin receipt / journal entry |
+| **Corpus Fund (3230)** | Builder handover (RERA Sec 11(4)(g)) | ❌ **One-time** — at society formation | One-time setup |
+
+**Sinking & Repair Fund auto-billing details:** `sp_generate_monthly_bills()` calculates per-apartment amounts from `apt_charges_fines_basis.apt_sinking_fund_rate` / `apt_repair_fund_rate` (per sq ft/month), creates `receivables` rows with `acc_id` pointing to the fund accounts, and `fn_post_receivable_accrual()` credits the fund (Cr) when the member pays.
+
+Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts, never commingled with operating income/expenditure) — not yet at the physical-bank-account level; the PDF's "Bank Account Separation" safeguard is a process control for the society's bank, outside what a books-of-account system can enforce.### Table Roles
 
 | Table | Type | Who creates | Status flow | Posts to transactions |
 |---|---|---|---|---|
