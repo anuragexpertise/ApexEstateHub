@@ -3958,7 +3958,7 @@ def render_fy_closing_card(rows: list, error: str | None,
 # ════════════════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════════════════
-# 4 STATEMENTS CARD — Depreciation, Income & Expenditure, Capital Account, Balance Sheet
+# 6 Statements CARD — Depreciation, Income & Expenditure, Capital Account, Balance Sheet
 # ════════════════════════════════════════════════════════════════════════════
 
 def render_financial_statements_card(
@@ -4113,7 +4113,7 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "balance_sheet"}),
                 # ── Print / Password-Protected PDF / Email (2026-09) ──
                 # Reuses the shared letterhead (print_letterhead.py) so the
-                # printed 4 Statements carry the same society logo, watermark
+                # printed 6 Statements carry the same society logo, watermark
                 # background, secretary signature and verification QR as every
                 # other document. The optional password field locks the PDF
                 # via pdf-lib.js — no server-side PDF library required.
@@ -4585,7 +4585,7 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
 
         # ── Letterhead data for Print / Password-Protected PDF / Email ──
         # Reuses the shared letterhead (print_letterhead.py) so the printed
-        # 4 Statements carry the same society logo, watermark background,
+        # 6 Statements carry the same society logo, watermark background,
         # secretary signature and verification QR as every other document.
         # The optional password field on the card locks the PDF via
         # pdf-lib.js — no server-side PDF library required.
@@ -4609,10 +4609,10 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
             pass
 
         # ──────────────────────────────────────────────────────────────────
-        # Build printable HTML body from the 4 statements data
+        # Build printable HTML body from the 6 Statements data
         # ──────────────────────────────────────────────────────────────────
         def _build_fin_stmts_body_html():
-            """Build HTML string of the 4 statements for print/PDF/email."""
+            """Build HTML string of the 6 Statements for print/PDF/email."""
             parts = []
             color = "#15304f"
 

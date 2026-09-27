@@ -1092,7 +1092,7 @@ def shell_layout() -> html.Div:
             dcc.Store(id="expense-action-store-email", storage_type="memory"),
             # fin-stmt-action-store*: dummy Output anchors for
             # financial_statements_callbacks.py's clientside Print/PDF/Email
-            # callbacks (new 2026-09 — 4 Statements previously had no
+            # callbacks (new 2026-09 — 6 Statements previously had no
             # print/download flow at all).
             dcc.Store(id="fin-stmt-action-store",       storage_type="memory"),
             dcc.Store(id="fin-stmt-action-store-print", storage_type="memory"),

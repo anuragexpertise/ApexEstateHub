@@ -286,8 +286,8 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE TABLE IF NOT EXISTS deposits (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    deposit_name VARCHAR(100) NOT NULL,  -- e.g. "SBI FD 40021", "HDFC Liquid Fund"
-    isin VARCHAR(20),                     -- ISIN, or the bank's FD/account reference if no ISIN applies
+    deposit_name VARCHAR(100) NOT NULL, -- e.g. "SBI FD 40021", "HDFC Liquid Fund"
+    isin VARCHAR(20), -- ISIN, or the bank's FD/account reference if no ISIN applies
     purchase_date DATE,
     purchase_value NUMERIC(12, 2),
     acc_id INT,
@@ -732,7 +732,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     bank_statement_line_id INT REFERENCES bank_statement_lines (id),
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
- 
+
 -- ── FUND UTILIZATIONS — admin-only withdrawals from Capital/Reserve/Sinking/Repair/Corpus funds ─────────
 CREATE TABLE IF NOT EXISTS fund_utilizations (
     id SERIAL PRIMARY KEY,
@@ -760,9 +760,9 @@ CREATE TABLE IF NOT EXISTS fund_utilizations (
     approval_date DATE, -- date of the resolution
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
-            'pending',    -- awaiting admin confirmation
-            'confirmed',  -- posted to ledger
-            'cancelled'   -- voided before posting
+            'pending', -- awaiting admin confirmation
+            'confirmed', -- posted to ledger
+            'cancelled' -- voided before posting
         )
     ),
     confirmed_by INT REFERENCES users (id),
@@ -770,7 +770,7 @@ CREATE TABLE IF NOT EXISTS fund_utilizations (
     previous_hash VARCHAR(64), -- for audit trail linking
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
- 
+
 CREATE TABLE IF NOT EXISTS rcm_liability (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -5593,7 +5593,7 @@ $$;
 
 -- fn_funds_account_fy (2026-09): the 5th/1st Financial Statement — "Funds
 -- Account" schedule (Opening B/F, Additions, Deductions, Closing C/F) for
--- every statutory fund/equity account, alongside the existing 4 Statements
+-- every statutory fund/equity account, alongside the existing 6 Statements
 -- (Depreciation, Income & Expenditure, Capital Account & Equity, Balance
 -- Sheet). Mirrors the Depreciation Account schedule's B/F-Additions-
 -- Deductions-C/F shape, but for Capital/Reserves/Sinking/Repair/Corpus.
@@ -5609,7 +5609,7 @@ $$;
 -- name matches '%Equity%' so it's the recursion ROOT, never a row in the
 -- tree) and any Dr-natured child (e.g. "Gifts Given") that isn't itself a
 -- fund/equity balance.
-DROP FUNCTION IF EXISTS fn_funds_account_fy(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_funds_account_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_funds_account_fy(
     p_society_id INT,
@@ -8833,7 +8833,7 @@ $$;
 -- together (e.g. an export workbook) so a reader doesn't mistake one for
 -- overriding the other. p_fy is accepted for interface symmetry with the
 -- other statements but unused: this is an all-time register, not FY-scoped.
-DROP FUNCTION IF EXISTS fn_asset_holdings_fy(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_asset_holdings_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_holdings_fy(
     p_society_id INT,
@@ -8885,7 +8885,7 @@ $$;
 -- form or admin card wired up) — this function and the "ALL Deposits"
 -- statement row will correctly show empty until that admin UI is built
 -- (tracked as a follow-up; see the patch notes).
-DROP FUNCTION IF EXISTS fn_deposit_holdings_fy(INT, INT) CASCADE;
+DROP FUNCTION IF EXISTS fn_deposit_holdings_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_deposit_holdings_fy(
     p_society_id INT,
