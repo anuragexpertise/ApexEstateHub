@@ -3970,23 +3970,26 @@ def render_financial_statements_card(
     **kwargs
 ) -> html.Div:
     """
-    Read-only 5 Statements Financial Report card with export buttons.
+    Read-only 6 Statements Financial Report card with export buttons.
     Displays:
-    1. ALL Holdings (Active Assets) — tangible fixed-asset register: Name, SN#,
-       Purchase Date, Disposed Date, Purchase Price, Sell Price, STCG, LTCG
-    2. ALL Deposits (Active Deposits, intangible) — investment register: Name,
-       ISIN#, Purchase Date, Sell Date, Purchase Price, Sell Price, STCG, LTCG
+    1. ALL Holdings — the complete tangible fixed-asset register (every
+       asset ever purchased, active or already disposed, sorted by sell/
+       disposal date): Name, SN#, Purchase Date, Disposed Date,
+       Purchase Price, Sell Price, STCG, LTCG
+    2. ALL Deposits (intangible) — investment register: Name, ISIN#,
+       Purchase Date, Sell Date, Purchase Price, Sell Price, STCG, LTCG
     3. Depreciation Account (Fixed Assets WDV Schedule)
-    4. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair &
+    4. Income & Expenditure Account (Accrual Basis)
+    5. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair &
        Maintenance: Opening B/F, Additions, Deductions, Closing C/F
-    5. Balance Sheet (Position Statement - 2 column format with nodes grouped by parent_account hierarchy)
+    6. Balance Sheet (Position Statement - 2 column format with nodes grouped by parent_account hierarchy)
 
-    Income & Expenditure and the standalone Capital Account & Equity
-    Schedule (fka statements 2/3 of the earlier "4 Statements" card) are no
-    longer shown here — ALL Equity above supersedes the equity schedule for
-    this card's purposes, and Income & Expenditure remains available via
-    loaders.get_income_expenditure_fy / financial_statements_export.py for
-    other callers even though this card doesn't render it.
+    The standalone Capital Account & Equity Schedule (which only covered
+    the Capital Account subtree) is superseded by ALL Equity above and is
+    not shown here, but remains available via loaders.get_capital_account_fy
+    / financial_statements_export.export_capital_account for other callers.
+    Income & Expenditure was dropped from an earlier revision of this card
+    and has now been reinstated per request.
 
     Coloring is uniform with NOC / Receipt / Agreement cards: #15304f
     (the letterhead header navy). Previously #2c3e50 which clashed with the
@@ -3996,6 +3999,7 @@ def render_financial_statements_card(
 
     # Extract datasets flexibly for 3-arg or 4-arg calls
     holdings_rows = kwargs.get("holdings_rows") or []
+    ie_rows = kwargs.get("ie_rows")
     deposits_rows = kwargs.get("deposits_rows") or []
     funds_rows = kwargs.get("funds_rows") or []
     dep_rows = kwargs.get("dep_rows")
@@ -4003,13 +4007,18 @@ def render_financial_statements_card(
     rp_rows = kwargs.get("rp_rows")
 
     # Legacy positional-arg call shapes: the old signature was
-    # (dep_rows, ie_rows, cap_rows, bs_rows) — ie_rows/cap_rows are accepted
-    # here for backward compatibility with any old caller but are no longer
-    # rendered (see docstring above), so they're just discarded once parsed.
+    # (dep_rows, ie_rows, cap_rows, bs_rows) — cap_rows (the old standalone
+    # Capital Account schedule, now superseded by ALL Equity) is accepted
+    # here for backward compatibility with any old caller but discarded,
+    # while ie_rows is kept since Income & Expenditure is back in the card.
+    # (dep_rows, ie_rows, cap_rows, bs_rows) — cap_rows (the old standalone
+    # Capital Account schedule, now superseded by ALL Equity) is accepted
+    # here for backward compatibility with any old caller but discarded,
+    # while ie_rows is kept since Income & Expenditure is back in the card.
     if dep_rows is None and len(args) >= 4:
-        dep_rows, _legacy_ie_rows, _legacy_cap_rows, bs_rows = args[0], args[1], args[2], args[3]
+        dep_rows, ie_rows, _legacy_cap_rows, bs_rows = args[0], args[1], args[2], args[3]
     elif dep_rows is None and len(args) == 3:
-        rp_rows, _legacy_ie_rows, bs_rows = args[0], args[1], args[2]
+        rp_rows, ie_rows, bs_rows = args[0], args[1], args[2]
 
     if dep_rows is None:
         dep_rows = rp_rows or []
@@ -4045,7 +4054,7 @@ def render_financial_statements_card(
                             "display": "flex", "alignItems": "center",
                             "justifyContent": "center", "marginRight": "12px"}),
             html.Div([
-                html.Strong("5 Statements", style={"fontSize": "14px"}),
+html.Strong("6 Statements", style={"fontSize": "14px"}),
                 html.Div(f"FY {_fy_label(selected_fy)}" if selected_fy else "—",
                          style={"fontSize": "11px", "color": "#999"}),
                 html.Div(society_name, style={"fontSize": "10px", "color": "#888"}),
@@ -4055,7 +4064,7 @@ def render_financial_statements_card(
             pills,
             html.Div([
                 dbc.Button(
-                    [html.I(className="fas fa-file-excel me-2"), "Export All 5 Statements"],
+                    [html.I(className="fas fa-file-excel me-2"), "Export All 6 Statements"],
                     id={"type": "btn-fy-export", "entity": "financial_statements"},
                     size="sm", color="success", outline=True,
                     style={"borderRadius": "10px", "fontWeight": "600", "fontSize": "11px",
@@ -4552,14 +4561,15 @@ def render_financial_statements_card(
             note,
         ])
 
-    if not holdings_rows and not deposits_rows and not dep_rows and not funds_rows and not bs_rows:
+    if not holdings_rows and not deposits_rows and not dep_rows and not ie_rows and not funds_rows and not bs_rows:
         body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
     else:
-        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings (Active Assets)")
-        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits (Active Deposits)")
+        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings")
+        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits")
         dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "3. Depreciation Account (Fixed Assets WDV Schedule)")
-        funds_preview = _make_preview_table(funds_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "4. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)")
-        bs_preview = _make_balance_sheet_preview(bs_rows, "5. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
+        ie_preview = _make_ie_preview(ie_rows, "4. Income & Expenditure Account (Accrual Basis)")
+        funds_preview = _make_preview_table(funds_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "5. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)")
+        bs_preview = _make_balance_sheet_preview(bs_rows, "6. Balance Sheet (2 Column Format - Parent Account Hierarchy)")
         
         # Verification QR code stamp & Authorised Signatory Footer
         qr_img = None
@@ -4655,21 +4665,21 @@ def render_financial_statements_card(
                     f'<tbody>{"".join(body_rows)}</tbody></table>'
                 )
 
-            # 1. ALL Holdings (Active Assets) — tangible fixed-asset register
+            # 1. ALL Holdings — complete tangible fixed-asset register (active + disposed)
             holdings_cols = ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
             holdings_map = {
                 "snnum": "ref_no", "disposed_date": "exit_date",
                 "purchase_price": "purchase_value", "sell_price": "sale_value",
             }
-            parts.append(_table("1. ALL Holdings (Active Assets)", holdings_rows, holdings_cols, holdings_map))
+            parts.append(_table("1. ALL Holdings", holdings_rows, holdings_cols, holdings_map))
 
-            # 2. ALL Deposits (Active Deposits, intangible) — investment register
+            # 2. ALL Deposits (intangible) — investment register
             deposits_cols = ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
             deposits_map = {
                 "isinnum": "ref_no", "sell_date": "exit_date",
                 "purchase_price": "purchase_value", "sell_price": "sale_value",
             }
-            parts.append(_table("2. ALL Deposits (Active Deposits)", deposits_rows, deposits_cols, deposits_map))
+            parts.append(_table("2. ALL Deposits", deposits_rows, deposits_cols, deposits_map))
 
             # 3. Depreciation Account
             dep_cols = ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"]
@@ -4681,13 +4691,19 @@ def render_financial_statements_card(
             }
             parts.append(_table("3. Depreciation Account (Fixed Assets WDV Schedule)", dep_rows, dep_cols, dep_map))
 
-            # 4. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance
+            # 4. Income & Expenditure
+            ie_cols = ["Account", "Section", "Mutual/Non-Mutual", "Amount"]
+            ie_map = {"account": "account_name", "section": "statement_section", "mutual/non-mutual": "mutuality_nature", "amount": "amount"}
+            if ie_rows:
+                parts.append(_table("4. Income & Expenditure Account (Accrual Basis)", ie_rows, ie_cols, ie_map))
+
+            # 5. ALL Equity — Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance
             funds_cols = ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"]
             funds_map = {"account": "account_name", "opening_b/f": "own_bf", "additions": "additions", "deductions": "deductions", "closing_c/f": "own_closing"}
             if funds_rows:
-                parts.append(_table("4. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)", funds_rows, funds_cols, funds_map))
+                parts.append(_table("5. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)", funds_rows, funds_cols, funds_map))
 
-            # 5. Balance Sheet (two-column format)
+            # 6. Balance Sheet (two-column format)
             if bs_rows:
                 parts.append(_build_bs_html(bs_rows, color))
 
@@ -4834,7 +4850,7 @@ def render_financial_statements_card(
         ])
 
         body = html.Div([
-            holdings_preview, deposits_preview, dep_preview, funds_preview, bs_preview, auth_block,
+            holdings_preview, deposits_preview, dep_preview, ie_preview, funds_preview, bs_preview, auth_block,
             dcc.Store(id="fin-stmt-letterhead-data", data=fin_letterhead_data, storage_type="memory"),
         ], style={"padding": "16px"})
 

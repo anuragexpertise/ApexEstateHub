@@ -960,13 +960,12 @@ def _write_balance_sheet_hierarchical(
 
 def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> Workbook:
     """
-    Build the five-statement workbook: ALL Holdings, ALL Deposits,
-    Depreciation Account, ALL Equity (Funds Account), Balance Sheet.
-    Income & Expenditure and the old standalone Capital Account sheet are
-    no longer part of this workbook (see render_financial_statements_card's
-    docstring in app/dash_apps/drilldown/renderers.py) — export_income_expenditure
-    and export_capital_account below still work standalone for anyone who
-    wants those sheets individually.
+    Build the six-statement workbook: ALL Holdings, ALL Deposits,
+    Depreciation Account, Income & Expenditure, ALL Equity (Funds Account),
+    Balance Sheet. The old standalone Capital Account sheet (which only
+    covered the Capital Account subtree) is superseded by ALL Equity and
+    is not part of this workbook — export_capital_account below still
+    works standalone for anyone who wants that narrower sheet.
     """
     from database.db_manager import db as _db
     if db is None:
@@ -1015,35 +1014,47 @@ def _build_workbook(society_id: int, fy: int, db, society_name: str = None) -> W
     except Exception:
         funds_rows = []
 
+    try:
+        ie_rows = db._execute(
+            "SELECT * FROM fn_income_expenditure_fy(%s,%s)", (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        ie_rows = []
+
     # Fetch hierarchical Balance Sheet data from fn_fy_closing_report
     root_children, children_by_parent, closing_by_id = _fetch_balance_sheet_hierarchy(db, society_id, fy)
 
     wb = Workbook()
     wb.remove(wb.active)
 
-    # Sheet 1: ALL Holdings (Active Assets)
+    # Sheet 1: ALL Holdings
     ws1 = wb.create_sheet(title="ALL Holdings")
     _write_holdings_style_sheet(ws1, holdings_rows, society_name, fy,
-                                 title="ALL Holdings (Active Assets)", ref_label="SN#", exit_label="Disposed Date")
+                                 title="ALL Holdings", ref_label="SN#", exit_label="Disposed Date")
 
-    # Sheet 2: ALL Deposits (Active Deposits)
+    # Sheet 2: ALL Deposits
     ws2 = wb.create_sheet(title="ALL Deposits")
     _write_holdings_style_sheet(ws2, deposits_rows, society_name, fy,
-                                 title="ALL Deposits (Active Deposits)", ref_label="ISIN#", exit_label="Sell Date")
+                                 title="ALL Deposits", ref_label="ISIN#", exit_label="Sell Date")
 
     # Sheet 3: Depreciation Account
     ws3 = wb.create_sheet(title="Depreciation Account")
     _write_depreciation_account_sheet(ws3, dep_rows, society_name, fy)
 
-    # Sheet 4: ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
-    ws4 = wb.create_sheet(title="ALL Equity")
-    _write_capital_account_sheet(ws4, funds_rows, society_name, fy,
+    # Sheet 4: Income & Expenditure
+    ws4 = wb.create_sheet(title="Income & Expenditure")
+    _apply_header(ws4, 4, _COL_WIDTHS_IE)
+    _write_income_expenditure_sheet(ws4, ie_rows, society_name, fy)
+
+    # Sheet 5: ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
+    ws5 = wb.create_sheet(title="ALL Equity")
+    _write_capital_account_sheet(ws5, funds_rows, society_name, fy,
                                   title="ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)",
                                   total_label="Total Equity & Funds")
 
-    # Sheet 5: Balance Sheet (hierarchical)
-    ws5 = wb.create_sheet(title="Balance Sheet")
-    _write_balance_sheet_hierarchical(ws5, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
+    # Sheet 6: Balance Sheet (hierarchical)
+    ws6 = wb.create_sheet(title="Balance Sheet")
+    _write_balance_sheet_hierarchical(ws6, root_children, children_by_parent, closing_by_id, society_name, fy, society_metadata)
 
     return wb
 
@@ -1188,7 +1199,7 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
 
 
 def export_asset_holdings(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
-    """Generate ALL Holdings (Active Assets) export (standalone)."""
+    """Generate ALL Holdings export (standalone)."""
     from database.db_manager import db as _db
     if db is None:
         db = _db
@@ -1205,7 +1216,7 @@ def export_asset_holdings(db, society_id: int, fy: int, format: str = "xlsx") ->
     wb.remove(wb.active)
     ws = wb.create_sheet(title="ALL Holdings")
     _write_holdings_style_sheet(ws, rows, society_name, fy,
-                                 title="ALL Holdings (Active Assets)", ref_label="SN#", exit_label="Disposed Date")
+                                 title="ALL Holdings", ref_label="SN#", exit_label="Disposed Date")
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1266,8 +1277,8 @@ def export_funds_account(db, society_id: int, fy: int, format: str = "xlsx") -> 
     return buf.getvalue()
 
 
-def export_all_five_statements(db, society_id: int, fy: int) -> bytes:
-    """Generate combined workbook with all five statement sheets."""
+def export_all_six_statements(db, society_id: int, fy: int) -> bytes:
+    """Generate combined workbook with all six statement sheets."""
     wb = _build_workbook(society_id, fy, db)
 
     buf = io.BytesIO()
@@ -1276,13 +1287,18 @@ def export_all_five_statements(db, society_id: int, fy: int) -> bytes:
     return buf.getvalue()
 
 
+def export_all_five_statements(db, society_id: int, fy: int) -> bytes:
+    """Alias for export_all_six_statements (backwards compatibility — the
+    workbook now has six sheets again, Income & Expenditure having been
+    reinstated; kept so any old caller using this name still works)."""
+    return export_all_six_statements(db, society_id, fy)
+
+
 def export_all_four_statements(db, society_id: int, fy: int) -> bytes:
-    """Alias for export_all_five_statements (backwards compatibility — the
-    workbook now has five sheets, not four; kept so any old caller using
-    this name still works)."""
-    return export_all_five_statements(db, society_id, fy)
+    """Alias for export_all_six_statements (backwards compatibility)."""
+    return export_all_six_statements(db, society_id, fy)
 
 
 def export_all_three_statements(db, society_id: int, fy: int) -> bytes:
-    """Alias for export_all_five_statements (backwards compatibility)."""
-    return export_all_five_statements(db, society_id, fy)
+    """Alias for export_all_six_statements (backwards compatibility)."""
+    return export_all_six_statements(db, society_id, fy)

@@ -2532,15 +2532,16 @@ def register_drilldown_callbacks(app):
             # browser download link could never actually satisfy.
             data = income_tax_export.generate_income_tax_summary_excel(None, sid, fy)
             filename = f"MutualitySummary_FY{fy}-{fy+1}.xlsx"
-        elif entity in ("financial_statements", "4_statements", "5_statements"):
-            # 5 Statements Financial Report:
-            # 1. ALL Holdings (Active Assets)
-            # 2. ALL Deposits (Active Deposits)
+        elif entity in ("financial_statements", "4_statements", "5_statements", "6_statements"):
+            # 6 Statements Financial Report:
+            # 1. ALL Holdings (complete asset register, active + disposed)
+            # 2. ALL Deposits
             # 3. Depreciation Account (Fixed Assets WDV schedule)
-            # 4. ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
-            # 5. Balance Sheet (2-column format with parent_account_id hierarchy)
-            data = financial_statements_export.export_all_five_statements(None, sid, fy)
-            filename = f"5Statements_FY{fy}-{fy+1}.xlsx"
+            # 4. Income & Expenditure (Accrual basis)
+            # 5. ALL Equity (Corpus/Capital/Sinking/Repair — Funds Account)
+            # 6. Balance Sheet (2-column format with parent_account_id hierarchy)
+            data = financial_statements_export.export_all_six_statements(None, sid, fy)
+            filename = f"6Statements_FY{fy}-{fy+1}.xlsx"
         elif entity == "asset_holdings":
             data = financial_statements_export.export_asset_holdings(None, sid, fy)
             filename = f"AllHoldings_FY{fy}-{fy+1}.xlsx"
@@ -3129,12 +3130,13 @@ def _render_card(
                 society_id=sid_val,
             )
 
-        # ── 5 Statements Financial Report — custom card
-        # Loads data for the 5 statements: Holdings, Deposits, Dep, Equity
-        # (Funds Account), Bal (2-column parent_account hierarchy).
-        # Income & Expenditure and the old standalone Capital Account &
-        # Equity Schedule are no longer part of this card (see
-        # render_financial_statements_card's docstring) — their loaders are
+# ── 6 Statements Financial Report — custom card
+        # Loads data for the 6 statements: Holdings, Deposits, Dep, Income &
+        # Expenditure, Equity (Funds Account), Bal (2-column parent_account
+        # hierarchy). The old standalone Capital Account & Equity Schedule
+        # is superseded by ALL Equity and no longer part of this card (see
+        # render_financial_statements_card's docstring) — its loader is
+        # left untouched for other callers.
         # left untouched for other callers.
         if card_id in ("form_financial_statements", "form_4_statements"):
             if get_current_user_role() != "admin":
@@ -3148,7 +3150,9 @@ def _render_card(
             deposits_rows, deposits_err = (loaders.get_deposit_holdings_fy(sid_val, selected_fy)
                                            if sid_val else ([], "Society not resolved"))
             dep_rows, dep_err = (loaders.get_depreciation_account_fy(sid_val, selected_fy)
-                                 if sid_val and selected_fy else ([], "Society not resolved"))
+                                   if sid_val and selected_fy else ([], "Society not resolved"))
+            ie_rows, ie_err = (loaders.get_income_expenditure_fy(sid_val, selected_fy)
+                                if sid_val and selected_fy else ([], "Society not resolved"))
             funds_rows, funds_err = (loaders.get_funds_account_fy(sid_val, selected_fy)
                                      if sid_val and selected_fy else ([], "Society not resolved"))
             bs_rows, bs_err = (loaders.get_balance_sheet_fy(sid_val, selected_fy)
@@ -3160,8 +3164,8 @@ def _render_card(
 
             return renderers.render_financial_statements_card(
                 holdings_rows=holdings_rows, deposits_rows=deposits_rows,
-                dep_rows=dep_rows, funds_rows=funds_rows, bs_rows=bs_rows,
-                error=dep_err or funds_err or bs_err,
+                dep_rows=dep_rows, ie_rows=ie_rows, funds_rows=funds_rows, bs_rows=bs_rows,
+                error=dep_err or ie_err or funds_err or bs_err,
                 fy_options=fy_options, selected_fy=selected_fy,
                 society_name=society_name, society_id=sid_val,
             )

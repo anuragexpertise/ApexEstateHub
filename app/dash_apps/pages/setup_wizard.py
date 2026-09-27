@@ -168,17 +168,26 @@ def _render_banner(title, text):
 def render_category_content(category, society_id=None):
     elements = []
     
-    # Render conversational header if available
-    conv_info = next((item for item in CONVERSATION_DATA if item.get('Setup Wizard Category') == category), None)
-    if conv_info and conv_info.get('Recommendation from Master to Admin'):
-        elements.append(
-            dbc.Alert(
-                [html.I(className="fas fa-lightbulb me-2"), conv_info['Recommendation from Master to Admin']],
-                color="info",
-                className="mb-3",
-                style={"fontSize": "13px"}
+    # Render conversational header(s) if available. A category can have more
+    # than one guidance row in conversation.xlsx (e.g. "Society Details" has
+    # both a Duty Hours tip and a State/Jurisdiction tip) — this used to
+    # take only the first match via next(...), so any row after the first
+    # for the same category was seeded correctly but never actually
+    # rendered. In particular the jurisdiction-aware State guidance row
+    # (added in an earlier audit) silently never appeared on screen because
+    # it wasn't the first "Society Details" row in the sheet. Now every
+    # matching row for the category renders as its own banner.
+    conv_infos = [item for item in CONVERSATION_DATA if item.get('Setup Wizard Category') == category]
+    for conv_info in conv_infos:
+        if conv_info.get('Recommendation from Master to Admin'):
+            elements.append(
+                dbc.Alert(
+                    [html.I(className="fas fa-lightbulb me-2"), conv_info['Recommendation from Master to Admin']],
+                    color="info",
+                    className="mb-3",
+                    style={"fontSize": "13px"}
+                )
             )
-        )
         
     # Add Print Button for specific categories
     if category in ["Society Compliance", "TAN & TDS Rates", "Accounts"]:
@@ -618,7 +627,13 @@ def get_setup_wizard_layout(society_id=None):
         [
             dbc.ModalHeader(
                 [
-                    dbc.ModalTitle("EstateHub First-Time Setup Wizard", style={"fontWeight": "bold", "color": "#fff"}),
+                    html.Div([
+                        dbc.ModalTitle("EstateHub First-Time Setup Wizard", style={"fontWeight": "bold", "color": "#fff", "marginBottom": "2px"}),
+                        html.Div(
+                            "Jurisdiction-aware for Indian RWAs/CHS/AOAs — state-specific statutory rules apply automatically once your State is set (see Society Details)",
+                            style={"color": "#ffffffcc", "fontSize": "11px"}
+                        ),
+                    ]),
                     html.Button(
                         html.I(className="fas fa-times"),
                         id="sw-close-btn",
