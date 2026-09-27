@@ -3,24 +3,7 @@
 """
 EstateHub — Aiven PostgreSQL migration + seed script.
 
-What it does
-============
-1. Connects to Aiven PostgreSQL (DATABASE_URL or PG* env vars).
-2. Creates / updates the full schema (idempotent — uses IF NOT EXISTS).
-3. Applies incremental alterations for existing installations
-   (columns, constraints, tables that newer schema versions add).
-4. On first run (no societies), asks whether to seed demo data:
-     • 1 master admin
-     • 1 society  (Sunrise Residency)
-     • 50 Chart-of-Accounts entries
-     • 1 admin, 13 apartment owners, 12 vendors, 12 security staff
-     • 12 concerns, 12 events, 2 gate-log entries, 2 assets
-
-All passwords stored with werkzeug generate_password_hash so
-auth_service.check_password_hash() can verify them.
-
-Usage
------
+Usage:
     python3 database/migrate.py            # normal
     python3 database/migrate.py --force    # re-run DDL even if tables exist
     python3 database/migrate.py --seed     # skip prompt, always seed
@@ -30,8 +13,6 @@ Usage
 import os
 import sys
 import argparse
-import json
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,13 +23,10 @@ import psycopg2
 import psycopg2.extras
 from werkzeug.security import generate_password_hash
 
+import logging
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger(__name__)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# CONNECTION
-# ═════════════════════════════════════════════════════════════════════════════
 
 def _dsn() -> str:
     raw = os.getenv("DATABASE_URL", "").strip()
@@ -72,17 +50,6 @@ def get_conn():
             _dsn(),
             cursor_factory=psycopg2.extras.RealDictCursor,
             connect_timeout=20,
-            # Without these, a blocked statement waits INDEFINITELY with
-            # zero output — the exact "terminal just sits there" symptom.
-            # Postgres default lock_timeout/statement_timeout is 0 (no
-            # limit) unless set here or on the server/role. lock_timeout
-            # fires fast and specifically on lock contention (most likely
-            # cause: another session — e.g. the live app, or a previous
-            # migrate.py/seed.py run that was Ctrl-C'd mid-transaction —
-            # still holding a lock on a table this script needs).
-            # statement_timeout is a broader backstop for any other kind
-            # of runaway query. Both raise a normal psycopg2 exception
-            # (55P03 / 57014) instead of hanging silently.
             options="-c lock_timeout=15000 -c statement_timeout=180000",
         )
         conn.autocommit = False
@@ -92,26 +59,18 @@ def get_conn():
         sys.exit(1)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# SCHEMA  (idempotent DDL)
-# ═════════════════════════════════════════════════════════════════════════════
-
 from pathlib import Path
+import sqlparse
 
 def load_schema_sql():
     sql_file = Path(__file__).with_name("estatehub.sql")
-
     if not sql_file.exists():
-        raise FileNotFoundError(
-            f"Schema file not found: {sql_file}"
-        )
-
+        raise FileNotFoundError(f"Schema file not found: {sql_file}")
     return sql_file.read_text(encoding="utf-8")
 
 SCHEMA_SQL = load_schema_sql()
 
 def run_schema(conn):
-    import sqlparse
     stmts = sqlparse.split(SCHEMA_SQL)
     ok = 0
     err = 0
@@ -134,30 +93,11 @@ def run_schema(conn):
     return ok, err
 
 
-
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# DEMO / SEED DATA — moved to database/seed.py (see --seed below).
-# ACCOUNTS, SOCIETY, USERS, EVENTS, CONCERNS, ASSETS and all idempotent
-# demo-data seeding now live in seed.run_seed(conn), using the same
-# society_id=1 identity and the same hardcoded accounts/users migrate.py
-# used to seed.
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═════════════════════════════════════════════════════════════════════════════
-
 def main():
     parser = argparse.ArgumentParser(description="EstateHub DB migration + seed")
-    parser.add_argument("--force",   action="store_true",
-                        help="Re-run DDL even if tables already exist")
-    parser.add_argument("--seed",    action="store_true",
-                        help="Always seed demo data without prompting")
-    parser.add_argument("--no-seed", action="store_true",
-                        help="Skip demo data seeding")
+    parser.add_argument("--force",   action="store_true", help="Re-run DDL even if tables already exist")
+    parser.add_argument("--seed",    action="store_true", help="Always seed demo data without prompting")
+    parser.add_argument("--no-seed", action="store_true", help="Skip demo data seeding")
     args = parser.parse_args()
 
     print()
@@ -171,7 +111,6 @@ def main():
     conn = get_conn()
     print("  ✓ Connected to Aiven PostgreSQL")
 
-    # ── Schema ────────────────────────────────────────────────────────────
     with conn.cursor() as cur:
         cur.execute(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
@@ -187,13 +126,9 @@ def main():
     ok, err = run_schema(conn)
     print(f"  ✓ DDL: {ok} ok, {err} skipped")
 
-
-
-    # ── Seed decision ─────────────────────────────────────────────────────
     if args.no_seed:
         print("  Seed skipped (--no-seed).")
         conn.close()
-        _summary()
         return
 
     with conn.cursor() as cur:
@@ -201,10 +136,8 @@ def main():
         has_societies = cur.fetchone()["c"] > 0
 
     if has_societies and not args.seed:
-        print(f"  ✓ Societies exist — skipping demo seed.")
-        print("    Use --seed to force-add demo data anyway.")
+        print("  ✓ Societies exist — skipping demo seed. Use --seed to force.")
         conn.close()
-        _summary()
         return
 
     if args.seed:
@@ -212,7 +145,7 @@ def main():
     else:
         print()
         print("  First run — no societies found.")
-        print("  Seed demo data?  (1 society, 39 users, 50 accounts,")
+        print("  Seed demo data? (1 society, 39 users, 50 accounts,")
         print("  12 events, 12 concerns, 2 gate logs, 2 assets)")
         print()
         try:
@@ -223,37 +156,24 @@ def main():
 
     if do_seed:
         try:
-            from seed import run_seed  # when run as `python3 database/migrate.py`
+            from seed import run_seed
         except ImportError:
-            from database.seed import run_seed  # when imported as a package
+            from database.seed import run_seed
         try:
             run_seed(conn)
         except psycopg2.errors.LockNotAvailable:
             print()
             print("  ❌  Seeding stopped: timed out waiting for a database lock.")
-            print("      Something else is holding a lock on a table this script")
-            print("      needs — most likely another connection to the same DB")
-            print("      (e.g. the live app, or a previous migrate.py/seed.py run")
-            print("      that was interrupted mid-transaction and left idle).")
-            print("      Run this in psql / Aiven console to find and end it:")
-            print()
-            print("        SELECT pid, state, query_start, state_change, query")
-            print("        FROM pg_stat_activity")
+            print("      Another connection is holding a lock — run in psql/Aiven console to find and end it:")
+            print("        SELECT pid, state, query FROM pg_stat_activity")
             print("        WHERE datname = current_database() AND pid <> pg_backend_pid()")
-            print("          AND state <> 'idle'")
-            print("        ORDER BY query_start;")
-            print()
-            print("      Idle-in-transaction sessions are the usual culprit —")
-            print("      SELECT pg_terminate_backend(<pid>) to clear one, then re-run.")
+            print("          AND state <> 'idle' ORDER BY query_start;")
             conn.rollback()
             conn.close()
             sys.exit(1)
         except psycopg2.errors.QueryCanceled:
             print()
             print("  ❌  Seeding stopped: a statement exceeded the 3-minute timeout.")
-            print("      This is a slower failure than a lock wait — check whether")
-            print("      the DB itself is under load, or a single statement is")
-            print("      doing far more work than expected.")
             conn.rollback()
             conn.close()
             sys.exit(1)
@@ -263,15 +183,10 @@ def main():
 
     if conn is not None:
         conn.close()
-    _summary()
-
-
-def _summary():
     print()
     print("═" * 62)
     print("✅ Migration complete")
     print("═" * 62)
-    print()
 
 
 if __name__ == "__main__":

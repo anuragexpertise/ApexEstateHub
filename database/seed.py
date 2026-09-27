@@ -580,6 +580,72 @@ FULLY_DEPRECIATED_ASSET = {
     "acc_id": 1130, "depreciation_rate": 100.0, "last_depreciation_date": "2024-03-31",
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEPOSIT PURCHASES — intangible investments (FDs, bonds, MF units, etc.)
+# acc_id references: 1200 (Investments) or sub-accounts under it
+# ═══════════════════════════════════════════════════════════════════════════════
+DEPOSIT_PURCHASES = [
+    # --- Active deposits (still held) ---
+    {"deposit_name": "SBI Fixed Deposit 40021", "isin": "SBIFD2026001",
+     "purchase_date": "2026-04-01", "purchase_value": 500000.00, "acc_id": 1200, "reference": "FD20260401SBI"},
+    {"deposit_name": "HDFC Corporate Bond Fund", "isin": "INF179KC1EV3",
+     "purchase_date": "2026-06-15", "purchase_value": 200000.00, "acc_id": 1200, "reference": "MF20260615HDFC"},
+    {"deposit_name": "ICICI Prudential Liquid Fund", "isin": "INF109K017Q9",
+     "purchase_date": "2026-08-20", "purchase_value": 300000.00, "acc_id": 1200, "reference": "MF20260820ICICI"},
+    {"deposit_name": "Kotak Mahindra FD 7.25%", "isin": "KOTAKFD202609",
+     "purchase_date": "2026-10-01", "purchase_value": 150000.00, "acc_id": 1200, "reference": "FD20261001KOTAK"},
+
+    # --- Deposits disposed at GAIN (sale_value > purchase_value) ---
+    {"deposit_name": "Axis Mutual Fund Growth", "isin": "AXISMF202503",
+     "purchase_date": "2025-04-10", "purchase_value": 100000.00,
+     "disposed": True, "sale_date": "2026-05-20", "sale_value": 115000.00, "acc_id": 1200, "reference": "MF20260520AXIS",
+     "tds_amount": 0.00, "sale_acc_id": 1311},   # Gain ~15k, held >1yr -> LTCG
+
+    {"deposit_name": "SBI Magnum Equity Fund", "isin": "SBIMF202508",
+     "purchase_date": "2025-11-01", "purchase_value": 200000.00,
+     "disposed": True, "sale_date": "2026-09-15", "sale_value": 235000.00, "acc_id": 1200, "reference": "MF20260915SBI",
+     "tds_amount": 0.00, "sale_acc_id": 1311},   # Gain ~35k, held <1yr -> STCG
+
+    # --- Deposits disposed at LOSS (sale_value < purchase_value) ---
+    {"deposit_name": "Franklin India Bond Fund", "isin": "FRANKBND202412",
+     "purchase_date": "2024-12-01", "purchase_value": 150000.00,
+     "disposed": True, "sale_date": "2026-03-10", "sale_value": 142000.00, "acc_id": 1200, "reference": "MF20260310FRANK",
+     "tds_amount": 0.00, "sale_acc_id": 1311},     # Loss ~8k, held >1yr -> LTCL
+
+    {"deposit_name": "Aditya Birla Short Term Fund", "isin": "ABSTF202507",
+     "purchase_date": "2025-07-15", "purchase_value": 180000.00,
+     "disposed": True, "sale_date": "2026-11-20", "sale_value": 175000.00, "acc_id": 1200, "reference": "MF20261120AB",
+     "tds_amount": 0.00, "sale_acc_id": 1311},   # Loss ~5k, held <1.5yr -> STCL
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ASSET DISPOSAL PERMUTATIONS — exercises fn_dispose_asset with varied
+# STCG/LTCG outcomes (gain/loss, short/long term), different modes, TDS.
+# Mirrors the RECEIPT_TYPES pattern for depositing.
+# ═══════════════════════════════════════════════════════════════════════════════
+ASSET_DISPOSALS = [
+    # Asset name must match an existing asset from SIMPLE_ASSETS or INSTRUMENT_PURCHASES
+    # disposed at GAIN, held >3 years -> LTCG
+    {"asset_name": "Old Intercom Panel",   "sale_value": 8000.00,
+     "sale_date": "2026-05-15", "mode": "cheque", "tds_amount": 0.00,
+     "particulars": "Old Intercom Panel sold to scrap dealer", "reference": "CHQ20260515INT"},
+
+    # disposed at GAIN, held <3 years -> STCG (Society Generator purchased 2026-05-15, sold 2027-01-20 -> ~8 months)
+    {"asset_name": "Society Generator",    "sale_value": 40000.00,
+     "sale_date": "2027-01-20", "mode": "neft", "tds_amount": 0.00,
+     "particulars": "Society Generator sold to vendor", "reference": "NEFT20270120GEN"},
+
+    # disposed at LOSS, held >3 years -> LTCL (Old asset from 2019)
+    {"asset_name": "Old Intercom Panel",   "sale_value": 2000.00,
+     "sale_date": "2026-08-10", "mode": "cash", "tds_amount": 0.00,
+     "particulars": "Old Intercom Panel sold at loss", "reference": "CSH20260810INT"},
+
+    # disposed at LOSS, held <3 years -> STCL (Community Hall Projector purchased 2026-06-20, sold 2027-02-01 -> ~7.5 months)
+    {"asset_name": "Community Hall Projector", "sale_value": 5000.00,
+     "sale_date": "2027-02-01", "mode": "imp", "tds_amount": 0.00,
+     "particulars": "Projector sold at loss", "reference": "IMP20270201PROJ"},
+]
+
 POLLS = [
     {
         "title": "Preferred day for the Diwali Mela?",
@@ -1671,17 +1737,15 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
            VALUES (%s,'Dr',%s,5100,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
-    )
+)
     cur.execute(
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Cr',%s,5110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Cr',%s,1110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
-    print(f"  ✓ Depreciation transfer posted: Dr InExp A/c ₹{total_dep} / Cr Dep A/c ₹{total_dep}")
-
 
 def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
     for asset in SIMPLE_ASSETS:
@@ -1701,6 +1765,98 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
         )
         conn.commit()
         print(f"  ✓ Asset    '{asset['asset_name']}' purchased on {asset['purchase_date']}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEPOSIT SEEDING — intangible investments (FDs, bonds, MF units)
+# ═══════════════════════════════════════════════════════════════════════════════
+def seed_deposits(cur, conn, society_id: int, admin_uid: int):
+    for dep in DEPOSIT_PURCHASES:
+        if _one(cur, "SELECT id FROM deposits WHERE society_id=%s AND deposit_name=%s",
+                (society_id, dep["deposit_name"])):
+            print(f"  · Deposit '{dep['deposit_name']}' already exists — skipped.")
+            continue
+
+        mode = dep.get("mode", "cash")
+        particulars = dep.get("particulars", f"Deposit purchase - {dep['deposit_name']}")
+        sale_acc_id = dep.get("sale_acc_id")
+
+        # Build fn_buy_deposit call
+        result = _one(
+            cur,
+            """SELECT * FROM fn_buy_deposit(
+                %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )""",
+            (society_id, dep["deposit_name"], dep.get("isin", ""), dep["purchase_value"],
+             dep["acc_id"], dep["purchase_date"], "cash", admin_uid,
+             f"Deposit purchase - {dep['deposit_name']}"),
+        )
+
+        # If disposed, also call fn_dispose_deposit
+        if dep.get("disposed"):
+            sale_date = dep.get("sale_date")
+            sale_value = dep.get("sale_value")
+            tds_amount = dep.get("tds_amount", 0.00)
+            sale_acc_id = dep.get("sale_acc_id")
+
+            dispose_result = _one(
+                cur,
+                """SELECT * FROM fn_dispose_deposit(
+                    %s, %s, %s, %s, %s, %s, %s, %s
+                )""",
+                (result["deposit_id"], dep["sale_value"], "cash", admin_uid,
+                 dep["sale_date"], f"Deposit disposal - {dep['deposit_name']}",
+                 dep.get("sale_acc_id"), dep.get("tds_amount", 0.00)),
+            )
+            print(f"  ✓ Deposit  '{dep['deposit_name']}' purchased {dep['purchase_date']} & disposed {dep['sale_date']} (sale ₹{dep['sale_value']:g}, ref: {dep['reference']})")
+        else:
+            print(f"  ✓ Deposit  '{dep['deposit_name']}' purchased {dep['purchase_date']} (₹{dep['purchase_value']:g}, ref: {dep['reference']})")
+
+        conn.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ASSET DISPOSAL PERMUTATIONS — exercises fn_dispose_asset with varied
+# STCG/LTCG outcomes (gain/loss, short/long term), different modes, TDS
+# ═══════════════════════════════════════════════════════════════════════════════
+def seed_asset_disposals(cur, conn, society_id: int, admin_uid: int):
+    for disp in ASSET_DISPOSALS:
+        # Find the asset by name
+        asset_row = _one(cur, "SELECT id FROM assets WHERE society_id=%s AND asset_name=%s",
+                         (society_id, disp["asset_name"]))
+        if not asset_row:
+            print(f"  · Asset '{disp['asset_name']}' not found — skipped.")
+            continue
+
+        asset_id = asset_row["id"]
+
+        # Check if already disposed
+        if _one(cur, "SELECT 1 FROM assets WHERE id=%s AND disposed=TRUE", (asset_id,)):
+            print(f"  · Asset '{disp['asset_name']}' already disposed — skipped.")
+            continue
+
+        # Check if disposal already seeded (by reference)
+        if _one(cur, """SELECT 1 FROM transactions
+            WHERE society_id=%s AND source_table='assets' AND source_id=%s
+            AND acc_particulars LIKE 'Asset disposed%%'""",
+                (society_id, asset_id)):
+            print(f"  · Asset '{disp['asset_name']}' disposal already seeded — skipped.")
+            continue
+
+        result = _one(
+            cur,
+            """SELECT * FROM fn_dispose_asset(
+                %s, %s, %s, %s, %s, %s, %s, %s
+            )""",
+            (asset_id, disp["sale_value"], disp.get("mode", "cash"),
+             admin_uid, disp["sale_date"], disp.get("particulars"),
+             disp.get("sale_acc_id"), disp.get("tds_amount", 0.00)),
+        )
+        conn.commit()
+        gain_loss = "gain" if disp["sale_value"] > 0 else "loss"
+        print(f"  ✓ Asset    '{disp['asset_name']}' disposed {disp['sale_date']} (sale ₹{disp['sale_value']:g}, ref: {disp['reference']})")
+
+    conn.commit()
 
 
 # Receipt types rekeyed:
@@ -1948,6 +2104,9 @@ def run_seed(conn):
 
     seed_simple_assets(cur, conn, society_id, admin_uid)
     seed_instruments_depreciation(cur, conn, society_id, admin_uid)
+
+    seed_deposits(cur, conn, society_id, admin_uid)
+    seed_asset_disposals(cur, conn, society_id, admin_uid)
 
     seed_receipts_and_salary(cur, conn, society_id, admin_uid, security_uid_1, apt1_id, users)
     seed_advance_credit_demo(cur, conn, society_id, apt2_id, admin_uid)

@@ -302,6 +302,195 @@ CREATE TABLE IF NOT EXISTS deposits (
     updated_at TIMESTAMP
 );
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- DEPOSIT CREATION / DISPOSAL (2026-09): mirrors fn_buy_asset / fn_dispose_asset
+-- for the intangible `deposits` table (FDs, bonds, mutual fund units, etc.)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- fn_buy_deposit: create a new intangible investment (FD, bond, MF unit, etc.)
+-- Mirrors fn_buy_asset but for the `deposits` table; posts Dr investment account,
+-- Cr cash/bank, and an expense row for the purchase.
+DROP FUNCTION IF EXISTS fn_buy_deposit(
+    INT, VARCHAR, VARCHAR, VARCHAR, NUMERIC,
+    INT, DATE, VARCHAR, INT, TEXT
+) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_buy_deposit(
+    p_society_id        INT,
+    p_deposit_name      VARCHAR,
+    p_isin              VARCHAR,
+    p_purchase_value    NUMERIC,
+    p_acc_id            INT,
+    p_purchase_date     DATE    DEFAULT CURRENT_DATE,
+    p_mode              VARCHAR DEFAULT 'cash',
+    p_created_by        INT     DEFAULT NULL,
+    p_particulars       TEXT    DEFAULT NULL
+)
+RETURNS TABLE(deposit_id INT, expense_id INT, transaction_id INT, journal_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_deposit_id INT;
+    v_expense_id INT;
+    v_trx_id     INT;
+    v_journal_id INT;
+    v_bank_acc   INT;
+    v_desc       TEXT;
+BEGIN
+    IF p_acc_id IS NULL THEN
+        RAISE EXCEPTION 'acc_id (investment class account) is required';
+    END IF;
+    IF p_purchase_value IS NULL OR p_purchase_value <= 0 THEN
+        RAISE EXCEPTION 'purchase_value must be > 0';
+    END IF;
+
+    INSERT INTO deposits(
+        society_id, deposit_name, isin, purchase_date, purchase_value,
+        acc_id, created_at
+    ) VALUES (
+        p_society_id, p_deposit_name, p_isin, p_purchase_date, p_purchase_value,
+        p_acc_id, NOW()
+    ) RETURNING id INTO v_deposit_id;
+
+    v_desc := COALESCE(p_particulars, 'Deposit Purchase - ' || p_deposit_name);
+    v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    -- Dr: investment class account
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        p_society_id, 'Dr', p_purchase_date, p_acc_id, v_deposit_id, 'deposits', v_desc,
+        p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'deposits', v_deposit_id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
+
+    -- Cr: cash / bank paired side
+    IF v_bank_acc IS NOT NULL THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, 'Cr', p_purchase_date, v_bank_acc, v_deposit_id, 'deposits',
+            'Cash paid - ' || v_desc,
+            p_purchase_value, p_mode, 'paid', p_created_by, NOW(), 'deposits', v_deposit_id, v_journal_id
+        );
+    END IF;
+
+    INSERT INTO expenses(
+        society_id, user_id, entity_id, role,
+        expense_date, acc_id, particulars, amount, mode,
+        status, confirmed_by, confirmed_at, source_reference, created_at
+    ) VALUES (
+        p_society_id, p_created_by, v_deposit_id, 'deposits',
+        p_purchase_date, p_acc_id, v_desc, p_purchase_value, p_mode,
+        'confirmed', p_created_by, NOW(), NULL, NOW()
+    ) RETURNING id INTO v_expense_id;
+
+    RETURN QUERY SELECT v_deposit_id, v_expense_id, v_trx_id, v_journal_id;
+END;
+$$;
+
+-- fn_dispose_deposit: dispose/mature an intangible investment (FD maturity, bond sale, MF redemption)
+-- Mirrors fn_dispose_asset but for the `deposits` table; posts Dr cash/bank, Cr investment account,
+-- and records gain/loss via STCG/LTCG per the 36-month test (sec 2(42A)).
+DROP FUNCTION IF EXISTS fn_dispose_deposit(
+    INT, NUMERIC, VARCHAR, INT, DATE, TEXT, INT, NUMERIC
+) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_dispose_deposit(
+    p_deposit_id    INT,
+    p_sale_value    NUMERIC,
+    p_mode          VARCHAR DEFAULT 'cash',
+    p_created_by    INT     DEFAULT NULL,
+    p_sale_date     DATE    DEFAULT CURRENT_DATE,
+    p_particulars   TEXT    DEFAULT NULL,
+    p_acc_id        INT     DEFAULT NULL,
+    p_tds_amount    NUMERIC DEFAULT 0
+)
+RETURNS TABLE(receipt_id INT, transaction_id INT, journal_id INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_deposit     deposits%ROWTYPE;
+    v_acc_id      INT;
+    v_bank_acc    INT;
+    v_receipt_id  INT;
+    v_trx_id      INT;
+    v_journal_id  INT;
+    v_desc        TEXT;
+    v_net_sale    NUMERIC(15,2);
+    v_tds_rec_acc INT;
+BEGIN
+    SELECT * INTO v_deposit FROM deposits WHERE id = p_deposit_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Deposit not found'; END IF;
+    IF v_deposit.disposed THEN RAISE EXCEPTION 'Deposit already disposed'; END IF;
+    IF p_sale_value IS NULL OR p_sale_value <= 0 THEN
+        RAISE EXCEPTION 'sale_value must be > 0';
+    END IF;
+
+    v_acc_id := COALESCE(p_acc_id, v_deposit.sale_acc_id);
+    IF v_acc_id IS NULL THEN
+        SELECT id INTO v_acc_id FROM accounts
+        WHERE society_id = v_deposit.society_id AND tab_name = 'SellAs'
+        LIMIT 1;
+    END IF;
+
+    v_desc := COALESCE(p_particulars, 'Deposit Sale/Maturity - ' || v_deposit.deposit_name);
+    v_bank_acc := fn_resolve_bank_leg(v_deposit.society_id, p_mode);
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    v_net_sale := p_sale_value - COALESCE(p_tds_amount, 0);
+    IF v_net_sale < 0 THEN RAISE EXCEPTION 'TDS amount cannot exceed sale value'; END IF;
+
+    -- Dr: TDS Receivable
+    IF COALESCE(p_tds_amount, 0) > 0 THEN
+        SELECT id INTO v_tds_rec_acc FROM accounts
+        WHERE society_id = v_deposit.society_id AND tab_name = 'TDSRec'
+        LIMIT 1;
+
+        IF v_tds_rec_acc IS NULL THEN
+            RAISE EXCEPTION 'Cannot apply TDS: No TDS Receivable account configured for this society.';
+        END IF;
+
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_deposit.society_id, 'Dr', p_sale_date, v_tds_rec_acc, p_deposit_id, 'deposits',
+            'TDS Deducted on Deposit Sale/Maturity - ' || v_deposit.deposit_name,
+            p_tds_amount, 'journal', 'paid', p_created_by, NOW(), 'deposits', p_deposit_id, v_journal_id
+        );
+    END IF;
+
+    -- Dr: cash / bank (sale proceeds) — non-cash mode only
+    IF v_bank_acc IS NOT NULL AND v_net_sale > 0 THEN
+        INSERT INTO transactions(
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            v_deposit.society_id, 'Dr', p_sale_date, v_bank_acc, p_deposit_id, 'deposits',
+            'Cash received - ' || v_desc,
+            v_net_sale, p_mode, 'paid', p_created_by, NOW(), 'deposits', p_deposit_id, v_journal_id
+        );
+    END IF;
+
+    -- Cr: investment class account, for the FULL sale value — this is the
+    -- "deductions" leg for the block-of-assets deduction logic (applies
+    -- to the intangible block too). No per-deposit gain/loss leg is
+    -- posted here; the STCG/LTCG split is purely informational and
+    -- computed in fn_deposit_holdings_fy at the time of the statement.
+    INSERT INTO transactions(
+        society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+        amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+    ) VALUES (
+        v_deposit.society_id, 'Cr', p_sale_date, v_deposit.acc_id, p_deposit_id, 'deposits',
+        'Deposit disposed (moneys payable) - ' || v_deposit.deposit_name,
+        p_sale_value, p_mode, 'paid', p_created_by, NOW(), 'deposits', p_deposit_id, v_journal_id
+    ) RETURNING id INTO v_trx_id;
+
+    RETURN QUERY SELECT v_receipt_id, v_trx_id, v_journal_id;
+END;
+$$;
+
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -581,7 +770,10 @@ CREATE TABLE IF NOT EXISTS receipts (
             'upi',
             'card',
             'bank',
-            'crypto'
+            'crypto',
+            'neft',
+            'rtgs',
+            'imp'
         )
     ),
     cheque_no VARCHAR(50),
@@ -685,7 +877,8 @@ CREATE TABLE IF NOT EXISTS expenses (
             'vendor',
             'security',
             'other',
-            'assets'
+            'assets',
+            'deposits'
         )
     ),
     expense_date DATE NOT NULL,
@@ -947,7 +1140,8 @@ CREATE TABLE IF NOT EXISTS transactions (
             'vendor',
             'security',
             'other',
-            'assets'
+            'assets',
+            'deposits'
         )
     ),
     acc_particulars VARCHAR(200),
@@ -965,7 +1159,10 @@ CREATE TABLE IF NOT EXISTS transactions (
             'card',
             'bank',
             'crypto',
-            'journal'
+            'journal',
+            'neft',
+            'rtgs',
+            'imp'
         )
     ),
     payment_gateway_id VARCHAR(50),
