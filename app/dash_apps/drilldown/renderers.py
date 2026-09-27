@@ -4185,6 +4185,24 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
         "additions": "additions",
         "closing_c/f": "own_closing",
         "closing_balance": "own_closing",
+        # ALL Holdings / ALL Deposits register — fn_asset_holdings_fy /
+        # fn_deposit_holdings_fy return columns named (name, ref_no,
+        # purchase_date, exit_date, purchase_value, sale_value, stcg,
+        # ltcg, closing_wdv), so the display columns (SN#, ISIN#,
+        # Disposed Date, Sell Date, Purchase Price, Sell Price) need
+        # explicit remaps — without them _make_preview_table looked up
+        # "snnum"/"isinnum"/"disposed_date"/"purchase_price"/"sell_price"
+        # directly and rendered empty for every row. Note _make_preview_table
+        # computes key = col.lower().replace(" ", "_"), so "SN#"/"ISIN#"
+        # become "sn#"/"isin#" — both spellings are mapped below.
+        "snnum": "ref_no", "sn#": "ref_no",
+        "isinnum": "ref_no", "isin#": "ref_no",
+        "disposed_date": "exit_date",
+        "sell_date": "exit_date",
+        "purchase_price": "purchase_value",
+        "sell_price": "sale_value",
+        "stcg": "stcg",
+        "ltcg": "ltcg",
     }
 
     def _make_preview_table(rows, columns, title, max_rows=None):
@@ -4564,8 +4582,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
     if not holdings_rows and not deposits_rows and not dep_rows and not ie_rows and not funds_rows and not bs_rows:
         body = dbc.Alert("No data found for this financial year.", color="secondary", style={"borderRadius": "10px"})
     else:
-        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings")
-        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits")
+        holdings_preview = _make_preview_table(holdings_rows, ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"], "1. ALL Holdings")
+        deposits_preview = _make_preview_table(deposits_rows, ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"], "2. ALL Deposits")
         dep_preview = _make_preview_table(dep_rows, ["Account", "Opening WDV", "Additions (1st Half)", "Additions (2nd Half)", "Deductions", "Rate %", "Depreciation", "Closing WDV"], "3. Depreciation Account (Fixed Assets WDV Schedule)")
         ie_preview = _make_ie_preview(ie_rows, "4. Income & Expenditure Account (Accrual Basis)")
         funds_preview = _make_preview_table(funds_rows, ["Account", "Opening B/F", "Additions", "Deductions", "Closing C/F"], "5. ALL Equity (Corpus Fund, Capital Account, Sinking Fund, Repair & Maintenance)")
@@ -4666,18 +4684,20 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                 )
 
             # 1. ALL Holdings — complete tangible fixed-asset register (active + disposed)
-            holdings_cols = ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
+            holdings_cols = ["Name", "SN#", "Purchase Date", "Disposed Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"]
             holdings_map = {
                 "snnum": "ref_no", "disposed_date": "exit_date",
-                "purchase_price": "purchase_value", "sell_price": "sale_value",
+                "purchase_price": "purchase_value", "closing_wdv": "closing_wdv",
+                "sell_price": "sale_value",
             }
             parts.append(_table("1. ALL Holdings", holdings_rows, holdings_cols, holdings_map))
 
             # 2. ALL Deposits (intangible) — investment register
-            deposits_cols = ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Sell Price", "STCG", "LTCG"]
+            deposits_cols = ["Name", "ISIN#", "Purchase Date", "Sell Date", "Purchase Price", "Closing WDV", "Sell Price", "STCG", "LTCG"]
             deposits_map = {
                 "isinnum": "ref_no", "sell_date": "exit_date",
-                "purchase_price": "purchase_value", "sell_price": "sale_value",
+                "purchase_price": "purchase_value", "closing_wdv": "closing_wdv",
+                "sell_price": "sale_value",
             }
             parts.append(_table("2. ALL Deposits", deposits_rows, deposits_cols, deposits_map))
 

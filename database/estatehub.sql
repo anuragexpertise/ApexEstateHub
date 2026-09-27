@@ -8847,7 +8847,8 @@ RETURNS TABLE (
     purchase_value NUMERIC(12,2),
     sale_value     NUMERIC(12,2),
     stcg           NUMERIC(12,2),
-    ltcg           NUMERIC(12,2)
+    ltcg           NUMERIC(12,2),
+    closing_wdv    NUMERIC(12,2)   -- per-asset written-down value (see note below)
 )
 LANGUAGE plpgsql STABLE AS $$
 #variable_conflict use_column
@@ -8865,7 +8866,27 @@ BEGIN
              THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END,
         CASE WHEN a.disposed AND a.sale_value IS NOT NULL
                   AND a.disposed_at > a.purchase_date + INTERVAL '3 years'
-             THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END
+             THEN ROUND(a.sale_value - a.purchase_value, 2) ELSE 0 END,
+        -- Per-asset Closing WDV (supplementary informational figure — NOT the
+        -- sec. 43(6)(c) block WDV that actually gets filed). The schema
+        -- tracks depreciation at the BLOCK/account level (fn_account_depreciation,
+        -- fn_fixed_asset_register_fy), never per-asset, so there is no true
+        -- per-asset accumulated-depreciation column to read. This applies the
+        -- asset's OWN depreciation_rate straight-line from purchase to the
+        -- valuation date (disposal date if sold, else end of FY p_fy, else
+        -- today) and subtracts the disposal proceeds. It is a reasonable
+        -- approximation for the "ALL Holdings" register's WDV column only —
+        -- say so wherever it sits next to the block-level Depreciation
+        -- Account statement so a reader doesn't mistake one for the other.
+        GREATEST(
+            a.purchase_value
+            - a.purchase_value * COALESCE(a.depreciation_rate, 0) / 100.0
+              * GREATEST(
+                  (COALESCE(a.disposed_at,
+                            CASE WHEN p_fy IS NOT NULL THEN MAKE_DATE(p_fy + 1, 3, 31)
+                                 ELSE CURRENT_DATE END)
+                   - a.purchase_date) / 365.25, 0)
+            - COALESCE(a.sale_value, 0), 0) AS closing_wdv
     FROM assets a
     WHERE a.society_id = p_society_id
     ORDER BY a.disposed_at ASC NULLS LAST, a.purchase_date DESC;
@@ -8899,7 +8920,8 @@ RETURNS TABLE (
     purchase_value NUMERIC(12,2),
     sale_value     NUMERIC(12,2),
     stcg           NUMERIC(12,2),
-    ltcg           NUMERIC(12,2)
+    ltcg           NUMERIC(12,2),
+    closing_wdv    NUMERIC(12,2)   -- per-deposit written-down value (see note below)
 )
 LANGUAGE plpgsql STABLE AS $$
 #variable_conflict use_column
@@ -8917,7 +8939,18 @@ BEGIN
              THEN ROUND(d.sale_value - d.purchase_value, 2) ELSE 0 END,
         CASE WHEN d.disposed AND d.sale_value IS NOT NULL
                   AND d.sale_date > d.purchase_date + INTERVAL '3 years'
-             THEN ROUND(d.sale_value - d.purchase_value, 2) ELSE 0 END
+             THEN ROUND(d.sale_value - d.purchase_value, 2) ELSE 0 END,
+        -- Per-deposit Closing WDV (supplementary informational figure).
+        -- Deposits are intangible investments (FDs, bonds, MF units) — there
+        -- is no depreciation_rate column on `deposits` and no block-level
+        -- WDV schedule for them, so this is simply the remaining book value:
+        -- purchase cost minus disposal proceeds if sold, else the full
+        -- purchase cost while still held. It mirrors the ALL Holdings
+        -- closing_wdv's intent (a per-row "what this is worth on the books
+        -- today") without pretending deposits are depreciable assets.
+        CASE WHEN d.disposed AND d.sale_value IS NOT NULL
+             THEN GREATEST(d.purchase_value - d.sale_value, 0)
+             ELSE d.purchase_value END AS closing_wdv
     FROM deposits d
     WHERE d.society_id = p_society_id
     ORDER BY d.disposed ASC, d.purchase_date DESC;
