@@ -692,6 +692,36 @@ def _fin_nature_of(row: dict, fallback_section_map=None):
     return None
 
 
+def _fin_stat_of(row: dict):
+    """
+    The statutory head a Balance Sheet account is mapped to, as
+    (head_code, head_label), or None when the account has no mapping.
+
+    fn_fy_closing_report already returns statutory_head_code /
+    statutory_head_label / statutory_statement_section /
+    statutory_display_order for every row — they were simply never rendered
+    on the card. The Excel export *did* use them (financial_statements_
+    export.py groups by head and prints the label), so before this the same
+    account appeared as "Sinking Fund Reserve" on screen and "Interest-Free
+    Maintenance Security Corpus" in the downloaded workbook. Surfacing the
+    head as a caption on each balance-sheet line makes the two agree.
+
+    Returns None when unmapped, when the label is blank, or when the label is
+    just the account's own name restated — in that last case a caption would
+    add noise without adding information.
+    """
+    if not row:
+        return None
+    code = (row.get("statutory_head_code") or "").strip()
+    label = (row.get("statutory_head_label") or "").strip()
+    if not label:
+        return None
+    name = (row.get("account_name") or "").strip()
+    if name and label.lower() == name.lower():
+        return None
+    return (code or None, label)
+
+
 def _fin_value_color(v, nature):
     """Colour a currency cell: nature first, nil value muted, else inherit."""
     if v is None or v == "":
@@ -3940,7 +3970,11 @@ def render_ledger_index_card(rows: list[dict], fy_options: list[int], selected_f
 def render_fy_closing_card(rows: list, error: str | None,
                             fy_options: list, selected_fy,
                             mutuality_summary: dict | None = None,
-                            society_id: int | None = None) -> html.Div:
+                            society_id: int | None = None,
+                            reserve_preview: dict | None = None,
+                            reserve_history: list[dict] | None = None,
+                            reserve_error: str | None = None,
+                            can_post_reserve: bool = False) -> html.Div:
     """
     Read-only FY Closing Report — same account-by-account detail for every
     role that can reach it (Admin/Owner/Vendor/Security all confirmed the
@@ -3953,6 +3987,12 @@ def render_fy_closing_card(rows: list, error: str | None,
     Mutuality Summary" button, which streams the full Excel workbook via the
     same btn-fy-export/dcc.Download pattern as every other export on this
     card (cashbook/ledger/ledger_index) — not a standalone route.
+
+    reserve_preview / reserve_history / can_post_reserve feed the statutory
+    reserve appropriation panel (render_reserve_appropriation_panel), the one
+    writing action on this card. All three are optional so the existing
+    read-only callers and tests keep working unchanged; the panel is simply
+    omitted when no preview is supplied.
     """
     color = "#17976e"
 
@@ -4105,6 +4145,21 @@ def render_fy_closing_card(rows: list, error: str | None,
         ], style={"padding": "12px 16px", "background": "#f8f9fb",
                   "borderTop": "1px solid #eee", "borderBottom": "1px solid #eee"})
 
+    # Statutory reserve appropriation. Built before the early returns so the
+    # panel is visible even when the account table itself failed to load —
+    # "why can't I close the year" is answered by this panel, not the table.
+    reserve_panel = (
+        render_reserve_appropriation_panel(
+            reserve_preview,
+            history=reserve_history,
+            error=reserve_error,
+            fy=selected_fy,
+            can_post=can_post_reserve,
+        )
+        if (reserve_preview is not None or reserve_error)
+        else None
+    )
+
     if error:
         return html.Div([
             header,
@@ -4114,6 +4169,7 @@ def render_fy_closing_card(rows: list, error: str | None,
                           color="warning", style={"borderRadius": "10px"}),
                 style={"padding": "16px"},
             ),
+            html.Div(reserve_panel, style={"padding": "0 0 4px"}) if reserve_panel else None,
         ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
                   "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
@@ -4158,8 +4214,280 @@ def render_fy_closing_card(rows: list, error: str | None,
         header,
         mutuality_kpi,
         html.Div(body, style={"padding": "16px"}),
+        # Statutory reserve appropriation sits below the account table, since
+        # the reserve is a destination for the year's result — the reader has
+        # just seen the closing figures that produce the surplus.
+        html.Div(reserve_panel, style={"padding": "0 0 4px"}) if reserve_panel else None,
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# STATUTORY RESERVE APPROPRIATION PANEL (UP AOA Model Bye-Laws Ch.VII
+# Para 46(c) & 3(d) — a fixed share of net surplus to the Reserve Fund)
+# ════════════════════════════════════════════════════════════════════════════
+# Sits on the FY Closing card, which is where the year's result already lives.
+# The panel is read-only by itself; the single write it can trigger is
+# delegated to fn_fy_close_reserve_appropriation via the admin-only callback
+# in drilldown_callbacks.py.
+
+_FIN_GREEN = "#1e7e34"
+_FIN_AMBER = "#b8860b"
+
+
+def render_reserve_appropriation_panel(
+    preview: dict | None,
+    history: list[dict] | None = None,
+    error: str | None = None,
+    fy: int | None = None,
+    can_post: bool = False,
+) -> html.Div:
+    """
+    Render the statutory reserve appropriation panel.
+
+    preview is the row from fn_fy_close_preview: net surplus, the amount a
+    `reserve_pct` share would move, the receiving account, and `blockers`
+    explaining why the close is not permitted. Rendered as a disabled,
+    fully-explained button rather than a hidden one, so an admin can see that
+    the year is closable and exactly what would happen.
+
+    can_post is the role gate. The SQL function is the real authority — it
+    re-checks the books and the idempotency itself — but hiding the button
+    for non-admins keeps the card honest about who may write to the ledger.
+    """
+    color = _FIN_NAVY
+    history = history or []
+
+    if error:
+        return html.Div([
+            html.Div([
+                html.I(className="fas fa-coins me-2",
+                       style={"color": color, "fontSize": "14px"}),
+                html.Strong("Statutory Reserve Appropriation"),
+            ], style={"fontSize": "13px", "fontWeight": "700", "color": color,
+                      "marginBottom": "8px"}),
+            dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error],
+                      color="warning", style={"borderRadius": "8px",
+                                              "fontSize": "11px"}),
+        ], style={"margin": "0 16px 16px", "padding": "14px 16px",
+                  "background": "#f8f9fb", "borderRadius": "10px",
+                  "border": f"1px solid {color}1a"})
+
+    if not preview:
+        return html.Div([
+            dbc.Alert("Reserve appropriation preview unavailable for this FY.",
+                      color="secondary", style={"borderRadius": "8px", "fontSize": "11px"}),
+        ], style={"margin": "0 16px 16px", "padding": "14px 16px",
+                  "background": "#f8f9fb", "borderRadius": "10px",
+                  "border": f"1px solid {color}1a"})
+
+    surplus = float(preview.get("surplus") or 0)
+    proposed = float(preview.get("proposed_transfer") or 0)
+    pct = float(preview.get("reserve_pct") or 0)
+    blockers = preview.get("blockers")
+    notes = preview.get("notes")
+    already = bool(preview.get("already_closed"))
+    can_close = bool(preview.get("can_close"))
+    balanced = bool(preview.get("books_balanced"))
+    reserve_name = preview.get("reserve_acc_name") or "— not resolved —"
+
+    def _tile(label, value, vcolor):
+        return html.Div([
+            html.Div(label, style={"fontSize": "9.5px", "fontWeight": "700",
+                                   "color": _FIN_NIL, "textTransform": "uppercase",
+                                   "letterSpacing": "0.4px", "marginBottom": "3px"}),
+            html.Div(value, style={"fontSize": "15px", "fontWeight": "700",
+                                   "color": vcolor, "fontVariantNumeric": "tabular-nums"}),
+        ], style={"flex": "1", "minWidth": "130px", "padding": "10px 12px",
+                  "background": "#ffffff", "borderRadius": "8px",
+                  "border": f"1px solid {color}14"})
+
+    tiles = html.Div([
+        _tile("Net surplus (Cr)", f"₹{surplus:,.2f}",
+              _FIN_GREEN if surplus > 0 else (_FIN_DR if surplus < 0 else _FIN_NIL)),
+        _tile(f"Reserve share ({pct:g}%)", f"₹{proposed:,.2f}",
+              _FIN_GREEN if proposed > 0 else _FIN_NIL),
+        _tile("Credit to", reserve_name, color),
+        _tile("Books balanced", "Yes" if balanced else "No",
+              _FIN_GREEN if balanced else _FIN_DR),
+    ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+              "marginBottom": "12px"})
+
+    # Status banner — the one thing an admin most needs to read at a glance.
+    if already:
+        banner = dbc.Alert(
+            [html.I(className="fas fa-lock me-2"),
+             f"FY {_fin_fy_label(fy)} is already closed"
+             + (f" ({preview.get('closure_status')})" if preview.get("closure_status") else "")
+             + ". The reserve has been appropriated; this year cannot be closed again."],
+            color="success", style={"borderRadius": "8px", "fontSize": "11px",
+                                    "marginBottom": "10px"})
+    elif not balanced:
+        banner = dbc.Alert(
+            [html.I(className="fas fa-exclamation-triangle me-2"),
+             f"Books are out of balance by ₹{float(preview.get('imbalance_amount') or 0):,.2f}. "
+             "The close is blocked — fix the ledger first."],
+            color="danger", style={"borderRadius": "8px", "fontSize": "11px",
+                                   "marginBottom": "10px"})
+    elif not can_close:
+        banner = dbc.Alert(
+            [html.I(className="fas fa-info-circle me-2"), blockers or
+             "This year cannot be appropriated to the reserve."],
+            color="secondary", style={"borderRadius": "8px", "fontSize": "11px",
+                                      "marginBottom": "10px"})
+    elif not can_post:
+        if proposed > 0:
+            banner = dbc.Alert(
+                [html.I(className="fas fa-user-lock me-2"),
+                 f"₹{proposed:,.2f} would be transferred from Income & Expenditure A/c "
+                 f"to {reserve_name}. Only an admin can post this."],
+                color="info", style={"borderRadius": "8px", "fontSize": "11px",
+                                     "marginBottom": "10px"})
+        else:
+            banner = dbc.Alert(
+                [html.I(className="fas fa-user-lock me-2"),
+                 f"This year would be closed with no reserve appropriation. "
+                 f"Only an admin can post this."],
+                color="info", style={"borderRadius": "8px", "fontSize": "11px",
+                                     "marginBottom": "10px"})
+    else:
+        banner = dbc.Alert(
+            [html.I(className="fas fa-arrow-right me-2"),
+             f"₹{proposed:,.2f} (={pct:g}% of the ₹{surplus:,.2f} net surplus) will be "
+             f"transferred from Income & Expenditure A/c to {reserve_name}. "
+             f"The remaining ₹{surplus - proposed:,.2f} stays in the P&L and continues "
+             f"to be reported as Reserves & Surplus on the Balance Sheet."],
+            color="warning", style={"borderRadius": "8px", "fontSize": "11px",
+                                    "marginBottom": "10px"})
+
+    # A note is not a blocker: the close is allowed, it just does something
+    # other than the usual appropriation (a deficit year posts no journal).
+    if notes and can_close and not already:
+        banner = html.Div([banner, dbc.Alert(
+            [html.I(className="fas fa-info-circle me-2"), notes],
+            color="secondary", style={"borderRadius": "8px", "fontSize": "11px",
+                                      "marginTop": "8px"})])
+
+    # Admin-only write. Disabled unless the SQL preview agrees the close is
+    # permitted, the year is open, and the viewer is an admin.
+    pct_input = dbc.Input(
+        id="fy-close-reserve-pct", type="number", min=0, max=100, step=0.5,
+        value=pct, disabled=True,
+        style={"width": "82px", "fontSize": "12px", "borderRadius": "6px"},
+    )
+    submit = dbc.Button(
+        [html.I(className="fas fa-lock me-2"),
+         (f"Close FY {_fin_fy_label(fy)} & Transfer to Reserve" if proposed > 0
+          else f"Close FY {_fin_fy_label(fy)} (no appropriation)")],
+        id="fy-close-reserve-submit",
+        n_clicks=0,
+        color="success", outline=True,
+        disabled=not (can_close and not already and can_post),
+        style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "11px"},
+    )
+    pct_note = html.Div(
+        html.I(className="fas fa-circle-info me-1",
+               style={"fontSize": "9px", "color": _FIN_NIL}),
+        "Share is fixed by the Model Bye-Laws for this regime and applied by the "
+        "database; it is shown for reference only.",
+        style={"fontSize": "9.5px", "color": _FIN_NIL, "fontStyle": "italic",
+               "marginTop": "6px"})
+
+    toast = html.Div(id="fy-close-reserve-toast", style={"marginTop": "10px"})
+
+    # Prior closes — proof the reserve is actually being built up, which is
+    # the whole point of the feature and was previously invisible.
+    if history:
+        hrows = []
+        for h in history:
+            xfer = float(h.get("reserve_transferred") or 0)
+            hrows.append(html.Tr([
+                html.Td(f"FY {_fin_fy_label(h.get('financial_year'))}",
+                        style={"fontSize": "11px", "fontWeight": "600"}),
+                html.Td(f"₹{float(h.get('surplus') or 0):,.2f}", className="text-end",
+                        style={"fontSize": "11px"}),
+                html.Td(f"{float(h.get('reserve_pct') or 0):g}%", className="text-end",
+                        style={"fontSize": "11px"}),
+                html.Td(f"₹{xfer:,.2f}", className="text-end",
+                        style={"fontSize": "11px", "fontWeight": "700",
+                               "color": _FIN_GREEN if xfer > 0 else _FIN_NIL}),
+                html.Td(h.get("reserve_acc_name") or "—",
+                        style={"fontSize": "10.5px", "color": "#555"}),
+                html.Td(str(h.get("status") or "—").title(),
+                        style={"fontSize": "10.5px", "textAlign": "center",
+                               "fontWeight": "600",
+                               "color": {"closed": _FIN_GREEN,
+                                         "no_surplus": _FIN_NIL,
+                                         "reversed": _FIN_DR}.get(
+                                   h.get("status"), _FIN_NIL)}),
+                html.Td(_fin_date(h.get("closed_at")) if h.get("closed_at") else "—",
+                        style={"fontSize": "10.5px", "textAlign": "center",
+                               "color": "#666"}),
+            ]))
+        history_table = html.Div([
+            html.Div("Closure history", style={"fontSize": "11px", "fontWeight": "700",
+                                               "color": "#444", "marginBottom": "6px",
+                                               "marginTop": "14px"}),
+            dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("FY", style={"fontSize": "10px", "background": color,
+                                          "color": "#fff"}),
+                    html.Th("Surplus", className="text-end",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                    html.Th("Share", className="text-end",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                    html.Th("Appropriated", className="text-end",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                    html.Th("Credited To",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                    html.Th("Status", className="text-center",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                    html.Th("Closed", className="text-center",
+                            style={"fontSize": "10px", "background": color, "color": "#fff"}),
+                ])),
+                html.Tbody(hrows),
+            ], bordered=False, hover=True, responsive=True, size="sm",
+                style={"marginTop": "0", "fontSize": "11px"}),
+        ])
+    else:
+        history_table = html.Div(
+            "No financial year has been closed yet, so the statutory reserve has "
+            "never been appropriated from surplus.",
+            style={"fontSize": "10.5px", "color": _FIN_NIL, "fontStyle": "italic",
+                   "marginTop": "14px"})
+
+    return html.Div([
+        html.Div([
+            html.I(className="fas fa-coins me-2", style={"color": color, "fontSize": "14px"}),
+            html.Strong("Statutory Reserve Appropriation"),
+        ], style={"fontSize": "13px", "fontWeight": "700", "color": color,
+                  "marginBottom": "10px"}),
+        tiles,
+        banner,
+        html.Div([
+            html.Div([html.Label("Appropriation share", style={"fontSize": "10.5px",
+                                                               "color": "#555",
+                                                               "marginBottom": "3px"}),
+                      pct_input], style={"marginRight": "10px"}),
+            submit,
+        ], style={"display": "flex", "alignItems": "flex-end", "flexWrap": "wrap"}),
+        pct_note,
+        toast,
+        history_table,
+    ], style={"margin": "0 16px 16px", "padding": "14px 16px",
+              "background": "#f8f9fb", "borderRadius": "10px",
+              "border": f"1px solid {color}1a"})
+
+
+def _fin_fy_label(fy):
+    """'2026-27' from the FY start year, matching the card's existing pills."""
+    if fy in (None, ""):
+        return "—"
+    try:
+        f = int(fy)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{f}-{str(f + 1)[-2:]}"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4599,14 +4927,15 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
 
             def _build_hierarchical_side(nodes, section_title, default_nature):
                 # (label, raw_amount_or_None, kind, indent, nature)
-                side = [(section_title, None, "header", 0, None)]
+                side = [(section_title, None, "header", 0, None, None)]
                 for n in nodes:
                     n_name = n.get("account_name") or n.get("name") or ""
                     n_amt = _amt(n)
                     n_nature = _fin_nature_of(n) or default_nature
                     kids = children_by_parent.get(n.get("account_id") or n.get("id"), [])
                     if kids:
-                        side.append((n_name, n_amt, "parent_node", 0, n_nature))
+                        side.append((n_name, n_amt, "parent_node", 0, n_nature,
+                                     _fin_stat_of(n)))
                         for k in kids:
                             k_name = k.get("account_name") or k.get("name") or ""
                             k_amt = float(k.get("display_amount") or k.get("amount")
@@ -4614,29 +4943,33 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                             k_nature = _fin_nature_of(k) or n_nature
                             grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
                             if grandkids:
-                                side.append((k_name, k_amt, "child_node", 1, k_nature))
+                                side.append((k_name, k_amt, "child_node", 1, k_nature,
+                                             _fin_stat_of(k)))
                                 for gk in grandkids:
                                     gk_name = gk.get("account_name") or gk.get("name") or ""
                                     gk_amt = float(gk.get("display_amount") or gk.get("amount")
                                                    or gk.get("own_closing") or 0)
                                     side.append((gk_name, gk_amt, "grandchild_node", 2,
-                                                 _fin_nature_of(gk) or k_nature))
+                                                 _fin_nature_of(gk) or k_nature,
+                                                 _fin_stat_of(gk)))
                             else:
-                                side.append((k_name, k_amt, "child_node", 1, k_nature))
+                                side.append((k_name, k_amt, "child_node", 1, k_nature,
+                                             _fin_stat_of(k)))
                     else:
-                        side.append((n_name, n_amt, "item", 0, n_nature))
+                        side.append((n_name, n_amt, "item", 0, n_nature,
+                                     _fin_stat_of(n)))
                 return side
 
             left_side = _build_hierarchical_side(liabilities_nodes, "Liabilities", "Cr")
             if liabilities_nodes:
-                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr"))
+                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr", None))
             if equity_nodes:
                 left_side += _build_hierarchical_side(equity_nodes, "Equity", "Cr")
-                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr"))
-            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr"))
+                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr", None))
+            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr", None))
 
             right_side = _build_hierarchical_side(assets_nodes, "Assets", "Dr")
-            right_side.append(("Total Assets", total_assets, "total", 0, "Dr"))
+            right_side.append(("Total Assets", total_assets, "total", 0, "Dr", None))
         else:
             assets = [r for r in rows if r.get("statement_section") == "Assets" or r.get("drcr_account") == "Dr"]
             liabilities = [r for r in rows if r.get("statement_section") == "Liabilities" or (r.get("drcr_account") == "Cr" and r.get("tab_name") != "CapAc")]
@@ -4650,22 +4983,22 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
             total_equity = sum(_amt(r) for r in equity)
 
             def _build_side(section_rows, section_title, default_nature):
-                side = [(section_title, None, "header", 0, None)]
+                side = [(section_title, None, "header", 0, None, None)]
                 for r in section_rows:
                     side.append((r.get("account_name") or "", _amt(r), "item", 0,
-                                 _fin_nature_of(r) or default_nature))
+                                 _fin_nature_of(r) or default_nature, _fin_stat_of(r)))
                 return side
 
             left_side = _build_side(liabilities, "Liabilities", "Cr")
             if liabilities:
-                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr"))
+                left_side.append(("Total Liabilities", total_liabilities, "subtotal", 0, "Cr", None))
             left_side += _build_side(equity, "Equity", "Cr")
             if equity:
-                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr"))
-            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr"))
+                left_side.append(("Total Equity", total_equity, "subtotal", 0, "Cr", None))
+            left_side.append(("Total Liabilities + Equity", total_liabilities + total_equity, "total", 0, "Cr", None))
 
             right_side = _build_side(assets, "Assets", "Dr")
-            right_side.append(("Total Assets", total_assets, "total", 0, "Dr"))
+            right_side.append(("Total Assets", total_assets, "total", 0, "Dr", None))
 
         def _style_for(kind, align_right=False, indent=0):
             st = _fin_cell(align="right" if align_right else "left",
@@ -4693,11 +5026,37 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                            "borderTop": f"2px solid {_FIN_NAVY}"})
             return st
 
-        def _cells(label, amount, kind, indent, nature):
+        def _label_cell(label, kind, indent, stat):
+            """
+            Account name, plus the statutory head it is mapped to as a
+            muted caption underneath.
+
+            The caption is the fix for the screen/export vocabulary split:
+            financial_statements_export.py groups the Balance Sheet by
+            statutory_head_label and prints that as the group header, so a
+            line reading "Sinking Fund Reserve" on the card was exported as
+            "Interest-Free Maintenance Security Corpus". Showing both, in
+            the same cell, means an auditor reading the screen and the
+            workbook are looking at the same classification.
+            """
+            if not stat:
+                return html.Td(label, style=_style_for(kind, indent=indent))
+            code, stat_label = stat
+            caption = f"{stat_label} · {code}" if code else stat_label
+            return html.Td([
+                html.Div(label),
+                html.Div(caption, style={
+                    "fontSize": "9px", "fontWeight": "400",
+                    "color": _FIN_NIL, "fontStyle": "italic",
+                    "marginTop": "1px", "whiteSpace": "normal",
+                }),
+            ], style=_style_for(kind, indent=indent))
+
+        def _cells(label, amount, kind, indent, nature, stat=None):
             if kind == "header":
                 return [html.Td(label, colSpan=2, style=_style_for("header"))]
             return [
-                html.Td(label, style=_style_for(kind, indent=indent)),
+                _label_cell(label, kind, indent, stat),
                 html.Td(_fin_money(amount), style={
                     **_style_for(kind, align_right=True),
                     "color": _fin_value_color(amount, nature),
@@ -4708,8 +5067,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
         n_rows = max(len(left_side), len(right_side))
         body_rows = []
         for i in range(n_rows):
-            l = left_side[i] if i < len(left_side) else ("", None, "item", 0, "Cr")
-            r = right_side[i] if i < len(right_side) else ("", None, "item", 0, "Dr")
+            l = left_side[i] if i < len(left_side) else ("", None, "item", 0, "Cr", None)
+            r = right_side[i] if i < len(right_side) else ("", None, "item", 0, "Dr", None)
 
             row_cells = _cells(*l)
             row_cells.append(html.Td("", style={"width": "18px", "padding": "0",
@@ -5054,6 +5413,23 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                 style += border_top
             return f'<td style="{style}">{text}</td>'
 
+        def _html_label(name, stat, indent=0, **kw):
+            """
+            Account name plus its statutory head as a muted italic caption —
+            the print/PDF twin of _label_cell on the card, so the letterhead
+            carries the same statutory vocabulary as both the screen and the
+            Excel export.
+            """
+            if not stat:
+                return _html_td(name, "left", indent=indent, **kw)
+            code, stat_label = stat
+            caption = f"{stat_label} · {code}" if code else stat_label
+            return _html_td(
+                f'<div>{name}</div>'
+                f'<div style="font-size:8.5px;color:{_FIN_NIL};'
+                f'font-style:italic;margin-top:1px">{caption}</div>',
+                "left", indent=indent, **kw)
+
         def _fin_mutuality_html(nature):
             if not nature:
                 return "—"
@@ -5288,8 +5664,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                     if kids:
                         out.append(
                             "<tr>"
-                            + _html_td(n_name, "left", color=color, weight="700",
-                                       bg="#eef2f7")
+                            + _html_label(n_name, _fin_stat_of(n), color=color,
+                                          weight="700", bg="#eef2f7")
                             + _html_td(_fin_money(n_amt), "right",
                                        color=_fin_value_color(n_amt, n_nature),
                                        weight="700", bg="#eef2f7")
@@ -5301,8 +5677,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                             k_nature = _fin_nature_of(k) or n_nature
                             grandkids = children_by_parent.get(k.get("account_id") or k.get("id"), [])
                             if grandkids:
-                                out.append("<tr>" + _html_td("↳ " + k_name, "left",
-                                                            weight="600", indent=1, bg="#f6f9fc")
+                                out.append("<tr>" + _html_label("↳ " + k_name, _fin_stat_of(k),
+                                                                weight="600", indent=1, bg="#f6f9fc")
                                            + _html_td(_fin_money(k_amt), "right",
                                                       color=_fin_value_color(k_amt, k_nature),
                                                       weight="600", bg="#f6f9fc") + "</tr>")
@@ -5311,17 +5687,18 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                                     gk_amt = float(gk.get("display_amount") or gk.get("amount")
                                                    or gk.get("own_closing") or 0)
                                     gk_nature = _fin_nature_of(gk) or k_nature
-                                    out.append("<tr>" + _html_td("• " + gk_name, "left",
+                                    out.append("<tr>" + _html_label("• " + gk_name, _fin_stat_of(gk),
                                                                 color="#4a505a", indent=2)
                                                + _html_td(_fin_money(gk_amt), "right",
                                                           color=_fin_value_color(gk_amt, gk_nature)) + "</tr>")
                             else:
-                                out.append("<tr>" + _html_td("↳ " + k_name, "left", weight="600", indent=1)
+                                out.append("<tr>" + _html_label("↳ " + k_name, _fin_stat_of(k),
+                                                                weight="600", indent=1)
                                            + _html_td(_fin_money(k_amt), "right",
                                                       color=_fin_value_color(k_amt, k_nature),
                                                       weight="600") + "</tr>")
                     else:
-                        out.append("<tr>" + _html_td(n_name, "left")
+                        out.append("<tr>" + _html_label(n_name, _fin_stat_of(n))
                                    + _html_td(_fin_money(n_amt), "right",
                                               color=_fin_value_color(n_amt, n_nature)) + "</tr>")
                 return out
@@ -5578,9 +5955,8 @@ def render_member_ledger_card(
 
     return html.Div([
         header,
-        toolbar,
+        mutuality_kpi,
         html.Div(body, style={"padding": "16px"}),
-        dcc.Download(id={"type": "fy-export-trigger", "entity": "member_ledger"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 

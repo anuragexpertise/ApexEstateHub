@@ -565,6 +565,104 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
         return [], str(e)
 
 
+# ── FY CLOSE / statutory reserve appropriation ─────────────────────────────
+# UP AOA Model Bye-Laws Ch.VII Para 46(c) & 3(d) require a fixed share of net
+# surplus (the Model Bye-Laws indicate 25%) to be transferred to the Reserve
+# Fund each year. fn_fy_close_preview is the read-only half (surplus, proposed
+# amount, and every reason the close would be refused) so the card can explain
+# itself before the admin commits; fn_fy_close_reserve_appropriation is the
+# write half. Both are idempotent per (society, FY) — see the fy_closures
+# table comment in estatehub.sql.
+
+DEFAULT_RESERVE_APPROPRIATION_PCT = 25.0
+
+
+def get_fy_close_preview(society_id: int, fy: int,
+                         reserve_pct: float = DEFAULT_RESERVE_APPROPRIATION_PCT) -> tuple[dict | None, str | None]:
+    """
+    Read-only close preview for the FY Closing card: net surplus for the FY,
+    the amount a `reserve_pct` appropriation would move, which account would
+    receive it, and `blockers` explaining why the close button is disabled.
+
+    Returns (preview_dict_or_None, error_message). A None preview with no
+    error is a legitimate answer when the society has no accounts seeded yet.
+    """
+    try:
+        row = db._execute(
+            "SELECT * FROM fn_fy_close_preview(%s,%s,%s)",
+            (society_id, fy, reserve_pct), fetch_one=True,
+        )
+        return (row or None), None
+    except Exception as e:
+        return None, str(e)
+
+
+def close_fy_with_reserve_appropriation(society_id: int, fy: int,
+                                        reserve_pct: float = DEFAULT_RESERVE_APPROPRIATION_PCT,
+                                        created_by: int | None = None) -> tuple[dict | None, str | None]:
+    """
+    Close the FY and post the statutory reserve appropriation:
+        Dr  Income Expenditure A/c
+            Cr  Reserve Fund
+    for `reserve_pct` of the FY's net surplus.
+
+    Refuses on books that do not balance. Idempotent — a second call for the
+    same (society, FY) returns status 'already_closed' having posted nothing,
+    so a double click or two admins racing cannot double-appropriation the
+    reserve.
+
+    Returns (result_dict_or_None, error_message). The error_message carries
+    the SQL exception text, which is already written to be human-readable
+    (e.g. the statutory-lock message from fn_process_fund_utilization, or the
+    unbalanced-books message).
+    """
+    try:
+        row = db._execute(
+            "SELECT * FROM fn_fy_close_reserve_appropriation(%s,%s,%s,%s)",
+            (society_id, fy, reserve_pct, created_by), fetch_one=True,
+        )
+        return (row or None), None
+    except Exception as e:
+        return None, str(e)
+
+
+def get_fy_closure_history(society_id: int, limit: int = 10) -> list[dict]:
+    """
+    Past FY closures for this society, most recent first.
+
+    The closing user's name is resolved in a second query rather than a
+    LEFT JOIN: it keeps this a plain single-table select (which the test
+    fake's SQL engine can execute) and it is one extra round trip on a
+    list that is rendered once per FY Closing card load.
+    """
+    try:
+        closures = db._execute(
+            """SELECT * FROM fy_closures
+               WHERE society_id = %s
+               ORDER BY financial_year DESC
+               LIMIT %s""",
+            (society_id, limit), fetch_all=True,
+        ) or []
+        if not closures:
+            return []
+
+        closed_by = {c["closed_by"] for c in closures if c.get("closed_by")}
+        names: dict[int, str] = {}
+        if closed_by:
+            user_rows = db._execute(
+                "SELECT id, name FROM users WHERE id = ANY(%s)",
+                (list(closed_by),), fetch_all=True,
+            ) or []
+            names = {u["id"]: u.get("name") for u in user_rows}
+
+        for c in closures:
+            c["closed_by_username"] = names.get(c.get("closed_by"))
+        return closures
+    except Exception as e:
+        print(f"❌ get_fy_closure_history: {e}")
+        return []
+
+
 def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
     """
     Wraps fn_receipts_payments_fy(society_id, fy).
@@ -3253,23 +3351,36 @@ def get_fund_balances(society_id: int) -> list[dict]:
                 WHERE society_id = %s AND name ILIKE %s
             ),
             fund_tree AS (
-                SELECT a.id, a.name, a.tab_name
+                SELECT a.id, a.name, a.tab_name, COALESCE(a.statutory_lock_pct, 0) AS statutory_lock_pct
                 FROM accounts a
                 JOIN equity_root er ON a.parent_account_id = er.id
                 WHERE a.society_id = %s AND a.drcr_account = 'Cr'
                 UNION ALL
-                SELECT a.id, a.name, a.tab_name
+                SELECT a.id, a.name, a.tab_name, COALESCE(a.statutory_lock_pct, 0)
                 FROM accounts a
                 JOIN fund_tree ft ON a.parent_account_id = ft.id
                 WHERE a.society_id = %s AND a.drcr_account = 'Cr'
             )
+            -- statutory_lock_pct / locked_amount / available_amount mirror what
+            -- fn_process_fund_utilization will actually enforce, so the card
+            -- can grey out a locked fund's balance before the admin types an
+            -- amount, instead of only rejecting it afterwards. Kept as plain
+            -- arithmetic here rather than by calling the function because this
+            -- runs for every fund row on every card load.
             SELECT ft.id AS acc_id, ft.name, ft.tab_name, ft.tab_name AS account_code,
                    COALESCE(SUM(
                        CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
-                   ), 0) AS balance
+                   ), 0) AS balance,
+                   ft.statutory_lock_pct,
+                   ROUND(COALESCE(SUM(
+                       CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
+                   ), 0) * ft.statutory_lock_pct / 100, 2) AS locked_amount,
+                   GREATEST(COALESCE(SUM(
+                       CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
+                   ), 0) * (100 - ft.statutory_lock_pct) / 100, 0) AS available_amount
             FROM fund_tree ft
             LEFT JOIN transactions t ON t.acc_id = ft.id AND t.society_id = %s
-            GROUP BY ft.id, ft.name, ft.tab_name
+            GROUP BY ft.id, ft.name, ft.tab_name, ft.statutory_lock_pct
             ORDER BY ft.id
         """
         params = (society_id, "%Equity%", society_id, society_id, society_id)

@@ -10,6 +10,11 @@ from app.dash_apps.drilldown import loaders
 from database.db_manager import db
 from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
 
+# A law-protected principal is called out in warm amber rather than the
+# green used for a spendable balance, so "nothing here is drawable" is
+# legible before the admin types an amount.
+_FUND_LOCK = "#b8860b"
+
 
 # Fund accounts are resolved dynamically by name (see loaders.get_fund_balances'
 # docstring) rather than by a hardcoded account-id list, since a different
@@ -77,15 +82,7 @@ def register_fund_management_callbacks(app):
             # Get fund options for dropdown — label comes straight from the
             # account's real name (already fetched dynamically by name, see
             # loaders.get_fund_balances), no id-keyed lookup table needed.
-            fund_options = []
-            for fb in fund_balances:
-                acc_id = fb.get("acc_id")
-                balance = float(fb.get("balance") or 0)
-                if balance > 0:
-                    fund_options.append({
-                        "label": f"{fb.get('name')} (₹{balance:,.2f})",
-                        "value": str(acc_id)
-                    })
+            fund_options = build_fund_options(fund_balances)
 
             # Get expense/bank accounts (Dr accounts that can receive the credit)
             expense_accounts = loaders.get_expense_bank_accounts(sid)
@@ -170,12 +167,7 @@ def register_fund_management_callbacks(app):
             # Reload data — label comes straight from the account's real
             # name (see refresh callback's comment above), no id-keyed map.
             fund_balances = loaders.get_fund_balances(sid)
-            fund_options = []
-            for fb in fund_balances:
-                acc_id = fb.get("acc_id")
-                balance = float(fb.get("balance") or 0)
-                if balance > 0:
-                    fund_options.append({"label": f"{fb.get('name')} (₹{balance:,.2f})", "value": str(acc_id)})
+            fund_options = build_fund_options(fund_balances)
 
             expense_accounts = loaders.get_expense_bank_accounts(sid)
             expense_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in expense_accounts]
@@ -191,33 +183,158 @@ def register_fund_management_callbacks(app):
             return dbc.Alert(f"Error: {e}", color="danger", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
 
+def fund_drawable_amount(fb: dict) -> float:
+    """
+    How much of a fund's balance can actually be drawn.
+
+    Single source of truth for the balances table, the fund dropdown and the
+    button state, because the two surfaces once disagreed: the table derived
+    `balance - locked` while the dropdown fell back to the gross balance, so a
+    locked fund with no available_amount key would be advertised as fully
+    drawable in the very dropdown used to pick it.
+
+    Mirrors fn_process_fund_utilization:
+        locked    = round(balance * lock_pct / 100, 2)
+        available = max(balance - locked, 0)
+    """
+    balance = float(fb.get("balance") or 0)
+    supplied = fb.get("available_amount")
+    if supplied is not None:
+        return float(supplied)
+    locked = float(fb.get("locked_amount") or 0)
+    if not locked and float(fb.get("statutory_lock_pct") or 0):
+        locked = round(balance * float(fb["statutory_lock_pct"]) / 100, 2)
+    return max(balance - locked, 0)
+
+
+def build_fund_options(fund_balances):
+    """
+    Fund dropdown options, labelled with the amount that can actually be
+    drawn rather than the gross balance.
+
+    A fund with no drawable headroom is still listed — dropping it silently
+    would leave an admin wondering where the Corpus Fund went — but it is
+    marked locked and disabled, so the statutory principal cannot be
+    targeted at all.
+    """
+    options = []
+    for fb in fund_balances:
+        acc_id = fb.get("acc_id")
+        balance = float(fb.get("balance") or 0)
+        if balance <= 0:
+            continue
+        lock_pct = float(fb.get("statutory_lock_pct") or 0)
+        available = fund_drawable_amount(fb)
+        name = fb.get("name")
+        if lock_pct > 0:
+            options.append({
+                "label": f"🔒 {name} — ₹{available:,.2f} drawable "
+                         f"(₹{balance:,.2f} held, {lock_pct:g}% statutory principal)",
+                "value": str(acc_id),
+                "disabled": available <= 0,
+            })
+        else:
+            options.append({
+                "label": f"{name} (₹{available:,.2f})",
+                "value": str(acc_id),
+                "disabled": available <= 0,
+            })
+    return options
+
+
 def build_balances_table(fund_balances):
     """Build the fund balances table."""
     color = "#15304f"
 
     balance_rows = []
+    any_locked = False
     for fb in fund_balances:
         info = resolve_fund_type_info(fb.get("name"))
         balance = float(fb.get("balance") or 0)
+        lock_pct = float(fb.get("statutory_lock_pct") or 0)
+        locked = float(fb.get("locked_amount") or 0)
+        # Headroom, not the gross figure. The column used to be headed
+        # "Available Balance" while showing the gross balance, which told an
+        # admin the whole Corpus Fund was spendable right up until the
+        # database refused the posting.
+        available = fund_drawable_amount(fb)
+        is_locked = lock_pct > 0
+        any_locked = any_locked or is_locked
+
+        if is_locked:
+            # Gross balance stays visible (it is real money) but is no longer
+            # presented as spendable; the drawable figure leads.
+            amount_cell = html.Td([
+                html.Div(f"₹{available:,.2f}", style={
+                    "fontSize": "13px", "fontWeight": "700",
+                    "color": _FUND_LOCK if available <= 0 else "#1e7e34",
+                    "textAlign": "right",
+                }),
+                html.Div(f"of ₹{balance:,.2f} held", style={
+                    "fontSize": "9.5px", "color": "#8a8f98", "textAlign": "right",
+                    "marginTop": "1px",
+                }),
+            ])
+            lock_cell = html.Td([
+                html.Div([html.I(className="fas fa-lock me-1"), f"{lock_pct:g}%"],
+                         style={"fontSize": "11px", "fontWeight": "700",
+                                "color": _FUND_LOCK, "whiteSpace": "nowrap"}),
+                html.Div(f"₹{locked:,.2f} protected", style={
+                    "fontSize": "9.5px", "color": "#8a8f98", "marginTop": "1px",
+                }),
+            ], style={"textAlign": "center"})
+        else:
+            amount_cell = html.Td(
+                f"₹{balance:,.2f}",
+                style={"fontSize": "13px", "fontWeight": "700",
+                       "color": "#1e7e34" if balance >= 0 else "#c0392b",
+                       "textAlign": "right"})
+            lock_cell = html.Td("—", style={"fontSize": "11px", "color": "#bbb",
+                                            "textAlign": "center"})
+
         balance_rows.append(html.Tr([
             html.Td(html.Div([
                 html.I(className=info["icon"], style={"marginRight": "8px", "color": color}),
                 html.Strong(info["label"])
             ]), style={"fontSize": "12px", "fontWeight": "600"}),
-            html.Td(f"₹{balance:,.2f}", style={"fontSize": "13px", "fontWeight": "700", "color": "#1e7e34" if balance >= 0 else "#c0392b", "textAlign": "right"}),
+            amount_cell,
+            lock_cell,
             html.Td(info["approval"], style={"fontSize": "11px", "color": "#666", "textAlign": "center"}),
             html.Td(info["purpose"], style={"fontSize": "11px", "color": "#888"}),
-        ]))
+        ], style={"background": "#fffaf5" if is_locked else None}))
 
-    return dbc.Table([
+    table = dbc.Table([
         html.Thead(html.Tr([
             html.Th("Fund", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Available Balance", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
+            html.Th("Available to Draw", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
+            html.Th("Statutory Lock", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
             html.Th("Approval Required", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
             html.Th("Permitted Purpose (per UP AOA / Bye-Laws)", style={"fontSize": "11px", "background": color, "color": "#fff"}),
         ])),
         html.Tbody(balance_rows),
     ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"})
+
+    if not any_locked:
+        return table
+
+    # Say out loud what the lock means, because "0.00 available" next to a
+    # six-figure balance otherwise reads as a bug rather than the law.
+    return html.Div([
+        table,
+        html.Div([
+            html.I(className="fas fa-shield-halved me-2",
+                   style={"color": _FUND_LOCK, "fontSize": "11px"}),
+            html.Span([
+                html.Strong("Statutory principal is protected."),
+                " The locked share cannot be drawn down under RERA / the Model "
+                "Bye-Laws, and the database refuses any request that would breach "
+                "it. Interest earned on a locked fund is usable — it is credited "
+                "to the Interest Income account rather than drawn from the fund.",
+            ], style={"fontSize": "10.5px", "color": "#666"}),
+        ], style={"marginTop": "10px", "padding": "9px 12px", "background": "#fffaf5",
+                  "borderLeft": f"3px solid {_FUND_LOCK}", "borderRadius": "0 6px 6px 0",
+                  "lineHeight": "1.5"}),
+    ])
 
 
 def build_log_table(utilization_log):

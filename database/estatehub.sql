@@ -178,6 +178,29 @@ CREATE TABLE IF NOT EXISTS accounts (
     tds_section VARCHAR(10)
 );
 
+-- ── Statutory principal lock on a fund account ─────────────────────────────
+-- 100 means "100% of this account's balance is statutory principal that may
+-- not be drawn down", which is what UP RERA / the UP AOA Model Bye-Laws say
+-- about a builder's Corpus Fund handover: interest earned on it is income
+-- (cr. Interest Income, freely usable), but the principal itself is
+-- inviolable. Previously this rule existed only as display text in
+-- fund_management_callbacks.py's FUND_TYPE_PATTERNS — fn_process_fund_utilization
+-- would draw from the Corpus account without complaint. The lock is data, not
+-- prose, so the guard below is jurisdiction-neutral: any fund account an
+-- admin sets to 100 is protected, whatever it is called.
+--
+-- Expressed as a percentage rather than an absolute amount so the lock
+-- survives further contributions: a Corpus Fund that accrues is still
+-- fully locked, while a fund an admin deliberately unlocks just sets 0.
+-- Added by ALTER rather than inline in the CREATE TABLE above, because
+-- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
+-- database and would silently leave existing databases without the column
+-- (the same trap called out at fn_resolve_depreciation_account below).
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS statutory_lock_pct NUMERIC(5,2)
+    NOT NULL DEFAULT 0
+    CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100);
+
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -963,6 +986,75 @@ CREATE TABLE IF NOT EXISTS fund_utilizations (
     previous_hash VARCHAR(64), -- for audit trail linking
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FY CLOSURES — one row per society per financial year, recording that the
+-- year has been closed and how much of the net surplus was appropriated to
+-- the statutory Reserve Fund.
+--
+-- WHY THIS TABLE HAD TO BE CREATED: fn_fy_closing_report is a *read-time*
+-- computation (see its header at ~line 7900 — "Nothing is posted to
+-- transactions, nothing is written to brought_forward"), so before this
+-- table there was no persistent notion of "this FY is closed" anywhere in
+-- the schema. The statutory reserve appropriation (UP AOA Model Bye-Laws
+-- Ch.VII Para 46(c)&3(d): a fixed share of net surplus to Reserve Fund) was
+-- therefore not just un-implemented but un-representable — and, crucially,
+-- there was no way to make it idempotent. A close that could run twice
+-- would silently double-appropriation the reserve.
+--
+-- The UNIQUE (society_id, financial_year) is the idempotency guard:
+-- fn_fy_close_reserve_appropriation relies on it to refuse a second close
+-- rather than relying only on a read-then-write check, which would be racy
+-- under two admins clicking at once.
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS fy_closures (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2026 = FY 1-Apr-2026..31-Mar-2027
+    -- Net surplus computed at close time, Cr-positive (same convention as
+    -- fn_fy_closing_report's own_closing). Negative = deficit.
+    surplus NUMERIC(15,2) NOT NULL DEFAULT 0,
+    -- The percentage of surplus that was appropriated, e.g. 25.00. Stored
+    -- per-closure rather than read from a settings table so that a later
+    -- change to the society's policy cannot retroactively rewrite what a
+    -- past year's close actually did.
+    reserve_pct NUMERIC(5,2) NOT NULL DEFAULT 0
+        CHECK (reserve_pct >= 0 AND reserve_pct <= 100),
+    -- Amount actually credited to the reserve account. May be less than
+    -- surplus * reserve_pct/100 only via ROUND; it is 0 for a deficit close.
+    reserve_transferred NUMERIC(15,2) NOT NULL DEFAULT 0
+        CHECK (reserve_transferred >= 0),
+    -- Which ledger account received the appropriation. Resolved
+    -- jurisdiction-aware (see fn_resolve_reserve_account), never hardcoded.
+    reserve_acc_id INT,
+    reserve_acc_name TEXT,
+    -- The contra account debited (the P&L "Income Expenditure A/c").
+    contra_acc_id INT,
+    -- journal_id ties to the two transactions rows this close wrote.
+    journal_id INT,
+    status VARCHAR(20) NOT NULL DEFAULT 'closed' CHECK (
+        status IN (
+            'closed',         -- year closed, appropriation posted
+            'no_surplus',     -- year closed, nothing appropriated (deficit or zero surplus)
+            'reversed'        -- administrator reversed the appropriation
+        )
+    ),
+    reversed_journal_id INT,       -- reversing journal, if status='reversed'
+    reversal_reason TEXT,
+    closed_by INT REFERENCES users (id),
+    closed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    reversed_by INT REFERENCES users (id),
+    reversed_at TIMESTAMP,
+    CONSTRAINT uq_fy_closure UNIQUE (society_id, financial_year),
+    CONSTRAINT fk_fy_closure_reserve_acc
+        FOREIGN KEY (society_id, reserve_acc_id)
+        REFERENCES accounts (society_id, id) ON DELETE SET NULL,
+    CONSTRAINT fk_fy_closure_contra_acc
+        FOREIGN KEY (society_id, contra_acc_id)
+        REFERENCES accounts (society_id, id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fy_closures_society ON fy_closures (society_id, financial_year DESC);
 
 CREATE TABLE IF NOT EXISTS rcm_liability (
     id SERIAL PRIMARY KEY,
@@ -5667,6 +5759,26 @@ $$;
 --   - Sinking Fund (3210): Member contributions → Major structural repairs, lift/DG replacement (General Body)
 --   - Repair & Maintenance Fund (3220): Member contributions → Routine common area maintenance (Managing Committee)
 --   - Corpus Fund (3230): Builder handover (RERA) → ONLY INTEREST usable, principal inviolable (General Body)
+--
+-- STATUTORY PRINCIPAL LOCK (2026-09): the Corpus Fund line above used to be
+-- documentation only. This function would happily Dr the builder-handover
+-- principal out of account 3230, which is exactly what UP RERA and the Model
+-- Bye-Laws forbid. The rule now lives in data, as accounts.statutory_lock_pct
+-- (100 on the Corpus account), and is enforced below against the drawable
+-- balance rather than the raw balance.
+--
+-- Expressed as a percentage of the *current* balance rather than an absolute
+-- amount, so a Corpus Fund that keeps accruing stays fully locked instead of
+-- quietly becoming drawable pound-for-pound. The unlocked headroom is the
+-- interest earned on the corpus, which lands in Interest Income (a Cr income
+-- account) rather than in the corpus account itself — so in the seeded chart
+-- a fully-locked corpus correctly reports zero headroom and the admin is
+-- pointed at the interest income instead.
+--
+-- Both available_amount and locked_amount are returned (additively — existing
+-- callers SELECT * and read status/journal_id, so widening the return type is
+-- backward compatible) so the Fund Management card can show the restriction
+-- before the admin types an amount, instead of only rejecting it after.
 -- ═════════════════════════════════════════════════════════════════════════
 DROP FUNCTION IF EXISTS fn_process_fund_utilization CASCADE;
 
@@ -5683,7 +5795,14 @@ CREATE OR REPLACE FUNCTION fn_process_fund_utilization(
     p_approval_ref     VARCHAR  DEFAULT NULL, -- GB/MC resolution reference
     p_approval_date    DATE     DEFAULT NULL
 )
-RETURNS TABLE(utilization_id INT, transaction_id INT, journal_id INT, status VARCHAR(20))
+RETURNS TABLE(
+    utilization_id INT,
+    transaction_id INT,
+    journal_id     INT,
+    status         VARCHAR(20),
+    available_amount NUMERIC(15,2),  -- balance net of the statutory principal lock
+    locked_amount    NUMERIC(15,2)   -- portion of the balance the law protects
+)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_utilization_id INT;
@@ -5696,6 +5815,10 @@ DECLARE
     v_is_admin       BOOLEAN;
     v_status         VARCHAR(20);
     v_prev_hash      VARCHAR(64);
+    v_lock_pct       NUMERIC(5,2);
+    v_fund_balance   NUMERIC(15,2);
+    v_locked         NUMERIC(15,2);
+    v_available      NUMERIC(15,2);
 BEGIN
     -- Validate amount
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
@@ -5704,7 +5827,8 @@ BEGIN
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'Particulars is required'; END IF;
 
     -- Validate fund account exists and is a Cr (liability/equity) account
-    SELECT drcr_account, name INTO v_drcr_fund, v_fund_name
+    SELECT drcr_account, name, COALESCE(statutory_lock_pct, 0)
+      INTO v_drcr_fund, v_fund_name, v_lock_pct
     FROM accounts WHERE id = p_fund_acc_id AND society_id = p_society_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Fund account % not found for this society', p_fund_acc_id; END IF;
     IF v_drcr_fund != 'Cr' THEN
@@ -5719,22 +5843,36 @@ BEGIN
         RAISE EXCEPTION 'Expense account % (%) must be a Dr (expense/asset) account', p_expense_acc_id, v_expense_name;
     END IF;
 
-    -- Check fund balance (Cr normal = positive balance = credit balance)
-    -- Fund accounts are Cr-normal, so positive balance = credit balance = available funds
-    DECLARE
-        v_fund_balance NUMERIC(15,2);
-    BEGIN
-        SELECT COALESCE(SUM(
-            CASE WHEN entry_side = 'Cr' THEN amount ELSE -amount END
-        ), 0) INTO v_fund_balance
-        FROM transactions
-        WHERE society_id = p_society_id AND acc_id = p_fund_acc_id;
+    -- Fund balance (Cr normal = positive balance = credit balance).
+    -- Fund accounts are Cr-normal, so positive balance = credit balance.
+    --
+    -- Two separate limits are enforced, and the statutory one is checked
+    -- FIRST so a locked fund reports the reason it is locked rather than a
+    -- bare "insufficient balance" that reads like an accounting error:
+    --   1. statutory_lock_pct of the balance is law-protected principal
+    --      (Corpus Fund: builder handover, UP RERA / Model Bye-Laws Ch.VII)
+    --   2. whatever headroom remains must still cover the request
+    SELECT COALESCE(SUM(
+        CASE WHEN entry_side = 'Cr' THEN amount ELSE -amount END
+    ), 0) INTO v_fund_balance
+    FROM transactions
+    WHERE society_id = p_society_id AND acc_id = p_fund_acc_id;
 
-        IF v_fund_balance < p_amount THEN
-            RAISE EXCEPTION 'Insufficient balance in fund % (%). Available: ₹%, Requested: ₹%', 
-                v_fund_name, p_fund_acc_id, v_fund_balance, p_amount;
+    v_locked := ROUND(v_fund_balance * v_lock_pct / 100, 2);
+    -- GREATEST guards against a negative balance (an overdrawn fund) making
+    -- the headroom larger than the balance itself.
+    v_available := GREATEST(v_fund_balance - v_locked, 0);
+
+    IF p_amount > v_available THEN
+        IF v_lock_pct > 0 THEN
+            RAISE EXCEPTION
+                'Fund % (%) is protected: % of its balance (₹%, of ₹%) is statutory principal that cannot be drawn down. Drawable: ₹%, Requested: ₹%. The interest earned on this fund is usable via the Interest Income account instead.',
+                v_fund_name, p_fund_acc_id, v_lock_pct, v_locked, v_fund_balance,
+                v_available, p_amount;
         END IF;
-    END;
+        RAISE EXCEPTION 'Insufficient balance in fund % (%). Available: ₹%, Requested: ₹%',
+            v_fund_name, p_fund_acc_id, v_available, p_amount;
+    END IF;
 
     -- Only admins can confirm immediately; others go to pending
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
@@ -5771,18 +5909,46 @@ BEGIN
 
         -- Post journal entries:
         -- 1. Dr Fund Account (reduce fund balance - Cr account, so Dr reduces it)
-        INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, amount, particulars, entity_type, entity_id, created_at, created_by)
-        VALUES (p_society_id, v_journal_id, p_fund_acc_id, 'Dr', p_amount, p_particulars, 'fund_utilization', v_utilization_id, NOW(), p_created_by);
-
         -- 2. Cr Expense/Bank Account (increase expense or reduce bank)
-        INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, amount, particulars, entity_type, entity_id, created_at, created_by)
-        VALUES (p_society_id, v_journal_id, p_expense_acc_id, 'Cr', p_amount, p_particulars, 'fund_utilization', v_utilization_id, NOW(), p_created_by);
+        --
+        -- trx_date / acc_particulars / source_table are the real column
+        -- names. This previously wrote `particulars`, `entity_type` and
+        -- omitted `trx_date` entirely — none of which exist on
+        -- `transactions` (its columns are acc_particulars, source_table and
+        -- a NOT NULL trx_date, per the CREATE TABLE at ~line 1124). The
+        -- INSERT therefore raised "column \"particulars\" does not exist" on
+        -- every confirmed utilization, so the *only* code path that
+        -- actually moves money out of a fund had never successfully run —
+        -- and no test caught it, because test/fake_db.py has no
+        -- `_fn_process_fund_utilization` handler, so the call silently
+        -- returned None (see _handle_function's `return None`).
+        -- mode is taken from the caller (p_mode), NOT hardcoded to 'journal':
+        -- this is a real money movement out to a bank/expense, unlike the
+        -- depreciation and reserve-appropriation journals which are pure
+        -- book entries.
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by
+        ) VALUES (
+            p_society_id, v_journal_id, p_fund_acc_id, 'Dr', CURRENT_DATE, p_amount,
+            p_particulars, p_mode, 'paid', 'fund_utilization', v_utilization_id, p_created_by
+        );
+
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by
+        ) VALUES (
+            p_society_id, v_journal_id, p_expense_acc_id, 'Cr', CURRENT_DATE, p_amount,
+            p_particulars, p_mode, 'paid', 'fund_utilization', v_utilization_id, p_created_by
+        );
     END IF;
 
     utilization_id := v_utilization_id;
     transaction_id := v_trx_id;
     journal_id := v_journal_id;
     status := v_status;
+    available_amount := v_available;
+    locked_amount := v_locked;
 
     RETURN NEXT;
 END;
@@ -5874,6 +6040,535 @@ BEGIN
               ), 0) AS own_closing
     FROM fund_tree ft
     ORDER BY ft.id;
+END;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FY CLOSE — statutory reserve appropriation
+-- ═══════════════════════════════════════════════════════════════════════════
+-- UP AOA Model Bye-Laws Ch.VII Para 46(c) & 3(d) require a fixed share of
+-- net surplus (the Model Bye-Laws indicate 25%) to be transferred to the
+-- Reserve Fund each year. That rule was previously only prose: it appeared in
+-- the comment block above fn_process_fund_utilization and as a "Manual —
+-- not yet implemented" row in the README, with no SQL, no loader, no button.
+-- These three functions implement it end to end.
+--
+-- WHY THIS IS A WRITE AND NOT A DISPLAY TWEAK: fn_fy_closing_report is
+-- explicitly read-time and non-persisting, so an appropriation has to be a
+-- real journal or the reserve simply never grows. fn_fy_close_reserve_
+-- appropriation is therefore the first VOLATILE function in this area, and
+-- it is deliberately conservative:
+--   - It refuses to run on books that do not balance (see the root-total
+--     acceptance test documented on fn_fy_closing_report: a nonzero root
+--     total is "a hard error signal, not something to silently absorb").
+--     Appropriating from unbalanced books would bake the error into equity.
+--   - It is idempotent via UNIQUE (society_id, financial_year) on fy_closures,
+--     not merely by a read-then-write check, so two concurrent admins cannot
+--     both appropriate.
+--   - It never appropriates from a deficit year. A loss is carried forward
+--     against the reserve implicitly, not by posting a negative transfer.
+--
+-- The read-only sibling fn_fy_close_preview exists so the card can show the
+-- surplus, the proposed amount and every blocker BEFORE the admin commits
+-- to an irreversible ledger write.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── Resolve the society's Reserve Fund ledger account ─────────────────────
+-- Resolved jurisdiction-aware, through account_statutory_mappings for the
+-- society's own legal regime, so a differently-numbered chart under another
+-- regime still works. The seeded UP_AOA_2010 mapping puts BOTH the Repair &
+-- Maintenance Fund Reserve (3220) and the Corpus Fund (3230) under head
+-- RESERVE_FUND, so "mapped to RESERVE_FUND" alone is ambiguous and cannot be
+-- used directly. The ORDER BY below disambiguates deterministically,
+-- preferring the account that is not a statutorily-locked fund and not
+-- named corpus/sinking, then lowest id:
+--     1. statutory_lock_pct = 0  (not a law-protected principal fund)
+--     2. name NOT ILIKE '%corpus%'
+--     3. name NOT ILIKE '%sinking%'
+--     4. account id ASC (stable tiebreak)
+-- Falls back to a plain ILIKE '%reserve fund%' name match for a society
+-- with no statutory mappings at all, and returns NULL if neither finds
+-- anything — callers must treat NULL as "cannot appropriate", not as an
+-- error to swallow.
+DROP FUNCTION IF EXISTS fn_resolve_reserve_account (INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_resolve_reserve_account(p_society_id INT)
+RETURNS INT
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+    v_regime VARCHAR(30);
+BEGIN
+    SELECT regime_code INTO v_regime
+    FROM society_legal_regime
+    WHERE society_id = p_society_id
+    ORDER BY effective_from DESC
+    LIMIT 1;
+
+    IF v_regime IS NOT NULL THEN
+        SELECT a.id INTO v_acc_id
+        FROM accounts a
+        JOIN account_statutory_mappings m
+          ON m.account_id = a.id
+         AND m.society_id = a.society_id
+         AND m.regime_code = v_regime
+        WHERE a.society_id = p_society_id
+          AND m.head_code = 'RESERVE_FUND'
+          AND m.effective_to IS NULL
+          AND a.drcr_account = 'Cr'
+        ORDER BY
+            (COALESCE(a.statutory_lock_pct, 0) > 0),
+            (a.name ILIKE '%corpus%'),
+            (a.name ILIKE '%sinking%'),
+            a.id
+        LIMIT 1;
+    END IF;
+
+    IF v_acc_id IS NULL THEN
+        SELECT a.id INTO v_acc_id
+        FROM accounts a
+        WHERE a.society_id = p_society_id
+          AND a.drcr_account = 'Cr'
+          AND a.name ILIKE '%reserve fund%'
+        ORDER BY
+            (COALESCE(a.statutory_lock_pct, 0) > 0),
+            (a.name ILIKE '%corpus%'),
+            (a.name ILIKE '%sinking%'),
+            a.id
+        LIMIT 1;
+    END IF;
+
+    RETURN v_acc_id;
+END;
+$$;
+
+-- ── Resolve the P&L contra account used for the appropriation ─────────────
+-- The debit side of the year-end journal is the "Income Expenditure A/c"
+-- (tab_name 'InExp', id 5100 in the seeded chart), a Cr-natured node under
+-- the Expenses block that exists precisely to accumulate P&L transfers —
+-- the depreciation journal already posts "Dr InExp / Cr Depreciation"
+-- against it (see the seed's year-end transfer journal). Reusing it means
+-- the appropriation lands in the same accumulator the closing report
+-- already understands, rather than inventing a new balancing account.
+-- Name fallback covers a chart where tab_name was renamed.
+DROP FUNCTION IF EXISTS fn_resolve_inexp_appropriation_account (INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_resolve_inexp_appropriation_account(p_society_id INT)
+RETURNS INT
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_acc_id INT;
+BEGIN
+    SELECT id INTO v_acc_id
+    FROM accounts
+    WHERE society_id = p_society_id AND tab_name = 'InExp'
+    LIMIT 1;
+
+    IF v_acc_id IS NULL THEN
+        SELECT id INTO v_acc_id
+        FROM accounts
+        WHERE society_id = p_society_id AND name ILIKE 'Income Expenditure%'
+        LIMIT 1;
+    END IF;
+
+    RETURN v_acc_id;
+END;
+$$;
+
+-- ── Read-only preview ────────────────────────────────────────────────────
+-- Everything the FY Closing card needs to decide whether to enable its
+-- "Close Year & Transfer to Reserve" button, and to explain itself if the
+-- button is disabled. STABLE, writes nothing.
+DROP FUNCTION IF EXISTS fn_fy_close_preview (INT, INT, NUMERIC) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_fy_close_preview(
+    p_society_id  INT,
+    p_fy          INT,
+    p_reserve_pct NUMERIC DEFAULT 25.0
+)
+RETURNS TABLE(
+    fy                INT,
+    already_closed    BOOLEAN,
+    closure_status    VARCHAR(20),
+    closure_date      TIMESTAMP,
+    books_balanced    BOOLEAN,
+    imbalance_amount  NUMERIC(15,2),
+    surplus           NUMERIC(15,2),
+    reserve_pct       NUMERIC(5,2),
+    proposed_transfer NUMERIC(15,2),
+    reserve_acc_id    INT,
+    reserve_acc_name  TEXT,
+    contra_acc_id     INT,
+    can_close         BOOLEAN,
+    blockers          TEXT,
+    notes             TEXT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start   DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end     DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_closure    RECORD;
+    v_root       NUMERIC(15,2) := 0;
+    v_surplus    NUMERIC(15,2) := 0;
+    v_pct        NUMERIC(5,2);
+    v_transfer   NUMERIC(15,2);
+    v_reserve_id INT;
+    v_contra_id  INT;
+    v_blockers   TEXT := '';
+    v_notes      TEXT := '';
+BEGIN
+    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, 25.0), 0), 100);
+
+    -- Root total: the double-entry identity in fn_fy_closing_report's
+    -- Cr-positive sign convention. Must be ~0 for the books to balance.
+    SELECT COALESCE(MAX(ABS(c.total_closing)), 0) INTO v_root
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    WHERE c.parent_account_id IS NULL;
+
+    -- Net surplus, computed exactly as fn_balance_sheet_fy's ie_surplus CTE
+    -- does (same strict-descendant sort_path match, same Cr-positive sum), so
+    -- what the card proposes and what the Balance Sheet reports as
+    -- "Reserves & Surplus" can never disagree.
+    SELECT COALESCE(SUM(c.own_closing), 0) INTO v_surplus
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    WHERE c.own_closing IS NOT NULL
+      AND c.own_closing != 0
+      AND EXISTS (
+          SELECT 1
+          FROM fn_fy_closing_report(p_society_id, p_fy) r
+          WHERE r.tab_name IN ('Inc', 'Exp')
+            AND c.sort_path LIKE r.sort_path || '.%'
+      );
+
+    v_reserve_id := fn_resolve_reserve_account(p_society_id);
+    v_contra_id  := fn_resolve_inexp_appropriation_account(p_society_id);
+    v_transfer   := GREATEST(ROUND(GREATEST(v_surplus, 0) * v_pct / 100, 2), 0);
+
+    SELECT c.id, c.status, c.closed_at INTO v_closure
+    FROM fy_closures c
+    WHERE c.society_id = p_society_id AND c.financial_year = p_fy;
+
+    -- Blockers, accumulated as readable sentences. Order matters: the most
+    -- fundamental reason (unbalanced books) is reported first, because a
+    -- deficit caused by a data-entry error should not be presented as a
+    -- legitimate loss of the year.
+    --
+    -- A BLOCKER means "the close must not happen". A NOTE means "the close is
+    -- allowed but does something other than the usual appropriation". Keeping
+    -- them apart matters: a deficit year still has to be closeable, otherwise
+    -- the year can never be closed at all and every later year inherits an
+    -- open, unbalanced-looking predecessor.
+    IF v_root > 0.01 THEN
+        v_blockers := v_blockers ||
+            format('Books do not balance (out by ₹%s). Fix the ledger before closing — appropriating from unbalanced books would bake the error into equity. ',
+                   trim(to_char(v_root, 'FM999,999,999,990.00')));
+    END IF;
+    IF v_closure IS NOT NULL AND v_closure.status <> 'reversed' THEN
+        v_blockers := v_blockers ||
+            format('FY %s is already closed (%s). ', p_fy, v_closure.status);
+    END IF;
+    IF v_surplus <= 0 AND v_closure IS NULL THEN
+        v_notes := v_notes ||
+            format('FY %s has no net surplus (₹%s), so there is nothing to appropriate — a deficit year carries forward against the reserve, it is not funded from it. Closing will record the year with no reserve transfer. ',
+                   p_fy, trim(to_char(v_surplus, 'FM999,999,999,990.00')));
+    END IF;
+    IF v_transfer > 0 AND v_reserve_id IS NULL THEN
+        v_blockers := v_blockers ||
+            'No Reserve Fund account could be resolved (looked for an account mapped to statutory head RESERVE_FUND, then a name matching ''%reserve fund%''). Map one, or this appropriation cannot be posted. ';
+    END IF;
+    IF v_transfer > 0 AND v_contra_id IS NULL THEN
+        v_blockers := v_blockers ||
+            'No Income Expenditure A/c (tab_name ''InExp'') found to debit the appropriation against. Add it to the chart of accounts first. ';
+    END IF;
+
+    fy                := p_fy;
+    already_closed    := (v_closure IS NOT NULL AND v_closure.status <> 'reversed');
+    closure_status    := v_closure.status;
+    closure_date      := v_closure.closed_at;
+    books_balanced    := (v_root <= 0.01);
+    imbalance_amount  := v_root;
+    surplus           := v_surplus;
+    reserve_pct       := v_pct;
+    proposed_transfer := v_transfer;
+    reserve_acc_id    := v_reserve_id;
+    reserve_acc_name  := (SELECT name FROM accounts
+                          WHERE id = v_reserve_id AND society_id = p_society_id);
+    contra_acc_id     := v_contra_id;
+    -- can_close is gated on the hard blockers only. A year with no surplus
+    -- is still closeable (the write records status 'no_surplus'); what
+    -- changes is that no journal is posted.
+    can_close         := (v_blockers = '');
+    blockers          := NULLIF(v_blockers, '');
+    notes             := NULLIF(v_notes, '');
+
+    RETURN NEXT;
+END;
+$$;
+
+-- ── The write path ───────────────────────────────────────────────────────
+-- Posts, in ONE journal:
+--     Dr  Income Expenditure A/c   (the P&L accumulator)
+--         Cr  Reserve Fund
+-- for `reserve_pct` of the FY's net surplus, then records the closure.
+--
+-- Cr-positive reasoning: the InExp node is Cr-natured, so a Dr posting
+-- reduces its Cr-positive own_closing, which reduces the P&L surplus the
+-- closing report computes; crediting the Reserve Fund (a Cr account under
+-- Equity) raises equity by the same amount. The root total is unchanged
+-- either way, so the books still balance.
+--
+-- The remaining 75% (or whatever is left) deliberately stays in the P&L and
+-- keeps showing up as "Reserves & Surplus" on the Balance Sheet — this
+-- function appropriates a share, it does not close the books.
+DROP FUNCTION IF EXISTS fn_fy_close_reserve_appropriation (INT, INT, NUMERIC, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_fy_close_reserve_appropriation(
+    p_society_id  INT,
+    p_fy          INT,
+    p_reserve_pct NUMERIC DEFAULT 25.0,
+    p_created_by  INT  DEFAULT NULL
+)
+RETURNS TABLE(
+    closure_id         INT,
+    fy                 INT,
+    status             VARCHAR(20),
+    surplus            NUMERIC(15,2),
+    reserve_pct        NUMERIC(5,2),
+    reserve_transferred NUMERIC(15,2),
+    journal_id         INT,
+    reserve_acc_name   TEXT,
+    message            TEXT
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_fy_end     DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_pct        NUMERIC(5,2);
+    v_prev_id    INT;
+    v_prev_status VARCHAR(20);
+    v_prev_surplus NUMERIC(15,2);
+    v_prev_pct   NUMERIC(5,2);
+    v_prev_xfer  NUMERIC(15,2);
+    v_prev_journal INT;
+    v_prev_name  TEXT;
+    v_prev_at    TIMESTAMP;
+    v_reserve_id INT;
+    v_contra_id  INT;
+    v_journal_id INT;
+    v_closure_id INT;
+    v_surplus    NUMERIC(15,2);
+    v_transfer   NUMERIC(15,2);
+    v_root       NUMERIC(15,2);
+    v_name       TEXT;
+    v_tn         VARCHAR(64);
+BEGIN
+    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, 25.0), 0), 100);
+
+    -- Idempotency.
+    --
+    -- Deliberately NOT written as `SELECT c.* INTO v_prev RECORD` +
+    -- `IF v_prev IS NOT NULL`. IS NULL on a RECORD is true only when *every*
+    -- field is null, which is a subtle test to rely on for control flow — and
+    -- when it was tried here the guard let a second close straight through to
+    -- the journal INSERT. Typed scalars plus FOUND is the idiomatic and
+    -- unambiguous form.
+    --
+    -- This SELECT gives a friendly 'already_closed' row instead of a raw
+    -- unique-violation error. It is NOT the concurrency guard — two admins
+    -- can both pass it. UNIQUE (society_id, financial_year) on fy_closures is
+    -- that guard, and the EXCEPTION block at the bottom of this function
+    -- turns a losing race into the same friendly row rather than an error.
+    SELECT c.id, c.status, c.surplus, c.reserve_pct, c.reserve_transferred,
+           c.journal_id, c.reserve_acc_name, c.closed_at
+      INTO v_prev_id, v_prev_status, v_prev_surplus, v_prev_pct, v_prev_xfer,
+           v_prev_journal, v_prev_name, v_prev_at
+    FROM fy_closures c
+    WHERE c.society_id = p_society_id AND c.financial_year = p_fy;
+
+    IF FOUND AND v_prev_status <> 'reversed' THEN
+        closure_id         := v_prev_id;
+        fy                 := p_fy;
+        status             := 'already_closed';
+        surplus            := v_prev_surplus;
+        reserve_pct        := v_prev_pct;
+        reserve_transferred := v_prev_xfer;
+        journal_id         := v_prev_journal;
+        reserve_acc_name   := v_prev_name;
+        message            := format(
+            'FY %s was already closed on %s — ₹%s was appropriated to %s at %s%%. Nothing further was posted.',
+            p_fy,
+            to_char(v_prev_at, 'DD/MM/YYYY HH24:MI'),
+            trim(to_char(v_prev_xfer, 'FM999,999,999,990.00')),
+            COALESCE(v_prev_name, 'the reserve fund'),
+            trim(to_char(v_prev_pct, 'FM990.00'))
+        );
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    -- Refuse on unbalanced books. fn_fy_closing_report documents a nonzero
+    -- root total as "a hard error signal, not something to silently absorb".
+    SELECT COALESCE(MAX(ABS(c.total_closing)), 0) INTO v_root
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    WHERE c.parent_account_id IS NULL;
+
+    IF v_root > 0.01 THEN
+        RAISE EXCEPTION
+            'FY %s cannot be closed: books are out of balance by ₹%. Fix the ledger first — appropriating a surplus computed from unbalanced books would post the error into the Reserve Fund.',
+            p_fy, v_root;
+    END IF;
+
+    SELECT COALESCE(SUM(c.own_closing), 0) INTO v_surplus
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    WHERE c.own_closing IS NOT NULL
+      AND c.own_closing != 0
+      AND EXISTS (
+          SELECT 1
+          FROM fn_fy_closing_report(p_society_id, p_fy) r
+          WHERE r.tab_name IN ('Inc', 'Exp')
+            AND c.sort_path LIKE r.sort_path || '.%'
+      );
+
+    v_reserve_id := fn_resolve_reserve_account(p_society_id);
+    v_contra_id  := fn_resolve_inexp_appropriation_account(p_society_id);
+    v_transfer   := GREATEST(ROUND(GREATEST(v_surplus, 0) * v_pct / 100, 2), 0);
+
+    SELECT name INTO v_name FROM accounts
+    WHERE id = v_reserve_id AND society_id = p_society_id;
+
+    -- A deficit year still gets a closure row, with nothing appropriated: a
+    -- loss is carried forward against the reserve implicitly. Recording the
+    -- close keeps the year from being re-closed later and makes the
+    -- no-transfer explicit in the audit trail instead of silent.
+    IF v_transfer <= 0 THEN
+        INSERT INTO fy_closures (
+            society_id, financial_year, surplus, reserve_pct, reserve_transferred,
+            reserve_acc_id, reserve_acc_name, contra_acc_id, status, closed_by
+        ) VALUES (
+            p_society_id, p_fy, v_surplus, v_pct, 0,
+            v_reserve_id, v_name, v_contra_id, 'no_surplus', p_created_by
+        ) RETURNING id INTO v_closure_id;
+
+        closure_id         := v_closure_id;
+        fy                 := p_fy;
+        status             := 'no_surplus';
+        surplus            := v_surplus;
+        reserve_pct        := v_pct;
+        reserve_transferred := 0;
+        journal_id         := NULL;
+        reserve_acc_name   := v_name;
+        message            := format(
+            'FY %s closed with no appropriation: net surplus is ₹%s, so there is nothing to transfer to the reserve. The deficit carries forward.',
+            p_fy, trim(to_char(v_surplus, 'FM999,999,999,990.00'))
+        );
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    IF v_reserve_id IS NULL THEN
+        RAISE EXCEPTION
+            'FY %s cannot be closed: no Reserve Fund account resolved. Map an account to statutory head RESERVE_FUND, or name one "%%Reserve Fund%%".', p_fy;
+    END IF;
+    IF v_contra_id IS NULL THEN
+        RAISE EXCEPTION
+            'FY %s cannot be closed: no Income Expenditure A/c (tab_name ''InExp'') found to debit the appropriation against.', p_fy;
+    END IF;
+
+    v_journal_id := NEXTVAL('seq_transaction_number');
+    v_tn := format('FYCLOSE-%s-%s', p_society_id, p_fy);
+
+    -- The journal legs and the closure row are written inside one inner block
+    -- so that an EXCEPTION handler can roll all three back together — plpgsql
+    -- only allows EXCEPTION on a block boundary, and the subtransaction it
+    -- opens is what makes "post nothing if we lose the race" true rather than
+    -- aspirational.
+    BEGIN
+        -- Dr Income Expenditure A/c / Cr Reserve Fund.
+        -- mode='journal': a pure book entry, no cash or bank leg (the same
+        -- convention as the seed's Dr Dep / Cr Asset year-end journal, and the
+        -- reason these rows stay out of the cashbook while still counting in
+        -- the ledger, trial balance and closing report). status='paid' is
+        -- required because fn_fy_closing_report only counts paid transactions —
+        -- without it the appropriation would post but not show up in the very
+        -- report that justified it.
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by,
+            transaction_number
+        ) VALUES (
+            p_society_id, v_journal_id, v_contra_id, 'Dr', v_fy_end, v_transfer,
+            format('Statutory reserve appropriation: %s%% of FY %s net surplus', trim(to_char(v_pct, 'FM990.00')), p_fy),
+            'journal', 'paid', 'fy_close', NULL, p_created_by, v_tn
+        );
+
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by,
+            transaction_number
+        ) VALUES (
+            p_society_id, v_journal_id, v_reserve_id, 'Cr', v_fy_end, v_transfer,
+            format('Transfer from Income & Expenditure A/c — statutory reserve appropriation (FY %s)', p_fy),
+            'journal', 'paid', 'fy_close', NULL, p_created_by, format('%s-B', v_tn)
+        );
+
+        -- Written LAST on purpose. Two admins can both pass the idempotency
+        -- SELECT above; exactly one INSERT into fy_closures survives the
+        -- UNIQUE constraint, and because it is the last statement in this
+        -- block, the loser's subtransaction rollback also undoes their two
+        -- journal legs — so the loser posts nothing at all.
+        INSERT INTO fy_closures (
+            society_id, financial_year, surplus, reserve_pct, reserve_transferred,
+            reserve_acc_id, reserve_acc_name, contra_acc_id, journal_id, status, closed_by
+        ) VALUES (
+            p_society_id, p_fy, v_surplus, v_pct, v_transfer,
+            v_reserve_id, v_name, v_contra_id, v_journal_id, 'closed', p_created_by
+        ) RETURNING id INTO v_closure_id;
+
+    -- Losing a concurrent close: hand back the same friendly 'already_closed'
+    -- row the sequential path returns, instead of surfacing a raw
+    -- unique-violation to the UI.
+    EXCEPTION WHEN unique_violation THEN
+        SELECT c.id, c.surplus, c.reserve_pct, c.reserve_transferred,
+               c.journal_id, c.reserve_acc_name
+          INTO v_prev_id, v_prev_surplus, v_prev_pct, v_prev_xfer,
+               v_prev_journal, v_prev_name
+        FROM fy_closures c
+        WHERE c.society_id = p_society_id AND c.financial_year = p_fy;
+
+        closure_id         := v_prev_id;
+        fy                 := p_fy;
+        status             := 'already_closed';
+        surplus            := v_prev_surplus;
+        reserve_pct        := v_prev_pct;
+        reserve_transferred := v_prev_xfer;
+        journal_id         := v_prev_journal;
+        reserve_acc_name   := v_prev_name;
+        message            := format(
+            'FY %s was closed concurrently by another administrator — ₹%s was appropriated to %s. Nothing further was posted.',
+            p_fy, trim(to_char(v_prev_xfer, 'FM999,999,999,990.00')),
+            COALESCE(v_prev_name, 'the reserve fund'));
+        RETURN NEXT;
+        RETURN;
+    END;
+
+    closure_id         := v_closure_id;
+    fy                 := p_fy;
+    status             := 'closed';
+    surplus            := v_surplus;
+    reserve_pct        := v_pct;
+    reserve_transferred := v_transfer;
+    journal_id         := v_journal_id;
+    reserve_acc_name   := v_name;
+    message            := format(
+        'FY %s closed. ₹%s (=%s%% of the ₹%s net surplus) transferred from Income & Expenditure A/c to %s. Journal %s. The remaining ₹%s stays in the P&L and is reported as Reserves & Surplus on the Balance Sheet.',
+        p_fy,
+        trim(to_char(v_transfer, 'FM999,999,999,990.00')),
+        trim(to_char(v_pct, 'FM990.00')),
+        trim(to_char(v_surplus, 'FM999,999,999,990.00')),
+        v_name, v_journal_id,
+        trim(to_char(v_surplus - v_transfer, 'FM999,999,999,990.00'))
+    );
+
+    RETURN NEXT;
 END;
 $$;
 

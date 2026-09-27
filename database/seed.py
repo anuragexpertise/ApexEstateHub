@@ -278,6 +278,26 @@ TDS_SECTION_MAP = {
     51150: '194J',   # Audit Fee
 }
 
+# Statutory principal locks — the percentage of each fund's balance that law
+# protects from being drawn down (accounts.statutory_lock_pct). Enforced by
+# fn_process_fund_utilization, which refuses any utilization above the
+# unlocked headroom.
+#
+# 3230 Corpus Fund at 100%: a builder's corpus handover is inviolable
+# principal under UP RERA and the UP AOA Model Bye-Laws Ch.VII. Only the
+# interest it earns is the society's to spend, and that interest is credited
+# to Interest Income (4110-4113), which is NOT locked — so the society is not
+# left without access to the return on its corpus, only to the corpus itself.
+#
+# Deliberately absent: Capital Account (3100), Reserve (3220), Sinking (3210).
+# Those are all spendable against a General Body resolution, so locking them
+# would block legitimate, lawful utilisation rather than enforce a rule.
+# An admin who wants a stricter local policy can raise a fund's lock from
+# Settings > Accounts; the column is editable, not seeded-hardcoded.
+STATUTORY_PRINCIPAL_LOCKS = {
+    3230: 100.00,
+}
+
 SOCIETY_ID = 1
 
 SOCIETY = {
@@ -1188,6 +1208,22 @@ def seed_accounts(cur, conn, society_id: int):
                 "UPDATE accounts SET parent_account_id = %s WHERE id = %s AND society_id = %s",
                 (parent, aid, society_id),
             )
+
+    # Statutory principal locks (see accounts.statutory_lock_pct in
+    # estatehub.sql). Keyed by account id so the lock travels with the seeded
+    # chart rather than depending on how a society later renames the account.
+    #
+    # Only the Corpus Fund is locked, and locked at 100%. UP RERA plus the UP
+    # AOA Model Bye-Laws treat a builder's corpus handover as inviolable
+    # principal: the interest it earns is income and freely usable, but the
+    # principal is not the society's to spend. Every other fund (Capital,
+    # Reserve, Sinking, Repair & Maintenance) is spendable against a General
+    # Body / Managing Committee resolution, so those deliberately stay at 0.
+    for aid, lock_pct in STATUTORY_PRINCIPAL_LOCKS.items():
+        cur.execute(
+            "UPDATE accounts SET statutory_lock_pct = %s WHERE id = %s AND society_id = %s",
+            (lock_pct, aid, society_id),
+        )
 
     conn.commit()
 

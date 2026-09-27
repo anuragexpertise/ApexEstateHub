@@ -3123,11 +3123,24 @@ def _render_card(
                 loaders.get_income_tax_mutuality_summary(sid_val, selected_fy)
                 if sid_val and selected_fy else None
             )
+            # Statutory reserve appropriation. The preview is read-only and
+            # harmless for any role, so it is always fetched; it carries its
+            # own `can_close` / `blockers` so a non-admin still sees exactly
+            # what the close would do, just without the button.
+            reserve_preview = reserve_err = None
+            reserve_history = []
+            if sid_val and selected_fy:
+                reserve_preview, reserve_err = loaders.get_fy_close_preview(sid_val, selected_fy)
+                reserve_history = loaders.get_fy_closure_history(sid_val)
             return renderers.render_fy_closing_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
                 mutuality_summary=mutuality_summary,
                 society_id=sid_val,
+                reserve_preview=reserve_preview,
+                reserve_history=reserve_history,
+                reserve_error=reserve_err,
+                can_post_reserve=(get_current_user_role() == "admin"),
             )
 
 # ── 6 Statements Financial Report — custom card
@@ -5946,3 +5959,101 @@ def register_member_ledger_callbacks(app):
         # Bumping the trigger forces the main drilldown callback to re-render
         store_data["trigger"] = store_data.get("trigger", 0) + 1 
         return store_data
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# STATUTORY RESERVE APPROPRIATION — the one writing action on the FY Closing
+# card (UP AOA Model Bye-Laws: a fixed share of net surplus to the Reserve Fund)
+# ════════════════════════════════════════════════════════════════════════════
+# Deliberately separate from register_drilldown_callbacks so the write path is
+# readable on its own: this posts to the ledger, so every guard is explicit.
+
+def register_fy_close_callbacks(app):
+
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Output("profile-action-trigger", "data", allow_duplicate=True),
+        Input("fy-close-reserve-submit", "n_clicks"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def close_fy_with_reserve(n_clicks, store, auth):
+        if not ctx.triggered or not n_clicks:
+            return no_update, no_update, no_update, no_update
+
+        if store is None:
+            store = {}
+
+        # Role and society come from the server-side session, never from
+        # drilldown-store / auth-store — both are client-editable, and this
+        # callback writes to the ledger. See app/security/audit_context.py.
+        if get_current_user_role() != "admin":
+            toast = {"_toast": {"type": "error",
+                                 "message": "Only an admin can close a financial year."}}
+            return no_update, no_update, no_update, toast
+
+        society_id = get_current_society_id()
+        if not society_id:
+            toast = {"_toast": {"type": "error", "message": "Society not resolved."}}
+            return no_update, no_update, no_update, toast
+
+        filters = dict(nav_state.get_filters(store))
+        fy = filters.get("financial_year") or filters.get("fy")
+        try:
+            fy = int(str(fy).split("-")[0])
+        except (TypeError, ValueError):
+            toast = {"_toast": {"type": "error",
+                                 "message": "No financial year is selected on this card."}}
+            return no_update, no_update, no_update, toast
+
+        # The share is the Model Bye-Laws constant, not a user input: the
+        # input box on the panel is display-only, so a tampered client value
+        # cannot change what gets appropriated.
+        result, err = loaders.close_fy_with_reserve_appropriation(
+            society_id, fy, created_by=get_current_user_id())
+
+        if err or not result:
+            message = err or "The financial year could not be closed."
+            import logging
+            logging.getLogger(__name__).exception(
+                f"FY close failed (society={society_id}, fy={fy}): {message}")
+            banner_color, banner_icon = "danger", "fa-exclamation-circle"
+        else:
+            status = result.get("status")
+            if status == "closed":
+                banner_color, banner_icon = "success", "fa-check-circle"
+                message = (
+                    f"FY {fy}-{str(fy + 1)[-2:]} closed. "
+                    f"₹{float(result.get('reserve_transferred') or 0):,.2f} appropriated "
+                    f"to {result.get('reserve_acc_name') or 'the Reserve Fund'} "
+                    f"(journal #{result.get('journal_id')})."
+                )
+            elif status == "already_closed":
+                # Not an error: a double-click or a second admin racing the
+                # first. The SQL guard posted nothing, so say so plainly
+                # rather than implying a second appropriation happened.
+                banner_color, banner_icon = "info", "fa-info-circle"
+                message = (
+                    f"FY {fy}-{str(fy + 1)[-2:]} was already closed — nothing was "
+                    "posted a second time."
+                )
+            elif status == "no_surplus":
+                banner_color, banner_icon = "warning", "fa-exclamation-triangle"
+                message = ("There is no net surplus for this year, so there is "
+                           "nothing to appropriate. The year is still marked closed.")
+            else:
+                banner_color, banner_icon = "warning", "fa-exclamation-triangle"
+                message = result.get("message") or f"Unexpected close status: {status}."
+
+        store["trigger"] = store.get("trigger", 0) + 1
+        content, bc, db_err = _render_current(store, auth)
+        if db_err:
+            banner_color = "warning"
+            message = f"{message} ({db_err})"
+        toast = {"_toast": {"type": "success" if banner_color == "success" else "error",
+                             "message": message}}
+        return store, content, bc, toast
