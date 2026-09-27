@@ -92,6 +92,7 @@ ROLE_CONFIG = {
         "icon": "fa-crown",
         "tabs": [
             {"label": "Societies",      "href": "/dashboard/master-societies",   "icon": "fa-building"},
+            {"label": "RWA Compliance (UP)", "href": "/dashboard/master-compliance-up", "icon": "fa-gavel"},
             {"label": "Settings",       "href": "/dashboard/master-settings", "icon": "fa-cog"},
         ],
     },
