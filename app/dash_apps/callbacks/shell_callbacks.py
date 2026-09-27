@@ -348,6 +348,7 @@ _PATH_LABELS = {
     "vendor-portal":     "Dashboard",
     "master":            "Societies",
     "master-societies":  "Societies",
+    "master-compliance-up": "RWA Compliance (UP)",
     "master-settings":   "Settings",
     "pass-evaluation":   "Pass Eval",
     "cashbook":          "Cashbook",
@@ -456,7 +457,8 @@ def _portal_content(role, society_id, pathname, auth=None):
 
     if is_master:
         tab = (
-            "master-settings" if "/master-settings" in p else
+            "master-settings"     if "/master-settings"     in p else
+            "rwa-compliance-up"   if "/master-compliance-up" in p else
             "master"  # covers both /master and /master-societies — same page
         )
         return master_portal_page(active_tab=tab, sid=society_id)

@@ -1693,6 +1693,40 @@ CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_regime ON account_stat
 
 CREATE INDEX IF NOT EXISTS idx_statutory_head_catalog_regime ON statutory_head_catalog (regime_code);
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- LEGAL INSTRUMENT CATALOG — one row per Act / Rules / Bye-law / Notification
+-- governing a legal_regime_profiles regime (e.g. every statute behind
+-- UP_AOA_2010, not just the 3 summary strings legal_regime_profiles carries).
+-- Populated by periodic web research (see the Master Portal → "RWA
+-- Compliance (UP)" tab) and pushed live via Master Settings → Integrate to DB.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS legal_instrument_catalog (
+    id SERIAL PRIMARY KEY,
+    regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
+    instrument_type VARCHAR(30) NOT NULL CHECK (
+        instrument_type IN (
+            'Act', 'Rules', 'Bye-laws', 'Notification',
+            'Central Act', 'Central Rules'
+        )
+    ),
+    title VARCHAR(300) NOT NULL,
+    enactment_year INT,
+    issuing_authority VARCHAR(150),
+    applicability TEXT,
+    key_provisions TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    display_order INT NOT NULL DEFAULT 100,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN ('active', 'superseded', 'draft')
+    ),
+    last_verified_on DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,

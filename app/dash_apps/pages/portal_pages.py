@@ -261,6 +261,146 @@ def _divider() -> html.Hr:
     return html.Hr(style={"margin": "20px 0", "opacity": "0.12"})
 
 
+_RWA_COMPLIANCE_UP_DDL = """CREATE TABLE IF NOT EXISTS legal_instrument_catalog (
+    id SERIAL PRIMARY KEY,
+    regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
+    instrument_type VARCHAR(30) NOT NULL CHECK (
+        instrument_type IN ('Act','Rules','Bye-laws','Notification','Central Act','Central Rules')
+    ),
+    title VARCHAR(300) NOT NULL,
+    enactment_year INT,
+    issuing_authority VARCHAR(150),
+    applicability TEXT,
+    key_provisions TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    display_order INT NOT NULL DEFAULT 100,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','draft')),
+    last_verified_on DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);"""
+
+_TYPE_BADGE_COLOR = {
+    "Act": "primary", "Central Act": "info", "Rules": "secondary",
+    "Central Rules": "info", "Bye-laws": "warning", "Notification": "dark",
+}
+
+
+def _rwa_compliance_up_page(c: str) -> html.Div:
+    """
+    Master Portal → 'RWA Compliance (UP)' tab.
+
+    Renders the tabulated Acts/Rules/Bye-laws/Notifications governing RWAs
+    (Apartment Owners' Associations) in Uttar Pradesh, gathered by web
+    research into legal_instrument_catalog (regime UP_AOA_2010) — a child
+    table of the existing legal_regime_profiles jurisdiction system.
+
+    This table is new: on a database that hasn't had it integrated yet, the
+    query below raises (relation does not exist), and rather than a raw
+    500 we show the exact steps + SQL to push it live from Master Settings
+    → KPI Inspector → "Integrate to DB", without needing a deploy.
+    """
+    from database.db_manager import db
+
+    try:
+        rows = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, status, last_verified_on
+               FROM legal_instrument_catalog
+               WHERE regime_code = 'UP_AOA_2010'
+               ORDER BY display_order""",
+            (), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = None  # table not integrated yet — show setup instructions instead
+
+    if rows is None:
+        return html.Div([
+            _page_title("fa-gavel", c, "RWA Compliance (UP)",
+                        "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh"),
+            dbc.Alert([
+                html.H6([html.I(className="fas fa-database me-2"), "Not integrated yet"],
+                        className="alert-heading", style={"fontWeight": "700"}),
+                html.P("legal_instrument_catalog doesn't exist on this database yet. Push it live with no "
+                       "deploy needed:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                html.Ol([
+                    html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
+                    html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
+                            style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
+                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
+                             "on regime+title+year), or paste individual ",
+                             html.Code("INSERT INTO legal_instrument_catalog ..."),
+                             " statements from ", html.Code("database/seed.py"),
+                             "'s LEGAL_INSTRUMENTS_UP_AOA list into the same box and Integrate to DB again."],
+                            style={"fontSize": "13px"}),
+                ], style={"marginBottom": "8px", "paddingLeft": "20px"}),
+            ], color="warning", className="mb-3 shadow-sm"),
+            dbc.Textarea(value=_RWA_COMPLIANCE_UP_DDL, readOnly=True, rows=20,
+                         style={"fontSize": "11px", "fontFamily": "monospace", "backgroundColor": "#f5f7fa",
+                                "border": "1px solid #cdd5df", "borderRadius": "8px", "color": "#2c3e50"}),
+        ], className="portal-page")
+
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r["instrument_type"], []).append(r)
+
+    sections = []
+    for itype, items in groups.items():
+        sections.append(html.H6(
+            [dbc.Badge(itype, color=_TYPE_BADGE_COLOR.get(itype, "light"), className="me-2"),
+             f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
+            style={"marginTop": "18px", "marginBottom": "8px", "fontWeight": "700", "color": "#15304f"},
+        ))
+        rows_html = []
+        for r in items:
+            year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
+            rows_html.append(html.Tr([
+                html.Td([html.Strong(r["title"] + year, style={"fontSize": "12px"}),
+                         html.Br(),
+                         html.Small(r.get("issuing_authority") or "", className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(html.Small(r.get("applicability") or "—"), style={"fontSize": "11px", "maxWidth": "220px"}),
+                html.Td(html.Small(r["key_provisions"]), style={"fontSize": "11px", "maxWidth": "380px"}),
+                html.Td(dbc.Badge(r["status"], color="success" if r["status"] == "active" else "secondary",
+                                  pill=True), style={"fontSize": "10px"}),
+                html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
+                        style={"fontSize": "10px", "maxWidth": "220px"}),
+            ]))
+        sections.append(dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Instrument", style={"fontSize": "11px"}),
+                html.Th("Applicability", style={"fontSize": "11px"}),
+                html.Th("Key Provisions", style={"fontSize": "11px"}),
+                html.Th("Status", style={"fontSize": "11px"}),
+                html.Th("Source", style={"fontSize": "11px"}),
+            ])),
+            html.Tbody(rows_html),
+        ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+    last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
+
+    return html.Div([
+        _page_title("fa-gavel", c, "RWA Compliance (UP)",
+                    "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh"),
+        _sec_hdr(f"{len(rows)} statutory instruments — UP_AOA_2010 regime",
+                 f"last verified {last_verified}" if last_verified else "verification date not recorded",
+                 "fa-scroll"),
+        html.Div(sections),
+        html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+        html.Small(
+            "To add or update an instrument: edit LEGAL_INSTRUMENTS_UP_AOA in database/seed.py (preferred, "
+            "keeps this list in version control), or push a one-off INSERT/UPDATE via Master Settings → "
+            "KPI Inspector → Integrate to DB.",
+            className="text-muted",
+        ),
+    ], className="portal-page")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # MASTER PORTAL
 # ════════════════════════════════════════════════════════════════════════════
@@ -274,6 +414,9 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
         {"label": "Vendor",    "value": "vendor"},
         {"label": "Security",  "value": "security"},
     ]
+    if active_tab == "rwa-compliance-up":
+        return _rwa_compliance_up_page(c)
+
     if active_tab == "master-settings":
         import dash
         app_obj = dash.get_app()

@@ -1013,6 +1013,105 @@ STATUTORY_HEADS_UP_AOA = [
 ]
 
 
+LEGAL_INSTRUMENTS_UP_AOA = [
+    # (regime_code, instrument_type, title, enactment_year, issuing_authority,
+    #  applicability, key_provisions, source_reference, display_order, status)
+    ("UP_AOA_2010", "Act",
+     "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
+     2010, "Government of Uttar Pradesh",
+     "Buildings with 4+ apartments (freehold or leasehold), excluding shopping malls and multiplexes",
+     "Primary statute for apartment ownership in UP. Sec 3 defines common areas/limited common areas/promoter; "
+     "Sec 12 requires promoter's Declaration of layout; Sec 14 mandates formation of an Association of Apartment "
+     "Owners (joint promoter+owner responsibility) and its Bye-laws for managing common areas/facilities; "
+     "Sec 18/20 govern common expenses and common profits.",
+     "UP Act 16 of 2010 (India Code / PRS Legislative Research)", 10, "active"),
+    ("UP_AOA_2010", "Rules",
+     "Uttar Pradesh Apartment Rules, 2011",
+     2011, "Government of Uttar Pradesh",
+     "Same scope as the 2010 Act",
+     "Complete procedural code under the Act: Sec 2 defines 'Competent Authority' as the Development Authority "
+     "Vice-Chairman (or District Collector where none exists); prescribes Forms/Annexures for the Declaration "
+     "(common areas, limited common areas, independent areas) and Deed of Apartment; sets out amendment and "
+     "violation-complaint procedures.",
+     "Notified 16 Nov 2011 in the UP Gazette", 20, "active"),
+    ("UP_AOA_2010", "Bye-laws",
+     "Model Bye-Laws for Uttar Pradesh Apartment Owners' Associations, 2011",
+     2011, "Government of Uttar Pradesh (under Sec 14(6) of the 2010 Act)",
+     "Every registered Apartment Owners' Association (AOA) in UP",
+     "Governs internal AOA administration — membership, Board of Management, general body/AGM procedure, "
+     "voting rights, common seal, and (Ch. VII) the financial framework: common expenses, Reserve Fund "
+     "(Para 46(c)/3(d)), Capital Account/share capital (Para 46(a)), staff benefits (Para 45(h)). Bye-law 54: "
+     "the Act prevails wherever a bye-law conflicts with it. Must be adopted at a General Body meeting by "
+     "2/3rd majority (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
+     "Notified 16 Nov 2011 under Sec 14(6); interpreted in Olive Country Apartment Owners Association vs "
+     "State of UP, WP No. 12110/2013, Allahabad HC, 14-11-2013", 30, "active"),
+    ("UP_AOA_2010", "Act",
+     "Societies Registration Act, 1860 (as applicable in Uttar Pradesh)",
+     1860, "Government of India / adapted by UP",
+     "RWAs/AOAs choosing registration as a society rather than (or in addition to) an AOA under the 2010 Act "
+     "— minimum 7 members in UP",
+     "Central registration statute administered in UP by the Registrar of Firms, Societies & Chits. Requires "
+     "a Memorandum of Association (name, address, objects, governing-body members) and Rules & Regulations "
+     "(membership, meeting procedure, managing-committee roles). Registration is valid 5 years and must be "
+     "renewed within one month of expiry; a public notice with an objection window precedes approval.",
+     "UP Societies Registration Rules, 1976 govern the UP-specific procedure", 40, "active"),
+    ("UP_AOA_2010", "Rules",
+     "Uttar Pradesh Societies Registration Rules, 1976",
+     1976, "Government of Uttar Pradesh",
+     "Societies (including RWAs) registering under the 1860 Act in UP",
+     "State procedural rules for the 1860 Act in UP: application format to the Deputy Registrar, required "
+     "annexures, the public-notice/objection window (15-30 days, at the Registrar's discretion), and annual "
+     "return/renewal filing.",
+     "UP Society Registration Rules, 1976", 50, "active"),
+    ("UP_AOA_2010", "Act",
+     "Uttar Pradesh Co-operative Societies Act, 1965",
+     1965, "Government of Uttar Pradesh",
+     "Group housing societies that register as a cooperative rather than under the 1860 Act or the 2010 "
+     "Apartment Act — an alternative route noted in case law (Resident Welfare Association vs State of UP, "
+     "2015) though courts have held the Apartment Act 2010 governs apartment owners specifically",
+     "Alternative registration/governance framework for housing cooperatives in UP, administered by the "
+     "Registrar of Cooperative Societies rather than Registrar of Firms/Societies/Chits.",
+     "Allahabad HC, Resident Welfare Association vs State of U.P., 16-10-2015 (discusses applicability "
+     "vs the 1860 Act/2010 Apartment Act)", 60, "active"),
+    ("UP_AOA_2010", "Central Act",
+     "Real Estate (Regulation and Development) Act, 2016 (RERA)",
+     2016, "Government of India",
+     "Promoters and Associations of Allottees for any RERA-registered project in UP (enforced by UP-RERA)",
+     "Sec 11(4)(e): promoter must enable formation of the Association within 3 months of a majority of "
+     "allottees booking units. Sec 11(4)(a)/(g): promoter remains responsible for obligations and outgoings "
+     "(taxes, water/electricity, maintenance) until conveyance/handover. Sec 17: promoter must hand over "
+     "common-area documents/plans within 30 days of the Completion Certificate, and physical possession of "
+     "common areas within 30 days of the Occupancy Certificate where no local law governs it (in UP, the "
+     "2010 Apartment Act is that local law).",
+     "RERA Act, 2016 (Central Act 16 of 2016), as applied via UP-RERA (up-rera.in)", 70, "active"),
+    ("UP_AOA_2010", "Rules",
+     "Uttar Pradesh Real Estate (Regulation and Development) Rules, 2016",
+     2016, "Government of Uttar Pradesh",
+     "RERA-registered projects and their Associations of Allottees in UP",
+     "State rules operationalising RERA in UP (registration procedure, UP-RERA authority structure, "
+     "grievance/adjudication process) — the state-level counterpart that interacts with the 2010 Apartment "
+     "Act on association formation and common-area handover timelines.",
+     "Notified under RERA Act 2016 Sec 84; UP-RERA (up-rera.in)", 80, "active"),
+    ("UP_AOA_2010", "Central Act",
+     "Central Goods and Services Tax Act, 2017 — principle of mutuality for RWAs",
+     2017, "Government of India",
+     "RWAs/AOAs collecting maintenance from members; exemption threshold applies per member",
+     "Notification No. 12/2017-CT (Rate) exempts RWA maintenance contributions up to ₹7,500 per month per "
+     "member from GST (contributions above that are taxable in full, not just the excess); registration "
+     "required once aggregate turnover crosses the GST threshold. Already implemented in this codebase's "
+     "gst_rates table and GST RCM subsystem.",
+     "CGST Act 2017; Notification No. 12/2017-Central Tax (Rate)", 90, "active"),
+    ("UP_AOA_2010", "Central Act",
+     "Income-tax Act, 1961 — principle of mutuality for RWAs",
+     1961, "Government of India",
+     "RWAs/AOAs assessing surplus from member contributions",
+     "Under the doctrine of mutuality, a surplus arising purely from members' own contributions (with no "
+     "profit motive or dealing with non-members) is not taxable income — the basis for this codebase's "
+     "fn_income_tax_summary_fy mutuality report; income from non-members (e.g. bank interest) remains taxable.",
+     "Income-tax Act, 1961 (mutuality is a judicially-developed doctrine, not a single section)", 100, "active"),
+]
+
+
 def seed_legal_regime_profiles(cur, conn):
     inserted = 0
     for (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
@@ -1055,6 +1154,40 @@ def seed_statutory_head_catalog(cur, conn):
         inserted += 1
     if inserted:
         print(f"  ✓ Statutory head catalog seeded ({inserted} new rows)")
+
+
+def seed_legal_instrument_catalog(cur, conn):
+    """
+    Populate legal_instrument_catalog from LEGAL_INSTRUMENTS_UP_AOA — the
+    tabulated Acts/Rules/Bye-laws/Notifications gathered by web research for
+    the UP_AOA_2010 regime, rendered on the Master Portal's "RWA Compliance
+    (UP)" tab. Idempotent on (regime_code, title, enactment_year), matching
+    the uq_legal_instrument constraint.
+    """
+    inserted = 0
+    for (regime_code, instrument_type, title, enactment_year, issuing_authority,
+         applicability, key_provisions, source_reference, display_order, status) in LEGAL_INSTRUMENTS_UP_AOA:
+        row = _one(
+            cur,
+            "SELECT 1 FROM legal_instrument_catalog WHERE regime_code=%s AND title=%s "
+            "AND enactment_year IS NOT DISTINCT FROM %s",
+            (regime_code, title, enactment_year),
+        )
+        if row:
+            continue
+        cur.execute(
+            """INSERT INTO legal_instrument_catalog
+               (regime_code, instrument_type, title, enactment_year, issuing_authority,
+                applicability, key_provisions, source_reference, display_order, status,
+                last_verified_on)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CURRENT_DATE)""",
+            (regime_code, instrument_type, title, enactment_year, issuing_authority,
+             applicability, key_provisions, source_reference, display_order, status),
+        )
+        conn.commit()
+        inserted += 1
+    if inserted:
+        print(f"  ✓ Legal instrument catalog seeded ({inserted} new rows)")
 
 
 def seed_society_legal_regime(cur, conn, society_id: int):
@@ -2122,6 +2255,7 @@ def run_seed(conn):
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
     seed_legal_regime_profiles(cur, conn)
+    seed_legal_instrument_catalog(cur, conn)
     seed_statutory_head_catalog(cur, conn)
     seed_account_statutory_mappings(cur, conn, society_id)
     seed_gst_rates(cur, conn)
