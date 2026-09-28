@@ -46,7 +46,7 @@ def cleanup_temp_images(max_age_hours: float = 2.0) -> int:
     the start of every _save_captured_image() call so cleanup happens
     naturally during normal usage without a separate scheduler.
     """
-    default_dir = Path("app/assets/default")
+    default_dir = Path(__file__).resolve().parents[2] / "assets" / "default"
     if not default_dir.exists():
         return 0
     cutoff = time.time() - max_age_hours * 3600

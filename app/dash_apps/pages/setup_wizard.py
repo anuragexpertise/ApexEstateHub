@@ -5,6 +5,186 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 
 
+# ── Defaults requested for first-time setup ────────────────────────────────
+DEFAULT_SINKING_FUND_RATE = 0.25    # ₹ per sq ft / month
+DEFAULT_REPAIR_FUND_RATE  = 0.75    # ₹ per sq ft / month
+MAX_INTEREST_RATE_PCT     = 1.75    # hard cap on the late-payment interest rate
+DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
+
+_Label = dbc.Label
+
+FIELD_TIPS = {
+    # Society Details
+    "Society Name": "Registered name of the society. Fixed at onboarding — contact Master to change it.",
+    "Society Logo (Image)": "Shown on receipts, letterheads and the portal header. Images are compressed to WebP under 50 KB.",
+    "Address": "Full postal address. Printed on receipts, bills and the Agreement.",
+    "State": "Decides inter-state (IGST) vs intra-state (CGST+SGST) on RCM, and which state's statutory rules and fund-rate defaults apply.",
+    "Email": "Society contact email used on bills and notices.",
+    "Phone Number": "Society contact number printed on receipts and notices.",
+    "PAN Number": "Society PAN. Fixed at onboarding — contact Master to change it.",
+    "Registration Number": "Registration number under the Societies Registration Act / UP Apartment Act as printed on your registration certificate.",
+    "Gate Pass Enforcement": "Which gate movement is denied when a vendor's or resident's pass is invalid or unpaid: entry, exit, or both.",
+    "Security Duty Hours": "Shift pattern for the security roster: 8-hour (three shifts) or 12-hour (day and night).",
+    "Login Background (Image)": "Optional picture shown behind your society's login screen.",
+    # Administrator
+    "Secretary Name": "Name of the Secretary / authorised signatory, printed on receipts and the Agreement.",
+    "Secretary Phone": "Secretary's contact number.",
+    "Secretary Email": "Secretary's contact email.",
+    "Secretary Signature Image": "Scanned signature printed on receipts and official letters.",
+    "SIGNING_SECRET (Strong Password)": "Key that signs every QR gate-pass for this society. Minimum 8 characters with upper case, lower case and a special character. Changing it later invalidates all printed QR codes.",
+    "Confirm SIGNING_SECRET": "Re-enter the SIGNING_SECRET exactly to avoid a typo locking you out of QR issuing.",
+    # Society Compliance
+    "Registered for GST?": "Yes shows the GSTIN & GST Rate step. Societies are usually registered only when turnover crosses the GST threshold.",
+    "Deducts TDS?": "Yes shows the TAN & TDS Rates step. Needed when you pay vendors above the TDS thresholds.",
+    "Sinking Fund Basis": "How the Sinking Fund contribution is calculated: per sq ft of apartment area, or as a share of construction cost.",
+    "Repair Fund Basis": "How the Repair & Maintenance Fund contribution is calculated: per sq ft, or as a share of construction cost.",
+    "Fund GST Exempt": "On = sinking / repair fund collections are treated as GST-exempt (see CBIC Circular 109/28/2019-GST).",
+    "Fund Charges Interest": "On = late-payment interest also applies to overdue Sinking / Repair fund dues.",
+    "GST Filing Cadence": "Monthly = a return every month. QRMP = quarterly returns with monthly tax payment.",
+    "TDS No PAN Action": "What happens when a payee has no PAN (Sec. 206AA higher rate): Warn = allow with a warning, Block = stop the payment.",
+    "Export Format": "Default layout for compliance exports: Structured (generic), GSTN Offline (GST portal) or TRACES 26Q (TDS return).",
+    # TAN / TDS
+    "TAN Number": "Tax Deduction Account Number (10 characters, e.g. ABCD12345E). Required to deposit TDS and file 26Q.",
+    "TDS Effective Date": "Date from which the TDS rates below apply. The default is the start of the financial year.",
+    # GST
+    "GSTIN": "15-character GST identification number issued on registration.",
+    "CGST Rate (%)": "Central GST rate. Default 9% (CGST 9% + SGST 9% = 18%).",
+    "SGST Rate (%)": "State GST rate. Default 9% (CGST 9% + SGST 9% = 18%).",
+    "Annual Turnover Limit for GST (Lakhs)": "Statutory turnover above which registration is mandatory. Maintained by Master — read-only.",
+    "Monthly Exemption Limit (₹ per member)": "Maintenance up to this amount per member per month is GST-exempt. Maintained by Master — read-only.",
+    # Apartment charges
+    "Base Maintenance Amount": "Flat monthly maintenance charged per apartment. Leave 0 if you charge only by rate per sq ft.",
+    "Maintenance Rate/SqFt": "Monthly maintenance per sq ft of apartment area.",
+    "Billing Due Day": "Day of the month by which bills must be paid (1–31). Interest starts after this day.",
+    "Sinking Fund Rate": f"Monthly Sinking Fund contribution (₹ per sq ft). Default {DEFAULT_SINKING_FUND_RATE}.",
+    "Repair Fund Rate": f"Monthly Repair & Maintenance Fund contribution (₹ per sq ft). Default {DEFAULT_REPAIR_FUND_RATE}.",
+    "Charges Interest Rate (%)": f"Interest charged on overdue dues. Capped at {MAX_INTEREST_RATE_PCT}%.",
+    # Vendor charges
+    "Vendor Pass (1 Day) ₹": f"Default fee for a one-day vendor pass. Default ₹{DEFAULT_VENDOR_1DAY}.",
+    "Vendor Pass (7 Days) ₹": f"Default fee for a seven-day vendor pass. Default ₹{DEFAULT_VENDOR_7DAY}.",
+    "Vendor Pass (1 Month) ₹": f"Default fee for a one-month vendor pass. Default ₹{DEFAULT_VENDOR_1MTH}.",
+    # Accounts / BF
+    "Payment QR Code Image": "Your society's payment QR (UPI). It must belong to the bank account you later set as primary.",
+    "Accounting/Calculation Start Date": "Date from which EstateHub calculates bills, interest and books. Usually the start of a financial year.",
+    "Financial Year (Start Year)": "Year in which the financial year of these opening balances starts (e.g. 2024 for FY 2024-25).",
+    # Agreement
+    "Type 'I AGREE' below to proceed": "Type I AGREE in capitals to accept the EstateHub terms and agreement.",
+    "Admin Password": "Your own login password. Confirms it is really you finalising the setup.",
+    "SIGNING_SECRET": "The SIGNING_SECRET you created on the Administrator step.",
+}
+
+
+def _tip_icon(tip):
+    """CSS-only tooltip (see setup_wizard.css .sw-tip) — no ids, works on hover and keyboard focus."""
+    return html.Span(
+        html.I(className="fas fa-info-circle"),
+        className="sw-tip", tabIndex=0,
+        **{"data-tip": tip, "aria-label": tip},
+    )
+
+
+def _label(text, *args, tip=None, **kwargs):
+    """dbc.Label with an info-icon tooltip looked up from FIELD_TIPS (or passed as tip=)."""
+    tip = tip or (FIELD_TIPS.get(text) if isinstance(text, str) else None)
+    children = [text, _tip_icon(tip)] if tip else text
+    return _Label(children, *args, **kwargs)
+
+
+def _th(text, tip=None):
+    """Table header cell with optional tooltip."""
+    return html.Div([text, _tip_icon(tip)] if tip else text)
+
+
+def _existing_society_images(society_id):
+    """Already-saved image filenames for this society (so re-opening the wizard shows them)."""
+    if not society_id:
+        return {}
+    try:
+        row = db._execute(
+            "SELECT logo, login_background, payment_qr, secretary_sign FROM societies WHERE id = :id",
+            {"id": society_id}, fetch_one=True,
+        ) or {}
+    except Exception:
+        return {}
+    return {
+        "logo": row.get("logo"), "bg": row.get("login_background"),
+        "pay_qr": row.get("payment_qr"), "sec_sign": row.get("secretary_sign"),
+    }
+
+
+def build_rules_panel(step, society_id=None):
+    """
+    Body of the "Acts & Rules" column for one wizard step.
+
+    1) Framework rows from README "Statutory Framework Coverage" (app/services/statutory_rules.py)
+    2) Official "read the Act" links from kpi_rule_links, looked up through
+       STEP_LINK_CATEGORIES — the old code queried the wizard step *name*
+       ("Society Details") against kpi_rule_links.category ('sinking_fund',
+       'fund_gst', ...) and always got nothing — for the society's own state
+       (was hard-coded "ALL", which also hid every UP-specific link).
+    """
+    from app.services.statutory_rules import rows_for_step, STEP_LINK_CATEGORIES
+
+    state = "UP"
+    if society_id:
+        try:
+            row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            state = ((row or {}).get("state") or "UP").strip() or "UP"
+        except Exception:
+            pass
+
+    cards = []
+    for area, sections, requirement, covered, note in rows_for_step(step):
+        cards.append(html.Div([
+            html.Div(area, className="sw-rule-area"),
+            html.Div(sections, className="sw-rule-sec"),
+            html.Div(requirement, className="sw-rule-req"),
+            html.Div(
+                [html.I(className=f"fas {'fa-check-circle' if covered else 'fa-exclamation-circle'} me-1"),
+                 ("In EstateHub: " if covered else "Not yet covered: ") + note],
+                className="sw-rule-cov " + ("ok" if covered else "partial"),
+            ),
+        ], className="sw-rule"))
+
+    links = []
+    cats = STEP_LINK_CATEGORIES.get(step, [])
+    if cats:
+        try:
+            from app.services.kpi_rule_links_service import get_links_for_categories
+            by_cat = get_links_for_categories(cats, state=state)
+        except Exception:
+            by_cat = {}
+        seen = set()
+        for cat in cats:
+            for lk in by_cat.get(cat, []):
+                if lk.url in seen:
+                    continue
+                seen.add(lk.url)
+                links.append(html.Div([
+                    html.A([html.I(className="fas fa-external-link-alt me-1"), lk.label],
+                           href=lk.url, target="_blank", rel="noopener noreferrer",
+                           style={"fontWeight": "500", "color": "#0d6efd", "textDecoration": "none", "display": "block", "marginBottom": "3px"}),
+                    html.P(lk.description, style={"fontSize": "11.5px", "color": "#6c757d", "marginBottom": "8px", "lineHeight": "1.4"}),
+                ], style={"borderBottom": "1px solid #eee", "marginBottom": "8px"}))
+
+    out = cards
+    if links:
+        out = cards + [html.H6("Official sources", className="text-primary mt-3 mb-2")] + links
+    return out
+
+
+def rules_subtitle(step, society_id=None):
+    state = ""
+    if society_id:
+        try:
+            row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            state = ((row or {}).get("state") or "").strip()
+        except Exception:
+            pass
+    scheme = "UP AOA 2010" if state in ("", "UP") else state
+    return f"{step} · {scheme}"
+
+
 def _field_feedback(field_id):
     return html.Small(
         id=field_id,
@@ -49,7 +229,7 @@ CATEGORY_ICONS = {
     "Agreement": "fas fa-handshake"
 }
 
-def _render_image_capture_control(entity, field):
+def _render_image_capture_control(entity, field, existing=None, society_id=None):
     """
     Upload-or-camera control for a single image field, reusing the exact
     working id/data-attribute pattern from renderers.py's "image_upload"
@@ -147,13 +327,28 @@ def _render_image_capture_control(entity, field):
             ),
         ], style={"display": "flex", "gap": "6px", "justifyContent": "center", "marginBottom": "6px"}),
 
-        html.Div(id={"type": "image-preview", "entity": entity, "field": field}, style={"marginTop": "5px", "marginBottom": "15px"}),
+        html.Div(
+            id={"type": "image-preview", "entity": entity, "field": field},
+            style={"marginTop": "5px", "marginBottom": "15px"},
+            # Show what is already saved; a new upload/snap overwrites this div.
+            children=(
+                html.Img(
+                    src=f"/assets/{society_id}/{existing}" if (existing and society_id and "/" not in str(existing)) else existing,
+                    style={"maxWidth": "200px", "maxHeight": "150px", "borderRadius": "8px", "border": "1px solid #ddd"},
+                ) if existing else None
+            ),
+        ),
         html.Img(id=prev_img_id, style={
             "display": "none", "maxWidth": "100%", "maxHeight": "160px",
             "borderRadius": "8px", "marginTop": "6px", "border": "1px solid #ddd",
         }),
-        dcc.Input(id={"type": "form-field-hidden", "entity": entity, "field": field}, type="hidden"),
-        dcc.Input(id={"type": "form-entity-pk", "entity": entity}, type="hidden", value=""),
+        # value=existing keeps an already-saved image when nothing new is uploaded
+        # (fn_complete_society_setup COALESCEs, so re-sending the same name is a no-op).
+        # NOTE: the old duplicate {"type": "form-entity-pk", "entity": entity} hidden input
+        # that used to be emitted here (once per image field => 4 identical ids for
+        # entity "society") was the likely cause of the upload callback never firing;
+        # it was an unused State, and has been removed from handle_image_upload as well.
+        dcc.Input(id={"type": "form-field-hidden", "entity": entity, "field": field}, type="hidden", value=existing or ""),
     ])
 
 
@@ -167,6 +362,7 @@ def _render_banner(title, text):
 
 def render_category_content(category, society_id=None):
     elements = []
+    _imgs = _existing_society_images(society_id) if category in ("Society Details", "Administrator", "Accounts") else {}
     
     # Render conversational header(s) if available. A category can have more
     # than one guidance row in conversation.xlsx (e.g. "Society Details" has
@@ -231,32 +427,32 @@ def render_category_content(category, society_id=None):
         ]
         return elements + [
             _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
-            dbc.Label("Society Name"),
+            _label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
-            dbc.Label("Society Logo (Image)"),
-            _render_image_capture_control("society", "logo"),
-            dbc.Label("Address"),
+            _label("Society Logo (Image)"),
+            _render_image_capture_control("society", "logo", _imgs.get("logo"), society_id),
+            _label("Address"),
             dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
             _field_feedback("sw-society-address-feedback"),
-            dbc.Label("State", html_for="sw-society-state"),
+            _label("State", html_for="sw-society-state"),
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
             html.P(
                 "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
                 "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
                 className="text-muted small mb-3",
             ),
-            dbc.Label("Email"),
+            _label("Email"),
             dbc.Input(id="sw-society-email", type="email", required=True, className="mb-3", value=s_email),
             _field_feedback("sw-society-email-feedback"),
-            dbc.Label("Phone Number"),
+            _label("Phone Number"),
             dbc.Input(id="sw-society-phone", type="tel", required=True, className="mb-3", value=s_phone),
             _field_feedback("sw-society-phone-feedback"),
-            dbc.Label("PAN Number"),
+            _label("PAN Number"),
             dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
-            dbc.Label("Registration Number"),
+            _label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
             _field_feedback("sw-society-reg-feedback"),
-            dbc.Label("Gate Pass Enforcement"),
+            _label("Gate Pass Enforcement"),
             dbc.Select(
                 id="sw-gate-logic",
                 options=[
@@ -267,7 +463,7 @@ def render_category_content(category, society_id=None):
                 value=s_gate_logic,
                 className="mb-3"
             ),
-            dbc.Label("Security Duty Hours"),
+            _label("Security Duty Hours"),
             dbc.Select(
                 id="sw-duty-hrs",
                 options=[
@@ -277,8 +473,8 @@ def render_category_content(category, society_id=None):
                 value=s_duty_hrs,
                 className="mb-3"
             ),
-            dbc.Label("Login Background (Image)"),
-            _render_image_capture_control("society", "bg"),
+            _label("Login Background (Image)"),
+            _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
         ]
     elif category == "TAN & TDS Rates":
         from database.seed import TDS_SECTION_RATE_SEED
@@ -289,9 +485,9 @@ def render_category_content(category, society_id=None):
                 s_tan = row.get("tan_number") or ""
         inputs = [
             _render_banner("TAN & TDS Rates", "Configure TAN and TDS Section rates. Values are pre-filled with standards."),
-            dbc.Label("TAN Number"),
+            _label("TAN Number"),
             dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN...", value=s_tan, className="mb-4"),
-            dbc.Label("TDS Effective Date"),
+            _label("TDS Effective Date"),
             html.Div(dcc.DatePickerSingle(
                 id="sw-tds-effective-date",
                 date="2024-04-01",
@@ -301,30 +497,30 @@ def render_category_content(category, society_id=None):
             html.H6("TDS Rates", className="text-primary mb-3")
         ]
         
-        header = dbc.Row([
-            dbc.Col(html.B("Section", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Discriminator", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Nature of Income", className="small text-uppercase"), width=4),
-            dbc.Col(html.B("Rate (%)", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("No Pan (%)", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Single Bill (₹)", className="small text-uppercase"), width=1.5),
-            dbc.Col(html.B("Aggregate (₹)", className="small text-uppercase"), width=1.5),
-        ], className="mb-2 border-bottom pb-2")
-        inputs.append(header)
-        
+        header = html.Div([
+            _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
+            _th("Discriminator", "Sub-category inside a section (for example payee type). Fixed by the seed data."),
+            _th("Nature of Income", "Description of the payment this row covers. Editable."),
+            _th("Rate (%)", "TDS rate when the payee has a PAN."),
+            _th("No Pan (%)", "Higher rate when the payee has no PAN (Sec. 206AA, typically 20%)."),
+            _th("Single Bill (₹)", "A single bill above this amount attracts TDS."),
+            _th("Aggregate (₹)", "TDS applies once total payments to a payee in the financial year exceed this."),
+        ], className="sw-grid-row sw-tds-grid sw-grid-head")
+
+        rows = []
         for idx, item in enumerate(TDS_SECTION_RATE_SEED):
             section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item
-            row = dbc.Row([
-                dbc.Col(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm"), width=1),
-                dbc.Col(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm"), width=2),
-                dbc.Col(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm"), width=4),
-                dbc.Col(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm"), width=1),
-                dbc.Col(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm"), width=1),
-                dbc.Col(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm"), width=1.5),
-                dbc.Col(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm"), width=1.5),
-            ], className="mb-2")
-            inputs.append(row)
-            
+            rows.append(html.Div([
+                html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm")),
+            ], className="sw-grid-row sw-tds-grid"))
+        inputs.append(html.Div([header] + rows, className="sw-hscroll"))
+
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "GSTIN & GST Rate":
         s_gstin = ""
@@ -347,17 +543,24 @@ def render_category_content(category, society_id=None):
         readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
         return elements + [
             _render_banner("GSTIN & GST Rate", "Configure this society's GSTIN and GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
-            dbc.Label("GSTIN"),
+            _label("GSTIN"),
             dbc.Input(id="sw-society-gstin", type="text", placeholder="Enter GSTIN...", value=s_gstin, className="mb-4"),
             html.Hr(),
-            html.H6("GST Rates", className="text-primary mb-3"),
-            dbc.Label("CGST Rate (%)"),
+            html.H6("GST Rates", className="text-primary mb-2"),
+            html.P(
+                [html.I(className="fas fa-info-circle me-1"),
+                 "These GST rates are the defaults for the selected UP AOA scheme "
+                 "(UP Apartment Act, 2010 — Apartment Owners' Association): CGST 9% + SGST 9% = 18%. "
+                 "Change them only if your CA advises."],
+                className="small text-muted mb-3",
+            ),
+            _label("CGST Rate (%)"),
             dbc.Input(id="sw-cgst", type="number", value=9.0, className="mb-3", step=0.1),
-            dbc.Label("SGST Rate (%)"),
+            _label("SGST Rate (%)"),
             dbc.Input(id="sw-sgst", type="number", value=9.0, className="mb-3", step=0.1),
-            dbc.Label("Annual Turnover Limit for GST (Lakhs)"),
+            _label("Annual Turnover Limit for GST (Lakhs)"),
             dbc.Input(type="number", value=turnover_val, className="mb-3", readonly=True, style=readonly_style),
-            dbc.Label("Monthly Exemption Limit (₹ per member)"),
+            _label("Monthly Exemption Limit (₹ per member)"),
             dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
         ]
     elif category == "Society Compliance":
@@ -392,23 +595,23 @@ def render_category_content(category, society_id=None):
         # removed; this radio now both drives navigation and is the value
         # persisted on submit.
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=c_gst_reg, inline=True, className="mb-3")], width=6),
-            dbc.Col([dbc.Label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
+            dbc.Col([_label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=c_gst_reg, inline=True, className="mb-3")], width=6),
+            dbc.Col([_label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
         ]))
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("Sinking Fund Basis"), dbc.Select(id="sw-comp-sink", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_sink_basis, className="mb-3")], width=6),
-            dbc.Col([dbc.Label("Repair Fund Basis"), dbc.Select(id="sw-comp-repair", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_repair_basis, className="mb-3")], width=6)
+            dbc.Col([_label("Sinking Fund Basis"), dbc.Select(id="sw-comp-sink", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_sink_basis, className="mb-3")], width=6),
+            dbc.Col([_label("Repair Fund Basis"), dbc.Select(id="sw-comp-repair", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_repair_basis, className="mb-3")], width=6)
         ]))
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("Fund GST Exempt"), dbc.Switch(id="sw-comp-gst-exempt", value=c_gst_exempt, className="mb-3")], width=6),
-            dbc.Col([dbc.Label("Fund Charges Interest"), dbc.Switch(id="sw-comp-charges-int", value=c_charges_int, className="mb-3")], width=6)
+            dbc.Col([_label("Fund GST Exempt"), dbc.Switch(id="sw-comp-gst-exempt", value=c_gst_exempt, className="mb-3")], width=6),
+            dbc.Col([_label("Fund Charges Interest"), dbc.Switch(id="sw-comp-charges-int", value=c_charges_int, className="mb-3")], width=6)
         ]))
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("GST Filing Cadence"), dbc.Select(id="sw-comp-gst-cadence", options=[{"label": "Monthly", "value": "monthly"}, {"label": "QRMP", "value": "qrmp"}], value=c_gst_cadence, className="mb-3")], width=6),
-            dbc.Col([dbc.Label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
+            dbc.Col([_label("GST Filing Cadence"), dbc.Select(id="sw-comp-gst-cadence", options=[{"label": "Monthly", "value": "monthly"}, {"label": "QRMP", "value": "qrmp"}], value=c_gst_cadence, className="mb-3")], width=6),
+            dbc.Col([_label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
         ]))
         inputs.append(dbc.Row([
-            dbc.Col([dbc.Label("Export Format"), dbc.Select(id="sw-comp-export-fmt", options=[{"label": "Structured", "value": "structured"}, {"label": "GSTN Offline", "value": "gstn_offline"}, {"label": "TRACES 26Q", "value": "traces_26q"}], value=c_export_fmt, className="mb-3")], width=6)
+            dbc.Col([_label("Export Format"), dbc.Select(id="sw-comp-export-fmt", options=[{"label": "Structured", "value": "structured"}, {"label": "GSTN Offline", "value": "gstn_offline"}, {"label": "TRACES 26Q", "value": "traces_26q"}], value=c_export_fmt, className="mb-3")], width=6)
         ]))
         inputs.append(html.Hr())
         inputs.append(html.H6("State Compliance Thresholds", className="mt-4 mb-2 text-primary"))
@@ -417,27 +620,33 @@ def render_category_content(category, society_id=None):
             inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Apartment Charges":
-        s_amt, s_rate, s_due, s_sink, s_repair, s_int = 0.0, 0.0, 1, 0.0, 0.0, 0.0
+        s_amt, s_rate, s_due = 0.0, 0.0, 1
+        s_sink, s_repair, s_int = DEFAULT_SINKING_FUND_RATE, DEFAULT_REPAIR_FUND_RATE, MAX_INTEREST_RATE_PCT
         if society_id:
             row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
-                s_sink, s_repair, s_int = row.get("apt_sinking_fund_rate", 0.0) or 0.0, row.get("apt_repair_fund_rate", 0.0) or 0.0, row.get("apt_interest_pct", 0.0) or 0.0
+                # a stored 0 means "never set" on first-time setup, so fall back to the defaults
+                s_sink = row.get("apt_sinking_fund_rate") or DEFAULT_SINKING_FUND_RATE
+                s_repair = row.get("apt_repair_fund_rate") or DEFAULT_REPAIR_FUND_RATE
+                s_int = min(row.get("apt_interest_pct") or MAX_INTEREST_RATE_PCT, MAX_INTEREST_RATE_PCT)
         return elements + [
-            _render_banner("Apartment Charges", "Set default charges, billing cycle day, sinking fund, and repair fund rates for all apartments."),
-            dbc.Row([dbc.Col([dbc.Label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([dbc.Label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
-            dbc.Row([dbc.Col([dbc.Label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4), dbc.Col([dbc.Label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], width=4), dbc.Col([dbc.Label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], width=4)]),
-            dbc.Row([dbc.Col([dbc.Label("Charges Interest Rate (%)"), dbc.Input(id="sw-apt-interest", type="number", value=s_int, step=0.01, className="mb-3")], width=4)])
+            _render_banner("Apartment Charges", f"Set default charges, billing cycle day, sinking fund, and repair fund rates for all apartments. Defaults are pre-filled: Sinking Fund {DEFAULT_SINKING_FUND_RATE}, Repair Fund {DEFAULT_REPAIR_FUND_RATE}, interest capped at {MAX_INTEREST_RATE_PCT}%."),
+            dbc.Row([dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
+            dbc.Row([dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4), dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], width=4), dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], width=4)]),
+            dbc.Row([dbc.Col([_label("Charges Interest Rate (%)"), dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, max=MAX_INTEREST_RATE_PCT, step=0.01, className="mb-1"), html.Small(f"Maximum {MAX_INTEREST_RATE_PCT}%", className="text-muted d-block mb-3")], width=4)])
         ]
     elif category == "Vendor Charges":
-        s_v1, s_v7, s_v30 = 0.0, 0.0, 0.0
+        s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
         if society_id:
             row = db._execute("SELECT vendor_1day, vendor_7day, vendor_1mth FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
-                s_v1, s_v7, s_v30 = row.get("vendor_1day", 0.0) or 0.0, row.get("vendor_7day", 0.0) or 0.0, row.get("vendor_1mth", 0.0) or 0.0
+                s_v1 = row.get("vendor_1day") or DEFAULT_VENDOR_1DAY
+                s_v7 = row.get("vendor_7day") or DEFAULT_VENDOR_7DAY
+                s_v30 = row.get("vendor_1mth") or DEFAULT_VENDOR_1MTH
         return elements + [
-            _render_banner("Vendor Charges", "Set default vendor pass charges (1-Day, 7-Day, 1-Month)."),
-            dbc.Row([dbc.Col([dbc.Label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([dbc.Label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([dbc.Label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
+            _render_banner("Vendor Charges", f"Set default vendor pass charges. Pre-filled: 1 Day ₹{DEFAULT_VENDOR_1DAY}, 7 Days ₹{DEFAULT_VENDOR_7DAY}, 1 Month ₹{DEFAULT_VENDOR_1MTH}."),
+            dbc.Row([dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
         ]
     elif category == "Accounts":
         s_calc = "2024-04-01"
@@ -447,42 +656,38 @@ def render_category_content(category, society_id=None):
         from database.seed import ACCOUNTS
         inputs = [
             _render_banner("Accounts Settings", "Configure accounting start date and Payment QR Code."),
-            html.P("Note: The primary_bank_account is not set by default. The Society's payment QR code must correspond to this bank. You can set this later in the Admin portal under the 'Settings' tab, 'Account' KPI.", className="text-info small mb-3"),
-            dbc.Label("Payment QR Code Image"),
-            _render_image_capture_control("society", "pay_qr"),
-            dbc.Label("Accounting/Calculation Start Date"),
+            html.P([html.B("Note: "), "The primary_bank_account is not set by default. The Society's payment QR code must correspond to this bank. You can set this later in the Admin portal under the 'Settings' tab, 'Account' KPI."], className="sw-note-red mb-3"),
+            _label("Payment QR Code Image"),
+            _render_image_capture_control("society", "pay_qr", _imgs.get("pay_qr"), society_id),
+            _label("Accounting/Calculation Start Date"),
             dcc.DatePickerSingle(id="sw-calc-start-date", date=s_calc, display_format='YYYY-MM-DD', className="mb-4 d-block"),
             html.Hr(),
             html.H6("All Accounts (Seeded)", className="text-primary mb-3"),
         ]
-        header = dbc.Row([
-            dbc.Col(html.B("ID", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Tab", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Name", className="small text-uppercase"), width=4),
-            dbc.Col(html.B("Dr/Cr", className="small text-uppercase", title="drcr_account"), width=1),
-            dbc.Col(html.B("BF?", className="small text-uppercase", title="has_bf"), width=1),
-            dbc.Col(html.B("Depr?", className="small text-uppercase", title="is_depreciable"), width=1),
-            dbc.Col(html.B("Depr %", className="small text-uppercase", title="depreciation_percent"), width=2),
-        ], className="mb-2 border-bottom pb-1")
-        inputs.append(header)
+        header = html.Div([
+            _th("ID"), _th("Tab"), _th("Name"),
+            _th("Dr/Cr", "drcr_account — whether the account normally carries a debit or credit balance."),
+            _th("BF?", "has_bf — whether this account can carry a brought-forward opening balance."),
+            _th("Depr?", "is_depreciable — whether depreciation is charged on this account."),
+            _th("Depr %", "depreciation_percent — annual depreciation rate (100 = not depreciated)."),
+        ], className="sw-grid-row sw-acc-grid sw-grid-head")
 
         # Group (sort) by parent_account_id (acc[4])
         sorted_accounts = sorted(ACCOUNTS, key=lambda x: (x[4] if x[4] is not None else -1, x[0]))
-
+        rows = []
         for acc in sorted_accounts:
             # acc mapping: 0=id, 1=header, 2=tab, 3=name, 4=parent, 5=drcr, 6=has_bf, 7=depr_percent
             is_depreciable = acc[7] < 100 if acc[7] is not None else False
-            
-            row = dbc.Row([
-                dbc.Col(html.Span(str(acc[0]), className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[2] or ""), className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[3] or ""), className="small fw-bold"), width=4, className="d-flex align-items-center"),
-                dbc.Col(html.Span(str(acc[5] or ""), className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span("Yes" if acc[6] else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span("Yes" if is_depreciable else "No", className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(f"{acc[7]}%" if acc[7] is not None else "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
-            ], className="mb-2")
-            inputs.append(row)
+            rows.append(html.Div([
+                html.Div(str(acc[0]), className="small text-muted"),
+                html.Div(str(acc[2] or ""), className="small text-muted"),
+                html.Div(str(acc[3] or ""), className="small fw-bold"),
+                html.Div(str(acc[5] or ""), className="small text-muted"),
+                html.Div("Yes" if acc[6] else "No", className="small text-muted"),
+                html.Div("Yes" if is_depreciable else "No", className="small text-muted"),
+                html.Div(f"{acc[7]}%" if acc[7] is not None else "", className="small text-muted"),
+            ], className="sw-grid-row sw-acc-grid"))
+        inputs.append(html.Div([header] + rows, className="sw-hscroll"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Brought Forward":
         s_fy = 2024
@@ -490,36 +695,55 @@ def render_category_content(category, society_id=None):
             row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
             if row: s_fy = row.get("financial_year", 2024)
         from database.seed import ACCOUNTS
-        accounts = [{"id": acc[0], "tab_name": acc[2], "name": acc[3], "drcr": acc[5]} for acc in ACCOUNTS if acc[6]]
-        
+
+        # Same shape as the Balance Sheet: Assets (Dr) on the left,
+        # Liabilities + Equity/Reserves (Cr) on the right, each as a parent -> child tree.
+        children = {}
+        for acc in ACCOUNTS:
+            children.setdefault(acc[4], []).append(acc)
+        for kids in children.values():
+            kids.sort(key=lambda a: a[0])
+
+        def _has_bf(acc):
+            return bool(acc[6]) or any(_has_bf(c) for c in children.get(acc[0], []))
+
+        def _render_node(acc, depth):
+            out = []
+            indent = {"paddingLeft": f"{12 + depth * 14}px"}
+            if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
+                out.append(html.Div([
+                    html.Div([acc[3] or "", html.Small(f"{acc[2] or ''} · {acc[5] or ''}")], className="sw-bf-name"),
+                    dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=0.0, step=0.01, min=0, size="sm"),
+                    dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks"),
+                ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))
+            else:        # group heading
+                out.append(html.Div(acc[3] or "", className="sw-bf-group", style=indent))
+            for child in children.get(acc[0], []):
+                if _has_bf(child):
+                    out.extend(_render_node(child, depth + 1))
+            return out
+
+        def _side(title, subtitle, root_ids):
+            body = []
+            for rid in root_ids:
+                root = next((a for a in ACCOUNTS if a[0] == rid), None)
+                if root and _has_bf(root):
+                    body.extend(_render_node(root, 0))
+            return html.Div([
+                html.Div([html.Span(title), html.Span(subtitle)], className="sw-bf-side-head"),
+                *body,
+            ], className="sw-bf-side")
+
         inputs = [
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. Values will be saved for the specified Financial Year."),
-            dbc.Label("Financial Year (Start Year)"),
+            _label("Financial Year (Start Year)"),
             dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3"),
             html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
+            html.Div([
+                _side("Assets", "Dr", [1000]),
+                _side("Liabilities & Equity", "Cr", [2000, 3000]),
+            ], className="sw-bf-grid"),
         ]
-        
-        header = dbc.Row([
-            dbc.Col(html.B("ID", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Tab", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Name", className="small text-uppercase"), width=4),
-            dbc.Col(html.B("Dr/Cr", className="small text-uppercase"), width=1),
-            dbc.Col(html.B("Amount (₹)", className="small text-uppercase"), width=2),
-            dbc.Col(html.B("Remarks", className="small text-uppercase"), width=2),
-        ], className="mb-2 border-bottom pb-1")
-        inputs.append(header)
-        
-        for acc in accounts:
-            row = dbc.Row([
-                dbc.Col(html.Span(str(acc["id"]), className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc["tab_name"] or "", className="small text-muted text-break"), width=2, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc["name"] or "", className="small fw-bold"), width=4, className="d-flex align-items-center"),
-                dbc.Col(html.Span(acc["drcr"] or "", className="small text-muted"), width=1, className="d-flex align-items-center"),
-                dbc.Col(dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc["id"]}, type="number", value=0.0, step=0.01, min=0, size="sm"), width=2),
-                dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc["id"]}, type="text", placeholder="Remarks...", size="sm"), width=2),
-            ], className="mb-2")
-            inputs.append(row)
-            
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
         s_name, s_phone, s_email = "", "", ""
@@ -530,14 +754,14 @@ def render_category_content(category, society_id=None):
         return elements + [
             _render_banner("Administrator Details", "Configure Secretary details, digital signature, and your secure QR SIGNING_SECRET. This secret is required to authenticate generated QR codes."),
             html.H6("Secretary Details", className="text-primary mb-3"),
-            dbc.Label("Secretary Name"),
+            _label("Secretary Name"),
             dbc.Input(id="sw-sec-name", type="text", value=s_name, className="mb-3"),
-            dbc.Label("Secretary Phone"),
+            _label("Secretary Phone"),
             dbc.Input(id="sw-sec-phone", type="tel", value=s_phone, className="mb-3"),
-            dbc.Label("Secretary Email"),
+            _label("Secretary Email"),
             dbc.Input(id="sw-sec-email", type="email", value=s_email, className="mb-3"),
-            dbc.Label("Secretary Signature Image"),
-            _render_image_capture_control("society", "sec_sign"),
+            _label("Secretary Signature Image"),
+            _render_image_capture_control("society", "sec_sign", _imgs.get("sec_sign"), society_id),
             html.Hr(),
             html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
             html.P(
@@ -549,10 +773,10 @@ def render_category_content(category, society_id=None):
                 "printed QR code for this society, requiring a full reissue.",
                 className="text-muted small mb-3",
             ),
-            dbc.Label("SIGNING_SECRET (Strong Password)"),
+            _label("SIGNING_SECRET (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
             _field_feedback("sw-qr-secret-feedback"),
-            dbc.Label("Confirm SIGNING_SECRET"),
+            _label("Confirm SIGNING_SECRET"),
             dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
             _field_feedback("sw-qr-secret-confirm-feedback"),
         ]
@@ -602,19 +826,19 @@ def render_category_content(category, society_id=None):
                 [dcc.Markdown(agreement_txt)],
                 style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             ),
-            dbc.Label("Type 'I AGREE' below to proceed"),
+            _label("Type 'I AGREE' below to proceed"),
             dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),
             _field_feedback("sw-i-agree-feedback"),
             html.Hr(),
             html.P("Authorization required to submit setup.", className="fw-bold"),
             dbc.Row([
                 dbc.Col([
-                    dbc.Label("Admin Password"),
+                    _label("Admin Password"),
                     dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3"),
                     _field_feedback("sw-admin-password-feedback")
                 ], width=6),
                 dbc.Col([
-                    dbc.Label("SIGNING_SECRET"),
+                    _label("SIGNING_SECRET"),
                     dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the SIGNING_SECRET created in the Administrator tab...", className="mb-3"),
                     _field_feedback("sw-qr-confirm-final-feedback")
                 ], width=6)
@@ -644,11 +868,18 @@ def get_setup_wizard_layout(society_id=None):
                 style={"background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)", "borderBottom": "none", "display": "flex", "justifyContent": "space-between"}
             ),
             dbc.ModalBody(
-                dbc.Row(className="d-flex h-100", children=[
-                    # Navigation (Left)
-                    dbc.Col(
-                        [
-                            html.H3([html.I(className="fas fa-magic me-2"), "Setup Wizard"], style={"color": "#667eea", "fontWeight": "bold", "marginBottom": "30px", "fontSize": "1.5rem"}),
+                # One shell for every step: [sidebar] [content] [Acts & Rules].
+                # Each column = pinned header | scrolling body (| pinned footer),
+                # so nothing shifts between categories (see assets/setup_wizard.css).
+                html.Div(className="sw-shell", children=[
+
+                    # ── Column 1: sidebar ──────────────────────────────────
+                    html.Div(className="sw-col sw-col-nav", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H3([html.I(className="fas fa-magic me-2"), "Setup Wizard"],
+                                    style={"color": "#667eea", "fontWeight": "bold", "fontSize": "1.5rem"}),
+                        ]),
+                        html.Div(className="sw-col-body", children=[
                             dbc.Nav(
                                 [
                                     dbc.NavLink(
@@ -663,54 +894,45 @@ def get_setup_wizard_layout(society_id=None):
                                 vertical=True,
                                 pills=True,
                                 id="sw-nav-menu"
-                            )
-                        ],
-                        style={"flex": "0 0 250px", "borderRight": "1px solid #ddd", "paddingRight": "10px"}
-                    ),
-                    
-                    # Content (Center)
-                    dbc.Col(
-                        className="d-flex flex-column",
-                        children=[
-                            html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold", "marginBottom": "20px"}),
-                            html.Div(id="sw-category-content", style={"flex": "1", "overflowY": "auto", "paddingRight": "10px"}, children=[
-                                html.Div(
-                                    render_category_content(cat, society_id),
-                                    id={"type": "sw-step-container", "index": i},
-                                    style={"display": "block" if i == 0 else "none"}
-                                ) for i, cat in enumerate(CATEGORIES)
-                            ]),
-                            
-                            html.Div(id="sw-error-msg", style={"color": "red", "marginTop": "15px"}),
+                            ),
+                        ]),
+                    ]),
 
+                    # ── Column 2: step content ─────────────────────────────
+                    html.Div(className="sw-col sw-col-content", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold"}),
+                        ]),
+                        html.Div(id="sw-category-content", className="sw-col-body", children=[
+                            html.Div(
+                                render_category_content(cat, society_id),
+                                id={"type": "sw-step-container", "index": i},
+                                style={"display": "block" if i == 0 else "none"}
+                            ) for i, cat in enumerate(CATEGORIES)
+                        ]),
+                        html.Div(className="sw-col-foot", children=[
+                            html.Div(id="sw-error-msg", style={"color": "red", "marginBottom": "8px"}),
                             html.Div(
                                 [
                                     dbc.Button("Previous", id="sw-btn-prev", color="secondary", className="me-2", disabled=True),
                                     dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2"),
                                     dbc.Button("Submit Setup", id="sw-btn-submit", color="success", style={"display": "none"})
                                 ],
-                                style={"marginTop": "30px", "textAlign": "right", "paddingTop": "15px", "borderTop": "1px solid #eee"}
-                            )
-                        ],
-                        style={"flex": "1", "padding": "0 20px"}
-                    ),
+                                style={"textAlign": "right"}
+                            ),
+                        ]),
+                    ]),
 
-                    # Rules & Compliance Panel (Right)
-                    dbc.Col(
-                        className="d-flex flex-column",
-                        children=[
-                            html.Div(
-                                [
-                                    html.H5([html.I(className="fas fa-book me-2"), "Acts & Rules"], style={"fontWeight": "bold", "color": "#2c3e50"}),
-                                    html.Hr(style={"margin": "10px 0"}),
-                                    html.Div(id="sw-compliance-rules-panel", style={"flex": "1", "fontSize": "12.5px", "color": "#3a4a5c", "overflowY": "auto"})
-                                ],
-                                className="d-flex flex-column h-100",
-                                style={"background": "rgba(255,255,255,0.85)", "padding": "15px", "borderRadius": "10px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"}
-                            )
-                        ],
-                        style={"flex": "0 0 300px", "paddingLeft": "10px"}
-                    )
+                    # ── Column 3: Acts & Rules ─────────────────────────────
+                    html.Div(className="sw-col sw-col-rules", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H5([html.I(className="fas fa-book me-2"), "Acts & Rules"], style={"fontWeight": "bold", "color": "#2c3e50"}),
+                            html.Small(id="sw-rules-subtitle", children=rules_subtitle(CATEGORIES[0], society_id), className="text-muted"),
+                        ]),
+                        html.Div(id="sw-compliance-rules-panel", className="sw-col-body",
+                                 children=build_rules_panel(CATEGORIES[0], society_id),
+                                 style={"fontSize": "12.5px", "color": "#3a4a5c"}),
+                    ]),
                 ]),
                 id="setup-wizard-modal-body",
                 style={
@@ -718,7 +940,6 @@ def get_setup_wizard_layout(society_id=None):
                     "backgroundSize": "cover",
                     "backgroundPosition": "center",
                     "minHeight": "650px",
-                    "padding": "30px"
                 }
             ),
             dcc.Store(id="sw-current-step", data=0),

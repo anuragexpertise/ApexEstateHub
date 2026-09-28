@@ -69,8 +69,14 @@ function snapCamCapture(btn) {
     // We locate it by checking if the id contains our marker substring.
     var hiddenInput = null;
     if (marker) {
+        // Dash writes dict ids into the DOM as compact JSON ({"entity":"x","field":"y",...}),
+        // but the marker is built server-side as '"entity": "x", "field": "y"' (with spaces),
+        // so a plain indexOf() would never match and a snapped photo never reached the server.
+        // Compare with all whitespace stripped from both sides.
+        var squash = function(t) { return String(t).replace(/\s+/g, ''); };
+        var wanted = squash(marker);
         document.querySelectorAll('input[type=hidden]').forEach(function(el) {
-            if (el.id && el.id.indexOf(marker) >= 0) hiddenInput = el;
+            if (el.id && squash(el.id).indexOf(wanted) >= 0) hiddenInput = el;
         });
     }
     if (hiddenInput) {

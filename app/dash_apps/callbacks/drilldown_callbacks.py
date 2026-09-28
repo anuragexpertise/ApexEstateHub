@@ -52,6 +52,13 @@ import pandas as pd
 import base64
 import os
 from pathlib import Path
+
+# Absolute, CWD-independent assets root. These used to be Path("app/assets"),
+# i.e. relative to whatever directory the server process was started from,
+# while the Flask /assets/<path> route (app/__init__.py) serves the absolute
+# app/assets folder — so on a host whose working directory isn't the repo root,
+# images were written to one place and looked up in another.
+ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
 from PIL import Image
 from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
 from dash.exceptions import PreventUpdate
@@ -406,9 +413,9 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
         pass
 
     if society_id:
-        target_dir = Path("app/assets") / str(society_id)
+        target_dir = ASSETS_ROOT / str(society_id)
     else:
-        target_dir = Path("app/assets/default") / entity
+        target_dir = (ASSETS_ROOT / "default") / entity
     target_dir.mkdir(parents=True, exist_ok=True)
 
     from app.dash_apps.drilldown.image_utils import compress_to_webp
@@ -447,11 +454,13 @@ def register_drilldown_callbacks(app):
         State({"type": "form-upload", "entity": MATCH, "field": MATCH}, "filename"),
         State("auth-store", "data"),
         State({"type": "form-upload", "entity": MATCH, "field": MATCH}, "id"),
-        State({"type": "form-entity-pk", "entity": MATCH}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def handle_image_upload(contents, filename, auth, field_id, entity_pk):
+    def handle_image_upload(contents, filename, auth, field_id):
+        # (Removed: State form-entity-pk, MATCH on entity. It was never used here, and the
+        #  Setup Wizard renders several image fields for one entity, so more than one
+        #  component matched that State and the callback could not resolve its inputs.)
         if not contents:
             return no_update, no_update
         try:
@@ -1932,9 +1941,9 @@ def register_drilldown_callbacks(app):
 
                     from pathlib import Path as _Path
                     if sid:
-                        _dir = _Path("app/assets") / str(sid)
+                        _dir = ASSETS_ROOT / str(sid)
                     else:
-                        _dir = _Path("app/assets/default") / entity_singular
+                        _dir = (ASSETS_ROOT / "default") / entity_singular
                     _dir.mkdir(parents=True, exist_ok=True)
                     _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webp"
                     with open(_dir / _fname, "wb") as _f:
@@ -3647,15 +3656,15 @@ def _label_for(entity_plural: str, record: dict) -> str:
 def _move_temp_images(entity, new_id, society_id, form_data):
     from pathlib import Path
 
-    temp_dir = Path("app/assets/default") / entity
+    temp_dir = (ASSETS_ROOT / "default") / entity
     if not temp_dir.exists():
         return
     if entity == "society":
-        final_dir = Path("app/assets") / str(society_id)
+        final_dir = ASSETS_ROOT / str(society_id)
     elif entity in ("apartment", "vendor", "security", "concern", "event"):
-        final_dir = Path("app/assets") / str(society_id) / entity / str(new_id)
+        final_dir = ASSETS_ROOT / str(society_id) / entity / str(new_id)
     else:
-        final_dir = Path("app/assets") / str(society_id) / f"{entity}_{new_id}"
+        final_dir = ASSETS_ROOT / str(society_id) / f"{entity}_{new_id}"
     final_dir.mkdir(parents=True, exist_ok=True)
     for field, filename in form_data.items():
         if isinstance(filename, str) and "/" not in filename and "." in filename:
@@ -5359,7 +5368,7 @@ def _save_society(db, d, sid, is_edit, pk):
     from pathlib import Path
 
     if is_edit:
-        society_dir = Path("app/assets") / str(pk)
+        society_dir = ASSETS_ROOT / str(pk)
         society_dir.mkdir(parents=True, exist_ok=True)
         _missing_files = []
         for field in ["logo", "login_background", "secretary_sign", "payment_qr"]:
@@ -5370,7 +5379,7 @@ def _save_society(db, d, sid, is_edit, pk):
                 and "/" not in filename
                 and "." in filename
             ):
-                tmp = Path("app/assets/default/society") / filename
+                tmp = (ASSETS_ROOT / "default" / "society") / filename
                 dst = society_dir / filename
                 if tmp.exists():
                     if dst.exists():
