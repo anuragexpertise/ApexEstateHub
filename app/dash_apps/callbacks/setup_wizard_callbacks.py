@@ -4,7 +4,10 @@ from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ct
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
-from app.dash_apps.pages.setup_wizard import get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS
+from app.dash_apps.pages.setup_wizard import (
+    get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
+    build_rules_panel, rules_subtitle, MAX_INTEREST_RATE_PCT,
+)
 from app.utils.ux_toasts import error_toast
 
 
@@ -114,6 +117,7 @@ def register_setup_wizard_callbacks(app):
         Output("sw-category-title", "children"),
         Output({"type": "sw-step-container", "index": ALL}, "style"),
         Output("sw-compliance-rules-panel", "children"),
+        Output("sw-rules-subtitle", "children"),
         Output({"type": "sw-nav-item", "index": ALL}, "active"),
         Output({"type": "sw-nav-item", "index": ALL}, "children"),
         Output("sw-btn-prev", "disabled"),
@@ -187,26 +191,9 @@ def register_setup_wizard_callbacks(app):
         cat_name = CATEGORIES[new_step]
         step_styles = [{"display": "block"} if i == new_step else {"display": "none"} for i in range(len(CATEGORIES))]
         
-        # Fetch Rules from DB
-        from app.services.kpi_rule_links_service import get_links_for_categories
-        links_by_cat = get_links_for_categories([cat_name], state="ALL")
-        links = links_by_cat.get(cat_name, [])
-        
-        if links:
-            rules_html = [
-                html.Div([
-                    html.A(
-                        [html.I(className="fas fa-external-link-alt me-1"), lk.label], 
-                        href=lk.url, 
-                        target="_blank", 
-                        style={"fontWeight": "500", "color": "#0d6efd", "textDecoration": "none", "display": "block", "marginBottom": "5px"}
-                    ),
-                    html.P(lk.description, style={"fontSize": "11.5px", "color": "#6c757d", "marginBottom": "12px", "lineHeight": "1.4"})
-                ], style={"borderBottom": "1px solid #eee", "paddingBottom": "8px", "marginBottom": "8px"})
-                for lk in links
-            ]
-        else:
-            rules_html = [html.P("No specific compliance rules or external links found for this section.", style={"color": "#6c757d", "fontStyle": "italic"})]
+        # Acts & Rules: framework rows + official links for THIS step (see build_rules_panel)
+        rules_html = build_rules_panel(cat_name, society_id)
+        rules_sub = rules_subtitle(cat_name, society_id)
 
         nav_active = [i == new_step for i in range(len(CATEGORIES))]
         nav_children = []
@@ -225,7 +212,7 @@ def register_setup_wizard_callbacks(app):
         next_style = {"display": "inline-block"} if new_step < len(CATEGORIES) - 1 else {"display": "none"}
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
-        return new_step, cat_name, step_styles, rules_html, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
+        return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
 
 
 
@@ -481,7 +468,7 @@ def register_setup_wizard_callbacks(app):
                         "created_by": auth.get("user_id"),
                         "s_email": s_email,
                         "reg_num": reg_num,
-                        "apt_interest": apt_interest,
+                        "apt_interest": min(max(float(apt_interest or 0), 0.0), MAX_INTEREST_RATE_PCT),
                         "c_sink": c_sink,
                         "c_repair": c_repair,
                         "c_gst_exempt": c_gst_exempt,
