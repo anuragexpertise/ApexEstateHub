@@ -4,7 +4,18 @@
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
 > Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
 
-> 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment-notes) for details.
+> 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment--utility-notes) for details.
+
+> 🆕 **Recent release — fund segregation & the Agreement print fix.** Agreement
+> Print/Save-as-PDF/Email was broken app-wide by a one-character typo in the
+> shared letterhead JS; it now works, along with every other PDF export that
+> uses the same helper. Fund Management gained **Appropriate Income → Fund**
+> (moving a locked fund's earned interest into a spendable fund) and **Fund
+> Deposit Routing** (per-fund destination bank account, with per-account bank
+> reconciliation to match). Start at
+> [§9 Fund Deposit Routing](#fund-deposit-routing--fund_bank_account_map),
+> [§16](#16-postgresql-function-index) for the new functions, and
+> [§19](#19-known-bugs--fixes-applied) for the full list of what was broken.
 
 ---
 
@@ -20,7 +31,7 @@
 8. [KPI Dashboard System](#8-kpi-dashboard-system)
 9. [Financial Module](#9-financial-module)
 10. [Pay Dues — Five Paths](#10-pay-dues--five-paths)
-11. [Gate Pass & QR Scanning](#11-gate-pass--qr-scanning)
+11. [QR Code & Access Control Architecture](#11-qr-code--access-control-architecture)
 12. [Default Profile (No KPI Selected)](#12-default-profile-no-kpi-selected)
 13. [Customize Tab — Layout Editor & KPI Inspector](#13-customize-tab--layout-editor--kpi-inspector)
 14. [File & Image Management](#14-file--image-management)
@@ -30,8 +41,8 @@
 18. [Critical Dash Rules](#18-critical-dash-rules)
 19. [Known Bugs & Fixes Applied](#19-known-bugs--fixes-applied)
 20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
-21. [🗑️ Legacy Code Removal Guide](#21-️-legacy-code-removal-guide)
-22. [Deployment Notes](#22-deployment-notes)
+21. [🧹 Legacy Code Cleanup Status](#21--legacy-code-cleanup-status)
+22. [Deployment & Utility Notes](#22-deployment--utility-notes)
 23. [Table of Workflows](#23-table-of-workflows)
 
 ---
@@ -60,11 +71,13 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Images** | WebP compression · Logo · Login background · Secretary sign · Profile photos |
 | **DB** | PostgreSQL `fn_*` stored functions · `%s` parameterised queries via psycopg2 |
 | **Security Portal** | Pending receipt creation → admin verification workflow |
-| **NOC** | Eligibility check → rich-text editor → Print / Save HTML / Email |
+| **NOC** | Eligibility check → rich-text editor → Print / Save as PDF / Email (shared letterhead) |
 | **Gate Pass (NFC)** | Web NFC API — write signed pass payload directly to an NFC tag from the browser |
 | **Patrol** | Interactive Leaflet map for patrol-location create/reissue, with geofencing |
-| **Bank Reconciliation** | Excel bank-statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
-| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward) + Agreement e-sign flow with Print/PDF/Email |
+| **Bank Reconciliation** | Per-bank-account Excel statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
+| **Fund Management** | Statutory fund balances with lock/drawable split · Utilize Fund (honours `statutory_lock_pct`) · **Appropriate Income → Fund** (Dr income / Cr fund) with pending→confirm workflow · **Fund Deposit Routing** (per-fund destination bank account) |
+| **Fund Deposit Routing** | A fund's contributions can be banked into a separately-held account/FD instead of the society's primary account; enforced at posting time by `fn_resolve_bank_leg`, and statement uploads are matched per account |
+| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
 | **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
 
 ---
@@ -481,12 +494,33 @@ Mapped against the consolidated statutory framework for Indian RWAs/CHS/AOAs (`d
 | **Reserve Fund (3220)** | 25% net surplus + entrance/transfer fees + common profits | ✅ **Auto** — `fn_fy_close_preview()` shows the proposed appropriation and every blocker before you commit; `fn_fy_close_reserve_appropriation()` posts it (Dr Income Expenditure A/c → Cr Reserve Fund) and records the closure on the FY Closing card | `estatehub.sql` — `fn_fy_close_preview`, `fn_fy_close_reserve_appropriation`, `fy_closures` |
 | **Capital Account (3100)** | Share subscriptions + entrance/transfer fees | ❌ **Manual** — onboarding/transfer events | Admin receipt / journal entry |
 | **Corpus Fund (3230)** | Builder handover (RERA Sec 11(4)(g)) | ❌ **One-time** — at society formation | One-time setup |
+| **Any fund — interest earned on it** | Bank / FD interest on the fund's own balance | ❌ **Manual** — credited to an **income** account, never back to the fund | **Appropriate Income → Fund** on the Fund Management card (`fn_appropriate_income_to_fund`) |
+
+**Sinking & Repair Fund auto-billing details:** `sp_generate_monthly_bills()` calculates per-apartment amounts from `apt_charges_fines_basis.apt_sinking_fund_rate` / `apt_repair_fund_rate` (per sq ft/month), creates `receivables` rows with `acc_id` pointing to the fund accounts, and `fn_post_receivable_accrual()` credits the fund (Cr) when the member pays. Because the receivable row itself carries the fund's `acc_id`, the Fund Management routing below follows the same money automatically on every collection path.
 
 **Statutory reserve appropriation (FY close):** closing a financial year from the FY Closing card automatically transfers the bye-laws' fixed share of that year's net surplus (25% under the UP AOA regime) into the Repair & Maintenance Fund Reserve. The transfer is one balanced two-leg journal, the receiving account is resolved through `account_statutory_mappings` for the society's own legal regime — preferring an unlocked fund over the law-protected Corpus Fund, which shares the same `RESERVE_FUND` statutory head — and the remaining surplus stays in the P&L and keeps reporting as Reserves & Surplus on the Balance Sheet. Closes are idempotent (`UNIQUE (society_id, financial_year)` plus a `unique_violation` guard), so a double click or two admins racing cannot appropriate the reserve twice; the second attempt reports `already_closed` having posted nothing. A deficit year is still closeable and records `no_surplus` with no journal, because a loss year carries forward *against* the reserve rather than being funded from it — blocking it would leave the year permanently open. The close refuses to run on books that do not balance.
 
-**Sinking & Repair Fund auto-billing details:** `sp_generate_monthly_bills()` calculates per-apartment amounts from `apt_charges_fines_basis.apt_sinking_fund_rate` / `apt_repair_fund_rate` (per sq ft/month), creates `receivables` rows with `acc_id` pointing to the fund accounts, and `fn_post_receivable_accrual()` credits the fund (Cr) when the member pays.
+**Interest appropriation (ad-hoc, any time):** the FY close above only handles the surplus reserve. A **locked** fund's own interest is a separate case: because its principal is inviolable, `fn_process_fund_utilization` refuses any draw against it, so that interest is credited to an **income** account (`4110 Interest Income`, and a locked Corpus Fund in particular earns it) and stays there. Moving it into a spendable fund is `fn_appropriate_income_to_fund` — a Dr income / Cr fund journal on the Fund Management card, `mode='journal'` because the rupees were already banked when the interest was credited. `fn_process_fund_utilization` cannot do this and must not be extended to: it requires a **Dr**-natured debit leg, and an income account is Cr, so it raises *"must be a Dr (expense/asset) account"* on exactly this case. Non-admin callers get a `pending` row that an admin action later confirms via `fn_confirm_fund_appropriation`.
 
-Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts, never commingled with operating income/expenditure) — not yet at the physical-bank-account level; the PDF's "Bank Account Separation" safeguard is a process control for the society's bank, outside what a books-of-account system can enforce.### Table Roles
+> **Available balance is a subtree figure, never a single row.** The account an admin picks is usually a *rollup* — `4110 Interest Income` has no transactions of its own, its children `4111/4112/4113` carry the postings. Both `fn_appropriate_income_to_fund` and `loaders.get_income_accounts_for_appropriation` therefore sum the account **and every descendant**. An account-only sum reports ₹0 forever and makes the feature look broken on a society that has in fact earned interest.
+
+### Fund Deposit Routing — `fund_bank_account_map`
+
+Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts, never commingled with operating income/expenditure) **and now also at the physical-bank-account level**.
+
+| Layer | Mechanism |
+|---|---|
+| Which bank a fund's money lands in | `fund_bank_account_map (society_id, fund_acc_id) → bank_acc_id`, edited on the Fund Management card → `fn_set_fund_bank_mapping(society_id, fund_acc_id, bank_acc_id, user_id)`. `p_bank_acc_id = NULL` clears the mapping and reverts the fund to `societies.primary_bank_account_id`. |
+| Who sets it | Admin only, **and scoped to their own society** — the function resolves the acting user inside `p_society_id`, so an admin of society A cannot re-route society B's funds. Master admins and unassigned seeded admins (NULL `society_id`) stay permitted. |
+| Where it is enforced | `fn_resolve_bank_leg(society_id, mode, credit_acc_id)`. The 3rd argument is **optional and NULL by default**, so every call site that isn't about a fund is byte-for-byte unaffected. It returns NULL for `cash`/`journal` before the mapping is ever consulted. |
+| Which call sites pass it | `fn_verify_receipt`, `fn_verify_receivable`, `fn_save_receipt` (one known credit account each), **and both "Pay Dues" engines** — see below. |
+| Reconcile the right statement | `bank_statement_lines.bank_acc_id` + a Bank Account selector on the upload modal; candidates are restricted to rows whose money provably landed in that account. |
+
+**The FIFO / selective "Pay Dues" split.** One dues payment routinely settles rows carrying *different* `acc_id`s — a Sinking Fund line (3210), a Repair Fund line (3220), a Maintenance line (4210). `fn_apply_apartment_dues_fifo_core` and `fn_apply_apartment_dues_selective_core` therefore resolve a bank account **per settled row**, accumulate a `{bank_acc_id: amount}` map, and emit **one Dr leg per distinct account** instead of one lump leg to the primary. The invariant is `Σ legs = Σ row takes + overpayment = p_amount`, identical to the single-leg version it replaces; any overpayment goes to the primary account (an advance is maintenance income, not a fund contribution). With no mapping configured the output is exactly the old single primary leg.
+
+> **Both engines must stay in step.** They were originally left pointing at the primary account while the single-verify paths honoured the mapping, which made routing silently inconsistent: verifying dues one flat at a time banked into the mapped account, paying the same dues through FIFO did not. A society with a second account could reconcile an SBI statement against money that had gone to ICICI.
+
+### Table Roles
 
 | Table | Type | Who creates | Status flow | Posts to transactions |
 |---|---|---|---|---|
@@ -806,6 +840,13 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | `fn_accounts_list / fn_account_profile` | Chart of accounts |
 | `fn_societies_list / fn_society_profile` | Master portal society data |
 | `fn_gate_logs_named(society_id, search, date)` | Gate access with entity names |
+| `fn_resolve_bank_leg(society_id, mode, credit_acc_id DEFAULT NULL)` | Resolves the bank account for an incoming payment. 2-arg form → `societies.primary_bank_account_id` (all pre-existing call sites unchanged). 3-arg form → `fund_bank_account_map` first, so a fund's contributions reach the account the admin mapped it to. NULL for `cash`/`journal` |
+| `fn_set_fund_bank_mapping(society_id, fund_acc_id, bank_acc_id, user_id)` | Admin-only, society-scoped upsert of `fund_bank_account_map`. `p_bank_acc_id = NULL` clears. Validates the fund is Cr-natured and the bank is Dr-natured |
+| `fn_appropriate_income_to_fund(society_id, income_acc_id, fund_acc_id, particulars, amount, created_by, approval_ref, approval_date)` | Dr income / Cr fund book entry. The only route for moving a locked fund's earned interest into a spendable fund. Balance-checked over the income account's **whole subtree**; admin → `confirmed` + journal, non-admin → `pending` |
+| `fn_confirm_fund_appropriation(appropriation_id, confirmed_by)` | Admin-only, society-scoped. Re-checks the accrued balance *and* both accounts' Dr/Cr nature, then posts the journal and flips `pending → confirmed`. Refuses to run twice |
+| `fn_cancel_fund_appropriation(appropriation_id, cancelled_by)` | Withdraws a still-`pending` request. Only ever legal on `pending` — a posted journal can never be orphaned by a status flip |
+| `fn_apply_apartment_dues_fifo_core` / `fn_apply_apartment_dues_selective_core` | The two "Pay Dues" engines. Both resolve a bank account **per settled row** and emit one Dr leg per distinct account, so a mixed Sinking+Repair+Maintenance payment reaches each fund's mapped account |
+| `fn_funds_account_fy(society_id, fy)` | 5th Financial Statement — Funds Account schedule (Opening B/F, Additions, Deductions, Closing C/F) per statutory fund |
 
 ---
 
@@ -821,7 +862,7 @@ EstateHub/
 │   ├── dash_apps/
 │   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
 │   │   ├── layout.py                         ← Shared page layout and UI components
-│   │   ├── callbacks/                        ← 34 modules; see registration order below
+│   │   ├── callbacks/                        ← 38 modules; see registration order below
 │   │   │   ├── __init__.py                   ← Registration order & loader rules (source of truth — read this file directly for the current wiring, it's kept well-commented)
 │   │   │   ├── shell_callbacks.py            ← URL routing, auth guard, sidebar, toast
 │   │   │   ├── login_callbacks.py            ← All login methods + password reset
@@ -840,7 +881,7 @@ EstateHub/
 │   │   │   ├── form_inspector_callbacks.py   ← Form field configuration
 │   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
 │   │   │   ├── bulk_enroll_callbacks.py      ← Excel bulk upload for members/staff
-│   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation
+│   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation, per bank account (Bank Account selector on the upload modal; candidates filtered by where the money actually landed)
 │   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
 │   │   │   ├── concern_bid_callbacks.py      ← Vendor "Save Bid" on a concern
 │   │   │   ├── invite_to_callbacks.py        ← Invite vendors/security to bid on a concern
@@ -854,12 +895,14 @@ EstateHub/
 │   │   │   ├── event_ticket_callbacks.py     ← Event ticket Print / Save / Email
 │   │   │   ├── vendor_pass_callbacks.py      ← Vendor pass Print / Save / Email
 │   │   │   ├── expense_callbacks.py          ← Expense voucher Print / Save / Email
+│   │   │   ├── financial_statements_callbacks.py ← 6 Statements card Print / PDF / Email (clientside)
+│   │   │   ├── fund_management_callbacks.py  ← Fund Management: utilize, income→fund appropriation (+pending confirm/cancel), fund→bank deposit routing. Also owns the shared card builders (`build_balances_table`, `build_fund_options`, `build_income_source_options`, `build_appropriation_log_table`, `build_fund_bank_mapping_rows`, `build_log_table`) |
 │   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
 │   │   │   ├── admin_callbacks.py            ← No-op registration slot (all callbacks pruned — see file docstring); kept so future admin-only callbacks have a documented slot
 │   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Wired in as step 6b
 │   │   │   └── print_letterhead.py           ← Shared letterhead helper (logo · login_background watermark · secretary sign · verification QR) used by receipt, NOC, event-ticket, and any future print/PDF/email flow; not a callbacks module, imported by the print callback modules
 │   │   ├── drilldown/
-│   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo
+│   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo. Fund Management: `get_fund_balances`, `get_expense_bank_accounts`, `get_fund_utilization_log`, `get_fund_bank_mappings`, `get_income_accounts_for_appropriation`, `get_fund_appropriation_log`
 │   │   │   ├── renderers.py                  ← list/profile/form/pay-dues/NOC card HTML
 │   │   │   ├── drillin.py                    ← DRILLIN_CONFIG for entity-picker/Bill-Group modals
 │   │   │   ├── state.py                      ← navigate_to, navigate_back, initial_state
@@ -903,7 +946,7 @@ wrapped in a `try/except`, so one broken module logs a `⚠️` and is
 skipped rather than crashing the whole app on boot. A startup-time check
 also warns if any `*_callbacks.py` file on disk defines a `register_*`
 function but is absent from `CALLBACK_MODULES`. Current order
-(module names match the files in [§17](#3-architecture-overview) above):
+(module names match the files in [§17](#17-codebase-map) above):
 
 ```python
 "shell_callbacks"            # 1.  URL routing MUST be first
@@ -984,6 +1027,21 @@ Rule 8: _save_entity must stamp user_id from auth-store into merged before dispa
 Rule 9: portal-content-store is the page-load trigger for the drilldown router.
         Do not remove it. Do not replace with prevent_initial_call=False on the main router
         (that causes conflicts with allow_duplicate outputs).
+
+Rule 10: Any component id a callback names in Input/State/Output MUST be emitted by the
+         renderer on every path that callback can fire from — including the error path.
+         A card that returns early on `if error:` drops the whole body, and every id
+         inside it; a callback still referencing those ids then fails at invocation.
+
+Rule 11: One builder per surface, imported by both the renderer and the callback.
+         Hand-rolling a "close enough" table or dropdown in renderers.py means the card's
+         FIRST render and its post-submit/Reload render are two different components —
+         and the two quietly drift. Render into a container div (id=...-table) whose
+         children the callback then replaces, rather than putting the id on the built
+         component itself.
+
+Rule 12: dbc.Label/Button take ONE positional arg (children). dbc.Label("x", html.Small(...))
+         raises at import/build time, not at render time — wrap multiple children in a list.
 ```
 
 ---
@@ -1008,6 +1066,18 @@ Rule 9: portal-content-store is the page-load trigger for the drilldown router.
 | Duplicate list columns | `active` and `scan_interval` appeared twice in Patrol Locations list | Removed `patrol_locations` from `_COMPUTED_FIELDS` in `schema_introspect.py` since schema introspector already natively discovers them |
 | No NFC programming UI | "Program NFC" button opened generic QR modal with no way to write NFC | Added "Write to NFC Tag" button to `_qr_modal` (`app_shell.py`) and wired Web NFC API `NDEFReader().write()` callback (`qr_callbacks.py`) |
 | Security portal Gate Alert buttons non-functional | `security_callbacks.py` was fully implemented and its render function imported by `portal_pages.py`, but `register_security_callbacks(app)` itself was never called in `callbacks/__init__.py` — every School Bus/Taxi/Visitor gate-alert button rendered with no listener | Added the missing `register_security_callbacks(app)` call (step 6b) in `callbacks/__init__.py` |
+| `def buildLetterheadPdfDoc` in the shared JS helper | A Python keyword inside the `LETTERHEAD_JS` string literal is a hard JS **`SyntaxError`**. Because that helper is prepended into *every* Print/PDF clientside callback, Save-as-PDF was broken everywhere it was used — Agreement, NOC, Receipts, Event Tickets, Vendor Pass, Expense, 6 Statements. The `buildLetterheadPdfDoc({… password: …})` option it referenced (`pdf-lib`) does not exist — pdf-lib has no encryption API | Rewrote it as a real `function` that renders via `html2pdf.js` (already on the allow-listed cdnjs CDN), waits for images, wraps the body in `#pdf-root`, and drops the fictional password option |
+| Agreement Email button silently failed/truncated | The button was a bare `mailto:` with the **entire** agreement text URL-encoded into the body — well past most mail clients' ~2 000-char limit, so the compose window came up empty or truncated | Short body plus a full-text copy to the clipboard whenever the encoded length would exceed the safe limit; recipient now prefilled from the society's `secretary_email` |
+| "6 Statements" PDF asked for a password that was then thrown away | `fin-stmt-password` was collected and passed to the (broken) `buildLetterheadPdfDoc`, which ignored it. pdf-lib has no encryption API and the surrounding JS did not parse | Removed the field, the `State`, and the `password` argument rather than collect a secret the app cannot honour. Real encryption needs a server-side pikepdf/qpdf step on a streaming route — a browser-side html2pdf pipeline cannot provide it |
+| `fn_appropriate_income_to_fund` always reported "Available: ₹0" | The balance check summed only the named account. The account an admin picks is the rollup `4110 Interest Income`, which has no transactions of its own — its children `4111/4112/4113` carry the postings — so the feature was dead on arrival for any society that had actually earned interest | Balance is now summed over the account's **whole subtree** via a recursive CTE, matching how the trial balance already rolls a parent up on top of its children. Same fix in `loaders.get_income_accounts_for_appropriation` so the dropdown shows the same figure the function enforces |
+| `pending` appropriations were permanently inert | The non-admin branch inserted a `pending` row and told the user "submitted for approval", but **nothing could ever action it** — no confirm function existed, so no journal was ever posted and the row sat there forever | Added `fn_confirm_fund_appropriation` / `fn_cancel_fund_appropriation`, plus Confirm/Cancel buttons on the log table. Both re-check the accrued balance and both accounts' Dr/Cr nature at action time |
+| Both new fund functions authorised on `users.id` alone | `SELECT (role='admin' OR is_master_admin) FROM users WHERE id = p_created_by` — the *accounts* were society-validated but the *permission* was not, so an admin of society A could re-route or appropriate society B's funds | Acting user is now resolved **inside** `p_society_id`; cross-society callers get the same refusal as a non-admin. Master admins and unassigned seeded admins (NULL `society_id`) stay permitted |
+| `IF drcr_account != 'Cr'` let null-natured accounts through | `accounts.drcr_account` is **nullable** (the rollup "Balance Sheet Root" has no Dr/Cr nature), and `NULL != 'Cr'` evaluates to NULL, not TRUE — so `IF` treated it as false and the guard passed silently | `IS DISTINCT FROM 'Cr'` in every new guard |
+| Fund→bank routing was inconsistent between collection paths | `fn_verify_receipt`/`fn_verify_receivable`/`fn_save_receipt` passed `p_credit_acc_id` to `fn_resolve_bank_leg`, but both FIFO and selective "Pay Dues" did not. Verifying dues one flat at a time banked into the mapped account; paying the same dues through the ordinary FIFO path did not | Both engines now resolve a bank account per settled row and emit one Dr leg per distinct account. Invariant `Σ legs = p_amount` verified across cash / mixed / overpayment / no-mapping branches; with no mapping the output is byte-identical to the old single leg |
+| Bank reconciliation matched the wrong account's statement | `bank_statement_lines` had no bank-account column, so uploading a second account's statement auto-reconciled against the primary account's receipts of the same amount | Added `bank_statement_lines.bank_acc_id` (NULL = primary, so all existing history stays valid) + a Bank Account selector on the upload modal. Candidates are narrowed only when a row's landing account is **provably** different — unknown is never excluded, so a single-account society behaves exactly as before |
+| Fund Management card showed two different tables | `renderers.py` hand-rolled its own balances table and utilization log alongside the ones in `fund_management_callbacks.py`. The card's *first* render showed a gross "Available Balance" with **no statutory-lock column**, and switched to the drawable/locked presentation on the first Reload click | Both tables and both `FUND_TYPE_PATTERNS` copies deleted; the card now imports the same builders the callbacks use, so first render and post-submit render cannot disagree |
+| `psycopg2` "invalid dsn: extra key/value separator" | `db_manager._build_dsn` appended `&options=-c timezone=...` without percent-encoding the `=`, killing the connection pool — **only** for deployments using discrete `PGHOST`/`PGUSER`/`PGPASSWORD` env vars instead of a single `DATABASE_URL` | `quote("=", safe="")` (and `/` and `+`) applied to the option key and value. A no-op for the single-connection-string path |
+| `MUTUALITY_NATURE_MAP` / `TDS_SECTION_MAP` side-dicts in `seed.py` | The values they carried were already inline columns on `accounts` (`mutuality_nature`, `tds_section`); the two dicts were a second, drifting copy of the same 12 + 6 facts | Deleted; `seed_accounts` reads the two inline fields directly from the `ACCOUNTS` tuple. All 83 rows verified to carry 10 fields with the same tags the dicts produced |
 
 ---
 
@@ -1057,6 +1127,61 @@ Dash-framework footguns.
   platform-level onboarding role with no `society_id` or gate/entity
   identity to represent (`qr_service.py`). Don't add one without first
   deciding what a master-level QR would even mean.
+- **PDF password protection is not built.** `buildLetterheadPdfDoc` offers
+  no `password` option and the UI no longer asks for one. html2pdf.js
+  cannot encrypt, and pdf-lib has no encryption API, so this needs a
+  server-side pikepdf/qpdf pass over a route that streams the PDF — a
+  separate piece of work, not a one-line change to the existing helper.
+
+### Fund Money — Invariants Not to Break
+
+- **`fn_resolve_bank_leg` must keep its 3rd argument optional.** It was added
+  as `p_credit_acc_id INT DEFAULT NULL` specifically so that every pre-existing
+  2-argument call site (`fn_verify_expense`, `fn_verify_payment`,
+  `fn_save_expense`, pass sales, asset buy/dispose, `fn_pay_rcm_liability`)
+  keeps resolving to `primary_bank_account_id` untouched. Dropping the default,
+  or reordering the parameters, silently re-routes every one of them.
+- **The two "Pay Dues" cores must be changed together.** Routing lives in
+  both `fn_apply_apartment_dues_fifo_core` and
+  `fn_apply_apartment_dues_selective_core`. They were briefly out of step —
+  one honoured the mapping, the other didn't — and the symptom was a society
+  whose bank balances disagreed with its statements depending on which screen
+  the payment was entered from. If you touch one, check the other.
+- **The bank leg is emitted from an accumulator, not from `p_amount`.** In both
+  cores the Dr legs are built from a `jsonb` map of `{bank_acc_id: amount}`
+  accumulated per settled row, and their sum is
+  `Σ row takes + overpayment = p_amount`. Adding a term to one side without the
+  other unbalances the journal. Overpayment deliberately goes to the *primary*
+  account: an advance is maintenance income, not a fund contribution.
+- **`fn_appropriate_income_to_fund` checks the income account's SUBTREE, and
+  the confirm function must too.** An account-only `SUM` is always ₹0 for a
+  rollup like `4110 Interest Income` and makes the whole feature look dead.
+  The check is repeated at confirm time because two pending requests can race
+  for the same interest — the pending row reserves nothing.
+- **Corpus Fund's interest lands on an income account, not back on Corpus.**
+  That is the intended design (the principal is 100% statutory-locked, so only
+  its *interest* is deployable), not an oversight. Moving it into a spendable
+  fund is the explicit `Appropriate Income → Fund` action, which wants a
+  General Body / Managing Committee approval reference recorded against it.
+  `fn_process_fund_utilization` must keep refusing it: that function requires a
+  Dr-natured debit leg, and an income account is Cr. Extending it to "allow"
+  the case would be a regression, not a feature.
+- **The statutory lock constrains outflow only, never inflow.** That is why
+  the appropriation destination dropdown uses `build_appropriation_fund_options`
+  (all funds, none disabled) and not `build_fund_options` (which disables funds
+  with no drawable headroom). Topping up a 100%-locked fund is precisely the
+  operation the feature exists for.
+
+### Data-Scoping Invariants Added Alongside
+
+- **"Unknown" is never treated as "the primary account".** Two places resolve
+  a payment's landing bank account: the reconciliation candidate filter and the
+  per-row Reconcile picker. Both resolve it from the posted bank leg
+  (`source_table`/`source_id` + the opposite `entry_side` — `Dr` for receipts,
+  `Cr` for expenses) and both treat an unresolvable row as *matching anything*,
+  never as belonging to the primary. Narrowing on a guess would drop matches
+  that were previously found; a society that never configures a second account
+  must see no behavioural change at all.
 
 ---
 
@@ -1130,11 +1255,25 @@ seeds a single demo society ("Sunrise Residency", `society_id = 1`) with:
 | Security staff | 12 | Mixed morning/evening/night shifts, roster + gate-log attendance for the first two guards |
 | Events | 12 | Spread across the demo financial year, all `open_to = 'all'` |
 | Concerns | 11 | Mixed types/statuses (`open`, `assigned`, `resolved`, `closed`); several pre-assigned to a vendor or security guard via `concerns_assigns` |
-| Chart-of-accounts | 50 | Identical to the legacy `migrate.py` account tree |
+| Chart-of-accounts | 83 | Full tree across Assets / Liabilities / Equity & Reserves & Funds / Income / Expenses, incl. the statutory funds (Sinking 3210, Repair 3220, Corpus 3230). `mutuality_nature` and `tds_section` are **inline fields on the `ACCOUNTS` tuple** (not side-dicts) and are written straight into the `accounts` columns of the same name |
+
+> **The chart of accounts is jurisdiction-agnostic by lookup, not by id.** No
+> function hardcodes `3210`/`3220`/`3230`. Funds are resolved by walking the
+> subtree of whichever account is named `ILIKE '%Equity%'`, income accounts by
+> `ILIKE '%Income%'`, bank accounts by their parent's name — the same approach
+> in SQL (`fn_funds_account_fy`) and in Python
+> (`loaders.get_fund_balances`, `get_fund_bank_mappings`,
+> `get_income_accounts_for_appropriation`,
+> `get_expense_bank_accounts`), so a society on a different chart of accounts
+> numbering still works. See [§20](#20--open-design-subtleties--flagged-caveats)
+> for why a hardcoded id list broke the fund dropdowns before.
 
 Re-running the seed is safe — every insert is guarded by an existence check
 (`ON CONFLICT` or a `SELECT ... WHERE NOT EXISTS`-style guard), so it will
-only fill in missing rows rather than duplicate demo data.
+only fill in missing rows rather than duplicate demo data. Note that the
+guard is existence-based, not update-based: a row that already exists is
+**left untouched**, so re-seeding will not retroactively apply a changed
+`mutuality_nature`/`tds_section` to an existing account.
 
 ```bash
 python3 database/seed.py                 # standalone
@@ -1154,6 +1293,27 @@ Use `database/migrate.py` to auto-initialize the schema and seed mock accounts f
 ```bash
 python3 database/migrate.py --seed
 ```
+
+**`migrate.py` re-runs the full DDL on every invocation** (the
+`--fresh`/`--force` flag only governs whether demo data is re-seeded). Schema
+changes therefore only ever need to land in `database/estatehub.sql` — no
+numbered migration file is required. Additive changes to *existing* tables
+must still be written idempotently, because `CREATE TABLE IF NOT EXISTS` is a
+no-op against an already-provisioned database:
+
+| Change kind | Required pattern |
+|---|---|
+| New table | `CREATE TABLE IF NOT EXISTS` + a `COMMENT ON` + `CREATE INDEX IF NOT EXISTS` |
+| New column on an existing table | Add the column to the `CREATE TABLE` (fresh installs) **and** a guarded `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` / `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint ...) $$` block for provisioned databases |
+| New index / constraint | `CREATE INDEX IF NOT EXISTS`, or a `DO $$ ... pg_constraint ... $$` guard for named constraints (a plain `ADD CONSTRAINT` re-run raises "already exists") |
+| New / changed function | `CREATE OR REPLACE` **plus** `DROP FUNCTION IF EXISTS <name>(<exact old signature>) CASCADE` when the parameter list changed — `CREATE OR REPLACE` only replaces a signature that matches exactly, so an un-dropped old overload lingers as an orphan and calls become ambiguous |
+
+> `bank_statement_lines.bank_acc_id` is the reference example: column in
+> `CREATE TABLE`, then a `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint
+> WHERE conname = 'fk_bank_lines_account') $$` block for the composite
+> `(society_id, bank_acc_id) → accounts (society_id, id)` FK. That composite
+> target is valid because `accounts`' primary key **is** `(society_id, id)` —
+> the same pattern `fund_bank_account_map` and `fund_appropriations` use.
 
 ### Required PostgreSQL Extensions
 
@@ -1203,6 +1363,8 @@ The following tables map every user-reachable workflow in the application, organ
 | **Admin → Society Dashboard** | Sidebar: Dashboard → 12 KPI cards (`kpi_apartments_dues`, `kpi_vendors_passes`, `kpi_security_on_duty`, `kpi_attendance_count`, `kpi_events_total`, `kpi_concerns_not_closed`, `kpi_concerns_assigned`, `kpi_gate_logs`, `kpi_assets_count`, `kpi_receipts_pending`, `kpi_channels_total`, `kpi_nocs_total`) → drill panel | High-level society health overview; one-click drill into any entity |
 | **Admin → Enrolled Members** | Sidebar: Enrolled → 3 KPI cards (`kpi_apartments_total`, `kpi_vendors_total`, `kpi_security_total`) → `list_apartments` / `list_vendors` / `list_security` → profile → Edit / Gate Pass / Pay Dues / Sell Pass / Toggle Duty | CRUD for apartments, vendors, security staff; sidebar `+` quick-link for New |
 | **Admin → Financials** | Sidebar: Financials → 10 KPI cards (`kpi_receipts_month`, `kpi_receipts_total`, `kpi_expenses_month`, `kpi_expenses_total`, `kpi_security_salaries_due`, `kpi_cash_in_hand`, `kpi_bank_balance`, `kpi_cashbook_open`, `kpi_ledger_open`, `kpi_fy_closing_report`) → lists / reports; sidebar `+` New Receipt / `−` New Expense | Track income/expenses, cashbook, ledger; create receipts/expenses; FY closing report |
+| **Admin → Fund Management** | Sidebar: Financials → `kpi_fund_management` nav tile → `form_fund_management` card: Fund Balances (gross / statutory lock / drawable) → **Utilize Fund** (honours `statutory_lock_pct`) → **Appropriate Income → Fund** (Dr income / Cr fund; non-admins get a `pending` row) → **Fund Deposit Routing** (per-fund destination bank account) → Recent Utilizations + Recent Appropriations logs with Confirm/Cancel on pending rows; **Reload Data** refreshes all four surfaces | Admin-only. See [§9 Financial Module](#9-financial-module) for the accounting and segregation rules |
+| **Admin → Bank Reconcile** | Receipts / Expenses list → **Bulk Reconcile** (or per-row **Reconcile**) → pick the **Bank Account** the statement is from → download template → upload Excel → auto-matched / needs-review / unmatched summary; **Post Unmatched** / **Delete Unreconciled** | Reconcile an uploaded statement against receipts/expenses, restricted to rows whose money actually landed in the chosen account |
 | **Admin → Channels** | Sidebar: Channels → 3 KPI cards (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Create / Subscribe / Trigger Alert / View Subscribers | Manage school bus, taxi, visitor alert channels and subscriptions |
 | **Admin → Assets** | Sidebar: Assets → 2 KPI cards (`kpi_assets_count`, `kpi_assets_value`) → `list_assets` → `profile_asset` → Edit / Dispose | Buy, manage, depreciate, and dispose of society assets |
 | **Admin → Events** | Sidebar: Events → 2 KPI cards (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Edit / Sell Tickets | Create/edit events, sell/manage event tickets |
