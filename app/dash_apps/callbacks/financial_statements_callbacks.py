@@ -26,7 +26,7 @@ from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_i
 # ── Print ────────────────────────────────────────────────────────────────────
 _FIN_STMT_PRINT_JS = clientside_iife(
     LETTERHEAD_JS + r"""
-function printFinStmt(n_clicks, lh, password) {
+function printFinStmt(n_clicks, lh) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
     lh = lh || {};
@@ -58,7 +58,7 @@ function printFinStmt(n_clicks, lh, password) {
 # ── Save as PDF ──────────────────────────────────────────────────────────────
 _FIN_STMT_PDF_JS = clientside_iife(
     LETTERHEAD_JS + r"""
-function downloadFinStmtPdf(n_clicks, lh, password) {
+function downloadFinStmtPdf(n_clicks, lh) {
     if (!n_clicks) return window.dash_clientside.no_update;
 
     lh = lh || {};
@@ -73,7 +73,6 @@ function downloadFinStmtPdf(n_clicks, lh, password) {
         qrUrl: lh.qr_url, qrCaption: lh.qr_caption,
         bodyHtml: lh.bodyHtml,
         printWidth: '750px',
-        password: password,
     });
 
     var blob = new Blob([html], {type: 'text/html'});
@@ -125,7 +124,6 @@ def register_financial_statements_callbacks(app):
         Output('fin-stmt-action-store-print', 'data', allow_duplicate=True),
         Input('fin-stmt-btn-print', 'n_clicks'),
         State('fin-stmt-letterhead-data', 'data'),
-        State('fin-stmt-password', 'value'),
         prevent_initial_call=True,
     )
 
@@ -134,7 +132,6 @@ def register_financial_statements_callbacks(app):
         Output('fin-stmt-action-store-pdf', 'data', allow_duplicate=True),
         Input('fin-stmt-btn-pdf', 'n_clicks'),
         State('fin-stmt-letterhead-data', 'data'),
-        State('fin-stmt-password', 'value'),
         prevent_initial_call=True,
     )
 

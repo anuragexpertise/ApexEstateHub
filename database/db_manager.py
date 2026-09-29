@@ -101,9 +101,23 @@ class DatabaseManager:
                 if 'sslrootcert=' not in dsn:
                     dsn = dsn + f"&sslrootcert={ca_path}"
                     
-        # Force PostgreSQL to operate in the local system timezone
+        # Force PostgreSQL to operate in the local system timezone.
+        # BUG (found while auditing Fund Management, 2026-09): only the
+        # space in "-c timezone=<tz>" was percent-encoded (%20); the '='
+        # inside the option value was left literal. libpq's URI parser reads
+        # every "key=value" pair in the query string, so it saw
+        # options=-c%20timezone as the key/value and then choked on the
+        # SECOND '=' before the tz name with "extra key/value separator '='
+        # in URI query parameter: options" — psycopg2 raised on every
+        # connection attempt for any deployment using PGHOST/PGUSER/... (i.e.
+        # not passing a single DATABASE_URL), which fails self._init_pool()
+        # and leaves db._pool = None: every DB-backed card (Fund Management's
+        # selector included) then shows a silent connection-pool error.
+        # Fixed by percent-encoding the WHOLE "-c timezone=<tz>" value with
+        # urllib.parse.quote(), which is what the DSN's own `quote(pw)` above
+        # already does for the password for the identical reason.
         tz = os.getenv("TZ", "Asia/Kolkata")
-        dsn += f"&options=-c%20timezone={tz}"
+        dsn += f"&options={quote(f'-c timezone={tz}')}"
 
         return dsn
 

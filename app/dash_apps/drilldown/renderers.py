@@ -4648,23 +4648,21 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                            "marginBottom": "12px"},
                 ),
                 dcc.Download(id={"type": "fy-export-trigger", "entity": "balance_sheet"}),
-                # ── Print / Password-Protected PDF / Email (2026-09) ──
+                # ── Print / PDF / Email (2026-09) ──
                 # Reuses the shared letterhead (print_letterhead.py) so the
                 # printed 6 Statements carry the same society logo, watermark
                 # background, secretary signature and verification QR as every
-                # other document. The optional password field locks the PDF
-                # via pdf-lib.js — no server-side PDF library required.
-                html.Div([
-                    dbc.Input(
-                        id="fin-stmt-password",
-                        type="password",
-                        placeholder="PDF password (optional)",
-                        size="sm",
-                        style={"width": "150px", "fontSize": "11px", "borderRadius": "8px",
-                               "marginRight": "6px"},
-                    ),
-                ], style={"display": "inline-flex", "alignItems": "center",
-                          "marginRight": "8px", "marginBottom": "12px"}),
+                # other document.
+                #
+                # NOTE: the "PDF password (optional)" field that used to sit
+                # here was removed. It never protected anything — the
+                # encryption path referenced pdf-lib, which has no encryption
+                # API at all, and the surrounding JS was a hard syntax error
+                # (a stray `def`), so the whole PDF export was broken. Rather
+                # than keep a field that collects a secret and silently throws
+                # it away, it is gone. Real encryption needs a server-side
+                # step (pikepdf/qpdf) on a route that streams the PDF, which
+                # the browser-side html2pdf pipeline cannot provide.
                 dbc.Button(
                     [html.I(className="fas fa-print me-2"), "Print"],
                     id="fin-stmt-btn-print",
@@ -7542,6 +7540,7 @@ def render_agreement_card(society: dict, agreement_record: dict) -> html.Div:
     agreement_letterhead_data = {
         "id": (agreement_record or {}).get("id"),
         "society_name": society_nm, "society_address": society_addr,
+        "secretary_email": society.get("secretary_email") or "",
         "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
         # No signatureUrl/secretaryName/qrUrl passed through here — the
         # shared letterhead's single-signatory footer is deliberately left
@@ -8374,36 +8373,46 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
 def render_fund_management_card(
     fund_balances: list, utilization_log: list, error: str | None = None,
     expense_accounts: list = None, society_name: str = "Society",
+    income_accounts: list = None, fund_mappings: list = None,
+    appropriation_log: list = None, bank_account_options: list = None,
 ) -> html.Div:
     """
-    Admin-only card for viewing fund balances and utilizing funds.
+    Admin-only card for viewing fund balances, utilizing funds, routing fund
+    contributions to a specific bank account, and appropriating accrued
+    income into a fund.
+
     fund_balances: list of dicts with {acc_id, name, balance, fund_type}
     utilization_log: list of fund_utilizations records
     expense_accounts: list of Dr accounts for expense/bank dropdown
+    income_accounts: Cr income accounts with their unappropriated balance
+    fund_mappings: one row per fund, with its mapped bank account if any
+    appropriation_log: recent income -> fund appropriations
     """
     color = "#15304f"
 
     # Funds are resolved dynamically by name in loaders.get_fund_balances
-    # (ILIKE '%Equity%' subtree walk) rather than a hardcoded account-id
+    # (ILIKE '%Equity%' subtree walk) rather than by a hardcoded account-id
     # list, so approval/purpose metadata is looked up the same way — by
     # matching the account's real name — instead of an id-keyed dict, which
     # broke the moment the real chart of accounts didn't match the
     # hardcoded ids (see fund_management_callbacks.py's resolve_fund_type_info
     # docstring for the full history).
-    FUND_TYPE_PATTERNS = [
-        ("capital account", {"label": "Capital Account", "approval": "General Body", "purpose": "Capital expenditure, loan repayment", "icon": "fas fa-building"}),
-        ("sinking",         {"label": "Sinking Fund", "approval": "General Body", "purpose": "Major structural repairs, lift/DG replacement, redevelopment", "icon": "fas fa-piggy-bank"}),
-        ("repair",          {"label": "Repair & Maintenance Fund", "approval": "Managing Committee", "purpose": "Routine common area maintenance", "icon": "fas fa-tools"}),
-        ("corpus",          {"label": "Corpus Fund", "approval": "General Body", "purpose": "ONLY INTEREST usable; principal inviolable (RERA)", "icon": "fas fa-vault"}),
-        ("reserve",         {"label": "Reserve Fund", "approval": "General Body", "purpose": "Unforeseen expenses, structural repairs", "icon": "fas fa-shield-alt"}),
-    ]
-
-    def _fund_type_info(name):
-        n = (name or "").lower()
-        for pattern, info in FUND_TYPE_PATTERNS:
-            if pattern in n:
-                return info
-        return {"label": name or "Unknown Fund", "approval": "—", "purpose": "—", "icon": "fas fa-question"}
+    #
+    # Every table and option list below comes from the SAME builders the
+    # Reload Data / Submit callbacks use. This card used to hand-roll its
+    # own balances table and utilization log, which meant the FIRST render
+    # of the card showed a gross "Available Balance" with no statutory-lock
+    # column at all, and switching to the drawable/locked presentation the
+    # moment anyone clicked Reload Data — two different tables, one card.
+    from app.dash_apps.callbacks.fund_management_callbacks import (
+        build_appropriation_fund_options,
+        build_appropriation_log_table,
+        build_balances_table,
+        build_fund_bank_mapping_rows,
+        build_fund_options,
+        build_income_source_options,
+        build_log_table,
+    )
 
     header = html.Div([
         html.Div(html.I(className="fas fa-coins", style={"color": "#fff", "fontSize": "16px"}),
@@ -8412,7 +8421,8 @@ def render_fund_management_card(
                         "display": "flex", "alignItems": "center", "justifyContent": "center", "marginRight": "12px"}),
         html.Div([
             html.Strong("Fund Management", style={"fontSize": "14px"}),
-            html.Div("Admin only — Utilize Capital/Reserve/Sinking/Repair/Corpus funds", style={"fontSize": "11px", "color": "#999"}),
+            html.Div("Admin only — Utilize / route / appropriate Capital, Reserve, Sinking, Repair and Corpus funds",
+                     style={"fontSize": "11px", "color": "#999"}),
         ]),
     ], style={"padding": "12px 16px", "display": "flex", "alignItems": "center",
               "background": f"linear-gradient(135deg,{color}18,rgba(255,255,255,0.95))"})
@@ -8423,38 +8433,147 @@ def render_fund_management_card(
             html.Div(dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), error], color="warning", style={"borderRadius": "10px"}), style={"padding": "16px"}),
         ], style={"borderRadius": "16px", "border": f"1px solid {color}22", "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
-    # Fund balances table
-    balance_rows = []
-    for fb in fund_balances:
-        acc_id = fb.get("acc_id")
-        info = _fund_type_info(fb.get("name"))
-        balance = float(fb.get("balance") or 0)
-        balance_rows.append(html.Tr([
-            html.Td(html.Div([
-                html.I(className=info["icon"], style={"marginRight": "8px", "color": color}),
-                html.Strong(info["label"])
-            ]), style={"fontSize": "12px", "fontWeight": "600"}),
-            html.Td(f"₹{balance:,.2f}", style={"fontSize": "13px", "fontWeight": "700", "color": "#1e7e34" if balance >= 0 else "#c0392b", "textAlign": "right"}),
-            html.Td(info["approval"], style={"fontSize": "11px", "color": "#666", "textAlign": "center"}),
-            html.Td(info["purpose"], style={"fontSize": "11px", "color": "#888"}),
-        ]))
+    # Fund balances table — same builder the Reload Data button uses.
+    balances_table = html.Div(
+        build_balances_table(fund_balances or []),
+        id="fund-mgmt-balances-table",
+    )
 
-    balances_table = dbc.Table([
-        html.Thead(html.Tr([
-            html.Th("Fund", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Available Balance", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
-            html.Th("Approval Required", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
-            html.Th("Permitted Purpose (per UP AOA / Bye-Laws)", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-        ])),
-        html.Tbody(balance_rows),
-    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}, id="fund-mgmt-balances-table")
-
-    # Utilization form — label comes straight from the account's real name
-    # (already fetched dynamically by name), no id-keyed lookup needed.
-    fund_options = [{"label": f"{fb.get('name')}", "value": str(fb.get("acc_id"))} for fb in fund_balances if float(fb.get("balance") or 0) > 0]
+    # Utilization form. Options built via the SAME build_fund_options() the
+    # Refresh/Submit callbacks use (fund_management_callbacks.py), instead of
+    # a second hand-rolled filter here — the two independently duplicated
+    # option-lists previously disagreed on lock/disabled formatting (see that
+    # module's fund_drawable_amount docstring for the earlier incident where
+    # the table and dropdown disagreed on what was "available"). A single
+    # source of truth means the very first render of the card looks exactly
+    # like the render after clicking "Reload Data".
+    fund_options = build_fund_options(fund_balances or [])
 
     # Expense/Bank account options (Dr accounts) - pre-populated from drilldown callback
     expense_account_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in (expense_accounts or [])]
+
+    # An empty dropdown with no explanation reads as broken/stuck ("selector
+    # not loading") rather than as the true state — a fund only has options
+    # once a fund account exists AND carries a balance, which is the normal
+    # state for a newly onboarded society or one with no bank account set up
+    # yet. Surface the actual reason instead of an unexplained blank list.
+    fund_hint = None
+    if not fund_options:
+        if not fund_balances:
+            fund_hint = "No fund accounts found under Equity for this society."
+        else:
+            fund_hint = "No fund currently carries a balance — nothing to utilize yet."
+    expense_hint = None
+    if not expense_account_options:
+        expense_hint = "No bank account is set up yet — add one under Bank Accounts first."
+
+    # ── Appropriate income → fund ─────────────────────────────────────────
+    income_options = build_income_source_options(income_accounts or [])
+    appropr_fund_options = build_appropriation_fund_options(fund_balances or [])
+    income_hint = None
+    if income_accounts is None:
+        income_hint = "Loading income accounts…"
+    elif not income_options:
+        income_hint = "No Cr-natured income accounts found under Income."
+    elif not any(not o.get("disabled") for o in income_options):
+        income_hint = ("No unappropriated income is available yet — a fund's "
+                       "interest is credited here once it is earned.")
+
+    appropr_form = html.Div([
+        html.Hr(style={"margin": "16px 0"}),
+        html.H6("Appropriate Income to Fund (Admin Only)", style={"fontWeight": "700", "marginBottom": "4px", "color": color}),
+        html.P(
+            "Moves accrued income — typically the interest a locked fund earns — "
+            "into a fund as a book entry (Dr income / Cr fund). No cash moves: "
+            "the money is already in the bank from when the interest was credited. "
+            "This is the only route for that transfer, because fund utilization "
+            "refuses an income account on its debit side.",
+            style={"fontSize": "11px", "color": "#666", "marginBottom": "12px", "lineHeight": "1.5"},
+        ),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("From Income Account *"),
+                dcc.Dropdown(
+                    id="fund-mgmt-appropr-income-select",
+                    options=income_options,
+                    placeholder="Select income account to appropriate from...",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ),
+                html.Small(income_hint, style={"fontSize": "10.5px", "color": "#b8860b", "display": "block", "marginTop": "3px"}) if income_hint else None,
+            ], width=5),
+            dbc.Col([
+                dbc.Label("To Fund *"),
+                dcc.Dropdown(
+                    id="fund-mgmt-appropr-fund-select",
+                    options=appropr_fund_options,
+                    placeholder="Select destination fund...",
+                    clearable=False,
+                    style={"fontSize": "13px"},
+                ),
+            ], width=4),
+            dbc.Col([
+                dbc.Label("Amount *"),
+                dbc.Input(id="fund-mgmt-appropr-amount-input", type="number",
+                          step="0.01", min="0.01", placeholder="₹",
+                          style={"fontSize": "13px"}),
+            ], width=3),
+        ], className="g-2 mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Particulars *"),
+                dbc.Textarea(
+                    id="fund-mgmt-appropr-particulars",
+                    placeholder="e.g., Corpus Fund interest for FY 2026-27 appropriated to Repair & Maintenance Fund...",
+                    style={"minHeight": "60px", "fontSize": "13px", "fontFamily": "inherit"},
+                ),
+            ], width=8),
+            dbc.Col([
+                dbc.Label("Approval Reference"),
+                dbc.Input(id="fund-mgmt-appropr-approval-ref", type="text",
+                          placeholder="GB/MC Resolution #", style={"fontSize": "13px"}),
+                dbc.Label("Approval Date", style={"marginTop": "8px"}),
+                dcc.DatePickerSingle(
+                    id="fund-mgmt-appropr-approval-date",
+                    display_format="YYYY-MM-DD",
+                    style={"width": "100%", "fontSize": "13px"},
+                ),
+            ], width=4),
+        ], className="g-2 mb-3"),
+        dbc.Button(
+            [html.I(className="fas fa-arrow-right me-2"), "Appropriate to Fund"],
+            id="fund-mgmt-appropr-btn-submit",
+            n_clicks=0,
+            color="primary",
+            style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "13px"},
+        ),
+        html.Div(id="fund-mgmt-appropr-toast", style={"marginTop": "12px"}),
+    ], style={"padding": "16px", "background": "#f7fafc", "borderRadius": "10px", "marginTop": "16px"})
+
+    # ── Fund → bank account routing ───────────────────────────────────────
+    mapping_section = html.Div([
+        html.Hr(style={"margin": "16px 0"}),
+        html.H6("Fund Deposit Routing", style={"fontWeight": "700", "marginBottom": "4px", "color": color}),
+        html.P(
+            "Where each fund's contributions are banked. A fund with no mapping "
+            "receives its money in the society's primary bank account. Set a "
+            "destination to keep a fund's money in a separately-held account or "
+            "FD — and clear a mapping to put it back.",
+            style={"fontSize": "11px", "color": "#666", "marginBottom": "12px", "lineHeight": "1.5"},
+        ),
+        html.Div(
+            build_fund_bank_mapping_rows(fund_mappings or [], bank_account_options or []),
+            id="fund-mgmt-map-table",
+        ),
+        dbc.Button(
+            [html.I(className="fas fa-save me-2"), "Save Routing"],
+            id="fund-mgmt-map-save-btn",
+            n_clicks=0,
+            color="primary",
+            style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "12px", "marginTop": "10px"},
+        ),
+        html.Div(id="fund-mgmt-map-toast", style={"marginTop": "12px"}),
+    ], style={"padding": "16px", "background": "#fafbfc", "borderRadius": "10px", "marginTop": "16px"})
 
     form = html.Div([
         html.Hr(style={"margin": "16px 0"}),
@@ -8469,6 +8588,7 @@ def render_fund_management_card(
                     clearable=False,
                     style={"fontSize": "13px"},
                 ),
+                html.Small(fund_hint, style={"fontSize": "10.5px", "color": "#b8860b", "display": "block", "marginTop": "3px"}) if fund_hint else None,
             ], width=4),
             dbc.Col([
                 dbc.Label("Expense / Bank Account *"),
@@ -8479,6 +8599,7 @@ def render_fund_management_card(
                     clearable=False,
                     style={"fontSize": "13px"},
                 ),
+                html.Small(expense_hint, style={"fontSize": "10.5px", "color": "#b8860b", "display": "block", "marginTop": "3px"}) if expense_hint else None,
             ], width=4),
             dbc.Col([
                 dbc.Label("Mode"),
@@ -8548,38 +8669,28 @@ def render_fund_management_card(
         html.Div(id="fund-mgmt-toast", style={"marginTop": "12px"}),
     ], style={"padding": "16px", "background": "#fafbfc", "borderRadius": "10px", "marginTop": "16px"})
 
-    # Utilization log
-    log_rows = []
-    for u in utilization_log[:20]:  # show last 20
-        status_color = {"confirmed": "#1e7e34", "pending": "#e67e22", "cancelled": "#c0392b"}.get(u.get("status", ""), "#666")
-        log_rows.append(html.Tr([
-            html.Td(u.get("created_at", "")[:10] if u.get("created_at") else "—", style={"fontSize": "11px"}),
-            html.Td(u.get("fund_name") or f"Fund {u.get('fund_acc_id')}", style={"fontSize": "11px", "fontWeight": "600"}),
-            html.Td(f"₹{float(u.get('amount') or 0):,.2f}", style={"fontSize": "11px", "textAlign": "right"}),
-            html.Td(u.get("particulars", "")[:50], style={"fontSize": "11px", "color": "#555"}),
-            html.Td(u.get("approval_ref", "—"), style={"fontSize": "11px", "color": "#666"}),
-            html.Td(html.Span(u.get("status", "—").title(), style={"color": status_color, "fontWeight": "600", "fontSize": "11px"}), style={"textAlign": "center"}),
-        ]))
-
-    log_table = dbc.Table([
-        html.Thead(html.Tr([
-            html.Th("Date", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Fund", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Amount", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "right"}),
-            html.Th("Particulars", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Approval Ref", style={"fontSize": "11px", "background": color, "color": "#fff"}),
-            html.Th("Status", style={"fontSize": "11px", "background": color, "color": "#fff", "textAlign": "center"}),
-        ])),
-        html.Tbody(log_rows),
-    ], bordered=False, hover=True, responsive=True, size="sm", style={"marginTop": "4px"}, id="fund-mgmt-log-table") if log_rows else dbc.Alert("No fund utilizations yet.", color="secondary", style={"borderRadius": "10px"})
+    # Utilization log — same builder the callbacks use, so the first render
+    # and the post-submit render are the same table.
+    log_table = html.Div(
+        build_log_table(utilization_log or []),
+        id="fund-mgmt-log-table",
+    )
 
     body = html.Div([
         html.H6("Fund Balances", style={"fontWeight": "700", "marginBottom": "8px", "color": color, "marginTop": "8px"}),
         balances_table,
         form,
+        appropr_form,
+        mapping_section,
         html.Hr(style={"margin": "16px 0"}),
         html.H6("Recent Utilizations (Last 20)", style={"fontWeight": "700", "marginBottom": "8px", "color": color}),
         log_table,
+        html.Hr(style={"margin": "16px 0"}),
+        html.H6("Recent Income → Fund Appropriations (Last 20)", style={"fontWeight": "700", "marginBottom": "8px", "color": color}),
+        html.Div(
+            build_appropriation_log_table(appropriation_log or []),
+            id="fund-mgmt-appropr-log-table",
+        ),
     ], style={"padding": "16px"})
 
     return html.Div([

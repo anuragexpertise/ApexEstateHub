@@ -3448,6 +3448,166 @@ def get_fund_utilization_log(society_id: int, limit: int = 20) -> list[dict]:
         return []
 
 
+def get_income_accounts_for_appropriation(society_id: int) -> list[dict]:
+    """
+    Cr-natured INCOME accounts (the source side of an appropriation, e.g.
+    "Corpus Fund interest → Repair & Maintenance Fund Reserve"), each with
+    the unappropriated balance still available to draw from.
+
+    The balance is summed over the account's whole SUBTREE, not the account
+    row alone, and that is not cosmetic: "Interest Income" (4110) is a
+    rollup whose children 4111/4112/4113 carry the actual postings, so an
+    account-only sum reports ₹0 forever and the dropdown would look empty
+    for a society that has in fact earned interest. Mirrors the recursive
+    balance check inside fn_appropriate_income_to_fund exactly, so the
+    figure shown is the figure the function will enforce.
+
+    Accounts with nothing available are still returned, but flagged, so the
+    admin can see the account exists rather than wondering where the income
+    went — the same reasoning as the locked funds in the utilization
+    dropdown (see fund_management_callbacks.build_fund_options).
+    """
+    try:
+        return db._execute(
+            """
+            WITH RECURSIVE income_root AS (
+                SELECT id FROM accounts
+                WHERE society_id = %s AND name ILIKE %s
+            ),
+            income_tree AS (
+                SELECT a.id, a.name, a.tab_name, a.parent_account_id
+                FROM accounts a
+                JOIN income_root ir ON a.parent_account_id = ir.id
+                WHERE a.society_id = %s AND a.drcr_account = 'Cr'
+                UNION ALL
+                SELECT c.id, c.name, c.tab_name, c.parent_account_id
+                FROM accounts c
+                JOIN income_tree it ON c.parent_account_id = it.id
+                WHERE c.society_id = %s AND c.drcr_account = 'Cr'
+            ),
+            -- ancestor_id -> node_id over the WHOLE income tree, so a header's
+            -- available figure is every descendant's balance, at any depth
+            -- (Income -> Interest Income -> Bank Interest is three levels,
+            -- and a direct-children-only rollup would stop one short of
+            -- exactly the numbers this screen is for).
+            descendants AS (
+                SELECT id AS ancestor_id, id AS node_id FROM income_tree
+                UNION ALL
+                SELECT d.ancestor_id, it.id
+                FROM descendants d
+                JOIN income_tree it ON it.parent_account_id = d.node_id
+            ),
+            balances AS (
+                SELECT t.acc_id,
+                       SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount
+                                WHEN t.entry_side = 'Dr' THEN -t.amount
+                                ELSE 0 END) AS amt
+                FROM transactions t
+                WHERE t.society_id = %s
+                  AND t.acc_id IN (SELECT id FROM income_tree)
+                GROUP BY t.acc_id
+            )
+            SELECT it.id, it.name, it.tab_name, it.tab_name AS account_code,
+                   COALESCE((
+                       SELECT SUM(COALESCE(b.amt, 0))
+                       FROM descendants d
+                       LEFT JOIN balances b ON b.acc_id = d.node_id
+                       WHERE d.ancestor_id = it.id
+                   ), 0) AS balance
+            FROM income_tree it
+            ORDER BY (COALESCE((
+                       SELECT SUM(COALESCE(b.amt, 0))
+                       FROM descendants d
+                       LEFT JOIN balances b ON b.acc_id = d.node_id
+                       WHERE d.ancestor_id = it.id
+                   ), 0) > 0) DESC, it.name
+            """,
+            (society_id, "%Income%", society_id, society_id, society_id),
+            fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_income_accounts_for_appropriation: {e}")
+        return []
+
+
+def get_fund_bank_mappings(society_id: int) -> list[dict]:
+    """
+    Every fund in the Equity subtree, paired with the bank account its
+    contributions are routed to (fund_bank_account_map). Funds with no
+    mapping are returned with bank_acc_id NULL rather than omitted, so the
+    mapping editor can render one row per fund and show "Primary bank
+    account" as the effective destination instead of leaving the admin to
+    infer absence from a missing row.
+    """
+    try:
+        return db._execute(
+            """
+            WITH RECURSIVE equity_root AS (
+                SELECT id FROM accounts
+                WHERE society_id = %s AND name ILIKE %s
+            ),
+            fund_tree AS (
+                SELECT a.id, a.name, a.tab_name
+                FROM accounts a
+                JOIN equity_root er ON a.parent_account_id = er.id
+                WHERE a.society_id = %s AND a.drcr_account = 'Cr'
+                UNION ALL
+                SELECT c.id, c.name, c.tab_name
+                FROM accounts c
+                JOIN fund_tree ft ON c.parent_account_id = ft.id
+                WHERE c.society_id = %s AND c.drcr_account = 'Cr'
+            )
+            SELECT ft.id AS fund_acc_id, ft.name AS fund_name, ft.tab_name,
+                   m.bank_acc_id, ba.name AS bank_name
+            FROM fund_tree ft
+            LEFT JOIN fund_bank_account_map m
+                   ON m.society_id = %s AND m.fund_acc_id = ft.id
+            LEFT JOIN accounts ba
+                   ON ba.id = m.bank_acc_id AND ba.society_id = %s
+            ORDER BY ft.id
+            """,
+            (society_id, "%Equity%", society_id, society_id, society_id, society_id),
+            fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_fund_bank_mappings: {e}")
+        return []
+
+
+def get_fund_appropriation_log(society_id: int, limit: int = 20) -> list[dict]:
+    """
+    Recent income→fund appropriations, with both account names joined in
+    (from_name / to_name) so the card can label each row without an
+    id-keyed lookup, and with a pending flag the confirm/cancel buttons
+    key off.
+    """
+    try:
+        return db._execute(
+            """
+            SELECT fa.*,
+                   ia.name AS from_name,
+                   ta.name AS to_name,
+                   cu.name AS created_by_name,
+                   conf.name AS confirmed_by_name,
+                   (fa.status = 'pending') AS is_pending
+            FROM fund_appropriations fa
+            LEFT JOIN accounts ia
+                   ON ia.id = fa.from_income_acc_id AND ia.society_id = fa.society_id
+            LEFT JOIN accounts ta
+                   ON ta.id = fa.to_fund_acc_id AND ta.society_id = fa.society_id
+            LEFT JOIN users cu ON cu.id = fa.user_id
+            LEFT JOIN users conf ON conf.id = fa.confirmed_by
+            WHERE fa.society_id = %s
+            ORDER BY fa.created_at DESC, fa.id DESC
+            LIMIT %s
+            """,
+            (society_id, limit), fetch_all=True,
+        ) or []
+    except Exception as e:
+        print(f"❌ get_fund_appropriation_log: {e}")
+        return []
+
+
 def get_funds_account(society_id: int, fy: int) -> list[dict]:
     """
     Load the "Funds Account" schedule (Opening B/F, Additions, Deductions,

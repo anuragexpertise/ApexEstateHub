@@ -7,9 +7,11 @@ ApexEstateHub — comprehensive demo/seed data.
 ================================================
 This seed has been renumbered to the block chart-of-accounts scheme
 (1000=Assets, 2000=Liabilities, 3000=Equity, 4000=Income, 5000=Expenses).
-Every acc_id in ACCOUNTS, BF_VALUES, MUTUALITY_NATURE_MAP, TDS_SECTION_MAP,
-SIMPLE_ASSETS, INSTRUMENT_PURCHASES, FULLY_DEPRECIATED_ASSET, EVENTS,
-RECEIPT_TYPES, and UP_AOA_ACCOUNT_MAPPINGS reflects the new IDs.
+Every acc_id in ACCOUNTS (mutuality_nature/tds_section are now inline fields
+on each ACCOUNTS row itself, not separate id-keyed dicts — see the comment
+above the ACCOUNTS list), BF_VALUES, SIMPLE_ASSETS, INSTRUMENT_PURCHASES,
+FULLY_DEPRECIATED_ASSET, EVENTS, RECEIPT_TYPES, and UP_AOA_ACCOUNT_MAPPINGS
+reflects the new IDs.
 
 Do NOT run this seed against a database that has NOT had
 migrations/001_block_coa_renumber.sql applied — the idempotency guard in
@@ -162,121 +164,125 @@ def _one(cur, sql, params=None):
 #
 # (acc_id, name, tab, header, parent_id, drcr_ac, has_bf, dep_pct)
 
+# mutuality/tds_section were previously two separate dicts
+# (MUTUALITY_NATURE_MAP / TDS_SECTION_MAP, rekeyed by account id) applied
+# during insert below — every new account needed editing in three places
+# (the row itself, plus either/both side-maps) to be fully tagged, and
+# nothing enforced that the id used in a side-map still matched a real row
+# (that's exactly how TDS_SECTION_RATE_SEED ended up with two colliding
+# '194C' rows in an earlier audit — a silent id mismatch is invisible when
+# the tag lives in a separate dict). mutuality/tds_section are now the last
+# two fields on each row itself, right next to depreciation_percent, so a
+# new or edited account is fully tagged in one place. `None` for a field
+# means what it always meant here: mutuality is meaningless outside Income
+# accounts, and tds_section only applies to a handful of Expense accounts
+# subject to TDS deduction — both stay NULL on every other account, exactly
+# as the two side-maps' `.get(aid)` (defaulting to None) did before.
 ACCOUNTS = [
     # ── Root ─────────────────────────────────────────────────────────────
-    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, 100),
+    (1,     "Balance Sheet Root",         "Bal",        "Balance Sheet",            None, None, False, 100, None, None),
 
     # ── 1000 Assets ──────────────────────────────────────────────────────
-    (1000,  "Assets",                     "As",         "Assets",                      1, "Dr", False, 100),
-    (1100,  "Fixed Assets",               "FA",         "Fixed Assets",             1000, "Dr", False, 100),
-    (1110,  "Immovable Assets",           "ImAs",       "Immovable Assets",         1100, "Dr", True,  100),
-    (1120,  "Furniture",                  "Fur",        "Furniture",                1100, "Dr", True,   10),
-    (1130,  "Instruments",                "Inst",       "Instruments & Tools",      1100, "Dr", True,   15),
-    (1140,  "Machinery",                  "Mch",        "Machinery",                1100, "Dr", True,   15),
-    (1150,  "Car",                        "Car",        "Car",                      1100, "Dr", True,   15),
-    (1160,  "Computers",                  "Comp",       "Computers",                1100, "Dr", True,   40),
-    (1170, "Generator",                   "Gen",        "Generator",                1100, "Dr", False,  15),
-    (1200,  "Investments",                "Inv",        "Investments",              1000, "Dr", True,  100),
-    (1300,  "Current Assets",             "CA",         "Current Assets",           1000, "Dr", False, 100),
-    (1310,  "Bank Accounts",              "BkAc",       "Bank Accounts",            1300, "Dr", False, 100),
-    (1311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",        1310, "Dr", True,  100),
-    (1312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",      1310, "Dr", True,  100),
-    (1320,  "Deposits (Assets)",          "Dp",         "Deposits (Assets)",        1300, "Dr", True,  100),
-    (1330,  "Cash-in-hand",               "CiH",        "Cash-in-hand",             1300, "Dr", True,  100),
-    (1340,  "Input Tax Credit (RCM)",     "ITCRCM",     "Input Tax Credit — RCM (recoverable)", 1300, "Dr", False, 100),
-    (1400,  "Loans & Advances Given",     "LAG",        "Loans & Advances Given",   1000, "Dr", True,  100),
-    (1500,  "Sundry Debtors",             "SDr",        "Sundry Debtors",           1000, "Dr", False, 100),
-    (1510,  "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)", 1500, "Dr", True,  100),
-    (1520,  "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",    1500, "Dr", True,  100),
+    (1000,  "Assets",                     "As",         "Assets",                      1, "Dr", False, 100, None, None),
+    (1100,  "Fixed Assets",               "FA",         "Fixed Assets",             1000, "Dr", False, 100, None, None),
+    (1110,  "Immovable Assets",           "ImAs",       "Immovable Assets",         1100, "Dr", True,  100, None, None),
+    (1120,  "Furniture",                  "Fur",        "Furniture",                1100, "Dr", True,   10, None, None),
+    (1130,  "Instruments",                "Inst",       "Instruments & Tools",      1100, "Dr", True,   15, None, None),
+    (1140,  "Machinery",                  "Mch",        "Machinery",                1100, "Dr", True,   15, None, None),
+    (1150,  "Car",                        "Car",        "Car",                      1100, "Dr", True,   15, None, None),
+    (1160,  "Computers",                  "Comp",       "Computers",                1100, "Dr", True,   40, None, None),
+    (1170, "Generator",                   "Gen",        "Generator",                1100, "Dr", False,  15, None, None),
+    (1200,  "Investments",                "Inv",        "Investments",              1000, "Dr", True,  100, None, None),
+    (1300,  "Current Assets",             "CA",         "Current Assets",           1000, "Dr", False, 100, None, None),
+    (1310,  "Bank Accounts",              "BkAc",       "Bank Accounts",            1300, "Dr", False, 100, None, None),
+    (1311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",        1310, "Dr", True,  100, None, None),
+    (1312,  "ICICI A/c - Society",        "ICICI",      "ICICI A/c - Society",      1310, "Dr", True,  100, None, None),
+    (1320,  "Deposits (Assets)",          "Dp",         "Deposits (Assets)",        1300, "Dr", True,  100, None, None),
+    (1330,  "Cash-in-hand",               "CiH",        "Cash-in-hand",             1300, "Dr", True,  100, None, None),
+    (1340,  "Input Tax Credit (RCM)",     "ITCRCM",     "Input Tax Credit — RCM (recoverable)", 1300, "Dr", False, 100, None, None),
+    (1400,  "Loans & Advances Given",     "LAG",        "Loans & Advances Given",   1000, "Dr", True,  100, None, None),
+    (1500,  "Sundry Debtors",             "SDr",        "Sundry Debtors",           1000, "Dr", False, 100, None, None),
+    (1510,  "Sundry Debtors (Digital)",   "SDrDig",     "Sundry Debtors (Digital)", 1500, "Dr", True,  100, None, None),
+    (1520,  "Sundry Debtors (Cash)",      "SDrCash",    "Sundry Debtors (Cash)",    1500, "Dr", True,  100, None, None),
 
     # ── 2000 Liabilities ─────────────────────────────────────────────────
-    (2000,  "Liabilities",                "Lb",         "Liabilities",                 1, "Cr", False, 100),
-    (2100,  "Non-Current Liabilities",    "NCL",        "Non-Current Liabilities",  2000, "Cr", False, 100),
-    (2110,  "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken", 2100, "Cr", True,  100),
-    (2200,  "Current Liabilities",        "CL",         "Current Liabilities",      2000, "Cr", False, 100),
-    (2210,  "CGST Payable",               "CGST",       "CGST Payable",             2200, "Cr", False, 100),
-    (2220,  "SGST Payable",               "SGST",       "SGST Payable",             2200, "Cr", False, 100),
-    (2230,  "CGST Payable (RCM)",         "CGSTRCM",    "CGST Payable (Reverse Charge)",        2200, "Cr", False, 100),
-    (2231,  "SGST Payable (RCM)",         "SGSTRCM",    "SGST Payable (Reverse Charge)",        2200, "Cr", False, 100),
-    (2232,  "IGST Payable (RCM)",         "IGSTRCM",    "IGST Payable (Reverse Charge, inter-state RCM)", 2200, "Cr", False, 100),
-    (2240,  "Sundry Creditors",           "SCr",        "Sundry Creditors",         2200, "Cr", True,  100),
-    (2290,  "TDS to IT",                  "TDSIT",      "TDS Paid",                 2200, "Dr", False, 100),
+    (2000,  "Liabilities",                "Lb",         "Liabilities",                 1, "Cr", False, 100, None, None),
+    (2100,  "Non-Current Liabilities",    "NCL",        "Non-Current Liabilities",  2000, "Cr", False, 100, None, None),
+    (2110,  "Loans & Advances Taken",     "LAT",        "Loans And Advances Taken", 2100, "Cr", True,  100, None, None),
+    (2200,  "Current Liabilities",        "CL",         "Current Liabilities",      2000, "Cr", False, 100, None, None),
+    (2210,  "CGST Payable",               "CGST",       "CGST Payable",             2200, "Cr", False, 100, None, None),
+    (2220,  "SGST Payable",               "SGST",       "SGST Payable",             2200, "Cr", False, 100, None, None),
+    (2230,  "CGST Payable (RCM)",         "CGSTRCM",    "CGST Payable (Reverse Charge)",        2200, "Cr", False, 100, None, None),
+    (2231,  "SGST Payable (RCM)",         "SGSTRCM",    "SGST Payable (Reverse Charge)",        2200, "Cr", False, 100, None, None),
+    (2232,  "IGST Payable (RCM)",         "IGSTRCM",    "IGST Payable (Reverse Charge, inter-state RCM)", 2200, "Cr", False, 100, None, None),
+    (2240,  "Sundry Creditors",           "SCr",        "Sundry Creditors",         2200, "Cr", True,  100, None, None),
+    (2290,  "TDS to IT",                  "TDSIT",      "TDS Paid",                 2200, "Dr", False, 100, None, None),
 
     # ── 3000 Equity / Reserves & Funds ───────────────────────────────────
-    (3000,  "Equity / Reserves & Funds",  "Eq",         "Equity",                      1, "Cr", False, 100),
-    (3100,  "Capital Account",            "CapAc",      "Capital Account",          3000, "Cr", True,  100),
-    (3200,  "Reserves & Funds",           "Res",        "Reserves & Funds",         3000, "Cr", False, 100),
-    (3210,  "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",     3200, "Cr", True,  100),
-    (3220,  "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",   3200, "Cr", True,  100),
-    (3230,  "Corpus Fund",                "CorpusFund", "Corpus Fund",              3200, "Cr", True,  100),
-    (3240,  "Gifts Received",             "Gifts",      "Gifts Received",           3000, "Cr", True,  100),
-    (3250,  "Provisions",                 "Prov",       "Provisions",               3000, "Cr", True,  100),
-    (3260,  "Gifts Given",                "GiftGiven",  "Gifts Given",              3000, "Dr", True,  100),
+    (3000,  "Equity / Reserves & Funds",  "Eq",         "Equity",                      1, "Cr", False, 100, None, None),
+    (3100,  "Capital Account",            "CapAc",      "Capital Account",          3000, "Cr", True,  100, None, None),
+    (3200,  "Reserves & Funds",           "Res",        "Reserves & Funds",         3000, "Cr", False, 100, None, None),
+    (3210,  "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",     3200, "Cr", True,  100, None, None),
+    (3220,  "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",   3200, "Cr", True,  100, None, None),
+    (3230,  "Corpus Fund",                "CorpusFund", "Corpus Fund",              3200, "Cr", True,  100, None, None),
+    (3240,  "Gifts Received",             "Gifts",      "Gifts Received",           3000, "Cr", True,  100, None, None),
+    (3250,  "Provisions",                 "Prov",       "Provisions",               3000, "Cr", True,  100, None, None),
+    (3260,  "Gifts Given",                "GiftGiven",  "Gifts Given",              3000, "Dr", True,  100, None, None),
 
     # ── 4000 Income ──────────────────────────────────────────────────────
-    (4000,  "Income",                     "Inc",        "Income",                      1, "Cr", False, 100),
-    (4100,  "Income Other Source",        "IncOther",   "Income other source",      4000, "Cr", False, 100),
-    (4110,  "Interest Income",            "IncInt",     "Interest Income",          4100, "Cr", False, 100),
-    (4111,  "Bank Interest",              "IntBK",      "Bank Interest",            4110, "Cr", False, 100),
-    (4112,  "Saving Interest",            "IntSav",     "Saving Interest",          4110, "Cr", False, 100),
-    (4113,  "FD Interest",                "IntFD",      "FD Interest",              4110, "Cr", False, 100),
-    (4114,  "Exempt Income",              "IncExmpt",   "Exempt Income",            4110, "Cr", False, 100),
-    (4115,  "Due Interest",               "IntDue",     "Maintenance Due Interest", 4110, "Cr", False, 100),
-    (4120,  "Selling Asset",              "SellAs",     "Selling Asset",            4100, "Cr", False, 100),
-    (4130,  "Property Income",            "PropInc",    "Property Income",          4100, "Cr", False, 100),
-    (4200,  "Member Contributions",       "MemCon",     "Member Contributions",     4000, "Cr", False, 100),
-    (4210,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 4200, "Cr", False, 100),
-    (4220,  "Society Fine",               "SocF",       "Society Fine Charge",      4200, "Cr", False, 100),
-    (4230,  "Society Charge",             "SocC",       "Society Fees",             4200, "Cr", False, 100),
-    (4240,  "Event Ticket",               "EventT",     "Event Ticket",             4200, "Cr", False, 100),
-    (4241,  "Holi Ticket",                "HoliT",      "Holi Ticket",              4240, "Cr", False, 100),
-    (4242,  "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",            4240, "Cr", False, 100),
+    # mutuality_nature ('mutual'/'non_mutual') now sits directly on each
+    # income row instead of MUTUALITY_NATURE_MAP — used only by the Income
+    # Tax mutuality report (fn_income_tax_summary_fy); every other account
+    # type leaves it None (see file header comment above ACCOUNTS).
+    (4000,  "Income",                     "Inc",        "Income",                      1, "Cr", False, 100, None, None),
+    (4100,  "Income Other Source",        "IncOther",   "Income other source",      4000, "Cr", False, 100, None, None),
+    (4110,  "Interest Income",            "IncInt",     "Interest Income",          4100, "Cr", False, 100, None, None),
+    (4111,  "Bank Interest",              "IntBK",      "Bank Interest",            4110, "Cr", False, 100, "non_mutual", None),
+    (4112,  "Saving Interest",            "IntSav",     "Saving Interest",          4110, "Cr", False, 100, "non_mutual", None),
+    (4113,  "FD Interest",                "IntFD",      "FD Interest",              4110, "Cr", False, 100, "non_mutual", None),
+    (4114,  "Exempt Income",              "IncExmpt",   "Exempt Income",            4110, "Cr", False, 100, None, None),
+    (4115,  "Due Interest",               "IntDue",     "Maintenance Due Interest", 4110, "Cr", False, 100, "mutual", None),
+    (4120,  "Selling Asset",              "SellAs",     "Selling Asset",            4100, "Cr", False, 100, "non_mutual", None),
+    (4130,  "Property Income",            "PropInc",    "Property Income",          4100, "Cr", False, 100, "non_mutual", None),
+    (4200,  "Member Contributions",       "MemCon",     "Member Contributions",     4000, "Cr", False, 100, None, None),
+    (4210,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 4200, "Cr", False, 100, "mutual", None),
+    (4220,  "Society Fine",               "SocF",       "Society Fine Charge",      4200, "Cr", False, 100, "mutual", None),
+    (4230,  "Society Charge",             "SocC",       "Society Fees",             4200, "Cr", False, 100, "mutual", None),
+    (4240,  "Event Ticket",               "EventT",     "Event Ticket",             4200, "Cr", False, 100, "mutual", None),
+    (4241,  "Holi Ticket",                "HoliT",      "Holi Ticket",              4240, "Cr", False, 100, "mutual", None),
+    (4242,  "Diwali Ticket",              "DiwaliT",    "Diwali Ticket",            4240, "Cr", False, 100, "mutual", None),
 
     # ── 5000 Expenses ────────────────────────────────────────────────────
-    (5000,  "Expenses",                   "Exp",        "Expenses",                    1, "Dr", False, 100),
-    (5100,  "Income Expenditure A/c",     "InExp",      "Income Expenditure Account", 5000, "Cr", False, 100),
-    (5110,  "Depreciation",               "Dep",        "Depreciation Account",     5100, "Dr", False, 100),
-    (5120,  "Rent Paid",                  "RentPaid",   "Rent Paid",                5100, "Dr", False, 100),
-    (5130,  "Miscellaneous",              "Misc",       "Miscellaneous",            5100, "Dr", False, 100),
-    (5140,  "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",      5100, "Dr", False, 100),
-    (5150,  "Salary",                     "Salary",     "Salary",                   5100, "Dr", False, 100),
-    (5160,  "Phone Charges",              "PhoneChrg",  "Phone Charges",            5100, "Dr", False, 100),
-    (5170,  "Electricity",                "Elec",       "Electricity",              5100, "Dr", False, 100),
-    (5180,  "Water Tax",                  "WTax",       "Water Tax",                5100, "Dr", False, 100),
-    (5190,  "House Tax",                  "HTax",       "House Tax",                5100, "Dr", False, 100),
-    (51100, "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",   5100, "Dr", False, 100),
-    (51110, "Repair and Maintenance",     "RM",         "Repair and Maintenance",   5100, "Dr", False, 100),
-    (51120, "Stationery",                 "Stationery", "Stationery",               5100, "Dr", False, 100),
-    (51130, "Generator Charges",          "GenChrg",    "Generator Charges",        5100, "Dr", False,  100),
-    (51140, "Accountant Fee",             "AccountantF","Accountant Fee",           5100, "Dr", False, 100),
-    (51150, "Audit Fee",                  "AuditF",     "Audit Fee",                5100, "Dr", False, 100),
-    (51160, "Lift AMC",                   "LiftAMC",    "Lift AMC",                 5100, "Dr", False, 100),
-    (51170, "Intercom AMC",               "IntercomAMC","Intercom AMC",             5100, "Dr", False, 100),
-    (51180, "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                 5100, "Dr", False, 100),
-    (51190, "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 5100, "Dr", False, 100),
-    (5200,  "Duties Paid",                "DutyP",      "Duties Paid",              5000, "Dr", False, 100),
-    (5210,  "Taxes Paid",                 "TaxP",       "Taxes Paid",               5000, "Dr", False, 100),
-    (5220,  "Income Tax",                 "ITax",       "Income Tax",               5000, "Dr", False, 100),
+    # tds_section (e.g. '194C', '194J') now sits directly on each expense
+    # row instead of TDS_SECTION_MAP — this is exactly the column an id
+    # typo in the old side-map couldn't have caught (it's the earlier
+    # TDS_SECTION_RATE_SEED collision's sibling risk: a wrong/stale id in a
+    # dict two hundred lines away from the row it was meant to tag).
+    (5000,  "Expenses",                   "Exp",        "Expenses",                    1, "Dr", False, 100, None, None),
+    (5100,  "Income Expenditure A/c",     "InExp",      "Income Expenditure Account", 5000, "Cr", False, 100, None, None),
+    (5110,  "Depreciation",               "Dep",        "Depreciation Account",     5100, "Dr", False, 100, None, None),
+    (5120,  "Rent Paid",                  "RentPaid",   "Rent Paid",                5100, "Dr", False, 100, None, None),
+    (5130,  "Miscellaneous",              "Misc",       "Miscellaneous",            5100, "Dr", False, 100, None, None),
+    (5140,  "Vehicle Expenditure",        "VehExp",     "Vehicle Expenditure",      5100, "Dr", False, 100, None, None),
+    (5150,  "Salary",                     "Salary",     "Salary",                   5100, "Dr", False, 100, None, None),
+    (5160,  "Phone Charges",              "PhoneChrg",  "Phone Charges",            5100, "Dr", False, 100, None, None),
+    (5170,  "Electricity",                "Elec",       "Electricity",              5100, "Dr", False, 100, None, None),
+    (5180,  "Water Tax",                  "WTax",       "Water Tax",                5100, "Dr", False, 100, None, None),
+    (5190,  "House Tax",                  "HTax",       "House Tax",                5100, "Dr", False, 100, None, None),
+    (51100, "Insurance Paid",             "InsurPaid",  "Insurance Premium Paid",   5100, "Dr", False, 100, None, None),
+    (51110, "Repair and Maintenance",     "RM",         "Repair and Maintenance",   5100, "Dr", False, 100, None, "194C"),
+    (51120, "Stationery",                 "Stationery", "Stationery",               5100, "Dr", False, 100, None, None),
+    (51130, "Generator Charges",          "GenChrg",    "Generator Charges",        5100, "Dr", False,  100, None, None),
+    (51140, "Accountant Fee",             "AccountantF","Accountant Fee",           5100, "Dr", False, 100, None, "194J"),
+    (51150, "Audit Fee",                  "AuditF",     "Audit Fee",                5100, "Dr", False, 100, None, "194J"),
+    (51160, "Lift AMC",                   "LiftAMC",    "Lift AMC",                 5100, "Dr", False, 100, None, "194C"),
+    (51170, "Intercom AMC",               "IntercomAMC","Intercom AMC",             5100, "Dr", False, 100, None, "194C"),
+    (51180, "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                 5100, "Dr", False, 100, None, "194C"),
+    (51190, "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 5100, "Dr", False, 100, None, None),
+    (5200,  "Duties Paid",                "DutyP",      "Duties Paid",              5000, "Dr", False, 100, None, None),
+    (5210,  "Taxes Paid",                 "TaxP",       "Taxes Paid",               5000, "Dr", False, 100, None, None),
+    (5220,  "Income Tax",                 "ITax",       "Income Tax",               5000, "Dr", False, 100, None, None),
 ]
-
-# Compliance tagging for existing accounts (Phase 1) — rekeyed to block IDs.
-MUTUALITY_NATURE_MAP = {
-    # Income — mutual (member-sourced)
-    4210: 'mutual', 4220: 'mutual', 4230: 'mutual', 4240: 'mutual',
-    4241: 'mutual', 4242: 'mutual', 4115: 'mutual',
-    # Income — non-mutual (interest, non-member)
-    4111: 'non_mutual', 4112: 'non_mutual', 4113: 'non_mutual',
-    4120: 'non_mutual', 4130: 'non_mutual',
-}
-
-TDS_SECTION_MAP = {
-    51110: '194C',   # Repair and Maintenance
-    51160: '194C',   # Lift AMC
-    51170: '194C',   # Intercom AMC
-    51180: '194C',   # CCTV AMC
-    51140: '194J',   # Accountant Fee
-    51150: '194J',   # Audit Fee
-}
 
 # Statutory principal locks — the percentage of each fund's balance that law
 # protects from being drawn down (accounts.statutory_lock_pct). Enforced by
@@ -1314,7 +1320,7 @@ def seed_accounts(cur, conn, society_id: int):
     created = 0
     inserted_ids = set()
 
-    for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
+    for (aid, name, tab, header, parent, drcr, has_bf, dep, mutuality, tds_section) in ACCOUNTS:
         try:
             cur.execute("SELECT 1 FROM accounts WHERE id = %s AND society_id = %s", (aid, society_id))
             if cur.fetchone():
@@ -1327,7 +1333,7 @@ def seed_accounts(cur, conn, society_id: int):
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (aid, society_id, name, tab, header, None,
                  drcr, has_bf, dep, dep < 100,
-                 MUTUALITY_NATURE_MAP.get(aid), TDS_SECTION_MAP.get(aid)),
+                 mutuality, tds_section),
             )
             inserted_ids.add(aid)
             created += 1
@@ -1335,7 +1341,7 @@ def seed_accounts(cur, conn, society_id: int):
             conn.rollback()
             log.warning("Account %s skip: %s", aid, exc)
 
-    for (aid, name, tab, header, parent, drcr, has_bf, dep) in ACCOUNTS:
+    for (aid, name, tab, header, parent, drcr, has_bf, dep, mutuality, tds_section) in ACCOUNTS:
         if parent is not None and aid in inserted_ids:
             cur.execute(
                 "UPDATE accounts SET parent_account_id = %s WHERE id = %s AND society_id = %s",
