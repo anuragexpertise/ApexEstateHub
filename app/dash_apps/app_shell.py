@@ -497,6 +497,29 @@ def _bank_reconcile_modal() -> dbc.Modal:
             dbc.ModalBody(
                 html.Div([
                     html.Div(id="bank-reconcile-instructions", className="mb-2"),
+                    # Which account is this statement from? Reconciliation is
+                    # per-account since fund_bank_account_map started routing
+                    # fund money into separately-held accounts — reconciling
+                    # a second account's statement against the primary
+                    # account's receipts silently matched the wrong money.
+                    html.Div([
+                        dbc.Label(
+                            [
+                                "Bank Account",
+                                html.Small(" — the account this statement was drawn from",
+                                           style={"color": "#7d8ea3", "fontWeight": "400"}),
+                            ],
+                            style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "4px"},
+                        ),
+                        dcc.Dropdown(
+                            id="bank-reconcile-bank-select",
+                            options=[],
+                            value=None,
+                            clearable=False,
+                            placeholder="Select the bank account…",
+                            style={"fontSize": "13px"},
+                        ),
+                    ], className="mb-3"),
                     dbc.Button(
                         [html.I(className="fas fa-file-download me-2"), "Download Template"],
                         id="bank-reconcile-template-btn", n_clicks=0,

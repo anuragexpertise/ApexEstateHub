@@ -759,6 +759,17 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
         match_confidence IN ('exact', 'fuzzy', 'manual')
     ),
     reconciled BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Which bank account this statement was drawn from (2026-09). NULL
+    -- means "the society's primary account" and is exactly what every row
+    -- uploaded before this column existed already means, so the whole
+    -- existing reconciliation history stays valid untouched. It only has to
+    -- be populated once a society actually keeps a second, separately-held
+    -- account (e.g. the fund -> bank mapping in fund_bank_account_map),
+    -- because before this column a statement from a non-primary account was
+    -- reconciled against receipts regardless of which physical account the
+    -- money had actually landed in — the money landed correctly, but the
+    -- statement it was matched against was the wrong document.
+    bank_acc_id INT,
     uploaded_by INT REFERENCES users (id),
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CHECK (
@@ -988,6 +999,86 @@ CREATE TABLE IF NOT EXISTS fund_utilizations (
 );
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- FUND ↔ BANK ACCOUNT MAPPING (2026-09, fund management audit follow-up)
+--
+-- WHY THIS TABLE EXISTS: every non-cash receipt/receivable payment was
+-- hard-wired by fn_resolve_bank_leg to societies.primary_bank_account_id —
+-- a single society-wide bank account — regardless of which fund the money
+-- was actually for. A society that keeps its Corpus Fund (or Sinking Fund)
+-- in a physically separate bank account/FD (common practice, and often
+-- expected under RERA/bye-laws) had no way to route those specific
+-- contributions there automatically; every contribution landed in whichever
+-- one account was "primary", however many real bank accounts existed in the
+-- chart. Fund Management's own Utilize Fund form already lets an admin pick
+-- ANY bank account for the OUTFLOW leg (see get_expense_bank_accounts) — this
+-- table gives the INFLOW leg the same ability, per fund.
+--
+-- One row per (society, fund) — a fund with no row here simply falls back to
+-- primary_bank_account_id (see fn_resolve_bank_leg below), so mapping is
+-- opt-in and every existing society keeps working unchanged until an admin
+-- sets one.
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS fund_bank_account_map (
+    society_id  INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    fund_acc_id INT NOT NULL,
+    bank_acc_id INT NOT NULL,
+    updated_by  INT REFERENCES users (id),
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (society_id, fund_acc_id),
+    FOREIGN KEY (society_id, fund_acc_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (society_id, bank_acc_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FUND APPROPRIATIONS (2026-09) — ad-hoc Dr Income / Cr Fund journal, e.g.
+-- "Corpus Fund interest -> Repair & Maintenance Fund Reserve". A locked
+-- fund's interest is credited to an Income account rather than the fund
+-- itself (see fn_process_fund_utilization's lock-breach message), so moving
+-- that interest INTO another fund is an income-to-equity appropriation, not
+-- a fund utilization — fn_process_fund_utilization rejects it outright
+-- because it requires a Dr-natured (expense/asset) account on the debit
+-- side, and an income account is Cr-natured. This table/function pair mirrors
+-- fund_utilizations/fn_process_fund_utilization's shape (including the
+-- pending-unless-admin status and previous_hash carry-forward, the same
+-- non-cryptographic chaining fund_utilizations already uses) but for the
+-- from_income_acc_id -> to_fund_acc_id direction instead of
+-- fund_acc_id -> expense_acc_id.
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS fund_appropriations (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id), -- admin who initiated
+    from_income_acc_id INT NOT NULL, -- Cr-natured income account (e.g. Interest Income)
+    FOREIGN KEY (society_id, from_income_acc_id) REFERENCES accounts (society_id, id),
+    to_fund_acc_id INT NOT NULL, -- Cr-natured fund/equity account being topped up
+    FOREIGN KEY (society_id, to_fund_acc_id) REFERENCES accounts (society_id, id),
+    particulars TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    approval_ref VARCHAR(255), -- General Body / Managing Committee resolution reference
+    approval_date DATE,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN ('pending', 'confirmed', 'cancelled')
+    ),
+    confirmed_by INT REFERENCES users (id),
+    confirmed_at TIMESTAMP,
+    previous_hash VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- The card's appropriation log (and the pending-confirm scan behind it)
+-- reads this table newest-first per society; without this it is a seq scan
+-- over every appropriation ever made, on every Fund Management render.
+CREATE INDEX IF NOT EXISTS idx_fund_appropr_society_created
+    ON fund_appropriations (society_id, created_at DESC, id DESC);
+
+-- Partial on the rows that actually have work outstanding — pending rows
+-- are a small slice of the table but are the only ones ever looked up by
+-- status.
+CREATE INDEX IF NOT EXISTS idx_fund_appropr_pending
+    ON fund_appropriations (society_id, created_at DESC)
+    WHERE status = 'pending';
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- FY CLOSURES — one row per society per financial year, recording that the
 -- year has been closed and how much of the net surplus was appropriated to
 -- the statutory Reserve Fund.
@@ -1140,13 +1231,38 @@ WHERE
     );
 
 COMMENT ON
-TABLE bank_statement_lines IS 'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates.';
+TABLE bank_statement_lines IS 'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates. bank_acc_id names the account the statement was drawn from; NULL means the society primary account (the pre-2026-09 behaviour).';
 
 CREATE INDEX IF NOT EXISTS idx_bank_lines_society_unmatched ON bank_statement_lines (society_id, matched_id)
 WHERE
     matched_id IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_bank_lines_batch ON bank_statement_lines (batch_id);
+
+-- Per-account statement lookup (2026-09). Partial on matched_id IS NULL
+-- because that is the only state the reconciliation screens ever filter by,
+-- and it keeps the index small on a table that keeps every historical line.
+CREATE INDEX IF NOT EXISTS idx_bank_lines_account ON bank_statement_lines (society_id, bank_acc_id, txn_date)
+WHERE
+    matched_id IS NULL;
+
+-- The FK is added here (not inline in the CREATE TABLE) so an
+-- already-provisioned database picks it up on the next migrate.py pass,
+-- exactly like the societies.primary_bank_account_id convention noted
+-- further down in this file. Composite (society_id, bank_acc_id) so a line
+-- can never point at another society's account.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_bank_lines_account'
+    ) THEN
+        ALTER TABLE bank_statement_lines
+            ADD CONSTRAINT fk_bank_lines_account
+            FOREIGN KEY (society_id, bank_acc_id)
+            REFERENCES accounts (society_id, id) ON DELETE SET NULL;
+    END IF;
+END;
+$$;
 
 -- Reconciliation state lives on the transaction side (receipts/expenses),
 -- mirroring how status/confirmed_by/confirmed_at already work there.
@@ -3380,6 +3496,7 @@ $$;
 DROP FUNCTION IF EXISTS fn_resolve_cash_account (INT, VARCHAR) CASCADE;
 
 DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR) CASCADE;
+DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR, INT) CASCADE;
 
 -- fn_resolve_bank_leg
 -- ====================
@@ -3406,19 +3523,59 @@ DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR) CASCADE;
 --                     transaction rows of its own.
 --   mode <> 'cash' -> societies.primary_bank_account_id, the single
 --                     society-wide bank leg for every non-cash mode
---                     (cheque/upi/card/bank/crypto alike). Raises loudly
---                     if not configured, rather than silently falling
---                     back to CiH like the old function did.
-CREATE OR REPLACE FUNCTION fn_resolve_bank_leg(p_society_id INT, p_mode VARCHAR)
+--                     (cheque/upi/card/bank/crypto alike) — UNLESS the
+--                     optional p_credit_acc_id names a fund that has its
+--                     own entry in fund_bank_account_map (2026-09, fund
+--                     management audit follow-up), in which case that
+--                     fund's dedicated bank account is used instead. This
+--                     is what lets a society keep Corpus/Sinking Fund
+--                     money in a physically separate account/FD rather
+--                     than everything landing in the one "primary" bank
+--                     account regardless of which fund it was for.
+--                     Raises loudly if no primary account is configured
+--                     and no mapping applies, rather than silently
+--                     falling back to CiH like the old function did.
+--
+-- p_credit_acc_id is OPTIONAL and NULL by default so every call site that
+-- isn't specifically about a fund (fn_verify_expense, fn_verify_payment,
+-- fn_save_expense, fn_sell_vendor_pass/event_ticket, fn_buy/dispose_asset/
+-- deposit, fn_pay_rcm_liability) keeps resolving to primary_bank_account_id
+-- exactly as before, completely unaffected by this change.
+--
+-- Call sites that DO pass it:
+--   fn_verify_receipt / fn_verify_receivable / fn_save_receipt — a single,
+--     unambiguous credit/fund account is known up front.
+--   fn_apply_apartment_dues_fifo_core / ..._selective_core — one "Pay Dues"
+--     payment can settle several receivable rows spanning different funds
+--     and Maintenance at once, so these do NOT collapse to one bank leg:
+--     they resolve a bank account PER settled row and emit one Dr leg per
+--     distinct account, attributing each row's share of the money to the
+--     account that row's acc_id maps to (any overpayment goes to the
+--     primary account, since an advance is maintenance income, not a fund
+--     contribution). Without that per-row split the mapping was silently
+--     inconsistent: verifying dues one flat at a time banked into the
+--     mapped account while the ordinary FIFO "Pay Dues" path did not.
+CREATE OR REPLACE FUNCTION fn_resolve_bank_leg(p_society_id INT, p_mode VARCHAR, p_credit_acc_id INT DEFAULT NULL)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc_id INT;
+    v_mapped_acc_id INT;
 BEGIN
     -- 'journal' (pure book entry, e.g. depreciation) needs no completing
     -- leg at all, same as 'cash' — both legs of a journal entry are
     -- always written explicitly by the caller.
     IF p_mode IN ('cash', 'journal') THEN
         RETURN NULL;
+    END IF;
+
+    IF p_credit_acc_id IS NOT NULL THEN
+        SELECT bank_acc_id INTO v_mapped_acc_id
+        FROM fund_bank_account_map
+        WHERE society_id = p_society_id AND fund_acc_id = p_credit_acc_id;
+
+        IF v_mapped_acc_id IS NOT NULL THEN
+            RETURN v_mapped_acc_id;
+        END IF;
     END IF;
 
     SELECT primary_bank_account_id INTO v_acc_id
@@ -3554,7 +3711,11 @@ BEGIN
     IF v_rec.acc_id IS NULL        THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Error: No income account on this receipt'; RETURN NEXT; RETURN; END IF;
 
     v_mode := COALESCE(p_mode, v_rec.mode);
-    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, v_mode);
+    -- Pass v_rec.acc_id as the credit account so a fund-specific bank
+    -- mapping (fund_bank_account_map) can route this receipt's money into
+    -- a dedicated account (e.g. a separate Corpus Fund account) instead of
+    -- always landing in primary_bank_account_id — see fn_resolve_bank_leg.
+    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, v_mode, v_rec.acc_id);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Cr: income account (the receipt's acc_id)
@@ -3746,7 +3907,9 @@ BEGIN
     v_int_post := GREATEST(COALESCE(v_int_post, 0), 0);
     v_base_post := v_take - v_int_post;
 
-    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, p_mode);
+    -- Pass v_rec.acc_id (the receivable's fund/income account) so a
+    -- fund-specific bank mapping can apply — see fn_resolve_bank_leg.
+    v_bank_acc := fn_resolve_bank_leg(v_rec.society_id, p_mode, v_rec.acc_id);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
     -- Cr: Sundry Debtors (Digital/Cash leaf, by p_mode) — relieves the
@@ -3945,6 +4108,21 @@ DECLARE
     v_receipt_id   INT;  -- new (2026-08): the receipt this payment is recorded against — either newly
                           -- created here (admin-direct path) or the pre-existing self-reported receipt
                           -- being confirmed (p_source_id, when p_source_table='receipts')
+    -- Per-bank-account split of the incoming money (2026-09). A split bill
+    -- settles rows carrying DIFFERENT acc_ids — a Sinking Fund line (3210),
+    -- a Repair Fund line (3220), a Maintenance line (4210) — and those can
+    -- be mapped to different physical bank accounts via
+    -- fund_bank_account_map. Posting one lump Dr to the single primary bank
+    -- account is what made the mapping silently inconsistent: verifying
+    -- dues one flat at a time banked into the mapped account, while paying
+    -- through the FIFO path (the common case) did not. Accumulated here as
+    -- {bank_acc_id: amount} and emitted as one Dr leg per distinct account
+    -- after the loop, so the journal still balances (the legs sum to
+    -- v_total_take + v_remaining = p_amount, exactly as the old single leg
+    -- did).
+    v_legs      JSONB := '{}'::JSONB;
+    v_leg_bank  INT;
+    v_leg       RECORD;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         RAISE EXCEPTION 'Amount must be > 0';
@@ -4008,6 +4186,18 @@ BEGIN
 
         v_total_take := v_total_take + v_take;
         v_remaining  := v_remaining - v_take;
+
+        -- Attribute this row's money to whatever bank account its own
+        -- acc_id maps to (NULL for cash mode, and NULL for any account
+        -- without a mapping — both fall through to the society's primary
+        -- account below via v_bank_acc).
+        v_leg_bank := COALESCE(fn_resolve_bank_leg(v_society_id, p_mode, rec.acc_id), v_bank_acc);
+        IF v_leg_bank IS NOT NULL THEN
+            v_legs := v_legs || jsonb_build_object(
+                v_leg_bank::TEXT,
+                COALESCE((v_legs ->> v_leg_bank::TEXT)::NUMERIC, 0) + v_take
+            );
+        END IF;
     END LOOP;
 
     -- Cr: Sundry Debtors (Digital/Cash leaf, by p_mode) — ONE combined
@@ -4047,20 +4237,39 @@ BEGIN
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
 
-    -- Dr: cash / bank paired side (actual amount received). References the
-    -- originating record (p_source_id, e.g. a confirmed self-pay receipt) when
-    -- given, else the first Cr leg posted this call, so the journal is
-    -- traceable as one event either way.
-    IF v_bank_acc IS NOT NULL THEN
+    -- Any overpayment is a maintenance receipt, so it belongs on the
+    -- primary account (maintenance is not a fund) — attribute it before
+    -- the Dr legs are emitted, so it lands in the same accumulator as the
+    -- rest of the payment.
+    IF v_remaining > 0 AND v_bank_acc IS NOT NULL THEN
+        v_legs := v_legs || jsonb_build_object(
+            v_bank_acc::TEXT,
+            COALESCE((v_legs ->> v_bank_acc::TEXT)::NUMERIC, 0) + v_remaining
+        );
+    END IF;
+
+    -- Dr: cash / bank paired side (actual amount received), split across
+    -- the distinct bank accounts the settled rows map to. References the
+    -- originating record (p_source_id, e.g. a confirmed self-pay receipt)
+    -- when given, else the first Cr leg posted this call, so the journal is
+    -- traceable as one event either way. When nothing maps anywhere
+    -- (cash mode, or no fund has a mapping) this is the single primary
+    -- leg exactly as before.
+    FOR v_leg IN
+        SELECT e.key::INT AS bank_acc, e.value::NUMERIC(15,2) AS amt
+          FROM jsonb_each_text(v_legs) e
+         WHERE e.value::NUMERIC > 0
+         ORDER BY e.key::INT
+    LOOP
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            v_society_id, 'Dr', CURRENT_DATE, v_leg.bank_acc, p_apartment_id, 'apartment',
             'Cash received - Maintenance Payment',
-            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
+            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
         );
-    END IF;
+    END LOOP;
 
     -- Advance-credit receivable marker (status='credit') for any excess beyond
     -- every currently-open due. Not a separate ledger entry — the overpayment
@@ -4263,6 +4472,15 @@ DECLARE
     v_total_take   NUMERIC(15,2) := 0;
     v_first_trx_id INT;
     v_receipt_id   INT;
+    -- Per-bank-account split of the incoming money — see the identical
+    -- accumulator in fn_apply_apartment_dues_fifo_core. Both "Pay Dues"
+    -- engines have to agree here, or a society that maps its Sinking Fund
+    -- to a separate account would see the same payment banked into that
+    -- account when taken FIFO and into the primary account when the very
+    -- same dues were selected by hand.
+    v_legs      JSONB := '{}'::JSONB;
+    v_leg_bank  INT;
+    v_leg       RECORD;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
 
@@ -4317,6 +4535,18 @@ BEGIN
 
         v_total_take := v_total_take + v_take;
         v_remaining  := v_remaining - v_take;
+
+        -- Attribute this row's money to whatever bank account its own
+        -- acc_id maps to (falls through to the society's primary account
+        -- via v_bank_acc when the account has no mapping, and to no leg at
+        -- all in cash mode).
+        v_leg_bank := COALESCE(fn_resolve_bank_leg(v_society_id, p_mode, rec.acc_id), v_bank_acc);
+        IF v_leg_bank IS NOT NULL THEN
+            v_legs := v_legs || jsonb_build_object(
+                v_leg_bank::TEXT,
+                COALESCE((v_legs ->> v_leg_bank::TEXT)::NUMERIC, 0) + v_take
+            );
+        END IF;
     END LOOP;
 
     IF v_total_take > 0 THEN
@@ -4343,16 +4573,32 @@ BEGIN
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
 
-    IF v_bank_acc IS NOT NULL THEN
+    -- Overpayment is a maintenance receipt, so it belongs on the primary
+    -- account (maintenance is not a mapped fund).
+    IF v_remaining > 0 AND v_bank_acc IS NOT NULL THEN
+        v_legs := v_legs || jsonb_build_object(
+            v_bank_acc::TEXT,
+            COALESCE((v_legs ->> v_bank_acc::TEXT)::NUMERIC, 0) + v_remaining
+        );
+    END IF;
+
+    -- Dr: cash / bank paired side, one leg per distinct mapped account.
+    -- Identical total to the single-leg version it replaces.
+    FOR v_leg IN
+        SELECT e.key::INT AS bank_acc, e.value::NUMERIC(15,2) AS amt
+          FROM jsonb_each_text(v_legs) e
+         WHERE e.value::NUMERIC > 0
+         ORDER BY e.key::INT
+    LOOP
         INSERT INTO transactions(
             society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
             amount, mode, status, created_by, created_at, source_table, source_id, journal_id
         ) VALUES (
-            v_society_id, 'Dr', CURRENT_DATE, v_bank_acc, p_apartment_id, 'apartment',
+            v_society_id, 'Dr', CURRENT_DATE, v_leg.bank_acc, p_apartment_id, 'apartment',
             'Cash received - Selective Payment',
-            p_amount, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
+            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
         );
-    END IF;
+    END LOOP;
 
     IF v_remaining > 0 THEN
         INSERT INTO receivables (
@@ -5564,7 +5810,12 @@ BEGIN
     ) RETURNING id INTO v_receipt_id;
 
     IF v_status = 'confirmed' THEN
-        v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode);
+        -- Pass p_acc_id (the receipt's fund/income account) so a
+        -- fund-specific bank mapping can apply — see fn_resolve_bank_leg.
+        -- This is how a manual Corpus Fund receipt (builder handover,
+        -- donation, GB-approved levy) can land directly in a dedicated
+        -- Corpus bank account instead of the society-wide primary one.
+        v_bank_acc := fn_resolve_bank_leg(p_society_id, p_mode, p_acc_id);
         v_journal_id := NEXTVAL('seq_transaction_number');
 
         -- entry_side mirrors fn_save_expense's convention, just the opposite
@@ -5984,6 +6235,453 @@ BEGIN
     available_amount := v_available;
     locked_amount := v_locked;
 
+    RETURN NEXT;
+END;
+$$;
+
+-- fn_set_fund_bank_mapping (2026-09, fund management audit follow-up)
+-- ======================================================================
+-- Admin-facing upsert for fund_bank_account_map. Validates both accounts
+-- belong to the calling society and have the right Dr/Cr nature (mirrors
+-- the same validation shape as fn_process_fund_utilization above) so a bad
+-- mapping can't be saved from the UI layer, whatever calls this.
+-- p_bank_acc_id = NULL clears the mapping for that fund (reverts it to
+-- primary_bank_account_id).
+DROP FUNCTION IF EXISTS fn_set_fund_bank_mapping (INT, INT, INT, INT) CASCADE;
+
+-- OUT columns are prefixed out_* (rather than fund_acc_id/bank_acc_id) —
+-- names matching fund_bank_account_map's own columns made the ON CONFLICT
+-- target list below ambiguous (PL/pgSQL variable vs. table column) since
+-- Postgres won't accept a table-qualified column in a conflict target.
+CREATE OR REPLACE FUNCTION fn_set_fund_bank_mapping(
+    p_society_id  INT,
+    p_fund_acc_id INT,
+    p_bank_acc_id INT,      -- NULL clears the mapping
+    p_updated_by  INT DEFAULT NULL
+)
+RETURNS TABLE(out_fund_acc_id INT, out_bank_acc_id INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_drcr_fund VARCHAR(2);
+    v_fund_name TEXT;
+    v_drcr_bank VARCHAR(2);
+    v_bank_name TEXT;
+    v_is_admin  BOOLEAN;
+BEGIN
+    IF p_fund_acc_id IS NULL THEN RAISE EXCEPTION 'Fund account is required'; END IF;
+
+    -- The acting user is looked up INSIDE p_society_id, not just by id. The
+    -- earlier version matched on users.id alone, so an admin of society A
+    -- could set a fund-bank mapping on society B by passing its id — the
+    -- accounts are validated against p_society_id, but the AUTHORIZATION
+    -- was not. Master admins and unassigned (seeded first-admin) users carry
+    -- a NULL society_id, so they stay allowed; anyone else whose society_id
+    -- disagrees is simply "not found" here and gets the same refusal as a
+    -- non-admin.
+    SELECT (u.role = 'admin' OR u.is_master_admin) INTO v_is_admin
+    FROM users u
+    WHERE u.id = p_updated_by
+      AND (u.is_master_admin OR u.society_id IS NULL OR u.society_id = p_society_id);
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Only an admin of this society can change fund-bank account mapping';
+    END IF;
+    IF NOT COALESCE(v_is_admin, FALSE) THEN
+        RAISE EXCEPTION 'Only an admin can change fund-bank account mapping';
+    END IF;
+
+    SELECT drcr_account, name INTO v_drcr_fund, v_fund_name
+    FROM accounts WHERE id = p_fund_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund account % not found for this society', p_fund_acc_id; END IF;
+    -- IS DISTINCT FROM, not !=: accounts.drcr_account is NULLABLE (the
+    -- rollup "Balance Sheet Root" has no Dr/Cr nature), and `NULL != 'Cr'`
+    -- evaluates to NULL rather than TRUE, so a plain `!=` guard lets every
+    -- null-natured account straight through the validation.
+    IF v_drcr_fund IS DISTINCT FROM 'Cr' THEN
+        RAISE EXCEPTION 'Account % (%) must be a Cr (equity/reserve) fund account', p_fund_acc_id, v_fund_name;
+    END IF;
+
+    IF p_bank_acc_id IS NULL THEN
+        DELETE FROM fund_bank_account_map
+        WHERE society_id = p_society_id AND fund_acc_id = p_fund_acc_id;
+
+        out_fund_acc_id := p_fund_acc_id;
+        out_bank_acc_id := NULL;
+        msg := format('%s now uses the primary bank account', v_fund_name);
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    -- A fund mapped to itself would be a silent no-op that still reports
+    -- success (the Cr-nature check above already rules out the Dr/Cr pair,
+    -- but an explicit check keeps the invariant local and self-evident).
+    IF p_bank_acc_id = p_fund_acc_id THEN
+        RAISE EXCEPTION 'A fund cannot be mapped to its own account';
+    END IF;
+
+    SELECT drcr_account, name INTO v_drcr_bank, v_bank_name
+    FROM accounts WHERE id = p_bank_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Bank account % not found for this society', p_bank_acc_id; END IF;
+    IF v_drcr_bank IS DISTINCT FROM 'Dr' THEN
+        RAISE EXCEPTION 'Account % (%) must be a Dr (bank/asset) account', p_bank_acc_id, v_bank_name;
+    END IF;
+
+    INSERT INTO fund_bank_account_map (society_id, fund_acc_id, bank_acc_id, updated_by, updated_at)
+    VALUES (p_society_id, p_fund_acc_id, p_bank_acc_id, p_updated_by, NOW())
+    ON CONFLICT (society_id, fund_acc_id)
+    DO UPDATE SET bank_acc_id = EXCLUDED.bank_acc_id,
+                  updated_by  = EXCLUDED.updated_by,
+                  updated_at  = NOW();
+
+    out_fund_acc_id := p_fund_acc_id;
+    out_bank_acc_id := p_bank_acc_id;
+    msg := format('%s contributions will now be deposited into %s', v_fund_name, v_bank_name);
+    RETURN NEXT;
+END;
+$$;
+
+-- fn_appropriate_income_to_fund (2026-09, fund management audit follow-up)
+-- ======================================================================
+-- Ad-hoc Dr Income / Cr Fund journal — e.g. moving Corpus Fund's interest
+-- (credited to Interest Income, since Corpus's principal is 100% statutory-
+-- locked — see fn_process_fund_utilization's lock-breach message) into
+-- Repair & Maintenance Fund Reserve or Sinking Fund Reserve.
+--
+-- fn_process_fund_utilization cannot do this: it requires the debit leg to
+-- be Dr-natured (expense/asset), and an income account is Cr-natured, so it
+-- raises 'must be a Dr (expense/asset) account' on exactly this case. This
+-- function is fn_process_fund_utilization's mirror image — Cr-natured on
+-- BOTH legs (Dr reduces the income account's Cr-positive balance, Cr raises
+-- the fund's) — mode is always 'journal' since no real cash/bank moves; the
+-- money already sits in the society's bank account from whenever the
+-- interest was originally credited.
+--
+-- Balance check is over the account's whole SUBTREE, not the account row
+-- alone. This is the difference between the function working and not: the
+-- account an admin actually picks for "Corpus Fund interest" is the rollup
+-- "Interest Income" (4110), which has no transactions of its own — bank
+-- interest is credited to its 4111 child, FD interest to 4112, and so on.
+-- The earlier account-only SUM therefore always returned 0 and every
+-- attempt died with "Insufficient balance ... Available: ₹0" no matter how
+-- much interest the society had actually earned. Summing the subtree
+-- matches how the reports already present a header's balance (the trial
+-- balance rolls each parent's own movement up on top of its children), so
+-- the check and the resulting statement agree.
+DROP FUNCTION IF EXISTS fn_appropriate_income_to_fund CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_appropriate_income_to_fund(
+    p_society_id       INT,
+    p_income_acc_id    INT,      -- Cr-natured income account (or header), e.g. Interest Income
+    p_fund_acc_id      INT,      -- Cr-natured fund/equity account to top up
+    p_particulars      TEXT,
+    p_amount           NUMERIC,
+    p_created_by       INT      DEFAULT NULL,
+    p_approval_ref     VARCHAR  DEFAULT NULL, -- GB/MC resolution reference
+    p_approval_date    DATE     DEFAULT NULL
+)
+RETURNS TABLE(
+    appropriation_id INT,
+    journal_id       INT,
+    status           VARCHAR(20)
+)
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+-- The OUT parameters (appropriation_id / journal_id / status) collide by name
+-- with fund_appropriations' own columns of the same name; the pragma pins
+-- ambiguous references to the column, the same defensive measure
+-- fn_funds_account_fy below takes for its own OUT/column overlap.
+DECLARE
+    v_appropriation_id INT;
+    v_journal_id       INT;
+    v_drcr_income      VARCHAR(2);
+    v_drcr_fund        VARCHAR(2);
+    v_income_name      TEXT;
+    v_fund_name        TEXT;
+    v_is_admin         BOOLEAN;
+    v_status           VARCHAR(20);
+    v_prev_hash        VARCHAR(64);
+    v_income_balance   NUMERIC(15,2);
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+    IF p_income_acc_id IS NULL THEN RAISE EXCEPTION 'Income account is required'; END IF;
+    IF p_fund_acc_id IS NULL THEN RAISE EXCEPTION 'Fund account is required'; END IF;
+    IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'Particulars is required'; END IF;
+    IF p_income_acc_id = p_fund_acc_id THEN RAISE EXCEPTION 'Source and destination accounts must differ'; END IF;
+
+    SELECT drcr_account, name INTO v_drcr_income, v_income_name
+    FROM accounts WHERE id = p_income_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Income account % not found for this society', p_income_acc_id; END IF;
+    -- IS DISTINCT FROM, not !=: accounts.dcr_account is NULLABLE, and
+    -- `NULL != 'Cr'` is NULL rather than TRUE, so `!=` silently admits any
+    -- null-natured (rollup) account through this guard.
+    IF v_drcr_income IS DISTINCT FROM 'Cr' THEN
+        RAISE EXCEPTION 'Account % (%) must be a Cr-natured income account to appropriate FROM', p_income_acc_id, v_income_name;
+    END IF;
+
+    SELECT drcr_account, name INTO v_drcr_fund, v_fund_name
+    FROM accounts WHERE id = p_fund_acc_id AND society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund account % not found for this society', p_fund_acc_id; END IF;
+    IF v_drcr_fund IS DISTINCT FROM 'Cr' THEN
+        RAISE EXCEPTION 'Fund account % (%) must be a Cr (equity/reserve) account', p_fund_acc_id, v_fund_name;
+    END IF;
+
+    -- Can't appropriate more income than has actually accrued — mirrors
+    -- fn_process_fund_utilization's balance check, but over the income
+    -- account's entire subtree (see the note above the CREATE: "Interest
+    -- Income" 4110 is a header whose children 4111/4112/4113 carry the
+    -- actual postings, so an account-only SUM is always 0).
+    WITH RECURSIVE income_subtree AS (
+        SELECT a.id
+          FROM accounts a
+         WHERE a.society_id = p_society_id AND a.id = p_income_acc_id
+        UNION ALL
+        SELECT c.id
+          FROM accounts c
+          JOIN income_subtree s ON c.parent_account_id = s.id
+         WHERE c.society_id = p_society_id
+    )
+    SELECT COALESCE(SUM(
+        CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
+    ), 0) INTO v_income_balance
+    FROM transactions t
+    WHERE t.society_id = p_society_id
+      AND t.acc_id IN (SELECT id FROM income_subtree);
+
+    IF p_amount > v_income_balance THEN
+        RAISE EXCEPTION 'Insufficient unappropriated income in % (%). Available: ₹%, Requested: ₹%',
+            v_income_name, p_income_acc_id, v_income_balance, p_amount;
+    END IF;
+
+    -- Society-scoped authorization. A NULL p_created_by is treated as
+    -- "not an admin" and lands on the pending path below, so the Dr/Cr
+    -- journal is only ever written by a verified admin of THIS society —
+    -- previously a user id alone was enough, and an admin of another
+    -- society could post into this one.
+    SELECT (u.role = 'admin' OR u.is_master_admin) INTO v_is_admin
+    FROM users u
+    WHERE u.id = p_created_by
+      AND (u.is_master_admin OR u.society_id IS NULL OR u.society_id = p_society_id);
+
+    IF COALESCE(v_is_admin, FALSE) THEN
+        v_status := 'confirmed';
+    ELSE
+        v_status := 'pending';
+    END IF;
+
+    SELECT previous_hash INTO v_prev_hash
+    FROM fund_appropriations
+    WHERE society_id = p_society_id
+    ORDER BY created_at DESC, id DESC LIMIT 1;
+
+    INSERT INTO fund_appropriations (
+        society_id, user_id, from_income_acc_id, to_fund_acc_id, particulars,
+        amount, approval_ref, approval_date, status, confirmed_by, confirmed_at,
+        previous_hash, created_at
+    ) VALUES (
+        p_society_id, p_created_by, p_income_acc_id, p_fund_acc_id, p_particulars,
+        p_amount, p_approval_ref, p_approval_date, v_status,
+        CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
+        CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
+        v_prev_hash, NOW()
+    ) RETURNING id INTO v_appropriation_id;
+
+    IF v_status = 'confirmed' THEN
+        v_journal_id := NEXTVAL('seq_transaction_number');
+
+        -- 1. Dr the income account (reduces its Cr-positive balance)
+        -- 2. Cr the fund account (raises the fund's Cr-positive balance)
+        -- mode='journal': a pure book entry, no cash/bank leg — the rupees
+        -- were already banked when the interest was first credited.
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by
+        ) VALUES (
+            p_society_id, v_journal_id, p_income_acc_id, 'Dr', COALESCE(p_approval_date, CURRENT_DATE), p_amount,
+            p_particulars, 'journal', 'paid', 'fund_appropriation', v_appropriation_id, p_created_by
+        );
+
+        INSERT INTO transactions (
+            society_id, journal_id, acc_id, entry_side, trx_date, amount,
+            acc_particulars, mode, status, source_table, source_id, created_by
+        ) VALUES (
+            p_society_id, v_journal_id, p_fund_acc_id, 'Cr', COALESCE(p_approval_date, CURRENT_DATE), p_amount,
+            p_particulars, 'journal', 'paid', 'fund_appropriation', v_appropriation_id, p_created_by
+        );
+    END IF;
+
+    appropriation_id := v_appropriation_id;
+    journal_id := v_journal_id;
+    status := v_status;
+
+    RETURN NEXT;
+END;
+$$;
+
+-- fn_confirm_fund_appropriation (2026-09)
+-- ======================================================================
+-- Turns a 'pending' appropriation written by a non-admin into a posted
+-- journal. Without this the pending branch of fn_appropriate_income_to_fund
+-- was a dead end: the row was inserted, the toast said "submitted for
+-- approval", and NOTHING could ever move it to 'confirmed' or post the
+-- Dr income / Cr fund legs. Re-validates the accrued balance at confirm
+-- time (income can be appropriated away by someone else in the interim),
+-- re-checks that the two accounts still exist and are still Cr-natured,
+-- and refuses to run twice on the same row.
+DROP FUNCTION IF EXISTS fn_confirm_fund_appropriation (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_confirm_fund_appropriation(
+    p_appropriation_id INT,
+    p_confirmed_by     INT
+)
+RETURNS TABLE(
+    appropriation_id INT,
+    journal_id       INT,
+    status           VARCHAR(20)
+)
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+DECLARE
+    v_row            fund_appropriations%ROWTYPE;
+    v_journal_id     INT;
+    v_is_admin       BOOLEAN;
+    v_income_balance NUMERIC(15,2);
+    v_income_name    TEXT;
+    v_fund_name      TEXT;
+    v_drcr_income    VARCHAR(2);
+    v_drcr_fund      VARCHAR(2);
+BEGIN
+    SELECT * INTO v_row
+    FROM fund_appropriations
+    WHERE id = p_appropriation_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN RAISE EXCEPTION 'Appropriation % not found', p_appropriation_id; END IF;
+
+    SELECT (u.role = 'admin' OR u.is_master_admin) INTO v_is_admin
+    FROM users u
+    WHERE u.id = p_confirmed_by
+      AND (u.is_master_admin OR u.society_id IS NULL OR u.society_id = v_row.society_id);
+    IF NOT FOUND OR NOT COALESCE(v_is_admin, FALSE) THEN
+        RAISE EXCEPTION 'Only an admin of this society can confirm an appropriation';
+    END IF;
+
+    IF v_row.status <> 'pending' THEN
+        RAISE EXCEPTION 'Appropriation % is already % — nothing to confirm', p_appropriation_id, v_row.status;
+    END IF;
+
+    SELECT name, drcr_account INTO v_income_name, v_drcr_income FROM accounts
+    WHERE society_id = v_row.society_id AND id = v_row.from_income_acc_id;
+    SELECT name, drcr_account INTO v_fund_name, v_drcr_fund FROM accounts
+    WHERE society_id = v_row.society_id AND id = v_row.to_fund_acc_id;
+    IF v_income_name IS NULL THEN
+        RAISE EXCEPTION 'Source income account % no longer exists for this society', v_row.from_income_acc_id;
+    END IF;
+    IF v_fund_name IS NULL THEN
+        RAISE EXCEPTION 'Destination fund account % no longer exists for this society', v_row.to_fund_acc_id;
+    END IF;
+    -- Re-check the Dr/Cr nature too, not just existence: an admin can
+    -- re-nature an account in the chart of accounts between the request
+    -- being raised and it being confirmed, and posting a Cr to a Dr-natured
+    -- account (or vice versa) would silently distort both balances.
+    IF v_drcr_income IS DISTINCT FROM 'Cr' THEN
+        RAISE EXCEPTION 'Source account % (%) is no longer a Cr-natured income account', v_row.from_income_acc_id, v_income_name;
+    END IF;
+    IF v_drcr_fund IS DISTINCT FROM 'Cr' THEN
+        RAISE EXCEPTION 'Destination account % (%) is no longer a Cr (equity/reserve) account', v_row.to_fund_acc_id, v_fund_name;
+    END IF;
+
+    -- Re-check the accrued balance: between submission and confirmation
+    -- another appropriation may already have drawn the same income down,
+    -- and the row was written with no reservation on it.
+    WITH RECURSIVE income_subtree AS (
+        SELECT a.id FROM accounts a
+         WHERE a.society_id = v_row.society_id AND a.id = v_row.from_income_acc_id
+        UNION ALL
+        SELECT c.id FROM accounts c
+          JOIN income_subtree s ON c.parent_account_id = s.id
+         WHERE c.society_id = v_row.society_id
+    )
+    SELECT COALESCE(SUM(
+        CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END
+    ), 0) INTO v_income_balance
+    FROM transactions t
+    WHERE t.society_id = v_row.society_id
+      AND t.acc_id IN (SELECT id FROM income_subtree);
+
+    IF v_row.amount > v_income_balance THEN
+        RAISE EXCEPTION 'Cannot confirm: only ₹% of unappropriated income remains in % (%)',
+            v_income_balance, v_income_name, v_row.from_income_acc_id;
+    END IF;
+
+    v_journal_id := NEXTVAL('seq_transaction_number');
+
+    INSERT INTO transactions (
+        society_id, journal_id, acc_id, entry_side, trx_date, amount,
+        acc_particulars, mode, status, source_table, source_id, created_by
+    ) VALUES (
+        v_row.society_id, v_journal_id, v_row.from_income_acc_id, 'Dr',
+        COALESCE(v_row.approval_date, v_row.created_at::DATE, CURRENT_DATE), v_row.amount,
+        v_row.particulars, 'journal', 'paid', 'fund_appropriation', v_row.id, p_confirmed_by
+    );
+
+    INSERT INTO transactions (
+        society_id, journal_id, acc_id, entry_side, trx_date, amount,
+        acc_particulars, mode, status, source_table, source_id, created_by
+    ) VALUES (
+        v_row.society_id, v_journal_id, v_row.to_fund_acc_id, 'Cr',
+        COALESCE(v_row.approval_date, v_row.created_at::DATE, CURRENT_DATE), v_row.amount,
+        v_row.particulars, 'journal', 'paid', 'fund_appropriation', v_row.id, p_confirmed_by
+    );
+
+    UPDATE fund_appropriations
+       SET status = 'confirmed', confirmed_by = p_confirmed_by, confirmed_at = NOW()
+     WHERE id = v_row.id;
+
+    appropriation_id := v_row.id;
+    journal_id := v_journal_id;
+    status := 'confirmed';
+    RETURN NEXT;
+END;
+$$;
+
+-- fn_cancel_fund_appropriation (2026-09)
+-- ======================================================================
+-- Withdraws a still-pending appropriation. Only ever legal on a 'pending'
+-- row, so a posted journal can never be orphaned by "cancelling" it after
+-- the fact — reversing a confirmed appropriation is a separate, deliberate
+-- act, not something a status flip should be able to do.
+DROP FUNCTION IF EXISTS fn_cancel_fund_appropriation (INT, INT) CASCADE;
+
+CREATE OR REPLACE FUNCTION fn_cancel_fund_appropriation(
+    p_appropriation_id INT,
+    p_cancelled_by     INT
+)
+RETURNS TABLE(appropriation_id INT, status VARCHAR(20))
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+DECLARE
+    v_row      fund_appropriations%ROWTYPE;
+    v_is_admin BOOLEAN;
+BEGIN
+    SELECT * INTO v_row FROM fund_appropriations WHERE id = p_appropriation_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Appropriation % not found', p_appropriation_id; END IF;
+
+    SELECT (u.role = 'admin' OR u.is_master_admin) INTO v_is_admin
+    FROM users u
+    WHERE u.id = p_cancelled_by
+      AND (u.is_master_admin OR u.society_id IS NULL OR u.society_id = v_row.society_id);
+    IF NOT FOUND OR NOT COALESCE(v_is_admin, FALSE) THEN
+        RAISE EXCEPTION 'Only an admin of this society can cancel an appropriation';
+    END IF;
+
+    IF v_row.status <> 'pending' THEN
+        RAISE EXCEPTION 'Appropriation % is % — only a pending request can be cancelled',
+            p_appropriation_id, v_row.status;
+    END IF;
+
+    UPDATE fund_appropriations SET status = 'cancelled' WHERE id = v_row.id;
+
+    appropriation_id := v_row.id;
+    status := 'cancelled';
     RETURN NEXT;
 END;
 $$;

@@ -113,12 +113,31 @@ function emailAgreement(n_clicks, lh) {
     if (!text) return window.dash_clientside.no_update;
     lh = lh || {};
 
+    // mailto: URLs are capped (~2000 chars in Outlook/Windows handlers, and
+    // several browsers silently drop longer ones), and the full agreement is
+    // far longer. Put the complete text on the clipboard and keep the mailto
+    // body short so the mail client always opens.
+    var subject = 'EstateHub Society Onboarding Agreement — ' + (lh.agreement_no || '');
+    var short = 'Please find the ' + (lh.society_name || 'society') + ' onboarding agreement below.\n\n' + text;
+    var maxBody = 1200;
+    var truncated = short.length > maxBody;
+    var body = truncated
+        ? short.substring(0, maxBody) + '\n\n[…truncated — full agreement text was copied to your clipboard; paste it here or attach the saved PDF.]'
+        : short;
+
+    if (truncated && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function() {});
+    }
+
+    var href = 'mailto:' + encodeURIComponent(lh.secretary_email || '') +
+               '?subject=' + encodeURIComponent(subject) +
+               '&body=' + encodeURIComponent(body);
     var _a = document.createElement('a');
-    _a.href = (
-        'mailto:?subject=' + encodeURIComponent('EstateHub Society Onboarding Agreement — ' + (lh.agreement_no || '')) +
-        '&body=' + encodeURIComponent(text)
-    );
+    _a.href = href;
+    _a.style.display = 'none';
+    document.body.appendChild(_a);
     _a.click();
+    document.body.removeChild(_a);
     return window.dash_clientside.no_update;
 }
 """,

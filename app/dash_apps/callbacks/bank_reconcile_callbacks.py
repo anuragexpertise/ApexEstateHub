@@ -27,6 +27,13 @@ STATEMENT FILE CONTRACT (header row required, case-insensitive):
 MATCHING (run once per uploaded row, against unreconciled rows only —
 no mode filter, all payment modes are eligible):
 
+  - WHICH ACCOUNT: the admin picks the bank account the statement was drawn
+    from. Candidates are then restricted to rows whose own money actually
+    landed in that account (resolved from the posted Dr/Cr bank leg of the
+    receipt/expense, via fund_bank_account_map for anything routed there).
+    A row whose landing account cannot be determined is NOT excluded —
+    unknown is treated as "any", so a society that never configures a
+    second account reconciles exactly as it did before this existed.
   - EXACT (auto-confirmed): same amount, within +/-3 days, AND
     reference_no is a substring of the row's cheque_no or
     transaction_id. A reference match is mandatory for auto-confirm —
@@ -74,6 +81,97 @@ DATE_WINDOW_FUZZY = timedelta(days=7)
 TEMPLATE_COLUMNS = ["txn_date", "description", "debit", "credit", "reference_no", "balance"]
 
 _ENTITY_LABELS = {"receipts": "Receipts", "expenses": "Expenses"}
+
+# Which side of the double entry the CASH/BANK leg sits on for each entity.
+# A receipt is Dr bank / Cr income, an expense is Dr expense / Cr bank (see
+# fn_save_receipt and fn_save_expense), so the bank leg is the opposite side
+# in each case. Used to work out which physical account a given
+# receipt/expense's money actually landed in.
+_BANK_LEG_SIDE = {"receipts": "Dr", "expenses": "Cr"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BANK ACCOUNT RESOLUTION
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_primary_bank_account_id(sid) -> int | None:
+    """The society's primary bank account (societies.primary_bank_account_id)."""
+    row = db.execute(
+        "SELECT primary_bank_account_id FROM societies WHERE id=%s",
+        (sid,), fetch_one=True,
+    )
+    return row.get("primary_bank_account_id") if row else None
+
+
+def get_bank_account_options(sid) -> list[dict]:
+    """Every bank/cash account this society can hold a statement for, with
+    the primary one first so it is the sensible default. A statement with
+    no account chosen is treated as the primary one."""
+    primary = get_primary_bank_account_id(sid)
+    rows = db.execute(
+        """SELECT id, name, tab_name FROM accounts
+           WHERE society_id=%s AND drcr_account='Dr'
+             AND (tab_name IN ('BkAc','SBI','ICICI','CiH') OR name ILIKE ANY(ARRAY['%bank%','%cash%']))
+           ORDER BY (id=%s) DESC, id""",
+        (sid, primary), fetch_all=True,
+    ) or []
+    return [
+        {"id": r["id"], "name": r["name"],
+         "is_primary": r["id"] == primary}
+        for r in rows
+    ]
+
+
+def _landing_bank_accounts(entity: str, sid: int, row_ids: list[int]) -> dict[int, int | None]:
+    """
+    Map receipt/expense id -> the bank account its money actually landed in.
+
+    Resolved from the posted bank leg rather than from any denormalised
+    column on receipts/expenses (neither table carries one, and adding it
+    would mean touching every writer). Returns None for rows with no
+    discoverable bank leg — a cash-mode receipt, a still-pending receipt, or
+    one written before the mapping existed. Callers MUST treat None as
+    "unknown, don't exclude", never as "belongs to the primary account":
+    guessing there would silently drop valid matches.
+    """
+    if not row_ids:
+        return {}
+    side = _BANK_LEG_SIDE.get(entity)
+    if not side:
+        return {}
+    rows = db.execute(
+        f"""SELECT source_id, acc_id FROM transactions
+            WHERE society_id=%s AND source_table=%s AND source_id = ANY(%s)
+              AND entry_side=%s AND mode <> 'cash' AND status='paid'
+            ORDER BY id ASC""",
+        (sid, entity, list(row_ids), side), fetch_all=True,
+    ) or []
+    out: dict[int, int | None] = {rid: None for rid in row_ids}
+    for r in rows:
+        # First leg wins: a split payment (see fn_apply_apartment_dues_fifo_core
+        # after the per-account bank split) legitimately has more than one, and
+        # the first is the one the statement line would correspond to.
+        if out.get(r["source_id"]) is None:
+            out[r["source_id"]] = r["acc_id"]
+    return out
+
+
+def _filter_candidates_by_account(entity: str, sid: int, statement_bank_acc: int | None,
+                                  candidates: list[dict]) -> list[dict]:
+    """
+    Drop candidates whose money provably landed in a DIFFERENT bank account
+    than the statement being uploaded.
+
+    Only applies when the admin actually chose an account. Rows whose
+    landing account can't be determined are kept — the pre-2026-09 behaviour
+    was to consider every same-amount row, and narrowing that on a guess
+    would lose matches that used to be found.
+    """
+    if not statement_bank_acc or not candidates:
+        return candidates
+    landing = _landing_bank_accounts(entity, sid, [c["id"] for c in candidates])
+    kept = [c for c in candidates if landing.get(c["id"]) in (None, statement_bank_acc)]
+    return kept or candidates  # never filter down to nothing silently
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -126,10 +224,13 @@ def _parse_statement(contents: str, filename: str) -> pd.DataFrame:
 # MATCHING + INSERT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int) -> dict:
+def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int,
+                      bank_acc_id: int | None = None) -> dict:
     """
     entity: 'receipts' or 'expenses'. Inserts one bank_statement_lines row
-    per statement row, auto-confirming exact matches. Returns
+    per statement row, auto-confirming exact matches. bank_acc_id is the
+    account the statement was drawn from (None = the society's primary
+    account, i.e. the historical behaviour). Returns
     {"exact": n, "fuzzy": n, "unmatched": n}.
     """
     amount_col = "credit" if entity == "receipts" else "debit"
@@ -162,6 +263,13 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int)
             fetch_all=True,
         ) or []
 
+        # ...but only against rows whose money actually landed in the account
+        # this statement was drawn from. Without this, uploading the ICICI
+        # statement would happily auto-reconcile an SBI receipt of the same
+        # amount, and the two accounts' balances would then disagree with the
+        # bank in a way nothing in the app could explain.
+        candidates = _filter_candidates_by_account(entity, sid, bank_acc_id, candidates)
+
         # A reference match is mandatory for auto-confirm — an amount-only
         # hit, however unique, always falls through to manual review.
         exact_hit = None
@@ -180,11 +288,11 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int)
         line_r = db.execute(
             """INSERT INTO bank_statement_lines
                (society_id, txn_date, description, debit, credit, reference_no, balance,
-                batch_id, uploaded_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                batch_id, bank_acc_id, uploaded_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (
                 sid, txn_date, row.get("description"), debit_val, credit_val,
-                ref_no or None, balance_val, batch_id, uploaded_by,
+                ref_no or None, balance_val, batch_id, bank_acc_id, uploaded_by,
             ),
             fetch_one=True,
         )
@@ -217,6 +325,14 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int)
 def _instructions_for(entity: str) -> html.Div:
     label = _ENTITY_LABELS.get(entity, entity.title())
     return html.Div([
+        html.P(
+            "Pick the bank account the statement was drawn from first — lines "
+            "are only matched against receipts/expenses whose money actually "
+            "landed in that account, so a second account's statement can't be "
+            "reconciled against the primary account's rows.",
+            className="mb-1",
+            style={"fontSize": "12px", "color": "#7d8ea3"},
+        ),
         html.P(
             f"Upload a bank statement (Excel) to reconcile against {label.lower()}.",
             className="mb-1",
@@ -407,6 +523,8 @@ def register_bank_reconcile_callbacks(app):
         Output("bank-reconcile-entity-store", "data"),
         Output("bank-reconcile-modal-title", "children"),
         Output("bank-reconcile-instructions", "children"),
+        Output("bank-reconcile-bank-select", "options"),
+        Output("bank-reconcile-bank-select", "value"),
         Output("bank-reconcile-result", "children"),
         Output("bank-reconcile-upload", "contents"),
         Input({"type": "btn-bulk-reconcile", "entity": ALL}, "n_clicks"),
@@ -421,7 +539,23 @@ def register_bank_reconcile_callbacks(app):
         if entity not in _ENTITY_LABELS:
             raise PreventUpdate
         title = f"Bank Reconcile — {_ENTITY_LABELS[entity]}"
-        return True, entity, title, _instructions_for(entity), "", None
+
+        # Which account is this statement from? Defaults to the primary one,
+        # which is the only possible answer for any society that hasn't
+        # split its money across accounts (and therefore the only thing the
+        # upload used to consider).
+        sid = get_current_society_id()
+        options, default = [], None
+        if sid:
+            for a in get_bank_account_options(sid):
+                label = f"{a['name']}{' (primary)' if a['is_primary'] else ''}"
+                options.append({"label": label, "value": a["id"]})
+                if a["is_primary"]:
+                    default = a["id"]
+            if default is None and options:
+                default = options[0]["value"]
+
+        return True, entity, title, _instructions_for(entity), options, default, "", None
 
     @app.callback(
         Output("bank-reconcile-modal", "is_open", allow_duplicate=True),
@@ -464,12 +598,13 @@ def register_bank_reconcile_callbacks(app):
         Input("bank-reconcile-upload", "contents"),
         State("bank-reconcile-upload", "filename"),
         State("bank-reconcile-entity-store", "data"),
+        State("bank-reconcile-bank-select", "value"),
         State("auth-store", "data"),
         State("drilldown-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def process_bank_statement_upload(contents, filename, entity, auth, store):
+    def process_bank_statement_upload(contents, filename, entity, bank_acc_id, auth, store):
         if not contents or entity not in _ENTITY_LABELS:
             raise PreventUpdate
 
@@ -491,6 +626,15 @@ def register_bank_reconcile_callbacks(app):
             )
 
         actor_id = get_current_user_id()
+
+        # The chosen account must be one of THIS society's own bank
+        # accounts — the dropdown is client-rendered, so its value is
+        # untrusted input and the composite FK would only reject it after a
+        # partial write.
+        bank_options = {a["id"] for a in get_bank_account_options(sid)}
+        if bank_acc_id is not None and int(bank_acc_id) not in bank_options:
+            bank_acc_id = None
+        bank_acc_id = int(bank_acc_id) if bank_acc_id is not None else None
 
         try:
             df = _parse_statement(contents, filename or "statement.xlsx")
@@ -517,7 +661,7 @@ def register_bank_reconcile_callbacks(app):
             )
 
         try:
-            results = _match_and_insert(df, entity, sid, actor_id)
+            results = _match_and_insert(df, entity, sid, actor_id, bank_acc_id)
         except Exception as e:
             return (
                 html.Div(error_toast(e, "Unable to reconcile this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),
@@ -575,6 +719,12 @@ def register_bank_reconcile_callbacks(app):
             "entity": entity, "pk": int(pk), "society_id": sid,
             "amount": float(row["amount"]),
             "row_date": str(row["receipt_date"] if entity == "receipts" else row["expense_date"]),
+            # Where this row's money actually landed, so the picker offers
+            # the statement line from the same account first and hides the
+            # ones from a different one. None = not determinable (cash mode,
+            # still pending, or predates the mapping) and the picker then
+            # shows everything, as it always did.
+            "bank_acc_id": _landing_bank_accounts(entity, sid, [int(pk)]).get(int(pk)),
         }
         return True, store
 
@@ -626,17 +776,42 @@ def register_bank_reconcile_callbacks(app):
             fetch_all=True,
         ) or []
 
+        # Show lines from the same account this row's money landed in first
+        # (when that is determinable). Lines from a different account are
+        # still listed afterwards rather than hidden — an admin reconciling
+        # a mis-keyed row needs to see them to be able to say "yes, that is
+        # the one".
+        row_bank = store.get("bank_acc_id")
+        if row_bank:
+            same = [l for l in lines if l.get("bank_acc_id") == row_bank]
+            other = [l for l in lines if l.get("bank_acc_id") != row_bank]
+            lines = (same + other)[:20]
+
         cards = []
+        acc_names = {a["id"]: a["name"] for a in get_bank_account_options(sid)}
         for line in lines:
+            line_bank = line.get("bank_acc_id")
+            is_same = bool(row_bank) and line_bank == row_bank
             cards.append(dbc.Card(
                 dbc.CardBody([
-                    html.Div(_fmt_line(line), style={"fontSize": "13px", "marginBottom": "8px"}),
+                    html.Div(_fmt_line(line), style={"fontSize": "13px", "marginBottom": "4px"}),
+                    html.Div(
+                        [html.I(className="fas fa-university me-1"),
+                         acc_names.get(line_bank, "Unknown account")],
+                        style={"fontSize": "11px", "marginBottom": "8px",
+                               "color": "#17976e" if is_same else "#b8860b",
+                               "fontWeight": "600" if is_same else "400"},
+                    ),
                     dbc.Button(
                         "Match this line", size="sm", color="success", outline=True,
                         id={"type": "reconcile-pick", "line_id": line["id"]},
                     ),
                 ]),
                 className="mb-2",
+                # Same account as the row's own money: the obvious candidate,
+                # so mark it. Different account: still offered, but the admin
+                # should know they're matching across accounts.
+                style={"borderLeft": "3px solid #17976e"} if is_same else None,
             ))
 
         cards.append(html.Hr())

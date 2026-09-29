@@ -382,6 +382,22 @@ def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
     )
 
 
+def _fund_bank_mapping_options(sid) -> list[dict]:
+    """
+    Bank accounts offered as a fund's deposit destination, for the Fund
+    Management card's routing table. The society's primary account is
+    labelled as such; clearing a row's dropdown is what reverts a fund to
+    it, so the list itself only needs the real alternatives.
+    """
+    try:
+        from app.dash_apps.callbacks.fund_management_callbacks import (
+            _bank_account_options_for_mapping,
+        )
+        return _bank_account_options_for_mapping(sid)
+    except Exception:
+        return []
+
+
 def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_id, label: str):
     """
     Shared save pipeline for BOTH the drag/drop Upload widget and the
@@ -3210,12 +3226,27 @@ def _render_card(
             
             # Get expense/bank accounts for dropdown
             expense_accounts = loaders.get_expense_bank_accounts(sid_val) if sid_val else []
-            
+
+            # Appropriation + fund->bank routing surfaces. These are separate
+            # loaders (not extra queries bolted onto get_fund_balances)
+            # because they serve different sections of the card and each one
+            # swallows its own errors — a society with no income accounts
+            # should still get a working utilization form, not an error
+            # card for the whole page.
+            income_accounts = loaders.get_income_accounts_for_appropriation(sid_val) if sid_val else []
+            fund_mappings = loaders.get_fund_bank_mappings(sid_val) if sid_val else []
+            appropriation_log = loaders.get_fund_appropriation_log(sid_val, limit=20) if sid_val else []
+            bank_account_options = _fund_bank_mapping_options(sid_val) if sid_val else []
+
             return renderers.render_fund_management_card(
                 fund_balances=fund_balances,
                 utilization_log=utilization_log,
                 expense_accounts=expense_accounts,
                 society_name=society_name,
+                income_accounts=income_accounts,
+                fund_mappings=fund_mappings,
+                appropriation_log=appropriation_log,
+                bank_account_options=bank_account_options,
             )
 
         # ── My Transactions — member's own Sundry Debtors passbook ───────────
