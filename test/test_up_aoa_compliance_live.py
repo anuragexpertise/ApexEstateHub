@@ -1,0 +1,259 @@
+"""
+Scenario L — UP Apartment Act 2010 / Model Bye-Laws 2011 compliance layer.
+
+These run against a REAL Postgres (the rules live in SQL functions, so FakeDB
+cannot exercise them). Load database/estatehub.sql, run database/seed.py, then
+point PGHOST/PGDATABASE/PGUSER/PGPASSWORD at it. Without PGHOST the whole module
+is skipped, so the normal FakeDB suite is unaffected.
+
+Every test works inside one transaction that is rolled back, so the demo data is
+left untouched.
+"""
+
+import os
+from datetime import date
+
+import pytest
+
+psycopg2 = pytest.importorskip("psycopg2")
+
+pytestmark = pytest.mark.skipif(
+    not os.getenv("PGHOST"), reason="needs a seeded Postgres (set PGHOST/PGDATABASE/PGUSER/PGPASSWORD)"
+)
+
+SOC = 1
+
+
+@pytest.fixture()
+def cur():
+    conn = psycopg2.connect(
+        host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"),
+        dbname=os.getenv("PGDATABASE"), user=os.getenv("PGUSER"),
+        password=os.getenv("PGPASSWORD"), sslmode=os.getenv("PGSSLMODE", "prefer"),
+    )
+    c = conn.cursor()
+    yield c
+    conn.rollback()
+    conn.close()
+
+
+def one(cur, sql, args=None):
+    cur.execute(sql, args)
+    return cur.fetchone()
+
+
+def first_apartment(cur):
+    return one(cur, "SELECT id, flat_number FROM apartments WHERE society_id=%s AND active ORDER BY id LIMIT 1", (SOC,))
+
+
+def add_receivable(cur, apt_id, due, amount=5000):
+    cur.execute(
+        """INSERT INTO receivables (society_id, entity_id, role, acc_id, description,
+                                    base_amount, amount, due_date, status)
+           VALUES (%s,%s,'apartment',4210,'test dues',%s,%s,%s,'pending') RETURNING id""",
+        (SOC, apt_id, amount, amount, due),
+    )
+    return cur.fetchone()[0]
+
+
+# ── statutory heads / mappings ─────────────────────────────────────────────────
+def test_sinking_fund_not_mapped_to_ifms_and_corpus_is(cur):
+    cur.execute("SELECT account_id, head_code FROM account_statutory_mappings "
+                "WHERE society_id=%s AND regime_code='UP_AOA_2010' AND account_id IN (3210,3220,3230)", (SOC,))
+    m = dict(cur.fetchall())
+    assert m[3210] == "SINKING_FUND"
+    assert m[3220] == "RESERVE_FUND"
+    assert m[3230] == "IFMS_CORPUS"
+
+
+def test_no_2016_amendment_or_chapter_vii_citations_remain(cur):
+    cur.execute("SELECT count(*) FROM statutory_head_catalog WHERE regime_code='UP_AOA_2010' "
+                "AND (source_reference ILIKE '%2016 Amendment%' OR source_reference LIKE '%Ch.VII%')")
+    assert cur.fetchone()[0] == 0
+
+
+# ── undivided interest ─────────────────────────────────────────────────────────
+def test_undivided_interest_backfilled_and_balanced(cur):
+    total, missing, pct, balanced = one(cur, "SELECT * FROM fn_undivided_interest_summary(%s)", (SOC,))
+    assert missing == 0 and balanced and abs(float(pct) - 100) <= 0.001
+
+
+def test_undivided_interest_missing_is_reported(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE apartments SET undivided_interest_pct=NULL WHERE id=%s", (apt_id,))
+    s = one(cur, "SELECT status FROM fn_undivided_interest_report(%s) WHERE apartment_id=%s", (SOC, apt_id))
+    assert s[0] == "missing"
+    assert one(cur, "SELECT balanced FROM fn_undivided_interest_summary(%s)", (SOC,))[0] is False
+
+
+# ── Major Repair Fund / transfer fee ───────────────────────────────────────────
+def test_transfer_fee_is_half_percent_and_posts_accrual_to_fund(cur):
+    apt_id, flat = first_apartment(cur)
+    tr, rec, fee, msg = one(cur, "SELECT * FROM fn_record_apartment_transfer(%s,%s,%s,%s,'Seller','Buyer',NULL)",
+                            (SOC, apt_id, date(2026, 9, 15), 8_000_000))
+    assert msg == "OK" and float(fee) == 40_000.00
+    # accrual leg: Dr Sundry Debtors / Cr Major Repair Fund (3270), journal mode
+    cur.execute("SELECT entry_side, acc_id, amount, mode FROM transactions "
+                "WHERE source_table='receivables' AND source_id=%s ORDER BY entry_side", (rec,))
+    legs = {(side, acc): (float(a), mode) for side, acc, a, mode in cur.fetchall()}
+    assert legs[("Cr", 3270)] == (40_000.0, "journal")
+    assert any(side == "Dr" for side, _ in legs)
+
+
+def test_transfer_fee_account_and_head_created_once(cur):
+    for _ in range(2):
+        cur.execute("SELECT fn_ensure_major_repair_fund(%s)", (SOC,))
+    assert one(cur, "SELECT count(*) FROM accounts WHERE society_id=%s AND id=3270", (SOC,))[0] == 1
+    assert one(cur, "SELECT head_code FROM account_statutory_mappings WHERE society_id=%s AND account_id=3270", (SOC,))[0] \
+        == "MAJOR_REPAIR_FUND"
+
+
+def test_transfer_fee_refused_when_no_regime(cur):
+    cur.execute("SELECT msg FROM fn_record_apartment_transfer(%s,1,%s,1000000,'a','b',NULL)", (999999, date(2026, 9, 1)))
+    assert cur.fetchone()[0].startswith("Error")
+
+
+def test_no_dues_certificate_deemed_after_15_days(cur):
+    apt_id, _ = first_apartment(cur)
+    tr = one(cur, "SELECT transfer_id FROM fn_record_apartment_transfer(%s,%s,%s,1000000,'a','b',NULL)",
+             (SOC, apt_id, date(2026, 9, 1)))[0]
+    cur.execute("UPDATE apartment_transfers SET nodues_requested_on=%s WHERE id=%s", (date(2026, 9, 10), tr))
+    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 24)))[0] == "pending"
+    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 25)))[0] == "deemed_granted"
+    cur.execute("UPDATE apartment_transfers SET nodues_refused_on=%s WHERE id=%s", (date(2026, 9, 20), tr))
+    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 30)))[0] == "refused"
+
+
+# ── bye-law 7 ──────────────────────────────────────────────────────────────────
+def test_bye_law7_cutoff_dates(cur):
+    fy = one(cur, "SELECT fn_bye_law7_cutoff_date(%s,%s)", (SOC, date(2026, 5, 10)))[0]
+    cal = one(cur, "SELECT fn_bye_law7_cutoff_date(%s,%s,'calendar_year')", (SOC, date(2026, 5, 10)))[0]
+    assert fy == date(2026, 3, 31) and cal == date(2025, 12, 31)
+
+
+def test_bye_law7_disqualifies_only_arrears_older_than_60_days_at_cutoff(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE receivables SET status='paid', paid_amount=amount WHERE entity_id=%s AND role='apartment'", (apt_id,))
+    add_receivable(cur, apt_id, date(2026, 1, 15))       # >60 days before 31 Mar 2026, but not before 31 Dec 2025 - 60d
+    fy = one(cur, "SELECT eligible, days_overdue FROM fn_bye_law7_eligibility(%s,%s) WHERE apartment_id=%s",
+             (SOC, date(2026, 5, 10), apt_id))
+    cal = one(cur, "SELECT eligible FROM fn_bye_law7_eligibility(%s,%s,'calendar_year') WHERE apartment_id=%s",
+              (SOC, date(2026, 5, 10), apt_id))
+    assert fy[0] is False and fy[1] == 75
+    assert cal[0] is True
+
+
+def test_bye_law7_off_without_regime(cur):
+    cur.execute("SELECT count(*) FROM fn_bye_law7_eligibility(%s,%s)", (999999, date(2026, 5, 10)))
+    assert cur.fetchone()[0] == 0
+
+
+# ── section 22 ─────────────────────────────────────────────────────────────────
+def test_s22_blocks_until_every_step_and_wait_is_done(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE receivables SET status='paid', paid_amount=amount WHERE entity_id=%s AND role='apartment'", (apt_id,))
+    add_receivable(cur, apt_id, date(2026, 1, 1), 9000)
+    cur.execute("INSERT INTO service_cutoff_proceedings (society_id, apartment_id, service_type, default_since) "
+                "VALUES (%s,%s,'water',%s) RETURNING id", (SOC, apt_id, date(2026, 1, 1)))
+    pid = cur.fetchone()[0]
+
+    ok, earliest, blockers = one(cur, "SELECT * FROM fn_service_cutoff_check(%s,%s)", (pid, date(2026, 9, 1)))
+    assert ok is False and len(blockers) >= 4          # no notice, no resolution, no copies, no display
+
+    cur.execute("""UPDATE service_cutoff_proceedings SET notice_served_on=%s, gb_resolution_on=%s,
+                   copy_sent_to_authority_on=%s, copy_sent_to_owner_on=%s, display_notice_on=%s WHERE id=%s""",
+                (date(2026, 8, 1), date(2026, 8, 10), date(2026, 8, 12), date(2026, 8, 12), date(2026, 8, 13), pid))
+    ok, earliest, blockers = one(cur, "SELECT * FROM fn_service_cutoff_check(%s,%s)", (pid, date(2026, 9, 1)))
+    assert ok is False and any("one-month wait" in b for b in blockers)
+    assert earliest == date(2026, 9, 12)
+
+    ok, _, blockers = one(cur, "SELECT * FROM fn_service_cutoff_check(%s,%s)", (pid, date(2026, 9, 12)))
+    assert ok is True and blockers == []
+
+    cur.execute("UPDATE service_cutoff_proceedings SET appeal_filed_on=%s WHERE id=%s", (date(2026, 8, 20), pid))
+    ok, _, blockers = one(cur, "SELECT * FROM fn_service_cutoff_check(%s,%s)", (pid, date(2026, 9, 12)))
+    assert ok is False and any("appeal" in b for b in blockers)
+
+
+def test_s22_requires_more_than_six_months_default(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO service_cutoff_proceedings (society_id, apartment_id, service_type, default_since) "
+                "VALUES (%s,%s,'water',%s) RETURNING id", (SOC, apt_id, date(2026, 4, 1)))
+    pid = cur.fetchone()[0]
+    _, earliest, blockers = one(cur, "SELECT * FROM fn_service_cutoff_check(%s,%s)", (pid, date(2026, 9, 30)))
+    assert any("exceed 6 months" in b for b in blockers)
+
+
+# ── cash / cheque limits ───────────────────────────────────────────────────────
+def _pending_expense(cur, amount, mode):
+    cur.execute("""INSERT INTO expenses (society_id, expense_date, acc_id, particulars, amount, mode, status)
+                   VALUES (%s,%s,51110,'test repair',%s,%s,'pending') RETURNING id""",
+                (SOC, date(2026, 9, 5), amount, mode))
+    return cur.fetchone()[0]
+
+
+def test_cash_over_limit_is_flagged_in_warn_mode_and_still_posts(cur):
+    cur.execute("UPDATE societies SET cash_limit_mode=NULL WHERE id=%s", (SOC,))
+    exp = _pending_expense(cur, 5000, "cash")
+    admin = one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
+    msg = one(cur, "SELECT msg FROM fn_verify_expense(%s,%s,'cash')", (exp, admin))[0]
+    assert not msg.startswith("Error")
+    assert one(cur, "SELECT count(*) FROM compliance_flags WHERE source_table='expenses' AND source_id=%s", (exp,))[0] == 1
+
+
+def test_cash_over_limit_is_refused_in_block_mode(cur):
+    cur.execute("UPDATE societies SET cash_limit_mode='block' WHERE id=%s", (SOC,))
+    exp = _pending_expense(cur, 5000, "cash")
+    admin = one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
+    msg = one(cur, "SELECT msg FROM fn_verify_expense(%s,%s,'cash')", (exp, admin))[0]
+    assert msg.startswith("Error") and "cheque" in msg
+    assert one(cur, "SELECT status FROM expenses WHERE id=%s", (exp,))[0] == "pending"
+
+
+def test_small_cash_and_large_bank_payments_are_not_flagged(cur):
+    cur.execute("UPDATE societies SET cash_limit_mode='block' WHERE id=%s", (SOC,))
+    admin = one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
+    for amount, mode in ((2500, "cash"), (50_000, "bank")):
+        exp = _pending_expense(cur, amount, mode)
+        msg = one(cur, "SELECT msg FROM fn_verify_expense(%s,%s,%s)", (exp, admin, mode))[0]
+        assert not msg.startswith("Error"), (amount, mode, msg)
+
+
+def test_petty_cash_check_reports_limit(cur):
+    cih, limit, breach = one(cur, "SELECT * FROM fn_petty_cash_check(%s)", (SOC,))
+    assert float(limit) == 20000.0 and breach == (float(cih) > 20000.0)
+
+
+# ── bye-law 49 calendar / lists ────────────────────────────────────────────────
+def test_statutory_calendar_flags_overdue_then_done(cur):
+    rows = {r[1]: r for r in _calendar(cur, date(2026, 10, 1))}
+    assert rows["Audited statement published"][2] == date(2026, 7, 31)
+    assert rows["Audited statement published"][4] == "overdue"
+    assert rows["Copy to competent authority"][2] == date(2026, 8, 15)
+    cur.execute("INSERT INTO aoa_statutory_filings (society_id, fy_start_year, statements_published_on, copy_to_authority_on) "
+                "VALUES (%s,2025,%s,%s)", (SOC, date(2026, 7, 20), date(2026, 8, 5)))
+    rows = {r[1]: r for r in _calendar(cur, date(2026, 10, 1))}
+    assert rows["Audited statement published"][4] == "done"
+    assert rows["Summary sent to owners"][2] == date(2026, 8, 4)     # published 20 Jul + 15 days
+    assert rows["Summary sent to owners"][4] == "overdue"
+
+
+def test_statutory_calendar_due_soon(cur):
+    rows = {r[1]: r for r in _calendar(cur, date(2026, 7, 10))}
+    assert rows["Audited statement published"][4] == "due_soon"
+
+
+def _calendar(cur, asof):
+    cur.execute("SELECT * FROM fn_statutory_calendar(%s,%s,1)", (SOC, asof))
+    return cur.fetchall()
+
+
+def test_owner_and_loanee_lists(cur):
+    cur.execute("SELECT count(*) FROM fn_aoa_owner_list(%s)", (SOC,))
+    n_owners = cur.fetchone()[0]
+    assert n_owners == one(cur, "SELECT count(*) FROM apartments WHERE society_id=%s AND active", (SOC,))[0]
+    apt_id, flat = first_apartment(cur)
+    cur.execute("INSERT INTO owner_loans (society_id, apartment_id, loan_date, principal, repaid_amount) "
+                "VALUES (%s,%s,%s,10000,4000)", (SOC, apt_id, date(2026, 6, 1)))
+    row = one(cur, "SELECT flat_number, outstanding FROM fn_aoa_loanee_list(%s)", (SOC,))
+    assert row[0] == flat and float(row[1]) == 6000.0
