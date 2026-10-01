@@ -225,6 +225,7 @@ ACCOUNTS = [
     (3210,  "Sinking Fund Reserve",       "SinkFund",   "Sinking Fund Reserve",     3200, "Cr", True,  100, None, None),
     (3220,  "Repair & Maintenance Fund Reserve", "RepFund", "Repair Fund Reserve",   3200, "Cr", True,  100, None, None),
     (3230,  "Corpus Fund",                "CorpusFund", "Corpus Fund",              3200, "Cr", True,  100, None, None),
+    (3270,  "Major Repair Fund (Transfer Fee)", "MajRepFund", "Major Repair Fund",       3200, "Cr", True,  100, None, None),
     (3240,  "Gifts Received",             "Gifts",      "Gifts Received",           3000, "Cr", True,  100, None, None),
     (3250,  "Provisions",                 "Prov",       "Provisions",               3000, "Cr", True,  100, None, None),
     (3260,  "Gifts Given",                "GiftGiven",  "Gifts Given",              3000, "Dr", True,  100, None, None),
@@ -290,7 +291,7 @@ ACCOUNTS = [
 # unlocked headroom.
 #
 # 3230 Corpus Fund at 100%: a builder's corpus handover is inviolable
-# principal under UP RERA and the UP AOA Model Bye-Laws Ch.VII. Only the
+# principal under UP RERA and the s.14(5) interest-free maintenance security. Only the
 # interest it earns is the society's to spend, and that interest is credited
 # to Interest Income (4110-4113), which is NOT locked — so the society is not
 # left without access to the return on its corpus, only to the corpus itself.
@@ -869,13 +870,13 @@ NULL_NO_FLOOR = None
 STATE_COMPLIANCE_THRESHOLDS = [
     ("UP",  "sinking_fund_pct_construction_cost", None, NULL_NO_FLOOR,
      "percent", "2026-04-01", None,
-     "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws or builder agreement (commonly 0.5% of flat price/year in practice)."),
+     "No sinking-fund percentage is prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws; the rate is set by general-body resolution or the promoter agreement."),
     ("MH",  "sinking_fund_pct_construction_cost", 0.25, None,
      "percent", "2018-01-01", None,
      "Maharashtra Model Bye-Laws — statutory minimum 0.25% of construction cost/year."),
     ("UP",  "repair_fund_pct_construction_cost", None, NULL_NO_FLOOR,
      "percent", "2026-04-01", None,
-     "UP Apartment Rules 2011 Ch.VII — no fixed statutory percentage. Rate set by AOA bye-laws / General Body."),
+     "No repair-fund percentage is prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws; the rate is set by general-body resolution."),
     ("MH",  "repair_fund_pct_construction_cost", 0.75, None,
      "percent", "2018-01-01", None,
      "Maharashtra Model Bye-Laws — statutory minimum 0.75% of construction cost/year."),
@@ -980,37 +981,41 @@ LEGAL_REGIME_PROFILES = [
 
 STATUTORY_HEADS_UP_AOA = [
     ("UP_AOA_2010", "IFMS_CORPUS", None, "Liabilities", "Interest-Free Maintenance Security Corpus", 10, True,
-     "UP Apartment Act 2010, Sec 14(5) proviso (2016 Amendment); Model Bye-Laws Ch.VII"),
+     "UP Apartment Act 2010, Sec 14(5)"),
+    ("UP_AOA_2010", "MAJOR_REPAIR_FUND", None, "Liabilities", "Major Repair Fund (Transfer-Fee ½%)", 15, True,
+     "Model Bye-Laws 2011, bye-law 39 (½% of transfer value held for major repairs)"),
     ("UP_AOA_2010", "RESERVE_FUND", None, "Liabilities", "Reserve Fund (Common Profits Nucleus)", 20, True,
-     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 46(c) & 3(d)"),
+     "Model Bye-Laws 2011, bye-laws 3(1)(d) and 46; Act Sec 14(8)(a)"),
+    ("UP_AOA_2010", "SINKING_FUND", None, "Liabilities", "Sinking Fund (voluntary; no statutory rate in UP)", 25, False,
+     "Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws; levied by general-body resolution"),
     ("UP_AOA_2010", "COMMON_EXPENSES_PAYABLE", None, "Liabilities", "Common Expenses Payable", 30, True,
-     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws Ch.VII"),
+     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35"),
     ("UP_AOA_2010", "SUNDRY_CREDITORS", None, "Liabilities", "Sundry Creditors", 40, False, ""),
     ("UP_AOA_2010", "LOANS_TAKEN", None, "Liabilities", "Loans & Advances Taken", 50, False, ""),
     ("UP_AOA_2010", "STAFF_BENEFITS_PAYABLE", None, "Liabilities", "Staff Benefits Payable (PF/Gratuity)", 60, True,
-     "UP Apartment Rules 2011, Model Bye-Laws Para 45(h)"),
+     "Model Bye-Laws 2011, bye-law 3(1)(h)"),
     ("UP_AOA_2010", "TAX_PAYABLE", None, "Liabilities", "Taxes Payable (GST/TDS/Property Tax)", 70, False, ""),
     ("UP_AOA_2010", "OTHER_LIABILITIES", None, "Liabilities", "Other Liabilities", 80, False, ""),
     ("UP_AOA_2010", "CAPITAL_ACCOUNT", None, "Equity", "Capital Account / Share Capital", 10, True,
-     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 46(a)"),
+     "Model Bye-Laws 2011, bye-laws 5 and 46 (share capital, ₹1,000 entrance fee)"),
     ("UP_AOA_2010", "ACCUMULATED_SURPLUS", None, "Equity", "Accumulated Surplus / Deficit", 20, True, ""),
     ("UP_AOA_2010", "CURRENT_YEAR_SURPLUS", None, "Equity", "Current Year Surplus / Deficit", 30, True, ""),
     ("UP_AOA_2010", "FIXED_ASSETS", None, "Assets", "Fixed Assets (Immovable + Movable)", 10, False, ""),
     ("UP_AOA_2010", "INVESTMENTS", None, "Assets", "Investments", 20, False, ""),
     ("UP_AOA_2010", "CASH_BANK", None, "Assets", "Cash & Bank Balances", 30, False, ""),
     ("UP_AOA_2010", "SUNDRY_DEBTORS", None, "Assets", "Sundry Debtors (Maintenance Receivable)", 40, True,
-     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws Ch.VII"),
+     "UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35"),
     ("UP_AOA_2010", "LOANS_GIVEN", None, "Assets", "Loans & Advances Given", 50, False, ""),
     ("UP_AOA_2010", "DEPOSITS_ASSETS", None, "Assets", "Deposits (Asset Side)", 60, False, ""),
     ("UP_AOA_2010", "OTHER_ASSETS", None, "Assets", "Other Assets", 70, False, ""),
     ("UP_AOA_2010", "MAINTENANCE_INCOME", None, "Income", "Maintenance Charges / Assessments", 10, True,
      "UP Apartment Act 2010, Sec 18(1)"),
     ("UP_AOA_2010", "COMMON_PROFITS", None, "Income", "Common Profits (Commercial/Common Area Income)", 20, True,
-     "UP Apartment Act 2010, Sec 3(k), 18(1); Model Bye-Laws Ch.VII, Para 3(d)"),
+     "UP Apartment Act 2010, Sec 14(8)(a), 18(1); Model Bye-Laws 2011, bye-law 3(1)(d)"),
     ("UP_AOA_2010", "INTEREST_INCOME", None, "Income", "Interest Income", 30, False, ""),
     ("UP_AOA_2010", "OTHER_INCOME", None, "Income", "Other Income", 40, False, ""),
     ("UP_AOA_2010", "REPAIR_MAINTENANCE_EXP", None, "Expenditure", "Repair & Maintenance Expenses", 10, True,
-     "UP Apartment Rules 2011, Model Bye-Laws Ch.VII, Para 3(c)"),
+     "Model Bye-Laws 2011, bye-law 3"),
     ("UP_AOA_2010", "STAFF_EXPENSES", None, "Expenditure", "Staff Salaries & Benefits", 20, False, ""),
     ("UP_AOA_2010", "ADMIN_EXPENSES", None, "Expenditure", "Administrative Expenses", 30, False, ""),
     ("UP_AOA_2010", "FINANCE_COSTS", None, "Expenditure", "Finance Costs / Interest", 40, False, ""),
@@ -1045,8 +1050,9 @@ LEGAL_INSTRUMENTS_UP_AOA = [
      2011, "Government of Uttar Pradesh (under Sec 14(6) of the 2010 Act)",
      "Every registered Apartment Owners' Association (AOA) in UP",
      "Governs internal AOA administration — membership, Board of Management, general body/AGM procedure, "
-     "voting rights, common seal, and (Ch. VII) the financial framework: common expenses, Reserve Fund "
-     "(Para 46(c)/3(d)), Capital Account/share capital (Para 46(a)), staff benefits (Para 45(h)). Bye-law 54: "
+     "voting rights, common seal, and the financial framework: common expenses, Reserve Fund "
+     "(bye-laws 3(1)(d), 46), share capital (bye-laws 5, 46), staff benefits (bye-law 3(1)(h)), the 1/2% "
+     "transfer fee to the major-repair fund and No Dues deemed grant (bye-law 39), statements/audit (bye-law 49). Bye-law 54: "
      "the Act prevails wherever a bye-law conflicts with it. Must be adopted at a General Body meeting by "
      "2/3rd majority (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
      "Notified 16 Nov 2011 under Sec 14(6); interpreted in Olive Country Apartment Owners Association vs "
@@ -1215,9 +1221,10 @@ def seed_society_legal_regime(cur, conn, society_id: int):
 # UP AOA statutory head mappings — rekeyed to block account IDs.
 UP_AOA_ACCOUNT_MAPPINGS = [
     # Liabilities
-    (3210, "IFMS_CORPUS", "Sinking Fund Reserve mapped to IFMS Corpus per UP Apt Act Sec 14(5)"),
-    (3220, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
-    (3230, "RESERVE_FUND", "Corpus Fund mapped to Reserve Fund per Model Bye-Laws Ch.VII"),
+    (3210, "SINKING_FUND", "Sinking Fund: voluntary fund, no statutory rate in UP (Act 2010 / Model Bye-Laws 2011)"),
+    (3220, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws 2011, bye-law 46"),
+    (3230, "IFMS_CORPUS", "Corpus Fund (builder handover) is the interest-free maintenance security under UP Apartment Act 2010 s.14(5)"),
+    (3270, "MAJOR_REPAIR_FUND", "Model Bye-Laws 2011, bye-law 39"),
     (2210, "TAX_PAYABLE", "CGST Payable"),
     (2220, "TAX_PAYABLE", "SGST Payable"),
     (2230, "TAX_PAYABLE", "CGST Payable (RCM)"),
@@ -2245,6 +2252,8 @@ def run_seed(conn):
 
     seed_master_admin(cur, conn)
     users = seed_users(cur, conn, society_id)
+    cur.execute("SELECT fn_backfill_undivided_interest(%s)", (society_id,))   # Act s.5(2): area share until the Declaration % is entered
+    conn.commit()
 
     admin_uid = users["admin@sunriseresidency.com"]["user_id"]
     apt1_id = users["owner1@sunriseresidency.com"]["linked_id"]
