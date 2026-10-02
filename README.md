@@ -587,9 +587,25 @@ A society reaches these rows only through `society_legal_regime` (assigned by `s
 | `s22_appeal_days` | `15` | days | Owner appeal window |
 | `s20_recovery_months` | `12` | months | Seeded, but **no function in this layer reads it** |
 
-Three override tiers sit on top: **per call** (`p_basis` on the bye-law 7 functions, exposed as the card's basis dropdown) → **per society** (`societies.cash_limit_mode`, which has no UI anywhere — DB only) → **per regime + effective date** (insert a new `regime_rule_parameters` row).
+Three override tiers sit on top: **per call** (`p_basis` on the bye-law 7 functions, exposed as the card's basis dropdown) → **per society** (`societies.cash_limit_mode`, set by master in **Master → AOA Rule Editor**) → **per regime + effective date** (insert a new `regime_rule_parameters` row).
 
 > **A rule the society's regime doesn't define returns empty/`NULL`, never a default and never "compliant".** Callers must read that as *rule not applicable*. `fn_bye_law7_eligibility` returns **zero rows** (not "everyone is eligible") when `arrears_disqualify_days` is unset, and the card hides itself entirely when `fn_regime_param_num(society_id, 'transfer_fee_pct') IS NULL`.
+
+### AOA Rule Editor (Master → AOA Rule Editor)
+
+Master-only maintenance of the rule tables behind the UP AOA layer: `app/services/regime_rules_admin.py`, `pages/master_rules_page.py`, `callbacks/master_rules_callbacks.py` (ids prefixed `mrl-`). The role is read from the server-side session, never the browser's auth-store.
+
+| Area | How it changes | Guards |
+|---|---|---|
+| `regime_rule_parameters` | **New dated version** (`effective_from` ≥ tomorrow, after every existing version); the row it replaces gets `effective_to = start − 1` | Only seeded keys; type/range check per key; bye-law 49 dates must be real and publish ≤ authority copy; unchanged value refused; statutory keys need the amending instrument cited (different from the one on file) plus an explicit confirmation; reason required |
+| `legal_instrument_catalog` | Status / applicability / provisions / source / last-verified | Never deleted — retire with `status = 'superseded'`; no future verified date |
+| `societies.cash_limit_mode` | `warn` / `block` / blank = regime default | Society must exist; reason required |
+
+Every write is one SQL statement that also inserts into `regime_rule_audit` (append-only; a trigger rejects UPDATE/DELETE), so change and audit commit together. **Integrate to DB** now refuses INSERT / UPDATE / DELETE / TRUNCATE / ALTER / DROP / COPY on `regime_rule_parameters`, `legal_instrument_catalog`, `legal_regime_profiles`, `society_legal_regime` and `regime_rule_audit` — a guardrail, not a security boundary.
+
+**State → regime sync.** `societies.state` is written as a code (`UP`) by the wizard, but every `fn_regime_param_*` / compliance function reads `society_legal_regime`, which only `seed.py` ever filled (matching the full name `Uttar Pradesh`). `fn_sync_society_regime` + trigger `societies_sync_regime` now assign the active regime for a state on insert/update (code or full name; a draft regime such as MH is never assigned; a state with no active regime leaves any existing row untouched).
+
+Not covered: owner loans are still invisible to No Dues, bye-law 7 and s.22 (see Owner Loans & Loanees).
 
 ### UP AOA Compliance Card (Admin → Financials)
 
