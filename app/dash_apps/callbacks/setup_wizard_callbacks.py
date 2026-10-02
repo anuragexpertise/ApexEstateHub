@@ -10,6 +10,11 @@ from app.dash_apps.pages.setup_wizard import (
 )
 from app.utils.ux_toasts import error_toast
 
+# Index of the statutes step in CATEGORIES — the only step whose body depends
+# on the State picked in Society Details. Step containers are keyed by that
+# index, so the refresh callback has to target a concrete one.
+UP_AOA_STEP = CATEGORIES.index("UP AOA Compliance") if "UP AOA Compliance" in CATEGORIES else None
+
 
 def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
     value = str(value or "").strip()
@@ -213,6 +218,31 @@ def register_setup_wizard_callbacks(app):
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
         return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
+
+
+    # Every step body is rendered once, when the modal is built — so the
+    # statutes step kept showing whatever societies.state held at that moment
+    # (empty for a society being onboarded, and a full name like
+    # 'Uttar Pradesh' rather than the 'UP' code the dropdown writes) no
+    # matter what the admin had just selected. Re-render it, and the Acts &
+    # Rules column, off the dropdown instead. Both rules-panel outputs are
+    # allow_duplicate because handle_wizard_navigation also writes them.
+    if UP_AOA_STEP is not None:
+        @app.callback(
+            Output({"type": "sw-step-container", "index": UP_AOA_STEP}, "children"),
+            Output("sw-compliance-rules-panel", "children", allow_duplicate=True),
+            Output("sw-rules-subtitle", "children", allow_duplicate=True),
+            Input("sw-society-state", "value"),
+            State("sw-society-id", "data"),
+            prevent_initial_call=True,
+        )
+        def refresh_up_aoa_step_content(picked_state, society_id):
+            step = "UP AOA Compliance"
+            return (
+                render_category_content(step, society_id, picked_state),
+                build_rules_panel(step, society_id, picked_state),
+                rules_subtitle(step, society_id, picked_state),
+            )
 
 
 

@@ -112,7 +112,7 @@ def _existing_society_images(society_id):
     }
 
 
-def build_rules_panel(step, society_id=None):
+def build_rules_panel(step, society_id=None, state=None):
     """
     Body of the "Acts & Rules" column for one wizard step.
 
@@ -124,19 +124,28 @@ def build_rules_panel(step, society_id=None):
        ("Society Details") against kpi_rule_links.category ('sinking_fund',
        'fund_gst', ...) and always got nothing — for the society's own state
        (was hard-coded "ALL", which also hid every UP-specific link).
+
+    `state` is the value of the Society Details State dropdown, when it has
+    been picked but not yet saved (societies.state is only written on
+    submit) — without it the panel showed the old/blank DB state while the
+    admin was looking at a freshly-chosen one.
     """
     from app.services.statutory_rules import (
         rows_for_step, STEP_LINK_CATEGORIES, STEP_INSTRUMENTS,
         instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+        normalize_state,
     )
 
-    state = "UP"
-    if society_id:
-        try:
-            row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            state = ((row or {}).get("state") or "UP").strip() or "UP"
-        except Exception:
-            pass
+    if state:
+        state = normalize_state(state)
+    else:
+        state = "UP"
+        if society_id:
+            try:
+                row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+                state = normalize_state((row or {}).get("state"))
+            except Exception:
+                pass
 
     cards = []
     for area, sections, requirement, covered, note in rows_for_step(step):
@@ -153,7 +162,7 @@ def build_rules_panel(step, society_id=None):
 
     instruments_html = []
     if step in STEP_INSTRUMENTS:
-        regime, instruments = instruments_for_society(society_id)
+        regime, instruments = instruments_for_society(society_id, state)
         instruments_html.append(html.H6(
             [html.I(className="fas fa-gavel me-2"), "Act / Rules / Bye-laws"],
             style={"fontWeight": "700", "color": "#2c3e50", "marginTop": "18px", "marginBottom": "6px"},
@@ -204,16 +213,11 @@ def build_rules_panel(step, society_id=None):
     return out
 
 
-def rules_subtitle(step, society_id=None):
-    state = ""
-    if society_id:
-        try:
-            row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            state = ((row or {}).get("state") or "").strip()
-        except Exception:
-            pass
-    scheme = "UP AOA 2010" if state in ("", "UP") else state
-    return f"{step} · {scheme}"
+def rules_subtitle(step, society_id=None, state=None):
+    """`<step> · <regime>` for the Acts & Rules column header."""
+    from app.services.statutory_rules import regime_for_society
+    regime = regime_for_society(society_id, state)
+    return f"{step} · {regime}"
 
 
 def _field_feedback(field_id):
@@ -392,7 +396,15 @@ def _render_banner(title, text):
         ], className="p-3")
     ], className="mb-4 shadow-sm border-0 bg-light")
 
-def render_category_content(category, society_id=None):
+def render_category_content(category, society_id=None, state=None):
+    """
+    Step body for one wizard category.
+
+    `state` is the Society Details State dropdown value; it is only persisted
+    on submit, so any step whose content depends on the state (the "UP AOA
+    Compliance" statutes) has to be re-rendered when the admin picks it — see
+    refresh_up_aoa_step_content in setup_wizard_callbacks.py.
+    """
     elements = []
     _imgs = _existing_society_images(society_id) if category in ("Society Details", "Administrator", "Accounts") else {}
     
@@ -662,8 +674,9 @@ def render_category_content(category, society_id=None):
         # this step is editable, so it takes no State in submit_setup_wizard.
         from app.services.statutory_rules import (
             instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+            normalize_state,
         )
-        regime, instruments = instruments_for_society(society_id)
+        regime, instruments = instruments_for_society(society_id, state)
 
         profile = {}
         try:
@@ -676,11 +689,13 @@ def render_category_content(category, society_id=None):
         except Exception:
             profile = {}
 
+        picked = normalize_state(state) if state else None
         out = [
             _render_banner(
                 "UP AOA Compliance — Act / Rules / Bye-laws",
-                f"The statutes governing this Apartment Owners' Association ({regime}). "
-                "This reference is maintained by Master and cannot be edited here — review it "
+                f"The statutes governing this Apartment Owners' Association ({regime}"
+                + (f", the State selected under Society Details" if picked else "")
+                + "). This reference is maintained by Master and cannot be edited here — review it "
                 "before submitting, and raise anything out of date through Master Portal → "
                 "RWA Compliance (UP).",
             ),
@@ -700,7 +715,7 @@ def render_category_content(category, society_id=None):
                         html.Div([html.Small("Model bye-laws", className="text-muted d-block"),
                                   html.Small(profile.get("model_bye_laws_version") or "—")], className="sw-rule-sec"),
                         html.Div([html.Small("Effective from", className="text-muted d-block"),
-                                  html.Small(profile.get("effective_from") or "—")], className="sw-rule-sec"),
+                                  html.Small(str(profile.get("effective_from") or "—"))], className="sw-rule-sec"),
                         html.Div([html.Small("Regime", className="text-muted d-block"),
                                   html.Small(regime),
                                   dbc.Badge(profile.get("status") or "active",
@@ -711,12 +726,16 @@ def render_category_content(category, society_id=None):
             ], className="mb-3 shadow-sm border-0"))
 
         if not instruments:
+            fallback = ("" if regime == "UP_AOA_2010" else
+                        " Until Master seeds them, this society falls back to the generic "
+                        "(Union-law) framework shown in the Acts & Rules column.")
             out.append(dbc.Alert(
-                [html.H6([html.I(className="fas fa-database me-2"), "Catalog not available"],
+                [html.H6([html.I(className="fas fa-database me-2"), f"No statutes on file for {regime}"],
                          className="alert-heading", style={"fontWeight": "700"}),
-                 html.P("No Act / Rules / Bye-laws rows could be loaded for this regime. "
-                        "Master can integrate them from Master Portal → Settings → KPI Inspector → "
-                        "\"Integrate to DB\" (see Master Portal → RWA Compliance (UP) for the SQL).",
+                 html.P(f"The {regime} regime has no Act / Rules / Bye-laws rows in "
+                        f"legal_instrument_catalog yet.{fallback} Master can integrate them from "
+                        "Master Portal → Settings → KPI Inspector → \"Integrate to DB\" — the SQL "
+                        "is on Master Portal → RWA Compliance (UP).",
                         style={"fontSize": "13px", "marginBottom": "0"})],
                 color="warning", className="mb-3 shadow-sm",
             ))

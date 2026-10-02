@@ -199,16 +199,45 @@ INSTRUMENT_BADGE_COLOR = {
 }
 
 
-def regime_for_society(society_id=None):
+def normalize_state(value):
+    """
+    societies.state -> the two-letter code used by kpi_rule_links /
+    state_compliance_thresholds / legal_regime_profiles.
+
+    Both shapes are in the wild: the Setup Wizard's State dropdown writes the
+    code ('UP'), while rows seeded earlier hold the full name
+    ('Uttar Pradesh' — societies.id 1 on the live DB). Both must resolve to
+    the same regime, or the wizard shows one state's statutes for a society
+    that believes it is another. Unknown / blank -> 'UP', matching the
+    wizard's own default (build_rules_panel).
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return "UP"
+    if raw.upper() == raw and len(raw) <= 3:
+        return raw.upper()          # already a code
+    try:
+        from app.services.kpi_rule_links_service import get_states
+        wanted = raw.lower()
+        for code, name in get_states().items():
+            if code != "ALL" and (name or "").strip().lower() == wanted:
+                return code
+    except Exception:
+        pass
+    return "UP"
+
+
+def regime_for_society(society_id=None, state_code=None):
     """
     Legal regime governing this society.
 
-    society_legal_regime (written by seed_society_legal_regime for UP
-    addresses) wins; otherwise societies.state is mapped through
-    STATE_REGIME. societies.state is only persisted on Setup Wizard submit
-    (see setup_wizard_callbacks.submit_setup_wizard), so a society part-way
-    through the wizard still resolves to the UP default.
+    An explicitly chosen state_code (the Setup Wizard's State dropdown, which
+    is only persisted on submit) wins; otherwise society_legal_regime is used,
+    then societies.state. societies.state is empty for a society part-way
+    through the wizard, so the UP default covers that case.
     """
+    if state_code:
+        return STATE_REGIME.get(normalize_state(state_code), DEFAULT_REGIME)
     if not society_id:
         return DEFAULT_REGIME
     try:
@@ -220,7 +249,7 @@ def regime_for_society(society_id=None):
         if row and row.get("regime_code"):
             return row["regime_code"]
         row = db._execute("SELECT state FROM societies WHERE id=%s", (society_id,), fetch_one=True)
-        return STATE_REGIME.get(((row or {}).get("state") or "").strip(), DEFAULT_REGIME)
+        return STATE_REGIME.get(normalize_state((row or {}).get("state")), DEFAULT_REGIME)
     except Exception:
         return DEFAULT_REGIME
 
@@ -279,9 +308,10 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
     )
 
 
-def instruments_for_society(society_id=None):
-    """(regime_code, instrument rows) for one society."""
-    regime = regime_for_society(society_id)
+def instruments_for_society(society_id=None, state_code=None):
+    """(regime_code, instrument rows) for one society (or for a state the
+    admin has just picked in the wizard but not yet saved)."""
+    regime = regime_for_society(society_id, state_code)
     return regime, instruments_for_regime(regime)
 
 
