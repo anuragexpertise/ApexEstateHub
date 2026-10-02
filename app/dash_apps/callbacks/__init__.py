@@ -48,6 +48,7 @@ def register_callbacks(app):
         "expense_callbacks",          # 13d. Expense buttons
         "financial_statements_callbacks",  # 13e. 6 Statements buttons
         "fund_management_callbacks",     # 13f. Fund Management (admin only)
+        "up_compliance_callbacks",       # 13g. UP AOA Compliance (admin only)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
         "assign_to_callbacks",        # 14b. Assign-To

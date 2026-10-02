@@ -257,3 +257,121 @@ def test_owner_and_loanee_lists(cur):
                 "VALUES (%s,%s,%s,10000,4000)", (SOC, apt_id, date(2026, 6, 1)))
     row = one(cur, "SELECT flat_number, outstanding FROM fn_aoa_loanee_list(%s)", (SOC,))
     assert row[0] == flat and float(row[1]) == 6000.0
+
+
+# ═══ Part 2: undivided-interest billing + owner loans in the ledger ═══════════
+def _generate(cur, basis=None, budget=None, per_sqft_amount=None):
+    """Run the real bill generator on a clean slate and return {apartment_id: base maintenance}."""
+    cur.execute("DELETE FROM receivables WHERE society_id=%s", (SOC,))
+    cur.execute("DELETE FROM apt_charges_fines_basis WHERE society_id=%s", (SOC,))
+    cur.execute("""INSERT INTO apt_charges_fines_basis (society_id, apt_id, apt_maintenance_amount, apt_maintenance_rate,
+                       apt_due_day, apt_interest_pct, start_date, apt_status, billing_basis, common_expense_budget_monthly)
+                   VALUES (%s, NULL, %s, 3.0, 5, 0, DATE_TRUNC('month', CURRENT_DATE)::DATE, TRUE, %s, %s)""",
+                (SOC, per_sqft_amount if per_sqft_amount is not None else 0, basis or "per_sqft", budget))
+    cur.execute("UPDATE apartments SET apt_calc_start_date = DATE_TRUNC('month', CURRENT_DATE)::DATE WHERE society_id=%s", (SOC,))
+    cur.execute("SELECT fn_auto_generate_receivables(%s)", (SOC,))
+    cur.execute("""SELECT entity_id, SUM(base_amount) FROM receivables
+                   WHERE society_id=%s AND role='apartment' AND description ILIKE 'Maintenance%%' GROUP BY entity_id""", (SOC,))
+    return {a: float(v) for a, v in cur.fetchall()}
+
+
+def test_billing_by_undivided_interest_splits_budget_by_percentage(cur):
+    cur.execute("SELECT fn_backfill_undivided_interest(%s, TRUE)", (SOC,))
+    got = _generate(cur, "undivided_interest", 90000)
+    assert abs(sum(got.values()) - 90000) < 0.5                     # whole budget is recovered
+    cur.execute("SELECT id, undivided_interest_pct FROM apartments WHERE society_id=%s AND active", (SOC,))
+    for apt_id, pct in cur.fetchall():
+        assert abs(got[apt_id] - round(90000 * float(pct) / 100, 2)) < 0.02
+
+
+def test_billing_default_stays_per_sqft(cur):
+    got = _generate(cur, "per_sqft", None, per_sqft_amount=0)
+    cur.execute("SELECT id, apartment_size FROM apartments WHERE society_id=%s AND active", (SOC,))
+    for apt_id, size in cur.fetchall():
+        assert abs(got[apt_id] - size * 3.0) < 0.02
+
+
+def test_undivided_basis_without_budget_falls_back_instead_of_billing_zero(cur):
+    got = _generate(cur, "undivided_interest", None, per_sqft_amount=0)
+    assert all(v > 0 for v in got.values())
+
+
+def test_flat_missing_percentage_falls_back_to_per_sqft(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("SELECT fn_backfill_undivided_interest(%s, TRUE)", (SOC,))
+    cur.execute("UPDATE apartments SET undivided_interest_pct=NULL WHERE id=%s", (apt_id,))
+    got = _generate(cur, "undivided_interest", 90000, per_sqft_amount=0)
+    size = one(cur, "SELECT apartment_size FROM apartments WHERE id=%s", (apt_id,))[0]
+    assert abs(got[apt_id] - size * 3.0) < 0.02
+
+
+def test_backfill_is_exactly_100_and_bill_preview_totals_budget(cur):
+    cur.execute("SELECT fn_backfill_undivided_interest(%s, TRUE)", (SOC,))
+    assert float(one(cur, "SELECT SUM(undivided_interest_pct) FROM apartments WHERE society_id=%s AND active", (SOC,))[0]) == 100.0
+    assert abs(float(one(cur, "SELECT SUM(monthly_share) FROM fn_undivided_interest_bill_preview(%s,50000)", (SOC,))[0]) - 50000) < 0.05
+
+
+def _admin(cur):
+    return one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
+
+
+def _bs(cur):
+    cur.execute("SELECT section, SUM(amount) FROM (SELECT * FROM fn_balance_sheet_fy(%s, 2026)) t GROUP BY section", (SOC,))
+    return {k: float(v or 0) for k, v in cur.fetchall()}
+
+
+def test_owner_loan_posts_dr_loans_cr_cash_and_rejects_bad_input(cur):
+    apt_id, _ = first_apartment(cur)
+    for args, frag in (((apt_id, date(2026, 9, 1), 10000, 12, "cash", "x", "", _admin(cur)), "resolution"),
+                       ((apt_id, date(2026, 9, 1), 0, 12, "cash", "x", "BM-1", _admin(cur)), "principal"),
+                       ((999999, date(2026, 9, 1), 10000, 12, "cash", "x", "BM-1", _admin(cur)), "apartment")):
+        cur.execute("SELECT msg FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s)", (SOC,) + args)
+        assert frag in cur.fetchone()[0]
+    cur.execute("UPDATE societies SET cash_limit_mode=NULL WHERE id=%s", (SOC,))
+    loan, msg = one(cur, "SELECT * FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (SOC, apt_id, date(2026, 9, 1), 2000, 12, "cash", "medical", "BM-7", _admin(cur)))
+    assert msg == "OK"
+    cur.execute("SELECT entry_side, acc_id, amount, mode FROM transactions WHERE source_table='owner_loans' AND source_id=%s", (loan,))
+    assert [(r[0], r[1], float(r[2]), r[3]) for r in cur.fetchall()] == [("Dr", 1410, 2000.0, "cash")]
+    assert one(cur, "SELECT head_code FROM account_statutory_mappings WHERE society_id=%s AND account_id=1410", (SOC,))[0] == "LOANS_GIVEN"
+
+
+def test_owner_loan_bank_disbursal_and_repayment_post_both_legs_and_update_register(cur):
+    apt_id, _ = first_apartment(cur)
+    loan, _m = one(cur, "SELECT * FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                   (SOC, apt_id, date(2026, 9, 1), 50000, 12, "bank", "roof repair", "GB-2026-03", _admin(cur)))
+    cur.execute("SELECT entry_side, acc_id FROM transactions WHERE source_table='owner_loans' AND source_id=%s ORDER BY entry_side", (loan,))
+    legs = cur.fetchall()
+    assert ("Dr", 1410) in legs and any(side == "Cr" and acc != 1410 for side, acc in legs)
+
+    rep, msg = one(cur, "SELECT * FROM fn_repay_owner_loan(%s,%s,%s,%s,%s,%s)", (loan, date(2026, 10, 1), 20000, 500, "bank", _admin(cur)))
+    assert msg == "OK"
+    cur.execute("SELECT entry_side, acc_id, amount FROM transactions WHERE source_table='owner_loan_repayments' AND source_id=%s", (rep,))
+    legs = {(side, acc): float(a) for side, acc, a in cur.fetchall()}
+    assert legs[("Cr", 1410)] == 20000.0 and legs[("Cr", 4116)] == 500.0
+    assert sum(a for (side, _), a in legs.items() if side == "Dr") == 20500.0          # balanced journal
+    assert float(one(cur, "SELECT outstanding FROM fn_aoa_loanee_list(%s) WHERE loan_date=%s", (SOC, date(2026, 9, 1)))[0]) == 30000.0
+    cur.execute("SELECT msg FROM fn_repay_owner_loan(%s,%s,%s,0,'bank',%s)", (loan, date(2026, 10, 2), 999999, _admin(cur)))
+    assert "exceeds" in cur.fetchone()[0]
+
+
+def test_register_only_loans_cannot_be_repaid_through_the_ledger(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO owner_loans (society_id, apartment_id, loan_date, principal) VALUES (%s,%s,%s,1000) RETURNING id",
+                (SOC, apt_id, date(2026, 6, 1)))
+    loan = cur.fetchone()[0]
+    cur.execute("SELECT msg FROM fn_repay_owner_loan(%s,%s,500,0,'cash',%s)", (loan, date(2026, 7, 1), _admin(cur)))
+    assert "register-only" in cur.fetchone()[0]
+
+
+def test_owner_loan_cash_limit_block_mode(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE societies SET cash_limit_mode='block' WHERE id=%s", (SOC,))
+    cur.execute("SELECT msg FROM fn_disburse_owner_loan(%s,%s,%s,5000,0,'cash','x','BM-2',%s)", (SOC, apt_id, date(2026, 9, 1), _admin(cur)))
+    assert "cheque" in cur.fetchone()[0]
+
+
+def test_interest_estimate_is_simple_interest(cur):
+    apt_id, _ = first_apartment(cur)
+    loan = one(cur, "SELECT loan_id FROM fn_disburse_owner_loan(%s,%s,%s,36500,10,'bank','x','BM-3',%s)", (SOC, apt_id, date(2026, 1, 1), _admin(cur)))[0]
+    assert float(one(cur, "SELECT fn_owner_loan_interest_estimate(%s,%s)", (loan, date(2026, 1, 31)))[0]) == 300.0
