@@ -180,7 +180,68 @@ def humanize_assignment(row: dict) -> str:
 # concerns.status is a trigger-synced aggregate of concerns_assigns.status
 # (see fn_sync_concern_status in estatehub.sql) — these helpers only ever
 # write concerns_assigns.status, never concerns.status directly.
+#
+# Every helper here is a STAGE TRANSITION, not an unconditional write: it
+# declares which predecessor stage(s) it may move a row from, so a stale
+# button (or a replayed callback) can never drag a row backwards.
 # ════════════════════════════════════════════════════════════════════════════
+
+# Re-inviting means "put this candidate back in the bidding pool", so any row
+# that has already been formally picked (or finished) must be left alone —
+# otherwise a re-invite silently demotes a working 'assigned'/'accepted'
+# assignee back to 'invited' and wipes the bid they submitted.
+RE_INVITE_BLOCKED_STAGES = ("assigned", "accepted", "resolved", "closed")
+
+# Re-assigning is a legitimate mid-flight correction ('assigned' -> 'assigned'
+# to a different person), but an admin who has already ACCEPTED the job has
+# committed to it, and resolved/closed rows are final history.
+REASSIGN_BLOCKED_STAGES = ("accepted", "resolved", "closed")
+
+# A concern can only be closed once nothing is still being worked on. Rows
+# still at 'invited'/'bid_submitted'/'declined' are not in flight — they are
+# candidates nobody picked — so they don't block closure.
+CLOSE_BLOCKING_STAGES = ("assigned", "accepted")
+
+
+def _lock_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> dict | None:
+    """SELECT ... FOR UPDATE the caller's own concerns_assigns row (if any).
+
+    Every stage transition in this module runs through here first so the
+    guard reads the row's CURRENT status under a row lock, rather than
+    relying on a conditional UPDATE (INSERT ... ON CONFLICT ... DO UPDATE ...
+    WHERE status NOT IN (...)) whose outcome the caller can only see as a
+    bare "no row returned" with no idea which stage blocked it.
+    """
+    row = db._execute(
+        "SELECT id, status, bid_amount FROM concerns_assigns "
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s FOR UPDATE",
+        (concern_id, society_id, role, entity_id), fetch_one=True,
+    )
+    return dict(row) if row else None
+
+
+def get_concern_assignment_status(concern_id: int, society_id: int, role: str, entity_id: int) -> str | None:
+    """The caller's own lifecycle stage on this concern, or None if they have
+    no assignment row at all. Backs the per-portal button gating in
+    renderers.py so "can I resolve this?" is answered from security's own row
+    rather than from some other admin's row on the same concern."""
+    row = _lock_assignment(concern_id, society_id, role, entity_id)
+    return (row or {}).get("status")
+
+
+def concern_is_closable(concern_id: int, society_id: int) -> bool:
+    """True when close_concern() would actually succeed — i.e. the concern has
+    at least one assignment row and nobody is still mid-job. Used by
+    renderers.py to show the Close button only where it will do something
+    (it used to render at every stage, including on an untouched concern)."""
+    rows = db._execute(
+        "SELECT status FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
+        (concern_id, society_id), fetch_all=True,
+    ) or []
+    if not rows:
+        return False
+    return not any((r or {}).get("status") in CLOSE_BLOCKING_STAGES for r in rows)
+
 
 def list_invitable_vendors(society_id: int, search: str | None = None, concern_id: int | None = None) -> list[dict]:
     """List vendors that can be invited to bid on concerns. If `concern_id`
@@ -227,24 +288,41 @@ def list_invitable_security(society_id: int, search: str | None = None, concern_
 
 
 def invite_concern_assignee(concern_id: int, society_id: int, role: str, entity_id: int, invited_by: int) -> tuple[bool, str]:
-    """INVITE stage: invite a vendor or security staff to submit a bid.
-    role must be 'VND' or 'SEC' — admins (role='ADM') are auto-assigned via
-    assign_concern() and never go through invite/bid.
-    Safe to call again on an existing row as long as that row hasn't already
-    progressed to resolved/closed (re-inviting resets it to 'invited')."""
-    if role not in ("VND", "SEC"):
-        return False, "Only vendors or security staff can be invited"
-    row = db._execute(
-        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
-        "VALUES (%s, %s, %s, %s, %s, 'invited', NULL) "
-        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
-        "  status='invited', bid_amount=NULL, invited_by=EXCLUDED.invited_by, updated_at=NOW() "
-        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
-        "RETURNING id",
-        (concern_id, society_id, role, entity_id, invited_by), fetch_one=True,
-    )
-    if not row:
-        return False, "Already resolved/closed for this concern — cannot re-invite"
+    """INVITE stage: invite a VENDOR to submit a bid.
+
+    role must be 'VND'. Security staff are NOT invited: per the Concerns
+    workflow spec they never bid (bid_submitted is vendor-only — see
+    BID_ROLE_CODE in concern_bid_callbacks.py), so an 'invited' SEC row would
+    sit with no legal way forward except a direct Assign. They are placed on a
+    concern straight at 'assigned' instead (see assign_concern, and the SEC
+    branch of invite_to_callbacks.py's submit), skipping the bidding round
+    entirely.
+
+    Safe to call again on an existing row ONLY while that row is still a
+    candidate (i.e. 'invited', 'bid_submitted' or 'declined'). A row that has
+    reached 'assigned'/'accepted'/'resolved'/'closed' is left untouched —
+    re-inviting used to reset it to 'invited' and NULL its bid_amount, which
+    silently demoted a working assignee.
+    """
+    if role != "VND":
+        if role == "SEC":
+            return False, "Security staff are assigned directly, not invited — use Assign"
+        return False, "Only vendors can be invited"
+    existing = _lock_assignment(concern_id, society_id, role, entity_id)
+    if existing and existing.get("status") in RE_INVITE_BLOCKED_STAGES:
+        return False, f"Already {existing.get('status')} for this concern — cannot re-invite"
+    if existing:
+        db._execute(
+            "UPDATE concerns_assigns SET status='invited', bid_amount=NULL, invited_by=%s, updated_at=NOW() "
+            "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+            (invited_by, concern_id, society_id, role, entity_id), fetch_one=True,
+        )
+    else:
+        db._execute(
+            "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, invited_by, status, bid_amount) "
+            "VALUES (%s, %s, %s, %s, %s, 'invited', NULL)",
+            (concern_id, society_id, role, entity_id, invited_by), fetch_one=True,
+        )
     return True, "Invitation sent"
 
 
@@ -255,42 +333,62 @@ MAX_BID_AMOUNT = 1_000_000  # ₹10,00,000
 
 
 def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: int, bid_amount) -> tuple[bool, str]:
-    """BID stage: the invited vendor/security submits their bid_amount.
-    Only valid from status='invited'; moves the row to 'bid_submitted'."""
+    """BID stage: the invited vendor submits (or revises) their bid_amount.
+    Valid from status='invited' OR 'bid_submitted' — a vendor who realises
+    their first figure was wrong can correct it before the admin assigns
+    anyone. Anything further along ('assigned' onwards) is rejected: the bid
+    has already been actioned."""
+    if role != "VND":
+        if role == "SEC":
+            return False, "Security staff do not bid on concerns"
+        return False, "Only vendors can bid on a concern"
     try:
         bid = float(bid_amount)
-        if bid < 0:
+        if bid <= 0:
             return False, "Bid amount must be positive"
         if bid > MAX_BID_AMOUNT:
             return False, f"Bid amount looks too high (max ₹{MAX_BID_AMOUNT:,.0f}) — please double-check"
     except (TypeError, ValueError):
         return False, "Enter a valid bid amount"
-    row = db._execute(
+    # Check the stage under the row lock rather than as a conditional UPDATE
+    # predicate, so a rejected bid can say WHY ("you've already been
+    # assigned") instead of the generic "no pending invitation found".
+    existing = _lock_assignment(concern_id, society_id, role, entity_id)
+    if not existing or existing.get("status") not in ("invited", "bid_submitted"):
+        return False, "No pending invitation found for you on this concern"
+    db._execute(
         "UPDATE concerns_assigns SET bid_amount=%s, status='bid_submitted', updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status='invited' "
-        "RETURNING id",
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
         (bid, concern_id, society_id, role, entity_id), fetch_one=True,
     )
-    if not row:
-        return False, "No pending invitation found for you on this concern"
     return True, "Bid submitted"
 
 
 def decline_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int) -> tuple[bool, str]:
     """DECLINE stage: opts the caller out of a concern.
 
-    VND/SEC: the invited vendor/security opts out before bidding. Only
-    valid from status='invited' — once a bid is submitted there's nothing
-    to "decline" (the admin either picks it via assign_concern() or
-    doesn't). Declined rows ARE re-invitable: invite_concern_assignee()'s
-    ON CONFLICT clause resets any row not already resolved/closed back to
-    'invited', and 'declined' was never in that exclusion list, so no
-    change was needed there. Declined vendors also drop out of the Assign
-    modal's candidate pool — see list_assignable_vendors().
+    VND: the invited vendor opts out before bidding. Only valid from
+    status='invited' — once a bid is submitted there's nothing to "decline"
+    (the admin either picks it via assign_concern() or doesn't). Declined
+    rows ARE re-invitable: invite_concern_assignee() resets any candidate row
+    (invited/bid_submitted/declined) back to 'invited', and 'declined' was
+    never in RE_INVITE_BLOCKED_STAGES, so no change was needed there.
+    Declined vendors also drop out of the Assign modal's candidate pool —
+    see list_assignable_vendors().
+
+    SEC: rejected outright. Security never bid, so there is no invitation to
+    decline; the "Decline" button is vendor-only in profile_actions.py and
+    the handler in drilldown_callbacks.py only ever resolves role='VND'.
+    Leaving this open here would have let security decline a job they had
+    already been assigned.
 
     ADM: an assigned admin declines the assignment outright. Only valid
     from status='assigned' (admins skip invite/bid — see assign_concern()),
     per the Admin portal's 'Decline' action in the Concerns workflow spec."""
+    if role not in ("ADM", "VND"):
+        return False, "Only vendors or admins can decline a concern"
+    if role == "SEC":
+        return False, "Security staff cannot decline a concern"
     from_status = "assigned" if role == "ADM" else "invited"
     row = db._execute(
         "UPDATE concerns_assigns SET status='declined', updated_at=NOW() "
@@ -329,30 +427,40 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
     """ASSIGN stage: formally assign an entity to the concern. Works both as
     'accept the bid' (promotes an existing invited/bid_submitted row to
     'assigned') and as a direct shortcut that skips invite/bid entirely
-    (e.g. admin auto-assign, or price already agreed offline). Never
-    downgrades a resolved/closed row.
+    (e.g. security staff, or price already agreed offline).
 
-    Also auto-declines (deletes) any other still-open (invited/bid_submitted)
-    rows of the SAME role for this concern — i.e. formally choosing one
-    vendor's bid implicitly declines the other vendors who bid but weren't
-    picked. This is belt-and-suspenders alongside the fn_sync_concern_status
-    aggregation fix (2026-08): that fix already stops leftover invited/
-    bid_submitted rows from blocking a concern's 'resolved' status, but
-    cleaning them up here also keeps the Invite/Assign modals from showing
-    stale "still invited" candidates for a slot that's already filled.
-    Different-role rows (e.g. a separately-assigned SEC row) are untouched.
+    Refuses to overwrite a row that has already been ACCEPTED by an admin or
+    reached resolved/closed (REASSIGN_BLOCKED_STAGES) — the old guard only
+    excluded resolved/closed, so re-assigning dropped an accepted admin back
+    to 'assigned' and silently discarded their acceptance. Re-pointing a
+    still-'assigned' row at somebody else stays allowed: that is a genuine
+    mid-flight correction.
+
+    Also drops any OTHER still-open (invited/bid_submitted) rows of the SAME
+    role for this concern — formally choosing one vendor's bid implicitly
+    declines the others who bid but weren't picked. Belt-and-suspenders
+    alongside the fn_sync_concern_status aggregation fix (2026-08): that fix
+    already stops leftover invited/bid_submitted rows from blocking a
+    concern's 'resolved' status, but cleaning them up here also keeps the
+    Invite/Assign modals from showing stale "still invited" candidates for a
+    slot that's already filled. Different-role rows (e.g. a separately
+    assigned SEC row) are untouched.
     """
-    row = db._execute(
-        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
-        "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
-        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
-        "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
-        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed') "
-        "RETURNING id",
-        (concern_id, society_id, role, entity_id, assigned_by), fetch_one=True,
-    )
-    if not row:
-        return False, "Already resolved/closed for this concern — cannot reassign"
+    existing = _lock_assignment(concern_id, society_id, role, entity_id)
+    if existing and existing.get("status") in REASSIGN_BLOCKED_STAGES:
+        return False, f"Already {existing.get('status')} for this concern — cannot reassign"
+    if existing:
+        db._execute(
+            "UPDATE concerns_assigns SET status='assigned', assigned_by=%s, updated_at=NOW() "
+            "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+            (assigned_by, concern_id, society_id, role, entity_id), fetch_one=True,
+        )
+    else:
+        db._execute(
+            "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
+            "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL)",
+            (concern_id, society_id, role, entity_id, assigned_by), fetch_one=True,
+        )
 
     db._execute(
         "DELETE FROM concerns_assigns "
@@ -365,7 +473,7 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
 
 def resolve_concern_assignment(concern_id: int, society_id: int, role: str, entity_id: int,
                                 resolved_by: int | None = None) -> tuple[bool, str]:
-    """RESOLVE stage: mark the caller's own concerns_assigns row as resolved
+    """RESOLVE stage: mark the caller's OWN concerns_assigns row as resolved
     (e.g. vendor/security marking their work done). Only valid from
     status='assigned' for VND/SEC. ADM rows go through the extra 'accepted'
     step first (see accept_concern_assignment) so an admin's row must be
@@ -391,11 +499,12 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
 
 def is_any_admin_accepted(concern_id: int, society_id: int) -> bool:
     """True if ANY admin (role='ADM') assignment on this concern has
-    reached status='accepted'. Per the Concerns workflow spec, the
-    Security portal's 'Resolved' button is gated on this — not on
-    security's own assignment status — so this helper backs both the
-    button's enablement (renderers.py) and its server-side guard
-    (drilldown_callbacks.py)."""
+    reached status='accepted'. Per the Concerns workflow spec, the Security
+    portal's 'Resolved' button additionally requires this — but only ever
+    TOGETHER WITH the caller holding their own 'assigned' SEC row (see
+    resolve_concern_assignment). On its own it used to be the whole gate,
+    which offered the button to a guard who had never been assigned and then
+    failed the write with "No active (assigned) assignment found"."""
     row = db._execute(
         "SELECT 1 FROM concerns_assigns WHERE concern_id=%s AND society_id=%s "
         "AND role='ADM' AND status='accepted' LIMIT 1",
@@ -406,12 +515,31 @@ def is_any_admin_accepted(concern_id: int, society_id: int) -> bool:
 
 def close_concern(concern_id: int, society_id: int, closed_by: int | None = None) -> tuple[bool, str]:
     """CLOSE stage — admin/owner action: close a concern for ALL assignees
-    at once, whatever stage each one is at. The sync trigger then rolls
-    concerns.status up to 'closed' too. `closed_by` is optional for backward
-    compatibility with any existing callers."""
+    at once. The sync trigger then rolls concerns.status up to 'closed' too.
+
+    Guarded (it previously had none, and unconditionally reported success):
+      * a concern with no assignment rows at all is NOT closable — the write
+        matched nothing, the trigger left concerns.status at 'open', and the
+        caller was still told "Concern closed" and sent a close push.
+      * while any assignee is still 'assigned'/'accepted' the job is live,
+        so closure is refused rather than stamping a working assignment
+        'closed'.
+    Rows still at invited/bid_submitted/declined are candidates nobody
+    picked — they don't block closure, and marking them 'closed' simply
+    retires them.
+    `closed_by` is optional for backward compatibility with existing callers.
+    """
+    rows = db._execute(
+        "SELECT status FROM concerns_assigns WHERE concern_id=%s AND society_id=%s",
+        (concern_id, society_id), fetch_all=True,
+    ) or []
+    if not rows:
+        return False, "Nobody has been assigned to this concern yet — invite or assign someone first"
+    if any((r or {}).get("status") in CLOSE_BLOCKING_STAGES for r in rows):
+        return False, "Work is still in progress — every assignee must mark it resolved first"
     db._execute(
         "UPDATE concerns_assigns SET status='closed', closed_by=%s, updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND status != 'closed' RETURNING id",
+        "WHERE concern_id=%s AND society_id=%s AND status <> 'closed' RETURNING id",
         (closed_by, concern_id, society_id), fetch_all=True,
     )
     return True, "Concern closed"

@@ -2,18 +2,25 @@
 """
 Concern Bid Modal Callbacks
 ============================
-Vendor/security's "Save Bid" action on a concern profile — the BID stage
+Vendor's "Save Bid" action on a concern profile — the BID stage
 of the unified concerns_assigns lifecycle (invited -> bid_submitted ->
 assigned -> resolved -> closed). Small single-field modal (concern-bid-modal
 / concern-bid-store in app_shell.py) — writes concerns_assigns.bid_amount
 and advances status for the CURRENT user's own 'invited' assignment row.
 
+VENDOR-ONLY, deliberately. Security staff are never invited (there is no
+bidding round for them) and are placed on a concern directly at 'assigned',
+so a 'bid_submitted' SEC row could never legally exist. BID_ROLE_CODE below
+is therefore a single-entry map — keep it that way, or the modal would start
+offering bids for a stage security can never reach.
+
 UI flow:
-  1. Vendor/security clicks "Save Bid" on a concern profile -> modal opens
+  1. Vendor clicks "Save Bid" on a concern profile -> modal opens
   2. They enter an amount -> Submit
   3. Writes concerns_assigns.bid_amount + status='bid_submitted' via
-     loaders.submit_concern_bid() — only succeeds if their row is currently
-     'invited'
+     loaders.submit_concern_bid() — succeeds from 'invited' OR from an
+     earlier 'bid_submitted' (so a vendor can revise a figure before anyone
+     is assigned), and fails from 'assigned' onwards
   4. Push-notifies admin + the concern's creator apartment
   5. Modal closes, concern list/profile refreshes
 """
@@ -134,6 +141,9 @@ def register_concern_bid_callbacks(app):
                 )
                 bidder_label = (e_row or {}).get("business_name") or (e_row or {}).get("name")
             else:
+                # Unreachable while BID_ROLE_CODE is vendor-only (the guard
+                # above already returned). Kept so widening the map can't
+                # silently send a blank bidder label.
                 e_row = db._execute(
                     "SELECT name FROM security_staff WHERE id=%s AND society_id=%s",
                     (entity_id, society_id), fetch_one=True,

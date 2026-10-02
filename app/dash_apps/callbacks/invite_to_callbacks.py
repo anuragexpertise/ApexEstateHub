@@ -12,7 +12,10 @@ UI flow:
   2. Modal shows 2 cards: VND, SEC (no ADM — admins are auto-assigned)
   3. Clicking a card loads the respective entity list below
   4. User toggles selection on items (checkboxes / card click)
-  5. Submit writes to concerns_assigns (status='invited')
+  5. Submit writes to concerns_assigns: vendors at 'invited' (they then bid),
+     security staff DIRECTLY at 'assigned' — security do not bid, so there is
+     no invitation round for them (see BID_ROLE_CODE in
+     concern_bid_callbacks.py and loaders.invite_concern_assignee).
   6. Modal closes, concern list/profile refreshes
 """
 
@@ -35,6 +38,7 @@ from app.security.audit_context import (
     get_current_society_id,
 )
 from app.utils.ux_toasts import error_toast
+from app.utils.field_config import DEFAULT_CONCERN_TYPE
 
 
 PORTAL_ROLE_LABEL = {
@@ -44,11 +48,16 @@ PORTAL_ROLE_LABEL = {
 
 # Shared with assign_to_callbacks.py's stage labelling (§2.2) — kept as a
 # local copy rather than a cross-module import so this file has no
-# dependency on assign_to_callbacks.py's internals.
+# dependency on assign_to_callbacks.py's internals. Mirrors
+# _CONCERN_STAGE_LABEL in renderers.py; 'declined' and 'accepted' were
+# missing here too, so a re-invited candidate or an admin who had already
+# accepted rendered an unstyled raw string instead of a pill.
 _STAGE_LABEL = {
     "invited": ("Invited", "#7d8ea3"),
     "bid_submitted": ("Bid submitted", "#1d74d8"),
+    "declined": ("Declined", "#94a3b8"),
     "assigned": ("Assigned", "#e59620"),
+    "accepted": ("Accepted", "#2563eb"),
     "resolved": ("Resolved", "#17976e"),
     "closed": ("Closed", "#64748b"),
 }
@@ -441,12 +450,20 @@ def register_invite_to_callbacks(app):
                         continue
                     
                     if role == "SEC":
+                        # Security never bid (bid_submitted is vendor-only,
+                        # see BID_ROLE_CODE in concern_bid_callbacks.py), so
+                        # there is no invitation round for them — they go
+                        # straight onto the concern as 'assigned'. The guard
+                        # must match assign_concern()'s REASSIGN_BLOCKED_
+                        # STAGES, or re-selecting an admin-equivalent SEC row
+                        # here would drop an accepted assignment back to
+                        # 'assigned'.
                         cur.execute(
                             "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status, bid_amount) "
                             "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL) "
                             "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
                             "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
-                            "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
+                            "WHERE concerns_assigns.status NOT IN ('accepted', 'resolved', 'closed')",
                             (concern_id, society_id, role, entity_id, actor_user_id)
                         )
                         inserted += 1
@@ -481,7 +498,7 @@ def register_invite_to_callbacks(app):
                         concern_row = cur.fetchone()
                         notify_concern_invited(
                             society_id, concern_id,
-                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            (dict(concern_row) if concern_row else {}).get("concern_type", DEFAULT_CONCERN_TYPE),
                             newly_invited,
                         )
                     except Exception as e:
@@ -501,7 +518,7 @@ def register_invite_to_callbacks(app):
                         concern_row = cur.fetchone()
                         notify_concern_assigned(
                             society_id, concern_id,
-                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            (dict(concern_row) if concern_row else {}).get("concern_type", DEFAULT_CONCERN_TYPE),
                             newly_assigned_sec,
                         )
                     except Exception as e:

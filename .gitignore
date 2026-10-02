@@ -35,3 +35,17 @@ targeted_audit.py
 # accidentally committed; never track these.
 .~lock.*#
 retest_click_failed.py
+
+# Aiven PostgreSQL TLS material + the provisioning script that drops the certs
+# on disk. These were committed despite the "secrets are local-only" rule —
+# nothing in .gitignore covered *.pem/*.crt/*.key, so a fresh clone handed
+# everyone the CA cert and, worse, service.key (the server's own PRIVATE key,
+# which is what Postgres uses to authenticate the app to Aiven). Removed from
+# the index; the files themselves stay on disk so aiven_db_setup.sh and the
+# local psycopg2 ssl connection keep working. Provision fresh material with
+# setup_aiven_db.sh on each machine instead of sharing it.
+*.pem
+*.crt
+*.cert
+*.key
+setup_aiven_db.sh
