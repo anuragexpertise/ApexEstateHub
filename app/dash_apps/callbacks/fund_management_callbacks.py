@@ -16,6 +16,29 @@ from app.security.audit_context import get_current_user_role, get_current_user_i
 _FUND_LOCK = "#b8860b"
 
 
+def _committed_with_refresh_failure(toast, exc):
+    """
+    Rendered when the journal is already committed but reloading/building the
+    cards afterwards blew up.
+
+    The write and the refresh run as separate phases precisely so this case can
+    be labelled honestly. Reporting a committed transaction as "Error: ..."
+    invites the admin to submit again, and a second appropriation of the same
+    amount is not something the database can catch: the income account simply
+    had enough balance to cover both. So the outcome line is kept verbatim and
+    the refresh failure is appended as its own warning.
+    """
+    return dbc.Alert(
+        [toast,
+         html.Hr(style={"margin": "6px 0"}),
+         html.Small(
+             f"The entry was saved, but this card could not refresh: {exc} "
+             "Press “Reload Data” to see it. Do not submit again.",
+             style={"display": "block", "color": "inherit", "opacity": "0.9"},
+         )],
+        color="warning", style={"borderRadius": "8px"})
+
+
 # Fund accounts are resolved dynamically by name (see loaders.get_fund_balances'
 # docstring) rather than by a hardcoded account-id list, since a different
 # jurisdiction/legal regime can number the chart of accounts differently.
@@ -159,6 +182,7 @@ def register_fund_management_callbacks(app):
         if not fund_acc_id or not expense_acc_id or not amount or not approval_ref or not approval_date or not particulars:
             return dbc.Alert("All required fields must be filled.", color="warning", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
+        # ── Phase 1: the write. Only a failure here means nothing was saved.
         try:
             amount = float(amount)
             if amount <= 0:
@@ -174,14 +198,21 @@ def register_fund_management_callbacks(app):
                 (sid, int(fund_acc_id), int(expense_acc_id), particulars, amount, mode, user_id, cheque_no, trx_id, approval_ref, approval_date),
                 fetch_one=True
             )
+        except Exception as e:
+            return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), *([no_update] * 10)
 
-            if result and result.get("status") == "confirmed":
-                toast = dbc.Alert(f"Fund utilized successfully! Journal ID: {result.get('journal_id')}", color="success", style={"borderRadius": "8px"})
-            elif result and result.get("status") == "pending":
-                toast = dbc.Alert("Fund utilization request submitted for approval.", color="info", style={"borderRadius": "8px"})
-            else:
-                toast = dbc.Alert("Unexpected result.", color="warning", style={"borderRadius": "8px"})
+        # Past this point the journal exists — nothing below may report a
+        # failure as if it had rolled back.
+        if result and result.get("status") == "confirmed":
+            toast = dbc.Alert(f"Fund utilized successfully! Journal ID: {result.get('journal_id')}", color="success", style={"borderRadius": "8px"})
+        elif result and result.get("status") == "pending":
+            toast = dbc.Alert("Fund utilization request submitted for approval.", color="info", style={"borderRadius": "8px"})
+        else:
+            toast = dbc.Alert("Unexpected result.", color="warning", style={"borderRadius": "8px"})
 
+        # ── Phase 2: reload the cards. A failure here leaves the form cleared
+        # (the journal is committed) and every card output untouched.
+        try:
             # Reload data — label comes straight from the account's real
             # name (see refresh callback's comment above), no id-keyed map.
             fund_balances = loaders.get_fund_balances(sid)
@@ -198,7 +229,10 @@ def register_fund_management_callbacks(app):
                     balances_table, log_table)
 
         except Exception as e:
-            return dbc.Alert(f"Error: {e}", color="danger", style={"borderRadius": "8px"}), no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+            print(f"❌ submit_fund_utilization: utilization committed but card refresh failed: {e}")
+            return (_committed_with_refresh_failure(toast, e),
+                    None, None, None, None, None, None, None, None,
+                    no_update, no_update)
 
     # ── Reload: also refresh the appropriation + mapping surfaces ──────────
     @app.callback(
@@ -268,6 +302,7 @@ def register_fund_management_callbacks(app):
                               color="warning", style={"borderRadius": "8px"}),
                     *([no_update] * 10))
 
+        # ── Phase 1: the write. Only a failure here means nothing was saved.
         try:
             amount = float(amount)
             if amount <= 0:
@@ -278,27 +313,42 @@ def register_fund_management_callbacks(app):
                  get_current_user_id(), approval_ref or None, approval_date or None),
                 fetch_one=True,
             )
-            if result and result.get("status") == "confirmed":
-                toast = dbc.Alert(
-                    f"₹{amount:,.2f} appropriated to the fund. Journal ID: {result.get('journal_id')}",
-                    color="success", style={"borderRadius": "8px"})
-            elif result and result.get("status") == "pending":
-                toast = dbc.Alert("Appropriation submitted for approval.",
-                                  color="info", style={"borderRadius": "8px"})
-            else:
-                toast = dbc.Alert("Unexpected result.", color="warning", style={"borderRadius": "8px"})
+        except Exception as e:
+            return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), *([no_update] * 10)
 
+        # Past this point the journal exists. Building the tables below used to
+        # sit inside the same try as the write, so a render bug in the log table
+        # reported a committed appropriation as "Error: ..." — the admin then
+        # resubmitted and appropriated the amount twice.
+        if result and result.get("status") == "confirmed":
+            toast = dbc.Alert(
+                f"₹{amount:,.2f} appropriated to the fund. Journal ID: {result.get('journal_id')}",
+                color="success", style={"borderRadius": "8px"})
+        elif result and result.get("status") == "pending":
+            toast = dbc.Alert("Appropriation submitted for approval.",
+                              color="info", style={"borderRadius": "8px"})
+        else:
+            toast = dbc.Alert("Unexpected result.", color="warning", style={"borderRadius": "8px"})
+
+        # ── Phase 2: reload the cards.
+        try:
             fund_balances = loaders.get_fund_balances(sid)
             income_accounts = loaders.get_income_accounts_for_appropriation(sid)
             return (toast,
                     build_income_source_options(income_accounts),
                     build_appropriation_fund_options(fund_balances),
+                    # Six Nones, not five: the Particulars field is an Output
+                    # too. Returning ten values for eleven Outputs made every
+                    # *successful* appropriation fail with "Incorrect number
+                    # of output values" and left the form filled in.
                     None, None, None, None, None, None,
                     build_balances_table(fund_balances),
                     build_appropriation_log_table(loaders.get_fund_appropriation_log(sid, limit=20)))
         except Exception as e:
-            return (dbc.Alert(f"Error: {e}", color="danger", style={"borderRadius": "8px"}),
-                    *([no_update] * 10))
+            print(f"❌ submit_appropriation: appropriation committed but card refresh failed: {e}")
+            return (_committed_with_refresh_failure(toast, e),
+                    no_update, no_update, None, None, None, None, None, None,
+                    no_update, no_update)
 
     # ── Confirm / cancel a pending appropriation ───────────────────────────
     @app.callback(
@@ -343,13 +393,17 @@ def register_fund_management_callbacks(app):
                 )
                 toast = dbc.Alert("Appropriation cancelled.",
                                   color="secondary", style={"borderRadius": "8px"})
+        except Exception as e:
+            return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), no_update, no_update
 
+        # Committed — a reload failure must not read as a failed action.
+        try:
             return (toast,
                     build_appropriation_log_table(loaders.get_fund_appropriation_log(sid, limit=20)),
                     build_balances_table(loaders.get_fund_balances(sid)))
         except Exception as e:
-            return (dbc.Alert(f"Error: {e}", color="danger", style={"borderRadius": "8px"}),
-                    no_update, no_update)
+            print(f"❌ confirm_or_cancel_appropriation: status changed but card refresh failed: {e}")
+            return _committed_with_refresh_failure(toast, e), no_update, no_update
 
     # ── Fund → bank account routing ────────────────────────────────────────
     @app.callback(
@@ -410,10 +464,16 @@ def register_fund_management_callbacks(app):
                 "fund continue to go to the primary bank account.",
                 color="success", style={"borderRadius": "8px"})
 
-        return (toast,
-                build_fund_bank_mapping_rows(
-                    loaders.get_fund_bank_mappings(sid),
-                    _bank_account_options_for_mapping(sid)))
+        # The mappings above are committed; a rebuild failure must not surface
+        # as a failed save, or the admin re-submits a list that already stuck.
+        try:
+            return (toast,
+                    build_fund_bank_mapping_rows(
+                        loaders.get_fund_bank_mappings(sid),
+                        _bank_account_options_for_mapping(sid)))
+        except Exception as e:
+            print(f"❌ save_fund_bank_mappings: mappings saved but card refresh failed: {e}")
+            return _committed_with_refresh_failure(toast, e), no_update
 
 
 def _bank_account_options_for_mapping(sid):
@@ -598,6 +658,22 @@ def build_balances_table(fund_balances):
     ])
 
 
+def _log_date(value):
+    """Day column for both fund log tables.
+
+    `created_at` is a TIMESTAMP column, so the driver hands back a
+    datetime.datetime — indexing it as `value[:10]` raises "'datetime.datetime'
+    object is not subscriptable", which surfaced as an error toast on the
+    *Appropriate to Fund* button because its callback rebuilds this table
+    after a successful write. Format by type instead of assuming a string.
+    """
+    if not value:
+        return "—"
+    if hasattr(value, "strftime"):
+        return value.strftime("%d/%m/%Y")
+    return str(value)[:10]
+
+
 def build_log_table(utilization_log):
     """Build the utilization log table."""
     color = "#15304f"
@@ -609,7 +685,7 @@ def build_log_table(utilization_log):
     for u in utilization_log:
         status_color = {"confirmed": "#1e7e34", "pending": "#e67e22", "cancelled": "#c0392b"}.get(u.get("status", ""), "#666")
         log_rows.append(html.Tr([
-            html.Td(u.get("created_at", "")[:10] if u.get("created_at") else "—", style={"fontSize": "11px"}),
+            html.Td(_log_date(u.get("created_at")), style={"fontSize": "11px"}),
             html.Td(u.get("fund_name") or f"Fund {u.get('fund_acc_id')}", style={"fontSize": "11px", "fontWeight": "600"}),
             html.Td(f"₹{float(u.get('amount') or 0):,.2f}", style={"fontSize": "11px", "textAlign": "right"}),
             html.Td(u.get("particulars", "")[:50], style={"fontSize": "11px", "color": "#555"}),
@@ -713,7 +789,7 @@ def build_appropriation_log_table(appropriation_log):
             actions = [html.Span("—", style={"color": "#ccc"})]
 
         log_rows.append(html.Tr([
-            html.Td(a.get("created_at", "")[:10] if a.get("created_at") else "—", style={"fontSize": "11px"}),
+            html.Td(_log_date(a.get("created_at")), style={"fontSize": "11px"}),
             html.Td(a.get("from_name") or f"Account {a.get('from_income_acc_id')}",
                     style={"fontSize": "11px", "fontWeight": "600"}),
             html.Td([html.I(className="fas fa-arrow-right me-1", style={"fontSize": "9px", "color": "#999"}),
