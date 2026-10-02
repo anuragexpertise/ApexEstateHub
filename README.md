@@ -63,6 +63,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Auth** | Password · PIN · Pattern · JWT tokens · Master Admin flag |
 | **Navigation** | Zero-reload SPA — KPI → List → Profile → Form drill-down |
 | **Financials** | Cashbook · Receipts · Expenses · Receivables · payables · FIFO Pay Dues |
+| **Statutory** | UP AOA compliance layer (bye-laws 7/39/49, undivided interest, s.22, cash limits) as **data-driven rules** · loans to owners · Funds Account schedule |
 | **Entities** | Apartments · Vendors · Security Staff · Societies · Accounts · Assets |
 | **Operations** | Events · Concerns/Complaints · Gate Logs · Attendance · NOC |
 | **Gate Pass** | Fernet-encrypted QR · Dual-mode camera scanner · Entry IN / Exit OUT |
@@ -467,13 +468,103 @@ Mapped against the consolidated statutory framework for Indian RWAs/CHS/AOAs (`d
 | Sinking Fund | Model Bye-laws (13(c)/14(c)) / State Apartment Ownership Acts | Dedicated fund for structural overhauls, lifts, DG sets; ~0.25–0.33%/yr of construction cost | ✅ Dedicated `Sinking Fund Reserve` ledger account, per-society rate config (`sinking_fund_rate_basis`: per-sq-ft or construction-cost), state-specific statutory rate defaults (UP/MH) in `state_compliance_thresholds`, auto-billed monthly |
 | Repair & Maintenance Fund | Model Bye-laws (13(a)/14(b)) | Routine upkeep of common areas/plumbing/electricals; typically ≥ 0.75%/yr of construction cost | ✅ Dedicated `Repair & Maintenance Fund Reserve` ledger account, same rate-config/billing pipeline as Sinking Fund |
 | | Corpus Fund | RERA Act, 2016 (Sec. 11(4)(g), Sec. 17) / State Apartment Ownership Acts | One-time builder-handover capital receipt; principal inviolable, only interest deployable | ✅ Dedicated `Corpus Fund` ledger account, mapped to its statutory head; balance sheet treats it as a capital reserve, not operating income (per the three-statement report's I&E vs. Balance Sheet split). **Principal protected at the ledger level** — `accounts.statutory_lock_pct` (100.00 for the seeded Corpus Fund) is enforced by `fn_process_fund_utilization()`, which refuses any draw that would breach the locked share and reports the deployable amount separately |
-| UP Apartment Act 2010 / Model Bye-Laws 2011 — Major Repair Fund | Model Bye-Laws bye-law 39 | ½% of the transfer value goes to the association for major repairs; No Dues Certificate deemed granted if not refused within 15 days | ✅ (DB engine) `fn_record_apartment_transfer` levies the fee as a receivable into account 3270 (head `MAJOR_REPAIR_FUND`) with its accrual leg; `fn_nodues_certificate_status` tracks the 15-day deemed grant. UI: **UP AOA Compliance** card (Financials tab, admin only) |
-| UP Apartment Act 2010 — Undivided interest | Act s.5(2), s.12(1)(f), s.18(1) | Common expenses are shared by each flat's percentage of undivided interest in the Declaration | ✅ `apartments.undivided_interest_pct` (flat area ÷ total area × 100 until the Declaration's own figure is entered) + `fn_undivided_interest_report/summary`. Billing can run **by undivided interest** (`apt_charges_fines_basis.billing_basis`, monthly budget × %); default stays per sq ft, and a flat without a % falls back to per sq ft. Sinking/repair levies stay per sq ft. Switch it on the UP AOA Compliance card |
-| UP Model Bye-Laws — Bye-law 49 filings | bye-law 49 | Audited statement by 31 Jul, copy to competent authority by 15 Aug, summary to owners within 15 days, owner and loanee lists attached | ✅ (DB engine) `fn_statutory_calendar` + `aoa_statutory_filings`; `fn_aoa_owner_list` / `fn_aoa_loanee_list` UI: **UP AOA Compliance** card, including an Excel download of both lists |
-| UP Model Bye-Laws — Bye-law 7 | bye-law 7 | Owners with arrears over 60 days cannot vote or stand for the Board | ✅ (DB engine) `fn_bye_law7_eligibility`. Whether "year" means financial or calendar year is contested; default is financial year, switchable via `regime_rule_parameters.bye_law7_year_basis` or the `p_basis` argument. Uses the balance outstanding when called |
-| UP Apartment Act 2010 — Section 22 | s.22 | Essential services may be cut only after >6 months default, 7 days notice, a general-body resolution, certified copy to the competent authority and owner, a one-month wait, a displayed notice and the appeal window | ✅ (DB engine) `service_cutoff_proceedings` + `fn_service_cutoff_check` reports blockers and the earliest lawful date; it never cuts anything itself, and the card refuses to record a cut-off the check does not allow |
-| UP Model Bye-Laws — Cash and cheque limits | financial provisions (bye-laws 46-52) | Petty cash ceiling ₹20,000; payments above ₹2,500 by cheque | ✅ (DB engine) `fn_verify_expense` flags cash payments over the threshold (`compliance_flags`), or refuses them when `societies.cash_limit_mode='block'`; `fn_petty_cash_check` compares cash-in-hand with the ceiling |
-| UP Model Bye-Laws — Loans to owners | bye-law 3(1)(f) | The association may lend to owners | ✅ `fn_disburse_owner_loan` (Dr Loans to Owners 1410 / Cr cash or bank; resolution reference mandatory; cash limit applies) and `fn_repay_owner_loan` (Cr 1410 principal, Cr Interest on Owner Loans 4116 interest). Loans entered before this change stay register-only and cannot be repaid through the ledger. UI: UP AOA Compliance card |
+| UP Apartment Act 2010 / Model Bye-Laws 2011 — Major Repair Fund | Model Bye-Laws bye-law 39 | ½% of the transfer value goes to the association for major repairs; No Dues Certificate deemed granted if not refused within 15 days | ✅ Engine + card — `fn_record_apartment_transfer` levies the fee as a receivable into account 3270 (head `MAJOR_REPAIR_FUND`) with its accrual leg; `fn_nodues_certificate_status` tracks the 15-day deemed grant; `fn_ensure_major_repair_fund` creates 3270 idempotently. UI: **UP AOA Compliance** card §3 |
+| UP Apartment Act 2010 — Undivided interest | Act s.5(2), s.12(1)(f), s.18(1) | Common expenses are shared by each flat's percentage of undivided interest in the Declaration | ✅ Engine + card — `apartments.undivided_interest_pct` (flat area ÷ total area × 100 until the Declaration's own figure is entered) + `fn_undivided_interest_report/summary` + `fn_backfill_undivided_interest`. Billing can run **by undivided interest** (`apt_charges_fines_basis.billing_basis`, monthly budget × %); default stays per sq ft, and a flat without a % falls back to per sq ft. Sinking/repair levies stay per sq ft. Switch it on the UP AOA Compliance card §2 |
+| UP Model Bye-Laws — Bye-law 49 filings | bye-law 49 | Audited statement by 31 Jul, copy to competent authority by 15 Aug, summary to owners within 15 days, owner and loanee lists attached | ✅ Engine + card — `fn_statutory_calendar` + `aoa_statutory_filings` (upsert per `fy_start_year`); `fn_aoa_owner_list` / `fn_aoa_loanee_list`. UI: UP AOA Compliance card §1, including an Excel download of both lists |
+| UP Model Bye-Laws — Bye-law 7 | bye-law 7 | Owners with arrears over 60 days cannot vote or stand for the Board | ✅ Engine + card — `fn_bye_law7_eligibility` / `fn_bye_law7_cutoff_date`. Whether "year" means financial or calendar year is contested; default is financial year, switchable via `regime_rule_parameters.bye_law7_year_basis`, the `p_basis` argument, or the card's basis dropdown. Uses the balance outstanding when called. Card §4 |
+| UP Apartment Act 2010 — Section 22 | s.22 | Essential services may be cut only after >6 months default, 7 days notice, a general-body resolution, certified copy to the competent authority and owner, a one-month wait, a displayed notice and the appeal window | ✅ Engine + card — `service_cutoff_proceedings` + `fn_service_cutoff_check` reports blockers and the earliest lawful date; it never cuts anything itself, and the card refuses to record a cut-off the check does not allow. Card §5 |
+| UP Model Bye-Laws — Cash and cheque limits | financial provisions (bye-laws 46-52) | Petty cash ceiling ₹20,000; payments above ₹2,500 by cheque | ✅ Engine + card — `fn_verify_expense` flags cash payments over the threshold (`compliance_flags`), or refuses them when `societies.cash_limit_mode='block'`; `fn_petty_cash_check` compares cash-in-hand with the ceiling; `fn_disburse_owner_loan` applies the same limit to cash disbursals. Card §7 is read-only |
+| UP Model Bye-Laws — Loans to owners | bye-law 3(1)(f) | The association may lend to owners | ✅ Engine + card — `fn_disburse_owner_loan` (Dr Loans to Owners 1410 / Cr cash or bank; resolution reference mandatory; cash limit applies) and `fn_repay_owner_loan` (Cr 1410 principal, Cr Interest on Owner Loans 4116 interest). Loans entered before this change stay register-only and cannot be repaid through the ledger. See [Owner Loans & Loanees](#owner-loans--loanees-bye-law-31f) |
+
+### UP AOA Regime Parameters — `regime_rule_parameters`
+
+Every statutory threshold the UP layer enforces is **data, not code**, in `regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from, effective_to)`. Looked up through `fn_regime_param_num(society_id, key, on DATE DEFAULT CURRENT_DATE)` / `fn_regime_param_text(...)`, which pick the latest row whose `effective_from <= p_on` and whose `effective_to` is NULL or still open — so a rule change is a data migration, never a redeploy.
+
+A society reaches these rows only through `society_legal_regime` (assigned by `seed.py:seed_society_legal_regime()` where `societies.state = 'Uttar Pradesh'` → `UP_AOA_2010`, `effective_from 2011-11-16`). **If that row is absent, every function in this layer returns empty/`NULL` rather than a default** — see the "rule not applicable ≠ compliant" note below.
+
+| `rule_key` | Value | Unit | What it drives |
+|---|---|---|---|
+| `transfer_fee_pct` | `0.5` | % of value | Bye-law 39 fee on a flat transfer → Major Repair Fund. **Also the on/off switch for the whole card** |
+| `nodues_deemed_days` | `15` | days | No Dues Certificate deemed granted if not refused within 15 days |
+| `petty_cash_limit` | `20000` | INR | Cash-in-hand ceiling (`fn_petty_cash_check`) |
+| `cash_payment_cheque_threshold` | `2500` | INR | Cash above this must be cheque/bank. Only `mode='cash'` counts as a breach — the threshold pre-dates UPI/NEFT |
+| `cash_limit_default_mode` | `'warn'` | text | Engine policy: `warn` records a `compliance_flags` row and still posts; `block` refuses |
+| `statement_publish_due_month` / `_day` | `7` / `31` | month/day | Bye-law 49 audited statements published |
+| `authority_copy_due_month` / `_day` | `8` / `15` | month/day | Bye-law 49 copy to the competent authority |
+| `owner_summary_days` | `15` | days | Summary to every owner after publication |
+| `arrears_disqualify_days` | `60` | days | Bye-law 7: arrears beyond this bar voting / standing |
+| `bye_law7_year_basis` | `'financial_year'` | text | Whether "the year before" is the financial or calendar year (contested — advocates differ) |
+| `s22_default_months` | `6` | months | s.22 service cut-off only after **more than** 6 months' default |
+| `s22_notice_days` | `7` | days | s.22 notice to the defaulter |
+| `s22_wait_months` | `1` | months | Wait after the certified copy goes to the authority and the owner |
+| `s22_appeal_days` | `15` | days | Owner appeal window |
+| `s20_recovery_months` | `12` | months | Seeded, but **no function in this layer reads it** |
+
+Three override tiers sit on top: **per call** (`p_basis` on the bye-law 7 functions, exposed as the card's basis dropdown) → **per society** (`societies.cash_limit_mode`, which has no UI anywhere — DB only) → **per regime + effective date** (insert a new `regime_rule_parameters` row).
+
+> **A rule the society's regime doesn't define returns empty/`NULL`, never a default and never "compliant".** Callers must read that as *rule not applicable*. `fn_bye_law7_eligibility` returns **zero rows** (not "everyone is eligible") when `arrears_disqualify_days` is unset, and the card hides itself entirely when `fn_regime_param_num(society_id, 'transfer_fee_pct') IS NULL`.
+
+### UP AOA Compliance Card (Admin → Financials)
+
+Nav tile `kpi_up_compliance` (group `Financials`, icon `fa-gavel`) → card `form_up_compliance`, bypasses `DRILLDOWN_MAP` like `kpi_fund_management`. Present **only** in `DEFAULT_LAYOUTS["admin"]["financials"]`. Admin-only is enforced in **three independent places** — the tile click (`drilldown_callbacks.py`), the card render, and `up_compliance_callbacks._ctx()` on every write — and `society_id`/`user_id` always come from the server session, never the browser. Non-admins (including `master`) get "Admin only."
+
+The card **records and checks**; it never files with an authority, never disqualifies a member and never cuts a service itself. Its standing disclaimer: *"Confirm bye-law numbers with an advocate before relying on them in a filing."* When the regime isn't UP, it renders a single alert pointing at the State field in Society Details.
+
+| § | Section | What the admin does | Component id prefix |
+|---|---|---|---|
+| 1 | Statement filings (bye-law 49) | Records the three filing dates + auditor, ticks the owner/loanee list attachments (upsert on `(society_id, fy_start_year)`), **downloads the owner + loanee annexures as a 2-sheet XLSX** | `upc-fil-*`, `upc-export-*` |
+| 2 | Undivided interest & billing basis | Backfills missing `%` from area share, switches society-wide maintenance billing between `per_sqft` and `undivided_interest` with a monthly budget | `upc-ui-*`, `upc-basis-*` |
+| 3 | Transfers: Major Repair Fund & No Dues | Records a flat transfer and levies the ½% fee; then sets No Dues requested / refused / issued dates | `upc-tr-*`, `upc-nd-*` |
+| 4 | Who can vote or stand (bye-law 7) | Picks an election date + year basis → lists only the **blocked** flats with overdue amount, oldest due date and days overdue | `upc-b7-*` |
+| 5 | Cutting an essential service (s.22) | Opens a proceeding, records each of the 7 steps, and sees the exact blocker list + earliest lawful cut-off date | `upc-s22-*` |
+| 6 | Loans to owners (bye-law 3(1)(f)) | Records a disbursement and repayments — see below | `upc-ln-*`, `upc-rp-*` |
+| 7 | Cash & cheque limits | **Read-only**: petty-cash badge + the last 10 `compliance_flags` | — |
+
+Python side is `app/services/up_aoa_actions.py` (every handler returns `(ok, message)` and re-checks society ownership via `_owns()` before touching a browser-supplied id) plus `app/dash_apps/pages/up_compliance_card.py` (renderer). **The rules are enforced in SQL**; `up_aoa_actions` only validates form input and calls them.
+
+> **`app/services/up_aoa_compliance_service.py` is currently dead code** — a thin read-only wrapper over nine of these functions with zero importers; the card uses `up_aoa_actions` instead. Its docstring is still the clearest statement of the contract ("These functions REPORT. They never cut a service, never disqualify a member and never file anything"), so keep it or delete it, but don't wire both in and let them drift.
+
+### Owner Loans & Loanees (bye-law 3(1)(f))
+
+**The society lends money to a member**, not the reverse. Account `1410 Loans to Owners` is a **Dr** asset under `1400 Loans & Advances Given`, mapped to statutory head `LOANS_GIVEN`; the opposite direction is the separate `2110 Loans & Advances Taken` / `LOANS_TAKEN`. There is no separate "loanees" table and no loanee id — **"loanees" is just the set of flats with an outstanding `owner_loans` balance**, i.e. the annexure bye-law 49 requires.
+
+**How the money moves** — a direct balanced journal into `transactions`, *not* a receipt and *not* a `receivables` row, so it deliberately bypasses the five-path Pay Dues FIFO:
+
+| Action | Function | Legs |
+|---|---|---|
+| Disburse | `fn_disburse_owner_loan(society_id, apartment_id, loan_date, principal, rate_pct, mode, purpose, resolution_ref, created_by)` → `{loan_id, msg}` | `Dr 1410 principal` / `Cr <primary bank> principal` |
+| Repay | `fn_repay_owner_loan(loan_id, repay_date, principal, interest, mode, created_by)` → `{repayment_id, msg}` | `Dr <primary bank> (principal + interest)` / `Cr 1410 principal` / `Cr 4116 interest` |
+
+Both post with `role='apartment'`, `status='paid'`, and a shared `journal_id` from `seq_transaction_number`. The **credit leg is omitted when `mode='cash'`** because `fn_resolve_bank_leg` returns NULL for `cash`/`journal` — cash-in-hand is derived from the cash book, never posted to directly. `fn_repay_owner_loan` takes a `FOR UPDATE` row lock on the loan and re-checks the outstanding balance.
+
+**Validation is engine policy, not statute** (the SQL says so in a comment): a **resolution reference is mandatory** (`"Error: a Board / general-body resolution reference is required"`), `mode='journal'` is refused, and the cash-payment limit applies to cash disbursals. `fn_ensure_owner_loan_accounts(society_id)` idempotently creates 1410 and 4116 and maps 1410 → `LOANS_GIVEN`.
+
+**Interest is simple interest on the outstanding principal, per annum, 365-day year, and it is an estimate — not an accrual:**
+
+```
+fn_owner_loan_interest_estimate(loan_id, asof) =
+    ROUND( (principal − repaid_amount) × rate_pct / 100
+           × GREATEST( asof − GREATEST(loan_date, MAX(repay_date)), 0 ) / 365.0, 2)
+```
+
+No journal is ever posted for accrued interest; income is booked **only** when cash actually arrives through `fn_repay_owner_loan` (which validates the principal against the outstanding balance but accepts any interest figure). The clock restarts on *any* repayment, including an interest-only one. Do not confuse the per-loan rate with `setup_wizard.MAX_INTEREST_RATE_PCT` — that is the late-payment cap on maintenance receivables.
+
+**Lifecycle:** there is no status column. The only axis is the derived `owner_loans.ledger_posted BOOLEAN`. Rows inserted directly into the table (i.e. predating the ledger change) are **register-only**: shown in the table and in `fn_aoa_loanee_list`, tagged "register only", excluded from the repayment dropdown, and refused by `fn_repay_owner_loan` with *"this loan is a register-only entry (never posted to the ledger); repay it by editing the register"*. Fully-repaid loans simply fall out of the loanee list and the dropdown. There is **no** requested → approved → disbursed → repaid state machine and **no** two-stage pending/confirm flow as on the Fund Management card — an admin's click posts the full journal immediately.
+
+**Where it lands in the reports:** 1410 is on the Balance Sheet under Assets (`statement_section='Assets'`, head `LOANS_GIVEN`, `has_bf = TRUE` so it carries forward); 4116 is Income in the I&E (`tab_name='Inc'`) and carries `mutuality_nature='mutual'`, so it flows into `fn_income_tax_summary_fy` as exempt income. Loan legs inherit `bank_reconciled = TRUE`, so they never appear as unmatched in bank reconciliation.
+
+> **Owner loans are NOT receivables, and that has real consequences.** No `receivables` row is ever created, so `fn_apartment_outstanding` reports **₹0 for a flat with an unpaid loan**. That means the loanee can still be issued a No Dues Certificate, still counts as eligible under bye-law 7, and is not blocked from a s.22 cut-off — the s.22 blockers read `receivables.status='pending'` only. If you extend this feature, wire the outstanding loan into those three checks (or into `fn_apartment_outstanding`) before relying on any of them.
+
+Tables: `owner_loans` (`principal > 0`, `repaid_amount >= 0`, `ledger_posted`, `disbursal_mode`, `journal_id` — the trailing `register only` comment on its `CREATE TABLE` is now stale) and `owner_loan_repayments` (`CHECK (principal_amount + interest_amount > 0)`, immutable, no status column). Note `owner_loan_repayments.created_at` is always `NOW()` — a back-dated repayment still records a current creation timestamp; the value date is `repay_date`.
+
+**The loanee annexure** — `fn_aoa_loanee_list(society_id)` returns `sr_no, flat_number, owner_name, loan_date, principal, interest_rate_pct, repaid_amount, outstanding, resolution_ref` for rows where `principal > repaid_amount`, and is written to the `Loanees` sheet of `UP_AOA_Annexures_Owners_and_Loanees.xlsx` (`annexure_workbook_bytes()`, alongside the `Owners` sheet from `fn_aoa_owner_list`). No totals row, no overdue flag, and it does **not** filter on `ledger_posted` — register-only loans appear in the statutory annexure.
+
+**Tests** (both **live-Postgres**, skipped unless `PGHOST` is set; load `estatehub.sql`, run `seed.py`, then point `PGHOST`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` at it):
+
+```bash
+python -m pytest test/test_up_aoa_compliance_live.py -v -k "loan or loanee"
+python -m pytest test/test_up_compliance_ui_live.py -v
+```
 
 ### Capital Account vs Corpus Fund — Key Distinction under RWA Laws
 
@@ -528,6 +619,21 @@ Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts,
 
 > **Both engines must stay in step.** They were originally left pointing at the primary account while the single-verify paths honoured the mapping, which made routing silently inconsistent: verifying dues one flat at a time banked into the mapped account, paying the same dues through FIFO did not. A society with a second account could reconcile an SBI statement against money that had gone to ICICI.
 
+### Fund Management — Write Contract (Do Not Collapse These Two Phases)
+
+Every write callback in `fund_management_callbacks.py` — **Utilize Fund**, **Appropriate Income → Fund**, **Confirm/Cancel** a pending appropriation, and **Save Routing** — is deliberately split into two phases:
+
+| Phase | Scope | On failure |
+|---|---|---|
+| **1 — the write** | `fn_process_fund_utilization` / `fn_appropriate_income_to_fund` / `fn_confirm_fund_appropriation` / `fn_cancel_fund_appropriation` / `fn_set_fund_bank_mapping` only | Red toast reading **`Not saved: <reason>`**; every other output is `no_update` so the form keeps what was typed |
+| **2 — the refresh** | reload loaders + rebuild the balances/log/mapping tables | **The committed outcome line is kept**, wrapped in a warning that reads *"The entry was saved, but this card could not refresh: … Do not submit again."* (`_committed_with_refresh_failure`). Card outputs stay `no_update`; the form is **still cleared**, because the journal exists |
+
+> **This split is a correctness requirement, not cosmetics.** The two phases used to share one `try`, so any *rendering* bug in the card reported a *committed* journal as `Error: ...` — and an admin who reads that and clicks again posts the same appropriation twice. Nothing in the database can catch it: the income account simply had enough balance to cover both. If you add a write to this module, keep the SQL call alone in the first `try` and every loader/builder call in the second.
+
+The same file also owns the shared card builders (`build_balances_table`, `build_fund_options`, `build_income_source_options`, `build_appropriation_log_table`, `build_fund_bank_mapping_rows`, `build_log_table`) — the card renderer imports these rather than hand-rolling a second copy (Rule 11 in [§18](#18-critical-dash-rules)).
+
+> **Log tables format `created_at` through `_log_date()`, never `value[:10]`.** `fund_appropriations.created_at` and the utilization log's are `TIMESTAMP` columns, so psycopg2 hands back a `datetime.datetime`, which is not subscriptable. The renderer and the callbacks share one helper so the first render and the post-submit render cannot disagree about the format.
+
 ### Table Roles
 
 | Table | Type | Who creates | Status flow | Posts to transactions |
@@ -537,6 +643,14 @@ Fund segregation is enforced at the ledger level (dedicated Cr-natured accounts,
 | `payables` | Auto-calculated debits | `fn_auto_generate_payables` | pending → verified / cancelled | On admin verify |
 | `expenses` | Manual debits | Admin | confirmed immediately | On create |
 | `transactions` | Immutable ledger | All of above | paid | Source of truth |
+| `fund_appropriations` | Manual credits (income → fund) | `fn_appropriate_income_to_fund` | pending → confirmed / cancelled | On confirm (admin), never on insert |
+| `owner_loans` | Manual credits (society lends to a flat) | `fn_disburse_owner_loan` | `ledger_posted` boolean; no status column | On create, single `Dr 1410` leg (+ bank leg unless cash) |
+| `owner_loan_repayments` | Manual debits (loan collected) | `fn_repay_owner_loan` | immutable — no status | On create, `Dr` bank + `Cr 1410` / `Cr 4116` |
+| `apartment_transfers` | Register + transfer-fee accrual | `fn_record_apartment_transfer` | `nodues_requested_on` / `_refused_on` / `_issued_on` | Only the ½% fee, as a `receivables` row on 3270 |
+| `service_cutoff_proceedings` | Register of s.22 steps | Admin, via the UP AOA card | in_progress → cut_off / withdrawn / restored | **Never** — the card records dates only |
+| `aoa_statutory_filings` | Bye-law 49 filing record | Admin, via the UP AOA card | upsert per `(society_id, fy_start_year)` | Never |
+| `compliance_flags` | Rule-breach log | `fn_verify_expense`, `fn_disburse_owner_loan` | none — `UNIQUE (source_table, source_id, rule_code)` de-dupes | Never; the posting continues in `warn` mode |
+| `regime_rule_parameters` | Statutory thresholds (data, not code) | `seed.py` / manual migration | effective-dated | Never |
 
 `transactions.role` (`'apartment' / 'vendor' / 'security' / 'other' / 'assets'`) is written on every insert alongside `entity_id`, mirroring the `role` column already on `receivables`/`receipts`/`payables`/`expenses`. It exists because `entity_id` alone is not a safe join key — an apartment id and a vendor id can collide — so any query resolving an entity's display name (`fn_account_ledger_fy`, `fn_cashbook_paired_v3`, `fn_cashbook_month_page`) must join `apartments`/`vendors`/`security_staff` **with `AND t.role = '...'`**, not on `entity_id` alone. `role = 'assets'` covers asset purchase/sale/writeoff legs, where `entity_id` points at `assets.id` — a distinct ID space that should never match an entity-name join.
 
@@ -599,6 +713,8 @@ EstateHub calculates simple interest on overdue maintenance receivables dynamica
 3. **Database Precision**: The `interest_months_applied` column in the `receivables` table is defined as `NUMERIC(10,4)` to handle the exact decimal fraction of months elapsed (e.g., 28 days = `0.9333` months).
 4. **FIFO Allocation**: When an apartment pays dues, the `fn_pay_apartment_dues_fifo` function applies the payment to the oldest outstanding receivable first. Within a specific receivable, payments are applied to clear interest first, then the principal base amount.
 5. **Component Breakdown**: When rendering the "My Transactions" ledger, the system runs a Common Table Expression (CTE) to fetch a grouped string (e.g. `Society Maint: 1500, Sinking Fund: 200`) representing the different journal entry legs that made up the receivable.
+
+> **Owner-loan interest is a different formula entirely** — simple interest on the outstanding principal over a **365-day** year, not this 30-day pro-rata, and it is only ever an *estimate*. See [Owner Loans & Loanees](#owner-loans--loanees-bye-law-31f). Do not reuse `fn_apply_receivable_interest`'s constants for it, or vice versa.
 ---
 
 ## 10. Pay Dues — Five Paths
@@ -856,6 +972,31 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 | `fn_apply_apartment_dues_fifo_core` / `fn_apply_apartment_dues_selective_core` | The two "Pay Dues" engines. Both resolve a bank account **per settled row** and emit one Dr leg per distinct account, so a mixed Sinking+Repair+Maintenance payment reaches each fund's mapped account |
 | `fn_funds_account_fy(society_id, fy)` | 5th Financial Statement — Funds Account schedule (Opening B/F, Additions, Deductions, Closing C/F) per statutory fund |
 
+**UP AOA layer** (all seeded from `regime_rule_parameters`; see [§9](#up-aoa-regime-parameters--regime_rule_parameters))
+
+| Function | Purpose |
+|---|---|
+| `fn_regime_param_num(society_id, key, on DEFAULT CURRENT_DATE)` / `fn_regime_param_text(...)` | Effective-dated statutory-threshold lookup for the society's `society_legal_regime`. NULL = rule not applicable, never a default |
+| `fn_statutory_calendar(society_id, asof, years DEFAULT 3)` | Bye-law 49 filing calendar: 3 FYs × 3 steps (publish / copy to authority / owner summary) with `done · overdue · due_soon · upcoming` (`due_soon` = within 30 days) |
+| `fn_aoa_owner_list(society_id)` | Annexure — one row per active flat with undivided-interest % and `outstanding_dues`. **Excludes owner loans** |
+| `fn_aoa_loanee_list(society_id)` | Annexure — flats with `principal > repaid_amount`: principal, rate, repaid, outstanding, resolution ref. No status, no totals, and does not filter on `ledger_posted` |
+| `fn_backfill_undivided_interest(society_id, overwrite DEFAULT FALSE)` | Fills NULL `apartments.undivided_interest_pct` from area share (6 dp), pushing the sub-0.001 residual onto the largest flat. The Declaration is authoritative — this is a convenience |
+| `fn_undivided_interest_summary(society_id)` | `{apartments_total, apartments_missing, total_declared_pct, balanced}` (balanced = no NULL and \|total − 100\| ≤ 0.001) |
+| `fn_undivided_interest_report(society_id)` | Per-flat drift from the area share: `missing · matches_area · differs_from_area` |
+| `fn_undivided_interest_bill_preview(society_id, monthly_budget)` | Splits a budget by undivided-interest %; tested, not wired to a card |
+| `fn_bye_law7_eligibility(society_id, election_date, basis DEFAULT NULL)` | Flats barred from voting/standing. **Zero rows when the rule is unset** — not "everyone is eligible". Uses the balance outstanding at call time |
+| `fn_bye_law7_cutoff_date(society_id, election_date, basis DEFAULT NULL)` | FY basis → Apr 1 of the FY − 1 day; calendar basis → Jan 1 of the election year − 1 day |
+| `fn_service_cutoff_check(proceeding_id, asof)` | s.22 preconditions: `can_cut_off`, `earliest_cutoff_date`, `blockers[]`. Reports only — it does not cut anything |
+| `fn_nodues_certificate_status(transfer_id, asof)` | `not_found · issued · not_requested · refused · deemed_granted · pending`; `deemed_on = requested_on + 15` |
+| `fn_petty_cash_check(society_id, asof)` | `{cash_in_hand, limit_amount, breach}` against the ₹20,000 ceiling |
+| `fn_cash_limit_mode(society_id)` / `fn_check_cash_payment_limit(society_id, amount, mode)` | `warn`/`block` resolution; the check returns a message only for `mode='cash'` over threshold |
+| `fn_record_apartment_transfer(society_id, apartment_id, transfer_date, transfer_value, transferor, transferee, created_by)` | Bye-law 39: ½% fee as a `receivables` row on 3270 + its accrual leg, plus the transfer register. **Does not change `apartments.owner_name`** |
+| `fn_ensure_major_repair_fund(society_id)` | Idempotently creates 3270 and its `MAJOR_REPAIR_FUND` statutory mapping |
+| `fn_ensure_owner_loan_accounts(society_id)` | Idempotently creates 1410 (Dr) / 4116 (Cr, `mutuality_nature='mutual'`) and maps 1410 → `LOANS_GIVEN`. Silently no-ops if parents 1400 / 4110 are missing |
+| `fn_disburse_owner_loan(society_id, apartment_id, loan_date, principal, rate_pct, mode, purpose, resolution_ref, created_by)` | `Dr 1410 / Cr cash-or-bank`, `ledger_posted = TRUE`. Resolution reference mandatory (engine policy, not statute); refuses `mode='journal'`, negative principal/rate, an unknown or inactive flat, and over-limit cash when `cash_limit_mode='block'` |
+| `fn_repay_owner_loan(loan_id, repay_date, principal, interest, mode, created_by)` | `Dr bank (principal + interest) / Cr 1410 / Cr 4116` under a `FOR UPDATE` row lock. Refuses over-repayment and register-only loans. **Interest is not validated against anything** — it posts straight to income |
+| `fn_owner_loan_interest_estimate(loan_id, asof DEFAULT CURRENT_DATE)` | Scalar simple-interest estimate on the outstanding principal (365-day year). A Board aid, never an accrual |
+
 ---
 
 ## 17. Codebase Map
@@ -870,7 +1011,7 @@ EstateHub/
 │   ├── dash_apps/
 │   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
 │   │   ├── layout.py                         ← Shared page layout and UI components
-│   │   ├── callbacks/                        ← 38 modules; see registration order below
+│   │   ├── callbacks/                        ← 39 modules; see registration order below
 │   │   │   ├── __init__.py                   ← Registration order & loader rules (source of truth — read this file directly for the current wiring, it's kept well-commented)
 │   │   │   ├── shell_callbacks.py            ← URL routing, auth guard, sidebar, toast
 │   │   │   ├── login_callbacks.py            ← All login methods + password reset
@@ -904,7 +1045,8 @@ EstateHub/
 │   │   │   ├── vendor_pass_callbacks.py      ← Vendor pass Print / Save / Email
 │   │   │   ├── expense_callbacks.py          ← Expense voucher Print / Save / Email
 │   │   │   ├── financial_statements_callbacks.py ← 6 Statements card Print / PDF / Email (clientside)
-│   │   │   ├── fund_management_callbacks.py  ← Fund Management: utilize, income→fund appropriation (+pending confirm/cancel), fund→bank deposit routing. Also owns the shared card builders (`build_balances_table`, `build_fund_options`, `build_income_source_options`, `build_appropriation_log_table`, `build_fund_bank_mapping_rows`, `build_log_table`) |
+│   │   │   ├── fund_management_callbacks.py  ← Fund Management: utilize, income→fund appropriation (+pending confirm/cancel), fund→bank deposit routing. Every write is split into a write phase and a refresh phase — see [§9 Fund Management — Write Contract](#fund-management--write-contract-do-not-collapse-these-two-phases). Also owns the shared card builders (`build_balances_table`, `build_fund_options`, `build_income_source_options`, `build_appropriation_log_table`, `build_fund_bank_mapping_rows`, `build_log_table`) |
+│   │   │   ├── up_compliance_callbacks.py   ← UP AOA Compliance card: 11 write callbacks (filings, annexure export, undivided-interest fill/basis, transfers + No Dues, bye-law 7, s.22, owner loan + repayment). Each returns through `_run()` → (toast, re-rendered body); `_ctx()` gates on role + resolves the society from the session |
 │   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
 │   │   │   ├── admin_callbacks.py            ← No-op registration slot (all callbacks pruned — see file docstring); kept so future admin-only callbacks have a documented slot
 │   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Wired in as step 6b
@@ -924,18 +1066,29 @@ EstateHub/
 │   │       ├── card_catalogue.py             ← KPI_CARDS, DEFAULT_LAYOUTS, make_kpi_card()
 │   │       ├── customize_layout.py           ← KPI Customize layout views
 │   │       ├── login_system.py               ← Login and pattern/PIN authentication views
+│   │       ├── setup_wizard.py               ← First-time society setup wizard (imports `statutory_rules.STEP_ROWS` for its Acts & Rules panel)
+│   │       ├── up_compliance_card.py         ← UP AOA Compliance card renderer — 7 sections, all component ids prefixed `upc-`. `render_up_compliance_body()` returns sections only so a save can swap the body without losing the toast (it reads `card.children[2].children` positionally)
 │   │       └── router.py                     ← Page routing definitions
 │   ├── services/
 │   │   ├── auth_service.py                   ← authenticate_user(), reset flow
-│   │   └── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
+│   │   ├── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
+│   │   ├── statutory_rules.py                ← Acts & Rules summary rows for the Setup Wizard's right-hand panel. **Presentation strings only** — the enforced thresholds live in `regime_rule_parameters` (§9), not here
+│   │   ├── up_aoa_actions.py                 ← The live UP AOA service: every handler returns `(ok, message)` and re-checks society ownership via `_owns()`; also `load_card_data()` (the single read path the renderer consumes) and `annexure_workbook_bytes()` (openpyxl, `Owners` + `Loanees` sheets)
+│   │   └── up_aoa_compliance_service.py      ← ⚠️ Dead code — a read-only wrapper over nine SQL functions with zero importers; the card uses `up_aoa_actions`. Keep as the documented "these functions report only" contract, or delete it — don't wire both
 │   └── assets/                               ← Static files + uploaded images
 │
 ├── database/
 │   ├── db_manager.py                         ← db._execute() → Aiven
-│   ├── estatehub.sql                         ← Full schema + all fn_* functions
+│   ├── estatehub.sql                         ← Full schema + all fn_* functions (incl. the UP AOA compliance layer)
 │   ├── migrate.py                            ← Schema initialization (delegates demo seeding to seed.py)
-│   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns)
+│   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns). Also assigns `society_legal_regime` for UP societies and the `UP_AOA_ACCOUNT_MAPPINGS` statutory heads
 │   └── reset_database.py                     ← Destructive DB reset and schema reload utility
+│
+├── test/                                    ← pytest suite (no pytest.ini/pyproject — run from the repo root)
+│   ├── conftest.py / fake_db.py              ← FakeDB singleton + per-test reset; backs the non-DB scenarios
+│   ├── test_scenario_*.py                    ← Scenario A–K, T, GST — FakeDB, no Postgres needed
+│   ├── test_up_aoa_compliance_live.py        ← UP AOA engine, 30 tests. **Live Postgres**, skipped unless PGHOST is set
+│   └── test_up_compliance_ui_live.py         ← UP AOA renderer/callback/handler wiring, 9 tests. **Live Postgres**
 │
 ├── cleanup.py                                ← Cleanup script for removing redundant files
 ├── run.py                                    ← Local server launcher (dash)
@@ -979,6 +1132,7 @@ function but is absent from `CALLBACK_MODULES`. Current order
 "event_ticket_callbacks"     # 13b. Event ticket Print/Save/Email
 "vendor_pass_callbacks"      # 13c. Vendor pass Print/Save/Email
 "expense_callbacks"          # 13d. Expense Print/Save/Email
+"up_compliance_callbacks"    # 13g. UP AOA Compliance card (admin only; registered as a standalone custom card)
 "bulk_enroll_callbacks"      # 14. Excel bulk upload
 "bank_reconcile_callbacks"   # 14a2. Bank statement reconciliation
 "assign_to_callbacks"        # 14b. Concern assignment
@@ -1086,6 +1240,11 @@ Rule 12: dbc.Label/Button take ONE positional arg (children). dbc.Label("x", htm
 | Fund Management card showed two different tables | `renderers.py` hand-rolled its own balances table and utilization log alongside the ones in `fund_management_callbacks.py`. The card's *first* render showed a gross "Available Balance" with **no statutory-lock column**, and switched to the drawable/locked presentation on the first Reload click | Both tables and both `FUND_TYPE_PATTERNS` copies deleted; the card now imports the same builders the callbacks use, so first render and post-submit render cannot disagree |
 | `psycopg2` "invalid dsn: extra key/value separator" | `db_manager._build_dsn` appended `&options=-c timezone=...` without percent-encoding the `=`, killing the connection pool — **only** for deployments using discrete `PGHOST`/`PGUSER`/`PGPASSWORD` env vars instead of a single `DATABASE_URL` | `quote("=", safe="")` (and `/` and `+`) applied to the option key and value. A no-op for the single-connection-string path |
 | `MUTUALITY_NATURE_MAP` / `TDS_SECTION_MAP` side-dicts in `seed.py` | The values they carried were already inline columns on `accounts` (`mutuality_nature`, `tds_section`); the two dicts were a second, drifting copy of the same 12 + 6 facts | Deleted; `seed_accounts` reads the two inline fields directly from the `ACCOUNTS` tuple. All 83 rows verified to carry 10 fields with the same tags the dicts produced |
+| Fund log tables crashed on `'datetime.datetime' object is not subscriptable` | `fund_appropriations.created_at` is a `TIMESTAMP`, so psycopg2 returns a `datetime`, but both log builders sliced it as a string (`value[:10]`). Clicking **Appropriate to Fund** raised it on every click once a log row existed | `_log_date()` formats by type (`strftime` for datetimes, slice for strings) and is shared by `build_log_table` and `build_appropriation_log_table`, so first render and post-submit render can't disagree |
+| A committed fund journal reported itself as `Error: ...` | The write and the card rebuild shared one `try`, so a *render* bug surfaced as a *failed transaction*. The admin resubmits and the same appropriation posts twice — nothing in the DB can catch it, the income account simply had the balance | Every write callback split into a write phase (failure → `Not saved: …`, form preserved) and a refresh phase (failure → `_committed_with_refresh_failure`, which keeps the outcome line and warns "do not submit again"). Applied to utilize, appropriate, confirm/cancel and routing |
+| `submit_appropriation` returned 10 values for 11 Outputs | The Particulars field is an Output but was never returned as `None`, so **every successful** appropriation would fail with "Incorrect number of output values" and leave the form filled — masked until the datetime crash above stopped firing first | Sixth `None` added; the form now clears completely. Note `render_up_compliance_body()` has the same class of coupling (positional `card.children[2].children`) |
+| UP AOA had SQL but no UI | Neither `fn_appropriate_income_to_fund`-class function had a Python caller; the fund functions existed, the card did not | Fund Management card: 4 sections, 6 shared builders, and the reload path wired to all of them |
+| `up_aoa_compliance_service.py` never imported | Added with the SQL engine, then superseded — the card calls `up_aoa_actions` directly, so the module has zero callers | Documented in [§17](#17-codebase-map) as dead code rather than left silently drifting |
 
 ---
 
@@ -1125,6 +1284,104 @@ Dash-framework footguns.
   `confirmed_by`/`user_id` needs the same re-derivation, not a pass-through
   of whatever the client sent.
 
+### UP AOA Layer — Invariants Not to Break
+
+- **The rules are data.** Every threshold is a `regime_rule_parameters` row
+  resolved through `fn_regime_param_*`, which honours `effective_from` /
+  `effective_to`. Hardcoding a percentage or a day count in either SQL or the
+  card puts it out of reach of the override tiers, and the card's own prose
+  already drifts from the data (see below).
+- **"Rule not applicable" must never render as "compliant."** An unset
+  parameter returns `NULL`/zero rows, and callers must say so. That is why
+  `fn_bye_law7_eligibility` returns **zero rows** rather than everyone, and why
+  the whole card hides itself when `transfer_fee_pct` is absent.
+- **The card records, it does not act.** It never files with an authority,
+  never disqualifies a member and never cuts a service. `fn_service_cutoff_check`
+  only *reports* blockers, and the card refuses to write a `cut_off_on` the
+  check does not allow. Keep it that way — the Board and the competent
+  authority act, and anything this card decides by itself is a legal opinion
+  the software has no business making.
+- **Society ownership is re-derived, never accepted from the browser.**
+  `up_aoa_actions._owns()` re-checks every id against the session's society
+  before touching it. A new handler that skips this is a cross-tenant write.
+- **The card's threshold prose is hard-coded and will drift.** It says
+  "31 July", "15 August", "₹20,000", "₹2,500" as literal strings while the
+  tables read from `regime_rule_parameters`. Change a parameter in SQL and the
+  numbers in the tables move but the sentences do not.
+- **`societies.cash_limit_mode` has no UI.** `warn` vs `block` is DB-only;
+  the card shows the current value in parentheses. Don't assume the card can
+  set it.
+- **Regime assignment is seed-time only.** `society_legal_regime` is written
+  by `seed_society_legal_regime()` (and only for `state = 'Uttar Pradesh'`),
+  and that function returns early if a row already exists. The card's advice
+  to "set the State in Society Details" does **not** switch the rules on by
+  itself — an existing society needs the seed or a manual insert.
+- **`cash_limit_default_mode` is engine policy, not statute.** It is seeded
+  with `source_reference` saying so. Don't cite it in a filing.
+- **Only `mode='cash'` counts as a cash-limit breach** (the ₹2,500 threshold
+  pre-dates UPI/NEFT, per its own source note). A ₹50,000 cheque is never
+  flagged, by design.
+- **Undivided-interest backfill is a convenience, not a legal computation.**
+  The SQL says "*The Declaration is authoritative*". `fn_undivided_interest_report`
+  deliberately reports `differs_from_area` as a drift, and the card renders it
+  in the same amber as a due-soon date rather than "fixing" it.
+- **s.22 blockers include live dues, not just elapsed time.** A proceeding
+  also raises `'no outstanding dues remain for this apartment'`, so a cut-off
+  is unreachable while the flat is actually paid up. That reads like a bug and
+  is not.
+- **Once `appeal_filed_on` is recorded, the cut-off is unreachable from the
+  UI** — the card can set `appeal_outcome='pending'` but nothing sets
+  `dismissed`, and `withdrawn`/`restored` are equally unreachable. These need
+  a direct SQL update today; add UI before relying on that path.
+
+### Owner Loans — Invariants & Sharp Edges
+
+- **Owner loans are deliberately not receivables.** No `receivables` row is
+  created, so `fn_apartment_outstanding` reports ₹0 for a flat with an unpaid
+  loan. Consequences today: a loanee can still get a No Dues Certificate,
+  still counts as bye-law 7 eligible, and is not blocked from an s.22 cut-off
+  (its blockers read `receivables.status='pending'` only). Wire the balance
+  into those three checks before trusting any of them.
+- **The resolution reference is mandatory by engine policy, not statute.**
+  The SQL comment says so explicitly. It is nonetheless the right rule —
+  a loan without a GB/MC resolution has no authority behind it.
+- **`ledger_posted` is the whole lifecycle.** There is no status column and
+  no pending/confirm stage. Register-only rows (`ledger_posted = FALSE`, i.e.
+  inserted before the ledger change) are refused by `fn_repay_owner_loan` and
+  must be corrected by editing the register — and they still appear in the
+  statutory loanee annexure, which does not filter on the flag.
+- **Interest is an estimate, never an accrual.** `fn_owner_loan_interest_estimate`
+  is a Board aid. `fn_repay_owner_loan` validates the **principal** against
+  the outstanding balance but accepts **any** interest figure, which posts
+  straight to income 4116. Nothing cross-checks the two.
+- **Any repayment resets the interest clock.** The estimate keys off
+  `MAX(repay_date)`, so an interest-only repayment (`principal = 0`) silently
+  discards accrued-but-unbooked interest for the elapsed period.
+- **Cash disbursals and cash repayments post a single leg.** `fn_resolve_bank_leg`
+  returns NULL for `cash`, so only the `Dr 1410` / `Cr 1410`+`Cr 4116` side is
+  written and the cash side is left to the cash book. A cash loan therefore
+  does **not** balance on its own in `transactions` — that is intended, and a
+  test asserts it exactly.
+- **There is no correction path.** No edit, no delete, no reversal for either
+  table, and no compensating-entry UI. A wrong disbursal or repayment can
+  only be fixed by direct SQL.
+- **`PAY_MODES` includes `'transfer'`, which is not a legal `transactions.mode`.**
+  The CHECK allows `cash · cheque · upi · card · bank · crypto · journal ·
+  neft · rtgs · imp`. Picking **Transfer** passes both the Python and the SQL
+  guard and then dies on the INSERT with a raw constraint violation instead
+  of a clean message. Conversely `card`/`neft`/`rtgs`/`crypto` are legal in
+  the DB and unreachable from the UI. Fix the tuple, not the guard.
+- **The card's loan table is `LIMIT 20`**, and the repayment dropdown is built
+  from it — a society with more than 20 loans **cannot repay an older one
+  through the UI at all**.
+- **`4116` has no `account_statutory_mappings` row** (only 1410 does), so it
+  reports a NULL statutory head in the I&E. And `fn_ensure_owner_loan_accounts`
+  silently no-ops when parents 1400 / 4110 are missing — the caller only
+  errors for the 1410 case.
+- **`owner_loan_repayments.created_at` is always `NOW()`**, so a back-dated
+  repayment carries a current creation timestamp. `repay_date` is the value
+  date that reaches `transactions.trx_date`.
+
 ### Deferred / Not-Yet-Built
 
 - **Cashbook `Cr LF` / `Dr LF` (ledger folio) columns are deliberately
@@ -1140,9 +1397,25 @@ Dash-framework footguns.
   cannot encrypt, and pdf-lib has no encryption API, so this needs a
   server-side pikepdf/qpdf pass over a route that streams the PDF — a
   separate piece of work, not a one-line change to the existing helper.
+- **The UP AOA card records dates, it does not handle documents.** Bye-law 49
+  and s.22 notices, GB minutes and auditor certificates are typed in as dates
+  and free text; there is no notice generation, no minutes upload and no
+  attachment storage anywhere in this feature. A loan's `resolution_ref` is a
+  string, not a linked resolution.
+- **The UP AOA tables have no migration file.** `regime_rule_parameters`,
+  `apartment_transfers`, `service_cutoff_proceedings`, `compliance_flags`,
+  `aoa_statutory_filings`, `owner_loans` and `owner_loan_repayments` exist
+  only as `CREATE TABLE IF NOT EXISTS` / guarded `ALTER` blocks in
+  `estatehub.sql`. An already-provisioned database gets them only by
+  re-running the DDL (see the change-kind table in §22).
 
 ### Fund Money — Invariants Not to Break
 
+- **Never merge a write and its card refresh into one `try`.** The
+  two-phase contract in [Fund Management — Write Contract](#fund-management--write-contract-do-not-collapse-these-two-phases)
+  exists because a committed transaction reported as `Error: ...` invites a
+  duplicate posting that the database cannot detect. `save_fund_bank_mappings`
+  was the last holdout; it now follows the same shape.
 - **`fn_resolve_bank_leg` must keep its 3rd argument optional.** It was added
   as `p_credit_acc_id INT DEFAULT NULL` specifically so that every pre-existing
   2-argument call site (`fn_verify_expense`, `fn_verify_payment`,
@@ -1288,6 +1561,13 @@ python3 database/seed.py                 # standalone
 python3 database/migrate.py --seed       # schema init + seed in one step
 ```
 
+Two seed functions are specifically about the **UP AOA layer**, and they only run from `run_seed` — not from a bare account insert:
+
+- `seed_society_legal_regime()` writes `society_legal_regime = ('UP_AOA_2010', effective_from 2011-11-16)` **only** where `societies.state = 'Uttar Pradesh'`, and returns early if a row already exists. This is the gate that makes every rule in `regime_rule_parameters` reachable — without it the UP AOA card renders its "rules are not active" alert even though every threshold row exists. There is no UI that assigns a regime.
+- `seed_account_statutory_mappings()` applies `UP_AOA_ACCOUNT_MAPPINGS` — every account→statutory-head binding for the regime, with `regime_code` and `effective_from` hard-coded (`1400`/`1410` → `LOANS_GIVEN`, `2110` → `LOANS_TAKEN`, `3270` → `MAJOR_REPAIR_FUND`, `3230` → `IFMS_CORPUS`, and the whole tax/GST/CASH_BANK set). Note `4116 Interest on Owner Loans` is deliberately **not** in that mapping, so it reports a NULL statutory head in the I&E.
+
+The rule-parameter rows themselves live in `estatehub.sql`, not `seed.py`.
+
 ### Database Migrations
 
 > **`database/estatehub.sql` is the single source of truth for the schema.** Every table, view, and `fn_*` stored function is defined there — it is what `database/reset_database.py` loads to rebuild the database from scratch, and it is the file to consult (or diff) before trusting any other description of the schema, including the summaries elsewhere in this README.
@@ -1373,6 +1653,7 @@ The following tables map every user-reachable workflow in the application, organ
 | **Admin → Financials** | Sidebar: Financials → 10 KPI cards (`kpi_receipts_month`, `kpi_receipts_total`, `kpi_expenses_month`, `kpi_expenses_total`, `kpi_security_salaries_due`, `kpi_cash_in_hand`, `kpi_bank_balance`, `kpi_cashbook_open`, `kpi_ledger_open`, `kpi_fy_closing_report`) → lists / reports; sidebar `+` New Receipt / `−` New Expense | Track income/expenses, cashbook, ledger; create receipts/expenses; FY closing report |
 | **Admin → Fund Management** | Sidebar: Financials → `kpi_fund_management` nav tile → `form_fund_management` card: Fund Balances (gross / statutory lock / drawable) → **Utilize Fund** (honours `statutory_lock_pct`) → **Appropriate Income → Fund** (Dr income / Cr fund; non-admins get a `pending` row) → **Fund Deposit Routing** (per-fund destination bank account) → Recent Utilizations + Recent Appropriations logs with Confirm/Cancel on pending rows; **Reload Data** refreshes all four surfaces | Admin-only. See [§9 Financial Module](#9-financial-module) for the accounting and segregation rules |
 | **Admin → Bank Reconcile** | Receipts / Expenses list → **Bulk Reconcile** (or per-row **Reconcile**) → pick the **Bank Account** the statement is from → download template → upload Excel → auto-matched / needs-review / unmatched summary; **Post Unmatched** / **Delete Unreconciled** | Reconcile an uploaded statement against receipts/expenses, restricted to rows whose money actually landed in the chosen account |
+| **Admin → UP AOA Compliance** | Sidebar: Financials → `kpi_up_compliance` nav tile → `form_up_compliance` card, 7 sections: ① **Bye-law 49 filings** — record the 3 filing dates + auditor, tick the owner/loanee annexures, **download the Owners + Loanees XLSX** ② **Undivided interest & billing basis** — backfill missing % from area, switch society-wide maintenance to per-% billing with a monthly budget ③ **Transfers & No Dues** — record a flat transfer (auto-levies the ½% Major Repair Fund fee), set No Dues requested/refused/issued ④ **Bye-law 7** — election date + year basis → the list of flats barred from voting/standing ⑤ **s.22 service cut-off** — open a proceeding, record each of the 7 steps, see the blocker list and earliest lawful date ⑥ **Loans to owners** — record a disbursement (resolution ref mandatory) and repayments ⑦ **Cash & cheque limits** — read-only petty-cash badge + compliance flags. **Reload Data** refreshes the whole card | Admin-only, and only for societies whose `society_legal_regime` is `UP_AOA_2010` — otherwise the card says so and hides. The card records and checks; it never files, disqualifies or cuts. See [§9](#up-aoa-compliance-card-admin--financials) |
 | **Admin → Channels** | Sidebar: Channels → 3 KPI cards (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Create / Subscribe / Trigger Alert / View Subscribers | Manage school bus, taxi, visitor alert channels and subscriptions |
 | **Admin → Assets** | Sidebar: Assets → 2 KPI cards (`kpi_assets_count`, `kpi_assets_value`) → `list_assets` → `profile_asset` → Edit / Dispose | Buy, manage, depreciate, and dispose of society assets |
 | **Admin → Events** | Sidebar: Events → 2 KPI cards (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Edit / Sell Tickets | Create/edit events, sell/manage event tickets |
