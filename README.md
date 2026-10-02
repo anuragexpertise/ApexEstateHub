@@ -78,7 +78,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Bank Reconciliation** | Per-bank-account Excel statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
 | **Fund Management** | Statutory fund balances with lock/drawable split · Utilize Fund (honours `statutory_lock_pct`) · **Appropriate Income → Fund** (Dr income / Cr fund) with pending→confirm workflow · **Fund Deposit Routing** (per-fund destination bank account) |
 | **Fund Deposit Routing** | A fund's contributions can be banked into a separately-held account/FD instead of the society's primary account; enforced at posting time by `fn_resolve_bank_leg`, and statement uploads are matched per account |
-| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
+| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
 | **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
 
 ---
@@ -1072,7 +1072,7 @@ EstateHub/
 │   ├── services/
 │   │   ├── auth_service.py                   ← authenticate_user(), reset flow
 │   │   ├── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
-│   │   ├── statutory_rules.py                ← Acts & Rules summary rows for the Setup Wizard's right-hand panel. **Presentation strings only** — the enforced thresholds live in `regime_rule_parameters` (§9), not here
+│   │   ├── statutory_rules.py                ← Acts & Rules summary rows for the Setup Wizard's right-hand panel, plus the Act/Rules/Bye-laws loader (`instruments_for_society()`) that reads `legal_instrument_catalog` (Master Portal → RWA Compliance (UP)) for the wizard's "UP AOA Compliance" step, falling back to `LEGAL_INSTRUMENTS_UP_AOA` in seed.py when that table isn't integrated yet. **Presentation strings only** — the enforced thresholds live in `regime_rule_parameters` (§9), not here
 │   │   ├── up_aoa_actions.py                 ← The live UP AOA service: every handler returns `(ok, message)` and re-checks society ownership via `_owns()`; also `load_card_data()` (the single read path the renderer consumes) and `annexure_workbook_bytes()` (openpyxl, `Owners` + `Loanees` sheets)
 │   │   └── up_aoa_compliance_service.py      ← ⚠️ Dead code — a read-only wrapper over nine SQL functions with zero importers; the card uses `up_aoa_actions`. Keep as the documented "these functions report only" contract, or delete it — don't wire both
 │   └── assets/                               ← Static files + uploaded images

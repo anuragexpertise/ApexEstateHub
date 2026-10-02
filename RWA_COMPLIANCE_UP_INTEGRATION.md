@@ -16,6 +16,8 @@ Files touched:
 | `app/dash_apps/app_shell.py` | New sidebar tab under Master: "RWA Compliance (UP)" |
 | `app/dash_apps/callbacks/shell_callbacks.py` | Route `/dashboard/master-compliance-up` + breadcrumb label |
 | `app/dash_apps/pages/portal_pages.py` | `_rwa_compliance_up_page()` — renders the table, or setup instructions if the table isn't there yet |
+| `app/services/statutory_rules.py` | `instruments_for_society()` / `instruments_for_regime()` / `grouped_instruments()` — the same catalog read for the Setup Wizard's "UP AOA Compliance" step and the Acts & Rules side panel (falls back to `LEGAL_INSTRUMENTS_UP_AOA` in `database/seed.py` when the table isn't integrated) |
+| `app/dash_apps/pages/setup_wizard.py` | New read-only "UP AOA Compliance" wizard step tabulating the Acts / Rules / Bye-laws; grouped `Instrument · Applicability · Key Provisions · Status · Source` |
 
 ## Option A — apply the patch normally (recommended)
 
