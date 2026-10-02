@@ -624,6 +624,15 @@ KPI_CARDS = {
         "title": "Fund Management", "group": "Financials",
     },
 
+    # Nav tile for the UP Apartment Act / Model Bye-Laws compliance card (Admin only).
+    # Bypasses DRILLDOWN_MAP like kpi_fund_management (see drilldown_callbacks.py).
+    "kpi_up_compliance": {
+        "query": "SELECT 'View' AS v",
+        "params": 0, "format": "text",
+        "icon": "fa-gavel", "color": "#7a4f01",
+        "title": "UP AOA Compliance", "group": "Financials",
+    },
+
     "kpi_apt_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
         "params": 1, "format": "number",
@@ -1149,6 +1158,7 @@ DEFAULT_LAYOUTS = {
             "kpi_fy_closing_report",
             "kpi_financial_statements",
             "kpi_fund_management",
+            "kpi_up_compliance",
         ],
         "events": ["kpi_events_total", "kpi_events_tickets"],
         # Per the Concerns workflow spec: Admin/Concerns tab shows

@@ -3135,7 +3135,7 @@ BEGIN
     LIMIT 1;
 
     FOR apt IN
-        SELECT id, apartment_size, apt_calc_start_date FROM apartments
+        SELECT id, apartment_size, apt_calc_start_date, undivided_interest_pct FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
         v_calc_start := COALESCE(apt.apt_calc_start_date, v_society_calc_start);
@@ -3157,7 +3157,8 @@ BEGIN
 
             SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
                    apt_interest_pct, start_date, end_date,
-                   apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest
+                   apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest,
+                   billing_basis, common_expense_budget_monthly
               INTO charge
               FROM apt_charges_fines_basis
              WHERE society_id = p_society_id AND apt_status = TRUE
@@ -3177,6 +3178,8 @@ BEGIN
                 charge.apt_sinking_fund_rate  := 0;
                 charge.apt_repair_fund_rate   := 0;
                 charge.charges_interest       := TRUE;
+                charge.billing_basis          := 'per_sqft';
+                charge.common_expense_budget_monthly := NULL;
             END IF;
 
             v_overlap_start := GREATEST(v_month_start, charge.start_date, v_calc_start);
@@ -3188,8 +3191,16 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            -- Maintenance base amount (existing logic, unchanged)
-            IF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
+            -- Maintenance base amount. 'undivided_interest' (UP Act s.18(1)): the society's monthly
+            -- common-expense budget x this flat's declared % of undivided interest. Falls back to
+            -- the per-sq-ft logic below when the basis is not selected, no budget is set, or this
+            -- flat has no percentage yet, so nothing is silently billed at zero.
+            IF charge.billing_basis = 'undivided_interest'
+               AND COALESCE(charge.common_expense_budget_monthly, 0) > 0
+               AND apt.undivided_interest_pct IS NOT NULL THEN
+                v_base_maint := ROUND(charge.common_expense_budget_monthly * apt.undivided_interest_pct / 100
+                                      * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            ELSIF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
                 v_base_maint := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE
                 v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
@@ -13430,6 +13441,16 @@ BEGIN
      WHERE society_id = p_society_id AND active AND apartment_size > 0
        AND (p_overwrite OR undivided_interest_pct IS NULL);
     GET DIAGNOSTICS v_n = ROW_COUNT;
+
+    -- 6-decimal rounding can leave the total a hair off 100; give the residual to the largest
+    -- flat, but only when every active flat now has a percentage (never disturb a partial fill).
+    IF NOT EXISTS (SELECT 1 FROM apartments WHERE society_id = p_society_id AND active AND undivided_interest_pct IS NULL) THEN
+        UPDATE apartments SET undivided_interest_pct = undivided_interest_pct
+               + (100 - (SELECT SUM(undivided_interest_pct) FROM apartments WHERE society_id = p_society_id AND active))
+         WHERE id = (SELECT id FROM apartments WHERE society_id = p_society_id AND active
+                      ORDER BY undivided_interest_pct DESC, id LIMIT 1)
+           AND ABS(100 - (SELECT SUM(undivided_interest_pct) FROM apartments WHERE society_id = p_society_id AND active)) < 0.001;
+    END IF;
     RETURN v_n;
 END $$;
 
@@ -13812,4 +13833,197 @@ LANGUAGE sql STABLE AS $$
     FROM owner_loans l JOIN apartments a ON a.id = l.apartment_id
     WHERE l.society_id = p_society_id AND l.principal > l.repaid_amount
     ORDER BY a.flat_number, l.loan_date
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- UP AOA COMPLIANCE LAYER, PART 2
+--   (a) billing by undivided-interest %   (b) owner loans posted to the ledger
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- ── (a) Billing basis ─────────────────────────────────────────────────────────
+-- 'per_sqft'            : apt_maintenance_rate x apartment_size (unchanged default)
+-- 'undivided_interest'  : common_expense_budget_monthly x apartments.undivided_interest_pct / 100
+-- apt_maintenance_amount stays a hard per-apartment override only in 'per_sqft' mode.
+-- Sinking / repair fund levies stay per-sq-ft in both modes.
+ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft'
+    CHECK (billing_basis IN ('per_sqft', 'undivided_interest'));
+ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS common_expense_budget_monthly NUMERIC(12, 2)
+    CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0);
+
+-- What each flat would pay for a given monthly common-expense budget, next to the
+-- per-sq-ft rate that would produce the same total.
+CREATE OR REPLACE FUNCTION fn_undivided_interest_bill_preview(p_society_id INT, p_monthly_budget NUMERIC)
+RETURNS TABLE (apartment_id INT, flat_number VARCHAR, apartment_size INT, undivided_interest_pct NUMERIC,
+               monthly_share NUMERIC, equivalent_rate_per_sqft NUMERIC)
+LANGUAGE sql STABLE AS $$
+    WITH t AS (SELECT NULLIF(SUM(apartment_size), 0) AS tot FROM apartments WHERE society_id = p_society_id AND active)
+    SELECT a.id, a.flat_number, a.apartment_size, a.undivided_interest_pct,
+           ROUND(p_monthly_budget * a.undivided_interest_pct / 100, 2),
+           ROUND(p_monthly_budget * a.undivided_interest_pct / 100 / NULLIF(a.apartment_size, 0), 4)
+    FROM apartments a CROSS JOIN t
+    WHERE a.society_id = p_society_id AND a.active AND a.undivided_interest_pct IS NOT NULL
+    ORDER BY a.flat_number
+$$;
+
+-- ── (b) Owner loans: ledger posting (bye-law 3(1)(f) lets the association lend to owners) ──
+ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS ledger_posted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS disbursal_mode VARCHAR(20);
+ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS journal_id INT;
+
+CREATE TABLE IF NOT EXISTS owner_loan_repayments (
+    id               SERIAL PRIMARY KEY,
+    loan_id          INT NOT NULL REFERENCES owner_loans (id) ON DELETE CASCADE,
+    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    repay_date       DATE NOT NULL,
+    principal_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (principal_amount >= 0),
+    interest_amount  NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (interest_amount >= 0),
+    mode             VARCHAR(20) NOT NULL,
+    journal_id       INT,
+    created_by       INT REFERENCES users (id),
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (principal_amount + interest_amount > 0)
+);
+
+CREATE OR REPLACE FUNCTION fn_ensure_owner_loan_accounts(p_society_id INT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO accounts (id, society_id, name, tab_name, header, parent_account_id,
+                          drcr_account, has_bf, depreciation_percent, is_depreciable)
+    SELECT 1410, p_society_id, 'Loans to Owners', 'LnOwn', 'Loans & Advances Given', 1400,
+           'Dr', TRUE, 100, FALSE
+    WHERE EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 1400)
+      AND NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 1410);
+
+    INSERT INTO accounts (id, society_id, name, tab_name, header, parent_account_id,
+                          drcr_account, has_bf, depreciation_percent, is_depreciable, mutuality_nature)
+    SELECT 4116, p_society_id, 'Interest on Owner Loans', 'IntOwnLn', 'Interest on Owner Loans', 4110,
+           'Cr', FALSE, 100, FALSE, 'mutual'
+    WHERE EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 4110)
+      AND NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 4116);
+
+    INSERT INTO account_statutory_mappings (society_id, account_id, regime_code, head_code, effective_from, source_reference)
+    SELECT p_society_id, 1410, slr.regime_code, 'LOANS_GIVEN', DATE '2011-11-16', 'Model Bye-Laws 2011, bye-law 3(1)(f)'
+    FROM society_legal_regime slr
+    WHERE slr.society_id = p_society_id AND slr.regime_code = 'UP_AOA_2010'
+      AND EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 1410)
+    ON CONFLICT DO NOTHING;
+END $$;
+
+-- Disbursement: Dr Loans to Owners / Cr cash or bank. Engine policy (not statute):
+-- a resolution reference is mandatory, and the cash-payment limit applies.
+CREATE OR REPLACE FUNCTION fn_disburse_owner_loan(
+    p_society_id INT, p_apartment_id INT, p_loan_date DATE, p_principal NUMERIC, p_rate_pct NUMERIC,
+    p_mode VARCHAR, p_purpose TEXT, p_resolution_ref VARCHAR, p_created_by INT)
+RETURNS TABLE (loan_id INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE v_flat VARCHAR; v_loan INT; v_bank INT; v_journal INT; v_limit TEXT;
+BEGIN
+    SELECT flat_number INTO v_flat FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id AND active;
+    IF NOT FOUND THEN loan_id := NULL; msg := 'Error: apartment not found in this society'; RETURN NEXT; RETURN; END IF;
+    IF p_principal IS NULL OR p_principal <= 0 THEN loan_id := NULL; msg := 'Error: principal must be positive'; RETURN NEXT; RETURN; END IF;
+    IF COALESCE(p_rate_pct, 0) < 0 THEN loan_id := NULL; msg := 'Error: interest rate cannot be negative'; RETURN NEXT; RETURN; END IF;
+    IF COALESCE(TRIM(p_resolution_ref), '') = '' THEN
+        loan_id := NULL; msg := 'Error: a Board / general-body resolution reference is required'; RETURN NEXT; RETURN; END IF;
+    IF p_mode IS NULL OR p_mode = 'journal' THEN loan_id := NULL; msg := 'Error: choose how the money was paid out'; RETURN NEXT; RETURN; END IF;
+
+    v_limit := fn_check_cash_payment_limit(p_society_id, p_principal, p_mode);
+    IF v_limit IS NOT NULL AND fn_cash_limit_mode(p_society_id) = 'block' THEN
+        loan_id := NULL; msg := 'Error: ' || v_limit; RETURN NEXT; RETURN; END IF;
+
+    PERFORM fn_ensure_owner_loan_accounts(p_society_id);
+    IF NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 1410) THEN
+        loan_id := NULL; msg := 'Error: this society has no Loans & Advances Given account'; RETURN NEXT; RETURN; END IF;
+
+    v_bank := fn_resolve_bank_leg(p_society_id, p_mode);
+    v_journal := NEXTVAL('seq_transaction_number');
+
+    INSERT INTO owner_loans (society_id, apartment_id, loan_date, principal, interest_rate_pct, purpose,
+                             resolution_ref, created_by, ledger_posted, disbursal_mode, journal_id)
+    VALUES (p_society_id, p_apartment_id, p_loan_date, p_principal, COALESCE(p_rate_pct, 0), p_purpose,
+            TRIM(p_resolution_ref), p_created_by, TRUE, p_mode, v_journal)
+    RETURNING id INTO v_loan;
+
+    INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                              amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
+    VALUES (p_society_id, 'Dr', p_loan_date, 1410, p_apartment_id, 'apartment',
+            'Loan to owner of ' || v_flat || ' (' || TRIM(p_resolution_ref) || ')',
+            p_principal, p_mode, 'paid', p_created_by, NOW(), 'owner_loans', v_loan, v_journal);
+    IF v_bank IS NOT NULL THEN
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                                  amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
+        VALUES (p_society_id, 'Cr', p_loan_date, v_bank, p_apartment_id, 'apartment',
+                'Loan paid out - ' || v_flat, p_principal, p_mode, 'paid', p_created_by, NOW(),
+                'owner_loans', v_loan, v_journal);
+    END IF;
+
+    IF v_limit IS NOT NULL THEN
+        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+        VALUES (p_society_id, 'CASH_PAYMENT_LIMIT', 'owner_loans', v_loan, v_limit)
+        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+    END IF;
+    loan_id := v_loan; msg := 'OK'; RETURN NEXT;
+END $$;
+
+-- Repayment: Dr cash/bank, Cr Loans to Owners (principal), Cr Interest on Owner Loans (interest).
+CREATE OR REPLACE FUNCTION fn_repay_owner_loan(
+    p_loan_id INT, p_repay_date DATE, p_principal NUMERIC, p_interest NUMERIC, p_mode VARCHAR, p_created_by INT)
+RETURNS TABLE (repayment_id INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE l owner_loans%ROWTYPE; v_p NUMERIC; v_i NUMERIC; v_bank INT; v_journal INT; v_rep INT; v_flat VARCHAR;
+BEGIN
+    SELECT * INTO l FROM owner_loans WHERE id = p_loan_id FOR UPDATE;
+    IF NOT FOUND THEN repayment_id := NULL; msg := 'Error: loan not found'; RETURN NEXT; RETURN; END IF;
+    IF NOT l.ledger_posted THEN
+        repayment_id := NULL; msg := 'Error: this loan is a register-only entry (never posted to the ledger); repay it by editing the register';
+        RETURN NEXT; RETURN; END IF;
+    v_p := COALESCE(p_principal, 0); v_i := COALESCE(p_interest, 0);
+    IF v_p < 0 OR v_i < 0 OR v_p + v_i <= 0 THEN repayment_id := NULL; msg := 'Error: enter a positive principal and/or interest amount'; RETURN NEXT; RETURN; END IF;
+    IF v_p > l.principal - l.repaid_amount THEN
+        repayment_id := NULL; msg := 'Error: principal exceeds the outstanding balance of ' || (l.principal - l.repaid_amount); RETURN NEXT; RETURN; END IF;
+    IF p_mode IS NULL OR p_mode = 'journal' THEN repayment_id := NULL; msg := 'Error: choose how the money was received'; RETURN NEXT; RETURN; END IF;
+
+    PERFORM fn_ensure_owner_loan_accounts(l.society_id);
+    SELECT flat_number INTO v_flat FROM apartments WHERE id = l.apartment_id;
+    v_bank := fn_resolve_bank_leg(l.society_id, p_mode);
+    v_journal := NEXTVAL('seq_transaction_number');
+
+    INSERT INTO owner_loan_repayments (loan_id, society_id, repay_date, principal_amount, interest_amount, mode, journal_id, created_by)
+    VALUES (p_loan_id, l.society_id, p_repay_date, v_p, v_i, p_mode, v_journal, p_created_by)
+    RETURNING id INTO v_rep;
+
+    IF v_bank IS NOT NULL THEN
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                                  amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
+        VALUES (l.society_id, 'Dr', p_repay_date, v_bank, l.apartment_id, 'apartment',
+                'Loan repayment received - ' || v_flat, v_p + v_i, p_mode, 'paid', p_created_by, NOW(),
+                'owner_loan_repayments', v_rep, v_journal);
+    END IF;
+    IF v_p > 0 THEN
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                                  amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
+        VALUES (l.society_id, 'Cr', p_repay_date, 1410, l.apartment_id, 'apartment',
+                'Loan principal repaid - ' || v_flat, v_p, p_mode, 'paid', p_created_by, NOW(),
+                'owner_loan_repayments', v_rep, v_journal);
+    END IF;
+    IF v_i > 0 THEN
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+                                  amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
+        VALUES (l.society_id, 'Cr', p_repay_date, 4116, l.apartment_id, 'apartment',
+                'Loan interest received - ' || v_flat, v_i, p_mode, 'paid', p_created_by, NOW(),
+                'owner_loan_repayments', v_rep, v_journal);
+    END IF;
+
+    UPDATE owner_loans SET repaid_amount = repaid_amount + v_p WHERE id = p_loan_id;
+    repayment_id := v_rep; msg := 'OK'; RETURN NEXT;
+END $$;
+
+-- Simple-interest estimate on the outstanding principal since the later of the loan
+-- date and the last repayment. A guide for the Board, not an accrual: interest is only
+-- booked when it is actually received through fn_repay_owner_loan.
+CREATE OR REPLACE FUNCTION fn_owner_loan_interest_estimate(p_loan_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS NUMERIC LANGUAGE sql STABLE AS $$
+    SELECT COALESCE(ROUND((l.principal - l.repaid_amount) * l.interest_rate_pct / 100
+                  * GREATEST(p_asof - GREATEST(l.loan_date, COALESCE((SELECT MAX(repay_date) FROM owner_loan_repayments WHERE loan_id = l.id), l.loan_date)), 0)
+                  / 365.0, 2), 0)
+    FROM owner_loans l WHERE l.id = p_loan_id
 $$;

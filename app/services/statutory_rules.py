@@ -69,8 +69,9 @@ STATUTORY_ROWS = {
     "reserve": (
         "Reserve Fund",
         "Societies Registration Act / State Cooperative Societies Acts",
-        "Statutory reserve from net surplus plus entrance/transfer fees, for "
-        "long-term solvency (25% of net surplus under the UP AOA regime).",
+        "Statutory reserve from net surplus, for long-term solvency (25% of "
+        "net surplus under the UP AOA regime). The UP transfer fee (1/2%) goes to "
+        "the Major Repair Fund under bye-law 39, not here.",
         True,
         "Mapped to the RESERVE_FUND head; FY close appropriates the surplus.",
     ),

@@ -742,6 +742,19 @@ def register_drilldown_callbacks(app):
                 kpi_style = {"display": "none"}
                 return store, content, bc, kpi_style, no_update
 
+            # ── UP AOA Compliance — custom card (Admin only)
+            if card_id == "kpi_up_compliance":
+                if role != "admin":
+                    return no_update, no_update, no_update, no_update, {
+                        "_toast": {"type": "error", "message": "Admin only."}
+                    }
+                store = nav_state.initial_state(role, sid)
+                store = nav_state.navigate_to(store, "form_up_compliance", "UP AOA Compliance")
+                hide_kpis = True
+                content, bc, db_err = _render_current(store, auth)
+                kpi_style = {"display": "none"}
+                return store, content, bc, kpi_style, no_update
+
             # ── My Transactions — custom card, not a schema-driven list.
             # Same bypass-DRILLDOWN_MAP pattern as kpi_fy_closing_report;
             # the logged-in member's own id is resolved server-side inside
@@ -3207,6 +3220,17 @@ def _render_card(
                 fy_options=fy_options, selected_fy=selected_fy,
                 society_name=society_name, society_id=sid_val,
             )
+
+        # ── UP AOA Compliance — custom card (Admin only)
+        if card_id == "form_up_compliance":
+            if get_current_user_role() != "admin":
+                return html.Div("Admin only.", className="text-danger p-3")
+            sid_val = filters.get("society_id")
+            if not sid_val:
+                return html.Div("Society not resolved.", className="text-danger p-3")
+            from app.services import up_aoa_actions
+            from app.dash_apps.pages.up_compliance_card import render_up_compliance_card
+            return render_up_compliance_card(up_aoa_actions.load_card_data(sid_val))
 
         # ── Fund Management — custom card (Admin only)
         if card_id == "form_fund_management":
