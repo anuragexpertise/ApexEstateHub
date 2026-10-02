@@ -443,8 +443,17 @@ def register_customize_callbacks(app):
                 )
         import time
 
+        from app.services.regime_rules_admin import is_protected_rule_sql
         from database.db_manager import db
- 
+
+        # Legal-regime rule tables are edited through Master -> AOA Rule Editor (validated, effective-dated,
+        # audited). A raw write here would skip all three, so it is refused. This is not a security boundary.
+        _hit = is_protected_rule_sql(sql_text)
+        if _hit:
+            return dbc.Alert(
+                f"'{_hit}' is a legal-regime rule table. Change it from Master → AOA Rule Editor so the change "
+                "is validated, dated and audited.", color="danger", className="mt-2 py-2", style={"fontSize": "12px"})
+
         sid = get_current_society_id()
         sql = sql_text.strip()
  

@@ -14047,3 +14047,89 @@ RETURNS NUMERIC LANGUAGE sql STABLE AS $$
                   / 365.0, 2), 0)
     FROM owner_loans l WHERE l.id = p_loan_id
 $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- MASTER RULE EDITOR — append-only audit log + societies.state → legal regime sync
+-- Backs Master Portal → "AOA Rule Editor" (app/services/regime_rules_admin.py).
+-- Idempotent: safe to re-run, safe to paste into Master Settings → Integrate to DB.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS regime_rule_audit (
+    id              BIGSERIAL PRIMARY KEY,
+    target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
+                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode')),
+    regime_code     VARCHAR(30),
+    society_id      INT,
+    rule_key        VARCHAR(300),
+    action          VARCHAR(20) NOT NULL CHECK (action IN ('new_version', 'update', 'set')),
+    old_value       JSONB,
+    new_value       JSONB,
+    reason          TEXT NOT NULL CHECK (length(btrim(reason)) >= 10),
+    changed_by      INT,
+    changed_by_role VARCHAR(20),
+    changed_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
+
+CREATE OR REPLACE FUNCTION trg_regime_rule_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'regime_rule_audit is append-only';
+END
+$$;
+DROP TRIGGER IF EXISTS regime_rule_audit_immutable ON regime_rule_audit;
+CREATE TRIGGER regime_rule_audit_immutable BEFORE UPDATE OR DELETE ON regime_rule_audit
+    FOR EACH ROW EXECUTE FUNCTION trg_regime_rule_audit_immutable();
+
+-- The Setup Wizard writes societies.state as a code ('UP'); older rows hold the full name
+-- ('Uttar Pradesh'). Every fn_regime_param_* / fn_* compliance function reads
+-- society_legal_regime, so a society with a state but no regime row silently got "rule not
+-- applicable" from all of them. This keeps the two in step, for every writer of societies.state.
+-- Only an ACTIVE regime profile is ever assigned; a state with none leaves the row untouched.
+CREATE OR REPLACE FUNCTION fn_sync_society_regime(p_society_id INT) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_state  TEXT;
+    v_code   TEXT;
+    v_regime VARCHAR(30);
+    v_from   DATE;
+BEGIN
+    SELECT btrim(state) INTO v_state FROM societies WHERE id = p_society_id;
+    IF v_state IS NULL OR v_state = '' THEN
+        RETURN 'no_state';
+    END IF;
+    SELECT m.code INTO v_code
+    FROM (VALUES ('UP','UTTAR PRADESH'), ('MH','MAHARASHTRA'), ('KA','KARNATAKA'), ('TN','TAMIL NADU'),
+                 ('DL','DELHI'), ('RJ','RAJASTHAN'), ('MP','MADHYA PRADESH'), ('WB','WEST BENGAL'),
+                 ('GJ','GUJARAT'), ('TS','TELANGANA'), ('AP','ANDHRA PRADESH'), ('BR','BIHAR'),
+                 ('HR','HARYANA'), ('PB','PUNJAB'), ('KL','KERALA')) AS m(code, name)
+    WHERE m.code = upper(v_state) OR m.name = upper(v_state);
+    IF v_code IS NULL THEN
+        RETURN 'unknown_state';
+    END IF;
+    SELECT code, effective_from INTO v_regime, v_from
+    FROM legal_regime_profiles
+    WHERE state_code = v_code AND status = 'active'
+    ORDER BY effective_from DESC LIMIT 1;
+    IF v_regime IS NULL THEN
+        RETURN 'no_active_regime';
+    END IF;
+    INSERT INTO society_legal_regime (society_id, regime_code, effective_from, source_reference)
+    VALUES (p_society_id, v_regime, v_from, 'auto: societies.state = ' || v_state)
+    ON CONFLICT (society_id) DO UPDATE
+        SET regime_code = EXCLUDED.regime_code, effective_from = EXCLUDED.effective_from,
+            source_reference = EXCLUDED.source_reference, updated_at = NOW()
+        WHERE society_legal_regime.regime_code <> EXCLUDED.regime_code;
+    RETURN v_regime;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION trg_societies_sync_regime() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM fn_sync_society_regime(NEW.id);
+    RETURN NULL;
+END
+$$;
+DROP TRIGGER IF EXISTS societies_sync_regime ON societies;
+CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state ON societies
+    FOR EACH ROW EXECUTE FUNCTION trg_societies_sync_regime();
+
+-- One-off backfill for societies that already picked a state in the wizard.
+SELECT fn_sync_society_regime(id) FROM societies;

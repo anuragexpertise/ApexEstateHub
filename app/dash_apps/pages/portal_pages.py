@@ -393,9 +393,9 @@ def _rwa_compliance_up_page(c: str) -> html.Div:
         html.Div(sections),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
         html.Small(
-            "To add or update an instrument: edit LEGAL_INSTRUMENTS_UP_AOA in database/seed.py (preferred, "
-            "keeps this list in version control), or push a one-off INSERT/UPDATE via Master Settings → "
-            "KPI Inspector → Integrate to DB.",
+            "To change an entry's status, provisions, source or verified date, use Master → AOA Rule Editor "
+            "(validated and audited). To add a new instrument, add it to LEGAL_INSTRUMENTS_UP_AOA in "
+            "database/seed.py and re-run the seed. Raw INSERT/UPDATE on this table through Integrate to DB is blocked.",
             className="text-muted",
         ),
     ], className="portal-page")
@@ -416,6 +416,10 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
     ]
     if active_tab == "rwa-compliance-up":
         return _rwa_compliance_up_page(c)
+
+    if active_tab == "aoa-rules":
+        from app.dash_apps.pages.master_rules_page import render_master_rules_page
+        return render_master_rules_page()
 
     if active_tab == "master-settings":
         import dash

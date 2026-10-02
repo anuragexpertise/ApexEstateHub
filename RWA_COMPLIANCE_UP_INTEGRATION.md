@@ -73,13 +73,11 @@ single simple-protocol call.
 
 4. Click **Integrate to DB**. `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF
    NOT EXISTS` make this safe to re-run if you're not sure it already ran.
-5. Seed the 10 researched rows — either:
-   - run `python database/seed.py` once against this database (it now calls
-     `seed_legal_instrument_catalog()`, idempotent on
-     `(regime_code, title, enactment_year)`), **or**
-   - copy the `INSERT INTO legal_instrument_catalog (...) VALUES (...)`
-     statements built from `LEGAL_INSTRUMENTS_UP_AOA` in `database/seed.py`
-     and paste them into the same SQL box, then **Integrate to DB** again.
+5. Seed the 10 researched rows: run `python database/seed.py` once against this
+   database (it calls `seed_legal_instrument_catalog()`, idempotent on
+   `(regime_code, title, enactment_year)`). Raw `INSERT`/`UPDATE` on
+   `legal_instrument_catalog` through the Integrate box is blocked — edits to
+   existing rows go through **Master → AOA Rule Editor**.
 6. Open the sidebar tab **RWA Compliance (UP)**
    (`/dashboard/master-compliance-up`) to confirm the table renders.
    Until step 3–4 have run, that page itself shows this same instruction
@@ -109,11 +107,10 @@ and UP-RERA rules can be amended). To refresh:
 2. Edit `LEGAL_INSTRUMENTS_UP_AOA` in `database/seed.py` — add new rows or
    update `status` to `'superseded'` on anything replaced (don't delete rows;
    superseded instruments are still useful history).
-3. Re-run `python database/seed.py`, or push the specific `INSERT ... ON
-   CONFLICT (regime_code, title, enactment_year) DO UPDATE SET ...` /
-   `UPDATE legal_instrument_catalog SET ...` statement via Integrate to DB
-   for a single-row fix without a full reseed.
-4. Update `last_verified_on` on whichever rows you re-confirmed, so the tab's
+3. Re-run `python database/seed.py` to add new rows. To fix or retire one
+   existing row without a reseed, use **Master → AOA Rule Editor → Edit a
+   catalog entry** (audited). The Integrate box refuses writes to this table.
+4. Set `last_verified_on` there on whichever rows you re-confirmed, so the tab's
    "last verified" line stays honest.
 
 Extending to another state (e.g. Maharashtra, already `status='draft'` in
