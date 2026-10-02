@@ -117,13 +117,18 @@ def build_rules_panel(step, society_id=None):
     Body of the "Acts & Rules" column for one wizard step.
 
     1) Framework rows from README "Statutory Framework Coverage" (app/services/statutory_rules.py)
-    2) Official "read the Act" links from kpi_rule_links, looked up through
+    2) For the steps listed in STEP_INSTRUMENTS, the tabulated Act / Rules /
+       Bye-laws governing this society's regime (legal_instrument_catalog)
+    3) Official "read the Act" links from kpi_rule_links, looked up through
        STEP_LINK_CATEGORIES — the old code queried the wizard step *name*
        ("Society Details") against kpi_rule_links.category ('sinking_fund',
        'fund_gst', ...) and always got nothing — for the society's own state
        (was hard-coded "ALL", which also hid every UP-specific link).
     """
-    from app.services.statutory_rules import rows_for_step, STEP_LINK_CATEGORIES
+    from app.services.statutory_rules import (
+        rows_for_step, STEP_LINK_CATEGORIES, STEP_INSTRUMENTS,
+        instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+    )
 
     state = "UP"
     if society_id:
@@ -146,6 +151,32 @@ def build_rules_panel(step, society_id=None):
             ),
         ], className="sw-rule"))
 
+    instruments_html = []
+    if step in STEP_INSTRUMENTS:
+        regime, instruments = instruments_for_society(society_id)
+        instruments_html.append(html.H6(
+            [html.I(className="fas fa-gavel me-2"), "Act / Rules / Bye-laws"],
+            style={"fontWeight": "700", "color": "#2c3e50", "marginTop": "18px", "marginBottom": "6px"},
+        ))
+        instruments_html.append(html.Small(
+            f"{regime} · {len(instruments)} instrument{'s' if len(instruments) != 1 else ''} — full table on the "
+            "'UP AOA Compliance' step.",
+            className="text-muted", style={"display": "block", "marginBottom": "6px"},
+        ))
+        for itype, items in grouped_instruments(instruments).items():
+            instruments_html.append(html.Div(
+                [dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), className="me-2",
+                           pill=True, style={"fontSize": "10px"}),
+                 html.Small(items[0]["title"] + (f" ({items[0]['enactment_year']})" if items[0].get("enactment_year") else ""),
+                            style={"fontSize": "11.5px", "fontWeight": "600", "color": "#1f3b57"})],
+                style={"marginBottom": "3px"},
+            ))
+            for r in items[1:]:
+                instruments_html.append(html.Small(
+                    "· " + r["title"] + (f" ({r['enactment_year']})" if r.get("enactment_year") else ""),
+                    className="text-muted", style={"display": "block", "marginLeft": "8px", "fontSize": "11px"},
+                ))
+
     links = []
     cats = STEP_LINK_CATEGORIES.get(step, [])
     if cats:
@@ -167,9 +198,9 @@ def build_rules_panel(step, society_id=None):
                     html.P(lk.description, style={"fontSize": "11.5px", "color": "#6c757d", "marginBottom": "8px", "lineHeight": "1.4"}),
                 ], style={"borderBottom": "1px solid #eee", "marginBottom": "8px"}))
 
-    out = cards
+    out = cards + instruments_html
     if links:
-        out = cards + [html.H6("Official sources", className="text-primary mt-3 mb-2")] + links
+        out = out + [html.H6("Official sources", className="text-primary mt-3 mb-2")] + links
     return out
 
 
@@ -209,7 +240,7 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Society Details", "Administrator", "Instructions"],
-    "Tax & Compliance": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    "Tax & Compliance": ["Society Compliance", "UP AOA Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
     "Billing & Accounts": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
@@ -220,6 +251,7 @@ CATEGORY_ICONS = {
     "Administrator": "fas fa-user-shield",
     "Instructions": "fas fa-info-circle",
     "Society Compliance": "fas fa-gavel",
+    "UP AOA Compliance": "fas fa-book-open",
     "TAN & TDS Rates": "fas fa-percent",
     "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
     "Apartment Charges": "fas fa-home",
@@ -386,7 +418,7 @@ def render_category_content(category, society_id=None):
             )
         
     # Add Print Button for specific categories
-    if category in ["Society Compliance", "TAN & TDS Rates", "Accounts"]:
+    if category in ["Society Compliance", "UP AOA Compliance", "TAN & TDS Rates", "Accounts"]:
         elements.append(
             html.Div([
                 dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
@@ -619,6 +651,123 @@ def render_category_content(category, society_id=None):
             state, key, val, val_text, unit, eff_from, eff_to, notes = item
             inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
+    elif category == "UP AOA Compliance":
+        # Read-only reference step: the tabulated Acts, Rules, Bye-laws and
+        # Notifications governing this society's regime, from
+        # legal_instrument_catalog — the same rows the Master Portal's
+        # "RWA Compliance (UP)" tab renders (portal_pages.py), so the admin
+        # can read the provisions behind the fund rates / bases they set on
+        # the Society Compliance and Apartment Charges steps. Maintained by
+        # Master (LEGAL_INSTRUMENTS_UP_AOA in database/seed.py); nothing on
+        # this step is editable, so it takes no State in submit_setup_wizard.
+        from app.services.statutory_rules import (
+            instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+        )
+        regime, instruments = instruments_for_society(society_id)
+
+        profile = {}
+        try:
+            profile = db._execute(
+                """SELECT name, primary_law, rules_version, model_bye_laws_version,
+                          effective_from, status
+                   FROM legal_regime_profiles WHERE code = :code""",
+                {"code": regime}, fetch_one=True,
+            ) or {}
+        except Exception:
+            profile = {}
+
+        out = [
+            _render_banner(
+                "UP AOA Compliance — Act / Rules / Bye-laws",
+                f"The statutes governing this Apartment Owners' Association ({regime}). "
+                "This reference is maintained by Master and cannot be edited here — review it "
+                "before submitting, and raise anything out of date through Master Portal → "
+                "RWA Compliance (UP).",
+            ),
+        ]
+
+        if profile:
+            out.append(dbc.Card([
+                dbc.CardBody([
+                    html.H6([html.I(className="fas fa-scale-balanced me-2"),
+                             profile.get("name") or regime],
+                            className="text-primary mb-2", style={"fontWeight": "700", "fontSize": "13px"}),
+                    html.Div([
+                        html.Div([html.Small("Primary law", className="text-muted d-block"),
+                                  html.Small(profile.get("primary_law") or "—")], className="sw-rule-sec"),
+                        html.Div([html.Small("Rules", className="text-muted d-block"),
+                                  html.Small(profile.get("rules_version") or "—")], className="sw-rule-sec"),
+                        html.Div([html.Small("Model bye-laws", className="text-muted d-block"),
+                                  html.Small(profile.get("model_bye_laws_version") or "—")], className="sw-rule-sec"),
+                        html.Div([html.Small("Effective from", className="text-muted d-block"),
+                                  html.Small(profile.get("effective_from") or "—")], className="sw-rule-sec"),
+                        html.Div([html.Small("Regime", className="text-muted d-block"),
+                                  html.Small(regime),
+                                  dbc.Badge(profile.get("status") or "active",
+                                            color="success" if (profile.get("status") or "active") == "active" else "secondary",
+                                            pill=True, style={"fontSize": "10px"})], className="sw-rule-sec"),
+                    ], style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(190px, 1fr))", "gap": "10px"}),
+                ])
+            ], className="mb-3 shadow-sm border-0"))
+
+        if not instruments:
+            out.append(dbc.Alert(
+                [html.H6([html.I(className="fas fa-database me-2"), "Catalog not available"],
+                         className="alert-heading", style={"fontWeight": "700"}),
+                 html.P("No Act / Rules / Bye-laws rows could be loaded for this regime. "
+                        "Master can integrate them from Master Portal → Settings → KPI Inspector → "
+                        "\"Integrate to DB\" (see Master Portal → RWA Compliance (UP) for the SQL).",
+                        style={"fontSize": "13px", "marginBottom": "0"})],
+                color="warning", className="mb-3 shadow-sm",
+            ))
+            return elements + out
+
+        out.append(html.H6(
+            f"{len(instruments)} statutory instrument{'s' if len(instruments) != 1 else ''} — {regime}",
+            style={"fontWeight": "700", "color": "#15304f", "marginTop": "14px", "marginBottom": "8px", "fontSize": "13px"},
+        ))
+
+        for itype, items in grouped_instruments(instruments).items():
+            out.append(html.H6(
+                [dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), className="me-2"),
+                 f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
+                style={"marginTop": "14px", "marginBottom": "6px", "fontWeight": "700",
+                       "color": "#15304f", "fontSize": "12.5px"},
+            ))
+            body_rows = []
+            for r in items:
+                year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
+                body_rows.append(html.Tr([
+                    html.Td([html.Strong(r["title"] + year, style={"fontSize": "11.5px"}),
+                             html.Br(),
+                             html.Small(r.get("issuing_authority") or "", className="text-muted")],
+                            style={"maxWidth": "240px"}),
+                    html.Td(html.Small(r.get("applicability") or "—"), style={"fontSize": "11px", "maxWidth": "200px"}),
+                    html.Td(html.Small(r.get("key_provisions") or "—"), style={"fontSize": "11px", "maxWidth": "340px"}),
+                    html.Td(dbc.Badge(r.get("status") or "active",
+                                      color="success" if (r.get("status") or "active") == "active" else "secondary",
+                                      pill=True), style={"fontSize": "10px"}),
+                    html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
+                            style={"fontSize": "10px", "maxWidth": "200px"}),
+                ]))
+            out.append(dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("Instrument", style={"fontSize": "11px"}),
+                    html.Th("Applicability", style={"fontSize": "11px"}),
+                    html.Th("Key Provisions", style={"fontSize": "11px"}),
+                    html.Th("Status", style={"fontSize": "11px"}),
+                    html.Th("Source", style={"fontSize": "11px"}),
+                ])),
+                html.Tbody(body_rows),
+            ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+        out.append(html.Small(
+            "Superseded instruments are retained as history — check the Status column before relying on "
+            "a provision. Last verified: "
+            + str(max((r.get("last_verified_on") for r in instruments if r.get("last_verified_on")), default="not recorded")) + ".",
+            className="text-muted d-block mt-2",
+        ))
+        return elements + out
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due = 0.0, 0.0, 1
         s_sink, s_repair, s_int = DEFAULT_SINKING_FUND_RATE, DEFAULT_REPAIR_FUND_RATE, MAX_INTEREST_RATE_PCT
