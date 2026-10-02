@@ -25,6 +25,7 @@
 2. [Feature Highlights](#2-feature-highlights)
 3. [Architecture Overview](#3-architecture-overview)
 4. [The Five Portals](#4-the-five-portals)
+    - [4.6 Concern Lifecycle (`concerns_assigns`)](#46-concern-lifecycle-concerns_assigns)
 5. [Portal Data Scoping](#5-portal-data-scoping)
 6. [Drill-Down Navigation Engine](#6-drill-down-navigation-engine)
 7. [Authentication & Security](#7-authentication--security)
@@ -236,6 +237,92 @@ For gate security staff. Scoped to `[society_id, security_id]`.
 - Attendance clock-in / clock-out
 - View apartments, vendors, events (read-only)
 - Default view: own security profile card below KPIs
+
+---
+
+### 4.6 Concern Lifecycle (`concerns_assigns`)
+
+A concern's state lives in **one row per assignee** in `concerns_assigns`, keyed
+by `(concern_id, role, entity_id)` where `role` is `ADM` / `VND` / `SEC`.
+`concerns.status` is **not** written by application code after the initial
+INSERT — it is a read-only aggregate cache maintained by one trigger,
+`fn_trg_sync_concern_status` → `fn_sync_concern_status(concern_id)`.
+
+**Per-role stage chains**
+
+| Role | Chain | How they get on the concern |
+|---|---|---|
+| `VND` (vendor) | `invited` → `bid_submitted` → `assigned` → `resolved` → `closed` (or `declined` from `invited`) | **Invite** → **Bid** (may submit *and revise* while `invited` or `bid_submitted`) |
+| `SEC` (security) | `assigned` → `resolved` → `closed` | **Assign** only — see below |
+| `ADM` (admin) | `assigned` → `accepted` → `resolved` → `closed` (or `declined` from `assigned`) | **Assign** (admins never bid) |
+
+**Security do not bid.** There is no invitation round for them: an `invited`
+`SEC` row has no legal way forward, because `Bid`/`Decline` are vendor-only and
+`bid_submitted` is not reachable from any security action. The Invite modal's
+`SEC` branch therefore writes the row straight at `assigned`, and
+`loaders.invite_concern_assignee()` rejects `SEC` outright with a pointer to
+Assign. Their **Resolved** button needs *both* halves of the gate — the guard's
+own row at `assigned` **and** an admin row on the same concern having reached
+`accepted`. Checking the admin row alone (as the code once did) offered the
+button to guards who were never assigned, or had already resolved.
+
+**The `concerns.status` aggregate counts "touched" rows only** — rows that
+reached `assigned` or beyond. Candidates still at `invited` / `bid_submitted` /
+`declined` are excluded entirely, so a losing bidder can never hold a concern
+back at `assigned` after its actual assignee has resolved.
+
+| Condition (over touched rows) | `concerns.status` |
+|---|---|
+| no touched rows | `open` |
+| all `closed` | `closed` |
+| all `resolved` or `closed` | `resolved` |
+| otherwise | `assigned` |
+
+`open` is a bucket covering three different situations — nobody invited yet,
+candidates invited and bidding, and every candidate declined — so the profile
+banner derives its wording from the actual assignment rows rather than from
+this column alone.
+
+**Invariants — do not break these**
+
+- Every helper in `loaders.py` is a **stage transition**, not an unconditional
+  write. Re-invite refuses to touch a row at `assigned` / `accepted` /
+  `resolved` / `closed` (`RE_INVITE_BLOCKED_STAGES`); re-assign refuses
+  `accepted` / `resolved` / `closed` (`REASSIGN_BLOCKED_STAGES`) but *does*
+  allow re-pointing a still-`assigned` row, which is a legitimate mid-flight
+  correction. Each guard reads the row under `SELECT … FOR UPDATE` so a
+  rejection can name the stage that blocked it.
+- `close_concern()` requires at least one assignment row and no row still at
+  `assigned` / `accepted` (`CLOSE_BLOCKING_STAGES`). Without that it reported
+  "Concern closed" on a concern with no assignees — the write matched nothing,
+  the trigger left `concerns.status` at `open`, and a close push still went out.
+  `loaders.concern_is_closable()` is the same predicate and gates the button.
+- Unchecking someone in the Assign modal must not erase committed work:
+  `accepted` rows are protected exactly like `resolved` / `closed`.
+- A concern's content is **frozen** once any row reaches `bid_submitted` or
+  beyond — `_save_concern`'s edit branch refuses, because the
+  `v.service_type ILIKE concern_type` match is what decides which vendors can
+  be invited at all.
+- The `concerns.preferred_time` column is `TIME`: an unset form value must be
+  `NULL`, never the string `"anytime"`.
+- `concerns.concern_type` defaults to `field_config.DEFAULT_CONCERN_TYPE`
+  (`"general"`), shared by the form pre-fill and the save handler so the two
+  cannot disagree. The default decides which vendors a blank concern can ever
+  be assigned to.
+- Owner-initiated Invite / Assign / Close are restricted to concerns whose
+  `created_by` is the caller, checked server-side on every path (button
+  visibility is not a guard).
+- **Only Admin and Owner may raise a concern.** `("vendor", "concerns")` and
+  `("security", "concerns")` are **view-only** — a `"new"` perm renders a
+  `New` button on the list card that routes to `form_concern_new`, where
+  `apartment_id` is `ADMIN_ONLY`-editable and therefore read-only and empty
+  for those roles, so the only thing it could ever produce is an orphan
+  concern with `apartment_id = NULL` that no owner can see, invite for, or
+  close. `_save_concern` refuses such a write server-side too, so a directly
+  posted callback cannot get around the perm. (Note that
+  `field_config.get_validation()` has **no callers** — every `_save_*` handler
+  validates its own fields by hand, so `"required"` in `FIELD_CONFIG` is
+  documentation, not enforcement.)
 
 ---
 
@@ -1033,7 +1120,7 @@ EstateHub/
 │   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation, per bank account (Bank Account selector on the upload modal; candidates filtered by where the money actually landed)
 │   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
 │   │   │   ├── concern_bid_callbacks.py      ← Vendor "Save Bid" on a concern
-│   │   │   ├── invite_to_callbacks.py        ← Invite vendors/security to bid on a concern
+│   │   │   ├── invite_to_callbacks.py        ← Invite vendors to bid on a concern; security are placed straight at 'assigned' (they don't bid)
 │   │   │   ├── channel_callbacks.py          ← Channel creation, subscribe/unsubscribe
 │   │   │   ├── poll_callbacks.py             ← Owner voting and poll management
 │   │   │   ├── account_callbacks.py          ← Account settings / change password
@@ -1137,7 +1224,7 @@ function but is absent from `CALLBACK_MODULES`. Current order
 "bank_reconcile_callbacks"   # 14a2. Bank statement reconciliation
 "assign_to_callbacks"        # 14b. Concern assignment
 "concern_bid_callbacks"      # 14c. Vendor bid on concern
-"invite_to_callbacks"        # 14d. Invite vendors/security to bid
+"invite_to_callbacks"        # 14d. Invite vendors to bid; security are assigned directly (no bidding)
 "drillin_callbacks"          # 14e. Entity-picker modal + Bill Group Pay (both register_* fns auto-called)
 "channel_callbacks"          # 15. Channels
 "poll_callbacks"             # 16. Polls
@@ -1245,6 +1332,19 @@ Rule 12: dbc.Label/Button take ONE positional arg (children). dbc.Label("x", htm
 | `submit_appropriation` returned 10 values for 11 Outputs | The Particulars field is an Output but was never returned as `None`, so **every successful** appropriation would fail with "Incorrect number of output values" and leave the form filled — masked until the datetime crash above stopped firing first | Sixth `None` added; the form now clears completely. Note `render_up_compliance_body()` has the same class of coupling (positional `card.children[2].children`) |
 | UP AOA had SQL but no UI | Neither `fn_appropriate_income_to_fund`-class function had a Python caller; the fund functions existed, the card did not | Fund Management card: 4 sections, 6 shared builders, and the reload path wired to all of them |
 | `up_aoa_compliance_service.py` never imported | Added with the SQL engine, then superseded — the card calls `up_aoa_actions` directly, so the module has zero callers | Documented in [§17](#17-codebase-map) as dead code rather than left silently drifting |
+| Security's "Resolved" button was gated on the wrong row | `renderers.py` and the handler both checked only whether *any* admin row on the concern was `accepted`, never security's own row. A guard who was never assigned — or who had already resolved — was offered the button and then got "No active (assigned) assignment found for you on this concern" | Both now require the caller's **own** `SEC` row at `assigned` *in addition to* the admin-accepted condition, via `loaders.get_concern_assignment_status()` |
+| Security was inviteable but could never do anything with it | The Invite modal wrote `SEC` rows at `invited`, but `Bid` and `Decline` are vendor-only and there is no other path off `invited` except a direct Assign — so security sat stuck at a stage the UI offered no button for | Security are no longer invited. `loaders.invite_concern_assignee()` rejects `SEC` with a pointer to Assign; the Invite modal's `SEC` branch writes straight at `assigned` |
+| Re-invite / re-assign silently demoted working rows | Both guards excluded only `resolved` / `closed`. Re-inviting reset an `assigned` (or `accepted`) row back to `invited` and wiped its `bid_amount`; re-assigning dropped an admin's `accepted` back to `assigned` | Stage-specific exclusion lists (`RE_INVITE_BLOCKED_STAGES`, `REASSIGN_BLOCKED_STAGES`) plus a `SELECT … FOR UPDATE` pre-check, so a refusal names the stage that blocked it. The Assign modal's uncheck handler now protects `accepted` rows too |
+| `close_concern` had no precondition | It reported "Concern closed" and fired a close push on a concern with **zero** assignment rows — the UPDATE matched nothing, the trigger left `concerns.status` at `open`, and the success toast was a lie. It also stamped `invited` / `bid_submitted` / `declined` rows `closed` on an untouched concern. The Close button rendered at every stage, including `open` | Refuses when there are no assignment rows or anyone is still `assigned` / `accepted`; `concern_is_closable()` is the same predicate and gates the button |
+| A vendor could not revise a bid, but a ₹0 bid was accepted | `Bid` was hidden the moment the row reached `bid_submitted`, and `submit_concern_bid` only matched `status='invited'`, so a vendor who fat-fingered their figure was stuck with it. The guard was `bid < 0` while the error read "must be positive", so a ₹0 bid went through | Bid is offered across the whole candidate window (`invited` **or** `bid_submitted`) and the write accepts both; guard corrected to `bid <= 0` |
+| `preferred_time` defaulted to `"anytime"` on a `TIME` column | An untouched optional time input came back as `""`, and the save handler substituted the string `"anytime"`, which Postgres rejects — `invalid input syntax for type time` — so a new concern submitted without a preferred time failed to insert at all. On edit the same default applied, so *clearing* the field raised the same error instead of nulling it | `_concern_time_value()` normalises `""` / `None` / whitespace to `NULL` on both the insert and the update |
+| `concern_type` had two different defaults | `field_config.py` declared `"general"`, the save handler wrote `"other"`. Not cosmetic: candidate queries match `v.service_type ILIKE concern_type`, so the default decided which vendors a blank concern could ever be assigned to — and `"other"` matched nothing | Single source of truth `field_config.DEFAULT_CONCERN_TYPE = "general"`, imported by the save handler and both modals |
+| "Your involvement" never showed a bid amount, and had no `declined` state | The banner read `assign_bid_amount`, but `_assignments` comes from `fn_concern_assignments()`, which returns the column as `bid_amount` — so the key was always absent. `declined` was missing from `_CONCERN_STAGE_LABEL` entirely, so a caller who had declined fell through to a generic `.title()` pill with no actions explained | Reads `bid_amount`; `'declined'` added to the label map |
+| The `open` banner was one fixed, wrong string | It always read "awaiting invitation/assignment" — including while three vendors had already bid, and after every candidate had declined (which puts the aggregate straight back to `open`, indistinguishable from a concern nobody has looked at). `resolved` said "pending close" to vendors and security, who have no Close button. The owner portal, which has no assignment row of its own, saw no assignee names and no bid count at all | `_concern_status_banner_text()` derives the wording from the actual rows; `resolved` is role-aware; `_concern_team_banner_text()` gives every portal the assignee list and bid count |
+| The new-concern form promised a bidding round that hadn't started | "please wait for bids from vendors/security" — but nobody has been invited yet, and security never bid. The actual next step is inviting | Reworded to point at Invite → Assign, and to say explicitly that security are assigned directly and don't bid |
+| A concern's content was editable at any stage | An owner could rewrite the description, type or preferred time after bids, after assignment, or after closure — invalidating the `service_type` match that decides who gets invited. The save path also had no `created_by` check (the 6b row-ownership block only covers apartment / vendor / security *profiles*), and since `apartment_id` is force-stamped to the caller's own flat, a forged `id` could re-point someone else's concern onto their own flat | Edit refused once any row reaches `bid_submitted` or beyond, and non-admin callers must own the concern (`created_by = caller`) |
+| Vendor portal could raise concerns it had no flat for | `("vendor", "concerns")` carried `"new"`, which renders a `New` button on the concerns list routing to `form_concern_new` — where `apartment_id` is `ADMIN_ONLY`-editable, so it renders read-only and **empty** for a vendor. The result was a concern with `apartment_id = NULL`: no owner could ever see, invite for, or close it, yet `notify_concern_created` still fired at the missing flat. `field_config`'s `"required"` rule did not help — `get_validation()` has no callers | Perm is now **view-only** for vendor and security. `_save_concern` additionally refuses any non-admin write with no `apartment_id`, covering a directly posted callback. Admin stays exempt so a society-level concern with no flat remains legal (the column is nullable by design) |
+| `ca.pem`, `service.cert`, `service.key`, `setup_aiven_db.sh` were committed | `.gitignore` covered `.env` and `*.json` but nothing matched `*.pem` / `*.crt` / `*.key`, so a fresh clone handed everyone Aiven's CA cert **and the server's own private key** (which is what Postgres uses to authenticate the app). `.gitignore` listing them had no effect — the files were tracked | Removed from the index (files left on disk so the local connection and `setup_aiven_db.sh` keep working) and ignore rules added. **The credentials themselves must be rotated on the Aiven project — that is an ops action, not a repo change, and is still outstanding** |
 
 ---
 
@@ -1657,7 +1757,7 @@ The following tables map every user-reachable workflow in the application, organ
 | **Admin → Channels** | Sidebar: Channels → 3 KPI cards (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Create / Subscribe / Trigger Alert / View Subscribers | Manage school bus, taxi, visitor alert channels and subscriptions |
 | **Admin → Assets** | Sidebar: Assets → 2 KPI cards (`kpi_assets_count`, `kpi_assets_value`) → `list_assets` → `profile_asset` → Edit / Dispose | Buy, manage, depreciate, and dispose of society assets |
 | **Admin → Events** | Sidebar: Events → 2 KPI cards (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Edit / Sell Tickets | Create/edit events, sell/manage event tickets |
-| **Admin → Concerns** | Sidebar: Concerns → 2 KPI cards (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Invite / Assign / Accept / Decline / Resolved / Close | Full concern lifecycle management |
+| **Admin → Concerns** | Sidebar: Concerns → 2 KPI cards (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Invite / Assign / Accept / Decline / Resolved / Close (Close appears only once every assignee has resolved) | Full concern lifecycle management |
 | **Admin → Polls** | Sidebar: Polls → 2 KPI cards (`kpi_polls_total`, `kpi_polls_active`) → `list_polls` → `profile_poll` → Edit / Declare Results / Close | Create, manage, and close community polls |
 | **Admin → Evaluate Pass** | Sidebar: Evaluate Pass → QR Scanner → Entry IN / Exit OUT / NFC Patrol; Manual QR entry; Recent Scans; KPIs (`kpi_events_total`, `kpi_concerns_assigned`) | Gate access control via QR scanning (shared with Security portal) |
 | **Admin → Customize** | Sidebar: Customize → Layout Editor → Select Portal/Tab → Drag-and-drop KPIs → Save/Reset | Customize KPI dashboard layout per portal/tab per society |
@@ -1673,7 +1773,7 @@ The following tables map every user-reachable workflow in the application, organ
 | **Owner → Channels** | Sidebar: Channels → 3 KPIs (`kpi_channels_total`, `kpi_channels_active`, `kpi_channels_pending`) → `list_channels` → `profile_channel` → Subscribe | Subscribe to school bus/taxi/visitor alert channels |
 | **Owner → Bills Paid** | Sidebar: Bills Paid → KPI (`kpi_receipts_total`) → `list_receipts` → `profile_receipt` → Print | View own confirmed receipts and print them |
 | **Owner → Events** | Sidebar: Events → 2 KPIs (`kpi_events_total`, `kpi_events_tickets`) → `list_events` / `list_event_ticket_items` → profile → Buy Tickets | View events, buy tickets, view purchased tickets |
-| **Owner → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Invite / Assign / Close | Raise, track, and close own concerns |
+| **Owner → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_not_closed`, `kpi_concerns_total`) → `list_concerns` → `profile_concern` → Raise New / Invite / Assign / Close (Invite, Assign and Close restricted to concerns the owner raised; Close only once every assignee has resolved) | Raise, track, and close own concerns |
 | **Owner → Polls** | Sidebar: Polls → 2 KPIs (`kpi_polls_total`, `kpi_polls_active`) → `list_polls` → `profile_poll` (vote) | View and vote in community polls |
 | **Owner → Settings** | Sidebar: Settings → 1 KPI (`kpi_owner_member_since`) → `list_apartments` (self-scoped) → `profile_apartment` → Edit | View/edit own apartment profile |
 
@@ -1685,7 +1785,7 @@ The following tables map every user-reachable workflow in the application, organ
 | **Vendor → Financials** | Sidebar: Financials → 2 KPIs (`kpi_receipts_total`, `kpi_ven_charges_count`) → `list_receipts` / `list_ven_charges` | View own receipts and charge rules |
 | **Vendor → Passes** | Sidebar: Passes → 2 KPIs (`kpi_my_pass_expiry`, `kpi_vendors_passes`) → `list_vendors` (self-scoped) → `profile_vendor` → Buy Pass / Gate Pass | View/buy own gate passes |
 | **Vendor → Events** | Sidebar: Events → 1 KPI (`kpi_events_total`) → `list_events` → `profile_event` → Buy Tickets | View events and buy tickets |
-| **Vendor → Concerns** | Sidebar: Concerns → 3 KPIs (`kpi_concerns_invited`, `kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Bid / Decline / Resolved; Manual QR concern lookup | Vendor concern workflow: receive invites, bid, get assigned, resolve |
+| **Vendor → Concerns** | Sidebar: Concerns → 3 KPIs (`kpi_concerns_invited`, `kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` (read-only — no New button) → `profile_concern` → Bid (submit **and revise** until assigned) / Decline (only while unbid) / Resolved (only once assigned); Manual QR concern lookup | Vendor concern workflow: receive invites, bid, get assigned, resolve |
 | **Vendor → Settings** | Sidebar: Settings → 1 KPI (`kpi_vendors_date`) → `list_vendors` (self-scoped) → `profile_vendor` → Edit | View/edit own vendor profile |
 
 #### 🔴 SECURITY Portal (role: `security`)
@@ -1697,7 +1797,7 @@ The following tables map every user-reachable workflow in the application, organ
 | **Security → Attendance** | Sidebar: Attendance → Clock In / Clock Out buttons | Clock in/out for shift duty |
 | **Security → Receipts** | Sidebar: Receipts → 1 KPI (`kpi_security_receipts`) → `list_receipts` (self-scoped) | View own collected receipts |
 | **Security → Events** | Sidebar: Events → 1 KPI (`kpi_events_total`) → `list_events` | View upcoming events |
-| **Security → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Resolved | View and resolve assigned concerns |
+| **Security → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Resolved (read-only until assigned by an admin, and until an admin has **accepted** the concern; security are never invited and never bid) | View and resolve assigned concerns |
 | **Security → Users** | Sidebar: Users → 3 KPIs (`kpi_security_total`, `kpi_security_on_duty`, `kpi_security_off_duty`) → `list_security` → `profile_security` | View fellow security staff duty roster |
 | **Security → Settings** | Sidebar: Settings → 1 KPI (`kpi_time_qr`) → Attendance QR | View/manage own profile, attendance QR |
 

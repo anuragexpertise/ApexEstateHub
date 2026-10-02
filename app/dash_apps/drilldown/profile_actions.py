@@ -173,8 +173,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "icon": "fa-hand-holding-usd",
             "color": "primary",
             # Vendor portal only, per the Concerns workflow spec
-            # (workflow_vendor_kpi_list_profile). Shown only while the
-            # caller's own row is 'invited' (renderers.py).
+            # (workflow_vendor_kpi_list_profile). Shown across the whole
+            # candidate window — the caller's own row is 'invited' OR
+            # 'bid_submitted' (renderers.py) — so a vendor can revise a
+            # figure before anyone is assigned.
             "roles": ["vendor"],
         },
         {
@@ -185,9 +187,10 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "color": "secondary",
             # Vendor portal only, per spec — companion to "Bid". Only
             # shown while the caller's own concerns_assigns row is
-            # 'invited' (same gate as "Bid"); sets status='declined',
-            # notifies admin, and drops the caller from the Assign modal's
-            # candidate pool for this concern until re-invited.
+            # 'invited' (same gate as "Bid" before a bid exists); sets
+            # status='declined', notifies admin, and drops the caller from
+            # the Assign modal's candidate pool for this concern until
+            # re-invited. Security are never invited and so never decline.
             "roles": ["vendor"],
         },
         {
@@ -196,11 +199,13 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-check",
             "color": "success",
-            # Vendor portal: shown while the caller's own row is
-            # 'assigned' (renderers.py). Security portal: also uses this
-            # action id, but per spec its gate checks whether an ADMIN's
-            # row on the same concern is 'accepted' — not the security
-            # caller's own status (see renderers.py / loaders.is_any_admin_accepted).
+            # Vendor portal: shown while the caller's own row is 'assigned'
+            # (renderers.py). Security portal uses this same action id and
+            # must ALSO hold their own 'assigned' SEC row — plus an admin
+            # row on the same concern having reached 'accepted' (see
+            # renderers.py / loaders.is_any_admin_accepted). Checking the
+            # admin row alone used to offer the button to guards who had
+            # never been assigned, or had already resolved.
             "roles": ["vendor", "security"],
         },
         {
@@ -243,6 +248,12 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
             "target_card": None,          # server-side only — no navigation
             "icon": "fa-lock",
             "color": "dark",
+            # Shown only where it can actually do something (renderers.py):
+            # at least one assignment row exists and nobody is still at
+            # 'assigned'/'accepted'. loaders.close_concern() enforces the
+            # same precondition server-side — it used to render at every
+            # stage and report "Concern closed" even on a concern with no
+            # assignees, where the write matched nothing.
             "roles": ["admin", "apartment"],   # Admin portal + Owner portal
         },
     ],

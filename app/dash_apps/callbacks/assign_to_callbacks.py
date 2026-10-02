@@ -33,6 +33,7 @@ from app.security.audit_context import (
     get_current_society_id,
 )
 from app.utils.ux_toasts import error_toast
+from app.utils.field_config import DEFAULT_CONCERN_TYPE
 
 PORTAL_ROLE_LABEL = {
     "ADM": "Admin",
@@ -43,11 +44,16 @@ PORTAL_ROLE_LABEL = {
 
 # Human labels for the concerns_assigns.status enrichment optionally
 # joined in by list_assignable_*() when a concern_id is passed. See
-# Concerns_Workflow_Review.md §2.2.
+# Concerns_Workflow_Review.md §2.2. Mirrors _CONCERN_STAGE_LABEL in
+# renderers.py — 'declined' and 'accepted' were missing here too, so a
+# candidate who had opted out or an admin who had already accepted rendered
+# a raw "Declined"/"Accepted" string with no pill styling.
 _STAGE_LABEL = {
     "invited": ("Invited", "#7d8ea3"),
     "bid_submitted": ("Bid submitted", "#1d74d8"),
+    "declined": ("Declined", "#94a3b8"),
     "assigned": ("Assigned", "#e59620"),
+    "accepted": ("Accepted", "#2563eb"),
     "resolved": ("Resolved", "#17976e"),
     "closed": ("Closed", "#64748b"),
 }
@@ -466,11 +472,15 @@ def register_assign_to_callbacks(app):
                 to_delete = prior_keys - selected_keys
                 to_insert = selected_keys - prior_keys
 
-                # Unchecking someone must not silently erase a resolved/closed
-                # assignment's history — only rows still in-flight (invited,
-                # bid_submitted, assigned) can be removed here.
+                # Unchecking someone must not silently erase committed work —
+                # only rows still in-flight (invited, bid_submitted, assigned,
+                # declined) can be removed here. 'accepted' was missing from
+                # this list even though the comment claimed the row's history
+                # was protected: an admin who had already ACCEPTED the job
+                # could be silently un-assigned by unticking their box,
+                # dropping them back to the start of the admin sub-lifecycle.
                 for key in to_delete:
-                    if prior_by_key.get(key) in ("resolved", "closed"):
+                    if prior_by_key.get(key) in ("accepted", "resolved", "closed"):
                         continue
                     parts = key.split("-", 1)
                     role = parts[0]
@@ -481,7 +491,7 @@ def register_assign_to_callbacks(app):
                     cur.execute(
                         "DELETE FROM concerns_assigns "
                         "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
-                        "AND status NOT IN ('resolved', 'closed')",
+                        "AND status NOT IN ('accepted', 'resolved', 'closed')",
                         (concern_id, society_id, role, entity_id),
                     )
 
@@ -534,7 +544,7 @@ def register_assign_to_callbacks(app):
                         concern_row = cur.fetchone()
                         notify_concern_assigned(
                             society_id, concern_id,
-                            (dict(concern_row) if concern_row else {}).get("concern_type", "other"),
+                            (dict(concern_row) if concern_row else {}).get("concern_type", DEFAULT_CONCERN_TYPE),
                             newly_assigned,
                         )
                     except Exception as e:

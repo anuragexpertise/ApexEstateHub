@@ -567,11 +567,18 @@ CREATE TABLE IF NOT EXISTS concerns (
 --
 -- ('accepted' added 2026-08 to support the Admin portal's Accept/Decline/
 -- Resolved actions on an assigned concern — see
--- migration_concerns_assigns_accepted_status.sql.) VND/SEC rows normally
+-- migration_concerns_assigns_accepted_status.sql.) VND rows normally
 -- start at 'invited' and progress through 'bid_submitted' before an admin
 -- formally 'assigned's them — though a direct "Assign" is still allowed at
 -- any point as a shortcut (e.g. price already agreed offline), which simply
--- promotes whatever row exists straight to 'assigned'.
+-- promotes whatever row exists straight to 'assigned'. A VND row can also
+-- revise its bid while still at 'bid_submitted'.
+--
+-- SEC rows skip 'invited'/'bid_submitted' ENTIRELY: security staff never
+-- bid, so there is no invitation round for them. They are placed straight on
+-- a concern at 'assigned' (the Invite modal's SEC branch, and
+-- loaders.assign_concern), then follow the same assigned -> resolved path
+-- as a vendor — gated on an ADM row having reached 'accepted' first.
 --
 -- concerns.status is KEPT (existing code, KPIs, and the
 -- idx_concerns_society_status index all depend on it), but it is a
@@ -579,12 +586,25 @@ CREATE TABLE IF NOT EXISTS concerns (
 -- below) from these rows — application code should stop writing
 -- concerns.status directly for anything except the initial INSERT ('open').
 --
--- Aggregate rule:
---   no concerns_assigns rows for this concern_id            -> concerns.status='open'
---   all rows status='closed'                                -> 'closed'
---   all rows status IN ('resolved','closed')                 -> 'resolved'
---   any row status IN ('assigned','accepted','resolved','closed') -> 'assigned'
---   otherwise (only 'invited'/'bid_submitted' rows exist)     -> 'open'
+-- Aggregate rule — "touched rows only":
+--   The calculation ONLY considers rows that reached 'assigned' or beyond
+--   (assigned / accepted / resolved / closed). Rows still at
+--   'invited' / 'bid_submitted' / 'declined' are CANDIDATES who were never
+--   formally chosen (losing bidders, everyone who opted out) and are
+--   excluded entirely, so they can never hold a concern back. Counting them
+--   meant a single leftover invited row kept a concern pinned at 'assigned'
+--   forever even after its actual assignee had resolved — fixed 2026-08,
+--   see fn_sync_concern_status below.
+--
+--   no touched rows                                  -> concerns.status='open'
+--   all touched rows status='closed'                 -> 'closed'
+--   all touched rows IN ('resolved','closed')        -> 'resolved'
+--   otherwise (some touched row still working)       -> 'assigned'
+--
+-- Note that 'open' is a bucket covering three distinct situations — nothing
+-- invited yet, candidates invited/bidding, and every candidate declined —
+-- which is why the profile banner derives its wording from the actual
+-- assignment rows rather than from this column alone.
 -- ════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS concerns_assigns (

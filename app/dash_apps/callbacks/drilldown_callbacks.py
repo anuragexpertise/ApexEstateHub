@@ -83,6 +83,7 @@ from app.security.audit_context import (
     get_current_linked_id,
 )
 from app.utils.ux_toasts import error_toast
+from app.utils.field_config import DEFAULT_CONCERN_TYPE
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
     today = dt_date.today()
@@ -1099,17 +1100,27 @@ def register_drilldown_callbacks(app):
                 return store, content, bc, kpi_style, toast
 
             # ── Resolved (vendor OR security) — mark the caller's own
-            #    assignment resolved. Vendor: enabled once vendor's own row
-            #    is 'assigned'. Security: per spec, enabled once an ADMIN's
-            #    row on the same concern is 'accepted' (see
-            #    loaders.is_any_admin_accepted / renderers.py) — the
-            #    underlying write still targets security's own row.
+            #    assignment resolved. Both roles need their OWN row at
+            #    'assigned' (the underlying write targets exactly that row).
+            #    Security additionally needs an admin's 'accepted' row on the
+            #    same concern per the Concerns workflow spec — but that check
+            #    alone used to be the WHOLE gate, so the button appeared for a
+            #    guard who was never assigned (or already resolved) and the
+            #    write then failed with "No active (assigned) assignment
+            #    found for you on this concern". Both halves are now enforced
+            #    here and mirrored in renderers.py.
             elif action == "vendor_resolve" and entity == "concern":
                 role = get_current_user_role()
                 caller_entity_id = get_current_linked_id()
                 role_code = {"vendor": "VND", "security": "SEC"}.get(role)
                 if not role_code or not caller_entity_id:
                     toast = {"_toast": {"type": "error", "message": "Only the assigned vendor or security staff can resolve this"}}
+                    return store, content, bc, {"display": "none"}, toast
+                own_status = loaders.get_concern_assignment_status(
+                    int(pk), sid, role_code, int(caller_entity_id),
+                )
+                if own_status != "assigned":
+                    toast = {"_toast": {"type": "error", "message": "No active (assigned) assignment found for you on this concern"}}
                     return store, content, bc, {"display": "none"}, toast
                 if role_code == "SEC" and not loaders.is_any_admin_accepted(int(pk), sid):
                     toast = {"_toast": {"type": "error", "message": "This concern hasn't been accepted by an admin yet"}}
@@ -5188,6 +5199,25 @@ def _save_event(db, d, sid, is_edit, pk):
     return True, f"Event '{title}' created", event_id
 
 
+def _concern_time_value(raw):
+    """Normalise a preferred_time form value for the concerns.preferred_time
+    TIME column.
+
+    The form is optional, and an untouched time input comes back as "" (or
+    None). The column is TIME, so it must be NULL when unset — the old
+    fallback wrote the literal string "anytime" into a TIME column, which
+    Postgres rejects outright ("invalid input syntax for type time"), so a
+    NEW concern submitted without a preferred time failed to insert at all.
+    On edit the same bad default was applied and an empty string was passed
+    through unchanged, so blanking the field on an existing concern raised
+    the same error instead of clearing it.
+    """
+    if raw in (None, ""):
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
 def _save_concern(db, d, sid, is_edit, pk):
     if is_edit:
         # concerns.status is a read-only aggregate synced by
@@ -5211,6 +5241,42 @@ def _save_concern(db, d, sid, is_edit, pk):
         # via the "vendor_resolve" action), and Closed (loaders.close_concern
         # via the "close_concern" action) — none of which go through this
         # function's edit branch at all.
+        #
+        # ── Stage guard ────────────────────────────────────────────────────
+        # The remaining problem is the CONTENT, not the status: once vendors
+        # have bid, an admin has been assigned, or the concern is closed,
+        # editing the description/type/time out from under everyone who
+        # already committed to it is wrong — and it silently invalidates the
+        # service_type match that decides which vendors are invited.
+        # Frozen stages: anything with a bid in, an assignment, or any
+        # resolution at all. 'open' with nobody invited yet stays editable.
+        touched = db._execute(
+            "SELECT 1 AS touched FROM concerns_assigns "
+            "WHERE concern_id=%s AND society_id=%s "
+            "AND status IN ('bid_submitted', 'assigned', 'accepted', 'resolved', 'closed') "
+            "LIMIT 1",
+            (pk, sid), fetch_one=True,
+        )
+        if touched:
+            return False, (
+                "This concern can no longer be edited — someone has already bid on or "
+                "been assigned to it. Close it and raise a new concern instead."
+            ), None
+        # Ownership: the hidden "id" field is client-supplied like any other
+        # input, and concerns.apartment_id is force-stamped to the caller's
+        # own flat at merge step 5 — so without this an owner who edited that
+        # id could rewrite a DIFFERENT owner's concern and re-point it at
+        # their own flat. The 6b row-ownership block only covers apartment /
+        # vendor / security PROFILES, so concerns needed its own check.
+        caller_role = get_current_user_role()
+        if caller_role not in ("admin", "master"):
+            owner_row = db._execute(
+                "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                (pk, sid), fetch_one=True,
+            ) or {}
+            if owner_row.get("created_by") != get_current_user_id():
+                return False, "You can only edit a concern you raised yourself", None
+        concern_type = (d.get("concern_type") or "").strip() or DEFAULT_CONCERN_TYPE
         _upd_by_clause = ", updated_by=%s"
         db._execute(
             "UPDATE concerns SET apartment_id=%s, concern_type=%s, description=%s, "
@@ -5219,12 +5285,12 @@ def _save_concern(db, d, sid, is_edit, pk):
             + _upd_by_clause
             + " WHERE id=%s AND society_id=%s",
             (
-                (d.get("apartment_id"), d.get("concern_type", "other"),
-                 d.get("description"), d.get("preferred_time"),
+                (d.get("apartment_id"), concern_type,
+                 d.get("description"), _concern_time_value(d.get("preferred_time")),
                  d.get("image"), d.get("user_id"), pk, sid)
                 if d.get("image")
-                else (d.get("apartment_id"), d.get("concern_type", "other"),
-                       d.get("description"), d.get("preferred_time"),
+                else (d.get("apartment_id"), concern_type,
+                       d.get("description"), _concern_time_value(d.get("preferred_time")),
                        d.get("user_id"), pk, sid)
             ),
         )
@@ -5232,6 +5298,29 @@ def _save_concern(db, d, sid, is_edit, pk):
     desc = (d.get("description") or "").strip()
     if not desc:
         return False, "Description is required", None
+    # A concern has to be attributable to a flat. Apartment callers are
+    # force-stamped to their own flat at merge step 5, so they always have
+    # one; admin/master keep the free "pick any flat" picker (a society-level
+    # concern with no flat is a legitimate admin choice, and the column is
+    # nullable by design).
+    #
+    # Vendor/security have no apartment_id at all — the field is
+    # ADMIN_ONLY-editable, so it renders read-only and empty for them — and
+    # a concern with apartment_id NULL can never be seen, invited for, or
+    # closed by an owner, while every owner-facing push still fires at a
+    # missing flat. The Vendor portal no longer renders a New button for
+    # concerns at all (("vendor","concerns") is view-only), so this is the
+    # server-side backstop for a directly-posted callback. Admin is exempt so
+    # the society-level case stays legal.
+    #
+    # field_config's "required" rules cannot catch any of this:
+    # field_config.get_validation() has no callers — every _save_* handler
+    # validates its own fields by hand.
+    if get_current_user_role() not in ("admin", "master") and not d.get("apartment_id"):
+        return False, (
+            "A concern must be raised against a flat. Please pick the flat first."
+        ), None
+    concern_type = (d.get("concern_type") or "").strip() or DEFAULT_CONCERN_TYPE
     r = db._execute(
         "INSERT INTO concerns(society_id, apartment_id, concern_type, description, "
         "preferred_time, status, image, created_at, created_by) "
@@ -5239,9 +5328,9 @@ def _save_concern(db, d, sid, is_edit, pk):
         (
             sid,
             d.get("apartment_id"),
-            d.get("concern_type", "other"),
+            concern_type,
             desc,
-            d.get("preferred_time", "anytime"),
+            _concern_time_value(d.get("preferred_time")),
             d.get("image") or None,
             d.get("user_id"),
         ),
@@ -5255,7 +5344,7 @@ def _save_concern(db, d, sid, is_edit, pk):
     # just duplicate that value at best, and race it at worst.
     if new_id:
         try:
-            PushService.notify_concern_created(sid, d.get("apartment_id"), d.get("concern_type", "other"))
+            PushService.notify_concern_created(sid, d.get("apartment_id"), concern_type)
         except Exception as e:
             print(f"⚠️  notify_concern_created failed: {e}")
     return True, "Concern submitted", new_id

@@ -156,7 +156,17 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # guards are in the callback handlers.
     ("vendor", "vendors"):        {"view", "edit"},
     ("vendor", "events"):         {"view"},
-    ("vendor", "concerns"):       {"view", "new"},
+    # VIEW ONLY — a vendor cannot raise a concern. Concerns are resident
+    # issues, filed against a flat: apartment_id is ADMIN_ONLY-editable and
+    # the whole lifecycle downstream (owner invites, owner closes, the
+    # owner-facing pushes) keys off that flat. The "new" that used to sit
+    # here rendered a "New" button on the vendor's concerns list leading to
+    # form_concern_new, where apartment_id is read-only and empty for a
+    # vendor — so the only thing it could produce was an orphan concern with
+    # apartment_id NULL that no owner could ever see, invite for, or close.
+    # _save_concern refuses such a write server-side too, so a forged
+    # callback post can't get around this either.
+    ("vendor", "concerns"):       {"view"},
     ("vendor", "gate_logs"):      {"view"},
     ("vendor", "receipts"):   {"view", "new"},
     ("vendor", "cashbook"):       {"view"},
@@ -1531,9 +1541,14 @@ def render_list_card(card_id: str, title: str, icon: str,
 # in invite_to_callbacks.py / assign_to_callbacks.py) so the concern profile
 # card can render a stage banner without a cross-module import.
 # Stage legend: invited -> bid_submitted -> assigned -> accepted -> resolved -> closed
+# 'declined' is a terminal opt-out, not a step in that chain, but it IS a
+# value concerns_assigns.status can hold — it was missing here, so a caller
+# who had declined fell through to the generic ".title()" fallback and got a
+# bland blue pill with no actions explained.
 _CONCERN_STAGE_LABEL = {
     "invited":       ("Invited",            "#7d8ea3"),
     "bid_submitted": ("Bid submitted",      "#1d74d8"),
+    "declined":      ("Declined",           "#94a3b8"),
     "assigned":      ("Assigned",           "#e59620"),
     "accepted":      ("Accepted",           "#2563eb"),
     "resolved":      ("Resolved",           "#17976e"),
@@ -1541,11 +1556,70 @@ _CONCERN_STAGE_LABEL = {
 }
 
 _CONCERN_STATUS_BANNER = {
-    "open":     ("New concern — awaiting invitation/assignment",  "#de5c52"),
-    "assigned": ("Assigned — work in progress",                   "#e59620"),
-    "resolved": ("Resolved — pending close",                      "#17976e"),
-    "closed":   ("Closed — this concern is complete",             "#64748b"),
+    "assigned": ("Assigned — work in progress", "#e59620"),
+    "closed":   ("Closed — this concern is complete", "#64748b"),
 }
+
+# Stages after which a concern's content is frozen — nobody is being picked
+# or worked on any more, so Invite/Assign would be meaningless.
+_CONCERN_FINAL_STAGES = ("resolved", "closed")
+
+
+def _concern_status_banner_text(status, assignments, role):
+    """(text, colour) for the overall concern status banner.
+
+    'open' is deliberately NOT a fixed string: it is the aggregate's bucket
+    for three very different situations, and telling a caller "awaiting
+    invitation/assignment" while three vendors have already bid (or while
+    every invited candidate has declined) is what made the workflow feel
+    stuck. Derive the wording from the actual assignment rows instead.
+    """
+    if status in _CONCERN_STATUS_BANNER:
+        return _CONCERN_STATUS_BANNER[status]
+    if status == "resolved":
+        # Only admin/owner can actually close — promising vendors and
+        # security a "close" they have no button for is just noise.
+        if role in ("admin", "apartment"):
+            return ("Resolved — ready to close", "#17976e")
+        return ("Resolved — waiting for admin to close", "#17976e")
+    if status == "open":
+        rows = assignments or []
+        if not rows:
+            return ("New concern — invite a vendor to start bidding", "#de5c52")
+        bids = sum(1 for a in rows if a.get("status") == "bid_submitted")
+        pending = sum(1 for a in rows if a.get("status") in ("invited", "bid_submitted"))
+        if pending:
+            if bids:
+                return (f"{bids} bid(s) received — assign someone to proceed", "#e59620")
+            return (f"{pending} candidate(s) invited — waiting for bids", "#e59620")
+        # Every candidate dropped out (or the only admin row was declined),
+        # which puts the aggregate straight back to 'open'. Say so, otherwise
+        # this looks identical to a concern nobody has looked at yet.
+        return ("All candidates declined — re-invite or assign someone directly", "#de5c52")
+    return ("In progress", "#1d74d8")
+
+
+def _concern_team_banner_text(assignments):
+    """One-line summary of who is handling the concern and how many bids are
+    in. Rendered for EVERY portal including the owner, who has no
+    concerns_assigns row of their own and therefore previously saw only the
+    generic status banner — no assignee names, no bid count."""
+    rows = assignments or []
+    names = [
+        (a.get("entity_name") or "").strip()
+        for a in rows
+        if a.get("status") in ("assigned", "accepted", "resolved", "closed")
+        and (a.get("entity_name") or "").strip()
+    ]
+    bids = sum(1 for a in rows if a.get("status") == "bid_submitted")
+    bits = []
+    if names:
+        bits.append("Assigned to: " + ", ".join(names))
+    if bids:
+        bits.append(f"{bids} bid(s) received")
+    if not bits:
+        return None
+    return " · ".join(bits)
 
 _CHANNEL_STATUS_BANNER = {
     True:  ("Active — accepting subscriptions and alerts",       "#17976e"),
@@ -1999,7 +2073,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
 
     text_cells = [_field_cell(f) for f in text_fields]
 
-    # ── Concern actions: scope actions to the caller's own concerns_assigns
+# ── Concern actions: scope actions to the caller's own concerns_assigns
     # stage ──────────────────────────────────────────────────────────────
     # NOTE (fixed 2026-08): these buttons used to be shown to every
     # vendor/security/admin caller on every concern regardless of their own
@@ -2008,24 +2082,38 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # require status='invited' or fail), vendor "Resolved" only at
     # 'assigned', and admin "Accept"/"Decline"/"Resolved" only at
     # 'assigned'/'assigned'/'accepted' respectively (loaders.py).
+    _concern_assignments = record_dict.get("_assignments") or []
+    _concern_status = record_dict.get("status")
     my_concern_status = None
     if entity == "concern" and role in ("vendor", "security", "admin"):
         my_role_code = {"vendor": "VND", "security": "SEC", "admin": "ADM"}[role]
         my_entity_id = auth_data.get("user_id") if role == "admin" else auth_data.get("linked_id")
-        for a in (record_dict.get("_assignments") or []):
+        for a in _concern_assignments:
             if a.get("role") == my_role_code and a.get("entity_id") == my_entity_id:
                 my_concern_status = a.get("status")
                 break
 
-    # Security's "Resolved" is gated differently from vendor's: per the
-    # Concerns workflow spec it's enabled once an ADMIN's row on this
-    # concern reaches 'accepted' — not on security's own assignment status.
+    # Security's "Resolved" needs BOTH halves of the spec's gate: the guard's
+    # OWN row at 'assigned' AND an admin's 'accepted' row on the same concern.
+    # Checking only the admin row offered the button to a guard who was never
+    # assigned (or had already resolved), and the write then failed with
+    # "No active (assigned) assignment found for you on this concern".
     any_admin_accepted = False
     if entity == "concern" and role == "security":
-        for a in (record_dict.get("_assignments") or []):
+        for a in _concern_assignments:
             if a.get("role") == "ADM" and a.get("status") == "accepted":
                 any_admin_accepted = True
                 break
+
+    # Close is refused by loaders.close_concern() unless the concern has at
+    # least one assignment row and nobody is still mid-job; it used to render
+    # at every stage, including on a brand-new concern where it did nothing
+    # but still toasted "Concern closed".
+    can_close_concern = False
+    if entity == "concern":
+        can_close_concern = bool(_concern_assignments) and not any(
+            (a or {}).get("status") in ("assigned", "accepted") for a in _concern_assignments
+        )
 
     # ── Action buttons filtered by role ─────────────────────────────────
     # renderers.py — render_profile_card(), action button loop
@@ -2047,19 +2135,29 @@ def render_profile_card(card_id: str, title: str, icon: str,
             if record_dict.get("status") != "active" or (record_dict.get("total_votes") or 0) > 0:
                 continue
         # Close Poll only makes sense from 'active'.
-        if act_id == "close_poll" and record_dict.get("status") != "active": continue
+        if act_id == "close_poll" and entity == "poll" and record_dict.get("status") != "active": continue
         # Declare Results is a no-op (and rejected server-side) once
         # already declared.
-        if act_id == "declare_results" and record_dict.get("status") == "results_declared": continue
-        if act_id == "save_bid" and my_concern_status != "invited": continue
+        if act_id == "declare_results" and entity == "poll" and record_dict.get("status") == "results_declared": continue
+        # ── Concern lifecycle guards ─────────────────────────────────────
+        # Bid is available across the whole candidate window: a vendor may
+        # submit once, then revise the figure before an admin assigns anyone
+        # (loaders.submit_concern_bid accepts 'invited' OR 'bid_submitted').
+        if act_id == "save_bid" and my_concern_status not in ("invited", "bid_submitted"): continue
+        # Declining only makes sense before a bid exists — after that the
+        # admin either picks the bid or doesn't.
         if act_id == "decline_concern" and my_concern_status != "invited": continue
         if act_id == "vendor_resolve":
-            if role == "security":
-                if not any_admin_accepted: continue
-            elif my_concern_status != "assigned": continue
+            if my_concern_status != "assigned":
+                continue
+            if role == "security" and not any_admin_accepted:
+                continue
         if act_id == "accept_concern" and my_concern_status != "assigned": continue
         if act_id == "decline_concern_admin" and my_concern_status != "assigned": continue
         if act_id == "admin_resolve" and my_concern_status != "accepted": continue
+        if act_id == "close_concern" and not can_close_concern: continue
+        # Picking someone is pointless once the work is done.
+        if act_id in ("invite", "assign") and _concern_status in _CONCERN_FINAL_STAGES: continue
         if act_id == "subscribe_channel":
             is_subscribed = record_dict.get("is_subscribed")
             act_label = "Subscribed" if is_subscribed else "Subscribe"
@@ -2081,9 +2179,9 @@ def render_profile_card(card_id: str, title: str, icon: str,
     # 4b: overall concern status banner
     _concern_banners = []
     if entity == "concern":
-        _cstatus = record_dict.get("status")
-        _stext, _scolor = _CONCERN_STATUS_BANNER.get(
-            _cstatus, ("In progress", "#1d74d8"))
+        _stext, _scolor = _concern_status_banner_text(
+            _concern_status, _concern_assignments, role,
+        )
         _concern_banners.append(dbc.Alert(
             [html.I(className="fas fa-info-circle me-2"), _stext],
             color="light",
@@ -2091,16 +2189,30 @@ def render_profile_card(card_id: str, title: str, icon: str,
                    "borderRadius": "8px", "marginBottom": "8px",
                    "borderColor": f"{_scolor}40"},
         ))
-        # 4a: caller's own assignment stage banner
+        # Who is handling it / how many bids are in. Shown to every portal —
+        # the owner has no concerns_assigns row of their own, so without this
+        # they saw no assignee names and no bid count at all.
+        _team_txt = _concern_team_banner_text(_concern_assignments)
+        if _team_txt:
+            _concern_banners.append(dbc.Alert(
+                [html.I(className="fas fa-users me-2"),
+                 html.Span([html.Strong(_team_txt)])],
+                color="light",
+                style={"fontSize": "12px", "fontWeight": "600", "padding": "8px 12px",
+                       "borderRadius": "8px", "marginBottom": "8px",
+                       "borderColor": "#1d74d840"},
+            ))
+        # 4a: caller's own assignment stage banner (vendor/security/admin —
+        # the owner has no assignment row, hence no "Your involvement")
         if my_concern_status:
             _mlabel, _mcolor = _CONCERN_STAGE_LABEL.get(
                 my_concern_status, (my_concern_status.title(), "#1d74d8"))
             _my_assign = None
-            for _a in (record_dict.get("_assignments") or []):
+            for _a in _concern_assignments:
                 if _a.get("role") == my_role_code and _a.get("entity_id") == my_entity_id:
                     _my_assign = _a
                     break
-            _bid = _my_assign.get("assign_bid_amount") if _my_assign else None
+            _bid = _my_assign.get("bid_amount") if _my_assign else None
             _stage_txt = f"{_mlabel} · ₹{_bid:,.0f}" if _bid not in (None, "") else _mlabel
             _concern_banners.append(dbc.Alert(
                 [html.I(className="fas fa-hourglass-half me-2"),
@@ -3417,15 +3529,20 @@ def _concern_wait_banner(entity_plural: str, prefill: dict) -> html.Div | None:
     """
     Shows a short heads-up on the NEW concern form (Admin's 'Flat No' picker
     and Owner's self-service form both funnel through form_concern_new) so
-    the person raising it knows the next step is bidding, not an instant fix.
+    the person raising it knows the next step.
     Not shown on Edit (prefill has an "id").
+
+    It used to say "please wait for bids from vendors/security", which
+    described a step that hasn't started: nobody has been invited yet, so
+    there are no bids to wait for, and security never bids at all (they're
+    placed straight at 'assigned'). The real next step is inviting.
     """
     if entity_plural != "concerns" or prefill.get("id"):
         return None
     return dbc.Alert(
         [
             html.I(className="fas fa-hourglass-half me-2"),
-            "After submitting, please wait for bids from vendors/security. Once bids arrive, the Invite and Assign buttons on the concern profile will let you pick a candidate.",
+            "After submitting, use Invite on the concern profile to ask vendors to bid. Once bids arrive, use Assign to pick one. Security staff are assigned directly and don't bid.",
         ],
         color="info",
         style={"fontSize": "13px", "fontWeight": "600", "flex": "0 0 auto", "maxWidth": "260px"},

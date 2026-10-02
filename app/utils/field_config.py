@@ -16,6 +16,15 @@ from datetime import date, datetime
 TODAY = date.today().isoformat()
 NOW = datetime.now().strftime("%Y-%m-%dT%H:%M")
 
+# Fallback concerns.concern_type when the field is left blank. This was
+# declared 'general' here and 'other' in the save handler, so the two
+# disagreed about what an untyped concern was called. It matters beyond
+# cosmetics: concerns_assigns candidate queries match on
+# `v.service_type ILIKE concerns.concern_type`, so the default decides which
+# vendors a blank concern can ever be assigned to. 'general' matches the seed
+# vendors' generic "General" service_type; 'other' matched nothing at all.
+DEFAULT_CONCERN_TYPE = "general"
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ROLE SETS — shorthand for common groupings
@@ -505,7 +514,7 @@ FIELD_CONFIG = {
         "concern_type": {
             "visible": ALL_ROLES,
             "editable": ADMIN_ONLY,
-            "default": "general",
+            "default": DEFAULT_CONCERN_TYPE,
             "validation": {
                 "required": "Please select a concern type.",
             },
