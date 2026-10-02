@@ -112,6 +112,38 @@ log = logging.getLogger(__name__)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# SEED DATA RULES (2026-10)
+# ═════════════════════════════════════════════════════════════════════════════
+#   1. Every transaction is dated strictly BEFORE 2-Oct-2026.
+#   2. No single cash-mode transaction exceeds Rs 2,500 — anything larger is
+#      booked through the bank (BANK_MODE).
+#   3. Cash-in-Hand never goes negative in the running balance (follows from
+#      rule 2 + the Rs 300,000 opening balance, and is re-checked by
+#      audit_seed_invariants() after every run).
+#
+# Rule 1 also covers postings that the SQL functions stamp with CURRENT_DATE
+# (receivable accruals, FIFO dues payments): the seed re-dates those itself —
+# see _redate_receivable_accruals() / _redate_postings_since().
+SEED_CUTOFF_DATE = date(2026, 10, 1)   # last permitted transaction date
+CASH_LIMIT       = 2500.00             # max single cash-mode transaction (Rs)
+# 'bank' is accepted by transactions, receipts AND expenses. (neft/rtgs/imp are
+# only valid on transactions/receipts, and fn_buy_asset / fn_buy_deposit also
+# write an expenses row, so they cannot be used for purchases.)
+BANK_MODE        = "bank"
+DEPOSIT_MODE     = BANK_MODE
+
+
+def _guard(label: str, when, amount: float, mode: str):
+    """Raise if one seed transaction breaks the date or cash-limit rule."""
+    d = when if isinstance(when, date) else date.fromisoformat(str(when))
+    if d > SEED_CUTOFF_DATE:
+        raise ValueError(f"seed rule: {label} is dated {d}, after {SEED_CUTOFF_DATE}")
+    if mode == "cash" and float(amount) > CASH_LIMIT:
+        raise ValueError(f"seed rule: {label} is a cash transaction of {amount:,.2f} "
+                         f"(limit {CASH_LIMIT:,.0f}) — use a bank mode")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # CONNECTION
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -590,7 +622,7 @@ SIMPLE_ASSETS = [
     {"company_name": "Tata","asset_name": "Society Patrol Vehicle",       "asset_SNo": "MH12AB1234",
      "purchase_date": "2026-09-12", "purchase_value": 350000, "acc_id": 1150, "reference": "NEFT0912VEH"},
     {"company_name": "Dell","asset_name": "Security Desktop PC",          "asset_SNo": "DELL-PC1",
-     "purchase_date": "2026-10-15", "purchase_value": 45000, "acc_id": 1160, "reference": "NEFT1015PC"},
+     "purchase_date": "2026-09-25", "purchase_value": 45000, "acc_id": 1160, "reference": "NEFT0925PC"},
 ]
 
 # Instruments purchases — acc_id is now 1130 (block).
@@ -598,10 +630,12 @@ INSTRUMENT_PURCHASES = [
     {"company_name": "LG","asset_name": "PA System (Community Hall)", "asset_SNo": "PA-2026-01",
      "purchase_date": "2026-06-10", "purchase_value": 8000.00, "half_rate": False, "reference": "NEFT0610PA"},
     {"company_name": "Huwaei","asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
-     "purchase_date": "2026-10-05", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT1005CCTV"},
+     "purchase_date": "2026-09-18", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT0918CCTV"},
 ]
 INSTRUMENT_FULL_RATE = 15.0
-YEAR_END_DATE = "2027-03-31"
+# Period-end depreciation journal date. Was 2027-03-31; moved to 30-Sep-2026 so it
+# falls inside the seed's date cutoff (SEED_CUTOFF_DATE).
+YEAR_END_DATE = "2026-09-30"
 
 FULLY_DEPRECIATED_ASSET = {
     "company_name": "Godrej", "asset_name": "Old Intercom Panel", "asset_SNo": "INTERCOM-2019",
@@ -643,8 +677,8 @@ DEPOSIT_PURCHASES = [
 
     {"deposit_name": "Aditya Birla Short Term Fund", "isin": "ABSTF202507",
      "purchase_date": "2025-07-15", "purchase_value": 180000.00,
-     "disposed": True, "sale_date": "2026-11-20", "sale_value": 175000.00, "acc_id": 1200, "reference": "MF20261120AB",
-     "tds_amount": 0.00, "sale_acc_id": 1311},   # Loss ~5k, held <1.5yr -> STCL
+     "disposed": True, "sale_date": "2026-07-10", "sale_value": 175000.00, "acc_id": 1200, "reference": "MF20260710AB",
+     "tds_amount": 0.00, "sale_acc_id": 1311},   # Loss ~5k, held <1yr -> STCL
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -659,20 +693,20 @@ ASSET_DISPOSALS = [
      "sale_date": "2026-05-15", "mode": "cheque", "tds_amount": 0.00,
      "particulars": "Old Intercom Panel sold to scrap dealer", "reference": "CHQ20260515INT"},
 
-    # disposed at GAIN, held <3 years -> STCG (Society Generator purchased 2026-05-15, sold 2027-01-20 -> ~8 months)
+    # disposed at GAIN, held <3 years -> STCG (Society Generator purchased 2026-05-15, sold 2026-09-20 -> ~4 months)
     {"asset_name": "Society Generator",    "sale_value": 40000.00,
-     "sale_date": "2027-01-20", "mode": "neft", "tds_amount": 0.00,
-     "particulars": "Society Generator sold to vendor", "reference": "NEFT20270120GEN"},
+     "sale_date": "2026-09-20", "mode": "neft", "tds_amount": 0.00,
+     "particulars": "Society Generator sold to vendor", "reference": "NEFT20260920GEN"},
 
     # disposed at LOSS, held >3 years -> LTCL (Old asset from 2019)
     {"asset_name": "Old Intercom Panel",   "sale_value": 2000.00,
      "sale_date": "2026-08-10", "mode": "cash", "tds_amount": 0.00,
      "particulars": "Old Intercom Panel sold at loss", "reference": "CSH20260810INT"},
 
-    # disposed at LOSS, held <3 years -> STCL (Community Hall Projector purchased 2026-06-20, sold 2027-02-01 -> ~7.5 months)
+    # disposed at LOSS, held <3 years -> STCL (Community Hall Projector purchased 2026-06-20, sold 2026-09-28 -> ~3 months)
     {"asset_name": "Community Hall Projector", "sale_value": 5000.00,
-     "sale_date": "2027-02-01", "mode": "imp", "tds_amount": 0.00,
-     "particulars": "Projector sold at loss", "reference": "IMP20270201PROJ"},
+     "sale_date": "2026-09-28", "mode": "imp", "tds_amount": 0.00,
+     "particulars": "Projector sold at loss", "reference": "IMP20260928PROJ"},
 ]
 
 POLLS = [
@@ -1843,7 +1877,7 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
             cur,
             "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, item["company_name"], item["asset_name"], item["asset_SNo"], item["purchase_value"],
-             1130, item["purchase_date"], item.get("installation_date"), "cash", admin_uid,
+             1130, item["purchase_date"], item.get("installation_date"), BANK_MODE, admin_uid,
              f"Instrument purchase - {item['asset_name']}"),
         )
         cur.execute(
@@ -1941,7 +1975,7 @@ def seed_simple_assets(cur, conn, society_id: int, admin_uid: int):
             cur,
             "SELECT * FROM fn_buy_asset(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (society_id, asset["company_name"], asset["asset_name"], asset["asset_SNo"], asset["purchase_value"],
-             asset["acc_id"], asset["purchase_date"], asset.get("installation_date"), "cash", admin_uid,
+             asset["acc_id"], asset["purchase_date"], asset.get("installation_date"), BANK_MODE, admin_uid,
              f"Asset purchase - {asset['asset_name']}"),
         )
         cur.execute(
@@ -1962,7 +1996,7 @@ def seed_deposits(cur, conn, society_id: int, admin_uid: int):
             print(f"  · Deposit '{dep['deposit_name']}' already exists — skipped.")
             continue
 
-        mode = dep.get("mode", "cash")
+        mode = dep.get("mode", DEPOSIT_MODE)
         particulars = dep.get("particulars", f"Deposit purchase - {dep['deposit_name']}")
         sale_acc_id = dep.get("sale_acc_id")
 
@@ -1973,7 +2007,7 @@ def seed_deposits(cur, conn, society_id: int, admin_uid: int):
                 %s, %s, %s, %s, %s, %s, %s, %s, %s
             )""",
             (society_id, dep["deposit_name"], dep.get("isin", ""), dep["purchase_value"],
-             dep["acc_id"], dep["purchase_date"], "cash", admin_uid,
+             dep["acc_id"], dep["purchase_date"], mode, admin_uid,
              f"Deposit purchase - {dep['deposit_name']}"),
         )
 
@@ -1989,7 +2023,7 @@ def seed_deposits(cur, conn, society_id: int, admin_uid: int):
                 """SELECT * FROM fn_dispose_deposit(
                     %s, %s, %s, %s, %s, %s, %s, %s
                 )""",
-                (result["deposit_id"], dep["sale_value"], "cash", admin_uid,
+                (result["deposit_id"], dep["sale_value"], mode, admin_uid,
                  dep["sale_date"], f"Deposit disposal - {dep['deposit_name']}",
                  dep.get("sale_acc_id"), dep.get("tds_amount", 0.00)),
             )
@@ -2054,11 +2088,11 @@ def seed_asset_disposals(cur, conn, society_id: int, admin_uid: int):
 #   22   -> 3240 (Gifts)
 RECEIPT_TYPES = [
     ("2026-04-01", 4210, "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
-     "owner2", "apartment", "cash", "NEFT20260401A201"),
+     "owner2", "apartment", "neft", "NEFT20260401A201"),
     ("2026-04-02", 4210, "Apartment Maintenance - Annual Bulk Payment A-102", 120000.00,
-     "owner4", "apartment", "cash", "NEFT20260402A102"),
+     "owner4", "apartment", "neft", "NEFT20260402A102"),
     ("2026-04-08", 4120, "Old Furniture Sold (scrap dealer pickup)", 3500.00,
-     None, "other", "cash", "IMPS0408SCRAP"),
+     None, "other", "imp", "IMPS0408SCRAP"),
     ("2026-04-22", 4230, "NOC / Ownership Transfer Fee - A-102", 1000.00,
      "owner4", "apartment", "cash", "NEFT0422NOC"),
     ("2026-05-03", 4220, "Late Maintenance Payment Fine - A-201", 500.00,
@@ -2066,10 +2100,10 @@ RECEIPT_TYPES = [
     ("2026-07-20", 4112, "Savings Bank Interest Credited (SBI)", 850.00,
      None, "other", "bank", "INT0720SBI"),
     ("2026-09-05", 4242, "Diwali Mela Stall Booking Fee", 4000.00,
-     "vendor1", "vendor", "cash", "NEFT0905DIWALI"),
-    ("2026-12-25", 3240, "Corporate Sponsorship Gift - Winter Fete", 2500.00,
+     "vendor1", "vendor", "neft", "NEFT0905DIWALI"),
+    ("2026-09-22", 3240, "Corporate Sponsorship Gift - Winter Fete", 2500.00,
      "vendor2", "vendor", "cheque", "000512"),
-    ("2027-02-14", 4230, "Community Event Ticket Sales", 1200.00,
+    ("2026-09-27", 4230, "Community Event Ticket Sales", 1200.00,
      None, "other", "upi", "UPI0214TICKET"),
 ]
 
@@ -2136,24 +2170,61 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
     print(f"  ✓ Salary payables auto-generated — {pending_count} pending (not yet paid)")
 
     # Salary 235 -> 5150
+    # Rs 12,000 is over the cash limit, so the advance is paid by bank transfer.
     if not _one(cur, """SELECT 1 FROM expenses WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Salary advance - Ramu Singh (paid, pending confirmation)")):
+        _guard("salary advance - Ramu Singh", "2026-07-16", 12000.00, BANK_MODE)
         cur.execute(
             """INSERT INTO expenses
                (society_id, user_id, entity_id, role, expense_date, acc_id, particulars,
                 amount, mode, status, tds_pct, tds_section, transaction_id, created_at)
-               VALUES (%s,%s,%s,'security',%s,5150,%s,%s,'cash','pending',0,NULL,%s,NOW())""",
+               VALUES (%s,%s,%s,'security',%s,5150,%s,%s,%s,'pending',0,NULL,%s,NOW())""",
             (society_id, security_user_id, None, "2026-07-16",
              "Salary advance - Ramu Singh (paid, pending confirmation)", 12000.00,
-             "NEFT0716SAL"),
+             BANK_MODE, "NEFT0716SAL"),
         )
         conn.commit()
         print("  ✓ Expense (salary paid, status=pending, needs admin confirmation): ₹12000")
 
 
+def _redate_receivable_accruals(cur, conn, society_id: int):
+    """fn_post_receivable_accrual stamps every accrual with CURRENT_DATE, so on
+    the day the seed runs they all land on one date (and past the cutoff when the
+    seed is run after 1-Oct-2026). Re-date each accrual to the first day of the
+    month it bills (receivables.period_month), capped at SEED_CUTOFF_DATE."""
+    cur.execute(
+        """UPDATE transactions t
+              SET trx_date = LEAST(COALESCE(r.period_month, %(cut)s), %(cut)s)
+             FROM receivables r
+            WHERE t.society_id = %(sid)s AND t.source_table = 'receivables'
+              AND t.source_id = r.id AND t.mode = 'journal'
+              AND t.trx_date > %(cut)s""",
+        {"cut": SEED_CUTOFF_DATE, "sid": society_id},
+    )
+    n = cur.rowcount
+    conn.commit()
+    if n:
+        print(f"  ✓ {n} receivable-accrual postings re-dated to their billing month (<= {SEED_CUTOFF_DATE})")
+
+
+def _redate_postings_since(cur, conn, society_id: int, trx_mark: int, rcp_mark: int):
+    """Clamp transactions / receipts created after the given id watermarks (i.e.
+    by the SQL call just made, which dates them CURRENT_DATE) to SEED_CUTOFF_DATE."""
+    cur.execute(
+        "UPDATE transactions SET trx_date = %s WHERE society_id = %s AND id > %s AND trx_date > %s",
+        (SEED_CUTOFF_DATE, society_id, trx_mark, SEED_CUTOFF_DATE),
+    )
+    cur.execute(
+        "UPDATE receipts SET receipt_date = %s WHERE society_id = %s AND id > %s AND receipt_date > %s",
+        (SEED_CUTOFF_DATE, society_id, rcp_mark, SEED_CUTOFF_DATE),
+    )
+    conn.commit()
+
+
 def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid: int):
     cur.execute("SELECT fn_auto_generate_receivables(%s)", (society_id,))
     conn.commit()
+    _redate_receivable_accruals(cur, conn, society_id)
 
     cur.execute(
         """SELECT COALESCE(SUM(amount - paid_amount),0) AS outstanding
@@ -2178,11 +2249,17 @@ def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid
         return
 
     overpay = round(float(outstanding) + 500.00, 2)
+    # Paid by UPI, not cash: the amount is far above CASH_LIMIT. The SQL function
+    # dates its postings CURRENT_DATE, so they are re-dated right after the call.
+    _guard("advance overpayment B-202", SEED_CUTOFF_DATE, overpay, "upi")
+    trx_mark = _one(cur, "SELECT COALESCE(MAX(id),0) AS m FROM transactions")["m"]
+    rcp_mark = _one(cur, "SELECT COALESCE(MAX(id),0) AS m FROM receipts")["m"]
     cur.execute(
         "SELECT * FROM fn_pay_apartment_dues_fifo(%s,%s,%s,%s,%s)",
-        (apt2_id, overpay, "cash", admin_uid, "Advance overpayment - B-202"),
+        (apt2_id, overpay, "upi", admin_uid, "Advance overpayment - B-202"),
     )
     conn.commit()
+    _redate_postings_since(cur, conn, society_id, trx_mark, rcp_mark)
     print(f"  ✓ Apartment B-202 overpaid by ₹500 (paid ₹{overpay} against ₹{outstanding} due) "
           f"— generates an advance-credit row via fn_apply_advance_credit")
 
@@ -2238,10 +2315,92 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# SEED DATA RULES — static check (before seeding) + DB audit (after seeding)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _validate_seed_constants():
+    """Fail fast, before touching the DB, if an edit to the seed data above
+    breaks the date cutoff or the cash limit."""
+    for a in SIMPLE_ASSETS:
+        _guard(f"asset '{a['asset_name']}'", a["purchase_date"], a["purchase_value"], BANK_MODE)
+    for i in INSTRUMENT_PURCHASES:
+        _guard(f"instrument '{i['asset_name']}'", i["purchase_date"], i["purchase_value"], BANK_MODE)
+    _guard("depreciation journal", YEAR_END_DATE, 0, BANK_MODE)
+    for d in DEPOSIT_PURCHASES:
+        m = d.get("mode", DEPOSIT_MODE)
+        _guard(f"deposit purchase '{d['deposit_name']}'", d["purchase_date"], d["purchase_value"], m)
+        if d.get("disposed"):
+            _guard(f"deposit sale '{d['deposit_name']}'", d["sale_date"], d["sale_value"], m)
+    for x in ASSET_DISPOSALS:
+        _guard(f"asset disposal '{x['asset_name']}'", x["sale_date"], x["sale_value"], x.get("mode", "cash"))
+    for (dt, _acc, particulars, amount, _ent, _role, mode, _ref) in RECEIPT_TYPES:
+        _guard(f"receipt '{particulars}'", dt, amount, mode)
+
+
+def audit_seed_invariants(cur, society_id: int) -> bool:
+    """Re-check the three seed rules against what is actually in the database
+    (not just the constants) and print a report. Returns True when all hold."""
+    ok = True
+    cut = SEED_CUTOFF_DATE
+
+    late = _one(cur, """
+        SELECT (SELECT COUNT(*) FROM transactions WHERE society_id=%(s)s AND trx_date    > %(c)s)
+             + (SELECT COUNT(*) FROM receipts     WHERE society_id=%(s)s AND receipt_date > %(c)s)
+             + (SELECT COUNT(*) FROM expenses     WHERE society_id=%(s)s AND expense_date > %(c)s)
+             + (SELECT COUNT(*) FROM assets       WHERE society_id=%(s)s AND (purchase_date > %(c)s OR disposed_at > %(c)s))
+             + (SELECT COUNT(*) FROM deposits     WHERE society_id=%(s)s AND (purchase_date > %(c)s OR sale_date   > %(c)s))
+               AS n,
+               (SELECT MAX(trx_date) FROM transactions WHERE society_id=%(s)s) AS last_trx
+    """, {"s": society_id, "c": cut})
+    if late["n"]:
+        ok = False
+        print(f"  ⚠  {late['n']} row(s) dated after {cut} — database holds data from an older seed; "
+              f"run reset_database.py and re-seed.")
+    else:
+        print(f"  ✓ Dates: every transaction is on/before {cut} (latest: {late['last_trx']})")
+
+    big = _one(cur, """
+        SELECT (SELECT COUNT(*) FROM transactions WHERE society_id=%(s)s AND mode='cash' AND amount > %(l)s)
+             + (SELECT COUNT(*) FROM receipts     WHERE society_id=%(s)s AND mode='cash' AND amount > %(l)s)
+             + (SELECT COUNT(*) FROM expenses     WHERE society_id=%(s)s AND mode='cash' AND amount > %(l)s) AS n
+    """, {"s": society_id, "l": CASH_LIMIT})
+    if big["n"]:
+        ok = False
+        print(f"  ⚠  {big['n']} cash-mode row(s) above Rs {CASH_LIMIT:,.0f}")
+    else:
+        print(f"  ✓ Cash: no cash transaction above Rs {CASH_LIMIT:,.0f}")
+
+    # Same formula as fn_cih_balance_asof: opening (BF) + cash-mode Cr - Dr, in date order.
+    cih = _one(cur, """
+        WITH bf AS (
+            SELECT COALESCE(SUM(CASE WHEN b.drcr_bf='Dr' THEN b.bf_amount ELSE -b.bf_amount END), 0) AS v
+              FROM brought_forward b JOIN accounts a ON a.id = b.acc_id AND a.society_id = b.society_id
+             WHERE a.society_id = %(s)s AND a.tab_name = 'CiH' AND b.financial_year = %(fy)s),
+        run AS (
+            SELECT (SELECT v FROM bf) + SUM(CASE WHEN t.entry_side='Cr' THEN t.amount
+                                                 WHEN t.entry_side='Dr' THEN -t.amount ELSE 0 END)
+                       OVER (ORDER BY t.trx_date, t.id) AS bal
+              FROM transactions t
+             WHERE t.society_id = %(s)s AND t.status = 'paid' AND t.mode = 'cash'
+               AND t.trx_date >= make_date(%(fy)s, 4, 1))
+        SELECT (SELECT v FROM bf) AS opening,
+               COALESCE((SELECT MIN(bal) FROM run), (SELECT v FROM bf)) AS lowest
+    """, {"s": society_id, "fy": BF_FY})
+    if float(cih["lowest"]) < 0:
+        ok = False
+        print(f"  ⚠  Cash-in-Hand running balance dips to Rs {float(cih['lowest']):,.2f}")
+    else:
+        print(f"  ✓ Cash-in-Hand: opening Rs {float(cih['opening']):,.2f}, "
+              f"running balance never below Rs {float(cih['lowest']):,.2f}")
+    return ok
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # MAIN SEED ENTRYPOINT
 # ═════════════════════════════════════════════════════════════════════════════
 
 def run_seed(conn):
+    _validate_seed_constants()
     cur = conn.cursor()
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
@@ -2300,6 +2459,10 @@ def run_seed(conn):
     seed_advance_credit_demo(cur, conn, society_id, apt2_id, admin_uid)
 
     seed_polls(cur, conn, society_id, admin_uid, users)
+
+    print()
+    print("  Seed rule audit:")
+    audit_seed_invariants(cur, society_id)
 
     conn.close()
 
