@@ -220,6 +220,31 @@ def register_setup_wizard_callbacks(app):
         return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
 
 
+    # Bye-Laws Adoption step: each radio / variation edit is saved straight away as a PROVISIONAL Layer-1 row
+    # (record_wizard_adoption — admin of this society or master; never active without a passed resolution).
+    @app.callback(
+        Output({"type": "sw-bl-msg", "clause": MATCH}, "children"),
+        Input({"type": "sw-bl-choice", "clause": MATCH}, "value"),
+        Input({"type": "sw-bl-var", "clause": MATCH}, "value"),
+        State({"type": "sw-bl-choice", "clause": MATCH}, "id"),
+        State("sw-society-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_wizard_bye_law_choice(choice, variation, comp_id, society_id):
+        if not choice or not society_id:
+            return no_update
+        from app.security.audit_context import get_current_user_id, get_current_user_role, get_current_society_id
+        from app.services import regime_rules_admin as rra
+        try:
+            ok, msg = rra.record_wizard_adoption(
+                get_current_user_id(), get_current_user_role(), get_current_society_id(),
+                int(society_id), comp_id["clause"], choice, variation or None)
+        except PermissionError as exc:
+            return f"✗ {exc}"
+        except Exception as exc:
+            return f"✗ not saved ({exc.__class__.__name__})"
+        return ("✓ " if ok else "✗ ") + msg
+
     # Every step body is rendered once, when the modal is built — so the
     # statutes step kept showing whatever societies.state held at that moment
     # (empty for a society being onboarded, and a full name like

@@ -106,7 +106,7 @@ def render_bye_laws_sections(society_id: int | None = None) -> list:
                     html.Div([html.Strong(clause_id, style={"fontSize": "11px"}), html.Br(),
                               html.Small(title, className="text-muted")]),
                     _layer_badge(v["layer"]),
-                    _status_badge(v["status"]),
+                    html.Span([_status_badge(v["status"]), html.Small(("→ " + v["proposed_status"].replace("_", " ")) if v.get("proposed_status") else "", className="text-muted")]),
                     v.get("variation_text") or "—",
                     f"{v['effective_from']:%d %b %Y}" if v.get("effective_from") else "—",
                     "Provisional" if v["status"] == "provisional" else ("Active" if v.get("resolution_id") else "—"),
@@ -128,7 +128,9 @@ def render_bye_laws_form(society_id: int | None) -> html.Div:
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in rra.MODEL_BYE_LAW_CLAUSES]
     layer_opts = [{"label": f"Layer {l} — {'Model Bye-Law Adoption' if l==1 else 'Society Policy (GBM)' if l==2 else 'Board Decision (MC)'}", "value": l} for l in (1, 2, 3)]
-    status_opts = [{"label": s.replace("_", " ").title(), "value": s} for s in rra.BYE_LAW_STATUSES]
+    status_opts = [{"label": {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation",
+                              "not_adopted": "Not adopted (non-statutory clauses only)"}[s], "value": s}
+                   for s in rra.ADOPTION_CHOICES]
     
     return _section(
         "Save Provisional Bye-Law Choice", "Creates a provisional entry; becomes active only when linked to a passed resolution. "
@@ -139,11 +141,11 @@ def render_bye_laws_form(society_id: int | None) -> html.Div:
             dbc.Col([_label("Layer"), dcc.Dropdown(id="mrl-bye-layer", options=layer_opts, clearable=False, style={"fontSize": "12px"})], md=4),
         ], className="mb-2"),
         dbc.Row([
-            dbc.Col([_label("Status"), dcc.Dropdown(id="mrl-bye-status", options=status_opts, clearable=False, style={"fontSize": "12px"})], md=4),
+            dbc.Col([_label("Choice"), dbc.RadioItems(id="mrl-bye-status", options=status_opts, value="adopted_as_is", className="small")], md=4),
             dbc.Col([_label("Takes effect on"), dbc.Input(id="mrl-bye-eff", type="date", size="sm", value=tomorrow, min=tomorrow)], md=4),
-            dbc.Col([_label("Resolution ID (optional)"), dbc.Input(id="mrl-bye-res", type="number", size="sm")], md=4),
+            dbc.Col([_label("Passed resolution ID (blank = save as provisional)"), dbc.Input(id="mrl-bye-res", type="number", size="sm")], md=4),
         ], className="mb-2"),
-        _label("Variation text (required for 'adopted_with_variation')"),
+        _label("Variation text (only for 'Adopt with variation')"),
         dbc.Textarea(id="mrl-bye-variation", rows=3, size="sm", className="mb-2", placeholder="Enter variation text..."),
         _label("Reason for the change"),
         dbc.Input(id="mrl-bye-reason", type="text", size="sm", className="mb-2", placeholder="Minimum 10 characters"),
@@ -215,7 +217,7 @@ def render_meetings_sections(society_id: int | None = None) -> list:
             f"{r.get('passed_on')}" if r.get('passed_on') else "—",
             r.get('majority_required') or "—",
             f"Meeting #{r.get('meeting_id')}" if r.get('meeting_id') else "—",
-            r.get('body')[:50] + "..." if r.get('body') and len(r['body']) > 50 else (r.get('body') or "—")]
+            r.get('body')[:50] + "..." if r.get('body') and len(r['body']) > 50 else (r.get('body') or "—")])
     
     return [
         _section("Meetings (GBM / EGM / MC)", "Record General Body and Managing Committee meetings.",

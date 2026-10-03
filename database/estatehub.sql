@@ -11802,12 +11802,15 @@ BEGIN
         )
     );
 
-    -- Update poll status
-    UPDATE polls
-       SET status = 'results_declared',
-           results_announced_at = NOW(),
-           updated_at = NOW()
-     WHERE id = p_poll_id;
+    -- A poll that misses quorum or majority is NOT declared: it stays as it was so the admin sees
+    -- the reason (and the poll is not silently closed out as if it had carried).
+    IF v_quorum_met AND v_majority_met THEN
+        UPDATE polls
+           SET status = 'results_declared',
+               results_announced_at = NOW(),
+               updated_at = NOW()
+         WHERE id = p_poll_id;
+    END IF;
 
     RETURN QUERY SELECT v_quorum_met AND v_majority_met,
            CASE WHEN v_quorum_met AND v_majority_met THEN 'Results declared - quorum and majority met'
@@ -13701,7 +13704,7 @@ BEGIN
     
     RETURN QUERY
     SELECT a.id, a.flat_number, a.owner_name, v_cut,
-           s.dues_overdue AS overdue_amount,
+           (s.arrears_bye_law7 + s.loan_overdue) AS overdue_amount,
            -- oldest_due_date: earliest due_date of overdue receivables/loans
            LEAST(
                (SELECT MIN(r.due_date) FROM receivables r
@@ -14212,9 +14215,13 @@ BEGIN
     IF NOT FOUND THEN can_issue := FALSE; reason := 'transfer not found'; loan_outstanding := 0; RETURN NEXT; RETURN; END IF;
     SELECT * INTO v_standing FROM fn_get_standing(t.society_id, t.apartment_id, p_asof);
     loan_outstanding := COALESCE(v_standing.loan_outstanding, 0);
-    IF v_standing.noc_blocked THEN
+    -- Bye-law 39: the certificate is deemed granted after 15 days, so the Board must be able to REFUSE inside the
+    -- window; what this check gates is recording it as ISSUED. Ordinary dues are the NOC check's concern
+    -- (fn_check_noc_eligibility); here only an owner loan blocks, as documented in the README and tested in
+    -- test_owner_loan_dues_live.py. (The unified fn_get_standing.noc_blocked also counts receivables.)
+    IF loan_outstanding > 0 AND COALESCE(fn_regime_param_num(t.society_id, 'owner_loan_blocks_nodues', p_asof), 1) = 1 THEN
         can_issue := FALSE;
-        reason := format('NOC blocked: outstanding dues Rs.%s; outstanding owner loan Rs.%s', v_standing.dues_outstanding, v_standing.loan_outstanding);
+        reason := format('an owner loan of %s is still outstanding on this flat; recover it first, or record the certificate as refused', loan_outstanding);
     ELSE
         can_issue := TRUE; reason := 'OK';
     END IF;
@@ -14388,6 +14395,10 @@ CREATE TABLE IF NOT EXISTS society_bye_laws (
 );
 CREATE INDEX IF NOT EXISTS idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
 CREATE INDEX IF NOT EXISTS idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
+-- A provisional row remembers what the admin intends (adopt as-is / with variation / not adopted) until a
+-- passed resolution is linked; without this an 'adopt as-is' or 'not adopted' choice could not be held at all.
+ALTER TABLE society_bye_laws ADD COLUMN IF NOT EXISTS proposed_status VARCHAR(25)
+    CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted'));
 
 -- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
 INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
@@ -14432,49 +14443,40 @@ RETURNS TABLE (
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_statute_text TEXT;
-    v_regime_code  VARCHAR;
 BEGIN
-    SELECT slr.regime_code INTO v_regime_code
-    FROM society_legal_regime slr
-    WHERE slr.society_id = p_society_id
-    ORDER BY slr.effective_from DESC LIMIT 1;
+    -- Layer 0 baseline (statute / Model Bye-Laws default) for the clauses the engine enforces.
+    v_statute_text := CASE p_clause_id
+        WHEN 'BL_07' THEN 'arrears_disqualify_days=60'
+        WHEN 'BL_39' THEN 'transfer_fee_pct=0.5; nodues_deemed_days=15'
+        WHEN 'BL_46' THEN 'cash_payment_cheque_threshold=2500; petty_cash_limit=20000'
+        WHEN 'BL_49' THEN 'publish_by=Jul 31; authority_copy_by=Aug 15; owner_summary_within=15 days'
+        WHEN 'S22'   THEN 'default_exceeds_months=6; notice_days=7; wait_months=1; appeal_days=15'
+        WHEN 'S20'   THEN 'recovery_after_months=12'
+        ELSE NULL END;
 
-    IF p_clause_id = 'BL_07' THEN v_statute_text := '60 days';
-    ELSIF p_clause_id = 'BL_39' THEN v_statute_text := 'transfer_fee_pct=0.5; nodues_deemed_days=15';
-    ELSIF p_clause_id = 'BL_46' THEN v_statute_text := 'cash_payment_cheque_threshold=2500; petty_cash_limit=20000';
-    ELSIF p_clause_id = 'BL_49' THEN v_statute_text := 'publish_by=Jul 31; authority_copy_by=Aug 15; owner_summary_within=15 days';
-    ELSIF p_clause_id = 'S22' THEN v_statute_text := 'default_exceeds_months=6; notice_days=7; wait_months=1; appeal_days=15';
-    ELSIF p_clause_id = 'S20' THEN v_statute_text := 'recovery_after_months=12';
-    ELSE v_statute_text := NULL; END IF;
+    -- The most specific ACTIVE society adoption wins (Board decision 3 > Society policy 2 > Model bye-law 1).
+    -- 'provisional' rows (not yet backed by a passed resolution) and 'not_adopted' rows never resolve.
+    -- A layer-1 row says "adopted as-is", so it resolves to the baseline value; only a variation carries text.
+    RETURN QUERY
+    SELECT sbl.layer, sbl.status::VARCHAR,
+           CASE WHEN sbl.status = 'adopted_as_is' THEN v_statute_text ELSE sbl.variation_text END,
+           sbl.effective_from,
+           CASE sbl.layer WHEN 1 THEN 'Model Bye-Laws 2011 (adopted by society)'
+                          WHEN 2 THEN 'Society Policy (GBM resolution)'
+                          ELSE 'Board Decision (MC resolution)' END
+      FROM society_bye_laws sbl
+     WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id
+       AND sbl.status IN ('adopted_as_is', 'adopted_with_variation')
+       AND sbl.resolution_id IS NOT NULL
+       AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
+     ORDER BY sbl.layer DESC, sbl.effective_from DESC
+     LIMIT 1;
+    IF FOUND THEN RETURN; END IF;
 
     IF v_statute_text IS NOT NULL THEN
-        RETURN QUERY SELECT 0::INT, 'statute'::VARCHAR, v_statute_text, DATE '2011-11-16', 'UP Apartment Act 2010 / Model Bye-Laws 2011'::TEXT;
-        RETURN; END IF;
-
-    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Model Bye-Laws 2011 (adopted by society)'::TEXT
-    FROM society_bye_laws sbl
-    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 1
-      AND sbl.status IN ('adopted_as_is', 'adopted_with_variation')
-      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
-    ORDER BY sbl.effective_from DESC LIMIT 1;
-    IF FOUND THEN RETURN; END IF;
-
-    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Society Policy (GBM resolution)'::TEXT
-    FROM society_bye_laws sbl
-    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 2
-      AND sbl.status = 'adopted_with_variation'
-      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
-    ORDER BY sbl.effective_from DESC LIMIT 1;
-    IF FOUND THEN RETURN; END IF;
-
-    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Board Decision (MC resolution)'::TEXT
-    FROM society_bye_laws sbl
-    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 3
-      AND sbl.status = 'adopted_with_variation'
-      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
-    ORDER BY sbl.effective_from DESC LIMIT 1;
-    IF FOUND THEN RETURN; END IF;
-
+        RETURN QUERY SELECT 0, 'statute'::VARCHAR, v_statute_text, DATE '2011-11-16',
+                            'UP Apartment Act 2010 / Model Bye-Laws 2011'::TEXT;
+    END IF;
     RETURN;
 END $$;
 
@@ -14495,6 +14497,7 @@ CREATE OR REPLACE FUNCTION fn_get_standing(
 RETURNS TABLE (
     dues_outstanding       NUMERIC,   -- receivables pending + partial (excludes paid/credit)
     dues_overdue           NUMERIC,   -- receivables past due_date
+    arrears_bye_law7       NUMERIC,   -- receivables past due_date by MORE than arrears_disqualify_days (bye-law 7)
     loan_outstanding       NUMERIC,   -- owner_loans principal - repaid
     loan_overdue           NUMERIC,   -- loan_outstanding WHERE due_date <= asof - arrears_days
     ineligible_vote        BOOLEAN,   -- dues_overdue > 0 OR loan_overdue > 0 (policy-controlled)
@@ -14526,6 +14529,10 @@ BEGIN
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < p_asof
             ), 0) AS overdue,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
+                WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
+                  AND r.due_date <= p_asof - v_arrears_days
+            ), 0) AS arrears_bl7,
+            COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL 
                   AND r.due_date <= p_asof - make_interval(months => v_s22_months)
             ), 0) AS overdue_s22_months
@@ -14552,10 +14559,13 @@ BEGIN
     SELECT
         rec.outstanding::NUMERIC,
         rec.overdue::NUMERIC,
+        rec.arrears_bl7::NUMERIC,
         ln.outstanding::NUMERIC,
         CASE WHEN v_counts_bye_law7 = 1 THEN ln.overdue_bye_law7 ELSE 0 END::NUMERIC,
+        -- poll vote ("no dues" polls): any receivable past its due date, or a bye-law-7 loan arrear
         (rec.overdue > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_vote,
-        (rec.overdue > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_stand,
+        -- bye-law 7 candidacy: arrears must exceed arrears_disqualify_days (60) — NOT merely be overdue
+        (rec.arrears_bl7 > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_stand,
         (rec.outstanding > 0 OR (v_blocks_nodues = 1 AND ln.outstanding > 0)) AS noc_blocked,
         -- s22_blocked = TRUE means cut-off is BLOCKED
         -- Cut-off is allowed if there ARE receivables overdue > 6 months (default condition met)

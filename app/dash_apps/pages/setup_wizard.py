@@ -244,7 +244,7 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Society Details", "Administrator", "Instructions"],
-    "Tax & Compliance": ["Society Compliance", "UP AOA Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    "Tax & Compliance": ["Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption", "TAN & TDS Rates", "GSTIN & GST Rate"],
     "Billing & Accounts": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
@@ -256,6 +256,7 @@ CATEGORY_ICONS = {
     "Instructions": "fas fa-info-circle",
     "Society Compliance": "fas fa-gavel",
     "UP AOA Compliance": "fas fa-book-open",
+    "Bye-Laws Adoption": "fas fa-scale-balanced",
     "TAN & TDS Rates": "fas fa-percent",
     "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
     "Apartment Charges": "fas fa-home",
@@ -430,7 +431,7 @@ def render_category_content(category, society_id=None, state=None):
             )
         
     # Add Print Button for specific categories
-    if category in ["Society Compliance", "UP AOA Compliance", "TAN & TDS Rates", "Accounts"]:
+    if category in ["Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption", "TAN & TDS Rates", "Accounts"]:
         elements.append(
             html.Div([
                 dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
@@ -663,6 +664,59 @@ def render_category_content(category, society_id=None, state=None):
             state, key, val, val_text, unit, eff_from, eff_to, notes = item
             inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
+    elif category == "Bye-Laws Adoption":
+        # The society's bye-law register: for each Model Bye-Law 2011 clause the admin notes the intended outcome
+        # (adopt as-is / adopt with variation / not adopted). Every choice is PROVISIONAL: it is stored with
+        # proposed_status and changes nothing in the engine until Master links a passed GBM resolution to it
+        # (Master → AOA Rule Editor → Society Bye-Laws). A clause nobody touches is governed by the Model
+        # Bye-Laws / Act as-is. Persistence is immediate, by callback (sw-bl-*), not on wizard submit.
+        from app.services import regime_rules_admin as rra
+        existing = {}
+        try:
+            for r in rra.list_society_bye_laws(society_id) if society_id else []:
+                if r["layer"] == 1:
+                    existing[r["clause_id"]] = r
+        except Exception:
+            existing = {}
+        labels = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation", "not_adopted": "Not adopted"}
+        rows = []
+        for clause_id, title in rra.MODEL_BYE_LAW_CLAUSES:
+            locked = clause_id in rra.STATUTE_BACKED_CLAUSES
+            cur = existing.get(clause_id) or {}
+            current = cur.get("proposed_status") if cur.get("status") == "provisional" else cur.get("status")
+            opts = [{"label": labels[c], "value": c} for c in rra.ADOPTION_CHOICES
+                    if not (locked and c == "not_adopted")]
+            active = bool(cur.get("resolution_id")) and cur.get("status") != "provisional"
+            rows.append(html.Tr([
+                html.Td([html.Strong(clause_id, style={"fontSize": "11px"}), html.Br(),
+                         html.Small(title + (" · enforced by the engine" if locked else ""), className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(dbc.RadioItems(id={"type": "sw-bl-choice", "clause": clause_id}, options=opts, value=current,
+                                       inline=True, className="small", inputClassName="me-1", labelClassName="me-3",
+                                       persistence=False)
+                        if not active else dbc.Badge("Active (resolution on file)", color="success")),
+                html.Td(dbc.Input(id={"type": "sw-bl-var", "clause": clause_id}, type="text", debounce=True, size="sm",
+                                  value=cur.get("variation_text") or "", placeholder="Variation text",
+                                  disabled=active, style={"fontSize": "11px"})),
+                html.Td(html.Small(id={"type": "sw-bl-msg", "clause": clause_id}, className="text-muted")),
+            ]))
+        return elements + [
+            dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
+                       "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
+                       html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
+                       "until a General Body resolution is recorded and linked by Master. Clauses you leave alone follow the "
+                       "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
+            html.Div([
+                html.Div([html.Strong("Who can change what"), html.Br(),
+                          html.Small("Act & Rules (locked) → Model Bye-Laws (this step; GBM resolution, 2/3) → Society Policy "
+                                     "(GBM; may only tighten a clause) → Board Decision (MC; operational limits). "
+                                     "A lower layer can never loosen a higher one.", className="text-muted")],
+                         className="mb-2")]),
+            html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in
+                                ("Clause", "Intended outcome", "Variation (if any)", "")])),
+                                html.Tbody(rows)], bordered=True, size="sm", hover=True),
+                     style={"maxHeight": "420px", "overflowY": "auto"}),
+        ]
     elif category == "UP AOA Compliance":
         # Read-only reference step: the tabulated Acts, Rules, Bye-laws and
         # Notifications governing this society's regime, from
