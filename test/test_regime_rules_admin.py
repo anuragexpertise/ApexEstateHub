@@ -187,3 +187,50 @@ def test_master_can_switch_owner_loan_policy_and_it_takes_effect_on_its_date(pg)
     assert ok, msg
     assert _param(pg, "owner_loan_counts_s22", date.today()) == 0
     assert _param(pg, "owner_loan_counts_s22", start) == 1
+
+
+# ── Society-resolution policies (Setup Wizard drop-downs) ────────────────────
+def test_policy_specs_cover_choices_and_four_clauses():
+    assert {"nodues_blocks_on", "vote_ineligibility_basis"} <= set(rra.POLICY_SPECS)
+    for bl in rra.STATUTE_BACKED_CLAUSES:
+        assert f"droppable_{bl}" in rra.POLICY_SPECS
+    assert rra.policy_default("nodues_blocks_on") == "loans_only"
+    assert rra.policy_default("vote_ineligibility_basis") == "any_overdue"
+    assert rra.policy_default("droppable_BL_07") == "locked"
+
+
+def test_locked_clause_default_blocks_not_adopted_without_db(monkeypatch):
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: None)
+    assert rra._validate_bye_law_save(1, "BL_07", 1, "not_adopted", None)
+    assert rra._validate_bye_law_save(1, "BL_42", 1, "not_adopted", None) is None
+
+
+def test_droppable_policy_unlocks_clause(monkeypatch):
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: {"v": "droppable"})
+    assert rra._validate_bye_law_save(1, "BL_07", 1, "not_adopted", None) is None
+
+
+def test_record_wizard_policy_rejects_bad_input():
+    with pytest.raises(PermissionError):
+        rra.record_wizard_policy(1, "apartment", 1, 1, "nodues_blocks_on", "loans_only")
+    with pytest.raises(PermissionError):
+        rra.record_wizard_policy(1, "admin", 2, 1, "nodues_blocks_on", "loans_only")
+    assert rra.record_wizard_policy(1, "admin", 1, 1, "nope", "x")[0] is False
+    assert rra.record_wizard_policy(1, "admin", 1, 1, "nodues_blocks_on", "bogus")[0] is False
+
+
+def test_clause_list_matches_notified_text():
+    d = dict(rra.MODEL_BYE_LAW_CLAUSES)
+    assert len(d) == 58 and list(d)[0] == "BL_01" and list(d)[-1] == "BL_58"
+    assert d["BL_07"].startswith("Disqualification") and d["BL_39"].startswith("Transfer of an Apartment")
+    assert d["BL_46"] == "Funds" and d["BL_49"].startswith("Accounts") and d["BL_55"].startswith("Compliance")
+    assert d["BL_58"].startswith("Amendment")
+    assert rra.STATUTE_BACKED_CLAUSES == ("BL_07", "BL_39", "BL_49", "BL_55")
+
+
+def test_bl55_cannot_be_varied_and_loan_basis_policy_exists(monkeypatch):
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: None)
+    assert "cannot be varied" in rra._validate_bye_law_save(1, "BL_55", 1, "adopted_with_variation", "x")
+    assert rra._validate_bye_law_save(1, "BL_55", 1, "adopted_as_is", None) is None
+    assert rra.policy_default("vote_loan_basis") == "margin_60_days"
+    assert rra.POLICY_SPECS["vote_loan_basis"][1] == "BL_08"

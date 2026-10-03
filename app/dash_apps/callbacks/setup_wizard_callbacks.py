@@ -245,6 +245,29 @@ def register_setup_wizard_callbacks(app):
             return f"✗ not saved ({exc.__class__.__name__})"
         return ("✓ " if ok else "✗ ") + msg
 
+    # Society-resolution drop-downs (Bye-Laws Adoption step): saved straight away as PROVISIONAL policy rows.
+    @app.callback(
+        Output({"type": "sw-pol-msg", "key": MATCH}, "children"),
+        Input({"type": "sw-pol-choice", "key": MATCH}, "value"),
+        State({"type": "sw-pol-choice", "key": MATCH}, "id"),
+        State("sw-society-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_wizard_policy_choice(value, comp_id, society_id):
+        if not value or not society_id:
+            return no_update
+        from app.security.audit_context import get_current_user_id, get_current_user_role, get_current_society_id
+        from app.services import regime_rules_admin as rra
+        try:
+            ok, msg = rra.record_wizard_policy(
+                get_current_user_id(), get_current_user_role(), get_current_society_id(),
+                int(society_id), comp_id["key"], value)
+        except PermissionError as exc:
+            return f"✗ {exc}"
+        except Exception as exc:
+            return f"✗ not saved ({exc.__class__.__name__})"
+        return ("✓ " if ok else "✗ ") + msg
+
     # Every step body is rendered once, when the modal is built — so the
     # statutes step kept showing whatever societies.state held at that moment
     # (empty for a society being onboarded, and a full name like

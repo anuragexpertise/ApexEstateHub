@@ -1088,9 +1088,9 @@ LEGAL_INSTRUMENTS_UP_AOA = [
      "Governs internal AOA administration — membership, Board of Management, general body/AGM procedure, "
      "voting rights, common seal, and the financial framework: common expenses, Reserve Fund "
      "(bye-laws 3(1)(d), 46), share capital (bye-laws 5, 46), staff benefits (bye-law 3(1)(h)), the 1/2% "
-     "transfer fee to the major-repair fund and No Dues deemed grant (bye-law 39), statements/audit (bye-law 49). Bye-law 54: "
-     "the Act prevails wherever a bye-law conflicts with it. Must be adopted at a General Body meeting by "
-     "2/3rd majority (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
+     "transfer fee to the major-repair fund and No Dues deemed grant (bye-law 39), statements/audit (bye-law 49). Bye-law 55: "
+     "the Act prevails wherever a bye-law conflicts with it. Amendment needs approval by owners of at least "
+     "2/3rd of the units AND the competent authority's prior approval (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
      "Notified 16 Nov 2011 under Sec 14(6); interpreted in Olive Country Apartment Owners Association vs "
      "State of UP, WP No. 12110/2013, Allahabad HC, 14-11-2013", 30, "active"),
     ("UP_AOA_2010", "Act",

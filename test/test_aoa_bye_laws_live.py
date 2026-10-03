@@ -51,6 +51,21 @@ def test_standing_30_days_overdue_can_stand_but_not_vote_in_no_dues_poll(cur):
     assert r[4] is True       # NOC: any outstanding dues
 
 
+def test_standing_exactly_60_days_can_stand_61_cannot(cur):
+    a = apt_id(cur)
+    receivable(cur, a, 500, date.today() - timedelta(days=60))
+    assert one(cur, "SELECT ineligible_stand FROM fn_get_standing(%s,%s,CURRENT_DATE)", (SOC, a))[0] is False
+    receivable(cur, a, 500, date.today() - timedelta(days=61))
+    assert one(cur, "SELECT ineligible_stand FROM fn_get_standing(%s,%s,CURRENT_DATE)", (SOC, a))[0] is True
+
+
+def test_policy_row_dated_today_beside_active_row_inserts(cur):
+    cur.execute("INSERT INTO society_policy_settings (society_id, policy_key, value_text, resolution_id) "
+                "SELECT %s,'vote_loan_basis','any_overdue', id FROM resolutions LIMIT 1", (SOC,))
+    cur.execute("INSERT INTO society_policy_settings (society_id, policy_key, value_text) "
+                "VALUES (%s,'vote_loan_basis','margin_60_days')", (SOC,))
+
+
 def test_standing_90_days_overdue_cannot_stand(cur):
     a = apt_id(cur)
     receivable(cur, a, 500, date.today() - timedelta(days=90))

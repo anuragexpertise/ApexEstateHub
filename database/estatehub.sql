@@ -13709,21 +13709,21 @@ BEGIN
            LEAST(
                (SELECT MIN(r.due_date) FROM receivables r
                 WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
-                  AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days),
+                  AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < v_cut - v_days),
                (SELECT MIN(l.due_date) FROM owner_loans l
                 WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
-                  AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days)
+                  AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_days)
            ) AS oldest_due_date,
            -- days_overdue: max days from due_date to cutoff_date for overdue items
            GREATEST(COALESCE((
                SELECT MAX(v_cut - r.due_date) FROM receivables r
                WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
-                 AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days
+                 AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < v_cut - v_days
            ), 0),
            COALESCE((
                SELECT MAX(v_cut - l.due_date) FROM owner_loans l
                WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
-                 AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days
+                 AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_days
            ), 0), 0)::INT AS days_overdue,
            NOT s.ineligible_stand AS eligible
     FROM apartments a
@@ -14203,6 +14203,49 @@ LANGUAGE sql STABLE AS $$
     SELECT rec.v::NUMERIC, ln.o::NUMERIC, ln.od::NUMERIC, ln.ie::NUMERIC, (rec.v + ln.o)::NUMERIC FROM rec, ln
 $$;
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SOCIETY RESOLUTION POLICIES (Setup Wizard drop-downs)
+-- Choices the engine used to hard-code. A row is PROVISIONAL (resolution_id NULL) until Master links a
+-- passed resolution; fn_society_policy only reads rows that have one, else the default below.
+--   nodues_blocks_on          loans_only* | dues_and_loans   what blocks ISSUING a No Dues Certificate
+--   vote_ineligibility_basis  any_overdue* | margin_60_days  receivables that bar a "no dues" poll vote
+--   vote_loan_basis           margin_60_days* | any_overdue  owner loans that bar a "no dues" poll vote
+--   droppable_BL_07/39/49/55  locked* | droppable            may the clause be recorded 'not adopted'
+-- (* = default). Clause numbers follow the Model Bye-Laws notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I).
+-- Bye-law 7 itself governs Board elections, not polls: poll eligibility is engine policy.
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS society_policy_settings (
+    id              BIGSERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    policy_key      VARCHAR(40) NOT NULL,
+    value_text      VARCHAR(40) NOT NULL,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+-- An earlier draft had UNIQUE (society_id, policy_key, effective_from): a provisional choice dated today then
+-- failed to insert beside an active row of the same date. One open (unresolved) choice per policy instead.
+ALTER TABLE society_policy_settings DROP CONSTRAINT IF EXISTS society_policy_settings_society_id_policy_key_effective_from_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_society_policy_provisional ON society_policy_settings (society_id, policy_key) WHERE resolution_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_society_policy_lookup ON society_policy_settings (society_id, policy_key, effective_from DESC, id DESC);
+
+CREATE OR REPLACE FUNCTION fn_society_policy(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT COALESCE(
+        (SELECT sp.value_text FROM society_policy_settings sp
+          WHERE sp.society_id = p_society_id AND sp.policy_key = p_key
+            AND sp.resolution_id IS NOT NULL AND sp.effective_from <= p_on
+          ORDER BY sp.effective_from DESC, sp.id DESC LIMIT 1),
+        CASE p_key WHEN 'nodues_blocks_on'         THEN 'loans_only'
+                   WHEN 'vote_ineligibility_basis' THEN 'any_overdue'
+                   WHEN 'vote_loan_basis'          THEN 'margin_60_days'
+                   WHEN 'droppable_BL_07' THEN 'locked' WHEN 'droppable_BL_39' THEN 'locked'
+                   WHEN 'droppable_BL_49' THEN 'locked' WHEN 'droppable_BL_55' THEN 'locked'
+                   ELSE NULL END)
+$$;
+
 -- May the No Dues Certificate for this transfer be ISSUED? (Refusing is always allowed, and the bye-law
 -- 39 deemed grant still runs by the calendar, so the Board must refuse inside the window.)
 -- Now uses fn_get_standing for unified noc_blocked check (Phase 2).
@@ -14217,9 +14260,13 @@ BEGIN
     loan_outstanding := COALESCE(v_standing.loan_outstanding, 0);
     -- Bye-law 39: the certificate is deemed granted after 15 days, so the Board must be able to REFUSE inside the
     -- window; what this check gates is recording it as ISSUED. Ordinary dues are the NOC check's concern
-    -- (fn_check_noc_eligibility); here only an owner loan blocks, as documented in the README and tested in
-    -- test_owner_loan_dues_live.py. (The unified fn_get_standing.noc_blocked also counts receivables.)
-    IF loan_outstanding > 0 AND COALESCE(fn_regime_param_num(t.society_id, 'owner_loan_blocks_nodues', p_asof), 1) = 1 THEN
+    -- (fn_check_noc_eligibility); by default only an owner loan blocks, as documented in the README and tested in
+    -- test_owner_loan_dues_live.py. A society resolution may widen this to ordinary dues too (policy
+    -- nodues_blocks_on = 'dues_and_loans'). (fn_get_standing.noc_blocked always counts receivables.)
+    IF COALESCE(v_standing.dues_outstanding, 0) > 0 AND fn_society_policy(t.society_id, 'nodues_blocks_on', p_asof) = 'dues_and_loans' THEN
+        can_issue := FALSE;
+        reason := format('dues of %s are still outstanding on this flat; recover them first, or record the certificate as refused', v_standing.dues_outstanding);
+    ELSIF loan_outstanding > 0 AND COALESCE(fn_regime_param_num(t.society_id, 'owner_loan_blocks_nodues', p_asof), 1) = 1 THEN
         can_issue := FALSE;
         reason := format('an owner loan of %s is still outstanding on this flat; recover it first, or record the certificate as refused', loan_outstanding);
     ELSE
@@ -14236,7 +14283,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS regime_rule_audit (
     id              BIGSERIAL PRIMARY KEY,
     target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
-                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions')),
+                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings')),
     regime_code     VARCHAR(30),
     society_id      INT,
     rule_key        VARCHAR(300),
@@ -14249,6 +14296,10 @@ CREATE TABLE IF NOT EXISTS regime_rule_audit (
     changed_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
+-- Live DBs created the table with an older target_table list; CREATE TABLE IF NOT EXISTS would not widen it.
+ALTER TABLE regime_rule_audit DROP CONSTRAINT IF EXISTS regime_rule_audit_target_table_check;
+ALTER TABLE regime_rule_audit ADD CONSTRAINT regime_rule_audit_target_table_check CHECK (target_table IN
+    ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings'));
 
 CREATE OR REPLACE FUNCTION trg_regime_rule_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -14448,8 +14499,8 @@ BEGIN
     v_statute_text := CASE p_clause_id
         WHEN 'BL_07' THEN 'arrears_disqualify_days=60'
         WHEN 'BL_39' THEN 'transfer_fee_pct=0.5; nodues_deemed_days=15'
-        WHEN 'BL_46' THEN 'cash_payment_cheque_threshold=2500; petty_cash_limit=20000'
-        WHEN 'BL_49' THEN 'publish_by=Jul 31; authority_copy_by=Aug 15; owner_summary_within=15 days'
+        WHEN 'BL_49' THEN 'cash_payment_cheque_threshold=2500; petty_cash_limit=20000; publish_by=Jul 31; authority_copy_by=Aug 15; owner_summary_within=15 days'
+        WHEN 'BL_55' THEN 'act_prevails=true'
         WHEN 'S22'   THEN 'default_exceeds_months=6; notice_days=7; wait_months=1; appeal_days=15'
         WHEN 'S20'   THEN 'recovery_after_months=12'
         ELSE NULL END;
@@ -14497,10 +14548,10 @@ CREATE OR REPLACE FUNCTION fn_get_standing(
 RETURNS TABLE (
     dues_outstanding       NUMERIC,   -- receivables pending + partial (excludes paid/credit)
     dues_overdue           NUMERIC,   -- receivables past due_date
-    arrears_bye_law7       NUMERIC,   -- receivables past due_date by MORE than arrears_disqualify_days (bye-law 7)
+    arrears_bye_law7       NUMERIC,   -- receivables past due_date by MORE than arrears_disqualify_days (bye-law 7; exactly 60 is eligible)
     loan_outstanding       NUMERIC,   -- owner_loans principal - repaid
     loan_overdue           NUMERIC,   -- loan_outstanding WHERE due_date <= asof - arrears_days
-    ineligible_vote        BOOLEAN,   -- dues_overdue > 0 OR loan_overdue > 0 (policy-controlled)
+    ineligible_vote        BOOLEAN,   -- overdue bill (or, by society policy, bye-law-7 arrears) OR loan arrears
     ineligible_stand       BOOLEAN,   -- same as vote, plus any additional criteria
     noc_blocked            BOOLEAN,   -- dues_outstanding > 0 OR (loan_outstanding > 0 AND owner_loan_blocks_nodues)
     s22_blocked            BOOLEAN    -- TRUE if cut-off is BLOCKED (no >6mo overdue dues OR loan_overdue if policy)
@@ -14530,7 +14581,7 @@ BEGIN
             ), 0) AS overdue,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
-                  AND r.due_date <= p_asof - v_arrears_days
+                  AND r.due_date < p_asof - v_arrears_days
             ), 0) AS arrears_bl7,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL 
@@ -14546,7 +14597,7 @@ BEGIN
             COALESCE(SUM(l.principal - l.repaid_amount), 0) AS outstanding,
             COALESCE(SUM(l.principal - l.repaid_amount) FILTER (
                 WHERE l.due_date IS NOT NULL
-                  AND l.due_date <= p_asof - v_arrears_days
+                  AND l.due_date < p_asof - v_arrears_days
             ), 0) AS overdue_bye_law7,
             COALESCE(SUM(l.principal - l.repaid_amount) FILTER (
                 WHERE l.due_date IS NOT NULL AND l.due_date < p_asof
@@ -14563,8 +14614,14 @@ BEGIN
         ln.outstanding::NUMERIC,
         CASE WHEN v_counts_bye_law7 = 1 THEN ln.overdue_bye_law7 ELSE 0 END::NUMERIC,
         -- poll vote ("no dues" polls): any receivable past its due date, or a bye-law-7 loan arrear
-        (rec.overdue > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_vote,
-        -- bye-law 7 candidacy: arrears must exceed arrears_disqualify_days (60) — NOT merely be overdue
+        -- society policy vote_ineligibility_basis: any_overdue (default) | margin_60_days (arrears_disqualify_days)
+        -- society policy vote_loan_basis: margin_60_days (default) | any_overdue (a loan past its due_date)
+        ((CASE WHEN fn_society_policy(p_society_id, 'vote_ineligibility_basis', p_asof) = 'margin_60_days'
+               THEN rec.arrears_bl7 ELSE rec.overdue END) > 0
+         OR (v_counts_bye_law7 = 1 AND
+             (CASE WHEN fn_society_policy(p_society_id, 'vote_loan_basis', p_asof) = 'any_overdue'
+                   THEN ln.overdue_s22 ELSE ln.overdue_bye_law7 END) > 0)) AS ineligible_vote,
+        -- bye-law 7 candidacy: arrears must EXCEED arrears_disqualify_days (60) - 60 days exactly is still eligible
         (rec.arrears_bl7 > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_stand,
         (rec.outstanding > 0 OR (v_blocks_nodues = 1 AND ln.outstanding > 0)) AS noc_blocked,
         -- s22_blocked = TRUE means cut-off is BLOCKED
