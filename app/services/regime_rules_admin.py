@@ -372,71 +372,120 @@ BYE_LAW_LAYERS = (1, 2, 3)
 # What an admin/master can *choose* for a clause. Whether the choice is provisional or active is not
 # a choice: it is provisional until a passed resolution of the right type is linked (see _check_resolution).
 ADOPTION_CHOICES = ("adopted_as_is", "adopted_with_variation", "not_adopted")
-# Clauses the engine itself enforces (fn_resolve_rule's Layer-0 baseline). A society cannot opt out of
-# these; it can only tighten them. Confirm the list with an advocate before relying on it.
-STATUTE_BACKED_CLAUSES = ("BL_07", "BL_39", "BL_46", "BL_49")
+# Clauses the engine itself enforces (fn_resolve_rule's Layer-0 baseline): 7 (arrears bar), 39 (No Dues / transfer
+# fee), 49 (cash and cheque limits, statement filings), 55 (the Act prevails over the bye-laws). A society cannot opt
+# out of these by default; the Setup Wizard's droppable_* policy can lift that, with a resolution. Numbering was
+# checked against the notified text; whether each clause is really non-droppable is a legal call - ask an advocate.
+STATUTE_BACKED_CLAUSES = ("BL_07", "BL_39", "BL_49", "BL_55")
 
-# Model Bye-Laws 2011 clause inventory (58 clauses)
+# Society-resolution policies chosen from drop-downs in the Setup Wizard. Stored in society_policy_settings as
+# PROVISIONAL rows; the engine (fn_society_policy) only reads a row once Master links a passed resolution.
+# key -> (label, clause the resolution must be about, ((value, label), ...)); the FIRST choice is the default.
+POLICY_SPECS: dict[str, tuple] = {
+    "nodues_blocks_on": ("What blocks issuing a No Dues Certificate", "BL_39",
+                         (("loans_only", "Outstanding owner loans only (default)"),
+                          ("dues_and_loans", "Ordinary dues and owner loans"))),
+    "vote_ineligibility_basis": ("Overdue bills that bar a 'no dues' poll vote", "BL_08",
+                                 (("any_overdue", "Any overdue bill (default)"),
+                                  ("margin_60_days", "Only arrears over 60 days (bye-law 7 margin)"))),
+    "vote_loan_basis": ("Owner loans that bar a 'no dues' poll vote", "BL_08",
+                        (("margin_60_days", "Only a loan over 60 days past its due date (default)"),
+                         ("any_overdue", "Any loan past its due date"))),
+}
+for _bl in STATUTE_BACKED_CLAUSES:
+    POLICY_SPECS[f"droppable_{_bl}"] = (
+        f"{_bl} may be recorded as 'not adopted'", _bl,
+        (("locked", "Enforced by the engine - cannot be dropped (default)"),
+         ("droppable", "Society may drop this clause")))
+del _bl
+
+
+def policy_default(policy_key: str) -> str:
+    return POLICY_SPECS[policy_key][2][0][0]
+
+
+def society_policy(society_id, policy_key: str) -> str:
+    """Active value of a society policy (resolution-backed), else the default. Never raises."""
+    if policy_key not in POLICY_SPECS:
+        raise KeyError(policy_key)
+    try:
+        row = _row("SELECT fn_society_policy(%s, %s) AS v", (int(society_id), policy_key))
+        if row and row.get("v"):
+            return row["v"]
+    except Exception:
+        pass
+    return policy_default(policy_key)
+
+
+def clause_is_locked(society_id, clause_id: str) -> bool:
+    """True if this society cannot record the clause as 'not adopted'."""
+    if clause_id not in STATUTE_BACKED_CLAUSES:
+        return False
+    return society_policy(society_id, f"droppable_{clause_id}") != "droppable"
+
+# Model Bye-Laws for UP Apartment Owners' Associations, notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I) under
+# s.14(6) of the 2010 Act: 58 clauses, numbered and titled as in the notification.
 MODEL_BYE_LAW_CLAUSES = [
-    ("BL_01", "Short title and commencement"),
+    ("BL_01", "Short title and application"),
     ("BL_02", "Definitions"),
-    ("BL_03", "Association of Apartment Owners - formation, membership, common seal"),
-    ("BL_04", "General Body - composition, meetings, quorum"),
-    ("BL_05", "Board of Management - composition, election, term"),
-    ("BL_06", "Office bearers - President, Vice-President, Secretary, Treasurer"),
-    ("BL_07", "Disqualifications for membership of Board (arrears > 60 days)"),
-    ("BL_08", "Vacation of office of Board members"),
-    ("BL_09", "Powers and duties of the Board"),
-    ("BL_10", "Meetings of the Board"),
-    ("BL_11", "Secretary - appointment, duties"),
-    ("BL_12", "Treasurer - appointment, duties"),
-    ("BL_13", "Committees"),
-    ("BL_14", "Common areas and facilities - maintenance, use"),
-    ("BL_15", "Common expenses - apportionment, collection"),
-    ("BL_16", "Reserve Fund"),
-    ("BL_17", "Sinking Fund"),
-    ("BL_18", "Repair and Maintenance Fund"),
-    ("BL_19", "Staff - appointment, terms, benefits"),
-    ("BL_20", "Audit and accounts"),
-    ("BL_21", "Inspection of records"),
-    ("BL_22", "Bye-laws - adoption, amendment"),
-    ("BL_23", "Dispute resolution"),
-    ("BL_24", "Penalties for contravention"),
-    ("BL_25", "Service of notices"),
-    ("BL_26", "Common seal"),
-    ("BL_27", "Banking arrangements"),
-    ("BL_28", "Insurance"),
-    ("BL_29", "Register of members"),
-    ("BL_30", "Annual General Meeting"),
-    ("BL_31", "Extraordinary General Meeting"),
-    ("BL_32", "Quorum for General Body meetings"),
-    ("BL_33", "Voting rights"),
-    ("BL_34", "Proxy voting"),
-    ("BL_35", "Minutes of meetings"),
-    ("BL_36", "Financial year"),
-    ("BL_37", "Budget"),
-    ("BL_38", "Levy of charges"),
-    ("BL_39", "Transfer of apartment - fee, No Dues Certificate"),
-    ("BL_40", "Succession and inheritance"),
-    ("BL_41", "Leasing and licensing"),
-    ("BL_42", "Parking"),
-    ("BL_43", "Common areas - exclusive use"),
-    ("BL_44", "Alterations to apartments"),
-    ("BL_45", "Nuisance and annoyance"),
-    ("BL_46", "Financial provisions - cash, cheque limits"),
-    ("BL_47", "Petty cash"),
-    ("BL_48", "Investment of funds"),
-    ("BL_49", "Statements and audit - filing calendar"),
-    ("BL_50", "Appointment of auditors"),
-    ("BL_51", "Audit report"),
-    ("BL_52", "Publication of accounts"),
-    ("BL_53", "Inspection of accounts by members"),
-    ("BL_54", "Supremacy of Act over bye-laws"),
-    ("BL_55", "Dissolution of Association"),
-    ("BL_56", "Application of funds on dissolution"),
-    ("BL_57", "Transitional provisions"),
-    ("BL_58", "Amendment of bye-laws (2/3 majority)"),
+    ("BL_03", "Objects of Association"),
+    ("BL_04", "Members of Association"),
+    ("BL_05", "Joint Apartment Owners"),
+    ("BL_06", "Holding one share compulsory"),
+    ("BL_07", "Disqualification (arrears over 60 days)"),
+    ("BL_08", "Voting"),
+    ("BL_09", "Quorum"),
+    ("BL_10", "Votes to be cast in person"),
+    ("BL_11", "Powers and duties of Association"),
+    ("BL_12", "Place of Meetings"),
+    ("BL_13", "Annual Meetings"),
+    ("BL_14", "Special Meetings"),
+    ("BL_15", "Notice of Meetings"),
+    ("BL_16", "Adjourned Meeting"),
+    ("BL_17", "Order of Business"),
+    ("BL_18", "Management of Association (Board)"),
+    ("BL_19", "President"),
+    ("BL_20", "Vice-President"),
+    ("BL_21", "Secretary"),
+    ("BL_22", "Treasurer"),
+    ("BL_23", "Manager"),
+    ("BL_24", "Powers and Duties of the Board"),
+    ("BL_25", "Other Duties of the Board"),
+    ("BL_26", "Election and term of office"),
+    ("BL_27", "Vacancies"),
+    ("BL_28", "Removal of office bearers"),
+    ("BL_29", "Organisation of meeting"),
+    ("BL_30", "Regular Meetings of the Board"),
+    ("BL_31", "Special Meetings of the Board"),
+    ("BL_32", "Waiver of notice"),
+    ("BL_33", "Quorum of the Board"),
+    ("BL_34", "Fidelity Bonds"),
+    ("BL_35", "Assessments"),
+    ("BL_36", "Maintenance and Repairs"),
+    ("BL_37", "Major repairs"),
+    ("BL_38", "Use of Dwelling Units - internal changes"),
+    ("BL_39", "Transfer of an Apartment - No Dues Certificate, transfer fee"),
+    ("BL_40", "Use of Apartments, Common Areas and Facilities"),
+    ("BL_41", "Right of Entry"),
+    ("BL_42", "Rules of Conduct"),
+    ("BL_43", "Damages"),
+    ("BL_44", "Unlawful activities"),
+    ("BL_45", "Visitors and Guests"),
+    ("BL_46", "Funds"),
+    ("BL_47", "Investment"),
+    ("BL_48", "Affiliation"),
+    ("BL_49", "Accounts - petty cash, cheque limit, audited statement filings"),
+    ("BL_50", "Publication of Accounts and Reports"),
+    ("BL_51", "Appointment of Auditors"),
+    ("BL_52", "Power of Auditor"),
+    ("BL_53", "Notice to Association of mortgage"),
+    ("BL_54", "Notice of un-paid assessments"),
+    ("BL_55", "Compliance - the Act prevails over the bye-laws"),
+    ("BL_56", "Seal of the Association"),
+    ("BL_57", "Power of competent authority to inspect the building"),
+    ("BL_58", "Amendment of Bye-Laws"),
 ]
+
 
 def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: str, variation_text: str | None) -> str | None:
     """Validate a society_bye_laws choice. Returns an error message or None."""
@@ -446,6 +495,8 @@ def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: 
         return f"Choice must be one of {ADOPTION_CHOICES}."
     if clause_id not in {c[0] for c in MODEL_BYE_LAW_CLAUSES}:
         return f"Unknown clause {clause_id}."
+    if clause_id == "BL_55" and choice == "adopted_with_variation":
+        return "BL_55 says the Act prevails over the bye-laws; it cannot be varied. Adopt it as-is."
     if choice == "adopted_with_variation" and not (variation_text or "").strip():
         return "Variation text is required when a clause is adopted with a variation."
     if choice != "adopted_with_variation" and variation_text:
@@ -453,7 +504,7 @@ def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: 
     if choice == "not_adopted":
         if layer != 1:
             return "Only a Model Bye-Law (Layer 1) clause can be recorded as not adopted."
-        if clause_id in STATUTE_BACKED_CLAUSES:
+        if clause_is_locked(society_id, clause_id):
             return f"{clause_id} is backed by the Act/Rules and the engine enforces it; it cannot be 'not adopted'."
     if layer in (2, 3) and choice != "adopted_with_variation":
         return "A society policy / board decision is a variation of an adopted clause; choose 'adopted with variation'."
@@ -586,6 +637,85 @@ def record_wizard_adoption(actor_id, actor_role, actor_society_id, society_id: i
            RETURNING id""",
         {"s": society_id, "c": clause_id, "pr": choice, "vt": vt, "uid": actor_id, "why": why, "role": actor_role})
     return (True, f"{clause_id} noted as provisional ({choice.replace('_', ' ')}).") if row else (False, "Nothing was saved.")
+
+
+def list_society_policies(society_id: int) -> dict[str, dict]:
+    """policy_key -> {value, active, proposed}: value is what the engine uses now, proposed is a pending choice."""
+    out = {k: {"value": policy_default(k), "active": False, "proposed": None} for k in POLICY_SPECS}
+    rows = _rows("""SELECT policy_key, value_text, resolution_id FROM society_policy_settings
+                     WHERE society_id = %s AND effective_from <= CURRENT_DATE
+                     ORDER BY effective_from DESC, id DESC""", (int(society_id),))
+    seen_active, seen_prov = set(), set()
+    for r in rows:
+        k = r["policy_key"]
+        if k not in out:
+            continue
+        if r["resolution_id"] and k not in seen_active:
+            out[k]["value"], out[k]["active"] = r["value_text"], True
+            seen_active.add(k)
+        elif not r["resolution_id"] and k not in seen_prov and k not in seen_active:
+            out[k]["proposed"] = r["value_text"]
+            seen_prov.add(k)
+    return out
+
+
+def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int,
+                         policy_key: str, value: str) -> tuple[bool, str]:
+    """Setup Wizard drop-down: record a society-resolution policy choice. Always provisional - inert in the engine
+    until Master links a passed resolution (link_policy_resolution). Admin: own society only."""
+    if actor_role not in ("admin", "master"):
+        raise PermissionError("Admin role required.")
+    if actor_role == "admin" and int(actor_society_id or 0) != int(society_id):
+        raise PermissionError("You can only record policy choices for your own society.")
+    spec = POLICY_SPECS.get(policy_key)
+    if not spec:
+        return False, f"Unknown policy {policy_key}."
+    if value not in {v for v, _ in spec[2]}:
+        return False, f"Choose one of: {', '.join(v for v, _ in spec[2])}."
+    row = _row(
+        """WITH upd AS (
+               UPDATE society_policy_settings SET value_text = %(v)s, updated_at = NOW()
+                WHERE society_id = %(s)s AND policy_key = %(k)s AND resolution_id IS NULL
+               RETURNING id
+           ), ins AS (
+               INSERT INTO society_policy_settings (society_id, policy_key, value_text, created_by)
+               SELECT %(s)s, %(k)s, %(v)s, %(uid)s WHERE NOT EXISTS (SELECT 1 FROM upd)
+               RETURNING id
+           )
+           INSERT INTO regime_rule_audit (target_table, society_id, rule_key, action, old_value, new_value,
+                                          reason, changed_by, changed_by_role)
+           SELECT 'society_policy_settings', %(s)s, %(k)s, 'set', NULL,
+                  jsonb_build_object('proposed', CAST(%(v)s AS text)),
+                  'Recorded in the Setup Wizard; awaiting resolution', %(uid)s, %(role)s
+           RETURNING id""",
+        {"s": int(society_id), "k": policy_key, "v": value, "uid": actor_id, "role": actor_role})
+    return (True, "Noted as provisional until a resolution is linked.") if row else (False, "Nothing was saved.")
+
+
+def link_policy_resolution(actor_id, actor_role, society_id: int, policy_key: str, resolution_id: int) -> tuple[bool, str]:
+    """Master: make the society's provisional policy choice active by linking a passed Layer-2 resolution."""
+    _require_master(actor_role)
+    spec = POLICY_SPECS.get(policy_key)
+    if not spec:
+        return False, f"Unknown policy {policy_key}."
+    _, rerr = _check_resolution(int(society_id), spec[1], 2, int(resolution_id))
+    if rerr:
+        return False, rerr
+    row = _row(
+        """WITH upd AS (
+               UPDATE society_policy_settings SET resolution_id = %(r)s, effective_from = GREATEST(effective_from, CURRENT_DATE),
+                      updated_at = NOW()
+                WHERE society_id = %(s)s AND policy_key = %(k)s AND resolution_id IS NULL
+               RETURNING id, value_text
+           )
+           INSERT INTO regime_rule_audit (target_table, society_id, rule_key, action, old_value, new_value,
+                                          reason, changed_by, changed_by_role)
+           SELECT 'society_policy_settings', %(s)s, %(k)s, 'confirm_provisional', NULL,
+                  jsonb_build_object('value', upd.value_text, 'resolution_id', %(r)s),
+                  'Linked to passed resolution', %(uid)s, 'master'
+             FROM upd RETURNING id""",
+        {"s": int(society_id), "k": policy_key, "r": int(resolution_id), "uid": actor_id})
+    return (True, "Policy is now active.") if row else (False, "No provisional choice to activate.")
 
 
 def list_society_bye_laws(society_id: int, on: date | None = None) -> list[dict]:

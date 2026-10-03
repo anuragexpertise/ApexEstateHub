@@ -681,7 +681,7 @@ def render_category_content(category, society_id=None, state=None):
         labels = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation", "not_adopted": "Not adopted"}
         rows = []
         for clause_id, title in rra.MODEL_BYE_LAW_CLAUSES:
-            locked = clause_id in rra.STATUTE_BACKED_CLAUSES
+            locked = rra.clause_is_locked(society_id, clause_id) if society_id else clause_id in rra.STATUTE_BACKED_CLAUSES
             cur = existing.get(clause_id) or {}
             current = cur.get("proposed_status") if cur.get("status") == "provisional" else cur.get("status")
             opts = [{"label": labels[c], "value": c} for c in rra.ADOPTION_CHOICES
@@ -700,6 +700,31 @@ def render_category_content(category, society_id=None, state=None):
                                   disabled=active, style={"fontSize": "11px"})),
                 html.Td(html.Small(id={"type": "sw-bl-msg", "clause": clause_id}, className="text-muted")),
             ]))
+        try:
+            pol = rra.list_society_policies(society_id) if society_id else {}
+        except Exception:
+            pol = {}
+        pol_rows = []
+        for key, (label, clause, choices) in rra.POLICY_SPECS.items():
+            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
+            shown = st["proposed"] or st["value"]
+            pol_rows.append(html.Tr([
+                html.Td([html.Strong(label, style={"fontSize": "12px"}), html.Br(),
+                         html.Small(f"Resolution on {clause}", className="text-muted")], style={"maxWidth": "260px"}),
+                html.Td(dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm",
+                                   options=[{"label": lbl, "value": v} for v, lbl in choices], value=shown)),
+                html.Td([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
+                         else dbc.Badge("Provisional", color="warning", text_color="dark"),
+                         html.Small(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")]),
+            ]))
+        policy_panel = html.Div([
+            html.H6("Society resolution settings", className="mt-3 mb-1"),
+            html.Small("Choices the engine used to hard-code. Provisional until Master links a passed resolution. "
+                       "Clauses 7, 39, 49 and 55 are 'enforced by the engine' unless you allow them to be dropped; "
+                       "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
+            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
+                       html.Tbody(pol_rows)], bordered=True, size="sm"),
+        ]) if society_id else html.Div()
         return elements + [
             dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
                        "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
@@ -716,6 +741,7 @@ def render_category_content(category, society_id=None, state=None):
                                 ("Clause", "Intended outcome", "Variation (if any)", "")])),
                                 html.Tbody(rows)], bordered=True, size="sm", hover=True),
                      style={"maxHeight": "420px", "overflowY": "auto"}),
+            policy_panel,
         ]
     elif category == "UP AOA Compliance":
         # Read-only reference step: the tabulated Acts, Rules, Bye-laws and
