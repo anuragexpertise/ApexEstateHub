@@ -10,7 +10,7 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 @token_required
 def get_societies(current_user):
     """Get all societies (master admin only)"""
-    if current_user.role != 'admin' or current_user.society_id is not None:
+    if current_user.role != 'master':
         return jsonify({'error': 'Unauthorized'}), 403
 
     societies = db._execute(
@@ -23,7 +23,8 @@ def get_societies(current_user):
 @token_required
 def get_society(current_user, society_id):
     """Get society details"""
-    if current_user.society_id != society_id and current_user.role != 'admin':
+    # Own society, or master. (It used to let ANY society's admin read ANY society.)
+    if current_user.role != 'master' and current_user.society_id != society_id:
         return jsonify({'error': 'Unauthorized'}), 403
 
     society = db._execute(
@@ -39,6 +40,8 @@ def get_kpis(current_user):
     society_id = current_user.society_id
 
     if not society_id:
+        if current_user.role != 'master':
+            return jsonify({'error': 'Unauthorized'}), 403
         # Master admin - return global KPIs
         totals = db._execute(
             "SELECT COUNT(*) as societies, SUM(CASE WHEN plan = 'Paid' THEN 1 ELSE 0 END) as paid FROM societies",

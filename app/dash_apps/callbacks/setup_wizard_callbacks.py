@@ -9,6 +9,8 @@ from app.dash_apps.pages.setup_wizard import (
     build_rules_panel, rules_subtitle, MAX_INTEREST_RATE_PCT,
 )
 from app.utils.ux_toasts import error_toast
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 
 # Index of the statutes step in CATEGORIES — the only step whose body depends
 # on the State picked in Society Details. Step containers are keyed by that
@@ -66,6 +68,7 @@ def register_setup_wizard_callbacks(app):
         Input("sw-qr-confirm-final", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def validate_setup_fields(address, email, phone, registration, secret, secret_confirm, agreement, password, secret_final):
         address_result = _setup_validation_result(address, "Address", "mb-3")
         email_result = _setup_validation_result(email, "Email", "mb-3", "email")
@@ -95,13 +98,15 @@ def register_setup_wizard_callbacks(app):
         Output("setup-wizard-container", "children"),
         Input("auth-store", "data")
     )
+    @require_session
     def trigger_setup_wizard(auth):
-        if not auth or not isinstance(auth, dict) or not auth.get("authenticated"):
+        # `auth` (the browser's auth-store) only re-triggers this callback on
+        # login; role and society come from the server session. Reading them
+        # from the client-editable store let a forged society_id open another
+        # society's setup wizard.
+        if get_current_user_role() != "admin":
             return no_update
-        if auth.get("role") != "admin":
-            return no_update
-            
-        society_id = auth.get("society_id")
+        society_id = get_current_society_id()
         if not society_id:
             return no_update
 
@@ -140,6 +145,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-qr-secret-confirm", "value"),
         prevent_initial_call=True
     )
+    @require_session
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm):
         triggered_id = ctx.triggered_id
         
@@ -230,6 +236,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-id", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def save_wizard_bye_law_choice(choice, variation, comp_id, society_id):
         if not choice or not society_id:
             return no_update
@@ -253,6 +260,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-id", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def save_wizard_policy_choice(value, comp_id, society_id):
         if not value or not society_id:
             return no_update
@@ -284,6 +292,7 @@ def register_setup_wizard_callbacks(app):
             State("sw-society-id", "data"),
             prevent_initial_call=True,
         )
+        @require_session
         def refresh_up_aoa_step_content(picked_state, society_id):
             step = "UP AOA Compliance"
             return (
@@ -369,6 +378,7 @@ def register_setup_wizard_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True
     )
+    @require_session
     def submit_setup_wizard(n_submit, n_close, 
                             logo_data, address, s_state, s_email, phone, bg_data, 
                             tan, gstin, reg_num, gate_logic, duty_hrs, pay_qr_data, calc_start, 
@@ -401,13 +411,21 @@ def register_setup_wizard_callbacks(app):
             # auth dict or None (logout) — every other callback in the app
             # does auth.get(...) on it. Validation failures below only ever
             # touch is_open / sw-error-msg.
-            if not auth or not auth.get("society_id"):
+            # Identity is server-resolved. Previously society_id/user_id came from
+            # the client-editable auth-store and NO role check existed, so any
+            # logged-in user (an apartment owner included) could overwrite a
+            # society's QR signing secret and setup. Setup is admin-only.
+            society_id = get_current_society_id()
+            _sw_uid = get_current_user_id()
+            if not society_id or not _sw_uid:
                 return True, no_update, no_update, no_update, no_update, "Session error — please log in again.", no_update, no_update
+            if get_current_user_role() != "admin":
+                return True, no_update, no_update, no_update, no_update, "Only the society admin can complete setup.", no_update, no_update
 
             import time
             if not hasattr(app, "_setup_rate_limits"):
                 app._setup_rate_limits = {}
-            uid = auth.get("user_id")
+            uid = _sw_uid
             now = time.time()
             if uid in app._setup_rate_limits and now - app._setup_rate_limits[uid] < 5:
                 return True, no_update, no_update, no_update, no_update, "Please wait before submitting again.", no_update, no_update
@@ -420,7 +438,7 @@ def register_setup_wizard_callbacks(app):
                 return True, no_update, no_update, no_update, no_update, "Admin Password is required.", no_update, no_update
 
             from werkzeug.security import check_password_hash
-            user_row = db._execute("SELECT password_hash FROM users WHERE id = :uid", {"uid": auth.get("user_id")}, fetch_one=True)
+            user_row = db._execute("SELECT password_hash FROM users WHERE id = :uid", {"uid": _sw_uid}, fetch_one=True)
             if not user_row or not check_password_hash(user_row["password_hash"], admin_pass):
                 return True, no_update, no_update, no_update, no_update, "Invalid Admin Password.", no_update, no_update
 
@@ -434,7 +452,7 @@ def register_setup_wizard_callbacks(app):
             if len(qr_secret) < 8 or not re.search(r'[A-Z]', qr_secret) or not re.search(r'[a-z]', qr_secret) or not re.search(r'[^a-zA-Z0-9]', qr_secret):
                 return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char.", no_update, no_update
 
-            society_id = auth.get("society_id")
+            # society_id was resolved from the server session above.
 
             # Reversible encryption (NOT a one-way hash like passwords/PINs
             # elsewhere in this codebase) — this is society_id's own real
@@ -543,7 +561,7 @@ def register_setup_wizard_callbacks(app):
                         "apt_sink": apt_sinking, "apt_repair": apt_repair,
                         "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,
                         "bf_fy": bf_fy, "bf_json": json.dumps(bf_json),
-                        "created_by": auth.get("user_id"),
+                        "created_by": _sw_uid,
                         "s_email": s_email,
                         "reg_num": reg_num,
                         "apt_interest": min(max(float(apt_interest or 0), 0.0), MAX_INTEREST_RATE_PCT),

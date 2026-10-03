@@ -36,6 +36,7 @@ NOTE (2026-08, two bugs fixed):
      not {"type":"form-field",...} — the Input below is updated to match.
 """
 from dash import Input, Output, State, MATCH, no_update, callback_context
+from app.security.guards import require_session
 
 
 _APPLIES_TO = {"receipt", "expense"}
@@ -49,6 +50,7 @@ def register_form_autofill_callbacks(app):
         State({"type": "form-field", "entity": MATCH, "field": "particulars"}, "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def suggest_particulars(acc_id, current_particulars):
         if not acc_id:
             return no_update
@@ -68,9 +70,15 @@ def register_form_autofill_callbacks(app):
 
         try:
             from database.db_manager import db
+            from app.security.audit_context import get_current_society_id
+            sid = get_current_society_id()
+            if not sid:
+                return no_update
+            # accounts is keyed (society_id, id): without the society filter any
+            # caller could read another tenant's account names by guessing ids.
             row = db._execute(
-                "SELECT name FROM accounts WHERE id = %s",
-                (acc_id,), fetch_one=True,
+                "SELECT name FROM accounts WHERE id = %s AND society_id = %s",
+                (acc_id, sid), fetch_one=True,
             )
             acc_name = (row or {}).get("name")
             if not acc_name:

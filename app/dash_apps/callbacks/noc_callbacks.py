@@ -64,6 +64,8 @@ That single line is the only layout change needed.
 
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id
 
 
 def _noc_to_html_js() -> str:
@@ -221,13 +223,15 @@ def register_noc_callbacks(app):
         State('noc-letterhead-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_noc_printed(n_clicks, lh_data):
         noc_id = (lh_data or {}).get("id")
-        if not n_clicks or not noc_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not noc_id or not sid:
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE nocs SET last_printed_at = NOW() WHERE id = %s", (int(noc_id),))
+            db._execute("UPDATE nocs SET last_printed_at = NOW() WHERE id = %s AND society_id = %s", (int(noc_id), sid))
         except Exception as e:
             print(f"noc last_printed_at stamp error: {e}")
         return no_update
@@ -238,13 +242,15 @@ def register_noc_callbacks(app):
         State('noc-letterhead-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_noc_emailed(n_clicks, lh_data):
         noc_id = (lh_data or {}).get("id")
-        if not n_clicks or not noc_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not noc_id or not sid:
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE nocs SET last_emailed_at = NOW() WHERE id = %s", (int(noc_id),))
+            db._execute("UPDATE nocs SET last_emailed_at = NOW() WHERE id = %s AND society_id = %s", (int(noc_id), sid))
         except Exception as e:
             print(f"noc last_emailed_at stamp error: {e}")
         return no_update

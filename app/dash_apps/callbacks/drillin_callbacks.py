@@ -545,6 +545,7 @@ def register_pay_dues_bill_callbacks(app):
         Input({"type": "form-field", "entity": "pay_due_bg", "field": "amount"}, "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def validate_pay_dues_bill_group(bill_group_id, amount):
         bill_error = "" if bill_group_id else "Select an unpaid bill before submitting."
         amount_error = ""

@@ -34,6 +34,8 @@ permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id
 
 
 def _ticket_html_js() -> str:
@@ -172,15 +174,17 @@ def register_event_ticket_callbacks(app):
         State('event-ticket-print-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_ticket_printed(n_clicks, print_data):
         ticket_id = (print_data or {}).get("id")
-        if not n_clicks or not ticket_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not ticket_id or not sid:
             return no_update
         try:
             from database.db_manager import db
             db._execute(
-                "UPDATE event_ticket_items SET last_printed_at = NOW() WHERE id = %s",
-                (int(ticket_id),),
+                "UPDATE event_ticket_items SET last_printed_at = NOW() WHERE id = %s AND society_id = %s",
+                (int(ticket_id), sid),
             )
         except Exception as e:
             print(f"event ticket last_printed_at stamp error: {e}")
@@ -192,15 +196,17 @@ def register_event_ticket_callbacks(app):
         State('event-ticket-print-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_ticket_emailed(n_clicks, print_data):
         ticket_id = (print_data or {}).get("id")
-        if not n_clicks or not ticket_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not ticket_id or not sid:
             return no_update
         try:
             from database.db_manager import db
             db._execute(
-                "UPDATE event_ticket_items SET last_emailed_at = NOW() WHERE id = %s",
-                (int(ticket_id),),
+                "UPDATE event_ticket_items SET last_emailed_at = NOW() WHERE id = %s AND society_id = %s",
+                (int(ticket_id), sid),
             )
         except Exception as e:
             print(f"event ticket last_emailed_at stamp error: {e}")

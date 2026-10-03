@@ -1008,6 +1008,7 @@ def register_shell_callbacks(app):
         State("sidebar-open-store",  "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def toggle_sidebar(ham, over, col, store):
         ctx = dash.callback_context
         if not ctx.triggered:
@@ -1201,6 +1202,7 @@ def register_shell_callbacks(app):
         Input("profile-action-trigger", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _forward_profile_toast(data):
         if not data or "_toast" not in data:
             raise PreventUpdate
@@ -1215,19 +1217,25 @@ def register_shell_callbacks(app):
         prevent_initial_call="initial_duplicate",
     )
     def _load_notifications(n_intervals, auth, store):
-        if not auth or not auth.get("authenticated") or not auth.get("user_id"):
+        # Identity comes from the server session, NOT from auth-store: the
+        # store is client-editable, and trusting its user_id let any visitor
+        # read another user's notifications. `auth` is kept only to retrigger
+        # this callback on login/logout.
+        from app.security.audit_context import get_current_user_id as _uid
+        uid = _uid()
+        if not uid:
             return {"unread_count": 0, "items": []}, no_update
         try:
             from database.db_manager import db
             unread = db._execute(
                 "SELECT COUNT(*) AS c FROM notifications WHERE user_id=:uid AND read=FALSE",
-                {"uid": auth["user_id"]}, fetch_one=True
+                {"uid": uid}, fetch_one=True
             )
             items = db._execute(
                 """SELECT id, title, body, url, created_at FROM notifications
                    WHERE user_id=:uid AND read=FALSE
                    ORDER BY created_at DESC LIMIT 20""",
-                {"uid": auth["user_id"]}, fetch_all=True
+                {"uid": uid}, fetch_all=True
             ) or []
             new_count = unread.get("c", 0) if unread else 0
             new_store = {"unread_count": new_count, "items": items}
@@ -1252,6 +1260,7 @@ def register_shell_callbacks(app):
         State("notifications-dropdown", "style"),
         prevent_initial_call=True,
     )
+    @require_session
     def _toggle_notifications_dropdown(n_clicks, store, current_style):
         if not n_clicks:
             raise PreventUpdate
@@ -1297,8 +1306,11 @@ def register_shell_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _mark_notification_read(n_clicks_list, auth):
-        if not auth or not auth.get("user_id"):
+        from app.security.audit_context import get_current_user_id as _uid
+        uid = _uid()
+        if not uid:
             raise PreventUpdate
         triggered = [c for c in n_clicks_list if c]
         if not triggered:
@@ -1308,22 +1320,22 @@ def register_shell_callbacks(app):
             from database.db_manager import db
             row = db._execute(
                 "SELECT title FROM notifications WHERE id=:nid AND user_id=:uid AND read=FALSE",
-                {"nid": notif_id, "uid": auth["user_id"]}, fetch_one=True
+                {"nid": notif_id, "uid": uid}, fetch_one=True
             )
             db._execute(
                 "UPDATE notifications SET read=TRUE WHERE id=:nid AND user_id=:uid",
-                {"nid": notif_id, "uid": auth["user_id"]}
+                {"nid": notif_id, "uid": uid}
             )
             unread = db._execute(
                 "SELECT COUNT(*) AS c FROM notifications WHERE user_id=:uid AND read=FALSE",
-                {"uid": auth["user_id"]}, fetch_one=True
+                {"uid": uid}, fetch_one=True
             )
             new_count = unread.get("c", 0) if unread else 0
             items = db._execute(
                 """SELECT id, title, body, url, created_at FROM notifications
                    WHERE user_id=:uid AND read=FALSE
                    ORDER BY created_at DESC LIMIT 20""",
-                {"uid": auth["user_id"]}, fetch_all=True
+                {"uid": uid}, fetch_all=True
             ) or []
             toast_data = {"type": "info", "message": f"Opened: {row['title'] if row else 'notification'}"}
             return ({"display": "none"}, {"unread_count": new_count, "items": items}, toast_data)
@@ -1337,6 +1349,7 @@ def register_shell_callbacks(app):
         Input("notifications-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _update_badge(store):
         count = (store or {}).get("unread_count", 0)
         if count > 0:
@@ -1355,14 +1368,17 @@ def register_shell_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _mark_all_read(n_clicks, auth):
-        if not n_clicks or not auth or not auth.get("user_id"):
+        from app.security.audit_context import get_current_user_id as _uid
+        uid = _uid()
+        if not n_clicks or not uid:
             raise PreventUpdate
         try:
             from database.db_manager import db
             db._execute(
                 "UPDATE notifications SET read=TRUE WHERE user_id=:uid AND read=FALSE",
-                {"uid": auth["user_id"]}
+                {"uid": uid}
             )
             return {"unread_count": 0, "items": []}
         except Exception as e:
@@ -1375,6 +1391,7 @@ def register_shell_callbacks(app):
         Input("drilldown-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _toggle_drill_back(store):
         stack = (store or {}).get("stack") or []
         visible = len(stack) > 1
@@ -1390,6 +1407,7 @@ def register_shell_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def _drill_back(n_clicks, store, auth):
         if not n_clicks:
             raise PreventUpdate

@@ -43,6 +43,11 @@ PUBLIC_CALLBACKS: dict[str, set[str]] = {
         "handle_master_login",
         "toggle_forgot_modal",
         "handle_reset_flow",
+        # Close-button handlers for the forgot/reset modals, which sit on
+        # the login screen — they run before any session exists and only
+        # flip a boolean. No data read or written.
+        "close_forgot_modal",
+        "close_reset_modal",
     },
     "shell_callbacks.py": {
         # Society-picker / two-stage login UI mechanics — dropdown
@@ -63,6 +68,16 @@ PUBLIC_CALLBACKS: dict[str, set[str]] = {
         # a separate, tracked follow-up, NOT satisfied by being on this
         # allowlist.
         "route_page",
+        # Renders whatever message the caller put in toast-store (login
+        # failures included, which by definition happen with no session).
+        # Pure presentation: Dash escapes the text and no data is read.
+        "show_toast",
+        # Must ALSO handle the no-session case (logout / session expiry
+        # clears auth-store and this callback is what resets the bell badge
+        # to zero), so it can't PreventUpdate up front. It resolves the user
+        # from the server session itself and returns an empty store when
+        # there isn't one — it never reads a user id from auth-store.
+        "_load_notifications",
         # Best-effort: should no-op gracefully with no/expired session
         # (nothing left to log out of), not get blocked by one.
         "logout",

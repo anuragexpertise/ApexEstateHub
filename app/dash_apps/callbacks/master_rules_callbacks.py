@@ -10,6 +10,7 @@ from dash import Input, Output, State, no_update
 from app.dash_apps.pages.master_rules_page import REGIME, render_rules_sections, render_bye_laws_sections, render_meetings_sections
 from app.security.audit_context import get_current_user_id, get_current_user_role
 from app.services import regime_rules_admin as rra
+from app.security.guards import require_session
 
 _TOAST = Output("mrl-toast", "children", allow_duplicate=True)
 _BODY = Output("mrl-body", "children", allow_duplicate=True)
@@ -63,6 +64,7 @@ def _run_mtg(fn):
 def register_master_rules_callbacks(app):
 
     @app.callback(Output("mrl-hint", "children"), Input("mrl-key", "value"), prevent_initial_call=True)
+    @require_session
     def show_hint(key):
         spec = rra.RULE_SPECS.get(key)
         if not spec:
@@ -78,6 +80,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-key", "value"), State("mrl-value", "value"), State("mrl-eff", "value"),
                   State("mrl-source", "value"), State("mrl-reason", "value"), State("mrl-confirm", "value"),
                   prevent_initial_call=True)
+    @require_session
     def save_rule(n, key, value, eff, source, reason, confirm):
         if not n:
             return no_update, no_update
@@ -87,6 +90,7 @@ def register_master_rules_callbacks(app):
     @app.callback(Output("mrl-cat-status", "value"), Output("mrl-cat-ver", "value"), Output("mrl-cat-app", "value"),
                   Output("mrl-cat-prov", "value"), Output("mrl-cat-src", "value"),
                   Input("mrl-cat-id", "value"), prevent_initial_call=True)
+    @require_session
     def prefill_catalog(iid):
         row = next((i for i in rra.list_instruments(REGIME) if i["id"] == iid), None)
         if not row:
@@ -99,6 +103,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
                   State("mrl-cat-prov", "value"), State("mrl-cat-src", "value"), State("mrl-cat-ver", "value"),
                   State("mrl-cat-reason", "value"), prevent_initial_call=True)
+    @require_session
     def save_catalog(n, iid, status, app_txt, prov, src, ver, reason):
         if not n:
             return no_update, no_update
@@ -108,6 +113,7 @@ def register_master_rules_callbacks(app):
     @app.callback(_TOAST, _BODY, Input("mrl-cash-save", "n_clicks"),
                   State("mrl-cash-soc", "value"), State("mrl-cash-mode", "value"), State("mrl-cash-reason", "value"),
                   prevent_initial_call=True)
+    @require_session
     def save_cash_mode(n, soc, mode, reason):
         if not n:
             return no_update, no_update
@@ -120,6 +126,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-bye-status", "value"), State("mrl-bye-variation", "value"), State("mrl-bye-eff", "value"),
                   State("mrl-bye-reason", "value"), State("mrl-bye-res", "value"),
                   prevent_initial_call=True)
+    @require_session
     def save_bye_law(n, soc, clause, layer, status, variation, eff, reason, res_id):
         if not n or not soc or not clause or not layer or not status:
             return no_update, no_update
@@ -132,6 +139,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-link-soc", "value"), State("mrl-link-clause", "value"), State("mrl-link-layer", "value"),
                   State("mrl-link-res", "value"), State("mrl-link-reason", "value"),
                   prevent_initial_call=True)
+    @require_session
     def link_bye_law(n, soc, clause, layer, res_id, reason):
         if not n or not soc or not clause or not layer or not res_id:
             return no_update, no_update
@@ -144,6 +152,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-mtg-soc", "value"), State("mrl-mtg-type", "value"), State("mrl-mtg-date", "value"),
                   State("mrl-mtg-quorum", "value"), State("mrl-mtg-minutes", "value"), State("mrl-mtg-reason", "value"),
                   prevent_initial_call=True)
+    @require_session
     def save_meeting(n, soc, mtype, mdate, quorum, minutes, reason):
         if not n or not soc or not mtype or not mdate:
             return no_update, no_update
@@ -152,6 +161,7 @@ def register_master_rules_callbacks(app):
             uid, role, int(soc), mtype, mdate, bool(quorum), minutes or None, reason))
 
     @app.callback(Output("mrl-res-majority", "value"), Input("mrl-res-dt", "value"), prevent_initial_call=True)
+    @require_session
     def prefill_resolution_majority(dt_id):
         if not dt_id:
             return no_update
@@ -163,6 +173,7 @@ def register_master_rules_callbacks(app):
                   State("mrl-res-clause", "value"), State("mrl-res-body", "value"), State("mrl-res-majority", "value"),
                   State("mrl-res-passed", "value"), State("mrl-res-passed-on", "value"), State("mrl-res-reason", "value"),
                   prevent_initial_call=True)
+    @require_session
     def save_resolution(n, soc, mtg_id, dt_id, clause, body, majority, passed, passed_on, reason):
         if not n or not soc or not mtg_id or not dt_id or not body:
             return no_update, no_update
@@ -176,6 +187,7 @@ def register_master_rules_callbacks(app):
     @app.callback(_TOAST, _MTG_BODY, Input({"type": "mrl-enact", "index": ALL}, "n_clicks"),
                   State({"type": "mrl-enact", "index": ALL}, "id"),
                   prevent_initial_call=True)
+    @require_session
     def execute_enactment(n_clicks, ids):
         if not n_clicks or not any(n_clicks):
             return no_update, no_update
