@@ -14219,7 +14219,7 @@ CREATE TABLE IF NOT EXISTS society_policy_settings (
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     policy_key      VARCHAR(40) NOT NULL,
     value_text      VARCHAR(40) NOT NULL,
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_id   INT,
     effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -14410,6 +14410,14 @@ CREATE TABLE IF NOT EXISTS resolutions (
 );
 CREATE INDEX IF NOT EXISTS idx_resolutions_meeting ON resolutions (meeting_id);
 CREATE INDEX IF NOT EXISTS idx_resolutions_clause ON resolutions (clause_id);
+
+-- society_policy_settings is defined earlier in this file than the governance
+-- tables. Add its FK here, once resolutions exists, so fresh resets work too.
+ALTER TABLE society_policy_settings
+    DROP CONSTRAINT IF EXISTS society_policy_settings_resolution_id_fkey;
+ALTER TABLE society_policy_settings
+    ADD CONSTRAINT society_policy_settings_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
 CREATE TABLE IF NOT EXISTS resolution_effects (
