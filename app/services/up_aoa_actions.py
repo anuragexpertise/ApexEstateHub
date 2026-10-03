@@ -133,6 +133,10 @@ def set_nodues(society_id: int, transfer_id, action, on):
     d = _d(on)
     if not d or not _owns("apartment_transfers", transfer_id, society_id):
         return False, "Choose a transfer and a date."
+    if action == "nodues_issued_on":
+        chk = db._execute("SELECT * FROM fn_nodues_issue_check(%s, %s)", (int(transfer_id), d), fetch_one=True) or {}
+        if not chk.get("can_issue"):
+            return False, f"Cannot issue the No Dues Certificate: {chk.get('reason') or 'dues remain'}."
     db._execute(f"UPDATE apartment_transfers SET {action} = %s WHERE id = %s AND society_id = %s", (d, int(transfer_id), society_id))
     return True, "No Dues Certificate record updated."
 
@@ -174,8 +178,13 @@ def set_cutoff_step(society_id: int, proceeding_id, step, on, appeal_outcome=Non
 
 
 # ── owner loans ───────────────────────────────────────────────────────────────
-def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, rate, mode, purpose, resolution_ref):
+def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, rate, mode, purpose, resolution_ref, due_date=None):
     p, d = _num(principal), _d(loan_date)
+    due = _d(due_date)
+    if due_date and not due:
+        return False, "The repayment date is not a valid date."
+    if due and d and due < d:
+        return False, "The repayment date cannot be before the loan date."
     if not _owns("apartments", apartment_id, society_id):
         return False, "Choose a flat."
     if not d or p is None or p <= 0:
@@ -187,7 +196,25 @@ def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, 
                        (resolution_ref or "").strip(), user_id), fetch_one=True) or {}
     if row.get("msg") != "OK":
         return False, str(row.get("msg") or "Could not record the loan.").replace("Error: ", "")
+    if due:   # a failure here leaves a posted loan with no repayment date: say so rather than hide it
+        res = db._execute("SELECT fn_set_owner_loan_due_date(%s, %s) AS m", (int(row["loan_id"]), due), fetch_one=True) or {}
+        if res.get("m") != "OK":
+            return True, (f"Loan of \u20b9{p:,.2f} posted, but the repayment date was not saved "
+                          f"({str(res.get('m') or 'unknown error').replace('Error: ', '')}). Set it from the loans table.")
     return True, f"Loan of \u20b9{p:,.2f} recorded and posted to Loans to Owners."
+
+
+def set_loan_due_date(society_id: int, loan_id, due_date):
+    """Set or clear (blank) a loan's repayment date. Needed for loans entered before due dates existed."""
+    if not _owns("owner_loans", loan_id, society_id):
+        return False, "Choose a loan."
+    due = _d(due_date)
+    if due_date and not due:
+        return False, "The repayment date is not a valid date."
+    res = db._execute("SELECT fn_set_owner_loan_due_date(%s, %s) AS m", (int(loan_id), due), fetch_one=True) or {}
+    if res.get("m") != "OK":
+        return False, str(res.get("m") or "Could not save the repayment date.").replace("Error: ", "")
+    return True, "Repayment date saved." if due else "Repayment date cleared: this loan can no longer be overdue."
 
 
 def repay_loan(society_id: int, user_id, loan_id, repay_date, principal, interest, mode):
@@ -220,16 +247,19 @@ def load_card_data(society_id: int) -> dict:
                       WHERE society_id=%s AND apt_id IS NULL AND apt_status=TRUE ORDER BY start_date DESC LIMIT 1""", society_id) or {},
         apartments=q("SELECT id, flat_number, owner_name FROM apartments WHERE society_id=%s AND active ORDER BY flat_number", society_id),
         transfers=q("""SELECT t.id, a.flat_number, t.transfer_date, t.transferee_name, t.transfer_value, t.fee_amount, t.fee_pct,
-                              s.status AS nodues_status, s.deemed_on
+                              s.status AS nodues_status, s.deemed_on,
+                              COALESCE(dp.loan_outstanding, 0) AS loan_outstanding, COALESCE(dp.receivables_outstanding, 0) AS dues_outstanding
                          FROM apartment_transfers t JOIN apartments a ON a.id = t.apartment_id
                          LEFT JOIN LATERAL fn_nodues_certificate_status(t.id) s ON TRUE
+                         LEFT JOIN LATERAL fn_apartment_dues_position(t.apartment_id) dp ON TRUE
                         WHERE t.society_id=%s ORDER BY t.transfer_date DESC, t.id DESC LIMIT 15""", society_id),
         s22=q("""SELECT p.id, a.flat_number, p.service_type, p.default_since, p.status, c.can_cut_off, c.earliest_cutoff_date, c.blockers
                    FROM service_cutoff_proceedings p JOIN apartments a ON a.id = p.apartment_id
                    LEFT JOIN LATERAL fn_service_cutoff_check(p.id) c ON TRUE
                   WHERE p.society_id=%s ORDER BY p.id DESC LIMIT 15""", society_id),
         loans=q("""SELECT l.id, a.flat_number, l.loan_date, l.principal, l.repaid_amount, l.principal - l.repaid_amount AS outstanding,
-                          l.interest_rate_pct, l.resolution_ref, l.ledger_posted, fn_owner_loan_interest_estimate(l.id) AS interest_estimate
+                          l.interest_rate_pct, l.resolution_ref, l.ledger_posted, fn_owner_loan_interest_estimate(l.id) AS interest_estimate,
+                          l.due_date, (l.due_date IS NOT NULL AND l.due_date < CURRENT_DATE AND l.principal > l.repaid_amount) AS overdue
                      FROM owner_loans l JOIN apartments a ON a.id = l.apartment_id
                     WHERE l.society_id=%s ORDER BY l.loan_date DESC, l.id DESC LIMIT 20""", society_id),
         petty=one("SELECT * FROM fn_petty_cash_check(%s)", society_id),

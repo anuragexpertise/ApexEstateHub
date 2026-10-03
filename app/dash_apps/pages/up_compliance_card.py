@@ -162,9 +162,12 @@ def render_up_compliance_card(data: dict) -> html.Div:
     secs.append(_section(
         "Transfers: Major Repair Fund and No Dues (bye-law 39)",
         "On a sale, \u00bd% of the transfer value goes to the Major Repair Fund (account 3270), not the Reserve Fund. It is added to the flat's "
-        "dues. A No Dues Certificate is treated as granted if not refused within 15 days of the request.",
-        _table(["Flat", "Date", "Buyer", "Value", "Fee", "No Dues"],
+        "dues. A No Dues Certificate is treated as granted if not refused within 15 days of the request. "
+        "An owner loan still outstanding on the flat blocks recording the certificate as issued (record a refusal instead, inside the 15 days); "
+        "master can change this in the AOA Rule Editor.",
+        _table(["Flat", "Date", "Buyer", "Value", "Fee", "Loan o/s", "No Dues"],
                [[r["flat_number"], _fmt(r["transfer_date"]), r.get("transferee_name") or "-", _fmt(r["transfer_value"]), _fmt(r["fee_amount"]),
+                 html.Span(_fmt(r["loan_outstanding"]), style={"color": "#c0392b", "fontWeight": "700"}) if r.get("loan_outstanding") else "-",
                  html.Span([_badge(r["nodues_status"]), html.Span(f"  deemed {_fmt(r['deemed_on'])}" if r.get("deemed_on") and r["nodues_status"] == "pending" else "",
                                                                    style={"fontSize": "11px"})])] for r in tr]),
         html.Hr(),
@@ -191,7 +194,7 @@ def render_up_compliance_card(data: dict) -> html.Div:
     secs.append(_section(
         "Who can vote or stand (bye-law 7)",
         "Owners with arrears of more than 60 days cannot vote or stand for the Board. Run this when the election notice goes out: "
-        "it uses the balance outstanding today. Advocates differ on whether 'the year before' means the financial or the calendar year.",
+        "it uses the balance outstanding today, and counts an owner loan whose repayment date has passed by the same margin. Advocates differ on whether 'the year before' means the financial or the calendar year.",
         dbc.Row([
             _field("Election date", _date("upc-b7-date"), 3),
             _field("Year basis", dcc.Dropdown(id="upc-b7-basis", clearable=False, value="financial_year", style={"fontSize": "13px"},
@@ -236,10 +239,14 @@ def render_up_compliance_card(data: dict) -> html.Div:
     secs.append(_section(
         "Loans to owners (bye-law 3(1)(f))",
         "Posted to the ledger: a loan debits Loans to Owners and credits cash or bank; a repayment credits Loans to Owners for principal and "
-        "Interest on Owner Loans for interest. A resolution reference is required. Interest shown is a simple-interest estimate only.",
-        _table(["Flat", "Date", "Principal", "Repaid", "Outstanding", "Rate %", "Interest est.", "Resolution", "Ledger"],
+        "Interest on Owner Loans for interest. A resolution reference is required. Interest shown is a simple-interest estimate only. "
+        "A loan with no repayment date can never be overdue, so set one to have it count under bye-law 7.",
+        _table(["Flat", "Date", "Principal", "Repaid", "Outstanding", "Rate %", "Interest est.", "Repay by", "Resolution", "Ledger"],
                [[r["flat_number"], _fmt(r["loan_date"]), _fmt(r["principal"]), _fmt(r["repaid_amount"]), _fmt(r["outstanding"]),
-                 _fmt(r["interest_rate_pct"]), _fmt(r["interest_estimate"]), r.get("resolution_ref") or "-",
+                 _fmt(r["interest_rate_pct"]), _fmt(r["interest_estimate"]),
+                 html.Span(_fmt(r["due_date"]) + (" (overdue)" if r.get("overdue") else ""),
+                           style={"color": "#c0392b", "fontWeight": "700"} if r.get("overdue") else {}) if r.get("due_date") else "not set",
+                 r.get("resolution_ref") or "-",
                  "posted" if r["ledger_posted"] else "register only"] for r in loans], empty="No loans recorded."),
         html.Hr(),
         dbc.Row([
@@ -251,9 +258,17 @@ def render_up_compliance_card(data: dict) -> html.Div:
         ], className="g-2"),
         dbc.Row([
             _field("Resolution reference *", dbc.Input(id="upc-ln-ref", type="text", placeholder="Board / GB resolution #", style={"fontSize": "13px"}), 4),
-            _field("Purpose", dbc.Input(id="upc-ln-purpose", type="text", style={"fontSize": "13px"}), 8),
+            _field("Repay by (optional)", _date("upc-ln-due"), 2),
+            _field("Purpose", dbc.Input(id="upc-ln-purpose", type="text", style={"fontSize": "13px"}), 6),
         ], className="g-2 mt-1"),
         _btn("Record loan", "upc-ln-save", "fa-hand-holding-usd"),
+        html.Hr(),
+        dbc.Row([
+            _field("Set repayment date for", dcc.Dropdown(id="upc-ld-loan", options=[{"label": f"{r['flat_number']}: \u20b9{_fmt(r['outstanding'])} outstanding (#{r['id']})", "value": r["id"]}
+                                                                                 for r in loans if r["outstanding"] > 0], placeholder="Select loan", style={"fontSize": "13px"}), 6),
+            _field("Repay by (blank clears)", _date("upc-ld-date"), 3),
+        ], className="g-2"),
+        _btn("Save repayment date", "upc-ld-save", "fa-calendar-check"),
         html.Hr(),
         dbc.Row([
             _field("Loan", dcc.Dropdown(id="upc-rp-loan", options=[{"label": f"{r['flat_number']}: \u20b9{_fmt(r['outstanding'])} outstanding (#{r['id']})", "value": r["id"]}

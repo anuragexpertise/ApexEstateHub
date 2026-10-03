@@ -25,6 +25,8 @@ UP = "UP_AOA_2010"
     ("cash_limit_default_mode", "Block", True), ("cash_limit_default_mode", "off", False),
     ("bye_law7_year_basis", "calendar_year", True), ("bye_law7_year_basis", "", False),
     ("statement_publish_due_month", "13", False), ("not_a_rule", "1", False),
+    ("owner_loan_blocks_nodues", "0", True), ("owner_loan_counts_bye_law7", "1", True),
+    ("owner_loan_counts_s22", "2", False), ("owner_loan_counts_s22", "0.5", False), ("owner_loan_counts_s22", "yes", False),
 ])
 def test_validate_rule_value(key, raw, ok):
     assert rra.validate_rule_value(key, raw)[0] is ok
@@ -173,3 +175,15 @@ def test_state_change_assigns_regime(pg):
     sid = pg.fetchone()["id"]
     pg.execute("SELECT regime_code FROM society_legal_regime WHERE society_id=%s", (sid,))
     assert pg.fetchone()["regime_code"] == UP
+
+
+@live
+def test_master_can_switch_owner_loan_policy_and_it_takes_effect_on_its_date(pg):
+    """The three owner-loan switches are policy (no statutory confirmation) and ride the same dated versioning."""
+    start = date.today() + timedelta(days=1)
+    assert _param(pg, "owner_loan_counts_s22", date.today()) == 0
+    ok, msg = rra.save_rule_version(7, "master", UP, "owner_loan_counts_s22", 1, start,
+                                    "Advocate opinion dated 2026-10-03 (test)", "Counsel confirmed loans count", False)
+    assert ok, msg
+    assert _param(pg, "owner_loan_counts_s22", date.today()) == 0
+    assert _param(pg, "owner_loan_counts_s22", start) == 1

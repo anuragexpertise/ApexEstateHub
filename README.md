@@ -605,7 +605,7 @@ Every write is one SQL statement that also inserts into `regime_rule_audit` (app
 
 **State → regime sync.** `societies.state` is written as a code (`UP`) by the wizard, but every `fn_regime_param_*` / compliance function reads `society_legal_regime`, which only `seed.py` ever filled (matching the full name `Uttar Pradesh`). `fn_sync_society_regime` + trigger `societies_sync_regime` now assign the active regime for a state on insert/update (code or full name; a draft regime such as MH is never assigned; a state with no active regime leaves any existing row untouched).
 
-Not covered: owner loans are still invisible to No Dues, bye-law 7 and s.22 (see Owner Loans & Loanees).
+Owner loans in the dues checks are governed by three policy switches in this editor — see Owner Loans & Loanees.
 
 ### UP AOA Compliance Card (Admin → Financials)
 
@@ -656,7 +656,15 @@ No journal is ever posted for accrued interest; income is booked **only** when c
 
 **Where it lands in the reports:** 1410 is on the Balance Sheet under Assets (`statement_section='Assets'`, head `LOANS_GIVEN`, `has_bf = TRUE` so it carries forward); 4116 is Income in the I&E (`tab_name='Inc'`) and carries `mutuality_nature='mutual'`, so it flows into `fn_income_tax_summary_fy` as exempt income. Loan legs inherit `bank_reconciled = TRUE`, so they never appear as unmatched in bank reconciliation.
 
-> **Owner loans are NOT receivables, and that has real consequences.** No `receivables` row is ever created, so `fn_apartment_outstanding` reports **₹0 for a flat with an unpaid loan**. That means the loanee can still be issued a No Dues Certificate, still counts as eligible under bye-law 7, and is not blocked from a s.22 cut-off — the s.22 blockers read `receivables.status='pending'` only. If you extend this feature, wire the outstanding loan into those three checks (or into `fn_apartment_outstanding`) before relying on any of them.
+> **Owner loans are NOT receivables** — no `receivables` row is ever created — so `fn_apartment_outstanding` (which also drives the NOC check and the flat-deactivation guard) still reports **₹0 for a flat with an unpaid loan**. That function is deliberately unchanged. The loan is instead wired into the three compliance checks, each behind an **engine-policy switch** that master edits in **Master → AOA Rule Editor** (dated, audited; none is a statutory figure, so none needs the amendment confirmation):
+>
+> | Check | Switch (default) | Behaviour |
+> |---|---|---|
+> | No Dues (bye-law 39) | `owner_loan_blocks_nodues` (**1**) | `fn_nodues_issue_check` refuses to record the certificate as **issued** while any loan principal is outstanding on the flat — whether or not it has a repayment date. Recording a **refusal** is never blocked. The bye-law's 15-day deemed grant still runs by the calendar, so the Board must refuse inside the window; the Transfers table shows a red *Loan o/s* figure for exactly that |
+> | Bye-law 7 | `owner_loan_counts_bye_law7` (**1**) | `fn_bye_law7_eligibility` adds the outstanding balance of a loan whose `due_date` is on or before *cut-off − arrears days* to `overdue_amount`, `oldest_due_date` and `days_overdue` (so a loanee can be ineligible; the amount is not split out) |
+> | Section 22 | `owner_loan_counts_s22` (**0**) | Off by default: s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service. When on, an overdue loan counts toward the "dues remain" blocker in `fn_service_cutoff_check`. Whether it may is a legal question — get advice before enabling |
+>
+> **`owner_loans.due_date`** (nullable, `CHECK (due_date >= loan_date)`) is what makes a loan *overdue*. A loan with no repayment date can never be overdue, so it blocks No Dues but is invisible to bye-law 7 and s.22. Existing loans have none until someone sets it: the card has a *Repay by* field on the new-loan form and a *Set repayment date* control for existing loans (`fn_set_owner_loan_due_date`; blank clears it). `fn_apartment_dues_position(apartment_id, asof)` returns receivables, loan outstanding, loan overdue, an interest estimate and the total for one flat. Not changed: `fn_aoa_owner_list.outstanding_dues` still excludes loans (the Loanees sheet carries them); `start_cutoff` still records receivables only as `arrears_amount`.
 
 Tables: `owner_loans` (`principal > 0`, `repaid_amount >= 0`, `ledger_posted`, `disbursal_mode`, `journal_id` — the trailing `register only` comment on its `CREATE TABLE` is now stale) and `owner_loan_repayments` (`CHECK (principal_amount + interest_amount > 0)`, immutable, no status column). Note `owner_loan_repayments.created_at` is always `NOW()` — a back-dated repayment still records a current creation timestamp; the value date is `repay_date`.
 
@@ -1453,11 +1461,16 @@ Dash-framework footguns.
 ### Owner Loans — Invariants & Sharp Edges
 
 - **Owner loans are deliberately not receivables.** No `receivables` row is
-  created, so `fn_apartment_outstanding` reports ₹0 for a flat with an unpaid
-  loan. Consequences today: a loanee can still get a No Dues Certificate,
-  still counts as bye-law 7 eligible, and is not blocked from an s.22 cut-off
-  (its blockers read `receivables.status='pending'` only). Wire the balance
-  into those three checks before trusting any of them.
+  created, so `fn_apartment_outstanding` (NOC, deactivation guard) still reports
+  ₹0 for a flat with an unpaid loan. The loan reaches the compliance checks
+  separately: it blocks *issuing* a No Dues Certificate, counts toward bye-law 7
+  once past its `due_date` (null = never overdue), and counts toward s.22 only if
+  master switches `owner_loan_counts_s22` on (default off). See the policy table
+  under Owner Loans & Loanees.
+- **Known, not fixed:** `fn_bye_law7_eligibility` and `fn_service_cutoff_check`
+  read receivables with `status = 'pending'` only, so a *partly paid* receivable
+  (`status = 'partial'`, which `fn_apartment_outstanding` does include) is
+  invisible to both.
 - **The resolution reference is mandatory by engine policy, not statute.**
   The SQL comment says so explicitly. It is nonetheless the right rule —
   a loan without a GB/MC resolution has no authority behind it.

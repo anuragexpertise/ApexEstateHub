@@ -13607,22 +13607,34 @@ CREATE OR REPLACE FUNCTION fn_bye_law7_eligibility(p_society_id INT, p_election_
 RETURNS TABLE (apartment_id INT, flat_number VARCHAR, owner_name VARCHAR, cutoff_date DATE,
                overdue_amount NUMERIC, oldest_due_date DATE, days_overdue INT, eligible BOOLEAN)
 LANGUAGE plpgsql STABLE AS $$
-DECLARE v_days INT; v_cut DATE;
+DECLARE v_days INT; v_cut DATE; v_loans BOOLEAN;
 BEGIN
     v_days := fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_election_date)::INT;
     IF v_days IS NULL THEN RETURN; END IF;           -- rule not active for this society
     v_cut := fn_bye_law7_cutoff_date(p_society_id, p_election_date, p_basis);
+    -- Engine policy (editable by master): an owner-loan balance whose repayment date has passed by
+    -- the same margin counts as arrears. A loan with no due_date is never overdue.
+    v_loans := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_election_date), 1) = 1;
     RETURN QUERY
-    SELECT a.id, a.flat_number, a.owner_name, v_cut,
-           COALESCE(SUM(r.amount - r.paid_amount), 0)::NUMERIC,
-           MIN(r.due_date),
-           COALESCE(MAX(v_cut - r.due_date), 0)::INT,
-           COALESCE(SUM(r.amount - r.paid_amount), 0) <= 0
-    FROM apartments a
-    LEFT JOIN receivables r
-           ON r.society_id = a.society_id AND r.entity_id = a.id AND r.role = 'apartment'
+    WITH arrears AS (
+        SELECT r.entity_id AS apt, (r.amount - r.paid_amount) AS amt, r.due_date AS due
+        FROM receivables r
+        WHERE r.society_id = p_society_id AND r.role = 'apartment'
           AND r.status = 'pending' AND r.amount > r.paid_amount
           AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days
+        UNION ALL
+        SELECT l.apartment_id, (l.principal - l.repaid_amount), l.due_date
+        FROM owner_loans l
+        WHERE v_loans AND l.society_id = p_society_id AND l.principal > l.repaid_amount
+          AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days
+    )
+    SELECT a.id, a.flat_number, a.owner_name, v_cut,
+           COALESCE(SUM(x.amt), 0)::NUMERIC,
+           MIN(x.due),
+           COALESCE(MAX(v_cut - x.due), 0)::INT,
+           COALESCE(SUM(x.amt), 0) <= 0
+    FROM apartments a
+    LEFT JOIN arrears x ON x.apt = a.id
     WHERE a.society_id = p_society_id AND a.active
     GROUP BY a.id, a.flat_number, a.owner_name
     ORDER BY a.flat_number;
@@ -13707,6 +13719,14 @@ BEGIN
     SELECT COALESCE(SUM(r.amount - r.paid_amount), 0) INTO v_out
       FROM receivables r WHERE r.society_id = p.society_id AND r.entity_id = p.apartment_id
        AND r.role = 'apartment' AND r.status = 'pending';
+    -- Engine policy (editable by master, default OFF): s.22 is about unpaid charges, so an overdue owner
+    -- loan only counts toward "dues remain" when counsel has confirmed that it may.
+    IF COALESCE(fn_regime_param_num(p.society_id, 'owner_loan_counts_s22', p_asof), 0) = 1 THEN
+        v_out := v_out + COALESCE((SELECT SUM(l.principal - l.repaid_amount) FROM owner_loans l
+                                    WHERE l.society_id = p.society_id AND l.apartment_id = p.apartment_id
+                                      AND l.principal > l.repaid_amount AND l.due_date IS NOT NULL
+                                      AND l.due_date < p_asof), 0);
+    END IF;
     IF v_out <= 0 THEN b := array_append(b, 'no outstanding dues remain for this apartment'); END IF;
 
     can_cut_off := COALESCE(array_length(b, 1), 0) = 0;
@@ -14047,6 +14067,74 @@ RETURNS NUMERIC LANGUAGE sql STABLE AS $$
                   / 365.0, 2), 0)
     FROM owner_loans l WHERE l.id = p_loan_id
 $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- OWNER LOANS IN THE DUES CHECKS (No Dues, bye-law 7, s.22)
+-- A loan is not a receivable, so fn_apartment_outstanding / the receivable-based checks never
+-- saw it. owner_loans had no repayment date either, so "overdue" could not be decided.
+-- What counts is engine POLICY, not statute, and is editable by master (AOA Rule Editor):
+--   owner_loan_blocks_nodues    1  an outstanding loan blocks ISSUING a No Dues Certificate
+--   owner_loan_counts_bye_law7  1  an overdue loan balance counts as arrears for bye-law 7
+--   owner_loan_counts_s22       0  an overdue loan balance counts toward the s.22 "dues remain" test
+-- fn_apartment_outstanding is deliberately untouched (it also drives NOC and the deactivation guard).
+-- ═══════════════════════════════════════════════════════════════════════════════
+ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS due_date DATE;
+ALTER TABLE owner_loans DROP CONSTRAINT IF EXISTS owner_loans_due_after_loan;
+ALTER TABLE owner_loans ADD CONSTRAINT owner_loans_due_after_loan CHECK (due_date IS NULL OR due_date >= loan_date);
+
+INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference) VALUES
+ ('UP_AOA_2010', 'owner_loan_blocks_nodues',   1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal'),
+ ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 1, NULL, '0/1', 'Engine policy (not statute): an owner-loan balance past its repayment date is treated as arrears for bye-law 7; confirm with an advocate'),
+ ('UP_AOA_2010', 'owner_loan_counts_s22',      0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice')
+ON CONFLICT DO NOTHING;
+
+CREATE OR REPLACE FUNCTION fn_set_owner_loan_due_date(p_loan_id INT, p_due DATE) RETURNS TEXT
+LANGUAGE plpgsql AS $$
+DECLARE l owner_loans%ROWTYPE;
+BEGIN
+    SELECT * INTO l FROM owner_loans WHERE id = p_loan_id FOR UPDATE;
+    IF NOT FOUND THEN RETURN 'Error: loan not found'; END IF;
+    IF p_due IS NOT NULL AND p_due < l.loan_date THEN RETURN 'Error: the repayment date cannot be before the loan date'; END IF;
+    UPDATE owner_loans SET due_date = p_due WHERE id = p_loan_id;
+    RETURN 'OK';
+END $$;
+
+-- One flat's dues to the association as at a date. Receivable part matches fn_apartment_outstanding.
+CREATE OR REPLACE FUNCTION fn_apartment_dues_position(p_apartment_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (receivables_outstanding NUMERIC, loan_outstanding NUMERIC, loan_overdue NUMERIC,
+               loan_interest_estimate NUMERIC, total_outstanding NUMERIC)
+LANGUAGE sql STABLE AS $$
+    WITH rec AS (
+        SELECT COALESCE(SUM(r.amount - r.paid_amount), 0) AS v FROM receivables r
+         WHERE r.entity_id = p_apartment_id AND r.role = 'apartment' AND r.status IN ('pending', 'partial')
+    ), ln AS (
+        SELECT COALESCE(SUM(l.principal - l.repaid_amount), 0) AS o,
+               COALESCE(SUM(l.principal - l.repaid_amount) FILTER (WHERE l.due_date IS NOT NULL AND l.due_date < p_asof), 0) AS od,
+               COALESCE(SUM(fn_owner_loan_interest_estimate(l.id, p_asof)), 0) AS ie
+          FROM owner_loans l WHERE l.apartment_id = p_apartment_id AND l.principal > l.repaid_amount
+    )
+    SELECT rec.v::NUMERIC, ln.o::NUMERIC, ln.od::NUMERIC, ln.ie::NUMERIC, (rec.v + ln.o)::NUMERIC FROM rec, ln
+$$;
+
+-- May the No Dues Certificate for this transfer be ISSUED? (Refusing is always allowed, and the bye-law
+-- 39 deemed grant still runs by the calendar, so the Board must refuse inside the window.)
+CREATE OR REPLACE FUNCTION fn_nodues_issue_check(p_transfer_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (can_issue BOOLEAN, reason TEXT, loan_outstanding NUMERIC)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE t apartment_transfers%ROWTYPE; v_loan NUMERIC;
+BEGIN
+    SELECT * INTO t FROM apartment_transfers WHERE id = p_transfer_id;
+    IF NOT FOUND THEN can_issue := FALSE; reason := 'transfer not found'; loan_outstanding := 0; RETURN NEXT; RETURN; END IF;
+    SELECT d.loan_outstanding INTO v_loan FROM fn_apartment_dues_position(t.apartment_id, p_asof) d;
+    loan_outstanding := COALESCE(v_loan, 0);
+    IF loan_outstanding > 0 AND COALESCE(fn_regime_param_num(t.society_id, 'owner_loan_blocks_nodues', p_asof), 1) = 1 THEN
+        can_issue := FALSE;
+        reason := format('an owner loan of %s is still outstanding on this flat; recover it first, or record the certificate as refused', loan_outstanding);
+    ELSE
+        can_issue := TRUE; reason := 'OK';
+    END IF;
+    RETURN NEXT;
+END $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- MASTER RULE EDITOR — append-only audit log + societies.state → legal regime sync

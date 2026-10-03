@@ -136,11 +136,18 @@ def register_up_compliance_callbacks(app):
     @app.callback(_TOAST, _BODY, Input("upc-ln-save", "n_clicks"),
                   State("upc-ln-flat", "value"), State("upc-ln-date", "date"), State("upc-ln-principal", "value"),
                   State("upc-ln-rate", "value"), State("upc-ln-mode", "value"), State("upc-ln-purpose", "value"),
-                  State("upc-ln-ref", "value"), prevent_initial_call=True)
-    def save_loan(n, flat, d, principal, rate, mode, purpose, ref):
+                  State("upc-ln-ref", "value"), State("upc-ln-due", "date"), prevent_initial_call=True)
+    def save_loan(n, flat, d, principal, rate, mode, purpose, ref, due):
         if not n:
             raise PreventUpdate
-        return _run(lambda sid, uid: act.disburse_loan(sid, uid, flat, d, principal, rate, mode, purpose, ref))
+        return _run(lambda sid, uid: act.disburse_loan(sid, uid, flat, d, principal, rate, mode, purpose, ref, due))
+
+    @app.callback(_TOAST, _BODY, Input("upc-ld-save", "n_clicks"),
+                  State("upc-ld-loan", "value"), State("upc-ld-date", "date"), prevent_initial_call=True)
+    def save_loan_due(n, loan, due):
+        if not n:
+            raise PreventUpdate
+        return _run(lambda sid, uid: act.set_loan_due_date(sid, loan, due))
 
     @app.callback(_TOAST, _BODY, Input("upc-rp-save", "n_clicks"),
                   State("upc-rp-loan", "value"), State("upc-rp-date", "date"), State("upc-rp-principal", "value"),
