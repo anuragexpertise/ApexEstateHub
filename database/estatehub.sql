@@ -2025,6 +2025,9 @@ CREATE TABLE IF NOT EXISTS polls (
     choice_3 VARCHAR(100),
     choice_4 VARCHAR(100),
     choice_5 VARCHAR(100),
+    -- Phase 4: Poll quorum and majority requirements
+    quorum_pct NUMERIC(5,2) NOT NULL DEFAULT 33.33 CHECK (quorum_pct > 0 AND quorum_pct <= 100),
+    majority_pct NUMERIC(5,2) NOT NULL DEFAULT 50.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
     results_announced_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
@@ -2898,12 +2901,20 @@ DROP FUNCTION IF EXISTS fn_check_noc_eligibility CASCADE;
 CREATE OR REPLACE FUNCTION fn_check_noc_eligibility(p_apartment_id INT)
 RETURNS TABLE(eligible BOOLEAN, reason TEXT, outstanding NUMERIC(15,2))
 LANGUAGE plpgsql STABLE AS $$
-DECLARE v_total NUMERIC(15,2);
+DECLARE v_standing RECORD;
 BEGIN
-    v_total := fn_apartment_outstanding(p_apartment_id);
-    IF v_total > 0 THEN
+    SELECT * INTO v_standing FROM fn_get_standing(
+        (SELECT society_id FROM apartments WHERE id = p_apartment_id),
+        p_apartment_id,
+        CURRENT_DATE
+    );
+    IF v_standing.noc_blocked THEN
         RETURN QUERY SELECT FALSE,
-            ('Outstanding dues Rs.' || v_total::TEXT || ' — clear before NOC')::TEXT, v_total;
+            ('NOC blocked: ' || 
+             CASE WHEN v_standing.dues_outstanding > 0 THEN 'outstanding dues Rs.' || v_standing.dues_outstanding ELSE '' END ||
+             CASE WHEN v_standing.dues_outstanding > 0 AND v_standing.loan_outstanding > 0 THEN '; ' ELSE '' END ||
+             CASE WHEN v_standing.loan_outstanding > 0 THEN 'outstanding owner loan Rs.' || v_standing.loan_outstanding ELSE '' END)::TEXT,
+            (v_standing.dues_outstanding + v_standing.loan_outstanding)::NUMERIC(15,2);
     ELSE
         RETURN QUERY SELECT TRUE, 'No outstanding dues — eligible for NOC'::TEXT, 0::NUMERIC(15,2);
     END IF;
@@ -11576,6 +11587,7 @@ DECLARE
     v_apt_id    INT;
     v_existing  INT;
     v_total     BIGINT;
+    v_standing  RECORD;
 BEGIN
     SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
 
@@ -11602,8 +11614,9 @@ BEGIN
     END IF;
 
     IF v_poll.open_to = 'no_dues' THEN
-        IF fn_apartment_overdue_outstanding(v_apt_id) > 0 THEN
-            RETURN QUERY SELECT FALSE, 'Your apartment has outstanding dues'::TEXT, 0::BIGINT;
+        SELECT * INTO v_standing FROM fn_get_standing(v_poll.society_id, v_apt_id, CURRENT_DATE);
+        IF v_standing.ineligible_vote THEN
+            RETURN QUERY SELECT FALSE, 'Your apartment has outstanding dues or overdue loans — not eligible to vote'::TEXT, 0::BIGINT;
             RETURN;
         END IF;
     END IF;
@@ -11707,29 +11720,101 @@ $$;
 -- fn_declare_results: Admin declares results at a specified time
 -- (tenant-scoped + no-op guard against re-declaring — see
 -- migration_poll_security_fixes.sql)
-DROP FUNCTION IF EXISTS fn_declare_results (INT, INT);
+-- Phase 4: Now checks quorum and majority requirements
+DROP FUNCTION IF EXISTS fn_declare_results (INT, INT, INT);
 
 CREATE OR REPLACE FUNCTION fn_declare_results(p_poll_id INT, p_user_id INT, p_society_id INT)
-RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+RETURNS TABLE (success BOOLEAN, message TEXT, results JSONB) LANGUAGE plpgsql AS $$
 DECLARE
     v_poll polls%ROWTYPE;
+    v_total_votes BIGINT;
+    v_eligible_voters BIGINT;
+    v_quorum_met BOOLEAN;
+    v_winning_choice SMALLINT;
+    v_winning_votes BIGINT;
+    v_majority_met BOOLEAN;
+    v_results JSONB;
 BEGIN
     SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
     IF NOT FOUND THEN
-        RETURN FALSE;
+        RETURN QUERY SELECT FALSE, 'Poll not found'::TEXT, NULL::JSONB;
+        RETURN;
     END IF;
 
     IF v_poll.status = 'results_declared' THEN
-        RETURN FALSE;
+        RETURN QUERY SELECT FALSE, 'Results already declared'::TEXT, NULL::JSONB;
+        RETURN;
     END IF;
 
+    -- Count total votes
+    SELECT COUNT(*) INTO v_total_votes FROM poll_votes WHERE poll_id = p_poll_id;
+
+    -- Count eligible voters (apartments that can vote based on open_to)
+    IF v_poll.open_to = 'no_dues' THEN
+        -- Count apartments with no outstanding dues/loans
+        SELECT COUNT(*) INTO v_eligible_voters
+        FROM apartments a
+        LEFT JOIN LATERAL fn_get_standing(p_society_id, a.id, CURRENT_DATE) s ON TRUE
+        WHERE a.society_id = p_society_id AND a.active
+          AND NOT s.ineligible_vote;
+    ELSE
+        SELECT COUNT(*) INTO v_eligible_voters FROM apartments WHERE society_id = p_society_id AND active;
+    END IF;
+
+    -- Check quorum
+    v_quorum_met := (v_eligible_voters = 0) OR (v_total_votes * 100.0 / NULLIF(v_eligible_voters, 0) >= v_poll.quorum_pct);
+
+    -- Determine winning choice
+    SELECT choice, COUNT(*) INTO v_winning_choice, v_winning_votes
+    FROM poll_votes
+    WHERE poll_id = p_poll_id
+    GROUP BY choice
+    ORDER BY COUNT(*) DESC, choice ASC
+    LIMIT 1;
+
+    -- Check majority (if only one choice has votes, it wins; otherwise need majority_pct)
+    IF v_winning_votes IS NULL THEN
+        v_majority_met := FALSE;
+    ELSIF v_total_votes = v_winning_votes THEN
+        v_majority_met := TRUE; -- unanimous
+    ELSE
+        v_majority_met := (v_winning_votes * 100.0 / NULLIF(v_total_votes, 0) >= v_poll.majority_pct);
+    END IF;
+
+    -- Build results JSON
+    v_results := jsonb_build_object(
+        'total_votes', v_total_votes,
+        'eligible_voters', v_eligible_voters,
+        'quorum_pct', v_poll.quorum_pct,
+        'quorum_met', v_quorum_met,
+        'majority_pct', v_poll.majority_pct,
+        'majority_met', v_majority_met,
+        'winning_choice', v_winning_choice,
+        'winning_votes', v_winning_votes,
+        'choice_breakdown', (
+            SELECT jsonb_object_agg('choice_' || choice, cnt)
+            FROM (
+                SELECT choice, COUNT(*) AS cnt
+                FROM poll_votes
+                WHERE poll_id = p_poll_id
+                GROUP BY choice
+            ) sub
+        )
+    );
+
+    -- Update poll status
     UPDATE polls
        SET status = 'results_declared',
            results_announced_at = NOW(),
            updated_at = NOW()
      WHERE id = p_poll_id;
 
-    RETURN TRUE;
+    RETURN QUERY SELECT v_quorum_met AND v_majority_met,
+           CASE WHEN v_quorum_met AND v_majority_met THEN 'Results declared - quorum and majority met'
+                WHEN NOT v_quorum_met THEN 'Quorum not met (' || ROUND(v_total_votes * 100.0 / NULLIF(v_eligible_voters, 0), 1) || '% of ' || v_eligible_voters || ' eligible)'
+                ELSE 'Majority not met (' || ROUND(v_winning_votes * 100.0 / NULLIF(v_total_votes, 0), 1) || '% for choice ' || v_winning_choice || ')'
+           END,
+           v_results;
 END;
 $$;
 
@@ -13588,6 +13673,7 @@ END $$;
 -- 3. Bye-law 7: arrears > 60 days bar voting / standing for the Board
 --    Balance used is the outstanding balance AS AT THE CALL (settlement dates are
 --    not stored on receivables), so run it at election-notice time.
+--    Now uses fn_get_standing for unified eligibility (Phase 2).
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_bye_law7_cutoff_date(p_society_id INT, p_election_date DATE, p_basis TEXT DEFAULT NULL)
 RETURNS DATE LANGUAGE plpgsql STABLE AS $$
@@ -13607,36 +13693,39 @@ CREATE OR REPLACE FUNCTION fn_bye_law7_eligibility(p_society_id INT, p_election_
 RETURNS TABLE (apartment_id INT, flat_number VARCHAR, owner_name VARCHAR, cutoff_date DATE,
                overdue_amount NUMERIC, oldest_due_date DATE, days_overdue INT, eligible BOOLEAN)
 LANGUAGE plpgsql STABLE AS $$
-DECLARE v_days INT; v_cut DATE; v_loans BOOLEAN;
+DECLARE v_days INT; v_cut DATE;
 BEGIN
     v_days := fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_election_date)::INT;
     IF v_days IS NULL THEN RETURN; END IF;           -- rule not active for this society
     v_cut := fn_bye_law7_cutoff_date(p_society_id, p_election_date, p_basis);
-    -- Engine policy (editable by master): an owner-loan balance whose repayment date has passed by
-    -- the same margin counts as arrears. A loan with no due_date is never overdue.
-    v_loans := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_election_date), 1) = 1;
+    
     RETURN QUERY
-    WITH arrears AS (
-        SELECT r.entity_id AS apt, (r.amount - r.paid_amount) AS amt, r.due_date AS due
-        FROM receivables r
-        WHERE r.society_id = p_society_id AND r.role = 'apartment'
-          AND r.status = 'pending' AND r.amount > r.paid_amount
-          AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days
-        UNION ALL
-        SELECT l.apartment_id, (l.principal - l.repaid_amount), l.due_date
-        FROM owner_loans l
-        WHERE v_loans AND l.society_id = p_society_id AND l.principal > l.repaid_amount
-          AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days
-    )
     SELECT a.id, a.flat_number, a.owner_name, v_cut,
-           COALESCE(SUM(x.amt), 0)::NUMERIC,
-           MIN(x.due),
-           COALESCE(MAX(v_cut - x.due), 0)::INT,
-           COALESCE(SUM(x.amt), 0) <= 0
+           s.dues_overdue AS overdue_amount,
+           -- oldest_due_date: earliest due_date of overdue receivables/loans
+           LEAST(
+               (SELECT MIN(r.due_date) FROM receivables r
+                WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
+                  AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days),
+               (SELECT MIN(l.due_date) FROM owner_loans l
+                WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
+                  AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days)
+           ) AS oldest_due_date,
+           -- days_overdue: max days from due_date to cutoff_date for overdue items
+           GREATEST(COALESCE((
+               SELECT MAX(v_cut - r.due_date) FROM receivables r
+               WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
+                 AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date <= v_cut - v_days
+           ), 0),
+           COALESCE((
+               SELECT MAX(v_cut - l.due_date) FROM owner_loans l
+               WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
+                 AND l.due_date IS NOT NULL AND l.due_date <= v_cut - v_days
+           ), 0), 0)::INT AS days_overdue,
+           NOT s.ineligible_stand AS eligible
     FROM apartments a
-    LEFT JOIN arrears x ON x.apt = a.id
+    LEFT JOIN LATERAL fn_get_standing(p_society_id, a.id, v_cut) s ON TRUE
     WHERE a.society_id = p_society_id AND a.active
-    GROUP BY a.id, a.flat_number, a.owner_name
     ORDER BY a.flat_number;
 END $$;
 
@@ -13668,6 +13757,7 @@ CREATE INDEX IF NOT EXISTS idx_service_cutoff_society ON service_cutoff_proceedi
 
 -- Does NOT cut anything: returns whether the s.22 preconditions are satisfied as of
 -- p_asof, what blocks it, and the earliest date it could lawfully happen.
+-- Now uses fn_get_standing for unified s22_blocked check (Phase 2).
 CREATE OR REPLACE FUNCTION fn_service_cutoff_check(p_proceeding_id INT, p_asof DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (can_cut_off BOOLEAN, earliest_cutoff_date DATE, blockers TEXT[])
 LANGUAGE plpgsql STABLE AS $$
@@ -13675,7 +13765,8 @@ DECLARE
     p service_cutoff_proceedings%ROWTYPE;
     v_months INT; v_notice INT; v_wait INT; v_appeal INT;
     b TEXT[] := ARRAY[]::TEXT[]; e DATE[] := ARRAY[]::DATE[];
-    v_copy DATE; v_out NUMERIC; d DATE;
+    v_copy DATE; d DATE;
+    v_standing RECORD;
 BEGIN
     SELECT * INTO p FROM service_cutoff_proceedings WHERE id = p_proceeding_id;
     IF NOT FOUND THEN can_cut_off := FALSE; earliest_cutoff_date := NULL; blockers := ARRAY['proceeding not found']; RETURN NEXT; RETURN; END IF;
@@ -13716,18 +13807,11 @@ BEGIN
         b := array_append(b, 'appeal filed and not dismissed');
     END IF;
 
-    SELECT COALESCE(SUM(r.amount - r.paid_amount), 0) INTO v_out
-      FROM receivables r WHERE r.society_id = p.society_id AND r.entity_id = p.apartment_id
-       AND r.role = 'apartment' AND r.status = 'pending';
-    -- Engine policy (editable by master, default OFF): s.22 is about unpaid charges, so an overdue owner
-    -- loan only counts toward "dues remain" when counsel has confirmed that it may.
-    IF COALESCE(fn_regime_param_num(p.society_id, 'owner_loan_counts_s22', p_asof), 0) = 1 THEN
-        v_out := v_out + COALESCE((SELECT SUM(l.principal - l.repaid_amount) FROM owner_loans l
-                                    WHERE l.society_id = p.society_id AND l.apartment_id = p.apartment_id
-                                      AND l.principal > l.repaid_amount AND l.due_date IS NOT NULL
-                                      AND l.due_date < p_asof), 0);
+    -- Use fn_get_standing for unified s22_blocked check
+    SELECT * INTO v_standing FROM fn_get_standing(p.society_id, p.apartment_id, p_asof);
+    IF v_standing.s22_blocked THEN
+        b := array_append(b, 'outstanding dues or overdue loans remain for this apartment (s.22 blocked)');
     END IF;
-    IF v_out <= 0 THEN b := array_append(b, 'no outstanding dues remain for this apartment'); END IF;
 
     can_cut_off := COALESCE(array_length(b, 1), 0) = 0;
     earliest_cutoff_date := (SELECT MAX(x) FROM unnest(e) x);
@@ -14118,18 +14202,19 @@ $$;
 
 -- May the No Dues Certificate for this transfer be ISSUED? (Refusing is always allowed, and the bye-law
 -- 39 deemed grant still runs by the calendar, so the Board must refuse inside the window.)
+-- Now uses fn_get_standing for unified noc_blocked check (Phase 2).
 CREATE OR REPLACE FUNCTION fn_nodues_issue_check(p_transfer_id INT, p_asof DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (can_issue BOOLEAN, reason TEXT, loan_outstanding NUMERIC)
 LANGUAGE plpgsql STABLE AS $$
-DECLARE t apartment_transfers%ROWTYPE; v_loan NUMERIC;
+DECLARE t apartment_transfers%ROWTYPE; v_standing RECORD;
 BEGIN
     SELECT * INTO t FROM apartment_transfers WHERE id = p_transfer_id;
     IF NOT FOUND THEN can_issue := FALSE; reason := 'transfer not found'; loan_outstanding := 0; RETURN NEXT; RETURN; END IF;
-    SELECT d.loan_outstanding INTO v_loan FROM fn_apartment_dues_position(t.apartment_id, p_asof) d;
-    loan_outstanding := COALESCE(v_loan, 0);
-    IF loan_outstanding > 0 AND COALESCE(fn_regime_param_num(t.society_id, 'owner_loan_blocks_nodues', p_asof), 1) = 1 THEN
+    SELECT * INTO v_standing FROM fn_get_standing(t.society_id, t.apartment_id, p_asof);
+    loan_outstanding := COALESCE(v_standing.loan_outstanding, 0);
+    IF v_standing.noc_blocked THEN
         can_issue := FALSE;
-        reason := format('an owner loan of %s is still outstanding on this flat; recover it first, or record the certificate as refused', loan_outstanding);
+        reason := format('NOC blocked: outstanding dues Rs.%s; outstanding owner loan Rs.%s', v_standing.dues_outstanding, v_standing.loan_outstanding);
     ELSE
         can_issue := TRUE; reason := 'OK';
     END IF;
@@ -14144,11 +14229,11 @@ END $$;
 CREATE TABLE IF NOT EXISTS regime_rule_audit (
     id              BIGSERIAL PRIMARY KEY,
     target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
-                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode')),
+                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions')),
     regime_code     VARCHAR(30),
     society_id      INT,
     rule_key        VARCHAR(300),
-    action          VARCHAR(20) NOT NULL CHECK (action IN ('new_version', 'update', 'set')),
+    action          VARCHAR(20) NOT NULL CHECK (action IN ('new_version', 'update', 'set', 'confirm_provisional')),
     old_value       JSONB,
     new_value       JSONB,
     reason          TEXT NOT NULL CHECK (length(btrim(reason)) >= 10),
@@ -14221,3 +14306,260 @@ CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state ON societie
 
 -- One-off backfill for societies that already picked a state in the wizard.
 SELECT fn_sync_society_regime(id) FROM societies;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- AOA BYE-LAWS ACCEPTANCE & GOVERNANCE LAYER
+-- Phase 0: Core tables for clause-level bye-law register + governance workflow
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 1. decision_types — whitelisted decision codes (seeded below)
+CREATE TABLE IF NOT EXISTS decision_types (
+    id                  SERIAL PRIMARY KEY,
+    code                VARCHAR(40) NOT NULL UNIQUE,
+    label               VARCHAR(120) NOT NULL,
+    required_body       VARCHAR(10) NOT NULL CHECK (required_body IN ('GBM', 'MC')),
+    majority_pct        NUMERIC(5, 2) NOT NULL DEFAULT 50.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
+    description         TEXT,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 2. meetings — GBM / EGM / MC records
+CREATE TABLE IF NOT EXISTS meetings (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    type                VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
+    held_on             DATE NOT NULL,
+    quorum_met          BOOLEAN NOT NULL DEFAULT FALSE,
+    minutes_pdf         VARCHAR(255),
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_meetings_society ON meetings (society_id, held_on DESC);
+
+-- 3. resolutions — Decisions linked to meetings and bye-law clauses
+CREATE TABLE IF NOT EXISTS resolutions (
+    id                  SERIAL PRIMARY KEY,
+    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    clause_id           VARCHAR(30),
+    decision_type_id    INT NOT NULL REFERENCES decision_types (id),
+    body                TEXT NOT NULL,
+    majority_required   NUMERIC(5, 2) NOT NULL,
+    passed              BOOLEAN NOT NULL DEFAULT FALSE,
+    passed_on           DATE,
+    text                TEXT,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_resolutions_meeting ON resolutions (meeting_id);
+CREATE INDEX IF NOT EXISTS idx_resolutions_clause ON resolutions (clause_id);
+
+-- 4. resolution_effects — Enactment queue (whitelisted handlers only)
+CREATE TABLE IF NOT EXISTS resolution_effects (
+    id                  SERIAL PRIMARY KEY,
+    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    handler_name        VARCHAR(60) NOT NULL CHECK (handler_name IN ('set_regime_param', 'set_society_policy', 'set_board_param')),
+    payload_json        JSONB NOT NULL,
+    executed_at         TIMESTAMP,
+    status              VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'executed', 'failed')),
+    error_message       TEXT,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_resolution_effects_resolution ON resolution_effects (resolution_id);
+
+-- 5. society_bye_laws — Clause-level bye-law register (4-layer hierarchy)
+--    Layer 0: Statute (UP Apartment Act 2010) — LOCKED, not stored here
+--    Layer 1: Model Bye-Laws 2011 — per clause: Adopt as-is | Adopt with variation | Not adopted
+--    Layer 2: Society Policies — GBM resolution required; can tighten Layer 1, never loosen
+--    Layer 3: Board Decisions — MC resolution; operational parameters within policy bounds
+CREATE TABLE IF NOT EXISTS society_bye_laws (
+    id                  BIGSERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    clause_id           VARCHAR(30) NOT NULL,
+    layer               INT NOT NULL CHECK (layer IN (1, 2, 3)),
+    status              VARCHAR(25) NOT NULL CHECK (status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted', 'provisional')),
+    variation_text      TEXT,
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    effective_from      DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to        DATE,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, clause_id, layer, effective_from)
+);
+CREATE INDEX IF NOT EXISTS idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
+CREATE INDEX IF NOT EXISTS idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
+
+-- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
+INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
+    ('ADOPT_BYE_LAW',        'Adopt Model Bye-Law Clause',            'GBM', 66.67, 'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 majority per Model Bye-Law 58)'),
+    ('VARY_BYE_LAW',         'Vary Adopted Bye-Law Clause',           'GBM', 66.67, 'Change variation text of an already-adopted clause (2/3 majority)'),
+    ('REJECT_BYE_LAW',       'Not Adopt Model Bye-Law Clause',        'GBM', 50.00, 'Record that a non-mandatory Model Bye-Law clause is not adopted (simple majority)'),
+    ('SET_SOCIETY_POLICY',   'Set Society Policy (Layer 2)',          'GBM', 66.67, 'Create or tighten a society policy within an adopted clause (2/3 majority; never loosens Model Bye-Law)'),
+    ('SET_BOARD_PARAM',      'Set Board Parameter (Layer 3)',         'MC',  50.00, 'Operational parameter set by Managing Committee (simple majority; within policy bounds)'),
+    ('APPROVE_LOAN',         'Approve Owner Loan',                    'GBM', 66.67, 'General Body approval for lending to an owner (Bye-Law 3(1)(f))'),
+    ('APPROPRIATE_FUND',     'Appropriate Funds (Reserve/Sinking)',   'GBM', 66.67, 'General Body resolution for fund appropriation per Bye-Laws 46-52'),
+    ('SERVICE_CUTOFF',       'Authorize Service Cut-Off (s.22)',      'GBM', 66.67, 'General Body resolution to cut essential service per UP Apartment Act s.22'),
+    ('AMEND_CASH_LIMIT',     'Change Cash-Limit Enforcement Mode',    'GBM', 50.00, 'Override cash_limit_mode for this society (simple majority)'),
+    ('GENERAL_RESOLUTION',   'General Resolution',                    'GBM', 50.00, 'Any other GBM resolution not covered above')
+ON CONFLICT (code) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- AOA BYE-LAWS ACCEPTANCE & GOVERNANCE LAYER — Phase 1
+-- fn_resolve_rule + fn_get_standing (shadow mode: add column to card, don't replace yet)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- ───────────────────────────────────────────────────────────────────────────────
+-- fn_resolve_rule — Four-layer rule resolver
+--   Layer 0: Statute (UP Apartment Act 2010) — hardcoded defaults in this function
+--   Layer 1: Model Bye-Laws 2011 — society_bye_laws layer=1 (adopted_as_is / adopted_with_variation)
+--   Layer 2: Society Policies — society_bye_laws layer=2 (tighten only, never loosen)
+--   Layer 3: Board Decisions — society_bye_laws layer=3 (operational params within policy bounds)
+-- Returns first non-NULL value reading Layer 0 → 1 → 2 → 3. Enforces "lower never loosens higher".
+-- ───────────────────────────────────────────────────────────────────────────────
+DROP FUNCTION IF EXISTS fn_resolve_rule(INT, VARCHAR, DATE);
+CREATE OR REPLACE FUNCTION fn_resolve_rule(
+    p_society_id INT,
+    p_clause_id  VARCHAR,
+    p_on         DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    layer          INT,
+    status         VARCHAR,
+    value_text     TEXT,
+    effective_from DATE,
+    source         TEXT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_statute_text TEXT;
+    v_regime_code  VARCHAR;
+BEGIN
+    SELECT slr.regime_code INTO v_regime_code
+    FROM society_legal_regime slr
+    WHERE slr.society_id = p_society_id
+    ORDER BY slr.effective_from DESC LIMIT 1;
+
+    IF p_clause_id = 'BL_07' THEN v_statute_text := '60 days';
+    ELSIF p_clause_id = 'BL_39' THEN v_statute_text := 'transfer_fee_pct=0.5; nodues_deemed_days=15';
+    ELSIF p_clause_id = 'BL_46' THEN v_statute_text := 'cash_payment_cheque_threshold=2500; petty_cash_limit=20000';
+    ELSIF p_clause_id = 'BL_49' THEN v_statute_text := 'publish_by=Jul 31; authority_copy_by=Aug 15; owner_summary_within=15 days';
+    ELSIF p_clause_id = 'S22' THEN v_statute_text := 'default_exceeds_months=6; notice_days=7; wait_months=1; appeal_days=15';
+    ELSIF p_clause_id = 'S20' THEN v_statute_text := 'recovery_after_months=12';
+    ELSE v_statute_text := NULL; END IF;
+
+    IF v_statute_text IS NOT NULL THEN
+        RETURN QUERY SELECT 0::INT, 'statute'::VARCHAR, v_statute_text, DATE '2011-11-16', 'UP Apartment Act 2010 / Model Bye-Laws 2011'::TEXT;
+        RETURN; END IF;
+
+    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Model Bye-Laws 2011 (adopted by society)'::TEXT
+    FROM society_bye_laws sbl
+    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 1
+      AND sbl.status IN ('adopted_as_is', 'adopted_with_variation')
+      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
+    ORDER BY sbl.effective_from DESC LIMIT 1;
+    IF FOUND THEN RETURN; END IF;
+
+    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Society Policy (GBM resolution)'::TEXT
+    FROM society_bye_laws sbl
+    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 2
+      AND sbl.status = 'adopted_with_variation'
+      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
+    ORDER BY sbl.effective_from DESC LIMIT 1;
+    IF FOUND THEN RETURN; END IF;
+
+    RETURN QUERY SELECT sbl.layer, sbl.status, sbl.variation_text, sbl.effective_from, 'Board Decision (MC resolution)'::TEXT
+    FROM society_bye_laws sbl
+    WHERE sbl.society_id = p_society_id AND sbl.clause_id = p_clause_id AND sbl.layer = 3
+      AND sbl.status = 'adopted_with_variation'
+      AND sbl.effective_from <= p_on AND (sbl.effective_to IS NULL OR sbl.effective_to >= p_on)
+    ORDER BY sbl.effective_from DESC LIMIT 1;
+    IF FOUND THEN RETURN; END IF;
+
+    RETURN;
+END $$;
+
+
+-- ───────────────────────────────────────────────────────────────────────────────
+-- fn_get_standing — Unified defaulter/standing resolver
+-- Replaces the 5 ad-hoc checks:
+--   fn_apartment_outstanding, fn_apartment_overdue_outstanding,
+--   fn_bye_law7_eligibility, fn_nodues_issue_check, fn_service_cutoff_check,
+--   fn_check_noc_eligibility, fn_cast_vote (via dues/overdue checks)
+-- ───────────────────────────────────────────────────────────────────────────────
+DROP FUNCTION IF EXISTS fn_get_standing(INT, INT, DATE);
+CREATE OR REPLACE FUNCTION fn_get_standing(
+    p_society_id  INT,
+    p_apartment_id INT,
+    p_asof        DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    dues_outstanding       NUMERIC,   -- receivables pending + partial (excludes paid/credit)
+    dues_overdue           NUMERIC,   -- receivables past due_date
+    loan_outstanding       NUMERIC,   -- owner_loans principal - repaid
+    loan_overdue           NUMERIC,   -- loan_outstanding WHERE due_date <= asof - arrears_days
+    ineligible_vote        BOOLEAN,   -- dues_overdue > 0 OR loan_overdue > 0 (policy-controlled)
+    ineligible_stand       BOOLEAN,   -- same as vote, plus any additional criteria
+    noc_blocked            BOOLEAN,   -- dues_outstanding > 0 OR (loan_outstanding > 0 AND owner_loan_blocks_nodues)
+    s22_blocked            BOOLEAN    -- TRUE if cut-off is BLOCKED (no >6mo overdue dues OR loan_overdue if policy)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_arrears_days         INT;
+    v_blocks_nodues        INT;
+    v_counts_bye_law7      INT;
+    v_counts_s22           INT;
+    v_s22_months           INT;
+BEGIN
+    -- Fetch regime parameters (with defaults if not set)
+    v_arrears_days    := COALESCE(fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_asof)::INT, 60);
+    v_blocks_nodues   := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_blocks_nodues', p_asof)::INT, 1);
+    v_counts_bye_law7 := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_asof)::INT, 1);
+    v_counts_s22      := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_s22', p_asof)::INT, 0);
+    v_s22_months      := COALESCE(fn_regime_param_num(p_society_id, 's22_default_months', p_asof)::INT, 6);
+
+    RETURN QUERY
+    WITH rec AS (
+        -- Receivables: pending + partial only (excludes paid, credit)
+        SELECT
+            COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending', 'partial')), 0) AS outstanding,
+            COALESCE(SUM(r.amount - r.paid_amount) FILTER (
+                WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < p_asof
+            ), 0) AS overdue,
+            COALESCE(SUM(r.amount - r.paid_amount) FILTER (
+                WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL 
+                  AND r.due_date <= p_asof - make_interval(months => v_s22_months)
+            ), 0) AS overdue_s22_months
+        FROM receivables r
+        WHERE r.society_id = p_society_id
+          AND r.entity_id = p_apartment_id
+          AND r.role = 'apartment'
+    ), ln AS (
+        -- Owner loans: outstanding + overdue (if due_date set and past arrears threshold)
+        SELECT
+            COALESCE(SUM(l.principal - l.repaid_amount), 0) AS outstanding,
+            COALESCE(SUM(l.principal - l.repaid_amount) FILTER (
+                WHERE l.due_date IS NOT NULL
+                  AND l.due_date <= p_asof - v_arrears_days
+            ), 0) AS overdue_bye_law7,
+            COALESCE(SUM(l.principal - l.repaid_amount) FILTER (
+                WHERE l.due_date IS NOT NULL AND l.due_date < p_asof
+            ), 0) AS overdue_s22
+        FROM owner_loans l
+        WHERE l.society_id = p_society_id
+          AND l.apartment_id = p_apartment_id
+          AND l.principal > l.repaid_amount
+    )
+    SELECT
+        rec.outstanding::NUMERIC,
+        rec.overdue::NUMERIC,
+        ln.outstanding::NUMERIC,
+        CASE WHEN v_counts_bye_law7 = 1 THEN ln.overdue_bye_law7 ELSE 0 END::NUMERIC,
+        (rec.overdue > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_vote,
+        (rec.overdue > 0 OR (v_counts_bye_law7 = 1 AND ln.overdue_bye_law7 > 0)) AS ineligible_stand,
+        (rec.outstanding > 0 OR (v_blocks_nodues = 1 AND ln.outstanding > 0)) AS noc_blocked,
+        -- s22_blocked = TRUE means cut-off is BLOCKED
+        -- Cut-off is allowed if there ARE receivables overdue > 6 months (default condition met)
+        -- So blocked when overdue_s22_months = 0 (no >6mo default) OR loan_overdue if policy
+        (rec.overdue_s22_months = 0 AND (v_counts_s22 = 0 OR ln.overdue_s22 = 0)) AS s22_blocked
+    FROM rec, ln;
+END $$;

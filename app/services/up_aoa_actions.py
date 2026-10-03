@@ -266,6 +266,11 @@ def load_card_data(society_id: int) -> dict:
         flags=q("""SELECT rule_code, source_table, source_id, detail, flagged_at FROM compliance_flags
                     WHERE society_id=%s ORDER BY flagged_at DESC LIMIT 10""", society_id),
         cash_mode=(one("SELECT fn_cash_limit_mode(%s) AS m", society_id) or {}).get("m"),
+        # Phase 1 shadow column: unified standing per apartment via fn_get_standing
+        standing=q("""SELECT a.id AS apartment_id, a.flat_number, s.*
+                          FROM apartments a
+                          LEFT JOIN LATERAL fn_get_standing(%s, a.id, CURRENT_DATE) s ON TRUE
+                         WHERE a.society_id=%s AND a.active ORDER BY a.flat_number""", society_id, society_id),
     )
     return data
 

@@ -1254,6 +1254,37 @@ def seed_society_legal_regime(cur, conn, society_id: int):
         print(f"  ✓ Society {society_id} assigned UP_AOA_2010 legal regime")
 
 
+def seed_decision_types(cur, conn):
+    """Seed the 10 whitelisted decision types for resolutions."""
+    rows = [
+        ("ADOPT_BYE_LAW",        "Adopt Model Bye-Law Clause",            "GBM", 66.67, "Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 majority per Model Bye-Law 58)"),
+        ("VARY_BYE_LAW",         "Vary Adopted Bye-Law Clause",           "GBM", 66.67, "Change variation text of an already-adopted clause (2/3 majority)"),
+        ("REJECT_BYE_LAW",       "Not Adopt Model Bye-Law Clause",        "GBM", 50.00, "Record that a non-mandatory Model Bye-Law clause is not adopted (simple majority)"),
+        ("SET_SOCIETY_POLICY",   "Set Society Policy (Layer 2)",          "GBM", 66.67, "Create or tighten a society policy within an adopted clause (2/3 majority; never loosens Model Bye-Law)"),
+        ("SET_BOARD_PARAM",      "Set Board Parameter (Layer 3)",         "MC",  50.00, "Operational parameter set by Managing Committee (simple majority; within policy bounds)"),
+        ("APPROVE_LOAN",         "Approve Owner Loan",                    "GBM", 66.67, "General Body approval for lending to an owner (Bye-Law 3(1)(f))"),
+        ("APPROPRIATE_FUND",     "Appropriate Funds (Reserve/Sinking)",   "GBM", 66.67, "General Body resolution for fund appropriation per Bye-Laws 46-52"),
+        ("SERVICE_CUTOFF",       "Authorize Service Cut-Off (s.22)",      "GBM", 66.67, "General Body resolution to cut essential service per UP Apartment Act s.22"),
+        ("AMEND_CASH_LIMIT",     "Change Cash-Limit Enforcement Mode",    "GBM", 50.00, "Override cash_limit_mode for this society (simple majority)"),
+        ("GENERAL_RESOLUTION",   "General Resolution",                    "GBM", 50.00, "Any other GBM resolution not covered above"),
+    ]
+    inserted = 0
+    for code, label, body, majority, desc in rows:
+        row = _one(cur, "SELECT 1 FROM decision_types WHERE code=%s", (code,))
+        if not row:
+            cur.execute(
+                """INSERT INTO decision_types (code, label, required_body, majority_pct, description)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (code, label, body, majority, desc),
+            )
+            inserted += 1
+    if inserted:
+        conn.commit()
+        print(f"  ✓ Decision types: {inserted} inserted")
+    else:
+        print("  ✓ Decision types already seeded — skipped")
+
+
 # UP AOA statutory head mappings — rekeyed to block account IDs.
 UP_AOA_ACCOUNT_MAPPINGS = [
     # Liabilities
@@ -2433,6 +2464,7 @@ def run_seed(conn):
     seed_state_compliance_thresholds(cur, conn)
     seed_legal_regime_profiles(cur, conn)
     seed_legal_instrument_catalog(cur, conn)
+    seed_decision_types(cur, conn)
     seed_statutory_head_catalog(cur, conn)
     seed_account_statutory_mappings(cur, conn, society_id)
     seed_gst_rates(cur, conn)
