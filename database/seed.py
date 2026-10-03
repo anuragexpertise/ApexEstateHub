@@ -1414,7 +1414,9 @@ def seed_accounts(cur, conn, society_id: int):
             created += 1
         except Exception as exc:
             conn.rollback()
-            log.warning("Account %s skip: %s", aid, exc)
+            raise RuntimeError(
+                f"Failed to seed account {aid} ({name!r}); aborting chart-of-accounts setup"
+            ) from exc
 
     for (aid, name, tab, header, parent, drcr, has_bf, dep, mutuality, tds_section) in ACCOUNTS:
         if parent is not None and aid in inserted_ids:
@@ -1992,7 +1994,7 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
         """INSERT INTO transactions
            (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status,
             created_by, source_table, journal_id, payment_gateway_id, role, entity_id, source_id, transaction_number)
-           VALUES (%s,'Cr',%s,1110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
+           VALUES (%s,'Cr',%s,5110,%s,%s,'journal','paid',%s,'depreciation_seed',%s,NULL,NULL,NULL,NULL,NULL)""",
         (society_id, YEAR_END_DATE, desc2, total_dep, admin_uid, journal_id2),
     )
     conn.commit()
@@ -2494,7 +2496,8 @@ def run_seed(conn):
 
     print()
     print("  Seed rule audit:")
-    audit_seed_invariants(cur, society_id)
+    if not audit_seed_invariants(cur, society_id):
+        raise RuntimeError("Seed invariant audit failed; refusing to report a successful seed.")
 
     conn.close()
 
