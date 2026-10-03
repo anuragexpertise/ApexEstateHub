@@ -5,6 +5,8 @@ import app.services.push_service as PushService
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 from app.utils.ux_toasts import error_toast
 import logging
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 
 logger = logging.getLogger(__name__)
 
@@ -37,20 +39,22 @@ card_id in ("form_poll_new", "form_poll_edit") — see poll_page.py).
 """
 
 
-def _get_user_from_auth(auth_data):
-    if not auth_data:
-        return None, None
-    return auth_data.get("user_id"), auth_data.get("society_id")
+def _require_auth(auth_data=None, required_role=None):
+    """Resolve the caller from the SERVER session, never from auth-store.
 
-
-def _require_auth(auth_data, required_role=None):
-    user_id, society_id = _get_user_from_auth(auth_data)
+    `auth_data` (the browser's auth-store) is accepted only so existing call
+    sites keep their signature; it is ignored. Before this fix, role and
+    society_id were read straight from that client-editable store, so anyone
+    who edited it in devtools could create or edit polls in another society.
+    """
+    user_id = get_current_user_id()
+    society_id = get_current_society_id()
     if not user_id or not society_id:
         return None, None, html.Div([
             html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#f39c12"}),
             "Please log in to access this feature.",
         ], className="alert alert-warning mt-2")
-    if required_role and auth_data.get("role") != required_role:
+    if required_role and get_current_user_role() != required_role:
         return None, None, html.Div([
             html.I(className="fas fa-lock me-2", style={"color": "#e74c3c"}),
             "You do not have permission to perform this action.",
@@ -65,6 +69,7 @@ def register_poll_callbacks(app):
         Input("poll-choice-count", "value"),
         prevent_initial_call=False,
     )
+    @require_session
     def toggle_extra_choices(choice_count):
         choice_count = choice_count or 2
         if choice_count >= 3:
@@ -88,6 +93,7 @@ def register_poll_callbacks(app):
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def save_poll(n_clicks, poll_id, title, description, choice_count,
                   c1, c2, c3, c4, c5, ends_at, open_to, auth_data):
         """Handles both Create Poll (poll_id empty) and Edit Poll

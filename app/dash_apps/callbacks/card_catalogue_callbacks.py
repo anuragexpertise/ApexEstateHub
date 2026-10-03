@@ -757,6 +757,7 @@ def register_card_catalogue_callbacks(app):
         Input("kpi-refresh-side-effects-store", "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def handle_kpi_side_effects(data):
         if not data:
             raise PreventUpdate

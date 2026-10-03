@@ -29,6 +29,8 @@ plus the agreement-modal itself (see _agreement_modal() in app_shell.py).
 
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id
 
 
 def _agreement_to_html_js() -> str:
@@ -188,13 +190,15 @@ def register_agreement_callbacks(app):
         State('agreement-letterhead-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_agreement_printed(n_clicks, lh_data):
         agreement_id = (lh_data or {}).get("id")
-        if not n_clicks or not agreement_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not agreement_id or not sid:
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE society_agreements SET last_printed_at = NOW() WHERE id = %s", (int(agreement_id),))
+            db._execute("UPDATE society_agreements SET last_printed_at = NOW() WHERE id = %s AND society_id = %s", (int(agreement_id), sid))
         except Exception as e:
             print(f"agreement last_printed_at stamp error: {e}")
         return no_update
@@ -205,13 +209,15 @@ def register_agreement_callbacks(app):
         State('agreement-letterhead-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_agreement_emailed(n_clicks, lh_data):
         agreement_id = (lh_data or {}).get("id")
-        if not n_clicks or not agreement_id:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not agreement_id or not sid:
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE society_agreements SET last_emailed_at = NOW() WHERE id = %s", (int(agreement_id),))
+            db._execute("UPDATE society_agreements SET last_emailed_at = NOW() WHERE id = %s AND society_id = %s", (int(agreement_id), sid))
         except Exception as e:
             print(f"agreement last_emailed_at stamp error: {e}")
         return no_update

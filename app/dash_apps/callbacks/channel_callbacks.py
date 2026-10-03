@@ -93,6 +93,7 @@ def register_channel_callbacks(app):
         Input("close-channel-subscribers-modal", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def close_subscribers_modal(n_clicks):
         if not n_clicks:
             raise PreventUpdate

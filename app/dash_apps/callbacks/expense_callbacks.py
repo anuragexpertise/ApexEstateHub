@@ -18,6 +18,8 @@ rendered dynamically inside drill-content, not the permanent shell layout.)
 """
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.guards import require_session
+from app.security.audit_context import get_current_society_id
 
 
 def _expense_html_js() -> str:
@@ -178,15 +180,17 @@ def register_expense_callbacks(app):
         State('expense-print-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_printed(n_clicks, print_data):
         expense_no = (print_data or {}).get("expense_no")
-        if not n_clicks or not expense_no:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not expense_no or not sid:
             return no_update
         try:
             from database.db_manager import db
             db._execute(
-                "UPDATE expenses SET last_printed_at = NOW() WHERE id = %s",
-                (int(expense_no),),
+                "UPDATE expenses SET last_printed_at = NOW() WHERE id = %s AND society_id = %s",
+                (int(expense_no), sid),
             )
         except Exception as e:
             print(f"expense last_printed_at stamp error: {e}")
@@ -198,15 +202,17 @@ def register_expense_callbacks(app):
         State('expense-print-data', 'data'),
         prevent_initial_call=True,
     )
+    @require_session
     def _stamp_emailed(n_clicks, print_data):
         expense_no = (print_data or {}).get("expense_no")
-        if not n_clicks or not expense_no:
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not n_clicks or not expense_no or not sid:
             return no_update
         try:
             from database.db_manager import db
             db._execute(
-                "UPDATE expenses SET last_emailed_at = NOW() WHERE id = %s",
-                (int(expense_no),),
+                "UPDATE expenses SET last_emailed_at = NOW() WHERE id = %s AND society_id = %s",
+                (int(expense_no), sid),
             )
         except Exception as e:
             print(f"expense last_emailed_at stamp error: {e}")

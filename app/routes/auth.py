@@ -75,11 +75,12 @@ def login():
         email=user_dict['email'],
         role=user_dict['role'],
         society_id=user_dict.get('society_id'),
+        linked_id=user_dict.get('linked_id'),
     )
     login_user(user_obj, remember=data.get('remember', False))
 
     access_token, refresh_token = generate_tokens(
-        user_obj.id, user_obj.email, user_obj.role
+        user_obj.id, user_obj.email, user_obj.role, user_obj.society_id
     )
 
     return jsonify({
@@ -122,10 +123,11 @@ def refresh_token():
     if not user:
         return jsonify({'success': False, 'message': 'User not found'}), 401
 
-    role = user.role
-    if role == 'admin' and user.society_id is None:
-        role = 'master'
-    access_token, _ = generate_tokens(user.id, user.email, role)
+    # user.role is already resolved by User.get() (admin + no society +
+    # is_master_admin -> master). The old "no society => master" shortcut
+    # here ignored the is_master_admin flag, so it could promote an
+    # unflagged society-less admin to master in the token.
+    access_token, _ = generate_tokens(user.id, user.email, user.role, user.society_id)
     return jsonify({'success': True, 'access_token': access_token})
 
 

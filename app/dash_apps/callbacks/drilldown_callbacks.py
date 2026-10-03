@@ -2470,6 +2470,7 @@ def register_drilldown_callbacks(app):
         Input({"type": "tds-autofill", "entity": "expense"}, "data"),
         prevent_initial_call=True,
     )
+    @require_session
     def expense_tds_pan_banner(data):
         data = data or {}
         warning = data.get("pan_warning")
@@ -6093,6 +6094,7 @@ def register_member_ledger_callbacks(app):
         State("drilldown-store", "data"),
         prevent_initial_call=True
     )
+    @require_session
     def update_member_ledger_state(fy_val, prev_clicks, next_clicks, store_data):
         ctx = callback_context
         if not ctx.triggered or not store_data:

@@ -9,6 +9,7 @@ import dash_bootstrap_components as dbc
 from app.dash_apps.drilldown import loaders
 from database.db_manager import db
 from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
+from app.security.guards import require_session
 
 # A law-protected principal is called out in warm amber rather than the
 # green used for a spendable balance, so "nothing here is drawable" is
@@ -79,6 +80,7 @@ def register_fund_management_callbacks(app):
         Input("fund-mgmt-refresh-btn", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def refresh_fund_management_data(refresh_clicks):
         """Reload fund balances and utilization log when refresh button is clicked."""
         if not refresh_clicks:
@@ -165,6 +167,7 @@ def register_fund_management_callbacks(app):
         State("fund-mgmt-particulars", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def submit_fund_utilization(n_clicks, fund_acc_id, expense_acc_id, amount, mode, cheque_no, trx_id, approval_ref, approval_date, particulars):
         """Submit fund utilization request."""
         if not n_clicks:
@@ -241,6 +244,7 @@ def register_fund_management_callbacks(app):
         Input("fund-mgmt-refresh-btn", "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def refresh_appropriation_sections(refresh_clicks):
         if not refresh_clicks:
             raise PreventUpdate
@@ -281,6 +285,7 @@ def register_fund_management_callbacks(app):
         State("fund-mgmt-appropr-approval-date", "date"),
         prevent_initial_call=True,
     )
+    @require_session
     def submit_appropriation(n_clicks, income_acc_id, fund_acc_id, amount,
                              particulars, approval_ref, approval_date):
         """
@@ -359,6 +364,7 @@ def register_fund_management_callbacks(app):
         Input({"type": "fund-appropr-cancel", "id": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
+    @require_session
     def confirm_or_cancel_appropriation(confirm_clicks, cancel_clicks):
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -413,6 +419,7 @@ def register_fund_management_callbacks(app):
         State({"type": "fund-mgmt-map-select", "fund": ALL}, "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def save_fund_bank_mappings(n_clicks, selections):
         """
         Persist one mapping per fund. A cleared dropdown (value None) clears
