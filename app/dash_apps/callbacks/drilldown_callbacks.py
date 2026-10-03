@@ -1195,11 +1195,14 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can declare results"}}
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id()
+                # fn_declare_results RETURNS TABLE(success, message, results): select its columns. Selecting the
+                # function itself yields one composite text value that is truthy even when the poll failed quorum.
                 result = db._execute(
-                    "SELECT fn_declare_results(%s::INT, %s::INT, %s::INT) AS ok",
+                    "SELECT success AS ok, message FROM fn_declare_results(%s::INT, %s::INT, %s::INT)",
                     (int(pk), int(user_id), int(sid)), fetch_one=True
                 )
                 ok = bool((result or {}).get("ok"))
+                declare_msg = (result or {}).get("message") or "Results could not be declared (already declared or not found)"
                 if ok:
                     try:
                         poll_row = db._execute(
@@ -1217,7 +1220,7 @@ def register_drilldown_callbacks(app):
                 store["refresh"] = True
                 toast = {"_toast": {
                     "type": "success" if ok else "error",
-                    "message": "Results declared" if ok else "Results could not be declared (already declared or not found)",
+                    "message": "Results declared" if ok else declare_msg,
                 }}
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"}

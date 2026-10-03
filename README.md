@@ -79,7 +79,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Bank Reconciliation** | Per-bank-account Excel statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
 | **Fund Management** | Statutory fund balances with lock/drawable split · Utilize Fund (honours `statutory_lock_pct`) · **Appropriate Income → Fund** (Dr income / Cr fund) with pending→confirm workflow · **Fund Deposit Routing** (per-fund destination bank account) |
 | **Fund Deposit Routing** | A fund's contributions can be banked into a separately-held account/FD instead of the society's primary account; enforced at posting time by `fn_resolve_bank_leg`, and statement uploads are matched per account |
-| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
+| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`, and a **Bye-Laws Adoption** step where the admin records which Model Bye-Laws clauses the Association is adopting — provisional until a General Body resolution is linked) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
 | **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
 
 ---
@@ -606,6 +606,73 @@ Every write is one SQL statement that also inserts into `regime_rule_audit` (app
 **State → regime sync.** `societies.state` is written as a code (`UP`) by the wizard, but every `fn_regime_param_*` / compliance function reads `society_legal_regime`, which only `seed.py` ever filled (matching the full name `Uttar Pradesh`). `fn_sync_society_regime` + trigger `societies_sync_regime` now assign the active regime for a state on insert/update (code or full name; a draft regime such as MH is never assigned; a state with no active regime leaves any existing row untouched).
 
 Owner loans in the dues checks are governed by three policy switches in this editor — see Owner Loans & Loanees.
+
+### Bye-Laws Acceptance & Governance
+
+How a society's own decisions — not just the statute — reach the engine. Tables `society_bye_laws`, `meetings`, `resolutions`, `decision_types`, `resolution_effects`; service `regime_rules_admin.py`; functions `fn_resolve_rule`, `fn_get_standing`.
+
+**Four layers; a lower layer never loosens a higher one.**
+
+| Layer | Source | Who decides | Stored as |
+|---|---|---|---|
+| 0 | UP Apartment Act 2010 / Rules 2011 | Locked | Baseline inside `fn_resolve_rule` (bye-laws 7, 39, 46, 49; ss. 20, 22) and `regime_rule_parameters` |
+| 1 | Model Bye-Laws 2011 — per clause: **adopt as-is / adopt with variation / not adopted** | General Body, 2/3 (`ADOPT_BYE_LAW`) | `society_bye_laws.layer = 1` |
+| 2 | Society policy — may only tighten a Layer-1 clause | General Body, 2/3 (`SET_SOCIETY_POLICY`) | `layer = 2` |
+| 3 | Board decision — operational limits | Managing Committee (`SET_BOARD_PARAM`) | `layer = 3` |
+
+**Provisional → active.** A choice saved without a resolution is stored `status = 'provisional'` and remembers the intended outcome in `proposed_status`; the engine ignores it. It becomes active only when Master links a **passed** resolution (`link_provisional_to_resolution`). `_check_resolution` refuses a resolution that is not this society's, not passed, for a different clause, of the wrong decision type for the layer, taken at a meeting with no recorded quorum, or (for GBM-bodied types) not taken at a GBM/EGM. `create_resolution` will not record a resolution as passed on a smaller majority than its decision type requires. The four statute-backed clauses (`STATUTE_BACKED_CLAUSES`: BL_07, BL_39, BL_46, BL_49) cannot be "not adopted" — confirm that list with an advocate.
+
+**Where each choice is made**
+
+| Where | Who | What |
+|---|---|---|
+| Setup Wizard → **Bye-Laws Adoption** | Society admin (own society only) | Radio per clause → provisional Layer-1 row, saved on click (`record_wizard_adoption`). Clauses left alone follow the Model Bye-Laws / Act as written |
+| Master → AOA Rule Editor → Society Bye-Laws | Master | Radio form for any layer, with an optional passed-resolution id; register shows layer, state (Provisional / Active) and the intended outcome |
+| Master → AOA Rule Editor → Meetings & Resolutions | Master | Record GBM / EGM / MC meetings (quorum flag, minutes path) and resolutions; link a provisional choice to a passed resolution |
+
+Every write also inserts into `regime_rule_audit`.
+
+**`fn_resolve_rule(society, clause, date)`** returns the most specific *active* adoption — Layer 3 over 2 over 1 — and falls back to the Layer-0 baseline. `provisional`, `not_adopted` and resolution-less rows never resolve. `adopted_as_is` resolves to the baseline text.
+
+**`fn_get_standing(society, apartment, date)`** is the one defaulter definition behind No Dues / NOC, poll voting, bye-law 7 candidacy and s.22:
+
+| Column | Meaning |
+|---|---|
+| `dues_outstanding` / `dues_overdue` | Pending + partial receivables / those past `due_date` |
+| `arrears_bye_law7` | Receivables more than `arrears_disqualify_days` (60) past due |
+| `loan_outstanding` / `loan_overdue` | Owner-loan balance / the part past the bye-law 7 margin (policy `owner_loan_counts_bye_law7`) |
+| `ineligible_vote` | Any overdue receivable, or an overdue loan — used by `fn_cast_vote` for "no dues" polls |
+| `ineligible_stand` | `arrears_bye_law7 > 0` or overdue loan — bye-law 7 candidacy. *Merely overdue is not enough: arrears must exceed the margin* |
+| `noc_blocked` | Any outstanding dues, or an outstanding loan when `owner_loan_blocks_nodues` |
+| `s22_blocked` | No receivable beyond `s22_default_months` (and no counted loan) — cut-off not allowed |
+
+**Polls.** `polls.quorum_pct` (default 33.33) and `majority_pct` (default 50). `fn_declare_results` returns `(success, message, results)`. A poll that misses quorum or majority is **not** declared — it stays as it was and the admin sees why; only a poll that carries is marked `results_declared` and notified.
+
+**How the modules are governed**
+
+| Module | Governed by | In the engine today |
+|---|---|---|
+| Enrollment of apartments / members | Bye-law 29 (register of members), 40 (succession) | 🟡 Register only — no rule-driven check |
+| Receivables / receipts | Bye-laws 15, 38 (levy), s.18(1) | ✅ Billing by area or undivided interest. 🟡 s.20 (recovery after 12 months) is only a baseline string in `fn_resolve_rule`; nothing enforces it |
+| Payables / expenses | Bye-law 46–47 (cash/cheque, petty cash) | ✅ `fn_verify_expense` flags or blocks; `fn_petty_cash_check` |
+| Funds | Bye-laws 16–18, 39, 48 | ✅ Fund accounts, FY-close appropriation, ½% transfer fee → Major Repair Fund |
+| Owner loans | Bye-law 3(1)(f), resolution mandatory | ✅ Ledger-posted; counted in No Dues / bye-law 7 per policy |
+| Transfers / NOC | Bye-law 39 | ✅ `fn_get_standing.noc_blocked`; 15-day deemed grant |
+| Polls / voting | Bye-laws 7, 33; quorum | ✅ Eligibility via `fn_get_standing`; quorum + majority at declaration |
+| Board elections | Bye-law 7 | ✅ `fn_bye_law7_eligibility` (60-day arrears) |
+| Service cut-off | s.22 | ✅ `fn_service_cutoff_check`; resolution reference recorded |
+| Statements & filings | Bye-law 49–52 | ✅ Calendar, filings, owner and loanee lists |
+| Concerns, Channels | Bye-law 9 (Board powers), 13 (committees) | 🟡 Not linked to any bye-law or resolution |
+| Vendors, Security | Bye-law 19 (staff), 27 | 🟡 Not linked to any bye-law or resolution |
+
+**Known gaps (not yet built)**
+- `fn_get_standing` reads `regime_rule_parameters`, **not** `fn_resolve_rule` — an adopted variation (e.g. a 45-day arrears margin) is recorded and shown but does not yet change the engine. Wiring it needs a parameter grammar for `variation_text` (whitelisted keys, tighten-only comparison).
+- `resolution_effects` has no writer, so Master's "pending enactments" list is always empty; provisional → active via `link_provisional_to_resolution` is the working path.
+- "Tighten only" for Layers 2/3 is a rule in this section, not a check — free-text variations cannot be compared.
+- Meetings and resolutions are recorded by Master; there is no admin/secretary entry screen and no read-only mirror on the Admin UP AOA Compliance card.
+- A poll that carries does not create a resolution; ratification at a GBM is manual.
+
+> Confirm bye-law numbers and the statute-backed clause list with an advocate before relying on them in a filing.
 
 ### UP AOA Compliance Card (Admin → Financials)
 
