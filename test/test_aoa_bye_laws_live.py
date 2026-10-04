@@ -8,8 +8,10 @@ from datetime import date, timedelta
 
 import pytest
 
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
 psycopg2 = pytest.importorskip("psycopg2")
-pytestmark = pytest.mark.skipif(not os.getenv("PGHOST"), reason="needs a seeded Postgres (set PGHOST/...)")
+pytestmark = pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON)
 SOC = 1
 
 
@@ -34,14 +36,34 @@ def receivable(cur, apt, amount, due):
                    VALUES (%s,%s,'apartment',%s,0,'pending',%s)""", (SOC, apt, amount, due))
 
 
-def apt_id(cur, n=0):
+def _clear_dues(cur, apt):
+    """Put a flat's dues position at zero so a test controls its own baseline.
+
+    The seeded demo society carries pending charges on nearly every flat, and
+    fn_get_standing() counts receivables with status pending/partial. Without
+    this, bye-law 7 sees the seeded arrears and disqualifies the flat no matter
+    what the test inserted — which is exactly what happened here. Only
+    pending/partial is counted, so settling the rest is enough, and the whole
+    thing is rolled back with the fixture.
+    """
+    cur.execute("UPDATE receivables SET status='paid', paid_amount=amount "
+                "WHERE society_id=%s AND entity_id=%s AND role='apartment'", (SOC, apt))
+
+
+def apt_id(cur, n=0, clear=False):
+    """The nth active flat; clear=True also zeroes its existing dues."""
     cur.execute("SELECT id FROM apartments WHERE society_id=%s AND active ORDER BY id OFFSET %s LIMIT 1", (SOC, n))
-    return cur.fetchone()[0]
+    row = cur.fetchone()
+    if not row:
+        pytest.skip(f"seeded society has fewer than {n + 1} active flats")
+    if clear:
+        _clear_dues(cur, row[0])
+    return row[0]
 
 
 # ── bye-law 7: candidacy needs arrears OVER the margin, not merely an overdue bill ─────────────────
 def test_standing_30_days_overdue_can_stand_but_not_vote_in_no_dues_poll(cur):
-    a = apt_id(cur)
+    a = apt_id(cur, clear=True)
     receivable(cur, a, 1000, date.today() - timedelta(days=30))
     r = one(cur, "SELECT dues_overdue, arrears_bye_law7, ineligible_vote, ineligible_stand, noc_blocked "
                  "FROM fn_get_standing(%s,%s,CURRENT_DATE)", (SOC, a))
@@ -52,7 +74,7 @@ def test_standing_30_days_overdue_can_stand_but_not_vote_in_no_dues_poll(cur):
 
 
 def test_standing_exactly_60_days_can_stand_61_cannot(cur):
-    a = apt_id(cur)
+    a = apt_id(cur, clear=True)
     receivable(cur, a, 500, date.today() - timedelta(days=60))
     assert one(cur, "SELECT ineligible_stand FROM fn_get_standing(%s,%s,CURRENT_DATE)", (SOC, a))[0] is False
     receivable(cur, a, 500, date.today() - timedelta(days=61))
@@ -67,14 +89,14 @@ def test_policy_row_dated_today_beside_active_row_inserts(cur):
 
 
 def test_standing_90_days_overdue_cannot_stand(cur):
-    a = apt_id(cur)
+    a = apt_id(cur, clear=True)
     receivable(cur, a, 500, date.today() - timedelta(days=90))
     assert one(cur, "SELECT ineligible_stand FROM fn_get_standing(%s,%s,CURRENT_DATE)", (SOC, a))[0] is True
 
 
 def test_bye_law7_election_list_agrees_with_standing(cur):
     cut = one(cur, "SELECT fn_bye_law7_cutoff_date(%s, CURRENT_DATE)", (SOC,))[0]
-    a, b = apt_id(cur, 0), apt_id(cur, 1)
+    a, b = apt_id(cur, 0, clear=True), apt_id(cur, 1, clear=True)
     receivable(cur, a, 1000, cut - timedelta(days=30))
     receivable(cur, b, 500, cut - timedelta(days=90))
     cur.execute("SELECT apartment_id, overdue_amount, days_overdue, eligible FROM fn_bye_law7_eligibility(%s, CURRENT_DATE)", (SOC,))
@@ -127,27 +149,51 @@ def test_resolver_adopted_as_is_resolves_to_baseline_text(cur):
 
 
 # ── polls: a failed poll is not "declared" ────────────────────────────────────────────────────────
-def _poll(cur, votes_for):
-    cur.execute("""INSERT INTO polls (society_id,title,open_to,status,choice_count,choice_1,choice_2)
-                   VALUES (%s,'t','all_members','closed',2,'Y','N') RETURNING id""", (SOC,))
+# Quorum is set explicitly rather than left at the 33.33% column default so these
+# tests don't depend on how many flats the seed happens to create.
+QUORUM_PCT = 50.0
+
+
+def _eligible_voters(cur):
+    """open_to='all_members' -> every active flat of the society may vote.
+    This is the denominator fn_declare_results() divides the ballot count by."""
+    return one(cur, "SELECT COUNT(*) FROM apartments WHERE society_id=%s AND active", (SOC,))[0]
+
+
+def _poll(cur, votes_for, quorum_pct=QUORUM_PCT):
+    """A closed poll in which `votes_for` active flats have voted choice 1.
+
+    Votes live in two tables since poll_votes was retired: poll_participation
+    records which flats took part, poll_ballots holds the anonymous ballot rows
+    that fn_declare_results() counts. Every ballot is choice 1, so majority is
+    always met and only quorum decides the outcome.
+    """
+    cur.execute("""INSERT INTO polls (society_id,title,open_to,status,choice_count,choice_1,choice_2,quorum_pct)
+                   VALUES (%s,'t','all_members','closed',2,'Y','N',%s) RETURNING id""", (SOC, quorum_pct))
     pid = cur.fetchone()[0]
     cur.execute("SELECT id FROM apartments WHERE society_id=%s AND active ORDER BY id LIMIT %s", (SOC, votes_for))
     for (a,) in cur.fetchall():
-        cur.execute("SELECT id FROM users WHERE role='apartment' AND society_id=%s ORDER BY id LIMIT 1", (SOC,))
-        u = cur.fetchone()
-        cur.execute("INSERT INTO poll_votes (poll_id,user_id,apartment_id,choice) VALUES (%s,%s,%s,1)", (pid, u[0] if u else 1, a))
+        cur.execute("INSERT INTO poll_participation (poll_id, apartment_id) VALUES (%s,%s)", (pid, a))
+        cur.execute("INSERT INTO poll_ballots (poll_id, choice) VALUES (%s,1)", (pid,))
     return pid
 
 
 def test_poll_without_quorum_is_not_declared(cur):
-    pid = _poll(cur, 1)
+    eligible = _eligible_voters(cur)
+    if eligible < 4:
+        pytest.skip(f"needs >= 4 active flats to build a sub-quorum poll (has {eligible})")
+    votes = max(1, eligible // 4)                      # a quarter of the electorate: under 50%
+    pid = _poll(cur, votes)
     ok, msg = one(cur, "SELECT success, message FROM fn_declare_results(%s,1,%s)", (pid, SOC))
     assert ok is False and "Quorum not met" in msg
     assert one(cur, "SELECT status FROM polls WHERE id=%s", (pid,))[0] == "closed"
 
 
 def test_poll_with_quorum_and_majority_is_declared(cur):
-    pid = _poll(cur, 5)
+    eligible = _eligible_voters(cur)
+    votes = eligible - eligible // 4                   # three quarters: over 50%
+    assert votes / eligible * 100 >= QUORUM_PCT
+    pid = _poll(cur, votes)
     ok, msg = one(cur, "SELECT success, message FROM fn_declare_results(%s,1,%s)", (pid, SOC))
     assert ok is True
     assert one(cur, "SELECT status FROM polls WHERE id=%s", (pid,))[0] == "results_declared"

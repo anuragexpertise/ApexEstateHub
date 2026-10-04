@@ -12,7 +12,9 @@ from datetime import date
 
 import pytest
 
-pytestmark = pytest.mark.skipif(not os.getenv("PGHOST"), reason="needs a seeded Postgres (set PGHOST/PGDATABASE/PGUSER/PGPASSWORD)")
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
+pytestmark = pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON)
 
 SOC = 1
 

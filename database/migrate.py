@@ -43,32 +43,19 @@ import psycopg2
 import psycopg2.extras
 import sqlparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from db_config import connection_params, describe_target  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger(__name__)
 
 SCHEMA_FILE = Path(__file__).with_name("estatehub.sql")
 
 
-def _dsn() -> str:
-    raw = os.getenv("DATABASE_URL", "").strip()
-    if raw:
-        return raw.replace("postgres://", "postgresql://", 1)
-    host   = os.getenv("PGHOST",     "").strip()
-    port   = os.getenv("PGPORT",     "5432").strip() or "5432"
-    dbname = os.getenv("PGDATABASE", "").strip()
-    user   = os.getenv("PGUSER",     "").strip()
-    pw     = os.getenv("PGPASSWORD", "").strip()
-    ssl    = os.getenv("PGSSLMODE",  "require").strip()
-    if not all([host, dbname, user, pw]):
-        print("❌  Set DATABASE_URL  or  PGHOST/PGDATABASE/PGUSER/PGPASSWORD")
-        sys.exit(1)
-    return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}?sslmode={ssl}"
-
-
 def get_conn():
     try:
         conn = psycopg2.connect(
-            _dsn(),
+            **connection_params(),
             cursor_factory=psycopg2.extras.RealDictCursor,
             connect_timeout=20,
             options="-c lock_timeout=15000 -c statement_timeout=180000",
@@ -138,7 +125,7 @@ def main():
     print("  EstateHub — Database Migration")
     print("═" * 62)
     print(f"  Schema: {SCHEMA_FILE.name}")
-    print(f"  Host   : {os.getenv('PGHOST', '(from DATABASE_URL)')}")
+    print(f"  Target : {describe_target()}")
     print(f"  DB     : {os.getenv('PGDATABASE', '')}")
     print()
 

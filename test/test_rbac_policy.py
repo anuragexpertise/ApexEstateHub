@@ -243,20 +243,28 @@ def test_rbac_tables_exist_in_schema():
 def test_schema_has_no_idempotency_guards():
     """estatehub.sql installs onto the empty schema that reset_database.py
     creates, so IF NOT EXISTS / DROP IF EXISTS guards are dead weight that only
-    hide drift. The two IF NOT EXISTS still in the file are inside PL/pgSQL
-    function bodies and are genuine business logic (guarding a partial fill and a
-    missing account), so only the DDL forms are asserted absent here."""
+    hide drift.
+
+    Two carve-outs, both real:
+      * the two `IF NOT EXISTS` left in the file are inside PL/pgSQL function
+        bodies and are genuine business logic (guarding a partial fill, and a
+        missing account) — this regex only matches DDL forms anyway;
+      * `DROP TABLE IF EXISTS _cb_month_rows` is inside
+        fn_cashbook_month_page and guards against a *second call in the same
+        transaction*, not against a legacy schema — `ON COMMIT DROP` only fires
+        at commit, so without it a report that pages over months fails on
+        page two.
+    """
     import re
     from pathlib import Path
     sql = (Path(__file__).resolve().parent.parent / "database" / "estatehub.sql").read_text()
+    body = sql.replace("DROP TABLE IF EXISTS _cb_month_rows;", "")
     ddl = re.compile(
         r"CREATE\s+(?:UNIQUE\s+)?(?:INDEX|TABLE|SEQUENCE)\s+IF NOT EXISTS"
         r"|DROP\s+(?:FUNCTION|TRIGGER|TABLE|VIEW)\s+(?:IF EXISTS|[\w\s(),]*\s+CASCADE)",
         re.IGNORECASE,
     )
-    hits = ddl.findall(sql)
-    # allow the two ALTER TABLE forward-reference FKs, which are plain DDL
-    assert not [h for h in hits if "ALTER" not in h], hits
+    assert not ddl.findall(body), ddl.findall(body)
 
 
 def test_policy_module_exports_can_and_can_do():

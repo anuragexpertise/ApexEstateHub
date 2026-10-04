@@ -9432,9 +9432,11 @@ BEGIN
         ), 0);
 
     -- A second call in the same transaction (a loop over months, a report
-    -- that fetches several pages) used to fail with "relation _cb_month_rows
-    -- already exists" because ON COMMIT DROP only fires at commit.
-
+    -- that fetches several pages) would fail with "relation _cb_month_rows
+    -- already exists" because ON COMMIT DROP only fires at commit. This DROP
+    -- is not a legacy-schema guard — the temp table is created by the
+    -- statement two lines below, in this same function.
+    DROP TABLE IF EXISTS _cb_month_rows;
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
         -- mode <> 'journal' excludes pure book entries (e.g. depreciation)
