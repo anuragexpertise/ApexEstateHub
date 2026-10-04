@@ -17,6 +17,20 @@ from unittest.mock import patch
 from test.fake_db import FakeDB, reset_fake_db
 
 
+def pytest_configure(config):
+    """Register the marks used to separate DB-dependent tests from unit tests.
+
+    `postgres_integration` covers behaviour that genuinely needs a real
+    PostgreSQL — SQL functions the Python fake cannot emulate, tenant scoping
+    across those functions, and workbook export driven by them. They must be
+    separately reportable from the hermetic suite (Four.md §2.5 gate 3).
+    """
+    config.addinivalue_line(
+        "markers",
+        "postgres_integration: needs a real PostgreSQL; run with ESTATEHUB_LIVE_TESTS=1",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_db_between_tests():
     """Guarantee a clean in-memory DB for every test method."""
