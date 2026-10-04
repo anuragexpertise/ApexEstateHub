@@ -12,6 +12,9 @@ import dash_bootstrap_components as dbc
 from app.dash_apps.pages.card_catalogue import KPI_CARDS
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, require_action
+from app.security.audit_context import get_current_society_id, get_current_user_role
 from app.utils.ux_toasts import error_toast
 # ════════════════════════════════════════════════════════════════
 # KPI METADATA — list-of-tuples so duplicate card_ids are preserved
@@ -356,12 +359,19 @@ def register_customize_kpi_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: dbc.Alert("Unauthorized: Master role required.", color="danger",
+                                                className="mt-2", style={"fontSize": "12px"}))
     def test_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
         if not n_clicks or not sql_text:
             return no_update
-        if not auth_data or auth_data.get("role") != "master":
+        # `auth_data` is the browser-editable auth-store and must never decide
+        # this: the role comes from the server session (RWA3 §3.1).
+        if get_current_user_role() != "master":
             return dbc.Alert("Unauthorized: Master role required.", color="danger", className="mt-2", style={"fontSize": "12px"})
-            
+        audit_event("platform.sql.execute", "platform_console", f"kpi_test:{kpi_id}",
+                    after={"sql": sql_text.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
+
         sql_upper = sql_text.upper()
         if "DELETE " in sql_upper or "DROP " in sql_upper:
             if "-- DELETE THIS SOCIETY" not in sql_upper:

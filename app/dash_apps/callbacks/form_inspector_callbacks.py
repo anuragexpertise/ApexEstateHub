@@ -10,6 +10,8 @@ from app.dash_apps.drilldown.registry import to_singular, to_plural
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 from app.dash_apps.drilldown import renderers
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import get_current_user_role
 from app.utils.ux_toasts import error_toast
 
@@ -132,6 +134,9 @@ def register_form_inspector_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: (no_update, no_update,
+                                       {"type": "error", "message": "Platform operator role required."}))
     def run_form_audit(n_clicks, auth_data):
         from dash.exceptions import PreventUpdate
         if not n_clicks:

@@ -67,6 +67,11 @@ class Cap:
     FINANCE_RECONCILE       = "finance.reconcile"
     REPORT_EXPORT           = "report.export"
     PLATFORM_RULES_MANAGE   = "platform.rules.manage"
+    # Master-portal inspectors that execute or expose raw SQL (RWA3 WP4 item 1:
+    # "database/report inspection" is a platform action, separate from society
+    # actions). Deliberately NOT folded into platform.rules.manage: editing a
+    # legal rule and running arbitrary SQL are different powers.
+    PLATFORM_SQL_INSPECT    = "platform.sql.inspect"
 
 
 CAPABILITIES: frozenset[str] = frozenset(
@@ -105,6 +110,7 @@ _RES: dict[str, frozenset[str]] = {
     Cap.FINANCE_RECONCILE:       frozenset({"bank_line"}),
     Cap.REPORT_EXPORT:           frozenset({"financial_report"}),
     Cap.PLATFORM_RULES_MANAGE:   frozenset({"platform_rule"}),
+    Cap.PLATFORM_SQL_INSPECT:    frozenset({"platform_console"}),
 }
 assert set(_RES) == set(CAPABILITIES), "every capability needs a resource-type entry"
 
@@ -141,7 +147,7 @@ _RESIDENT_COMMON = frozenset({
 # Explicit capability sets. No wildcards, and no role holds both sides of a
 # maker/checker pair unless the SoD guard below can separate them per item.
 DEFAULT_CAPABILITIES: dict[str, frozenset[str]] = {
-    PLATFORM_OPERATOR: frozenset({Cap.PLATFORM_RULES_MANAGE}),
+    PLATFORM_OPERATOR: frozenset({Cap.PLATFORM_RULES_MANAGE, Cap.PLATFORM_SQL_INSPECT}),
     SOCIETY_ADMIN: frozenset({
         Cap.ROLES_MANAGE, Cap.ENROLLMENT_VALIDATE, Cap.ENROLLMENT_COMMIT,
         Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN, Cap.POLL_MANAGE,
@@ -177,7 +183,8 @@ for _role, _caps in DEFAULT_CAPABILITIES.items():
     assert not any("*" in c for c in _caps), f"{_role} contains a wildcard"
 
 # Platform operators never receive tenant data capabilities.
-assert DEFAULT_CAPABILITIES[PLATFORM_OPERATOR] == frozenset({Cap.PLATFORM_RULES_MANAGE})
+assert DEFAULT_CAPABILITIES[PLATFORM_OPERATOR] == frozenset(
+    {Cap.PLATFORM_RULES_MANAGE, Cap.PLATFORM_SQL_INSPECT})
 
 
 # ── principal & decision ─────────────────────────────────────────────────────
@@ -283,6 +290,10 @@ _SELF_SCOPE: dict[str, tuple[str, str]] = {
 # Own-unit finance for residents; own-vendor finance for vendors.
 _FINANCE_SELF_ATTRS = (("unit_id", "linked_unit_id"), ("vendor_id", "linked_vendor_id"))
 
+# Actions only a platform operator may perform, and which a platform operator
+# may perform exclusively (no society-data wildcard).
+PLATFORM_ACTIONS: frozenset[str] = frozenset({Cap.PLATFORM_RULES_MANAGE, Cap.PLATFORM_SQL_INSPECT})
+
 # Maker/checker: the item's preparer may not perform these on their own item.
 _MAKER_CHECKED = frozenset({Cap.FINANCE_PAYMENT_APPROVE, Cap.FINANCE_POST, Cap.FINANCE_REVERSE})
 
@@ -337,7 +348,7 @@ def authorize(principal: Optional[Principal], action: str, resource_type: str,
 
     # Tenant: derived from the principal; any other society is a hard deny.
     if PLATFORM_OPERATOR in roles:
-        if action != Cap.PLATFORM_RULES_MANAGE:
+        if action not in PLATFORM_ACTIONS:
             return _deny("platform operators have no access to society data",
                          action, resource_type)
     else:
@@ -345,7 +356,7 @@ def authorize(principal: Optional[Principal], action: str, resource_type: str,
             return _deny("missing tenant", action, resource_type)
         if target_society_id is not None and target_society_id != principal.society_id:
             return _deny("cross-society access denied", action, resource_type)
-        if action == Cap.PLATFORM_RULES_MANAGE:
+        if action in PLATFORM_ACTIONS:
             return _deny("platform action requires a platform operator", action, resource_type)
 
     allowing = [r for r in sorted(roles) if action in DEFAULT_CAPABILITIES.get(r, frozenset())]

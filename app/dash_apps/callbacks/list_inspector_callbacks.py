@@ -33,12 +33,19 @@ from app.dash_apps.drilldown.registry import (
     to_plural,
 )
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
     get_current_society_id,
 )
 from app.utils.ux_toasts import error_toast
+
+def _console_denied_alert(_decision=None):
+    return dbc.Alert("Platform operator role required.", color="danger",
+                     className="mt-2", style={"fontSize": "12px"})
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # DERIVE LIST → KPI MAP
@@ -269,6 +276,7 @@ def register_list_inspector_callbacks(app):
         prevent_initial_call=False,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console")
     def load_list_sql(selected_list, selected_kpi, auth_data):
         from app.dash_apps.drilldown import loaders
 
@@ -307,10 +315,21 @@ def register_list_inspector_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: (_console_denied_alert(), no_update))
     def run_list_sql(n_clicks, sql_text, auth_data):
         if not n_clicks or not sql_text or not sql_text.strip():
             return no_update, no_update
+        # Legacy server-side role check. This callback executes arbitrary SQL and
+        # previously had NO role check at all; the capability above is the real
+        # control, this keeps it closed even if the action is set to shadow mode.
+        if get_current_user_role() != "master":
+            return _console_denied_alert(), no_update
         from database.db_manager import db
+
+        audit_event("platform.sql.execute", "platform_console", "list_inspector",
+                    after={"sql": sql_text.strip()[:2000]},
+                    permission_used=Cap.PLATFORM_SQL_INSPECT)
 
         t0 = time.perf_counter()
         try:
@@ -370,6 +389,9 @@ def register_list_inspector_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: (no_update, no_update,
+                                       {"type": "error", "message": "Platform operator role required."}))
     def run_list_audit(n_clicks, auth_data):
         from dash.exceptions import PreventUpdate
         if not n_clicks:

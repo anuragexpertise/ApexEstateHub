@@ -43,8 +43,8 @@ def test_no_wildcards_and_all_caps_known():
         assert not any("*" in c for c in caps), role
 
 
-def test_platform_operator_holds_only_platform_rules():
-    assert az.DEFAULT_CAPABILITIES[az.PLATFORM_OPERATOR] == {Cap.PLATFORM_RULES_MANAGE}
+def test_platform_operator_holds_only_platform_capabilities():
+    assert az.DEFAULT_CAPABILITIES[az.PLATFORM_OPERATOR] == {Cap.PLATFORM_RULES_MANAGE, Cap.PLATFORM_SQL_INSPECT}
 
 
 def test_capability_matrix_is_frozen():

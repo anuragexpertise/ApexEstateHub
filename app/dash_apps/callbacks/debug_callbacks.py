@@ -25,6 +25,8 @@ import dash_bootstrap_components as dbc
 
 from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
@@ -117,6 +119,9 @@ def register_debug_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: (no_update, no_update,
+                                       {"type": "error", "message": "Platform operator role required."}))
     def run_kpi_audit(n_clicks, auth_data):
         if not n_clicks:
             raise PreventUpdate

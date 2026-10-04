@@ -14,6 +14,8 @@ from app.dash_apps.pages.card_catalogue import (
     make_kpi_card,
 )
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
@@ -428,12 +430,19 @@ def register_customize_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console",
+                    on_deny=lambda d: dbc.Alert("Unauthorized: Master role required.", color="danger",
+                                                className="mt-2", style={"fontSize": "12px"}))
     def integrate_kpi_sql(n_clicks, sql_text, kpi_id, auth_data):
         if not n_clicks or not (sql_text or "").strip():
             return no_update
-        if not auth_data or auth_data.get("role") != "master":
+        # Server-session role, never the browser's auth-store (RWA3 §3.1). This
+        # callback WRITES arbitrary SQL, so it must hold even in shadow mode.
+        if get_current_user_role() != "master":
             return dbc.Alert("Unauthorized: Master role required.", color="danger", className="mt-2", style={"fontSize": "12px"})
-            
+        audit_event("platform.sql.integrate", "platform_console", f"kpi_integrate:{kpi_id}",
+                    after={"sql": sql_text.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
+
         sql_upper = sql_text.upper()
         if "DELETE " in sql_upper or "DROP " in sql_upper:
             if "-- DELETE THIS SOCIETY" not in sql_upper:
