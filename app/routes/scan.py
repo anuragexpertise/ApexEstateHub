@@ -25,12 +25,21 @@ import base64
 
 import numpy as np
 from flask import Blueprint, request, jsonify
+from flask_login import current_user
 
 scan_bp = Blueprint("scan", __name__, url_prefix="/api")
+
+# ~6 MB of decoded image as a base64 data URL; a camera frame is far smaller.
+_MAX_IMAGE_CHARS = 8_000_000
 
 
 @scan_bp.route("/scan-qr", methods=["POST"])
 def scan_qr():
+    # This endpoint decodes arbitrary uploaded images with OpenCV; it used to be
+    # reachable with no session at all (free CPU for anyone on the internet).
+    # Same-origin fetches from the scanner UI carry the session cookie.
+    if not current_user.is_authenticated:
+        return jsonify({"status": "error", "message": "Authentication required"}), 401
     if not request.is_json:
         return jsonify({"status": "error", "message": "Expected JSON"}), 400
 
@@ -39,6 +48,8 @@ def scan_qr():
 
     if not image_data:
         return jsonify({"status": "error", "message": "No imageData provided"}), 400
+    if len(image_data) > _MAX_IMAGE_CHARS:
+        return jsonify({"status": "error", "message": "Image too large"}), 413
 
     # Strip data-URL header
     try:

@@ -10,3 +10,5 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt pytest
       - run: env -u PGHOST -u PGDATABASE -u PGUSER -u PGPASSWORD -u DATABASE_URL python -m pytest -q test -m "not postgres_integration"
+      - run: python scripts/check_callback_guards.py
+      - run: python scripts/inventory_endpoints.py --check

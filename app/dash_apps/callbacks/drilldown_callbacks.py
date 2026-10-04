@@ -2791,6 +2791,24 @@ def register_drilldown_callbacks(app):
             store = {}
 
         banner_color, banner_icon, banner_text = "success", "fa-check-circle", "Vote recorded"
+
+        # Action-level authorization (RWA3 WP4/WP5): the poll is resolved in
+        # the caller's own society and the vote is cast for the caller's own
+        # server-resolved apartment. Starts in shadow mode (policy: owners only).
+        from app.security.audit_context import get_current_linked_id as _linked
+        from app.security.authorization import Cap as _Cap
+        from app.security.service_guard import authorize_resource as _authz_res, blocks as _blocks
+        _decision, _ = _authz_res(_Cap.POLL_VOTE, "poll", "polls", poll_id,
+                                  extra={"voter_unit_id": _linked()})
+        if _blocks(_decision):
+            content, bc, db_err = _render_current(store, auth)
+            banner = dbc.Alert(
+                [html.I(className="fas fa-lock me-2"), "You are not eligible to vote on this poll."],
+                color="warning",
+                style={"fontSize": "13px", "fontWeight": "600", "padding": "10px 14px",
+                       "borderRadius": "8px", "marginBottom": "10px"},
+            )
+            return store, html.Div([banner, content]), bc, no_update
         try:
             # fn_cast_vote RETURNS TABLE(success, message, total_votes) —
             # must be selected with "SELECT * FROM ..." (not
@@ -2803,6 +2821,10 @@ def register_drilldown_callbacks(app):
             ok = bool((result or {}).get("success"))
             msg = (result or {}).get("message") or ("Vote recorded" if ok else "Your vote could not be recorded")
             if ok:
+                # Secret ballot: record THAT a vote was cast, never which choice.
+                from app.security.service_guard import audit_event as _audit
+                _audit("poll.vote", "poll", poll_id, after={"cast": True},
+                       permission_used=_Cap.POLL_VOTE)
                 invalidate_kpi_cache()
                 store["refresh"] = True
                 banner_color, banner_icon, banner_text = "success", "fa-check-circle", msg

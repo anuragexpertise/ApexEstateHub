@@ -27,6 +27,8 @@ from app.dash_apps.drilldown.loaders import (
     humanize_assignment,
 )
 from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, authorize_resource, blocks
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
@@ -453,6 +455,16 @@ def register_assign_to_callbacks(app):
             if concern_owner_row.get("created_by") != actor_user_id:
                 return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
 
+        # Action-level authorization (RWA3 WP4/WP5): an admin assigning must hold
+        # concern.assign, and the concern is resolved inside the caller's own
+        # society first (a forged concern id from another tenant is "not found").
+        # A resident creator keeps the legacy ownership path above; that
+        # exception is recorded in docs/authz_manifest.json.
+        if caller_role == "admin":
+            _decision, _ = authorize_resource(Cap.CONCERN_ASSIGN, "concern", "concerns", concern_id)
+            if blocks(_decision):
+                return False, {"type": "error", "message": "You do not have permission to assign this concern."}, no_update, no_update, no_update
+
         try:
             with db._conn() as conn:
                 cur = conn.cursor()
@@ -527,6 +539,13 @@ def register_assign_to_callbacks(app):
                         "AND status IN ('invited', 'bid_submitted')",
                         (concern_id, society_id, role, entity_id),
                     )
+
+                # Audit in the SAME transaction as the assignment rows: if this
+                # insert fails the whole assignment rolls back (no un-audited write).
+                audit_event("concern.assign", "concern", concern_id,
+                            before={"assigned": sorted(prior_keys)},
+                            after={"assigned": sorted(selected_keys)},
+                            permission_used=Cap.CONCERN_ASSIGN, cur=cur)
 
                 # concerns.status is now kept in sync automatically by
                 # trg_concerns_assigns_sync_status (see estatehub.sql) whenever

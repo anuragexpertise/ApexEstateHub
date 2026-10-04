@@ -670,6 +670,17 @@ def register_bulk_enroll_callbacks(app):
 
         actor_id = get_current_user_id()
 
+        # Action-level authorization (RWA3 WP5 enrollment): the legacy portal
+        # gate above stays; the capability + tenant check is added on top.
+        # A platform operator (no society) can never reach this write.
+        from app.security.authorization import Cap
+        from app.security.service_guard import blocks, check
+        if blocks(check(Cap.ENROLLMENT_COMMIT, "enrollment_batch", target_society_id=sid)):
+            return (
+                html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
         try:
             rows = _parse_upload(contents, filename)
         except Exception as e:
@@ -705,6 +716,14 @@ def register_bulk_enroll_callbacks(app):
         else:   # security
             results = _bulk_insert_security(rows, sid, actor_id)
 
+        # Secret-free audit: counts and the entity kind only - never row
+        # contents, which carry names, phones and (initial) credentials.
+        from app.security.service_guard import audit_event
+        audit_event("enrollment.commit", "enrollment_batch", None,
+                    after={"entity": entity, "filename": filename or "upload.xlsx",
+                           "rows": len(rows), "success": results["success"],
+                           "failed": len(results["failed"])},
+                    permission_used=Cap.ENROLLMENT_COMMIT)
         result_ui = _render_results(results, filename or "upload.xlsx")
 
         # Refresh the underlying list card so new rows appear immediately.
