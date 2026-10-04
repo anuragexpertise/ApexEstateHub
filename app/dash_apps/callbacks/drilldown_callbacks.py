@@ -1195,6 +1195,11 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can declare results"}}
                     return store, content, bc, {"display": "none"}, toast
                 user_id = get_current_user_id()
+                from app.services.workflow_service import authorize_poll_declaration
+                ok_auth, reason = authorize_poll_declaration(user_id, sid)
+                if not ok_auth:
+                    toast = {"_toast": {"type": "error", "message": f"Permission denied: {reason}"}}
+                    return store, content, bc, {"display": "none"}, toast
                 # fn_declare_results RETURNS TABLE(success, message, results): select its columns. Selecting the
                 # function itself yields one composite text value that is truthy even when the poll failed quorum.
                 result = db._execute(
@@ -1240,6 +1245,12 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only Admin or the concern creator can close a concern"}}
                     return store, content, bc, {"display": "none"}, toast
                 actor_user_id = get_current_user_id()
+                if role == "admin":
+                    from app.services.workflow_service import authorize, Permission
+                    ok_auth, reason = authorize(actor_user_id, Permission.CONCERN_RESOLVE, sid)
+                    if not ok_auth:
+                        toast = {"_toast": {"type": "error", "message": f"Permission denied: {reason}"}}
+                        return store, content, bc, {"display": "none"}, toast
                 ok, msg = loaders.close_concern(int(pk), sid, closed_by=actor_user_id)
                 if ok:
                     try:
