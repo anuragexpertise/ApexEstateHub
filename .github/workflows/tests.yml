@@ -1,0 +1,12 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  hermetic:
+    # Unit tests must pass with NO database configured (RWA3 §2.5).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pytest
+      - run: env -u PGHOST -u PGDATABASE -u PGUSER -u PGPASSWORD -u DATABASE_URL python -m pytest -q test -m "not postgres_integration"

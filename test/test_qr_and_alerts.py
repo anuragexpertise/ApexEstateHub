@@ -4,8 +4,16 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import base64
+import hashlib
+import hmac
 import unittest
+from io import BytesIO
 from unittest.mock import patch
+
+from PIL import Image
+
+from app.services import qr_service
 from app.services.qr_service import parse_qr_payload, generate_qr_code, ROLE_CODE_MAP
 
 
