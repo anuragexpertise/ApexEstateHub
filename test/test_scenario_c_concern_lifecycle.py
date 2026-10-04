@@ -12,6 +12,8 @@ Tests the full concern workflow:
 import pytest
 from unittest.mock import patch
 
+from test.conftest import grant_society_admin, revoke_role
+
 from app.services import auth_service, society_service, push_service
 from app.dash_apps.drilldown import loaders
 from app.dash_apps.drilldown.renderers import (
@@ -34,6 +36,11 @@ def _seed_concern_world(patched_db):
         {"id": 2, "email": "owner@sun.com", "role": "apartment", "society_id": 1,
          "linked_id": 101, "failed_login_attempts": 0, "locked_until": None},
     ])
+    # The admin needs the office roles seed.py backfills (society_secretary +
+    # treasurer) before concern.assign / concern.resolve can pass the
+    # authorization gate. Without this every gated call below would be denied
+    # and these tests would be exercising the gate rather than the state machine.
+    grant_society_admin(patched_db, user_id=1, society_id=1)
     patched_db.tables.setdefault("apartments", []).append({
         "id": 101, "society_id": 1, "flat_number": "A-101", "owner_name": "Rajesh",
         "apartment_size": 1200, "active": True,

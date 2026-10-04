@@ -71,7 +71,12 @@ CREATE TABLE IF NOT EXISTS societies (
     -- "has this society finished onboarding" flag the Setup Wizard
     -- trigger checks, same role the old column played.
     signing_secret_enc TEXT,
-    primary_bank_account_id INT
+    primary_bank_account_id INT,
+    -- Per-society override of the legal regime's cash-payment enforcement:
+    -- 'warn' (default NULL behaviour) logs an over-limit cash payment,
+    -- 'block' refuses it. Kept as society data rather than a global switch
+    -- because the rule is enforced per AOA bye-laws / general-body resolution.
+    cash_limit_mode VARCHAR(5) CHECK (cash_limit_mode IN ('warn', 'block'))
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -175,31 +180,24 @@ CREATE TABLE IF NOT EXISTS accounts (
     mutuality_nature VARCHAR(10) CHECK (
         mutuality_nature IN ('mutual', 'non_mutual')
     ) DEFAULT 'mutual',
-    tds_section VARCHAR(10)
+    tds_section VARCHAR(10),
+    -- Statutory principal lock on a fund account. 100 means "100% of this
+    -- account's balance is statutory principal that may not be drawn down",
+    -- which is what UP RERA / the UP AOA Model Bye-Laws say about a builder's
+    -- Corpus Fund handover: interest earned on it is income (cr. Interest
+    -- Income, freely usable), but the principal itself is inviolable.
+    -- Previously this rule existed only as display text in
+    -- fund_management_callbacks.py's FUND_TYPE_PATTERNS —
+    -- fn_process_fund_utilization would draw from the Corpus account without
+    -- complaint. The lock is data, not prose, so the guard is
+    -- jurisdiction-neutral: any fund account an admin sets to 100 is
+    -- protected, whatever it is called. Expressed as a percentage rather than
+    -- an absolute amount so the lock survives further contributions: a Corpus
+    -- Fund that accrues is still fully locked, while a fund an admin
+    -- deliberately unlocks just sets 0.
+    statutory_lock_pct NUMERIC(5,2) NOT NULL DEFAULT 0
+        CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100)
 );
-
--- ── Statutory principal lock on a fund account ─────────────────────────────
--- 100 means "100% of this account's balance is statutory principal that may
--- not be drawn down", which is what UP RERA / the UP AOA Model Bye-Laws say
--- about a builder's Corpus Fund handover: interest earned on it is income
--- (cr. Interest Income, freely usable), but the principal itself is
--- inviolable. Previously this rule existed only as display text in
--- fund_management_callbacks.py's FUND_TYPE_PATTERNS — fn_process_fund_utilization
--- would draw from the Corpus account without complaint. The lock is data, not
--- prose, so the guard below is jurisdiction-neutral: any fund account an
--- admin sets to 100 is protected, whatever it is called.
---
--- Expressed as a percentage rather than an absolute amount so the lock
--- survives further contributions: a Corpus Fund that accrues is still
--- fully locked, while a fund an admin deliberately unlocks just sets 0.
--- Added by ALTER rather than inline in the CREATE TABLE above, because
--- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
--- database and would silently leave existing databases without the column
--- (the same trap called out at fn_resolve_depreciation_account below).
-ALTER TABLE accounts
-    ADD COLUMN IF NOT EXISTS statutory_lock_pct NUMERIC(5,2)
-    NOT NULL DEFAULT 0
-    CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100);
 
 CREATE TABLE IF NOT EXISTS apartments (
     id SERIAL PRIMARY KEY,
@@ -217,6 +215,13 @@ CREATE TABLE IF NOT EXISTS apartments (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
+    -- Act s.5(2) area share: until the Declaration of Apartment/Deed of
+    -- Apartment percentage is keyed in, a flat's share of the common
+    -- expenses is its carpet-area share. fn_backfill_undivided_interest
+    -- seeds it from apartment_size; the UI lets an admin override it once
+    -- the real Declaration figures are available.
+    undivided_interest_pct NUMERIC(9, 6)
+        CHECK (undivided_interest_pct IS NULL OR (undivided_interest_pct > 0 AND undivided_interest_pct <= 100)),
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
 
@@ -830,7 +835,12 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CHECK (
         num_nonnulls (debit, credit) = 1
-    )
+    ),
+    -- The bank account a line belongs to can never be another society's
+    -- account. A single-column FK on bank_acc_id alone would permit exactly
+    -- that, because accounts.id is only unique per society.
+    CONSTRAINT fk_bank_lines_account FOREIGN KEY (society_id, bank_acc_id)
+        REFERENCES accounts (society_id, id) ON DELETE SET NULL
 );
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
@@ -1302,24 +1312,6 @@ CREATE INDEX IF NOT EXISTS idx_bank_lines_account ON bank_statement_lines (socie
 WHERE
     matched_id IS NULL;
 
--- The FK is added here (not inline in the CREATE TABLE) so an
--- already-provisioned database picks it up on the next migrate.py pass,
--- exactly like the societies.primary_bank_account_id convention noted
--- further down in this file. Composite (society_id, bank_acc_id) so a line
--- can never point at another society's account.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_bank_lines_account'
-    ) THEN
-        ALTER TABLE bank_statement_lines
-            ADD CONSTRAINT fk_bank_lines_account
-            FOREIGN KEY (society_id, bank_acc_id)
-            REFERENCES accounts (society_id, id) ON DELETE SET NULL;
-    END IF;
-END;
-$$;
-
 -- Reconciliation state lives on the transaction side (receipts/expenses),
 -- mirroring how status/confirmed_by/confirmed_at already work there.
 -- bank_statement_line_id is nullable: a manual reconcile (no matching
@@ -1505,7 +1497,17 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
     -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
     apt_sinking_fund_rate NUMERIC(10, 2) DEFAULT 0,
     apt_repair_fund_rate NUMERIC(10, 2) DEFAULT 0,
-    charges_interest BOOLEAN DEFAULT TRUE
+    charges_interest BOOLEAN DEFAULT TRUE,
+    -- Billing basis:
+    --   'per_sqft'           : apt_maintenance_rate x apartment_size (default).
+    --                          apt_maintenance_amount stays a hard override.
+    --   'undivided_interest' : common_expense_budget_monthly x
+    --                          apartments.undivided_interest_pct / 100.
+    -- Sinking / repair fund levies stay per-sq-ft in both modes.
+    billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft'
+        CHECK (billing_basis IN ('per_sqft', 'undivided_interest')),
+    common_expense_budget_monthly NUMERIC(12, 2)
+        CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0)
 );
 
 -- ── Vendor charges ─────────────────────────────────────────────
@@ -1559,28 +1561,6 @@ CREATE TABLE IF NOT EXISTS brought_forward (
     )
 );
 
-CREATE TABLE IF NOT EXISTS role_permissions (
-    id SERIAL PRIMARY KEY,
-    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    role VARCHAR(10) NOT NULL,
-    card_id VARCHAR(100) NOT NULL,
-    permission VARCHAR(20) NOT NULL CHECK (
-        permission IN (
-            'view',
-            'create',
-            'edit',
-            'delete'
-        )
-    ),
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (
-        society_id,
-        role,
-        card_id,
-        permission
-    )
-);
-
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- RBAC FOUNDATION (Phase 1 — Option B: hardened coarse roles + targeted permissions)
 --
@@ -1591,6 +1571,11 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 -- poll declaration). The legacy role_permissions columns (card_id /
 -- view-create-edit-delete enum) are retained until every reader migrates — see
 -- Migration §4: no column drops until parity passes.
+--
+-- Declaration order matters here and is top-down: role_definitions and
+-- permissions are declared before role_permissions so role_permissions' grant
+-- columns can carry their foreign keys inline. A column added by a later
+-- ALTER is silently absent from any database whose table already existed.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- 1. role_definitions — the society-scoped / platform role vocabulary.
@@ -1629,15 +1614,51 @@ CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
 --    approval_threshold  => max amount this role may approve without escalation.
 --    Legacy columns (society_id/role/card_id/permission) are retained for
 --    backward compatibility until the card-catalogue readers migrate.
-ALTER TABLE role_permissions
-    ADD COLUMN IF NOT EXISTS role_definition_id   INT REFERENCES role_definitions (id) ON DELETE CASCADE,
-    ADD COLUMN IF NOT EXISTS permission_id        INT REFERENCES permissions (id) ON DELETE CASCADE,
-    ADD COLUMN IF NOT EXISTS scope_society_id     INT REFERENCES societies (id) ON DELETE CASCADE,
-    ADD COLUMN IF NOT EXISTS min_amount           NUMERIC(12,2),
-    ADD COLUMN IF NOT EXISTS approval_threshold   NUMERIC(12,2);
+CREATE TABLE IF NOT EXISTS role_permissions (
+    id SERIAL PRIMARY KEY,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    -- role/card_id/permission are the LEGACY card-catalogue grant shape and are
+    -- NULL on an RBAC grant row (which is identified by role_definition_id +
+    -- permission_id instead). They were NOT NULL when only the legacy shape
+    -- existed, which made every RBAC grant seed below fail on the not-null
+    -- constraint before ON CONFLICT was ever reached.
+    role VARCHAR(10),
+    card_id VARCHAR(100),
+    permission VARCHAR(20) CHECK (
+        permission IN (
+            'view',
+            'create',
+            'edit',
+            'delete'
+        )
+    ),
+    created_at TIMESTAMP DEFAULT NOW(),
+    role_definition_id INT REFERENCES role_definitions (id) ON DELETE CASCADE,
+    permission_id INT REFERENCES permissions (id) ON DELETE CASCADE,
+    scope_society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    min_amount NUMERIC(12,2),
+    approval_threshold NUMERIC(12,2),
+    UNIQUE (
+        society_id,
+        role,
+        card_id,
+        permission
+    )
+);
 CREATE INDEX IF NOT EXISTS idx_role_permissions_role_def  ON role_permissions (role_definition_id);
 CREATE INDEX IF NOT EXISTS idx_role_permissions_perm      ON role_permissions (permission_id);
 CREATE INDEX IF NOT EXISTS idx_role_permissions_scope     ON role_permissions (scope_society_id);
+-- A grant must be unique, or a re-run silently stacks duplicates that the
+-- policy engine then has to de-duplicate at read time. NULL scope_society_id
+-- means "applies wherever the role is held" (platform-wide), and NULLs compare
+-- as distinct in a plain unique index, so the two cases need two partial
+-- indexes. The grant seeds below name them explicitly in ON CONFLICT.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_role_permissions_grant_global
+    ON role_permissions (role_definition_id, permission_id)
+    WHERE scope_society_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_role_permissions_grant_scoped
+    ON role_permissions (role_definition_id, permission_id, scope_society_id)
+    WHERE scope_society_id IS NOT NULL;
 
 -- 4. user_role_assignments — effective-dated membership of a user in a role.
 --    The auth-store / users.role gate the PORTAL; these rows drive policy.can_do.
@@ -1754,7 +1775,7 @@ WHERE (rd.code = 'platform_operator' AND p.resource = 'role' AND p.action = 'gra
    OR (rd.code = 'society_secretary' AND p.resource = 'finance' AND p.action = 'payment.approve')
    OR (rd.code = 'society_secretary' AND p.resource = 'role' AND p.action = 'grant')
    OR (rd.code = 'society_secretary' AND p.resource = 'enrollment' AND p.action = 'import')
-ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO NOTHING;
+ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO NOTHING;
 
 INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id)
 SELECT rd.id, p.id, NULL
@@ -1766,7 +1787,7 @@ WHERE (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'receipt.
    OR (rd.code = 'resident_owner' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
    OR (rd.code = 'resident_tenant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
    OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'payment.approve')
-ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO NOTHING;
+ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO NOTHING;
 
 -- Accountant payment approval is capped: min_amount = 5000 means a payment at/above
 -- this threshold needs escalation beyond the accountant role.
@@ -1774,8 +1795,150 @@ INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_i
 SELECT rd.id, p.id, NULL, 5000
 FROM role_definitions rd, permissions p
 WHERE rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'payment.approve'
-ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO UPDATE
+ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO UPDATE
     SET min_amount = EXCLUDED.min_amount;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- AUDIT, APPROVAL & OUTBOX FOUNDATIONS
+--
+-- The workflow-specific logs (concern_transitions, poll_transitions,
+-- channel_event_transitions, regime_rule_audit) cover individual domains but
+-- nothing recorded the actor/society/resource/action/before-after of the other
+-- writes the blueprint §6 requires to be attributable: financial edits,
+-- enrollments, role grants, exports, master actions. audit_events is that
+-- cross-domain log. approval_steps is the maker/checker record the doc §2
+-- "prevent self-approval" rule needs. outbox is the transactional hand-off
+-- from a committed workflow change to notification/reporting/accounting
+-- consumers, so a push-provider failure can no longer lose the event and a
+-- retry can no longer duplicate the business transition.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 7. audit_events — cross-domain, attributable, append-only.
+--    Restrict writes to a dedicated writer role at deployment time (see the
+--    REVOKE note after the trigger): the application connects as one role, so
+--    the trigger below is what actually stops an ordinary code path from
+--    rewriting history. Back this table up separately from the rest of the
+--    database and test retrieval after restore.
+CREATE TABLE IF NOT EXISTS audit_events (
+    id                BIGSERIAL PRIMARY KEY,
+    society_id        INT REFERENCES societies (id) ON DELETE SET NULL,
+    actor_id          INT REFERENCES users (id) ON DELETE SET NULL,
+    actor_role        VARCHAR(20),
+    action            VARCHAR(60) NOT NULL,
+    resource_type     VARCHAR(60) NOT NULL,
+    resource_id       VARCHAR(64),
+    -- before/after as JSONB so one log covers every domain's shape; the
+    -- sensitive-value concern is handled by restricting read access, not by
+    -- splitting the schema per resource.
+    before_value      JSONB,
+    after_value       JSONB,
+    reason            TEXT,
+    source            VARCHAR(30) NOT NULL DEFAULT 'app'
+                      CHECK (source IN ('app', 'seed', 'sql', 'migration', 'import', 'system')),
+    -- Correlation ties one user action to the workflow rows, notification and
+    -- accounting entries it produced, across all three logs.
+    correlation_id    UUID,
+    permission_used   VARCHAR(60),
+    document_hash     VARCHAR(128),
+    approval_ref      VARCHAR(100),
+    ip_address        VARCHAR(45),
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_events_society_time
+    ON audit_events (society_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_resource
+    ON audit_events (resource_type, resource_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor
+    ON audit_events (actor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_correlation
+    ON audit_events (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_events_action
+    ON audit_events (action, created_at DESC);
+
+CREATE OR REPLACE FUNCTION trg_audit_events_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_events is append-only (attempted %)', TG_OP;
+END
+$$;
+DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events;
+CREATE TRIGGER audit_events_immutable BEFORE UPDATE OR DELETE ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION trg_audit_events_immutable();
+
+-- 8. approval_steps — maker/checker record behind the thresholds that
+--    role_permissions.min_amount / approval_threshold only describe. One
+--    request, N steps, each with the authority that satisfied it. The CHECK on
+--    requested_by/decided_by is deliberately absent: a maker who is also the
+--    approver is exactly the case the application must reject, and a
+--    constraint here would block recording the attempt rather than prevent it.
+CREATE TABLE IF NOT EXISTS approval_steps (
+    id                SERIAL PRIMARY KEY,
+    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    resource_type     VARCHAR(60) NOT NULL,
+    resource_id       VARCHAR(64) NOT NULL,
+    step_no           INT NOT NULL CHECK (step_no > 0),
+    action            VARCHAR(60) NOT NULL,
+    -- Maker / Checker / Approver are the roles in the chain, not users: the
+    -- same request can need a treasurer then a secretary then the general body.
+    required_role     VARCHAR(60),
+    threshold_amount  NUMERIC(14, 2),
+    requested_by      INT REFERENCES users (id) ON DELETE SET NULL,
+    requested_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    decided_by        INT REFERENCES users (id) ON DELETE SET NULL,
+    decided_at        TIMESTAMP,
+    outcome           VARCHAR(20) CHECK (outcome IN ('pending', 'approved', 'rejected', 'skipped', 'expired')),
+    decision_reason   TEXT,
+    -- General-body resolution / bye-law clause / board minute this step rests
+    -- on, so an approval is traceable to an authority rather than a name.
+    resolution_ref    VARCHAR(100),
+    delegation_id     INT REFERENCES delegations (id) ON DELETE SET NULL,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_approval_step UNIQUE (society_id, resource_type, resource_id, step_no),
+    CONSTRAINT approval_step_decided CHECK (
+        (outcome IS NULL OR outcome = 'pending')
+        OR decided_by IS NOT NULL
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_approval_steps_resource
+    ON approval_steps (society_id, resource_type, resource_id, step_no);
+CREATE INDEX IF NOT EXISTS idx_approval_steps_pending
+    ON approval_steps (society_id, outcome) WHERE outcome = 'pending';
+
+-- 9. outbox — transactional hand-off. The business change and this row commit
+--    together; a separate consumer drains it. Consumers MUST be idempotent on
+--    (event_type, aggregate_type, aggregate_id) so a redelivery cannot repeat a
+--    business transition, and a notification failure can never roll back — or
+--    silently lose — the workflow change that produced it.
+CREATE TABLE IF NOT EXISTS outbox (
+    id                BIGSERIAL PRIMARY KEY,
+    society_id        INT REFERENCES societies (id) ON DELETE CASCADE,
+    event_type        VARCHAR(80) NOT NULL,
+    aggregate_type    VARCHAR(60) NOT NULL,
+    aggregate_id      VARCHAR(64) NOT NULL,
+    payload           JSONB NOT NULL,
+    correlation_id    UUID,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'processing', 'delivered', 'failed', 'dead')),
+    attempts          INT NOT NULL DEFAULT 0,
+    available_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    claimed_by        VARCHAR(80),
+    claimed_at        TIMESTAMP,
+    delivered_at      TIMESTAMP,
+    last_error        TEXT,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- The idempotency key, on the business identity and nothing else: one
+    -- committed business change produces at most one outbox row per
+    -- (event_type, aggregate). Keying this on correlation_id instead would not
+    -- work — that column is nullable and NULLs compare as DISTINCT in a unique
+    -- index, so every retry of an event written without one would insert a fresh
+    -- row and the guarantee would silently evaporate.
+    CONSTRAINT uq_outbox_event UNIQUE (event_type, aggregate_type, aggregate_id)
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_ready
+    ON outbox (available_at, id) WHERE status IN ('pending', 'failed');
+CREATE INDEX IF NOT EXISTS idx_outbox_society
+    ON outbox (society_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbox_correlation
+    ON outbox (correlation_id) WHERE correlation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS Dashboard_settings (
     id SERIAL PRIMARY KEY,
@@ -2189,6 +2352,11 @@ CREATE TABLE IF NOT EXISTS alert_events (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     channel_id INT REFERENCES alert_channels (id) ON DELETE CASCADE,
     visitor_id INT REFERENCES visitors (id) ON DELETE CASCADE,
+    -- Must stay in step with app/services/workflow.py STATE_MACHINES['alert_events']:
+    -- pending -> arrived | calling | denied | expired, calling -> resolved |
+    -- denied | expired. 'expired' was missing here while the engine allowed it,
+    -- so the one legal way to retire an unanswered alert raised a constraint
+    -- violation instead of recording the expiry.
     state VARCHAR(30) NOT NULL CHECK (
         state IN (
             'idle',
@@ -2196,7 +2364,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
             'arrived',
             'calling',
             'resolved',
-            'denied'
+            'denied',
+            'expired'
         )
     ),
     triggered_by INT REFERENCES users (id),
@@ -2414,9 +2583,11 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 -- Single default bank account used for every non-cash transaction leg
 -- (cheque/upi/card/bank/crypto alike) society-wide. See
 -- fn_resolve_bank_leg below for how writer functions consume this.
--- Added here (after `accounts`, which it forward-references) rather than
--- inline on the societies CREATE TABLE above, same late-ALTER-TABLE
--- pattern already used for societies_created_by_fkey just above.
+--
+-- The FK cannot be declared inline on the societies CREATE TABLE: `accounts`
+-- forward-references `societies` (every account belongs to a society), so
+-- `accounts` is declared after it and this one composite FK has to wait
+-- until both exist. It is the only such forward reference left in this file.
 --
 -- The FK alone can't express "must be a child of THIS society's own Bank
 -- Accounts header" — a trigger (defense-in-depth alongside the FK)
@@ -2425,11 +2596,18 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 -- header account. Per-mode bank routing (UPI -> ICICI, Cheque -> SBI,
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
-ALTER TABLE societies
-DROP CONSTRAINT IF EXISTS fk_primary_bank_account;
-
-ALTER TABLE societies
-ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_primary_bank_account'
+    ) THEN
+        ALTER TABLE societies
+            ADD CONSTRAINT fk_primary_bank_account
+            FOREIGN KEY (id, primary_bank_account_id)
+            REFERENCES accounts (society_id, id);
+    END IF;
+END;
+$$;
 
 -- societies.signing_secret_enc / secretary_email (2026-09) — clean cutover,
 -- no signed QR codes or society rows existed in production yet, so this is
@@ -13730,13 +13908,6 @@ WHERE
 -- NOT relied on anywhere.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-ALTER TABLE apartments ADD COLUMN IF NOT EXISTS undivided_interest_pct NUMERIC(9, 6)
-    CHECK (undivided_interest_pct IS NULL OR (undivided_interest_pct > 0 AND undivided_interest_pct <= 100));
-
--- Per-society override of the regime's cash-payment enforcement ('warn' | 'block').
-ALTER TABLE societies ADD COLUMN IF NOT EXISTS cash_limit_mode VARCHAR(5)
-    CHECK (cash_limit_mode IN ('warn', 'block'));
-
 CREATE TABLE IF NOT EXISTS regime_rule_parameters (
     regime_code      VARCHAR(30) NOT NULL,   -- deliberately no FK: loadable before seed.py creates the regime row
     rule_key         VARCHAR(60) NOT NULL,
@@ -14279,8 +14450,19 @@ CREATE TABLE IF NOT EXISTS owner_loans (
     purpose           TEXT,
     resolution_ref    VARCHAR(100),
     repaid_amount     NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (repaid_amount >= 0),
+    -- Bye-law 3(1)(f) lets the association lend to an owner. The register row
+    -- alone is not a money movement: ledger_posted records whether the
+    -- disbursal has actually been journalled (journal_id points at that
+    -- journal), so a registered loan can never be mistaken for a posted one.
+    ledger_posted     BOOLEAN NOT NULL DEFAULT FALSE,
+    disbursal_mode    VARCHAR(20),
+    journal_id        INT,
+    -- A due date is optional — an interest-free, open-ended loan has none.
+    -- When present it cannot predate the loan itself.
+    due_date          DATE,
     created_by        INT REFERENCES users (id),
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT owner_loans_due_after_loan CHECK (due_date IS NULL OR due_date >= loan_date)
 );   -- register only: this table does not post to the ledger
 
 CREATE OR REPLACE FUNCTION fn_aoa_owner_list(p_society_id INT)
@@ -14317,11 +14499,6 @@ $$;
 -- 'undivided_interest'  : common_expense_budget_monthly x apartments.undivided_interest_pct / 100
 -- apt_maintenance_amount stays a hard per-apartment override only in 'per_sqft' mode.
 -- Sinking / repair fund levies stay per-sq-ft in both modes.
-ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft'
-    CHECK (billing_basis IN ('per_sqft', 'undivided_interest'));
-ALTER TABLE apt_charges_fines_basis ADD COLUMN IF NOT EXISTS common_expense_budget_monthly NUMERIC(12, 2)
-    CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0);
-
 -- What each flat would pay for a given monthly common-expense budget, next to the
 -- per-sq-ft rate that would produce the same total.
 CREATE OR REPLACE FUNCTION fn_undivided_interest_bill_preview(p_society_id INT, p_monthly_budget NUMERIC)
@@ -14338,10 +14515,8 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 -- ── (b) Owner loans: ledger posting (bye-law 3(1)(f) lets the association lend to owners) ──
-ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS ledger_posted BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS disbursal_mode VARCHAR(20);
-ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS journal_id INT;
-
+-- owner_loans.ledger_posted / disbursal_mode / journal_id are declared inline
+-- on the owner_loans CREATE TABLE earlier in this file.
 CREATE TABLE IF NOT EXISTS owner_loan_repayments (
     id               SERIAL PRIMARY KEY,
     loan_id          INT NOT NULL REFERENCES owner_loans (id) ON DELETE CASCADE,
@@ -14509,11 +14684,9 @@ $$;
 --   owner_loan_counts_bye_law7  1  an overdue loan balance counts as arrears for bye-law 7
 --   owner_loan_counts_s22       0  an overdue loan balance counts toward the s.22 "dues remain" test
 -- fn_apartment_outstanding is deliberately untouched (it also drives NOC and the deactivation guard).
+-- owner_loans.due_date / owner_loans_due_after_loan are declared inline on the
+-- table itself (see the owner_loans CREATE TABLE earlier in this file).
 -- ═══════════════════════════════════════════════════════════════════════════════
-ALTER TABLE owner_loans ADD COLUMN IF NOT EXISTS due_date DATE;
-ALTER TABLE owner_loans DROP CONSTRAINT IF EXISTS owner_loans_due_after_loan;
-ALTER TABLE owner_loans ADD CONSTRAINT owner_loans_due_after_loan CHECK (due_date IS NULL OR due_date >= loan_date);
-
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference) VALUES
  ('UP_AOA_2010', 'owner_loan_blocks_nodues',   1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal'),
  ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 1, NULL, '0/1', 'Engine policy (not statute): an owner-loan balance past its repayment date is treated as arrears for bye-law 7; confirm with an advocate'),
@@ -14571,8 +14744,8 @@ CREATE TABLE IF NOT EXISTS society_policy_settings (
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 -- An earlier draft had UNIQUE (society_id, policy_key, effective_from): a provisional choice dated today then
--- failed to insert beside an active row of the same date. One open (unresolved) choice per policy instead.
-ALTER TABLE society_policy_settings DROP CONSTRAINT IF EXISTS society_policy_settings_society_id_policy_key_effective_from_key;
+-- failed to insert beside an active row of the same date. One open (unresolved) choice per policy instead —
+-- enforced by the partial unique index below.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_society_policy_provisional ON society_policy_settings (society_id, policy_key) WHERE resolution_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_society_policy_lookup ON society_policy_settings (society_id, policy_key, effective_from DESC, id DESC);
 
@@ -14641,10 +14814,8 @@ CREATE TABLE IF NOT EXISTS regime_rule_audit (
     changed_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
--- Live DBs created the table with an older target_table list; CREATE TABLE IF NOT EXISTS would not widen it.
-ALTER TABLE regime_rule_audit DROP CONSTRAINT IF EXISTS regime_rule_audit_target_table_check;
-ALTER TABLE regime_rule_audit ADD CONSTRAINT regime_rule_audit_target_table_check CHECK (target_table IN
-    ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings'));
+-- target_table's allowed-value CHECK is declared inline above; an already-provisioned
+-- database keeps whichever list it was created with until it is re-provisioned.
 
 CREATE OR REPLACE FUNCTION trg_regime_rule_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -14757,12 +14928,19 @@ CREATE INDEX IF NOT EXISTS idx_resolutions_meeting ON resolutions (meeting_id);
 CREATE INDEX IF NOT EXISTS idx_resolutions_clause ON resolutions (clause_id);
 
 -- society_policy_settings is defined earlier in this file than the governance
--- tables. Add its FK here, once resolutions exists, so fresh resets work too.
-ALTER TABLE society_policy_settings
-    DROP CONSTRAINT IF EXISTS society_policy_settings_resolution_id_fkey;
-ALTER TABLE society_policy_settings
-    ADD CONSTRAINT society_policy_settings_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+-- tables, so its resolution_id FK cannot be declared inline — same single
+-- forward reference as societies.fk_primary_bank_account above.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'society_policy_settings_resolution_id_fkey'
+    ) THEN
+        ALTER TABLE society_policy_settings
+            ADD CONSTRAINT society_policy_settings_resolution_id_fkey
+            FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+    END IF;
+END;
+$$;
 
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
 CREATE TABLE IF NOT EXISTS resolution_effects (
@@ -14789,6 +14967,11 @@ CREATE TABLE IF NOT EXISTS society_bye_laws (
     layer               INT NOT NULL CHECK (layer IN (1, 2, 3)),
     status              VARCHAR(25) NOT NULL CHECK (status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted', 'provisional')),
     variation_text      TEXT,
+    -- A provisional row remembers what the admin intends (adopt as-is / with
+    -- variation / not adopted) until a passed resolution is linked; without
+    -- this an 'adopt as-is' or 'not adopted' choice could not be held at all.
+    proposed_status     VARCHAR(25)
+        CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')),
     resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
     effective_from      DATE NOT NULL DEFAULT CURRENT_DATE,
     effective_to        DATE,
@@ -14799,10 +14982,6 @@ CREATE TABLE IF NOT EXISTS society_bye_laws (
 );
 CREATE INDEX IF NOT EXISTS idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
 CREATE INDEX IF NOT EXISTS idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
--- A provisional row remembers what the admin intends (adopt as-is / with variation / not adopted) until a
--- passed resolution is linked; without this an 'adopt as-is' or 'not adopted' choice could not be held at all.
-ALTER TABLE society_bye_laws ADD COLUMN IF NOT EXISTS proposed_status VARCHAR(25)
-    CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted'));
 
 -- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
 INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES

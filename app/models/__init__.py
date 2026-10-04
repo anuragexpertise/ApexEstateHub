@@ -17,11 +17,17 @@ from app.models.poll import Poll, PollVote
 # ════════════════════════════════════════════════════════════════
 
 class UserRole(str, Enum):
+    # Exactly the users.role CHECK constraint in database/estatehub.sql — nothing
+    # more may be added here. There is deliberately NO "master"/"master_admin"
+    # member: the platform role is never persisted, it is derived per row by
+    # app.security.roles.resolve_role() (admin + no society + is_master_admin).
+    # A persisted "master_admin" was rejected by the DB CHECK and would have
+    # disagreed with roles.py, which is the single role vocabulary.
+    # See app/security/roles.py.
     ADMIN = "admin"
     APARTMENT = "apartment"
     VENDOR = "vendor"
     SECURITY = "security"
-    MASTER_ADMIN = "master_admin"
 
 class payablestatus(str, Enum):
     PENDING = "pending"

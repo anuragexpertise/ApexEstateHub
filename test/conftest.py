@@ -64,3 +64,53 @@ def patched_db(fake_db):
     yield fake_db
     for p in patches:
         p.stop()
+
+
+def grant_society_admin(fake_db, user_id: int, society_id: int = 1) -> int:
+    """Give a society admin the office roles seed.py's seed_rbac_roles backfills.
+
+    Mirrors database/seed.py: every user with role='admin' and a society gets
+    society_secretary + treasurer until a real committee election supersedes it.
+    Those roles are what carry concern.assign / concern.resolve /
+    poll.declare_results / finance.payment.approve in estatehub.sql's default
+    grants, so any test whose acting user is an admin needs this before an
+    authorization-gated call can succeed — exactly as a real DB does.
+
+    Returns the id of the user_role_assignments row (the first one).
+    """
+    rows = fake_db.tables["user_role_assignments"]
+    created = None
+    for code in ("society_secretary", "treasurer"):
+        rd = next((r for r in fake_db.tables["role_definitions"]
+                   if r.get("code") == code), None)
+        if not rd:
+            continue
+        row = {
+            "id": fake_db._next_id("user_role_assignments"),
+            "user_id": user_id,
+            "role_definition_id": rd["id"],
+            "society_id": society_id,
+            "entity_link": None,
+            "effective_from": "2026-04-01 00:00:00",
+            "effective_to": None,
+            "granted_by": None,
+            "source": "aoa",
+            "status": "active",
+        }
+        rows.append(row)
+        created = created or row["id"]
+    return created
+
+
+def revoke_role(fake_db, user_id: int, role_code: str = "society_secretary") -> None:
+    """Mark a user's active assignment of `role_code` revoked — the negative
+    counterpart of grant_society_admin, for testing that access is lost
+    immediately (blueprint §9: 'Revoked/expired assignments lose access
+    immediately')."""
+    rd = next((r for r in fake_db.tables["role_definitions"]
+               if r.get("code") == role_code), None)
+    if not rd:
+        return
+    for row in fake_db.tables["user_role_assignments"]:
+        if row["user_id"] == user_id and row["role_definition_id"] == rd["id"]:
+            row["status"] = "revoked"
