@@ -19,33 +19,16 @@ log = logging.getLogger(__name__)
 # fallback), and vice versa, since jwt.decode() requires an exact key
 # match. app/routes/auth.py now imports JWT_SECRET and
 # generate_tokens_for() from here instead of redefining them.
-_DEFAULT_JWT_SECRET = 'your-jwt-secret-key-change-this'
+# SECURITY: signing-key policy now lives in app/security/secret_policy.py and is
+# shared with app/config.py (Flask SECRET_KEY / Config.JWT_SECRET_KEY), so the
+# two can never drift apart again. In production a missing, known-default or
+# short key refuses to boot; elsewhere it falls back to a random per-process key
+# (never a constant that is identical on every machine).
+from app.security.secret_policy import resolve_secret, is_production  # noqa: E402,F401
 
-
-def _is_production() -> bool:
-    """True on Render (it sets RENDER) or when an env flag says production."""
-    return bool(os.getenv('RENDER')) or any(
-        os.getenv(k, '').strip().lower() == 'production' for k in ('APP_ENV', 'FLASK_ENV', 'ENV')
-    )
-
-
-JWT_SECRET = os.getenv('JWT_SECRET_KEY') or _DEFAULT_JWT_SECRET
+JWT_SECRET = resolve_secret('JWT_SECRET_KEY')
 JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hour
 JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000))  # 30 days
-
-# FAIL CLOSED in production. A published default signing key means anyone can
-# mint a valid token for any user id, so the app must refuse to boot rather
-# than warn and carry on. Outside production (local dev, tests) it still warns.
-if JWT_SECRET == _DEFAULT_JWT_SECRET:
-    if _is_production():
-        raise RuntimeError(
-            "JWT_SECRET_KEY is unset (or still the built-in default) in a production "
-            "environment. Set a long random JWT_SECRET_KEY before starting the app."
-        )
-    log.warning(
-        "JWT_SECRET_KEY is not set — falling back to an insecure development key. "
-        "Never deploy like this."
-    )
 
 
 def generate_tokens_for(user_id, email, role, society_id=None):

@@ -1,25 +1,15 @@
 # app/models/user.py
 from flask_login import UserMixin
 from database.db_manager import db
+from app.security.roles import resolve_role
 
 
 def _resolve_role(raw_role: str, society_id, is_master_admin_flag: bool) -> str:
-    """
-    Mirrors the role synthesis in app/services/auth_service.py::authenticate_user
-    (raw "admin" + no society_id + is_master_admin=TRUE -> the virtual
-    "master" role the rest of the app checks for). users.role never
-    literally contains 'master' in the DB (CHECK constraint only allows
-    admin/apartment/vendor/security) — "master" only ever existed as a
-    value computed at login time and handed to the client. Without this,
-    get_current_user_role() would return "admin" for master admins on
-    every request after the first, since User.get()/find_by_email() just
-    read the raw column — a real behavior change (master routed as an
-    ordinary admin), not just a style difference, so it has to be kept in
-    sync with auth_service.py's derivation rather than dropped.
-    """
-    if raw_role == "admin" and not society_id and is_master_admin_flag:
-        return "master"
-    return raw_role
+    """Thin wrapper kept for existing callers; the derivation (admin + no
+    society + is_master_admin -> virtual "master") lives in
+    app/security/roles.py so login, session loading and token refresh can't
+    disagree."""
+    return resolve_role(raw_role, society_id, is_master_admin_flag)
 
 
 class User(UserMixin):

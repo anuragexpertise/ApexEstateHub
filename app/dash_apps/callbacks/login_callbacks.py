@@ -11,6 +11,7 @@ from dash.exceptions import PreventUpdate
 
 from app.services.auth_service import authenticate_user
 from app.security.guards import require_session
+from app.security.roles import portal_home
 from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
@@ -107,13 +108,9 @@ def _redirect(role: str, society_id) -> str:
         if society_setup_incomplete(society_id):
             return "/setup-wizard"
 
-    paths = {
-        "admin":     "/dashboard/admin-portal",
-        "apartment": "/dashboard/owner-portal",
-        "vendor":    "/dashboard/vendor-portal",
-        "security":  "/dashboard/pass-evaluation",
-    }
-    return paths.get(role, "/dashboard/admin-portal")
+    # Single role->portal map (app/security/roles.py). Unknown roles get the
+    # neutral /dashboard/ instead of silently landing in the admin portal.
+    return portal_home(role)
 
 
 def register_login_callbacks(app):
