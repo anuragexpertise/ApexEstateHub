@@ -852,7 +852,14 @@ def register_shell_callbacks(app):
         if server_user_id is None:
             return _BLANK
 
-        role       = get_current_user_role() or "admin"
+        # No `or "admin"` fallback here. This value decides which portal shell
+        # is rendered and what role_config the whole page is built from, so an
+        # unresolvable role must render nothing rather than silently assume the
+        # most privileged one. A session whose role cannot be resolved is a bug
+        # or a tampered token; both are denials, not admin.
+        role = get_current_user_role()
+        if role not in ROLE_CONFIG:
+            return _BLANK
         society_id = get_current_society_id()
         linked_id  = get_current_linked_id()
         user_id    = server_user_id

@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 # database/migrate.py
 """
-EstateHub — Aiven PostgreSQL migration + seed script.
+EstateHub — apply database/estatehub.sql to PostgreSQL, then optionally seed.
+
+estatehub.sql is the single source of truth for the schema. Every column,
+constraint and index is declared inline on its CREATE TABLE, so this script has
+no DDL of its own to keep in step with the file. Two constraints cannot be
+inlined and are the only ALTER TABLE statements left, both inside idempotent
+DO blocks because they point at a table declared later in the file
+(societies -> accounts, society_policy_settings -> resolutions).
+
+Because each statement is executed on its own, the script is safe to re-run: a
+CREATE TABLE that already exists is a no-op and a failing statement is reported
+and skipped rather than aborting the rest.
 
 Usage:
     python3 database/migrate.py            # normal
-    python3 database/migrate.py --force    # re-run DDL even if tables exist
+    python3 database/migrate.py --force    # same DDL pass, ignore existing tables
     python3 database/migrate.py --seed     # skip prompt, always seed
     python3 database/migrate.py --no-seed  # skip prompt, never seed
 """
 
+import argparse
+import logging
 import os
 import sys
-import argparse
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,11 +34,12 @@ load_dotenv(override=False)
 
 import psycopg2
 import psycopg2.extras
-from werkzeug.security import generate_password_hash
+import sqlparse
 
-import logging
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger(__name__)
+
+SCHEMA_FILE = Path(__file__).with_name("estatehub.sql")
 
 
 def _dsn() -> str:
@@ -59,24 +73,15 @@ def get_conn():
         sys.exit(1)
 
 
-from pathlib import Path
-import sqlparse
+def run_schema(conn) -> tuple[int, int]:
+    if not SCHEMA_FILE.exists():
+        print(f"❌  Schema file not found: {SCHEMA_FILE}")
+        sys.exit(1)
 
-def load_schema_sql():
-    sql_file = Path(__file__).with_name("estatehub.sql")
-    if not sql_file.exists():
-        raise FileNotFoundError(f"Schema file not found: {sql_file}")
-    return sql_file.read_text(encoding="utf-8")
-
-SCHEMA_SQL = load_schema_sql()
-
-def run_schema(conn):
-    stmts = sqlparse.split(SCHEMA_SQL)
-    ok = 0
-    err = 0
+    ok = err = 0
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-        for stmt in stmts:
+        for stmt in sqlparse.split(SCHEMA_FILE.read_text(encoding="utf-8")):
             stmt = stmt.strip()
             if not stmt:
                 continue
@@ -86,16 +91,37 @@ def run_schema(conn):
                 ok += 1
             except Exception as exc:
                 conn.rollback()
-                snippet = stmt[:120].replace("\n", " ")
-                print(f"\nFAILED:\n{snippet}")
-                print(exc)
+                print(f"\nFAILED:\n{stmt[:120].replace(chr(10), ' ')}\n{exc}")
                 err += 1
     return ok, err
 
 
+def schema_present(conn) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+            "WHERE table_name='societies') AS ex"
+        )
+        return cur.fetchone()["ex"]
+
+
+def society_count(conn) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM societies")
+        return cur.fetchone()["c"]
+
+
+def seed(conn):
+    try:
+        from seed import run_seed
+    except ImportError:
+        from database.seed import run_seed
+    run_seed(conn)   # run_seed() closes the connection itself
+
+
 def main():
-    parser = argparse.ArgumentParser(description="EstateHub DB migration + seed")
-    parser.add_argument("--force",   action="store_true", help="Re-run DDL even if tables already exist")
+    parser = argparse.ArgumentParser(description="EstateHub schema + seed")
+    parser.add_argument("--force",   action="store_true", help="Run the DDL pass even if tables already exist")
     parser.add_argument("--seed",    action="store_true", help="Always seed demo data without prompting")
     parser.add_argument("--no-seed", action="store_true", help="Skip demo data seeding")
     args = parser.parse_args()
@@ -104,38 +130,31 @@ def main():
     print("═" * 62)
     print("  EstateHub — Database Migration")
     print("═" * 62)
-    print(f"  Host : {os.getenv('PGHOST','(from DATABASE_URL)')}")
-    print(f"  DB   : {os.getenv('PGDATABASE','')}")
+    print(f"  Schema: {SCHEMA_FILE.name}")
+    print(f"  Host   : {os.getenv('PGHOST', '(from DATABASE_URL)')}")
+    print(f"  DB     : {os.getenv('PGDATABASE', '')}")
     print()
 
     conn = get_conn()
-    print("  ✓ Connected to Aiven PostgreSQL")
+    print("  ✓ Connected to PostgreSQL")
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
-            "WHERE table_name='societies') AS ex"
-        )
-        tables_exist = cur.fetchone()["ex"]
-
-    if tables_exist and not args.force:
-        print("  ✓ Schema present — running safe ALTER/CREATE IF NOT EXISTS pass…")
+    if schema_present(conn) and not args.force:
+        print("  ✓ Schema present — re-running estatehub.sql (idempotent pass)…")
     else:
         print("  ⟳ Creating schema…")
 
     ok, err = run_schema(conn)
-    print(f"  ✓ DDL: {ok} ok, {err} skipped")
+    print(f"  ✓ DDL: {ok} applied, {err} failed/skipped")
+    if err:
+        print("  ⚠  Failed statements above are usually objects that already exist;")
+        print("     anything else needs fixing in estatehub.sql before this DB is usable.")
 
     if args.no_seed:
         print("  Seed skipped (--no-seed).")
         conn.close()
         return
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS c FROM societies")
-        has_societies = cur.fetchone()["c"] > 0
-
-    if has_societies and not args.seed:
+    if society_count(conn) > 0 and not args.seed:
         print("  ✓ Societies exist — skipping demo seed. Use --seed to force.")
         conn.close()
         return
@@ -145,8 +164,7 @@ def main():
     else:
         print()
         print("  First run — no societies found.")
-        print("  Seed demo data? (1 society, 39 users, 50 accounts,")
-        print("  12 events, 12 concerns, 2 gate logs, 2 assets)")
+        print("  Seed demo data?")
         print()
         try:
             ans = input("  Seed demo data? [Y/n]: ").strip().lower()
@@ -156,28 +174,20 @@ def main():
 
     if do_seed:
         try:
-            from seed import run_seed
-        except ImportError:
-            from database.seed import run_seed
-        try:
-            run_seed(conn)
+            seed(conn)
         except psycopg2.errors.LockNotAvailable:
             print()
             print("  ❌  Seeding stopped: timed out waiting for a database lock.")
-            print("      Another connection is holding a lock — run in psql/Aiven console to find and end it:")
+            print("      Find the holder with:")
             print("        SELECT pid, state, query FROM pg_stat_activity")
             print("        WHERE datname = current_database() AND pid <> pg_backend_pid()")
             print("          AND state <> 'idle' ORDER BY query_start;")
-            conn.rollback()
-            conn.close()
             sys.exit(1)
         except psycopg2.errors.QueryCanceled:
             print()
             print("  ❌  Seeding stopped: a statement exceeded the 3-minute timeout.")
-            conn.rollback()
-            conn.close()
             sys.exit(1)
-        conn = None  # run_seed() closes the connection itself
+        conn = None   # run_seed() closed it
     else:
         print("  Seed skipped.  Log in as master admin to create a society.")
 

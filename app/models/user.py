@@ -91,7 +91,16 @@ class User(UserMixin):
         return str(self.id)
     
     def is_master_admin(self):
-        return self.role == 'master' or (self.role == 'admin' and self.society_id is None)
+        # self.role is already the RESOLVED role (User.get runs it through
+        # _resolve_role), so the only correct test is "did that derivation
+        # produce the virtual platform role". This used to also return True for
+        # `role == 'admin' and society_id is None` — which is exactly the case
+        # the derivation deliberately does NOT promote (flag missing). That
+        # clause granted a society-less admin platform-wide data, contradicting
+        # roles.resolve_role() and routes/auth.py. Compare through
+        # roles.MASTER_ROLE so the vocabulary stays in one module.
+        from app.security.roles import MASTER_ROLE
+        return self.role == MASTER_ROLE
     
     def is_admin(self):
         return self.role == 'admin' and self.society_id is not None

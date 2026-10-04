@@ -42,6 +42,8 @@ from app.security.policy import Permission
 def _seed_rbac(patched_db, with_row: bool = True):
     if with_row:
         patched_db.tables["role_definitions"].append({"id": 1, "code": "society_secretary", "scope": "society"})
+    else:
+        patched_db.tables["role_definitions"].clear()
     return patched_db
 
 
@@ -53,25 +55,44 @@ def _seed_assignment(fake_db, assignment_id=1, concern_id=10, status="assigned",
     })
 
 
-# ── authorize() / fail-open ──────────────────────────────────────────────────
+# ── authorize() / deny-by-default ─────────────────────────────────────────────
 
-def test_authorize_fail_open_when_unseeded(patched_db, monkeypatch):
-    """Unseeded RBAC (legacy DB): the gate must NOT lock out existing admins."""
-    monkeypatch.setattr(policy, "can_do", lambda *a, **k: (False, "no role"))
-    assert wf_service._rbac_enabled() is False
+def test_authorize_denies_when_unseeded(patched_db, monkeypatch):
+    """Unseeded RBAC: the policy cannot be evaluated, so nothing is authorized.
+
+    This used to assert fail-OPEN, on the reasoning that a migrate-only deploy
+    would otherwise lock every admin out. That reasoning inverted the rule the
+    gate exists for: role_definitions is platform-wide, so the moment ANY
+    society is seeded the check already denied everyone else — a database where
+    it is empty is a broken deployment, not a permissive one."""
+    monkeypatch.setattr(policy, "can_do", lambda *a, **k: (True, "should not be reached"))
+    _seed_rbac(patched_db, with_row=False)
+    assert wf_service._rbac_state()[0] is False
     ok, reason = authorize(4, Permission.CONCERN_RESOLVE, 1)
-    assert ok is True
+    assert ok is False
+    assert "authorization unavailable" in reason
+    assert "role_definitions" in reason
 
 
 def test_authorize_enforces_once_seeded(patched_db, monkeypatch):
     _seed_rbac(patched_db, with_row=True)
-    assert wf_service._rbac_enabled() is True
+    assert wf_service._rbac_state()[0] is True
     monkeypatch.setattr(policy, "can_do", lambda *a, **k: (False, "no role"))
     ok, reason = authorize(4, Permission.CONCERN_RESOLVE, 1)
     assert ok is False and reason == "no role"
     # and a passing grant lets them through
     monkeypatch.setattr(policy, "can_do", lambda *a, **k: (True, ""))
     assert authorize(4, Permission.CONCERN_RESOLVE, 1)[0] is True
+
+
+def test_authorize_denies_when_rbac_tables_missing(patched_db, monkeypatch):
+    """A pre-migration database (table absent) is a denial, not a bypass."""
+    def _boom(*a, **k):
+        raise RuntimeError('relation "role_definitions" does not exist')
+    monkeypatch.setattr(wf_service.db, "_execute", _boom)
+    ok, reason = authorize(4, Permission.CONCERN_RESOLVE, 1)
+    assert ok is False
+    assert "authorization unavailable" in reason
 
 
 def test_authorize_no_user_denied_when_seeded(patched_db):

@@ -25,11 +25,34 @@ estatehub.sql that resolves accounts via ILIKE-name or hardcoded literal
 fn_sell_event_ticket, fn_complete_society_setup, ...) will fail to find the
 renumbered accounts and either silently no-op or raise. Apply 002 first.
 
-Restores the full demo dataset (2026-08) after the block-COA migration:
-owners, vendors, security guards, events, concerns, assets, apartment/
-vendor charge histories, security roster + attendance, the depreciable-
-instruments ledger, receipts, salary/payables, receivables, advance
-credit, and polls. Fully idempotent: safe to run repeatedly.
+Restores the full demo dataset after the block-COA migration: owners, vendors,
+security guards, events, concerns, assets, apartment/vendor charge histories,
+security roster + attendance, the depreciable-instruments ledger, receipts,
+salary/payables, receivables, advance credit, and polls. Fully idempotent: safe
+to run repeatedly.
+
+FINANCIAL YEAR SCOPE
+--------------------
+Everything the seed *does* belongs to one financial year: FY 2026-27,
+1-Apr-2026 to 31-Mar-2027, truncated at 30-Sep-2026 (SEED_FY_START /
+SEED_CUTOFF_DATE). A single FY therefore reconciles on its own, with no
+cross-year stitching in the statements, reconciliation or CA pack.
+
+Two kinds of pre-FY date remain, both opening balances rather than activity,
+both declared with opening=True so the FY-start floor skips them:
+
+  * the four disposed DEPOSIT_PURCHASES (bought 2024-12 to 2025-11) and the
+    written-down FULLY_DEPRECIATED_ASSET (2019), whose purchase dates are the
+    cost basis the capital-gains holding period is measured from — without them
+    the STCG/LTCG and STCL/LTCL disposal cases all collapse to short-term;
+  * every statutory/compliance effective_from in STATE_COMPLIANCE_THRESHOLDS
+    and LEGAL_REGIME_PROFILES, which are the real commencement dates of Acts,
+    Rules and circulars and must not be back-dated to the seed's window.
+
+audit_seed_invariants() re-checks both ends of the window against the rows
+actually written, counting opening-balance legs separately rather than hiding
+them, and the seed refuses to report success if anything else falls outside
+FY 2026-27.
 
 What it seeds (society_id = 1, "Sunrise Residency"):
 
@@ -112,19 +135,32 @@ log = logging.getLogger(__name__)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SEED DATA RULES (2026-10)
+# SEED DATA RULES
 # ═════════════════════════════════════════════════════════════════════════════
-#   1. Every transaction is dated strictly BEFORE 2-Oct-2026.
+#   0. The dataset belongs to ONE financial year — FY 2026-27, i.e.
+#      1-Apr-2026 .. 31-Mar-2027 — and stops at 30-Sep-2026 (see the two
+#      constants below). Every receipt, expense, purchase, disposal, journal,
+#      accrual, roster shift and event date must land inside that window, so a
+#      single FY report, reconciliation or CA pack can be produced without
+#      stitching several years together. Acquisition dates earlier than the FY
+#      start are opening-balance facts, not activity: the assets and
+#      investments the society already owned on 1-Apr-2026. They carry the
+#      cost basis the STCG/LTCG permutation cases below depend on, and they
+#      are declared with opening=True so _guard() checks them against the
+#      cutoff only.
+#   1. Every transaction is dated on or before 30-Sep-2026.
 #   2. No single cash-mode transaction exceeds Rs 2,500 — anything larger is
 #      booked through the bank (BANK_MODE).
 #   3. Cash-in-Hand never goes negative in the running balance (follows from
 #      rule 2 + the Rs 300,000 opening balance, and is re-checked by
 #      audit_seed_invariants() after every run).
 #
-# Rule 1 also covers postings that the SQL functions stamp with CURRENT_DATE
+# Rules 0-1 also cover postings that the SQL functions stamp with CURRENT_DATE
 # (receivable accruals, FIFO dues payments): the seed re-dates those itself —
 # see _redate_receivable_accruals() / _redate_postings_since().
-SEED_CUTOFF_DATE = date(2026, 10, 1)   # last permitted transaction date
+SEED_FY         = 2026                          # START year; FY 2026-27 = Apr-2026..Mar-2027
+SEED_FY_START   = date(2026, 4, 1)              # first day of the seeded financial year
+SEED_CUTOFF_DATE = date(2026, 9, 30)            # last permitted transaction date
 CASH_LIMIT       = 2500.00             # max single cash-mode transaction (Rs)
 # 'bank' is accepted by transactions, receipts AND expenses. (neft/rtgs/imp are
 # only valid on transactions/receipts, and fn_buy_asset / fn_buy_deposit also
@@ -133,11 +169,20 @@ BANK_MODE        = "bank"
 DEPOSIT_MODE     = BANK_MODE
 
 
-def _guard(label: str, when, amount: float, mode: str):
-    """Raise if one seed transaction breaks the date or cash-limit rule."""
+def _guard(label: str, when, amount: float, mode: str, opening: bool = False):
+    """Raise if one seed transaction breaks the date or cash-limit rule.
+
+    opening=True marks a pre-FY acquisition date (an asset or investment the
+    society already held when the financial year opened). Those are exempt from
+    the FY-start floor — they are the opening balance, not this year's
+    activity — but must still respect the cutoff."""
     d = when if isinstance(when, date) else date.fromisoformat(str(when))
     if d > SEED_CUTOFF_DATE:
         raise ValueError(f"seed rule: {label} is dated {d}, after {SEED_CUTOFF_DATE}")
+    if not opening and d < SEED_FY_START:
+        raise ValueError(f"seed rule: {label} is dated {d}, before the FY start "
+                         f"{SEED_FY_START} — seed activity must stay inside one "
+                         f"financial year (mark an opening balance with opening=True)")
     if mode == "cash" and float(amount) > CASH_LIMIT:
         raise ValueError(f"seed rule: {label} is a cash transaction of {amount:,.2f} "
                          f"(limit {CASH_LIMIT:,.0f}) — use a bank mode")
@@ -633,19 +678,33 @@ INSTRUMENT_PURCHASES = [
      "purchase_date": "2026-09-18", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT0918CCTV"},
 ]
 INSTRUMENT_FULL_RATE = 15.0
-# Period-end depreciation journal date. Was 2027-03-31; moved to 30-Sep-2026 so it
-# falls inside the seed's date cutoff (SEED_CUTOFF_DATE).
+# Period-end depreciation journal date. Was 2027-03-31; moved to the last day of
+# the seeded half-year so it sits on SEED_CUTOFF_DATE and inside FY 2026-27.
 YEAR_END_DATE = "2026-09-30"
 
+# Opening fixed asset: bought and fully written down long before the seeded
+# financial year, so its book value is 0 while it is still in service. This is
+# the legacy asset the two >3-year disposals in ASSET_DISPOSALS need (LTCG on
+# gain, LTCL on loss) and the partner of the pre-FY DEPOSIT_PURCHASES — an
+# opening balance, not FY 2026-27 activity. Guarded with opening=True.
 FULLY_DEPRECIATED_ASSET = {
     "company_name": "Godrej", "asset_name": "Old Intercom Panel", "asset_SNo": "INTERCOM-2019",
     "purchase_date": "2019-04-01", "purchase_value": 5000.00,
     "acc_id": 1130, "depreciation_rate": 100.0, "last_depreciation_date": "2024-03-31",
+    "opening": True,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DEPOSIT PURCHASES — intangible investments (FDs, bonds, MF units, etc.)
 # acc_id references: 1200 (Investments) or sub-accounts under it
+#
+# The four disposed deposits were bought BEFORE the seeded financial year: they
+# are opening balances the society already held on 1-Apr-2026, and their
+# acquisition date is the cost basis fn_dispose_deposit measures the holding
+# period against. That is what makes this list cover all four capital-gains
+# cases (STCG / LTCG gain, STCL / LTCL loss) — move a purchase date into the
+# FY and every case collapses to short-term. They are guarded with
+# opening=True so the FY-start floor does not reject them.
 # ═══════════════════════════════════════════════════════════════════════════════
 DEPOSIT_PURCHASES = [
     # --- Active deposits (still held) ---
@@ -656,27 +715,27 @@ DEPOSIT_PURCHASES = [
     {"deposit_name": "ICICI Prudential Liquid Fund", "isin": "INF109K017Q9",
      "purchase_date": "2026-08-20", "purchase_value": 300000.00, "acc_id": 1200, "reference": "MF20260820ICICI"},
     {"deposit_name": "Kotak Mahindra FD 7.25%", "isin": "KOTAKFD202609",
-     "purchase_date": "2026-10-01", "purchase_value": 150000.00, "acc_id": 1200, "reference": "FD20261001KOTAK"},
+     "purchase_date": "2026-09-23", "purchase_value": 150000.00, "acc_id": 1200, "reference": "FD20260923KOTAK"},
 
     # --- Deposits disposed at GAIN (sale_value > purchase_value) ---
     {"deposit_name": "Axis Mutual Fund Growth", "isin": "AXISMF202503",
-     "purchase_date": "2025-04-10", "purchase_value": 100000.00,
+     "purchase_date": "2025-04-10", "purchase_value": 100000.00, "opening": True,
      "disposed": True, "sale_date": "2026-05-20", "sale_value": 115000.00, "acc_id": 1200, "reference": "MF20260520AXIS",
      "tds_amount": 0.00, "sale_acc_id": 1311},   # Gain ~15k, held >1yr -> LTCG
 
     {"deposit_name": "SBI Magnum Equity Fund", "isin": "SBIMF202508",
-     "purchase_date": "2025-11-01", "purchase_value": 200000.00,
+     "purchase_date": "2025-11-01", "purchase_value": 200000.00, "opening": True,
      "disposed": True, "sale_date": "2026-09-15", "sale_value": 235000.00, "acc_id": 1200, "reference": "MF20260915SBI",
      "tds_amount": 0.00, "sale_acc_id": 1311},   # Gain ~35k, held <1yr -> STCG
 
     # --- Deposits disposed at LOSS (sale_value < purchase_value) ---
     {"deposit_name": "Franklin India Bond Fund", "isin": "FRANKBND202412",
-     "purchase_date": "2024-12-01", "purchase_value": 150000.00,
-     "disposed": True, "sale_date": "2026-03-10", "sale_value": 142000.00, "acc_id": 1200, "reference": "MF20260310FRANK",
+     "purchase_date": "2024-12-01", "purchase_value": 150000.00, "opening": True,
+     "disposed": True, "sale_date": "2026-06-18", "sale_value": 142000.00, "acc_id": 1200, "reference": "MF20260618FRANK",
      "tds_amount": 0.00, "sale_acc_id": 1311},     # Loss ~8k, held >1yr -> LTCL
 
     {"deposit_name": "Aditya Birla Short Term Fund", "isin": "ABSTF202507",
-     "purchase_date": "2025-07-15", "purchase_value": 180000.00,
+     "purchase_date": "2025-07-15", "purchase_value": 180000.00, "opening": True,
      "disposed": True, "sale_date": "2026-07-10", "sale_value": 175000.00, "acc_id": 1200, "reference": "MF20260710AB",
      "tds_amount": 0.00, "sale_acc_id": 1311},   # Loss ~5k, held <1yr -> STCL
 ]
@@ -1839,7 +1898,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                     apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
                     apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
                    VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
-                 (society_id, b202, "2026-06-01", 3500.00, 5, 1.75, 0.25, 0.25, True),
+                 (society_id, b202, B202_CHARGE_START, 3500.00, 5, 1.75, 0.25, 0.25, True),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")
@@ -1858,9 +1917,16 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
         print("  ✓ Vendor charge basis added")
 
 
+SECURITY_ROSTER_DATES = [date(2026, 7, d) for d in (14, 15, 16, 17)]
+
+# B-202 is billed on a flat per-apartment amount rather than the society's
+# default rate x area, effective from this date.
+B202_CHARGE_START = "2026-06-01"
+
+
 def seed_security_roster_and_attendance(cur, conn, society_id: int, guards: list,
                                           admin_uid: int = None):
-    roster_dates = [date(2026, 7, d) for d in (14, 15, 16, 17)]
+    roster_dates = SECURITY_ROSTER_DATES
 
     for g in guards:
         sec_id = g["linked_id"]
@@ -2353,28 +2419,52 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
 
 def _validate_seed_constants():
     """Fail fast, before touching the DB, if an edit to the seed data above
-    breaks the date cutoff or the cash limit."""
+    breaks the financial-year window, the date cutoff or the cash limit.
+
+    opening=True items (pre-FY acquisitions) are exempt from the FY-start floor
+    but not from the cutoff or the cash limit."""
     for a in SIMPLE_ASSETS:
         _guard(f"asset '{a['asset_name']}'", a["purchase_date"], a["purchase_value"], BANK_MODE)
     for i in INSTRUMENT_PURCHASES:
         _guard(f"instrument '{i['asset_name']}'", i["purchase_date"], i["purchase_value"], BANK_MODE)
     _guard("depreciation journal", YEAR_END_DATE, 0, BANK_MODE)
+    fd = FULLY_DEPRECIATED_ASSET
+    _guard(f"opening asset '{fd['asset_name']}'", fd["purchase_date"], 0, BANK_MODE,
+           opening=fd.get("opening", False))
     for d in DEPOSIT_PURCHASES:
         m = d.get("mode", DEPOSIT_MODE)
-        _guard(f"deposit purchase '{d['deposit_name']}'", d["purchase_date"], d["purchase_value"], m)
+        _guard(f"deposit purchase '{d['deposit_name']}'", d["purchase_date"], d["purchase_value"], m,
+               opening=d.get("opening", False))
         if d.get("disposed"):
             _guard(f"deposit sale '{d['deposit_name']}'", d["sale_date"], d["sale_value"], m)
     for x in ASSET_DISPOSALS:
         _guard(f"asset disposal '{x['asset_name']}'", x["sale_date"], x["sale_value"], x.get("mode", "cash"))
     for (dt, _acc, particulars, amount, _ent, _role, mode, _ref) in RECEIPT_TYPES:
         _guard(f"receipt '{particulars}'", dt, amount, mode)
+    for e in EVENTS:
+        _guard(f"event '{e['title']}'", e["date"], 0, BANK_MODE)
+    for d in SECURITY_ROSTER_DATES:
+        _guard(f"security roster shift {d}", d, 0, BANK_MODE)
+    # Charge-basis effective dates open this year's billing, so they may not
+    # predate the year they bill.
+    _guard("default charge basis", SOCIETY["calc_start_date"], 0, BANK_MODE)
+    _guard("B-202 charge basis", B202_CHARGE_START, 0, BANK_MODE)
+    for email, u in ((u["email"], u) for u in USERS):
+        if u.get("apt_calc_start_date"):
+            _guard(f"charge basis start for {email}", u["apt_calc_start_date"], 0, BANK_MODE)
+    # The two ad-hoc receipts and the salary advance are written inline in
+    # seed_receipts_and_salary rather than through the tables above.
+    _guard("receipt 'Community Hall Booking Fee'", "2026-07-10", 2000.00, "cash")
+    _guard("receipt 'Visitor Parking Fee (gate collection)'", "2026-07-16", 300.00, "cash")
+    _guard("salary advance - Ramu Singh", "2026-07-16", 12000.00, BANK_MODE)
 
 
 def audit_seed_invariants(cur, society_id: int) -> bool:
-    """Re-check the three seed rules against what is actually in the database
-    (not just the constants) and print a report. Returns True when all hold."""
+    """Re-check the seed rules against what is actually in the database (not
+    just the constants) and print a report. Returns True when all hold."""
     ok = True
     cut = SEED_CUTOFF_DATE
+    fy_start = SEED_FY_START
 
     late = _one(cur, """
         SELECT (SELECT COUNT(*) FROM transactions WHERE society_id=%(s)s AND trx_date    > %(c)s)
@@ -2391,6 +2481,67 @@ def audit_seed_invariants(cur, society_id: int) -> bool:
               f"run reset_database.py and re-seed.")
     else:
         print(f"  ✓ Dates: every transaction is on/before {cut} (latest: {late['last_trx']})")
+
+    # One financial year only. Money movement must sit inside FY 2026-27.
+    # The one documented exception is an OPENING-BALANCE acquisition: a deposit
+    # bought before the FY opened still posts its own Dr/Cr legs and expense row
+    # at the purchase date, because that date is the cost basis the later
+    # disposal measures its holding period against. Those legs are counted and
+    # reported separately rather than silently ignored; anything else dated
+    # before the FY start fails the seed.
+    early = _one(cur, """
+        WITH opening_deposits AS (
+            SELECT d.id
+              FROM deposits d
+             WHERE d.society_id = %(s)s AND d.purchase_date < %(f)s
+        ),
+        early_movement (kind, is_opening) AS (
+            -- fn_buy_deposit posts both journal legs against source_table='deposits'
+            SELECT 'transaction', EXISTS (SELECT 1 FROM opening_deposits o WHERE o.id = t.source_id)
+              FROM transactions t
+             WHERE t.society_id = %(s)s AND t.trx_date < %(f)s AND t.source_table = 'deposits'
+            UNION ALL
+            SELECT 'transaction', FALSE
+              FROM transactions t
+             WHERE t.society_id = %(s)s AND t.trx_date < %(f)s
+               AND (t.source_table IS NULL OR t.source_table <> 'deposits')
+            UNION ALL
+            -- the matching expenses row links to its deposit via entity_id
+            SELECT 'expense', EXISTS (SELECT 1 FROM opening_deposits o WHERE o.id = e.entity_id)
+              FROM expenses e
+             WHERE e.society_id = %(s)s AND e.expense_date < %(f)s AND e.role = 'deposits'
+            UNION ALL
+            SELECT 'expense', FALSE
+              FROM expenses e
+             WHERE e.society_id = %(s)s AND e.expense_date < %(f)s
+               AND (e.role IS NULL OR e.role <> 'deposits')
+            UNION ALL
+            SELECT 'receipt', FALSE
+              FROM receipts r
+             WHERE r.society_id = %(s)s AND r.receipt_date < %(f)s
+            UNION ALL
+            SELECT 'asset disposal', FALSE
+              FROM assets a
+             WHERE a.society_id = %(s)s AND a.disposed_at IS NOT NULL AND a.disposed_at < %(f)s
+            UNION ALL
+            SELECT 'deposit disposal', FALSE
+              FROM deposits d
+             WHERE d.society_id = %(s)s AND d.sale_date IS NOT NULL AND d.sale_date < %(f)s
+        )
+        SELECT COUNT(*) FILTER (WHERE NOT is_opening) AS unexpected,
+               COUNT(*) FILTER (WHERE is_opening)     AS opening_rows,
+               (SELECT MIN(trx_date) FROM transactions WHERE society_id = %(s)s) AS first_trx
+          FROM early_movement
+    """, {"s": society_id, "f": fy_start})
+    if early["unexpected"]:
+        ok = False
+        print(f"  ⚠  {early['unexpected']} money-movement row(s) dated before {fy_start} — the seed "
+              f"must cover one financial year only; run reset_database.py and re-seed.")
+    else:
+        opening_note = (f" ({early['opening_rows']} opening-balance leg(s) excluded)"
+                        if early["opening_rows"] else "")
+        print(f"  ✓ Financial year: all FY activity within {fy_start} onwards "
+              f"(earliest: {early['first_trx']}){opening_note}")
 
     big = _one(cur, """
         SELECT (SELECT COUNT(*) FROM transactions WHERE society_id=%(s)s AND mode='cash' AND amount > %(l)s)

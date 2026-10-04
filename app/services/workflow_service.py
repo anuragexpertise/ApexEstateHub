@@ -48,28 +48,32 @@ from app.security.policy import Permission
 
 # ── 1. authorization gate ────────────────────────────────────────────────────
 #
-# Fail-open semantics for legacy / not-yet-seeded databases:
-# `authorize()` keys off the SERVER-resolved actor_id (never the browser
-# auth-store role) and runs `policy.can_do`, which honors active grants AND
-# delegating (maker/checker) delegations. But on a database that has been
-# migrated (RBAC tables exist) but whose `role_definitions` have NOT been seeded
-# by `database/seed.seed_rbac_roles`, every user would look "ungranted" and be
-# denied — silently breaking existing admin portals after a migrate-only deploy.
-# So we detect the "no policy configured" state (empty role_definitions, or the
-# table itself absent on a pre-migration DB) and short-circuit to allow, exactly
-# preserving legacy behaviour until the RBAC backfill runs. Once seeded, the
-# gate is fail-closed: a missing/expired/revoked grant is a denial.
+# Deny by default. `authorize()` keys off the SERVER-resolved actor_id (never
+# the browser auth-store role) and runs `policy.can_do`, which honors active
+# grants AND delegating (maker/checker) delegations.
+#
+# There used to be a fail-open branch here: if `role_definitions` was empty (or
+# the table was missing on a pre-migration database) every action was allowed.
+# That is the exact inversion of the rule this gate exists to enforce — a
+# database that has NOT been provisioned with the RBAC vocabulary is not a
+# database where nobody is authorized, it is a database whose authorization
+# cannot be evaluated. It now denies and says so.
+#
+# Note this only bites a database where role_definitions is empty for EVERY
+# society. role_definitions is platform-wide, so as soon as it is seeded the
+# check is already fail-closed for everyone — a society whose admin has no
+# user_role_assignments row was already denied before this change.
 
-def _rbac_enabled() -> bool:
-    """True once the RBAC vocabulary has been seeded (role_definitions non-empty).
-    On a legacy DB where the table is missing entirely, the SELECT errors and we
-    treat that as 'disabled' (fail-open) so existing behaviour is preserved."""
+def _rbac_state() -> tuple[bool, str | None]:
+    """(policy evaluable, reason-if-not). Reason is the denial text."""
     try:
-        row = db._execute("SELECT id FROM role_definitions LIMIT 1",
-                          fetch_one=True)
-        return bool(row)
-    except Exception:
-        return False
+        row = db._execute("SELECT id FROM role_definitions LIMIT 1", fetch_one=True)
+    except Exception as exc:
+        return False, f"RBAC tables unavailable ({exc.__class__.__name__}) — denying"
+    if not row:
+        return False, ("no role_definitions seeded — run seed.py / "
+                       "database/migrations/006_rbac_foundation.sql")
+    return True, None
 
 
 def authorize(actor_id, permission, society_id, **ctx) -> tuple[bool, str]:
@@ -79,8 +83,9 @@ def authorize(actor_id, permission, society_id, **ctx) -> tuple[bool, str]:
         return True, ""
     if actor_id is None:
         return False, "no authenticated user"
-    if not _rbac_enabled():
-        return True, ""   # legacy / unseeded DB — no fine-grained policy configured
+    evaluable, reason = _rbac_state()
+    if not evaluable:
+        return False, f"authorization unavailable: {reason}"
     return policy.can_do(actor_id, permission, society_id=society_id, **ctx)
 
 

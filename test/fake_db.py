@@ -42,6 +42,21 @@ def _norm(v):
     return v
 
 
+def _qkey(alias: str, col: str) -> str:
+    """Qualified key for a joined row. Several of the tables authorization joins
+    have their own `id`, and a flat dict cannot tell them apart."""
+    return f"__{alias}__{col}"
+
+
+_QUALIFY_RE = re.compile(r"\b(\w+)\.(\w+)\b")
+
+
+def _qualify(clause: str) -> str:
+    """Rewrite `alias.col` to `_alias__col` so the existing WHERE matcher can
+    resolve joined columns without knowing about aliases."""
+    return _QUALIFY_RE.sub(lambda m: _qkey(m.group(1), m.group(2)), clause)
+
+
 # ---------------------------------------------------------------------------
 # Core fake DB
 # ---------------------------------------------------------------------------
@@ -117,7 +132,78 @@ class FakeDB:
             "society_legal_regime": [],
             "legal_regime_profiles": [],
         }
-        self._seq = {t: 1 for t in self.tables}
+        self._seed_rbac_reference_data()
+
+    # The RBAC vocabulary + default grants, mirroring the seed blocks in
+    # database/estatehub.sql (role_definitions / permissions /
+    # role_permissions). workflow_service.authorize() denies by default when
+    # role_definitions is empty — a database that has not been provisioned is
+    # one whose authorization cannot be evaluated — so the fake DB must carry
+    # the same reference rows a real one does, otherwise every authorization
+    # test would pass for the wrong reason (an open gate) or fail for the wrong
+    # one (a missing catalogue). Individual user_role_assignments are the test's
+    # own business: granting one is exactly what it is trying to test.
+    _RBAC_PERMISSIONS = [
+        ("concern", "assign"), ("concern", "resolve"),
+        ("poll", "declare_results"),
+        ("finance", "receipt.view_own"), ("finance", "payment.approve"),
+        ("finance", "period.close"),
+        ("enrollment", "import"), ("role", "grant"),
+        ("visitor", "approve"),
+    ]
+    _RBAC_ROLE_DEFINITIONS = [
+        ("platform_operator", "platform"), ("society_secretary", "society"),
+        ("treasurer", "society"), ("committee_member", "society"),
+        ("accountant", "society"), ("resident_owner", "society"),
+        ("resident_tenant", "society"), ("vendor_contact", "society"),
+        ("security_staff", "society"),
+    ]
+    # (role_code, resource, action, min_amount) — the grants estatehub.sql seeds.
+    _RBAC_GRANTS = [
+        ("platform_operator", "role", "grant", None),
+        ("platform_operator", "finance", "period.close", None),
+        ("society_secretary", "concern", "assign", None),
+        ("society_secretary", "concern", "resolve", None),
+        ("society_secretary", "poll", "declare_results", None),
+        ("society_secretary", "finance", "payment.approve", None),
+        ("society_secretary", "role", "grant", None),
+        ("society_secretary", "enrollment", "import", None),
+        ("treasurer", "finance", "receipt.view_own", None),
+        ("treasurer", "finance", "period.close", None),
+        ("treasurer", "finance", "payment.approve", None),
+        ("accountant", "finance", "receipt.view_own", None),
+        ("accountant", "finance", "payment.approve", 5000),
+        ("committee_member", "poll", "declare_results", None),
+        ("resident_owner", "finance", "receipt.view_own", None),
+        ("resident_tenant", "finance", "receipt.view_own", None),
+    ]
+
+    def _seed_rbac_reference_data(self):
+        perm_id, rd_id, rp_id = {}, {}, 1
+        for i, (resource, action) in enumerate(self._RBAC_PERMISSIONS, start=1):
+            perm_id[(resource, action)] = i
+            self.tables["permissions"].append(
+                {"id": i, "resource": resource, "action": action})
+        for i, (code, scope) in enumerate(self._RBAC_ROLE_DEFINITIONS, start=1):
+            rd_id[code] = i
+            self.tables["role_definitions"].append(
+                {"id": i, "code": code, "scope": scope})
+        for code, resource, action, min_amount in self._RBAC_GRANTS:
+            self.tables["role_permissions"].append({
+                "id": rp_id,
+                "role_definition_id": rd_id[code],
+                "permission_id": perm_id[(resource, action)],
+                "scope_society_id": None,
+                "min_amount": min_amount,
+                "approval_threshold": None,
+            })
+            rp_id += 1
+        # Start every id counter past whatever the reference rows consumed, so a
+        # later INSERT ... RETURNING id cannot collide with a seeded id.
+        self._seq = {
+            t: max((r.get("id", 0) for r in rows), default=0) + 1
+            for t, rows in self.tables.items()
+        }
 
     def reset(self):
         self._setup_schema()
@@ -341,6 +427,15 @@ class FakeDB:
         return None
 
     def _handle_select(self, sql, params, fetch_one, fetch_all):
+        # Authorization runs through a 4-table join (policy._query_grants:
+        # user_role_assignments -> role_definitions -> role_permissions ->
+        # permissions). Single-table parsing below cannot express that, and
+        # used to hand back un-joined rows that happened to have the right
+        # table name — so the grants query looked "empty but answered". Only
+        # JOIN queries take the new path; every other query keeps exactly the
+        # code it had.
+        if re.search(r"\bJOIN\b", sql, re.IGNORECASE):
+            return self._handle_join_select(sql, params, fetch_one, fetch_all)
         table = self._table_from_sql(sql)
         if not table or table not in self.tables:
             return None if fetch_one else []
@@ -369,6 +464,149 @@ class FakeDB:
         if fetch_one:
             return rows[0] if rows else None
         return rows if fetch_all else rows
+
+    def _handle_join_select(self, sql, params, fetch_one, fetch_all):
+        """Equi-join support: `FROM a [alias] JOIN b ON a.x = b.y [JOIN c ON ...]`.
+
+        Deliberately limited to inner equi-joins, which is all the authorization
+        queries need. Every column is stored under BOTH a qualified key
+        (`_alias_col`) and its bare name, because several of the joined tables
+        have an `id` and Postgres distinguishes `rd.id` from `rp.id` while a flat
+        dict cannot — without the qualified copy a later join would silently
+        compare a column against the wrong table's value.
+        """
+        jt = r"(?:(?:LEFT|RIGHT|FULL|INNER|OUTER|CROSS)\s+)?"
+        join_re = re.compile(
+            rf"\bJOIN\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?\s+ON\s+(.+?)"
+            rf"(?=\s+{jt}JOIN\b|\s+WHERE\b|\s+ORDER\b|\s+GROUP\b"
+            rf"|\s+LIMIT\b|\s+OFFSET\b|$)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        kinds = re.findall(
+            rf"\b((?:(?:LEFT|RIGHT|FULL|INNER|OUTER|CROSS)\s+)?)JOIN\s+\w+",
+            sql, re.IGNORECASE,
+        )
+        joins = [
+            ((kinds[i].strip().upper() or "INNER") if i < len(kinds) else "INNER",
+             table, alias or table, on)
+            for i, (table, alias, on) in enumerate(join_re.findall(sql))
+        ]
+        base_m = re.search(r"\bFROM\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?", sql, re.IGNORECASE)
+        sel_m = re.match(r"\s*SELECT\s+(.+?)\s+FROM\b", sql, re.IGNORECASE | re.DOTALL)
+        if not base_m:
+            return None if fetch_one else []
+        base_table, base_alias = base_m.group(1), base_m.group(2) or base_m.group(1)
+
+        def absorb(base_row, source_row, alias):
+            """Merge one source row into a row, recording every column twice:
+            qualified (`_alias_col`) so two tables' `id` stay distinguishable,
+            and bare so the SELECT projection can find it."""
+            out = dict(base_row)
+            for k, v in source_row.items():
+                out[_qkey(alias, k)] = v
+                out[k] = v          # bare name, last table wins (SELECT-list order)
+            return out
+
+        merged = [absorb({}, rrow, base_alias)
+                  for rrow in self.tables.get(base_table, [])]
+        for kind, table, alias, on_clause in joins:
+            on_q = _qualify(on_clause)
+            right_cols = ([c for rrow in self.tables.get(table, []) for c in rrow]
+                          or None)
+            out = []
+            for row in merged:
+                hit = False
+                for rrow in self.tables.get(table, []):
+                    merged_row = absorb(row, rrow, alias)
+                    if self._join_matches(merged_row, on_q):
+                        out.append(merged_row)
+                        hit = True
+                if not hit and kind in ("LEFT", "FULL"):
+                    # LEFT JOIN keeps the left row with right columns NULL —
+                    # dropping it would hide, e.g., a channel with no apartment.
+                    out.append({**row, **{c: None for c in (right_cols or [])}})
+            merged = out
+
+        where_m = re.search(
+            r"\bWHERE\s+(.+?)(?:\s+ORDER\b|\s+LIMIT\b|\s+OFFSET\b|$)",
+            sql, re.IGNORECASE | re.DOTALL,
+        )
+        where = _qualify(where_m.group(1)) if where_m else ""
+        rows = [r for r in merged if self._match_where(r, where, params)]
+
+        limit_m = re.search(r"\bLIMIT\s+(\d+)", sql, re.IGNORECASE)
+        if limit_m:
+            rows = rows[:int(limit_m.group(1))]
+        rows = [self._project_join_row(r, sel_m.group(1) if sel_m else None) for r in rows]
+        if fetch_one:
+            return rows[0] if rows else None
+        return rows if fetch_all else rows
+
+    def _project_join_row(self, row: dict, select_list: str | None) -> dict:
+        """Reduce a merged row to the columns the SELECT actually asked for.
+
+        Without this, policy._query_grants would look for `role_code` /
+        `role_scope` — which exist only as `AS` aliases in the SELECT list, never
+        as columns — and every caller would see a missing key.
+        """
+        if not select_list:
+            return {k: v for k, v in row.items() if not k.startswith("__")}
+        out = {}
+        for item in select_list.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            as_m = re.search(r"\s+AS\s+(\w+)\s*$", item, re.IGNORECASE)
+            expr, name = (item[:as_m.start()], as_m.group(1)) if as_m else (item, None)
+            star_m = re.match(r"^(\w+)\.\*$", expr)          # `ac.*` — expand
+            if star_m:
+                prefix = _qkey(star_m.group(1), "")
+                for k, v in row.items():
+                    if k.startswith(prefix):
+                        out[k[len(prefix):]] = v
+                continue
+            if expr == "*":
+                out.update({k: v for k, v in row.items() if not k.startswith("__")})
+                continue
+            qualified = re.findall(r"(\w+)\.(\w+)", expr)
+            if qualified:
+                alias, col = qualified[-1]
+                out[name or col] = row.get(_qkey(alias, col), row.get(col))
+            else:
+                col = expr.split()[0].strip()
+                out[name or col] = row.get(col)
+        return out
+
+    def _join_matches(self, row: dict, on_clause: str) -> bool:
+        """True when every term in an ON clause holds for the qualified row.
+
+        Handles `a.x = b.y` and `a.x = 'literal'`; NULL on either side never
+        matches, as in SQL. Anything richer is treated as a non-match rather
+        than silently passing.
+        """
+        terms = [t for t in re.split(r"\bAND\b", on_clause, flags=re.IGNORECASE) if t.strip()]
+        if not terms:
+            return True
+        for term in terms:
+            eq = re.match(
+                r"^\s*(?:(\w+)\.)?(\w+)\s*=\s*(.+?)\s*$", term, re.IGNORECASE
+            )
+            if not eq:
+                return False   # anything richer than an equality is not supported
+            l_alias, l_col, rhs = eq.groups()
+            lv = row.get(_qkey(l_alias, l_col)) if l_alias else row.get(l_col)
+            lit = re.match(r"^'([^']*)'$", rhs.strip())
+            if lit:                                   # `u.role = 'apartment'`
+                rv = lit.group(1)
+            else:
+                rq = re.match(r"^(?:(\w+)\.)?(\w+)$", rhs.strip(), re.IGNORECASE)
+                if not rq:
+                    return False
+                r_alias, r_col = rq.groups()
+                rv = row.get(_qkey(r_alias, r_col)) if r_alias else row.get(r_col)
+            if lv is None or rv is None or str(lv) != str(rv):
+                return False
+        return True
 
     def _handle_insert(self, sql, params, fetch_one):
         table = self._table_from_sql(sql)
