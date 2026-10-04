@@ -356,11 +356,24 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
     existing = _lock_assignment(concern_id, society_id, role, entity_id)
     if not existing or existing.get("status") not in ("invited", "bid_submitted"):
         return False, "No pending invitation found for you on this concern"
-    db._execute(
+    # 'submitted'/'bid_submitted' is a vendor self-service leg (no grant), but
+    # it still gets an append-only audit row so the concern lifecycle has a
+    # complete trail. authorize(permission=None) is a passthrough.
+    from app.services.workflow_service import authorize, log_concern_transition
+    allowed, reason = authorize(None, None, society_id)
+    if not allowed:
+        return False, f"Permission denied: {reason}"
+    from_state = existing.get("status")
+    row = db._execute(
         "UPDATE concerns_assigns SET bid_amount=%s, status='bid_submitted', updated_at=NOW() "
-        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
+        "RETURNING id",
         (bid, concern_id, society_id, role, entity_id), fetch_one=True,
     )
+    if row:
+        log_concern_transition(None, row.get("id"), concern_id,
+                               from_state, "bid_submitted", role, entity_id,
+                               None, society_id, comment="bid_submitted")
     return True, "Bid submitted"
 
 
@@ -389,7 +402,20 @@ def decline_concern_assignment(concern_id: int, society_id: int, role: str, enti
         return False, "Only vendors or admins can decline a concern"
     if role == "SEC":
         return False, "Security staff cannot decline a concern"
+    from app.services.workflow_service import (authorize, log_concern_transition,
+                                                Permission)
     from_status = "assigned" if role == "ADM" else "invited"
+    # ADM decline is an admin action on the security-critical surface; the
+    # granting/delegation check runs through can_do. VND 'Decline' is
+    # self-service (the invited vendor opts out) — permission=None passes the
+    # gate through, and the audit row records the transition with
+    # permission_used=NULL. For VND the acting user is not passed by the
+    # caller (entity_id is the vendor entity, not a user id), so actor_id=None.
+    permission = Permission.CONCERN_RESOLVE if role == "ADM" else None
+    actor_id = entity_id if role == "ADM" else None
+    allowed, reason = authorize(actor_id, permission, society_id)
+    if not allowed:
+        return False, f"Permission denied: {reason}"
     row = db._execute(
         "UPDATE concerns_assigns SET status='declined', updated_at=NOW() "
         "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
@@ -400,6 +426,9 @@ def decline_concern_assignment(concern_id: int, society_id: int, role: str, enti
         msg = "No active assignment found for you on this concern" if role == "ADM" \
             else "No pending invitation found for you on this concern"
         return False, msg
+    log_concern_transition(actor_id, row["id"], concern_id,
+                           from_status, "declined", role, entity_id,
+                           permission, society_id, comment="decline")
     return True, "Declined"
 
 
@@ -412,6 +441,12 @@ def accept_concern_assignment(concern_id: int, society_id: int, entity_id: int) 
     resolve_concern_assignment / the caller in drilldown_callbacks.py),
     which is enabled only once an admin's row on the same concern reaches
     this state."""
+    from app.services.workflow_service import (authorize, log_concern_transition,
+                                                Permission)
+    allowed, reason = authorize(int(entity_id), Permission.CONCERN_RESOLVE,
+                                society_id)
+    if not allowed:
+        return False, f"Permission denied: {reason}"
     row = db._execute(
         "UPDATE concerns_assigns SET status='accepted', updated_at=NOW() "
         "WHERE concern_id=%s AND society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned' "
@@ -420,6 +455,9 @@ def accept_concern_assignment(concern_id: int, society_id: int, entity_id: int) 
     )
     if not row:
         return False, "No active (assigned) assignment found for you on this concern"
+    log_concern_transition(int(entity_id), row["id"], concern_id,
+                           "assigned", "accepted", "ADM", entity_id,
+                           Permission.CONCERN_RESOLVE, society_id, comment="accept")
     return True, "Accepted"
 
 
@@ -446,9 +484,15 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
     slot that's already filled. Different-role rows (e.g. a separately
     assigned SEC row) are untouched.
     """
+    from app.services.workflow_service import (authorize, log_concern_transition,
+                                                Permission)
+    allowed, reason = authorize(assigned_by, Permission.CONCERN_ASSIGN, society_id)
+    if not allowed:
+        return False, f"Permission denied: {reason}"
     existing = _lock_assignment(concern_id, society_id, role, entity_id)
     if existing and existing.get("status") in REASSIGN_BLOCKED_STAGES:
         return False, f"Already {existing.get('status')} for this concern — cannot reassign"
+    from_state = existing.get("status") if existing else None
     if existing:
         db._execute(
             "UPDATE concerns_assigns SET status='assigned', assigned_by=%s, updated_at=NOW() "
@@ -461,6 +505,15 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
             "VALUES (%s, %s, %s, %s, %s, 'assigned', NULL)",
             (concern_id, society_id, role, entity_id, assigned_by), fetch_one=True,
         )
+        # refresh `existing` so the audit row has the new assignment id + status
+        existing = db._execute(
+            "SELECT id, status FROM concerns_assigns "
+            "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s",
+            (concern_id, society_id, role, entity_id), fetch_one=True,
+        )
+    log_concern_transition(assigned_by, (existing or {}).get("id"), concern_id,
+                           from_state, "assigned", role, entity_id,
+                           Permission.CONCERN_ASSIGN, society_id, comment="assign")
 
     db._execute(
         "DELETE FROM concerns_assigns "
@@ -484,6 +537,18 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
     `resolved_by` is optional for backward compatibility with any existing
     callers."""
     from_status = "accepted" if role == "ADM" else "assigned"
+    from app.services.workflow_service import (authorize, log_concern_transition,
+                                                Permission)
+    # ADM leg is an admin/owner action on the security-critical surface: enforce
+    # the delegation-aware grant. VND/SEC legs are self-service (the caller's
+    # OWN assigned row) — they carry no grant requirement, so authorize() with
+    # permission=None is a no-op passthrough, but the audit row still records
+    # the transition with permission_used=NULL.
+    permission = Permission.CONCERN_RESOLVE if role == "ADM" else None
+    actor_id = resolved_by
+    allowed, reason = authorize(actor_id, permission, society_id)
+    if not allowed:
+        return False, f"Permission denied: {reason}"
     row = db._execute(
         "UPDATE concerns_assigns SET status='resolved', resolved_by=%s, updated_at=NOW() "
         "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s AND status=%s "
@@ -494,6 +559,9 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
         msg = "No active (accepted) assignment found for you on this concern" if role == "ADM" \
             else "No active (assigned) assignment found for you on this concern"
         return False, msg
+    log_concern_transition(resolved_by, row["id"], concern_id,
+                           from_status, "resolved", role, entity_id,
+                           permission, society_id, comment="resolve")
     return True, "Marked resolved"
 
 
