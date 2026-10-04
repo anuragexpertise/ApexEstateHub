@@ -634,6 +634,42 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
     UNIQUE (concern_id, role, entity_id)
 );
 
+-- ════════════════════════════════════════════════════════════════════════
+-- concern_transitions — D2 (append-only, source of truth for audit)
+--
+-- Append-only log of every state change on a concerns_assigns row.
+-- concerns_assigns.status remains a materialized cache (written by the
+-- workflow service, rolled up to concerns.status by the existing
+-- fn_sync_concern_status trigger); THIS table is the authoritative audit trail.
+-- The workflow service (app/services/workflow.py) is the only writer: it rejects
+-- illegal jumps and is idempotent on (assignment_id, from_state, to_state, actor).
+-- ════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS concern_transitions (
+    id              SERIAL PRIMARY KEY,
+    concern_id      INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
+    assignment_id   INT REFERENCES concerns_assigns (id) ON DELETE SET NULL,
+    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_role     VARCHAR(10) CHECK (entity_role IN ('ADM', 'VND', 'SEC')),
+    entity_id       INT,
+    from_state      VARCHAR(20),
+    to_state        VARCHAR(20) NOT NULL CHECK (
+        to_state IN ('invited', 'bid_submitted', 'declined', 'assigned',
+                     'accepted', 'resolved', 'closed')
+    ),
+    actor_id        INT REFERENCES users (id),
+    permission_used VARCHAR(60),  -- e.g. 'concern.assign', 'concern.resolve'
+    comment         TEXT,
+    evidence        JSONB,        -- doc_hash / correlation_id / before-after snapshot
+    correlation_id  UUID,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_concern_transitions_concern
+    ON concern_transitions (concern_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_concern_transitions_assignment
+    ON concern_transitions (assignment_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_concern_transitions_society
+    ON concern_transitions (society_id, created_at);
+
 -- ── security_roster & attendance (needed before payables FK) ──
 CREATE TABLE IF NOT EXISTS security_roster (
     id SERIAL PRIMARY KEY,
@@ -1545,6 +1581,202 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     )
 );
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- RBAC FOUNDATION (Phase 1 — Option B: hardened coarse roles + targeted permissions)
+--
+-- D1 (2026-10-04, decided Option B): users.role stays the PORTAL gate. Fine-grained,
+-- society-scoped authorization lives in the tables below and is consumed by
+-- app/security/policy.py's can_do() engine, applied ONLY on the security-critical
+-- surface (financial actions, role grants, period close, concern resolution,
+-- poll declaration). The legacy role_permissions columns (card_id /
+-- view-create-edit-delete enum) are retained until every reader migrates — see
+-- Migration §4: no column drops until parity passes.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 1. role_definitions — the society-scoped / platform role vocabulary.
+--    scope 'platform' => applies system-wide (NULL society in assignments).
+--    scope 'society'  => must carry a society_id in user_role_assignments.
+CREATE TABLE IF NOT EXISTS role_definitions (
+    id          SERIAL PRIMARY KEY,
+    code        VARCHAR(40) NOT NULL,
+    scope       VARCHAR(10) NOT NULL CHECK (scope IN ('platform', 'society')),
+    name        VARCHAR(100) NOT NULL,
+    description TEXT,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (code, scope)
+);
+CREATE INDEX IF NOT EXISTS idx_role_definitions_code ON role_definitions (code);
+CREATE INDEX IF NOT EXISTS idx_role_definitions_scope ON role_definitions (scope);
+
+-- 2. permissions — (resource, action) pairs the policy engine checks.
+--    resource is namespaced (e.g. 'concern', 'poll', 'finance', 'enrollment',
+--    'role', 'visitor'). action is the verb on that resource.
+CREATE TABLE IF NOT EXISTS permissions (
+    id          SERIAL PRIMARY KEY,
+    resource    VARCHAR(60) NOT NULL,
+    action      VARCHAR(60) NOT NULL,
+    description TEXT,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (resource, action)
+);
+CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
+
+-- 3. role_permissions — GRANT: which role_definition may do which permission.
+--    scope_society_id NULL  => the grant applies wherever the role is held
+--                             (platform-wide for platform-scoped roles).
+--    scope_society_id set  => the grant only applies to that one society.
+--    min_amount          => money amount at/above which the action needs approval.
+--    approval_threshold  => max amount this role may approve without escalation.
+--    Legacy columns (society_id/role/card_id/permission) are retained for
+--    backward compatibility until the card-catalogue readers migrate.
+ALTER TABLE role_permissions
+    ADD COLUMN IF NOT EXISTS role_definition_id   INT REFERENCES role_definitions (id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS permission_id        INT REFERENCES permissions (id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS scope_society_id     INT REFERENCES societies (id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS min_amount           NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS approval_threshold   NUMERIC(12,2);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_role_def  ON role_permissions (role_definition_id);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_perm      ON role_permissions (permission_id);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_scope     ON role_permissions (scope_society_id);
+
+-- 4. user_role_assignments — effective-dated membership of a user in a role.
+--    The auth-store / users.role gate the PORTAL; these rows drive policy.can_do.
+--    NULL society_id is only valid for a platform-scoped role_definition.
+CREATE TABLE IF NOT EXISTS user_role_assignments (
+    id                SERIAL PRIMARY KEY,
+    user_id           INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    role_definition_id INT NOT NULL REFERENCES role_definitions (id) ON DELETE CASCADE,
+    society_id        INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_link       INT,  -- nullable FK to apartments/vendors/security_staff by context
+    effective_from    TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to      TIMESTAMP,
+    granted_by        INT REFERENCES users (id),
+    source            VARCHAR(20) NOT NULL CHECK (source IN ('seed', 'grant', 'aoa', 'inherit')),
+    status            VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')),
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_ura_user_role_society_entity UNIQUE
+        (user_id, role_definition_id, society_id, entity_link, effective_from)
+);
+CREATE INDEX IF NOT EXISTS idx_ura_user_active
+    ON user_role_assignments (user_id, status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_ura_role_society
+    ON user_role_assignments (role_definition_id, society_id, status);
+CREATE INDEX IF NOT EXISTS idx_ura_effective
+    ON user_role_assignments (user_id, role_definition_id, society_id) WHERE status = 'active'
+        AND (effective_to IS NULL OR effective_to > NOW());
+
+-- 5. delegations — maker/checker hand-over: delegator grants a permission to a
+--    delegatee for a bounded scope + time window.
+CREATE TABLE IF NOT EXISTS delegations (
+    id              SERIAL PRIMARY KEY,
+    delegator_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    delegatee_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    permission_id   INT NOT NULL REFERENCES permissions (id) ON DELETE CASCADE,
+    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_id       INT,  -- scope the delegation to one entity, if applicable
+    effective_from  TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to    TIMESTAMP,
+    revoked_at      TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_delegation UNIQUE
+        (delegator_id, delegatee_id, permission_id, society_id, effective_from)
+);
+CREATE INDEX IF NOT EXISTS idx_delegations_delegatee
+    ON delegations (delegatee_id) WHERE revoked_at IS NULL
+        AND (effective_to IS NULL OR effective_to > NOW());
+CREATE INDEX IF NOT EXISTS idx_delegations_delegator
+    ON delegations (delegator_id) WHERE revoked_at IS NULL;
+
+-- 6. societies_memberships — normalised link between a user and the entity they
+--    act through (apartment / vendor / security) in a society. This is the
+--    long-term home for what users.linked_id currently models; existing callers
+--    keep using linked_id until the migration is complete (deferred per D1).
+CREATE TABLE IF NOT EXISTS societies_memberships (
+    id                 SERIAL PRIMARY KEY,
+    society_id         INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id            INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    entity_type        VARCHAR(20) NOT NULL CHECK (entity_type IN ('apartment', 'vendor', 'security')),
+    entity_id          INT NOT NULL,
+    role_definition_id INT REFERENCES role_definitions (id) ON DELETE SET NULL,
+    effective_from     TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to       TIMESTAMP,
+    status             VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'revoked')),
+    created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by         INT REFERENCES users (id),
+    CONSTRAINT uq_sm_society_entity UNIQUE (society_id, entity_type, entity_id),
+    CONSTRAINT uq_sm_society_user    UNIQUE (society_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sm_entity   ON societies_memberships (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sm_user     ON societies_memberships (society_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_sm_active   ON societies_memberships (society_id, user_id, status)
+    WHERE status = 'active';
+
+-- Seed reference data for the RBAC vocabulary (mirrors
+-- database/migrations/006_rbac_foundation.sql). These rows define the system's
+-- role + permission catalogue; the backfill of real users happens in seed.py.
+
+INSERT INTO role_definitions (code, scope, name, description) VALUES
+    ('platform_operator',  'platform', 'Platform Operator',  'System-wide operator (migrated master_admin).'),
+    ('society_secretary',  'society',  'Society Secretary',  'AOA secretary: assign concerns, declare poll results, approve payments.'),
+    ('treasurer',          'society',  'Treasurer',          'AOA treasurer: view receipts, approve payments, close periods.'),
+    ('committee_member',   'society',  'Committee Member',   'MC member: declare poll results.'),
+    ('accountant',         'society',  'Accountant',         'Society accountant: view receipts, approve payments up to threshold.'),
+    ('resident_owner',     'society',  'Resident Owner',     'Apartment owner: view own receipts.'),
+    ('resident_tenant',    'society',  'Resident Tenant',    'Apartment tenant: view own receipts.'),
+    ('vendor_contact',     'society',  'Vendor Contact',     'Registered vendor: view own concerns/bids.'),
+    ('security_staff',     'society',  'Security Staff',     'Society security: manage channel events, view roster.')
+ON CONFLICT (code, scope) DO NOTHING;
+
+INSERT INTO permissions (resource, action, description) VALUES
+    ('concern',     'assign',              'Assign/invite an entity to a concern'),
+    ('concern',     'resolve',             'Mark a concern assignment resolved/closed'),
+    ('poll',        'declare_results',     'Declare poll results and close a poll'),
+    ('finance',     'receipt.view_own',    'View own financial receipts'),
+    ('finance',     'payment.approve',     'Approve a payment against the approval threshold'),
+    ('finance',     'period.close',        'Close a financial period / FY'),
+    ('enrollment',  'import',              'Bulk-enroll apartment/vendor/security members'),
+    ('role',        'grant',               'Grant or revoke a society role on a user'),
+    ('visitor',     'approve',             'Approve / deny a visitor / gate alert')
+ON CONFLICT (resource, action) DO NOTHING;
+
+-- Default role->permission grants. scope_society_id NULL => grant applies
+-- wherever the role is held (society-scoped roles are tied to a society via
+-- user_role_assignments.society_id, not here). Accountant payment.approve has a
+-- min_amount floor: amounts at/above this require a higher authority.
+INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id, min_amount, approval_threshold)
+SELECT rd.id, p.id, NULL, NULL, NULL
+FROM role_definitions rd, permissions p
+WHERE (rd.code = 'platform_operator' AND p.resource = 'role' AND p.action = 'grant')
+   OR (rd.code = 'platform_operator' AND p.resource = 'finance' AND p.action = 'period.close')
+   OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'assign')
+   OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'resolve')
+   OR (rd.code = 'society_secretary' AND p.resource = 'poll' AND p.action = 'declare_results')
+   OR (rd.code = 'society_secretary' AND p.resource = 'finance' AND p.action = 'payment.approve')
+   OR (rd.code = 'society_secretary' AND p.resource = 'role' AND p.action = 'grant')
+   OR (rd.code = 'society_secretary' AND p.resource = 'enrollment' AND p.action = 'import')
+ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO NOTHING;
+
+INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id)
+SELECT rd.id, p.id, NULL
+FROM role_definitions rd, permissions p
+WHERE (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
+   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'period.close')
+   OR (rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
+   OR (rd.code = 'committee_member' AND p.resource = 'poll' AND p.action = 'declare_results')
+   OR (rd.code = 'resident_owner' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
+   OR (rd.code = 'resident_tenant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
+   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'payment.approve')
+ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO NOTHING;
+
+-- Accountant payment approval is capped: min_amount = 5000 means a payment at/above
+-- this threshold needs escalation beyond the accountant role.
+INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id, min_amount)
+SELECT rd.id, p.id, NULL, 5000
+FROM role_definitions rd, permissions p
+WHERE rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'payment.approve'
+ON CONFLICT (role_definition_id, permission_id, scope_society_id) DO UPDATE
+    SET min_amount = EXCLUDED.min_amount;
+
 CREATE TABLE IF NOT EXISTS Dashboard_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -1972,6 +2204,27 @@ CREATE TABLE IF NOT EXISTS alert_events (
     expires_at TIMESTAMP
 );
 
+-- channel_event_transitions — D2 append-only audit for alert_channels events.
+-- alert_events.state is a read-only materialized cache; this table is the source
+-- of truth (pending -> arrived/calling -> resolved/denied/expired).
+CREATE TABLE IF NOT EXISTS channel_event_transitions (
+    id              SERIAL PRIMARY KEY,
+    event_id        INT NOT NULL REFERENCES alert_events (id) ON DELETE CASCADE,
+    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
+    from_state      VARCHAR(30),
+    to_state        VARCHAR(30) NOT NULL,
+    actor_id        INT REFERENCES users (id),
+    permission_used VARCHAR(60),
+    comment         TEXT,
+    evidence        JSONB,
+    correlation_id  UUID,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cet_event
+    ON channel_event_transitions (event_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_cet_society
+    ON channel_event_transitions (society_id, created_at);
+
 CREATE TABLE IF NOT EXISTS patrol_locations (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -2059,6 +2312,48 @@ CREATE TABLE IF NOT EXISTS poll_ballots (
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5)
 );
+
+-- ════════════════════════════════════════════════════════════════════════
+-- Poll audit (D2): append-only transition log + eligibility snapshot
+--
+-- poll_transitions is the source of truth for the poll lifecycle
+-- (created -> opened -> closed -> results_declared). polls.status is a
+-- read-only materialized cache refreshed by the workflow service.
+-- poll_eligibility_snapshot freezes the eligible voter set at poll creation so
+-- a later change to an apartment's dues standing can't retroactively widen or
+-- narrow who could vote on an already-cast ballot.
+-- ════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS poll_transitions (
+    id              SERIAL PRIMARY KEY,
+    poll_id         INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
+    from_state      VARCHAR(20),
+    to_state        VARCHAR(20) NOT NULL CHECK (
+        to_state IN ('created', 'opened', 'closed', 'results_declared')
+    ),
+    actor_id        INT REFERENCES users (id),
+    permission_used VARCHAR(60),
+    comment         TEXT,
+    evidence        JSONB,
+    correlation_id  UUID,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_poll_transitions_poll
+    ON poll_transitions (poll_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_poll_transitions_society
+    ON poll_transitions (society_id, created_at);
+
+CREATE TABLE IF NOT EXISTS poll_eligibility_snapshot (
+    id          SERIAL PRIMARY KEY,
+    poll_id     INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id),
+    eligible    BOOLEAN NOT NULL DEFAULT FALSE,
+    reason      TEXT,
+    captured_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (poll_id, apartment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_elig_poll
+    ON poll_eligibility_snapshot (poll_id, apartment_id);
 
 -- One-time inline migration from the old linked poll_votes table (kept
 -- minimal: clean-schema pilots skip it because poll_votes never exists).
